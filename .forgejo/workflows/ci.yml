@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: ./.forgejo/actions/setup-nix
       - name: Full gate (build, fmt, clippy -D warnings, nextest, doctests, bdd, bats)
         run: nix develop -c just ci
       - name: Marketplace validation (jq + manifest sync + prettier)
@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: ./.forgejo/actions/setup-nix
       - name: Audit dependencies for known advisories
         run: nix develop -c just audit
 
@@ -36,7 +36,7 @@ jobs:
     if: ${{ startsWith(github.head_ref, 'release-plz-') || contains(github.event.pull_request.labels.*.name, 'release') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: ./.forgejo/actions/setup-nix
       - name: 100% mutant kill
         run: nix develop -c just mutants
 
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: ./.forgejo/actions/setup-nix
       # Structural check: every Codex manifest is valid. Full `codex`-CLI
       # runtime verification (codex mcp add + codex exec) runs where a
       # Codex login is available.
