@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use sidequest_core::launch::Goal;
+use sidequest_core::launch::{BranchName, Goal};
 use thiserror::Error;
 use tokio::process::Command;
 
@@ -27,13 +27,22 @@ pub enum SessionError {
 /// # Errors
 ///
 /// Returns [`SessionError`] if the session cannot be spawned or exits non-zero.
-pub async fn run(worktree: &Path, command: &str, goal: &Goal) -> Result<(), SessionError> {
-    let goal_text: &str = goal.as_ref();
+pub async fn run(
+    worktree: &Path,
+    command: &str,
+    goal: &Goal,
+    project_root: &Path,
+    branch: &BranchName,
+) -> Result<(), SessionError> {
+    let bin = std::env::current_exe().map_err(|error| SessionError::Spawn(error.to_string()))?;
     let output = Command::new("sh")
         .arg("-c")
         .arg(command)
         .current_dir(worktree)
-        .env("SIDEQUEST_GOAL", goal_text)
+        .env("SIDEQUEST_GOAL", goal.as_ref())
+        .env("SIDEQUEST_PROJECT_ROOT", project_root)
+        .env("SIDEQUEST_BRANCH", branch.as_ref())
+        .env("SIDEQUEST_BIN", &bin)
         .output()
         .await
         .map_err(|error| SessionError::Spawn(error.to_string()))?;
