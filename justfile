@@ -39,11 +39,14 @@ bdd:
 
 # Shell / plugin-script tests (CI gate).
 bats:
-    bats $(find plugins -name '*.bats' | sort)
+    bats $(find plugins scripts -name '*.bats' | sort)
 
 # Mutation testing — 100% kill required (release-gated in CI).
+# Unset CARGO_TARGET_DIR (the devshell pins it to an absolute path): otherwise
+# cargo-mutants builds *mutated* source into the shared dev target dir and
+# corrupts its incremental fingerprints. Isolated here under mutants.out/.
 mutants:
-    cargo mutants --workspace
+    env -u CARGO_TARGET_DIR cargo mutants --workspace
 
 # Dependency vulnerability audit.
 audit:
@@ -54,4 +57,5 @@ validate-marketplace:
     jq empty .claude-plugin/marketplace.json
     jq empty .agents/plugins/marketplace.json
     find plugins -name plugin.json -exec jq empty {} \;
+    bash scripts/validate-manifests.sh
     prettier --check "**/*.{json,md}"
