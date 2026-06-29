@@ -33,6 +33,14 @@
       "version": "0.1.0",
       "category": "Productivity",
       "keywords": ["standards", "tdd", "bdd", "quality"]
+    },
+    {
+      "name": "babysit-pr",
+      "source": "babysit-pr",
+      "description": "Babysit a pull/merge request to completion across GitHub, Forgejo, and GitLab.",
+      "version": "0.1.0",
+      "category": "Developer Tools",
+      "keywords": ["pr", "ci", "review"]
     }
   ]
 }
