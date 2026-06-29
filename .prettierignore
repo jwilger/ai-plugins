@@ -1,0 +1,8 @@
+# Generated / vendored trees — never format these.
+.dependencies/
+target/
+.worktrees/
+.direnv/
+.cargo-bin/
+Cargo.lock
+flake.lock

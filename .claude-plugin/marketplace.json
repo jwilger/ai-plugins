@@ -9,5 +9,14 @@
   "metadata": {
     "pluginRoot": "./plugins"
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "side-quest",
+      "source": "side-quest",
+      "description": "Launch backgrounded side-quests that implement changes in isolated git worktrees and deliver per project config.",
+      "version": "0.1.0",
+      "category": "Productivity",
+      "keywords": ["worktree", "agents", "automation"]
+    }
+  ]
 }
