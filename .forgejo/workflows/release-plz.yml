@@ -21,7 +21,7 @@ permissions:
 jobs:
   release-pr:
     name: Create/Update signed release PR
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Skip release-PR-merge commits to avoid an open/merge loop.
     if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
     concurrency:
