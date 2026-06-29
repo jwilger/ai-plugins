@@ -96,6 +96,39 @@ For an end-to-end check in Claude Code: `/plugin marketplace add .` then
   `marketplace.json`. Always note a plugin's supported harnesses in its README
   and the `README.md` catalog tables.
 
+## Rust control plane (`crates/`)
+
+The **sidequest** control plane lives in a Cargo workspace under `crates/`:
+
+- `crates/sidequest-core` — the pure functional core (no I/O dependencies, by
+  construction).
+- `crates/sidequest` — the imperative shell, with two binaries: `sidequest-mcp`
+  (the MCP stdio server, the primary surface) and `sidequest` (the CLI).
+
+Work inside the Nix devshell and use `just` as the command interface:
+
+```shell
+nix develop      # nightly toolchain (rust-toolchain.toml) + just + cargo-nextest/mutants/audit + release-plz
+just ci          # fmt-check + clippy -D warnings + nextest  (run before every commit)
+just mutants     # mutation testing — 100% mutant kill required
+```
+
+Rust dependencies are managed **only via `cargo add`** (never hand-edit
+`[dependencies]`).
+
+## Engineering standards (harness-agnostic)
+
+This project follows a strict, documented engineering regime. The canonical rules
+live in [`docs/rules/`](docs/rules/) and every architectural decision is recorded
+in [`docs/adr/`](docs/adr/). In brief: functional-core/imperative-shell with a
+Step/Trampoline effect pattern; parse-don't-validate semantic types (`nutype`);
+railway-oriented errors (`thiserror`); strict clippy; BDD/Cucumber one step at a
+time in vertical slices; 100% mutation kill; eval-driven effectiveness and
+minimum-necessary context for skills/MCP; PR-based CI with required approval and
+managed release; Conventional Commits with **no `Co-Authored-By` trailers**; never
+take quality shortcuts. These rules apply to **both Claude Code and Codex**;
+`CLAUDE.md` is a thin pointer to this file.
+
 ## Reference
 
 - Marketplaces: https://code.claude.com/docs/en/plugin-marketplaces
