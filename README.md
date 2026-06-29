@@ -1,0 +1,81 @@
+# ai-plugins
+
+A **multi-harness marketplace of AI coding-assistant plugins**.
+
+Today it is a [Claude Code](https://code.claude.com) plugin marketplace. It is
+deliberately structured so the same repository can also serve
+[Codex](https://openai.com/codex/) and other harnesses that adopt the plugin /
+marketplace concept. Each plugin below is tagged with the harness(es) it
+supports.
+
+## Plugin catalog
+
+### Claude Code
+
+| Plugin     | Description                                               | Status |
+| ---------- | --------------------------------------------------------- | ------ |
+| _none yet_ | The marketplace is live but no plugins are published yet. | —      |
+
+### Codex
+
+| Plugin    | Description                                                      | Status |
+| --------- | ---------------------------------------------------------------- | ------ |
+| _planned_ | Codex does not yet consume this marketplace; support is planned. | —      |
+
+> When a plugin is added under [`plugins/`](plugins/) and registered in
+> [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json), add a
+> row to the matching harness table above with a link to the plugin's own
+> `README.md` and the harness(es) it targets.
+
+## Using the marketplace (Claude Code)
+
+Add this repository as a marketplace, then install a plugin from it:
+
+```shell
+# From inside Claude Code:
+/plugin marketplace add jwilger/ai-plugins      # GitHub owner/repo shorthand
+# ...or a local checkout:
+/plugin marketplace add ./ai-plugins
+
+/plugin install <plugin-name>@ai-plugins
+```
+
+The marketplace is referenced by its **name** (`ai-plugins`) in install
+commands, regardless of the URL you added it from. List and manage with
+`/plugin list`, `/plugin marketplace update ai-plugins`, and
+`/plugin marketplace remove ai-plugins`.
+
+## Developing in this repo
+
+A [Nix flake](flake.nix) provides a reproducible devshell with Node, npm, Rust
+(cargo), `jq`, `prettier`, `ripgrep`, and `fd`.
+
+```shell
+nix develop        # enter the devshell
+# or, with direnv:
+echo "use flake" > .envrc && direnv allow
+```
+
+Any **globally installed** tooling (`npm install -g …`, `cargo install …`) is
+redirected into a git-ignored `./.dependencies/` directory by the
+devshell, so it never pollutes your home directory. Delete that directory any
+time for a clean slate.
+
+See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
+
+## Repository layout
+
+```
+.
+├── .claude-plugin/
+│   └── marketplace.json   # the marketplace manifest (lists plugins)
+├── plugins/               # one subdirectory per plugin
+│   └── README.md          # plugin anatomy / conventions
+├── flake.nix              # Nix devshell
+├── AGENTS.md              # guidance for AI agents working in this repo
+└── README.md              # this file
+```
+
+## License
+
+See individual plugins for their licenses.

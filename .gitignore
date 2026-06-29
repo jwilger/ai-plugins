@@ -1,0 +1,14 @@
+# Project-local "global" dependency sandbox (npm -g, cargo install, etc.).
+# Provisioned by the Nix devshell; never committed.
+/.dependencies/
+
+# direnv
+.direnv/
+
+# Nix
+result
+result-*
+
+# Editor / OS noise
+.DS_Store
+*.swp
