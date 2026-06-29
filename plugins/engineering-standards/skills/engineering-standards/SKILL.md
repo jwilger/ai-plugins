@@ -39,9 +39,16 @@ adapt the concrete tooling to the language while keeping the discipline.
 
 ## Quality gates (all must pass before any commit)
 
-- **Strictest practical linting**, treated as an allowlist (turn lint groups on,
-  then decline individual lints as documented project decisions). Forbid the
-  panic family in production code. Suppress only with a documented reason.
+- **Lint as strictly as the toolchain allows, as an allowlist.** Every
+  language and tool differs, but the philosophy is universal: turn on every lint
+  group/level the toolchain offers (treat warnings as errors in the gate), then
+  relax individual lints _only_ as deliberate, documented, per-project decisions
+  — and only when you genuinely need to, never to save time. The friction is the
+  point: confronting each lint forces an intentional choice about what correct
+  code looks like here. Prefer a narrowly-scoped, reason-carrying suppression
+  (e.g. `#[expect(reason = "…")]` or the local equivalent) over a blanket allow,
+  and forbid panic-prone constructs on production paths. Only ever ratchet
+  stricter; never loosen the baseline.
 - **Mutation testing with a 100% kill rate**, enforced in CI.
 - **Effectiveness measured by evals, not vibes** — prompts/skills/tool
   descriptions are validated by evals (triggering + behavior), not opinion.
