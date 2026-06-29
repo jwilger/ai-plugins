@@ -6,7 +6,7 @@
 
 use rmcp::{
     ServerHandler,
-    model::{ServerCapabilities, ServerInfo},
+    model::{Implementation, ServerCapabilities, ServerInfo},
 };
 
 /// The sidequest control-plane MCP server.
@@ -18,8 +18,12 @@ pub struct SidequestServer;
 
 impl ServerHandler for SidequestServer {
     fn get_info(&self) -> ServerInfo {
-        // Name and version are taken from the build environment (the `sidequest`
-        // crate). Capabilities are empty until the tool families land.
-        ServerInfo::new(ServerCapabilities::builder().build())
+        // `Implementation::from_build_env` reports rmcp's own crate name, so set
+        // our identity explicitly. Capabilities stay empty until the tool
+        // families land.
+        let mut implementation = Implementation::from_build_env();
+        implementation.name = String::from("sidequest");
+        implementation.version = String::from(env!("CARGO_PKG_VERSION"));
+        ServerInfo::new(ServerCapabilities::builder().build()).with_server_info(implementation)
     }
 }

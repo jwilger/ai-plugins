@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: fmt-check clippy test
+ci: fmt-check clippy test bdd
 
 # Build everything.
 build:
@@ -25,9 +25,14 @@ fmt-check:
 clippy:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# Tests (CI gate). `--no-tests=pass` keeps the walking skeleton green.
+# Unit/integration tests (CI gate). `--no-tests=pass` keeps thin crates green.
+# The cucumber target uses a custom harness (see `bdd`), so exclude it here.
 test:
-    cargo nextest run --workspace --all-features --no-tests=pass
+    cargo nextest run --workspace --all-features --no-tests=pass -E 'not binary(=cucumber)'
+
+# BDD / Cucumber acceptance tests (CI gate). Custom harness, so not run by nextest.
+bdd:
+    cargo test --workspace --test cucumber
 
 # Mutation testing — 100% kill required (release-gated in CI).
 mutants:

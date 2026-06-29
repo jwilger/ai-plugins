@@ -124,6 +124,9 @@ unwrap_in_result = "allow"
 allow_attributes = "deny"
 # All lint-suppression attributes require a documented reason
 allow_attributes_without_reason = "deny"
+# cucumber-codegen compiles literal step strings into regexes with no
+# metacharacters; that is intentional, not a smell.
+trivial_regex = "allow"
 
 # ── Panic-family lints ────────────────────────────────────────────────────────
 # All panic-family lints are denied. Production code must use `ok_or`/`?`/`ok_or_else`.

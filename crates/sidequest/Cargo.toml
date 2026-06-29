@@ -16,3 +16,13 @@ rmcp = { version = "1.7", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+cucumber = "0.21"
+rmcp = { version = "1.7", features = ["client", "transport-child-process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# Cucumber owns its own runner, so disable the libtest harness for this target.
+[[test]]
+name = "cucumber"
+harness = false
