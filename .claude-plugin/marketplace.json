@@ -31,8 +31,8 @@
       "source": "engineering-standards",
       "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
       "version": "0.1.0",
-      "category": "Productivity",
-      "keywords": ["standards", "tdd", "bdd", "quality"]
+      "category": "Developer Tools",
+      "keywords": ["standards", "tdd", "bdd", "architecture", "quality"]
     },
     {
       "name": "babysit-pr",
