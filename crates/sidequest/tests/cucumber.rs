@@ -36,10 +36,21 @@ struct SideQuestWorld {
     launch_error: Option<bool>,
 }
 
+/// Build a `sidequest-mcp` command. Asserting the sibling `sidequest` worker
+/// binary exists makes cargo build it as a prerequisite of this integration
+/// test (the server resolves it as a sibling of `sidequest-mcp`), so the suite
+/// can never spawn a missing or never-built worker.
+fn sidequest_mcp_command() -> Command {
+    assert!(
+        std::path::Path::new(env!("CARGO_BIN_EXE_sidequest")).exists(),
+        "the sidequest worker binary should be built for the test"
+    );
+    Command::new(env!("CARGO_BIN_EXE_sidequest-mcp"))
+}
+
 #[when("a harness connects to the sidequest control plane over MCP")]
 async fn connects(world: &mut SideQuestWorld) {
-    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
-    let transport = TokioChildProcess::new(Command::new(binary))
+    let transport = TokioChildProcess::new(sidequest_mcp_command())
         .expect("spawning the sidequest-mcp binary should succeed");
 
     let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
@@ -90,8 +101,7 @@ fn a_git_repository(world: &mut SideQuestWorld) {
 )]
 async fn launches(world: &mut SideQuestWorld, goal: String) {
     let repo = world.repo.as_ref().expect("a git repository exists");
-    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
-    let mut command = Command::new(binary);
+    let mut command = sidequest_mcp_command();
     command.arg(repo.path());
     if let Some(session_command) = world.session_command.as_deref() {
         command.env("SIDEQUEST_SESSION_COMMAND", session_command);
@@ -305,8 +315,7 @@ fn launch_rejected(world: &mut SideQuestWorld) {
 
 async fn try_launch(world: &SideQuestWorld, goal: &str, harness: Option<&str>) -> bool {
     let repo = world.repo.as_ref().expect("a git repository exists");
-    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
-    let mut command = Command::new(binary);
+    let mut command = sidequest_mcp_command();
     command.arg(repo.path());
     let transport =
         TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
@@ -427,6 +436,35 @@ fn quest_is_running(world: &mut SideQuestWorld, branch: String) {
     assert!(found, "the side-quest {branch} should be running");
 }
 
+#[then(expr = "the side-quest {string} is delivered")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn quest_is_delivered(world: &mut SideQuestWorld, branch: String) {
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    let mut found = false;
+    for _ in 0..200u32 {
+        let listing = fetch_listing(&repo).await;
+        if listing.as_array().is_some_and(|records| {
+            records.iter().any(|record| {
+                record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+                    && record.get("state").and_then(serde_json::Value::as_str) == Some("delivered")
+            })
+        }) {
+            found = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(found, "the side-quest {branch} should be delivered");
+}
+
 #[given(expr = "a session runner that asks {string} and records the answer to {string}")]
 #[expect(
     clippy::needless_pass_by_value,
@@ -480,8 +518,7 @@ async fn awaiting_input(world: &mut SideQuestWorld, branch: String, question: St
 )]
 async fn operator_answers(world: &mut SideQuestWorld, answer: String, branch: String) {
     let repo = world.repo.as_ref().expect("a git repository exists");
-    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
-    let mut command = Command::new(binary);
+    let mut command = sidequest_mcp_command();
     command.arg(repo.path());
     let transport =
         TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
@@ -507,8 +544,7 @@ async fn operator_answers(world: &mut SideQuestWorld, answer: String, branch: St
 }
 
 async fn fetch_listing(repo: &Path) -> serde_json::Value {
-    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
-    let mut command = Command::new(binary);
+    let mut command = sidequest_mcp_command();
     command.arg(repo);
     let transport =
         TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
@@ -534,6 +570,51 @@ fn wait_for<T>(probe: impl Fn() -> Option<T>) -> Option<T> {
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
     probe()
+}
+
+#[given("a project configured for PR delivery")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn configured_for_pr(world: &mut SideQuestWorld) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    std::fs::write(
+        repo.path().join("sidequest.toml"),
+        "[delivery]\nmode = \"pr\"\n",
+    )
+    .expect("the config file is writable");
+}
+
+#[then(expr = "the origin branch {string} contains {string} with {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions receive &mut World and own their parsed parameters"
+)]
+fn origin_branch_contains(
+    world: &mut SideQuestWorld,
+    branch: String,
+    file: String,
+    content: String,
+) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let actual = wait_for(|| {
+        let output = std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["show", &format!("origin/{branch}:{file}")])
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    });
+    assert_eq!(
+        actual.as_deref(),
+        Some(content.as_str()),
+        "origin branch {branch} should contain {file}"
+    );
 }
 
 fn run_git(dir: &Path, args: &[&str]) {

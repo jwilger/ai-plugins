@@ -5,6 +5,10 @@
 # Rust build artifacts (workspace target dir at repo root).
 /target/
 
+# cargo-mutants scratch output.
+/mutants.out/
+/mutants.out.old/
+
 # Side-quest worktrees (default location; configurable via sidequest.toml).
 /.worktrees/
 

@@ -7,11 +7,14 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: fmt-check clippy test bdd bats
+ci: build fmt-check clippy test bdd bats
 
-# Build everything.
+# Build the library + binaries with no dev-dependencies, so feature
+# unification from dev-deps can't mask a missing feature that would break a
+# standalone `cargo build` / `cargo publish`. (Deliberately not `--all-targets`,
+# which would pull dev-deps back in; clippy/test cover those.)
 build:
-    cargo build --workspace --all-targets
+    cargo build --workspace
 
 # Apply formatting.
 fmt:
