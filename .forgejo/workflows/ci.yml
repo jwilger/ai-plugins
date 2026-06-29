@@ -7,16 +7,25 @@ on:
     branches: [main]
 
 jobs:
-  gate:
+  quality:
     name: Quality gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Full gate (fmt, clippy -D warnings, nextest, bdd, bats)
+      - name: Full gate (build, fmt, clippy -D warnings, nextest, doctests, bdd, bats)
         run: nix develop -c just ci
-      - name: Marketplace validation (jq + prettier)
+      - name: Marketplace validation (jq + manifest sync + prettier)
         run: nix develop -c just validate-marketplace
+
+  security-audit:
+    name: Security audit (cargo-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Audit dependencies for known advisories
+        run: nix develop -c just audit
 
   mutation:
     name: Mutation testing (release PRs)
@@ -43,3 +52,29 @@ jobs:
             jq empty .agents/plugins/marketplace.json
             find plugins -path "*/.codex-plugin/plugin.json" -exec jq empty {} \;
           '
+
+  # Single required status check for branch protection: succeeds only when every
+  # required job did. `mutation` is conditional (release PRs only), so it is
+  # allowed to be skipped but never failed.
+  gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    needs: [quality, security-audit, mutation, codex-cross-harness]
+    if: always()
+    steps:
+      - name: Require all required jobs to have succeeded
+        run: |
+          required="${{ needs.quality.result }} ${{ needs.security-audit.result }} ${{ needs.codex-cross-harness.result }}"
+          echo "required job results: $required"
+          for result in $required; do
+            if [ "$result" != "success" ]; then
+              echo "a required job did not succeed: $result"
+              exit 1
+            fi
+          done
+          mutation="${{ needs.mutation.result }}"
+          echo "mutation result: $mutation"
+          if [ "$mutation" = "failure" ]; then
+            echo "mutation testing failed"
+            exit 1
+          fi

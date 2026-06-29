@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: build fmt-check clippy test bdd bats
+ci: build fmt-check clippy test doctest bdd bats
 
 # Build the library + binaries with no dev-dependencies, so feature
 # unification from dev-deps can't mask a missing feature that would break a
@@ -32,6 +32,10 @@ clippy:
 # The cucumber target uses a custom harness (see `bdd`), so exclude it here.
 test:
     cargo nextest run --workspace --all-features --no-tests=pass -E 'not binary(=cucumber)'
+
+# Doctests (CI gate). nextest does not run doctests, so run them explicitly.
+doctest:
+    cargo test --workspace --all-features --doc
 
 # BDD / Cucumber acceptance tests (CI gate). Custom harness, so not run by nextest.
 bdd:

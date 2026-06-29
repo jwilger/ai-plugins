@@ -4,6 +4,9 @@
 
 [workspace]
 allow_dirty = false
+# Label the release PR so CI's mutation-testing job (gated on the `release`
+# label) runs against it before publish.
+pr_labels = ["release"]
 
 [[package]]
 name = "sidequest-core"
