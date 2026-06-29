@@ -54,6 +54,9 @@
 
             # JSON schema / formatting helpers handy for authoring plugins.
             prettier
+
+            # Shell / plugin-script tests.
+            bats
           ];
 
           # Let rust-analyzer find the standard library sources.
