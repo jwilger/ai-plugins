@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  gate:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Full gate (fmt, clippy -D warnings, nextest, bdd, bats)
+        run: nix develop -c just ci
+      - name: Marketplace validation (jq + prettier)
+        run: nix develop -c just validate-marketplace
+
+  mutation:
+    name: Mutation testing (release PRs)
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'release')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: 100% mutant kill
+        run: nix develop -c cargo mutants --workspace
+
+  codex-cross-harness:
+    name: Codex cross-harness manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      # Structural check: every Codex manifest is valid. Full `codex`-CLI
+      # runtime verification (codex mcp add + codex exec) runs where a
+      # Codex login is available.
+      - name: Codex manifests are valid JSON
+        run: |
+          nix develop -c bash -c '
+            jq empty .agents/plugins/marketplace.json
+            find plugins -path "*/.codex-plugin/plugin.json" -exec jq empty {} \;
+          '
