@@ -60,10 +60,17 @@ pub async fn execute(
         .await
         .map_err(|error| QuestError::Config(error.to_string()))?
         .delivery_mode();
-    let delivered = matches!(delivery, Some(DeliveryMode::LocalMerge));
-    if delivered {
-        deliver::local_merge(project_root, branch).await?;
-    }
+    let delivered = match delivery {
+        Some(DeliveryMode::LocalMerge) => {
+            deliver::local_merge(project_root, branch).await?;
+            true
+        }
+        Some(DeliveryMode::PushOrigin) => {
+            deliver::push_origin(project_root, branch).await?;
+            true
+        }
+        Some(DeliveryMode::Pr) | None => false,
+    };
 
     let state = if delivered {
         SideQuestState::Delivered
