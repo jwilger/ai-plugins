@@ -53,7 +53,7 @@ pub async fn execute(
     let worktree = PathBuf::from(&record.worktree);
 
     if let Some(command) = session_command {
-        session::run(&worktree, command, &record.goal).await?;
+        session::run(&worktree, command, &record.goal, project_root, branch).await?;
     }
 
     let delivery = config::load(project_root)

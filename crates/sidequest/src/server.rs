@@ -19,13 +19,22 @@ use serde::Deserialize;
 use sidequest_core::launch::{BranchName, Goal, branch_for_goal};
 use sidequest_core::side_quest::{SideQuestRecord, SideQuestState};
 
-use crate::{registry, worktree};
+use crate::{registry, steer, worktree};
 
 /// Parameters for the `launch` tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct LaunchParams {
     /// The objective for the side-quest, in the user's own words.
     pub goal: String,
+}
+
+/// Parameters for the `answer` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AnswerParams {
+    /// The side-quest's branch (its identifier).
+    pub branch: String,
+    /// The answer to the side-quest's pending question.
+    pub answer: String,
 }
 
 /// The sidequest control-plane MCP server, rooted at the repository its
@@ -74,6 +83,8 @@ impl SidequestServer {
                 branch: branch.clone(),
                 worktree: worktree.clone(),
                 state: SideQuestState::Running,
+                question: None,
+                answer: None,
             },
         )
         .await
@@ -105,6 +116,20 @@ impl SidequestServer {
         let value = serde_json::to_value(&records)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::structured(value))
+    }
+
+    /// Answer a side-quest that is awaiting operator input.
+    #[tool(description = "Answer a side-quest that is awaiting operator input.")]
+    async fn answer(
+        &self,
+        Parameters(params): Parameters<AnswerParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let branch = BranchName::try_new(params.branch)
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
+        steer::answer(self.project_root.as_ref(), &branch, &params.answer)
+            .await
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        Ok(CallToolResult::success(vec![Content::text("answered")]))
     }
 }
 

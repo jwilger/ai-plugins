@@ -210,24 +210,13 @@ fn main_checkout_contains(world: &mut SideQuestWorld, file: String, content: Str
 
 #[when("the harness lists the side-quests")]
 async fn lists(world: &mut SideQuestWorld) {
-    let repo = world.repo.as_ref().expect("a git repository exists");
-    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
-    let mut command = Command::new(binary);
-    command.arg(repo.path());
-    let transport =
-        TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
-    let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("list"))
-        .await
-        .expect("the list tool call should succeed");
-    world.listing = result.structured_content;
-
-    client
-        .cancel()
-        .await
-        .expect("the client should shut down cleanly");
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    world.listing = Some(fetch_listing(&repo).await);
 }
 
 #[then(expr = "the list includes a side-quest on branch {string}")]
@@ -287,6 +276,105 @@ fn quest_is_running(world: &mut SideQuestWorld, branch: String) {
             && record.get("state").and_then(serde_json::Value::as_str) == Some("running")
     });
     assert!(found, "the side-quest {branch} should be running");
+}
+
+#[given(expr = "a session runner that asks {string} and records the answer to {string}")]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions own their parsed parameters"
+)]
+fn session_asks_and_records(world: &mut SideQuestWorld, question: String, file: String) {
+    world.session_command = Some(format!(
+        "answer=$(\"$SIDEQUEST_BIN\" ask --project-root \"$SIDEQUEST_PROJECT_ROOT\" --branch \"$SIDEQUEST_BRANCH\" --question '{question}'); printf '%s' \"$answer\" > {file}"
+    ));
+}
+
+#[then(expr = "the side-quest {string} is awaiting input with question {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn awaiting_input(world: &mut SideQuestWorld, branch: String, question: String) {
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    let mut found = false;
+    for _ in 0..200u32 {
+        let listing = fetch_listing(&repo).await;
+        if listing.as_array().is_some_and(|records| {
+            records.iter().any(|record| {
+                record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+                    && record.get("state").and_then(serde_json::Value::as_str)
+                        == Some("awaiting-input")
+                    && record.get("question").and_then(serde_json::Value::as_str)
+                        == Some(question.as_str())
+            })
+        }) {
+            found = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        found,
+        "the side-quest {branch} should be awaiting input with question {question}"
+    );
+}
+
+#[when(expr = "the operator answers {string} to {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn operator_answers(world: &mut SideQuestWorld, answer: String, branch: String) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
+    let mut command = Command::new(binary);
+    command.arg(repo.path());
+    let transport =
+        TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
+    let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
+
+    let mut arguments = serde_json::Map::new();
+    arguments.insert("branch".to_owned(), serde_json::Value::String(branch));
+    arguments.insert("answer".to_owned(), serde_json::Value::String(answer));
+    let result = client
+        .call_tool(CallToolRequestParams::new("answer").with_arguments(arguments))
+        .await
+        .expect("the answer tool call should succeed");
+    assert_ne!(
+        result.is_error,
+        Some(true),
+        "answer should not report an error"
+    );
+
+    client
+        .cancel()
+        .await
+        .expect("the client should shut down cleanly");
+}
+
+async fn fetch_listing(repo: &Path) -> serde_json::Value {
+    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
+    let mut command = Command::new(binary);
+    command.arg(repo);
+    let transport =
+        TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
+    let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
+    let result = client
+        .call_tool(CallToolRequestParams::new("list"))
+        .await
+        .expect("the list tool call should succeed");
+    client
+        .cancel()
+        .await
+        .expect("the client should shut down cleanly");
+    result
+        .structured_content
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
 }
 
 fn wait_for<T>(probe: impl Fn() -> Option<T>) -> Option<T> {
