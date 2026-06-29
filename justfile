@@ -36,7 +36,7 @@ bdd:
 
 # Shell / plugin-script tests (CI gate).
 bats:
-    bats plugins/worktrees/tests
+    bats $(find plugins -name '*.bats' | sort)
 
 # Mutation testing — 100% kill required (release-gated in CI).
 mutants:
