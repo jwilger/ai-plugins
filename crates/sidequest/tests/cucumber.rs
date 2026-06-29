@@ -30,6 +30,8 @@ struct SideQuestWorld {
     listing: Option<serde_json::Value>,
     /// A signal file a blocking session waits for.
     signal_path: Option<PathBuf>,
+    /// A bare origin remote, kept alive for the scenario.
+    remote: Option<tempfile::TempDir>,
 }
 
 #[when("a harness connects to the sidequest control plane over MCP")]
@@ -234,6 +236,59 @@ fn list_includes_branch(world: &mut SideQuestWorld, branch: String) {
     assert!(
         found,
         "the list should include a side-quest on branch {branch}"
+    );
+}
+
+#[given("a bare origin remote")]
+fn a_bare_origin_remote(world: &mut SideQuestWorld) {
+    let remote = tempfile::tempdir().expect("a temp dir is creatable");
+    run_git(remote.path(), &["init", "--bare", "-q"]);
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let remote_path = remote.path().to_string_lossy().into_owned();
+    run_git(repo.path(), &["remote", "add", "origin", &remote_path]);
+    run_git(repo.path(), &["push", "-q", "origin", "HEAD"]);
+    world.remote = Some(remote);
+}
+
+#[given("a project configured for push-origin delivery")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn configured_for_push_origin(world: &mut SideQuestWorld) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    std::fs::write(
+        repo.path().join("sidequest.toml"),
+        "[delivery]\nmode = \"push-origin\"\n",
+    )
+    .expect("the config file is writable");
+}
+
+#[then(expr = "the origin integration branch contains {string} with {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions receive &mut World and own their parsed parameters"
+)]
+fn origin_contains(world: &mut SideQuestWorld, file: String, content: String) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let head = git_stdout(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let branch = head.trim();
+    let actual = wait_for(|| {
+        let output = std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["show", &format!("origin/{branch}:{file}")])
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    });
+    assert_eq!(
+        actual.as_deref(),
+        Some(content.as_str()),
+        "the work should be on the origin integration branch"
     );
 }
 
