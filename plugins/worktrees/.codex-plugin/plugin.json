@@ -8,6 +8,7 @@
   },
   "license": "AGPL-3.0-or-later",
   "keywords": ["worktree", "git", "isolation", "enforcement"],
+  "skills": "./skills/",
   "interface": {
     "displayName": "Worktrees",
     "shortDescription": "Worktree isolation and a main-checkout enforcement guard.",

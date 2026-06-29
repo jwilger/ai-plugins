@@ -19,8 +19,14 @@ chmod +x .git/hooks/pre-commit .git/hooks/pre-push
 The guard whitelists nothing it shouldn't: it only blocks commits/pushes, never
 worktree creation or file edits, so the `/side-quest` machinery is never blocked.
 
-A goal-driven `setup` skill (per-project isolation: ports, containers, caches,
-secrets) is planned.
+## Setup skill
+
+The goal-driven `setup` skill (`skills/setup/`) makes a repository worktree-ready:
+it defines the isolation goals (filesystem, secrets, warm caches, container/DB
+isolation, ports, lifecycle hooks, enforcement) and guides tailoring a
+project-specific bootstrap. Reusable building blocks: `scripts/worktree-ports.sh`
+(slot-based, idempotent port allocator) and the `templates/` bootstrap/teardown
+starting points.
 
 ## Harnesses
 
