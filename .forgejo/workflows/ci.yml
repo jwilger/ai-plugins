@@ -9,7 +9,7 @@ on:
 jobs:
   quality:
     name: Quality gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -20,7 +20,7 @@ jobs:
 
   security-audit:
     name: Security audit (cargo-audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -29,7 +29,7 @@ jobs:
 
   mutation:
     name: Mutation testing (release PRs)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Release PRs are opened on a `release-plz-*` branch (see
     # .forgejo/scripts/create-release-plz-release-pr.sh); a manual `release`
     # label also triggers it.
@@ -42,7 +42,7 @@ jobs:
 
   codex-cross-harness:
     name: Codex cross-harness manifests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -62,7 +62,7 @@ jobs:
   semantic-review:
     name: Request auto_review semantic review
     if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       AUTO_REVIEW_GATEWAY_URL: ${{ vars.AUTO_REVIEW_GATEWAY_URL }}
@@ -104,7 +104,7 @@ jobs:
   # (pull_request only, best-effort) may be skipped but never failed.
   gate:
     name: CI gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [quality, security-audit, mutation, codex-cross-harness, semantic-review]
     if: always()
     steps:
