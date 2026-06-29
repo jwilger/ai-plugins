@@ -13,6 +13,7 @@ use rmcp::{
     schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
+use sidequest_core::config::DeliveryMode;
 use sidequest_core::launch::{Goal, branch_for_goal};
 
 use crate::{deliver, session, worktree};
@@ -30,7 +31,7 @@ pub struct LaunchParams {
 pub struct SidequestServer {
     project_root: Arc<Path>,
     session_command: Option<Arc<str>>,
-    delivery: Option<Arc<str>>,
+    delivery: Option<DeliveryMode>,
 }
 
 #[tool_router]
@@ -42,12 +43,12 @@ impl SidequestServer {
     pub fn new(
         project_root: PathBuf,
         session_command: Option<String>,
-        delivery: Option<String>,
+        delivery: Option<DeliveryMode>,
     ) -> Self {
         Self {
             project_root: Arc::from(project_root),
             session_command: session_command.map(Arc::from),
-            delivery: delivery.map(Arc::from),
+            delivery,
         }
     }
 
@@ -75,7 +76,7 @@ impl SidequestServer {
                 .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         }
 
-        if matches!(self.delivery.as_deref(), Some("local-merge")) {
+        if matches!(self.delivery, Some(DeliveryMode::LocalMerge)) {
             deliver::local_merge(self.project_root.as_ref(), &branch)
                 .await
                 .map_err(|error| McpError::internal_error(error.to_string(), None))?;
