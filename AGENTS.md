@@ -129,6 +129,22 @@ managed release; Conventional Commits with **no `Co-Authored-By` trailers**; nev
 take quality shortcuts. These rules apply to **both Claude Code and Codex**;
 `CLAUDE.md` is a thin pointer to this file.
 
+## CI/CD and release
+
+CI and release run on Forgejo Actions (`.forgejo/workflows/`):
+
+- **`ci.yml`** (PR + push to `main`): the full `just ci` gate (fmt, clippy
+  `-D warnings`, nextest, BDD, bats), marketplace validation, Codex-manifest
+  checks, and mutation testing on `release`-labeled PRs.
+- **`release.yml`**: `release-plz` opens a release PR and publishes the crates to
+  crates.io on merge. Configure repository secrets `RELEASE_PLZ_TOKEN` (forge
+  PAT) and `CARGO_REGISTRY_TOKEN` (crates.io); add signing vars for signed
+  release commits, mirroring eventcore.
+
+Publication order (`release-plz.toml`): `sidequest-core` before `sidequest`.
+Branch protection (≥1 approval, with auto_review contributing the approval) is a
+Forgejo server-side setting.
+
 ## Reference
 
 - Marketplaces: https://code.claude.com/docs/en/plugin-marketplaces
