@@ -127,4 +127,40 @@ mod tests {
             "an unknown delivery mode is a parse error"
         );
     }
+
+    #[test]
+    fn delivery_modes_have_kebab_case_identifiers() {
+        assert_eq!(DeliveryMode::LocalMerge.as_str(), "local-merge");
+        assert_eq!(DeliveryMode::PushOrigin.as_str(), "push-origin");
+        assert_eq!(DeliveryMode::Pr.as_str(), "pr");
+    }
+
+    #[test]
+    fn reads_the_harness_settings() {
+        let config = Config::from_toml("[harness]\ndefault = \"claude\"\nallow_cross = true\n")
+            .expect("valid config parses");
+        assert_eq!(
+            config.harness_default(),
+            Some("claude"),
+            "the configured default harness is read verbatim"
+        );
+        assert!(
+            config.allow_cross_harness(),
+            "cross-harness spawning is enabled when configured"
+        );
+    }
+
+    #[test]
+    fn harness_settings_default_to_unset_and_disallowed() {
+        let config = Config::from_toml("").expect("empty config is valid");
+        assert_eq!(
+            config.harness_default(),
+            None,
+            "an unconfigured project has no default harness"
+        );
+        assert!(
+            !config.allow_cross_harness(),
+            "cross-harness spawning is disabled by default"
+        );
+    }
 }

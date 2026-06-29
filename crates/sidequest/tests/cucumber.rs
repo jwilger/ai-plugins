@@ -34,6 +34,8 @@ struct SideQuestWorld {
     remote: Option<tempfile::TempDir>,
     /// Whether the most recent guarded launch attempt was rejected.
     launch_error: Option<bool>,
+    /// Whether the most recent `list` attempt surfaced an error.
+    list_error: Option<bool>,
 }
 
 /// Build a `sidequest-mcp` command. Asserting the sibling `sidequest` worker
@@ -279,6 +281,63 @@ async fn launches_targeting(world: &mut SideQuestWorld, goal: String, harness: S
 async fn tries_launch_targeting(world: &mut SideQuestWorld, goal: String, harness: String) {
     let ok = try_launch(world, &goal, Some(&harness)).await;
     world.launch_error = Some(!ok);
+}
+
+#[when(expr = "a harness tries to launch a side-quest with the goal {string}")]
+async fn tries_launch(world: &mut SideQuestWorld, goal: String) {
+    let ok = try_launch(world, &goal, None).await;
+    world.launch_error = Some(!ok);
+}
+
+#[given("the config path is a directory")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn config_path_is_a_directory(world: &mut SideQuestWorld) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    std::fs::create_dir_all(repo.path().join("sidequest.toml"))
+        .expect("the config path can be made a directory");
+}
+
+#[given("the registry path is a directory")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn registry_path_is_a_directory(world: &mut SideQuestWorld) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let registry = repo
+        .path()
+        .join(".git")
+        .join("sidequest")
+        .join("registry.json");
+    std::fs::create_dir_all(&registry).expect("the registry path can be made a directory");
+}
+
+#[when("the harness tries to list the side-quests")]
+async fn tries_to_list(world: &mut SideQuestWorld) {
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    let ok = list_call_succeeds(&repo).await;
+    world.list_error = Some(!ok);
+}
+
+#[then("listing the side-quests fails")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn listing_fails(world: &mut SideQuestWorld) {
+    assert_eq!(
+        world.list_error,
+        Some(true),
+        "listing should surface an error for a corrupt registry, not silently report none"
+    );
 }
 
 #[then(expr = "the side-quest {string} targets harness {string}")]
@@ -541,6 +600,22 @@ async fn operator_answers(world: &mut SideQuestWorld, answer: String, branch: St
         .cancel()
         .await
         .expect("the client should shut down cleanly");
+}
+
+/// Whether a `list` tool call against `repo` succeeds (no transport error and no
+/// tool-level error).
+async fn list_call_succeeds(repo: &Path) -> bool {
+    let mut command = sidequest_mcp_command();
+    command.arg(repo);
+    let transport =
+        TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
+    let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
+    let result = client.call_tool(CallToolRequestParams::new("list")).await;
+    client
+        .cancel()
+        .await
+        .expect("the client should shut down cleanly");
+    result.is_ok_and(|outcome| outcome.is_error != Some(true))
 }
 
 async fn fetch_listing(repo: &Path) -> serde_json::Value {
