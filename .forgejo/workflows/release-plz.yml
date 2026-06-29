@@ -48,7 +48,7 @@ jobs:
 
       - name: Install Nix
         if: ${{ env.GIT_TOKEN != '' && env.RELEASE_SIGNING_KEY != '' }}
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: ./.forgejo/actions/setup-nix
 
       - name: Create/update signed release PR
         if: ${{ env.GIT_TOKEN != '' && env.RELEASE_SIGNING_KEY != '' }}

@@ -29,7 +29,7 @@ jobs:
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: ./.forgejo/actions/setup-nix
 
       # Quality gates already ran on the release PR (branch protection ensures
       # they passed before merge), so this only publishes.
