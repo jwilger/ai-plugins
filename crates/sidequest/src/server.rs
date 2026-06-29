@@ -1,29 +1,83 @@
 //! The MCP server surface for the control plane.
 //!
-//! At this stage the server is *connectable* and advertises its identity and
-//! capabilities; the operator and worker tool families are added outside-in by
-//! later behavioral slices.
+//! Exposes the operator tools harnesses call. Worker tools (self-reporting) and
+//! the remaining operator tools are added outside-in by later slices.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rmcp::{
-    ServerHandler,
-    model::{Implementation, ServerCapabilities, ServerInfo},
+    ErrorData as McpError, ServerHandler,
+    handler::server::wrapper::Parameters,
+    model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo},
+    schemars, tool, tool_handler, tool_router,
 };
+use serde::Deserialize;
+use sidequest_core::launch::{Goal, branch_for_goal};
 
-/// The sidequest control-plane MCP server.
-///
-/// Implements [`ServerHandler`]; served over stdio by the `sidequest-mcp`
-/// binary so either harness can connect to it as an MCP client.
-#[derive(Debug, Clone, Default)]
-pub struct SidequestServer;
+use crate::worktree;
 
+/// Parameters for the `launch` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LaunchParams {
+    /// The objective for the side-quest, in the user's own words.
+    pub goal: String,
+}
+
+/// The sidequest control-plane MCP server, rooted at the repository its
+/// side-quests operate on.
+#[derive(Clone)]
+pub struct SidequestServer {
+    project_root: Arc<Path>,
+}
+
+#[tool_router]
+impl SidequestServer {
+    /// Build a server rooted at `project_root`.
+    #[must_use]
+    pub fn new(project_root: PathBuf) -> Self {
+        Self {
+            project_root: Arc::from(project_root),
+        }
+    }
+
+    /// Launch a side-quest: create an isolated git worktree on a fresh branch
+    /// derived from the goal.
+    #[tool(
+        description = "Launch a side-quest: create an isolated git worktree on a fresh branch derived from the goal."
+    )]
+    async fn launch(
+        &self,
+        Parameters(params): Parameters<LaunchParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let goal = Goal::try_new(params.goal)
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
+        let branch = branch_for_goal(&goal)
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
+
+        let worktree_path = worktree::create(self.project_root.as_ref(), &branch)
+            .await
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+
+        let payload = serde_json::json!({
+            "branch": branch.as_ref(),
+            "worktree_path": worktree_path.display().to_string(),
+        });
+        Ok(CallToolResult::success(vec![Content::text(
+            payload.to_string(),
+        )]))
+    }
+}
+
+#[tool_handler]
 impl ServerHandler for SidequestServer {
     fn get_info(&self) -> ServerInfo {
         // `Implementation::from_build_env` reports rmcp's own crate name, so set
-        // our identity explicitly. Capabilities stay empty until the tool
-        // families land.
+        // our identity explicitly.
         let mut implementation = Implementation::from_build_env();
         implementation.name = String::from("sidequest");
         implementation.version = String::from(env!("CARGO_PKG_VERSION"));
-        ServerInfo::new(ServerCapabilities::builder().build()).with_server_info(implementation)
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(implementation)
     }
 }
