@@ -15,12 +15,18 @@ repository = "https://git.johnwilger.com/Slipstream/ai-plugins"
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
-# Core lint groups — treat as allowlist per https://billylevin.dev/posts/clippy-config/
+# Allowlist posture per https://billylevin.dev/posts/clippy-config/: enable the
+# subjective groups, then disable individual lints below as deliberate,
+# documented decisions. We go intentionally *stricter* than the post's baseline
+# (only ever stricter, never weaker): `all` and `pedantic` are denied (the post
+# warns), and `nursery` is enabled too (the post leaves it off). `restriction`
+# and `nursery` stay at `warn`; `just clippy` and CI run `-D warnings`, so every
+# warning is a hard error in the gate. `blanket_clippy_restriction_lints`
+# silences the meta-lint that fires when enabling `restriction`.
 all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 restriction = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
-# Required to avoid the meta-lint on enabling the restriction group
 blanket_clippy_restriction_lints = "allow"
 
 # ── Restriction / nursery group triage ───────────────────────────────────────
