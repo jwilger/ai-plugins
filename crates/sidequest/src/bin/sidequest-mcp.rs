@@ -4,6 +4,8 @@
 //! invoke operator / worker tools. At this stage the server is connectable and
 //! advertises its identity; the tool families are added by later slices.
 
+use std::path::PathBuf;
+
 use anyhow::Context as _;
 use rmcp::ServiceExt as _;
 use sidequest::server::SidequestServer;
@@ -12,7 +14,12 @@ use sidequest::server::SidequestServer;
 async fn main() -> anyhow::Result<()> {
     init_tracing();
 
-    let service = SidequestServer
+    let project_root = std::env::args().nth(1).map_or_else(
+        || std::env::current_dir().context("the current directory must be accessible"),
+        |arg| Ok(PathBuf::from(arg)),
+    )?;
+
+    let service = SidequestServer::new(project_root)
         .serve(rmcp::transport::stdio())
         .await
         .context("MCP handshake failed")?;
