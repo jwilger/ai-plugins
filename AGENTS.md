@@ -133,17 +133,27 @@ take quality shortcuts. These rules apply to **both Claude Code and Codex**;
 
 CI and release run on Forgejo Actions (`.forgejo/workflows/`):
 
-- **`ci.yml`** (PR + push to `main`): the full `just ci` gate (fmt, clippy
-  `-D warnings`, nextest, BDD, bats), marketplace validation, Codex-manifest
-  checks, and mutation testing on `release`-labeled PRs.
-- **`release.yml`**: `release-plz` opens a release PR and publishes the crates to
-  crates.io on merge. Configure repository secrets `RELEASE_PLZ_TOKEN` (forge
-  PAT) and `CARGO_REGISTRY_TOKEN` (crates.io); add signing vars for signed
-  release commits, mirroring eventcore.
+- **`ci.yml`** (PR + push to `main`): the full `just ci` gate (build, fmt, clippy
+  `-D warnings`, nextest, doctests, BDD, bats), marketplace validation
+  (including the cross-harness manifest sync-validator), a `cargo-audit`
+  security job, Codex-manifest checks, mutation testing on release PRs (keyed on
+  the `release-plz-*` branch), and a final `gate` aggregator job so branch
+  protection has a single required check.
+- **Release is two-phase**, mirroring eventcore:
+  - **`release-plz.yml`** (Phase 1, push to `main` except `chore(release):`
+    commits): opens/updates a **signed** release PR. `main` rejects unverified
+    commits, so `release-plz update` makes the file changes and the helper
+    scripts in `.forgejo/scripts/` create the signed commit and open the PR via
+    the forge API.
+  - **`publish.yml`** (Phase 2, when the `chore(release):` merge lands): runs
+    `release-plz release` to publish to crates.io and cut the Forgejo release.
 
-Publication order (`release-plz.toml`): `sidequest-core` before `sidequest`.
-Branch protection (≥1 approval, with auto_review contributing the approval) is a
-Forgejo server-side setting.
+Organization secrets/vars (available to the repo): `RELEASE_PLZ_TOKEN` (forge
+PAT), `RELEASE_SIGNING_KEY` (SSH or GPG key), `CARGO_REGISTRY_TOKEN` (crates.io),
+and `RELEASE_SIGNING_NAME` / `RELEASE_SIGNING_EMAIL` (vars). Publication order
+(`release-plz.toml`): `sidequest-core` before `sidequest`. Branch protection
+(≥1 approval, with auto_review contributing the approval) is a Forgejo
+server-side setting.
 
 ## Reference
 

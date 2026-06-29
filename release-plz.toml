@@ -4,9 +4,9 @@
 
 [workspace]
 allow_dirty = false
-# Label the release PR so CI's mutation-testing job (gated on the `release`
-# label) runs against it before publish.
-pr_labels = ["release"]
+# Phase 1 (release-plz.yml) runs `release-plz update` and opens the PR itself on
+# a `release-plz-*` branch, which is how CI's mutation-testing job recognizes a
+# release PR — so no `pr_labels` here.
 
 [[package]]
 name = "sidequest-core"
