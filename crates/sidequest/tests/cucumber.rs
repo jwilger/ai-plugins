@@ -9,7 +9,7 @@
 //! to as a real MCP client over stdio — never internal types. Cross-harness
 //! behaviors will use `Examples: codex, claude`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cucumber::{World, given, then, when};
 use rmcp::ServiceExt as _;
@@ -28,6 +28,8 @@ struct SideQuestWorld {
     session_command: Option<String>,
     /// The structured result of the most recent `list` call.
     listing: Option<serde_json::Value>,
+    /// A signal file a blocking session waits for.
+    signal_path: Option<PathBuf>,
 }
 
 #[when("a harness connects to the sidequest control plane over MCP")]
@@ -153,14 +155,15 @@ fn a_session_runner_recording_to(world: &mut SideQuestWorld, file: String) {
 fn worktree_contains(world: &mut SideQuestWorld, file: String, content: String) {
     let repo = world.repo.as_ref().expect("a git repository exists");
     let worktrees = repo.path().join(".worktrees");
-    let entry = std::fs::read_dir(&worktrees)
-        .expect("the worktrees directory exists")
-        .next()
-        .expect("a worktree was created")
-        .expect("the worktree entry is readable");
-    let actual = std::fs::read_to_string(entry.path().join(&file))
-        .expect("the recorded file exists in the worktree");
-    assert_eq!(actual, content, "the session recorded the goal into {file}");
+    let actual = wait_for(|| {
+        let entry = std::fs::read_dir(&worktrees).ok()?.next()?.ok()?;
+        std::fs::read_to_string(entry.path().join(&file)).ok()
+    });
+    assert_eq!(
+        actual.as_deref(),
+        Some(content.as_str()),
+        "the session should record the goal into {file}"
+    );
 }
 
 #[given("a project configured for local-merge delivery")]
@@ -196,11 +199,12 @@ fn a_session_runner_committing(world: &mut SideQuestWorld, file: String, content
 )]
 fn main_checkout_contains(world: &mut SideQuestWorld, file: String, content: String) {
     let repo = world.repo.as_ref().expect("a git repository exists");
-    let actual = std::fs::read_to_string(repo.path().join(&file))
-        .expect("the delivered file exists in the main checkout");
+    let path = repo.path().join(&file);
+    let actual = wait_for(|| std::fs::read_to_string(&path).ok());
     assert_eq!(
-        actual, content,
-        "the work was delivered to the main checkout"
+        actual.as_deref(),
+        Some(content.as_str()),
+        "the work should be delivered to the main checkout"
     );
 }
 
@@ -242,6 +246,57 @@ fn list_includes_branch(world: &mut SideQuestWorld, branch: String) {
         found,
         "the list should include a side-quest on branch {branch}"
     );
+}
+
+#[given(expr = "a session runner that waits for a signal then commits {string} with {string}")]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions own their parsed parameters"
+)]
+fn session_waits_then_commits(world: &mut SideQuestWorld, file: String, content: String) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let signal = repo.path().join(".signal");
+    world.session_command = Some(format!(
+        "until [ -f '{signal}' ]; do sleep 0.05; done; printf '%s' '{content}' > {file} && git add {file} && git commit -q -m work",
+        signal = signal.display()
+    ));
+    world.signal_path = Some(signal);
+}
+
+#[when("the side-quest is signaled to finish")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn signal_finish(world: &mut SideQuestWorld) {
+    let signal = world.signal_path.as_ref().expect("a signal path was set");
+    std::fs::write(signal, "").expect("the signal file is writable");
+}
+
+#[then(expr = "the side-quest {string} is running")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions receive &mut World and own their parsed parameters"
+)]
+fn quest_is_running(world: &mut SideQuestWorld, branch: String) {
+    let listing = world.listing.as_ref().expect("a listing was retrieved");
+    let records = listing.as_array().expect("the listing is a JSON array");
+    let found = records.iter().any(|record| {
+        record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+            && record.get("state").and_then(serde_json::Value::as_str) == Some("running")
+    });
+    assert!(found, "the side-quest {branch} should be running");
+}
+
+fn wait_for<T>(probe: impl Fn() -> Option<T>) -> Option<T> {
+    for _ in 0..200u32 {
+        if let Some(value) = probe() {
+            return Some(value);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    probe()
 }
 
 fn run_git(dir: &Path, args: &[&str]) {

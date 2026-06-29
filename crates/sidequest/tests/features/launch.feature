@@ -20,3 +20,13 @@ Feature: Launching a side-quest in an isolated worktree
     And a session runner that commits "feature.txt" with "done"
     When a harness launches a side-quest with the goal "add the feature"
     Then the main checkout contains "feature.txt" with "done"
+
+  Scenario: a side-quest runs in the background and is observable while running
+    Given a git repository
+    And a project configured for local-merge delivery
+    And a session runner that waits for a signal then commits "feature.txt" with "done"
+    When a harness launches a side-quest with the goal "add the feature"
+    And the harness lists the side-quests
+    Then the side-quest "side-quest/add-the-feature" is running
+    When the side-quest is signaled to finish
+    Then the main checkout contains "feature.txt" with "done"

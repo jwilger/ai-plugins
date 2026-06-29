@@ -1236,6 +1236,7 @@ name = "sidequest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "cucumber",
  "rmcp",
  "rmcp-macros",
