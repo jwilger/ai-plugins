@@ -1,0 +1,13 @@
+{
+  "name": "ai-plugins",
+  "owner": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "description": "A multi-harness marketplace of AI coding-assistant plugins. Currently serves Claude Code; structured to also serve Codex and other harnesses that support the plugin concept.",
+  "version": "0.1.0",
+  "metadata": {
+    "pluginRoot": "./plugins"
+  },
+  "plugins": []
+}
