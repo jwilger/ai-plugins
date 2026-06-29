@@ -1,6 +1,6 @@
 ---
 name: engineering-standards
-description: Use when starting a new software project, scaffolding a repository, or making substantive changes to one that should follow a strict, portfolio-grade engineering regime.
+description: Use when starting or making substantive changes to a project that should follow a strict, portfolio-grade engineering regime — the default standards for architecture, type-safety, error handling, testing, linting, ADRs, and review to apply as you work. (To set up the tooling that enforces them, use the scaffold skill.)
 ---
 
 # Engineering standards
