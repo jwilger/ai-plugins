@@ -101,4 +101,25 @@ mod tests {
             "an empty slug cannot form a branch"
         );
     }
+
+    #[test]
+    fn branch_name_requires_ref_safe_slug_segments() {
+        for bad in [
+            "FOO",            // an uppercase (non-slug) character
+            "side-quest/Bad", // an invalid character in a later segment
+            "foo//bar",       // an empty interior segment (repeated slash)
+            "/leading",       // a leading slash
+            "trailing/",      // a trailing slash
+            "has space",      // whitespace is not ref-safe
+        ] {
+            assert!(
+                BranchName::try_new(bad).is_err(),
+                "{bad:?} is not a ref-safe branch name"
+            );
+        }
+        assert!(
+            BranchName::try_new("side-quest/fix-the-buttons").is_ok(),
+            "a lowercase slug under a prefix is ref-safe"
+        );
+    }
 }
