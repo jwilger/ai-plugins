@@ -26,8 +26,6 @@ struct SideQuestWorld {
     repo: Option<tempfile::TempDir>,
     /// The session command to run inside the worktree, if any.
     session_command: Option<String>,
-    /// The delivery mode, if any (e.g. `"local-merge"`).
-    delivery: Option<String>,
 }
 
 #[when("a harness connects to the sidequest control plane over MCP")]
@@ -89,9 +87,6 @@ async fn launches(world: &mut SideQuestWorld, goal: String) {
     command.arg(repo.path());
     if let Some(session_command) = world.session_command.as_deref() {
         command.env("SIDEQUEST_SESSION_COMMAND", session_command);
-    }
-    if let Some(delivery) = world.delivery.as_deref() {
-        command.env("SIDEQUEST_DELIVERY", delivery);
     }
     let transport =
         TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
@@ -166,9 +161,18 @@ fn worktree_contains(world: &mut SideQuestWorld, file: String, content: String) 
     assert_eq!(actual, content, "the session recorded the goal into {file}");
 }
 
-#[given("the side-quest delivers to the local main branch")]
-fn delivers_to_local_main(world: &mut SideQuestWorld) {
-    world.delivery = Some("local-merge".to_owned());
+#[given("a project configured for local-merge delivery")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn configured_for_local_merge(world: &mut SideQuestWorld) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    std::fs::write(
+        repo.path().join("sidequest.toml"),
+        "[delivery]\nmode = \"local-merge\"\n",
+    )
+    .expect("the config file is writable");
 }
 
 #[given(expr = "a session runner that commits {string} with {string}")]

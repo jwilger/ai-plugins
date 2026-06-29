@@ -9,6 +9,7 @@
 //!
 //! Behavior is added outside-in as the BDD slices require it.
 
+pub mod config;
 pub mod deliver;
 pub mod server;
 pub mod session;
