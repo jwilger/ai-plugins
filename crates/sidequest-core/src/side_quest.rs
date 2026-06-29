@@ -35,4 +35,7 @@ pub struct SideQuestRecord {
     /// The operator's answer to a pending question, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer: Option<String>,
+    /// The harness the side-quest runs in, if specified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
 }

@@ -19,13 +19,17 @@ use serde::Deserialize;
 use sidequest_core::launch::{BranchName, Goal, branch_for_goal};
 use sidequest_core::side_quest::{SideQuestRecord, SideQuestState};
 
-use crate::{registry, steer, worktree};
+use crate::{config, registry, steer, worktree};
 
 /// Parameters for the `launch` tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct LaunchParams {
     /// The objective for the side-quest, in the user's own words.
     pub goal: String,
+    /// The harness to run the side-quest in. Requires `[harness] allow_cross`
+    /// when it differs from the project default.
+    #[serde(default)]
+    pub harness: Option<String>,
 }
 
 /// Parameters for the `answer` tool.
@@ -71,6 +75,23 @@ impl SidequestServer {
         let branch = branch_for_goal(&goal)
             .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
 
+        let config = config::load(self.project_root.as_ref())
+            .await
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        let harness = match params.harness {
+            Some(requested) => {
+                let is_default = config.harness_default() == Some(requested.as_str());
+                if !is_default && !config.allow_cross_harness() {
+                    return Err(McpError::invalid_params(
+                        "cross-harness-disabled: set [harness] allow_cross = true to spawn in another harness",
+                        None,
+                    ));
+                }
+                Some(requested)
+            }
+            None => config.harness_default().map(str::to_owned),
+        };
+
         let worktree_path = worktree::create(self.project_root.as_ref(), &branch)
             .await
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
@@ -85,6 +106,7 @@ impl SidequestServer {
                 state: SideQuestState::Running,
                 question: None,
                 answer: None,
+                harness,
             },
         )
         .await

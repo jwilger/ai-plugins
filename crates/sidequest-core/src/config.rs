@@ -36,12 +36,24 @@ pub struct DeliverySection {
     pub mode: Option<DeliveryMode>,
 }
 
+/// The `[harness]` table.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct HarnessSection {
+    /// The default harness side-quests run in, if any.
+    pub default: Option<String>,
+    /// Whether launching a side-quest in a non-default harness is allowed.
+    pub allow_cross: bool,
+}
+
 /// Parsed `sidequest.toml`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Delivery configuration.
     pub delivery: DeliverySection,
+    /// Harness configuration.
+    pub harness: HarnessSection,
 }
 
 impl Config {
@@ -59,6 +71,18 @@ impl Config {
     #[must_use]
     pub fn delivery_mode(&self) -> Option<DeliveryMode> {
         self.delivery.mode
+    }
+
+    /// The configured default harness, if any.
+    #[must_use]
+    pub fn harness_default(&self) -> Option<&str> {
+        self.harness.default.as_deref()
+    }
+
+    /// Whether cross-harness spawning is allowed.
+    #[must_use]
+    pub fn allow_cross_harness(&self) -> bool {
+        self.harness.allow_cross
     }
 }
 
