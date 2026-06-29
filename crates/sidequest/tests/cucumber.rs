@@ -32,6 +32,8 @@ struct SideQuestWorld {
     signal_path: Option<PathBuf>,
     /// A bare origin remote, kept alive for the scenario.
     remote: Option<tempfile::TempDir>,
+    /// Whether the most recent guarded launch attempt was rejected.
+    launch_error: Option<bool>,
 }
 
 #[when("a harness connects to the sidequest control plane over MCP")]
@@ -237,6 +239,98 @@ fn list_includes_branch(world: &mut SideQuestWorld, branch: String) {
         found,
         "the list should include a side-quest on branch {branch}"
     );
+}
+
+#[given("a project that allows cross-harness spawning")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn allows_cross_harness(world: &mut SideQuestWorld) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    std::fs::write(
+        repo.path().join("sidequest.toml"),
+        "[harness]\ndefault = \"claude\"\nallow_cross = true\n",
+    )
+    .expect("the config file is writable");
+}
+
+#[when(expr = "a harness launches a side-quest with the goal {string} targeting {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn launches_targeting(world: &mut SideQuestWorld, goal: String, harness: String) {
+    let ok = try_launch(world, &goal, Some(&harness)).await;
+    assert!(ok, "launch targeting {harness} should succeed");
+}
+
+#[when(expr = "a harness tries to launch a side-quest with the goal {string} targeting {string}")]
+async fn tries_launch_targeting(world: &mut SideQuestWorld, goal: String, harness: String) {
+    let ok = try_launch(world, &goal, Some(&harness)).await;
+    world.launch_error = Some(!ok);
+}
+
+#[then(expr = "the side-quest {string} targets harness {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions receive &mut World and own their parsed parameters"
+)]
+fn targets_harness(world: &mut SideQuestWorld, branch: String, harness: String) {
+    let listing = world.listing.as_ref().expect("a listing was retrieved");
+    let records = listing.as_array().expect("the listing is a JSON array");
+    let found = records.iter().any(|record| {
+        record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+            && record.get("harness").and_then(serde_json::Value::as_str) == Some(harness.as_str())
+    });
+    assert!(
+        found,
+        "the side-quest {branch} should target harness {harness}"
+    );
+}
+
+#[then("the launch is rejected")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn launch_rejected(world: &mut SideQuestWorld) {
+    assert_eq!(
+        world.launch_error,
+        Some(true),
+        "the cross-harness launch should be rejected"
+    );
+}
+
+async fn try_launch(world: &SideQuestWorld, goal: &str, harness: Option<&str>) -> bool {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
+    let mut command = Command::new(binary);
+    command.arg(repo.path());
+    let transport =
+        TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
+    let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
+
+    let mut arguments = serde_json::Map::new();
+    arguments.insert(
+        "goal".to_owned(),
+        serde_json::Value::String(goal.to_owned()),
+    );
+    if let Some(harness) = harness {
+        arguments.insert(
+            "harness".to_owned(),
+            serde_json::Value::String(harness.to_owned()),
+        );
+    }
+    let outcome = client
+        .call_tool(CallToolRequestParams::new("launch").with_arguments(arguments))
+        .await;
+    client
+        .cancel()
+        .await
+        .expect("the client should shut down cleanly");
+    outcome.is_ok()
 }
 
 #[given("a bare origin remote")]
