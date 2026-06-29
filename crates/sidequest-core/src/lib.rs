@@ -7,3 +7,5 @@
 //!
 //! Domain types, effects, and state machines are added outside-in as the
 //! behavioral slices require them.
+
+pub mod launch;
