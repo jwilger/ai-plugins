@@ -25,6 +25,14 @@
       "version": "0.1.0",
       "category": "Productivity",
       "keywords": ["worktree", "git", "enforcement"]
+    },
+    {
+      "name": "engineering-standards",
+      "source": "engineering-standards",
+      "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
+      "version": "0.1.0",
+      "category": "Productivity",
+      "keywords": ["standards", "tdd", "bdd", "quality"]
     }
   ]
 }
