@@ -1,0 +1,11 @@
+{
+  "name": "worktrees",
+  "description": "Make a repository worktree-ready: goal-driven per-worktree isolation plus an enforcement guard that protects the main checkout.",
+  "version": "0.1.0",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["worktree", "git", "isolation", "enforcement"]
+}

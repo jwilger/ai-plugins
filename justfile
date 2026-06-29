@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: fmt-check clippy test bdd
+ci: fmt-check clippy test bdd bats
 
 # Build everything.
 build:
@@ -33,6 +33,10 @@ test:
 # BDD / Cucumber acceptance tests (CI gate). Custom harness, so not run by nextest.
 bdd:
     cargo test --workspace --test cucumber
+
+# Shell / plugin-script tests (CI gate).
+bats:
+    bats plugins/worktrees/tests
 
 # Mutation testing — 100% kill required (release-gated in CI).
 mutants:
