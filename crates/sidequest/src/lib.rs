@@ -8,3 +8,5 @@
 //! scripting / hook / debug surface).
 //!
 //! Behavior is added outside-in as the BDD slices require it.
+
+pub mod server;
