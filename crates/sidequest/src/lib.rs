@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod deliver;
+pub mod registry;
 pub mod server;
 pub mod session;
 pub mod worktree;

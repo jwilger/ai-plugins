@@ -10,3 +10,4 @@
 
 pub mod config;
 pub mod launch;
+pub mod side_quest;
