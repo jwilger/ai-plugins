@@ -26,6 +26,8 @@ struct SideQuestWorld {
     repo: Option<tempfile::TempDir>,
     /// The session command to run inside the worktree, if any.
     session_command: Option<String>,
+    /// The structured result of the most recent `list` call.
+    listing: Option<serde_json::Value>,
 }
 
 #[when("a harness connects to the sidequest control plane over MCP")]
@@ -199,6 +201,46 @@ fn main_checkout_contains(world: &mut SideQuestWorld, file: String, content: Str
     assert_eq!(
         actual, content,
         "the work was delivered to the main checkout"
+    );
+}
+
+#[when("the harness lists the side-quests")]
+async fn lists(world: &mut SideQuestWorld) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
+    let mut command = Command::new(binary);
+    command.arg(repo.path());
+    let transport =
+        TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
+    let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
+
+    let result = client
+        .call_tool(CallToolRequestParams::new("list"))
+        .await
+        .expect("the list tool call should succeed");
+    world.listing = result.structured_content;
+
+    client
+        .cancel()
+        .await
+        .expect("the client should shut down cleanly");
+}
+
+#[then(expr = "the list includes a side-quest on branch {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions receive &mut World and own their parsed parameters"
+)]
+fn list_includes_branch(world: &mut SideQuestWorld, branch: String) {
+    let listing = world.listing.as_ref().expect("a listing was retrieved");
+    let records = listing.as_array().expect("the listing is a JSON array");
+    let found = records.iter().any(|record| {
+        record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+    });
+    assert!(
+        found,
+        "the list should include a side-quest on branch {branch}"
     );
 }
 

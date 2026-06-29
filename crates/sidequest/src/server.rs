@@ -15,8 +15,9 @@ use rmcp::{
 use serde::Deserialize;
 use sidequest_core::config::DeliveryMode;
 use sidequest_core::launch::{Goal, branch_for_goal};
+use sidequest_core::side_quest::{SideQuestRecord, SideQuestState};
 
-use crate::{deliver, session, worktree};
+use crate::{deliver, registry, session, worktree};
 
 /// Parameters for the `launch` tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -76,19 +77,49 @@ impl SidequestServer {
                 .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         }
 
-        if matches!(self.delivery, Some(DeliveryMode::LocalMerge)) {
+        let delivered = matches!(self.delivery, Some(DeliveryMode::LocalMerge));
+        if delivered {
             deliver::local_merge(self.project_root.as_ref(), &branch)
                 .await
                 .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         }
 
+        let worktree = worktree_path.display().to_string();
+        let state = if delivered {
+            SideQuestState::Delivered
+        } else {
+            SideQuestState::Done
+        };
+        registry::record(
+            self.project_root.as_ref(),
+            SideQuestRecord {
+                goal: goal.clone(),
+                branch: branch.clone(),
+                worktree: worktree.clone(),
+                state,
+            },
+        )
+        .await
+        .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+
         let payload = serde_json::json!({
             "branch": branch.as_ref(),
-            "worktree_path": worktree_path.display().to_string(),
+            "worktree_path": worktree,
         });
         Ok(CallToolResult::success(vec![Content::text(
             payload.to_string(),
         )]))
+    }
+
+    /// List the side-quests recorded for this project.
+    #[tool(description = "List the side-quests recorded for this project.")]
+    async fn list(&self) -> Result<CallToolResult, McpError> {
+        let records = registry::list(self.project_root.as_ref())
+            .await
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        let value = serde_json::to_value(&records)
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        Ok(CallToolResult::structured(value))
     }
 }
 
