@@ -1,0 +1,13 @@
+[package]
+name = "sidequest-core"
+description = "Pure functional core for the sidequest control plane: semantic types, effects, and state machines. Has no I/O dependencies by construction."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
