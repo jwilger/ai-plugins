@@ -26,6 +26,8 @@ struct SideQuestWorld {
     repo: Option<tempfile::TempDir>,
     /// The session command to run inside the worktree, if any.
     session_command: Option<String>,
+    /// The delivery mode, if any (e.g. `"local-merge"`).
+    delivery: Option<String>,
 }
 
 #[when("a harness connects to the sidequest control plane over MCP")]
@@ -87,6 +89,9 @@ async fn launches(world: &mut SideQuestWorld, goal: String) {
     command.arg(repo.path());
     if let Some(session_command) = world.session_command.as_deref() {
         command.env("SIDEQUEST_SESSION_COMMAND", session_command);
+    }
+    if let Some(delivery) = world.delivery.as_deref() {
+        command.env("SIDEQUEST_DELIVERY", delivery);
     }
     let transport =
         TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
@@ -159,6 +164,38 @@ fn worktree_contains(world: &mut SideQuestWorld, file: String, content: String) 
     let actual = std::fs::read_to_string(entry.path().join(&file))
         .expect("the recorded file exists in the worktree");
     assert_eq!(actual, content, "the session recorded the goal into {file}");
+}
+
+#[given("the side-quest delivers to the local main branch")]
+fn delivers_to_local_main(world: &mut SideQuestWorld) {
+    world.delivery = Some("local-merge".to_owned());
+}
+
+#[given(expr = "a session runner that commits {string} with {string}")]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions own their parsed parameters"
+)]
+fn a_session_runner_committing(world: &mut SideQuestWorld, file: String, content: String) {
+    world.session_command = Some(format!(
+        "printf '%s' '{content}' > {file} && git add {file} && git commit -q -m work"
+    ));
+}
+
+#[then(expr = "the main checkout contains {string} with {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions receive &mut World and own their parsed parameters"
+)]
+fn main_checkout_contains(world: &mut SideQuestWorld, file: String, content: String) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let actual = std::fs::read_to_string(repo.path().join(&file))
+        .expect("the delivered file exists in the main checkout");
+    assert_eq!(
+        actual, content,
+        "the work was delivered to the main checkout"
+    );
 }
 
 fn run_git(dir: &Path, args: &[&str]) {

@@ -20,8 +20,9 @@ async fn main() -> anyhow::Result<()> {
     )?;
 
     let session_command = std::env::var("SIDEQUEST_SESSION_COMMAND").ok();
+    let delivery = std::env::var("SIDEQUEST_DELIVERY").ok();
 
-    let service = SidequestServer::new(project_root, session_command)
+    let service = SidequestServer::new(project_root, session_command, delivery)
         .serve(rmcp::transport::stdio())
         .await
         .context("MCP handshake failed")?;
