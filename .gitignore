@@ -2,6 +2,12 @@
 # Provisioned by the Nix devshell; never committed.
 /.dependencies/
 
+# Rust build artifacts (workspace target dir at repo root).
+/target/
+
+# Side-quest worktrees (default location; configurable via sidequest.toml).
+/.worktrees/
+
 # direnv
 .direnv/
 
