@@ -1,0 +1,18 @@
+{
+  "name": "engineering-standards",
+  "version": "0.1.0",
+  "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["standards", "tdd", "bdd", "architecture", "quality"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Engineering Standards",
+    "shortDescription": "A strict, portfolio-grade engineering regime for any project.",
+    "category": "Developer Tools",
+    "capabilities": ["Read"]
+  }
+}
