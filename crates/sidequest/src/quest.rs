@@ -69,7 +69,11 @@ pub async fn execute(
             deliver::push_origin(project_root, branch).await?;
             true
         }
-        Some(DeliveryMode::Pr) | None => false,
+        Some(DeliveryMode::Pr) => {
+            deliver::push_branch(project_root, branch).await?;
+            true
+        }
+        None => false,
     };
 
     let state = if delivered {

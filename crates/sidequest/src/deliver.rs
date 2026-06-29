@@ -55,3 +55,14 @@ pub async fn push_origin(project_root: &Path, branch: &BranchName) -> Result<(),
     local_merge(project_root, branch).await?;
     git(project_root, &["push", "origin", "HEAD"]).await
 }
+
+/// Push the side-quest `branch` to origin as a feature branch (without merging
+/// it), so a pull/merge request can be opened for it (by the babysit-pr skill).
+///
+/// # Errors
+///
+/// Returns a [`DeliverError`] if git cannot be spawned or the push fails.
+pub async fn push_branch(project_root: &Path, branch: &BranchName) -> Result<(), DeliverError> {
+    let branch_ref: &str = branch.as_ref();
+    git(project_root, &["push", "origin", branch_ref]).await
+}
