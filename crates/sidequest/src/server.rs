@@ -1,9 +1,12 @@
 //! The MCP server surface for the control plane.
 //!
-//! Exposes the operator tools harnesses call. Worker tools (self-reporting) and
-//! the remaining operator tools are added outside-in by later slices.
+//! Exposes the operator tools harnesses call. Launching a side-quest is
+//! non-blocking: it creates the worktree, records the quest as running, and
+//! spawns a detached worker that runs the session, delivers, and updates the
+//! record. Worker (self-reporting) tools are added by later slices.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
 
 use rmcp::{
@@ -13,11 +16,10 @@ use rmcp::{
     schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
-use sidequest_core::config::DeliveryMode;
-use sidequest_core::launch::{Goal, branch_for_goal};
+use sidequest_core::launch::{BranchName, Goal, branch_for_goal};
 use sidequest_core::side_quest::{SideQuestRecord, SideQuestState};
 
-use crate::{deliver, registry, session, worktree};
+use crate::{registry, worktree};
 
 /// Parameters for the `launch` tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -32,31 +34,24 @@ pub struct LaunchParams {
 pub struct SidequestServer {
     project_root: Arc<Path>,
     session_command: Option<Arc<str>>,
-    delivery: Option<DeliveryMode>,
 }
 
 #[tool_router]
 impl SidequestServer {
     /// Build a server rooted at `project_root`. `session_command`, when present,
-    /// is run (via `sh -c`) inside each new worktree as the goal session;
-    /// `delivery` selects how the work is delivered (`"local-merge"`).
+    /// is run (via `sh -c`) inside each worktree as the goal session.
     #[must_use]
-    pub fn new(
-        project_root: PathBuf,
-        session_command: Option<String>,
-        delivery: Option<DeliveryMode>,
-    ) -> Self {
+    pub fn new(project_root: PathBuf, session_command: Option<String>) -> Self {
         Self {
             project_root: Arc::from(project_root),
             session_command: session_command.map(Arc::from),
-            delivery,
         }
     }
 
-    /// Launch a side-quest: create an isolated git worktree on a fresh branch
-    /// derived from the goal.
+    /// Launch a side-quest: create an isolated git worktree, record the quest as
+    /// running, and start a detached background worker. Returns immediately.
     #[tool(
-        description = "Launch a side-quest: create an isolated git worktree on a fresh branch derived from the goal."
+        description = "Launch a side-quest: create an isolated git worktree on a fresh branch derived from the goal, and run it in the background."
     )]
     async fn launch(
         &self,
@@ -70,41 +65,31 @@ impl SidequestServer {
         let worktree_path = worktree::create(self.project_root.as_ref(), &branch)
             .await
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-
-        if let Some(command) = self.session_command.as_deref() {
-            session::run(&worktree_path, command, &goal)
-                .await
-                .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        }
-
-        let delivered = matches!(self.delivery, Some(DeliveryMode::LocalMerge));
-        if delivered {
-            deliver::local_merge(self.project_root.as_ref(), &branch)
-                .await
-                .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        }
-
         let worktree = worktree_path.display().to_string();
-        let state = if delivered {
-            SideQuestState::Delivered
-        } else {
-            SideQuestState::Done
-        };
+
         registry::record(
             self.project_root.as_ref(),
             SideQuestRecord {
                 goal: goal.clone(),
                 branch: branch.clone(),
                 worktree: worktree.clone(),
-                state,
+                state: SideQuestState::Running,
             },
         )
         .await
         .map_err(|error| McpError::internal_error(error.to_string(), None))?;
 
+        spawn_worker(
+            self.project_root.as_ref(),
+            &branch,
+            self.session_command.as_deref(),
+        )
+        .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+
         let payload = serde_json::json!({
             "branch": branch.as_ref(),
             "worktree_path": worktree,
+            "state": "running",
         });
         Ok(CallToolResult::success(vec![Content::text(
             payload.to_string(),
@@ -121,6 +106,38 @@ impl SidequestServer {
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::structured(value))
     }
+}
+
+/// Locate the sibling `sidequest` worker binary next to this executable, falling
+/// back to the `PATH`.
+fn worker_binary() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("sidequest")))
+        .unwrap_or_else(|| PathBuf::from("sidequest"))
+}
+
+/// Spawn a detached `sidequest run-quest` worker for `branch`. The worker
+/// outlives this server process.
+fn spawn_worker(
+    project_root: &Path,
+    branch: &BranchName,
+    session_command: Option<&str>,
+) -> std::io::Result<()> {
+    let mut command = std::process::Command::new(worker_binary());
+    command
+        .arg("run-quest")
+        .arg("--project-root")
+        .arg(project_root)
+        .arg("--branch")
+        .arg(branch.as_ref())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(session) = session_command {
+        command.arg("--session-command").arg(session);
+    }
+    command.spawn().map(|_child| ())
 }
 
 #[tool_handler]

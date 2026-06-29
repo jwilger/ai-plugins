@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod deliver;
+pub mod quest;
 pub mod registry;
 pub mod server;
 pub mod session;

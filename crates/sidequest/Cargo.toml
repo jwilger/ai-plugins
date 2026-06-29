@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 rmcp = { version = "1.7", features = ["server", "transport-io"] }
 rmcp-macros = "1.8"
 schemars = "1"
