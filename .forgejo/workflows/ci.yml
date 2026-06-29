@@ -30,7 +30,10 @@ jobs:
   mutation:
     name: Mutation testing (release PRs)
     runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.labels.*.name, 'release')
+    # Release PRs are opened on a `release-plz-*` branch (see
+    # .forgejo/scripts/create-release-plz-release-pr.sh); a manual `release`
+    # label also triggers it.
+    if: ${{ startsWith(github.head_ref, 'release-plz-') || contains(github.event.pull_request.labels.*.name, 'release') }}
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
