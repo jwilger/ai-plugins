@@ -24,6 +24,8 @@ struct SideQuestWorld {
     server_name: Option<String>,
     /// A temporary git repository the side-quest operates on.
     repo: Option<tempfile::TempDir>,
+    /// The session command to run inside the worktree, if any.
+    session_command: Option<String>,
 }
 
 #[when("a harness connects to the sidequest control plane over MCP")]
@@ -83,6 +85,9 @@ async fn launches(world: &mut SideQuestWorld, goal: String) {
     let binary = env!("CARGO_BIN_EXE_sidequest-mcp");
     let mut command = Command::new(binary);
     command.arg(repo.path());
+    if let Some(session_command) = world.session_command.as_deref() {
+        command.env("SIDEQUEST_SESSION_COMMAND", session_command);
+    }
     let transport =
         TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
     let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
@@ -126,6 +131,34 @@ fn worktree_exists(world: &mut SideQuestWorld, branch: String) {
         branch,
         "the worktree should be checked out on the side-quest branch"
     );
+}
+
+#[given(expr = "a session runner that records the goal to {string}")]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions own their parsed parameters"
+)]
+fn a_session_runner_recording_to(world: &mut SideQuestWorld, file: String) {
+    world.session_command = Some(format!("printf '%s' \"$SIDEQUEST_GOAL\" > {file}"));
+}
+
+#[then(expr = "the worktree contains {string} with {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions receive &mut World and own their parsed parameters"
+)]
+fn worktree_contains(world: &mut SideQuestWorld, file: String, content: String) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let worktrees = repo.path().join(".worktrees");
+    let entry = std::fs::read_dir(&worktrees)
+        .expect("the worktrees directory exists")
+        .next()
+        .expect("a worktree was created")
+        .expect("the worktree entry is readable");
+    let actual = std::fs::read_to_string(entry.path().join(&file))
+        .expect("the recorded file exists in the worktree");
+    assert_eq!(actual, content, "the session recorded the goal into {file}");
 }
 
 fn run_git(dir: &Path, args: &[&str]) {
