@@ -49,5 +49,6 @@ audit:
 # Marketplace manifest + formatting validation.
 validate-marketplace:
     jq empty .claude-plugin/marketplace.json
+    jq empty .agents/plugins/marketplace.json
     find plugins -name plugin.json -exec jq empty {} \;
     prettier --check "**/*.{json,md}"
