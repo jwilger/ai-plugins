@@ -15,7 +15,7 @@ use rmcp::{
 use serde::Deserialize;
 use sidequest_core::launch::{Goal, branch_for_goal};
 
-use crate::{session, worktree};
+use crate::{deliver, session, worktree};
 
 /// Parameters for the `launch` tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -30,17 +30,24 @@ pub struct LaunchParams {
 pub struct SidequestServer {
     project_root: Arc<Path>,
     session_command: Option<Arc<str>>,
+    delivery: Option<Arc<str>>,
 }
 
 #[tool_router]
 impl SidequestServer {
     /// Build a server rooted at `project_root`. `session_command`, when present,
-    /// is run (via `sh -c`) inside each new worktree as the goal session.
+    /// is run (via `sh -c`) inside each new worktree as the goal session;
+    /// `delivery` selects how the work is delivered (`"local-merge"`).
     #[must_use]
-    pub fn new(project_root: PathBuf, session_command: Option<String>) -> Self {
+    pub fn new(
+        project_root: PathBuf,
+        session_command: Option<String>,
+        delivery: Option<String>,
+    ) -> Self {
         Self {
             project_root: Arc::from(project_root),
             session_command: session_command.map(Arc::from),
+            delivery: delivery.map(Arc::from),
         }
     }
 
@@ -64,6 +71,12 @@ impl SidequestServer {
 
         if let Some(command) = self.session_command.as_deref() {
             session::run(&worktree_path, command, &goal)
+                .await
+                .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        }
+
+        if matches!(self.delivery.as_deref(), Some("local-merge")) {
+            deliver::local_merge(self.project_root.as_ref(), &branch)
                 .await
                 .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         }
