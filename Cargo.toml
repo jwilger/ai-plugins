@@ -1,0 +1,137 @@
+[workspace]
+resolver = "2"
+members = ["crates/sidequest-core", "crates/sidequest"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["John Wilger <john@johnwilger.com>"]
+# NOTE: license confirmed-pending — mirrors claude-factory (closest analog). See
+# docs/adr/0001. Revisit before the first crates.io publish.
+license = "AGPL-3.0-or-later"
+repository = "https://git.johnwilger.com/Slipstream/ai-plugins"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Core lint groups — treat as allowlist per https://billylevin.dev/posts/clippy-config/
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+restriction = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Required to avoid the meta-lint on enabling the restriction group
+blanket_clippy_restriction_lints = "allow"
+
+# ── Restriction / nursery group triage ───────────────────────────────────────
+# Each entry is a deliberate project-policy decision, not a convenience suppress.
+
+# Rust idiom: implicit returns at end of block are idiomatic
+implicit_return = "allow"
+# `?` is the idiomatic error-propagation operator
+question_mark_used = "allow"
+# We use flat file naming (state_machine.rs, not state_machine/mod.rs)
+self_named_module_files = "allow"
+# Inline modules are idiomatic here: `pub mod well_known` constant groups and
+# `#[cfg(test)] mod tests` blocks live alongside the code they support
+inline_modules = "allow"
+# Re-exports (`pub use`) are standard Rust API design
+pub_use = "allow"
+# `impl Trait` in params is idiomatic for simple public functions
+impl_trait_in_params = "allow"
+# Float arithmetic is intentional (rates, averages)
+float_arithmetic = "allow"
+# Standard arithmetic without explicit overflow checks is acceptable in this domain
+arithmetic_side_effects = "allow"
+# Domain enums are exhaustively matched by design; non_exhaustive would break callers
+exhaustive_enums = "allow"
+# Domain structs are constructed by known code paths; exhaustive is intentional
+exhaustive_structs = "allow"
+# Single-char identifiers (e, i, x) are idiomatic in closures and math contexts
+min_ident_chars = "allow"
+# Variable shadowing is acceptable for refinement patterns (re-binding parsed values)
+shadow_reuse = "allow"
+shadow_unrelated = "allow"
+# Non-ASCII characters in string literals (unicode output, emoji) are intentional
+non_ascii_literal = "allow"
+# We are not targeting no_std environments; `std` is fine
+std_instead_of_core = "allow"
+# `.to_string()` on &str is idiomatic in non-hot-path code
+str_to_string = "allow"
+# Private item documentation is not required
+missing_docs_in_private_items = "allow"
+# `#[inline]` annotations are not required; this is not a WASM/perf-critical lib
+missing_inline_in_public_items = "allow"
+# `const fn` is not required on all eligible functions
+missing_const_for_fn = "allow"
+# `as` casts: `cast_precision_loss` and pedantic casts cover the dangerous cases
+as_conversions = "allow"
+# Item ordering: we follow logical grouping, not strict alphabetical ordering
+arbitrary_source_item_ordering = "allow"
+# Anonymous trait imports are acceptable
+unused_trait_names = "allow"
+# rmcp's #[tool_handler] macro generates an async trait impl with no .await
+unused_async_trait_impl = "allow"
+# Absolute paths in code body: we use `use` statements at module top instead
+absolute_paths = "allow"
+# Cloning Arc/Rc is intentional and explicit; the type communicates shared ownership
+clone_on_ref_ptr = "allow"
+# Cognitive complexity overlaps with too_many_lines which we already handle
+cognitive_complexity = "allow"
+# Decimal literals are standard; hex/binary representation not required
+decimal_literal_representation = "allow"
+# Documentation punctuation style is not enforced
+doc_paragraphs_missing_punctuation = "allow"
+# Explicit `if/else` returning `Some`/`None` is often clearer than `.then_some()`
+if_then_some_else_none = "allow"
+# `let _ = expr` is standard for intentionally discarding values
+let_underscore_untyped = "allow"
+# Default trait method implementations need not always be overridden
+missing_trait_methods = "allow"
+# Domain types intentionally repeat their module name (e.g. ForgeError in forge module)
+module_name_repetitions = "allow"
+# Multiple inherent impl blocks are used for logical organization
+multiple_inherent_impl = "allow"
+# Pattern type mismatch: our match patterns are intentionally typed as written
+pattern_type_mismatch = "allow"
+# `ref` patterns are idiomatic in match arms
+ref_patterns = "allow"
+# We use `?` and early return, not `.and_then()` chains
+return_and_then = "allow"
+# Single-use helper functions improve readability and testability
+single_call_fn = "allow"
+# We use `std` consistently; alloc equivalents would add no value here
+std_instead_of_alloc = "allow"
+# Struct field patterns with `..` are fine; we don't need all fields named
+unneeded_field_pattern = "allow"
+# `1u64` style is more readable than `1_u64`
+unseparated_literal_suffix = "allow"
+# Default numeric fallback (0 as i32) is fine; strong inference makes it non-ambiguous in context
+default_numeric_fallback = "allow"
+# MutexGuard/RwLockWriteGuard drops in async code are intentional — held for the full operation scope
+significant_drop_tightening = "allow"
+# Boundary error conversion with domain-specific messages; original error type is internal
+map_err_ignore = "allow"
+# Intentional catch-all match arms for event handling and test assertions; future variants handled at the emit site
+wildcard_enum_match_arm = "allow"
+# Rust integration test files in tests/ live outside cfg(test) modules by convention
+tests_outside_test_module = "allow"
+# String slicing at floor_char_boundary-computed indices is safe; clippy can't prove it statically
+string_slice = "allow"
+# expect_used = "deny" already enforces documented expect() annotations; this duplicate check adds noise
+unwrap_in_result = "allow"
+# `#[allow]` attributes must use `#[expect]` instead — enforced to catch stale suppression
+allow_attributes = "deny"
+# All lint-suppression attributes require a documented reason
+allow_attributes_without_reason = "deny"
+
+# ── Panic-family lints ────────────────────────────────────────────────────────
+# All panic-family lints are denied. Production code must use `ok_or`/`?`/`ok_or_else`.
+# Test modules may use `#[expect(clippy::expect_used, reason = "...")]`.
+expect_used = "deny"
+unwrap_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
