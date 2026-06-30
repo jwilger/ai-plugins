@@ -74,6 +74,36 @@ time for a clean slate.
 
 See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
 
+## Installing `sidequest` via Nix
+
+The flake also exposes the [`sidequest`](crates/) control plane as a package, so
+other Nix projects can install the `sidequest` CLI and `sidequest-mcp` server
+without cloning this repo.
+
+```shell
+# Run it directly:
+nix run git+https://git.johnwilger.com/Slipstream/ai-plugins#sidequest -- --help
+
+# Or build/install the package (provides both `sidequest` and `sidequest-mcp`):
+nix build git+https://git.johnwilger.com/Slipstream/ai-plugins#sidequest
+```
+
+To consume it from another flake, add this repo as an input and pull the
+package out of its `packages.<system>` set:
+
+```nix
+{
+  inputs.ai-plugins.url = "git+https://git.johnwilger.com/Slipstream/ai-plugins";
+
+  outputs = { self, nixpkgs, ai-plugins }: {
+    # e.g. add to a devShell or home/system packages:
+    #   ai-plugins.packages.${system}.sidequest
+  };
+}
+```
+
+The package is built with the same pinned nightly toolchain as the devshell.
+
 ## Repository layout
 
 ```
