@@ -49,12 +49,16 @@ recreate it locally if you use direnv.
    - `commands/<name>.md` — legacy flat-file slash commands (prefer `skills/`).
    - `hooks/hooks.json`, `.mcp.json`, `.lsp.json`, `bin/` — as needed.
 4. Register the plugin in `.claude-plugin/marketplace.json` by appending to the
-   `plugins` array. Because `metadata.pluginRoot` is `./plugins`, `source` is
-   just the directory name:
+   `plugins` array. `source` is the **explicit relative path** to the plugin
+   directory, `./plugins/<plugin-name>` (do not use a bare directory name with
+   `metadata.pluginRoot` — some Claude Code versions reject that as an
+   unsupported source type and treat the plugin as remote). Mirror the entry in
+   `.agents/plugins/marketplace.json` for Codex (which uses the
+   `{ "source": "local", "path": "./plugins/<plugin-name>" }` object form).
    ```json
    {
      "name": "<plugin-name>",
-     "source": "<plugin-name>",
+     "source": "./plugins/<plugin-name>",
      "description": "…",
      "version": "0.1.0",
      "keywords": ["…"],
