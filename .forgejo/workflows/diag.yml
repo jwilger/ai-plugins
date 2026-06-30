@@ -1,0 +1,35 @@
+name: DIAG
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  diag-bare:
+    name: diag bare (no uses, no nix)
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "bare ok"
+
+  diag-checkout:
+    name: diag checkout only
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "checkout ok"; ls -a | head
+
+  diag-setup-nix:
+    name: diag checkout + setup-nix
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.forgejo/actions/setup-nix
+      - run: nix --version && echo "setup-nix ok"
+
+  diag-nix-develop:
+    name: diag nix develop
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.forgejo/actions/setup-nix
+      - run: nix develop -c echo "nix develop ok"
