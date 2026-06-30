@@ -6,3 +6,6 @@ target/
 .cargo-bin/
 Cargo.lock
 flake.lock
+
+# release-plz-generated changelogs (keepachangelog format, not prettier-managed).
+CHANGELOG.md

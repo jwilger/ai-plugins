@@ -49,8 +49,13 @@ bats:
 # Unset CARGO_TARGET_DIR (the devshell pins it to an absolute path): otherwise
 # cargo-mutants builds *mutated* source into the shared dev target dir and
 # corrupts its incremental fingerprints. Isolated here under mutants.out/.
+# `--timeout 300`: the black-box BDD scenarios *poll* for a few seconds when a
+# mutation breaks delivery, which exceeds cargo-mutants' tiny auto-timeout
+# (~20s, derived from the fast baseline) and is mis-scored as TIMEOUT instead of
+# CAUGHT. A generous per-mutant timeout lets those tests fail (= catch the
+# mutant) cleanly; genuinely hung mutants still time out.
 mutants:
-    env -u CARGO_TARGET_DIR cargo mutants --workspace
+    env -u CARGO_TARGET_DIR cargo mutants --workspace --timeout 300
 
 # Dependency vulnerability audit.
 audit:
