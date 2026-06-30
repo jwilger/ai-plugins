@@ -35,5 +35,16 @@ runs:
         # That's not allowed for security."), with or without a sandbox. Remove
         # the world/group-write bits so builds (e.g. an uncached nodejs) proceed.
         chmod go-w / 2>/dev/null || true
-        # The container can't always set up a build sandbox either; disable it.
-        printf 'NIX_CONFIG=%s\n' "sandbox = false" >> "$GITHUB_ENV"
+        # Make nix config authoritative every job (warm volumes reuse whatever a
+        # prior install wrote): disable the sandbox (the container can't set one
+        # up), pin the public binary cache + its key, and don't insist on
+        # signatures so a warm volume missing the key still substitutes instead
+        # of rebuilding everything from source.
+        {
+          echo 'NIX_CONFIG<<NIXEOF'
+          echo 'sandbox = false'
+          echo 'substituters = https://cache.nixos.org/'
+          echo 'trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY='
+          echo 'require-sigs = false'
+          echo 'NIXEOF'
+        } >> "$GITHUB_ENV"
