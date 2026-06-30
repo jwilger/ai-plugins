@@ -22,10 +22,73 @@
         pkgs = import nixpkgs { inherit system overlays; };
 
         # The toolchain file is authoritative; the overlay revision pins the
-        # exact nightly. (Package/release builds add crane on top of this.)
+        # exact nightly.
         rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+
+        # Build packages with the same pinned nightly toolchain the devshell
+        # uses, rather than nixpkgs' stable rustc/cargo.
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
+
+        # The sidequest control plane. Building the `sidequest` crate pulls in
+        # its path dependency `sidequest-core`, and installs both binaries it
+        # declares: `sidequest` (CLI) and `sidequest-mcp` (MCP stdio server).
+        sidequest = rustPlatform.buildRustPackage {
+          pname = "sidequest";
+          version = "0.1.0";
+
+          # Only the Rust workspace is needed to build; keep the rest of the
+          # marketplace repo out of the build sandbox for reproducibility.
+          src = pkgs.lib.fileset.toSource {
+            root = ./.;
+            fileset = pkgs.lib.fileset.unions [
+              ./Cargo.toml
+              ./Cargo.lock
+              ./crates
+              ./rust-toolchain.toml
+            ];
+          };
+
+          cargoLock.lockFile = ./Cargo.lock;
+
+          # Build/install just the control-plane crate (and its path dep).
+          cargoBuildFlags = [ "-p" "sidequest" ];
+
+          # The crate's tests (cucumber/BDD, process supervision, git worktrees)
+          # require a writable git/process environment that the Nix build
+          # sandbox does not provide. CI's `just ci` is the test gate; the
+          # package build only needs to compile and install the binaries.
+          doCheck = false;
+
+          meta = with pkgs.lib; {
+            description = "The sidequest control plane (CLI + MCP stdio server) for backgrounded-worktree development.";
+            homepage = "https://git.johnwilger.com/Slipstream/ai-plugins";
+            license = licenses.agpl3Plus;
+            maintainers = [ ];
+            mainProgram = "sidequest";
+          };
+        };
       in
       {
+        packages = {
+          inherit sidequest;
+          default = sidequest;
+        };
+
+        apps = {
+          sidequest = {
+            type = "app";
+            program = "${sidequest}/bin/sidequest";
+          };
+          sidequest-mcp = {
+            type = "app";
+            program = "${sidequest}/bin/sidequest-mcp";
+          };
+          default = self.apps.${system}.sidequest;
+        };
+
         devShells.default = pkgs.mkShell {
           name = "ai-plugins";
 
