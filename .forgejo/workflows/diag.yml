@@ -5,26 +5,56 @@ on:
     branches: [main]
 
 jobs:
-  diag-capture:
-    name: diag capture nix develop error
+  class-disk:
+    name: class disk-full
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: ./.forgejo/actions/setup-nix
-      - name: Capture nix develop output + disk
-        run: |
+      - run: |
           set +e
-          echo "== df before ==" > /tmp/diag.txt
-          df -h >> /tmp/diag.txt 2>&1
-          echo "== nix develop --command true ==" >> /tmp/diag.txt
-          nix develop --command true >> /tmp/diag.txt 2>&1
-          echo "EXIT=$?" >> /tmp/diag.txt
-          echo "== df after ==" >> /tmp/diag.txt
-          df -h >> /tmp/diag.txt 2>&1
-          tail -c 12000 /tmp/diag.txt > /tmp/diag-tail.txt
-          cat /tmp/diag-tail.txt
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: diag
-          path: /tmp/diag-tail.txt
+          nix develop --command true > /tmp/o.txt 2>&1
+          pct="$(df --output=pcent / | tail -1 | tr -dc 0-9)"
+          echo "disk%=$pct"
+          { grep -qiE 'no space left|disk' /tmp/o.txt || [ "${pct:-0}" -ge 95 ]; } && exit 0 || exit 1
+
+  class-build:
+    name: class builder-failed
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.forgejo/actions/setup-nix
+      - run: |
+          set +e
+          nix develop --command true > /tmp/o.txt 2>&1
+          grep -qiE "builder for .* failed|build of .* failed|failed to build|hash mismatch|error: build" /tmp/o.txt && exit 0 || exit 1
+
+  class-fetch:
+    name: class fetch-network
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.forgejo/actions/setup-nix
+      - run: |
+          set +e
+          nix develop --command true > /tmp/o.txt 2>&1
+          grep -qiE "unable to download|cannot connect|could not download|TLS|SSL|getaddrinfo|temporary failure|connection (timed out|refused)|unexpected end-of-file" /tmp/o.txt && exit 0 || exit 1
+
+  class-eval:
+    name: class eval-attr
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.forgejo/actions/setup-nix
+      - run: |
+          set +e
+          nix develop --command true > /tmp/o.txt 2>&1
+          grep -qiE "attribute .* missing|undefined variable|error: .*evaluat|is marked as broken|Package .* is not available|insecure" /tmp/o.txt && exit 0 || exit 1
+
+  class-ok:
+    name: class nix-develop-ok
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.forgejo/actions/setup-nix
+      - run: nix develop --command true && echo "nix develop OK"
