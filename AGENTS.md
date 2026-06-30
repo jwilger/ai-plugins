@@ -49,12 +49,16 @@ recreate it locally if you use direnv.
    - `commands/<name>.md` — legacy flat-file slash commands (prefer `skills/`).
    - `hooks/hooks.json`, `.mcp.json`, `.lsp.json`, `bin/` — as needed.
 4. Register the plugin in `.claude-plugin/marketplace.json` by appending to the
-   `plugins` array. Because `metadata.pluginRoot` is `./plugins`, `source` is
-   just the directory name:
+   `plugins` array. `source` is the **explicit relative path** to the plugin
+   directory, `./plugins/<plugin-name>` (do not use a bare directory name with
+   `metadata.pluginRoot` — some Claude Code versions reject that as an
+   unsupported source type and treat the plugin as remote). Mirror the entry in
+   `.agents/plugins/marketplace.json` for Codex (which uses the
+   `{ "source": "local", "path": "./plugins/<plugin-name>" }` object form).
    ```json
    {
      "name": "<plugin-name>",
-     "source": "<plugin-name>",
+     "source": "./plugins/<plugin-name>",
      "description": "…",
      "version": "0.1.0",
      "keywords": ["…"],
@@ -95,6 +99,65 @@ For an end-to-end check in Claude Code: `/plugin marketplace add .` then
   manifest if a harness needs a different format, rather than overloading
   `marketplace.json`. Always note a plugin's supported harnesses in its README
   and the `README.md` catalog tables.
+
+## Rust control plane (`crates/`)
+
+The **sidequest** control plane lives in a Cargo workspace under `crates/`:
+
+- `crates/sidequest-core` — the pure functional core (no I/O dependencies, by
+  construction).
+- `crates/sidequest` — the imperative shell, with two binaries: `sidequest-mcp`
+  (the MCP stdio server, the primary surface) and `sidequest` (the CLI).
+
+Work inside the Nix devshell and use `just` as the command interface:
+
+```shell
+nix develop      # nightly toolchain (rust-toolchain.toml) + just + cargo-nextest/mutants/audit + release-plz
+just ci          # fmt-check + clippy -D warnings + nextest  (run before every commit)
+just mutants     # mutation testing — 100% mutant kill required
+```
+
+Rust dependencies are managed **only via `cargo add`** (never hand-edit
+`[dependencies]`).
+
+## Engineering standards (harness-agnostic)
+
+This project follows a strict, documented engineering regime. The canonical rules
+live in [`docs/rules/`](docs/rules/) and every architectural decision is recorded
+in [`docs/adr/`](docs/adr/). In brief: functional-core/imperative-shell with a
+Step/Trampoline effect pattern; parse-don't-validate semantic types (`nutype`);
+railway-oriented errors (`thiserror`); strict clippy; BDD/Cucumber one step at a
+time in vertical slices; 100% mutation kill; eval-driven effectiveness and
+minimum-necessary context for skills/MCP; PR-based CI with required approval and
+managed release; Conventional Commits with **no `Co-Authored-By` trailers**; never
+take quality shortcuts. These rules apply to **both Claude Code and Codex**;
+`CLAUDE.md` is a thin pointer to this file.
+
+## CI/CD and release
+
+CI and release run on Forgejo Actions (`.forgejo/workflows/`):
+
+- **`ci.yml`** (PR + push to `main`): the full `just ci` gate (build, fmt, clippy
+  `-D warnings`, nextest, doctests, BDD, bats), marketplace validation
+  (including the cross-harness manifest sync-validator), a `cargo-audit`
+  security job, Codex-manifest checks, mutation testing on release PRs (keyed on
+  the `release-plz-*` branch), and a final `gate` aggregator job so branch
+  protection has a single required check.
+- **Release is two-phase**, mirroring eventcore:
+  - **`release-plz.yml`** (Phase 1, push to `main` except `chore(release):`
+    commits): opens/updates a **signed** release PR. `main` rejects unverified
+    commits, so `release-plz update` makes the file changes and the helper
+    scripts in `.forgejo/scripts/` create the signed commit and open the PR via
+    the forge API.
+  - **`publish.yml`** (Phase 2, when the `chore(release):` merge lands): runs
+    `release-plz release` to publish to crates.io and cut the Forgejo release.
+
+Organization secrets/vars (available to the repo): `RELEASE_PLZ_TOKEN` (forge
+PAT), `RELEASE_SIGNING_KEY` (SSH or GPG key), `CARGO_REGISTRY_TOKEN` (crates.io),
+and `RELEASE_SIGNING_NAME` / `RELEASE_SIGNING_EMAIL` (vars). Publication order
+(`release-plz.toml`): `sidequest-core` before `sidequest`. Branch protection
+(≥1 approval, with auto_review contributing the approval) is a Forgejo
+server-side setting.
 
 ## Reference
 

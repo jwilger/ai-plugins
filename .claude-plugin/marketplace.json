@@ -6,8 +6,38 @@
   },
   "description": "A multi-harness marketplace of AI coding-assistant plugins. Currently serves Claude Code; structured to also serve Codex and other harnesses that support the plugin concept.",
   "version": "0.1.0",
-  "metadata": {
-    "pluginRoot": "./plugins"
-  },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "side-quest",
+      "source": "./plugins/side-quest",
+      "description": "Launch backgrounded side-quests that implement changes in isolated git worktrees and deliver per project config.",
+      "version": "0.1.0",
+      "category": "Productivity",
+      "keywords": ["worktree", "agents", "automation"]
+    },
+    {
+      "name": "worktrees",
+      "source": "./plugins/worktrees",
+      "description": "Make a repository worktree-ready: per-worktree isolation plus an enforcement guard that protects the main checkout.",
+      "version": "0.1.0",
+      "category": "Productivity",
+      "keywords": ["worktree", "git", "enforcement"]
+    },
+    {
+      "name": "engineering-standards",
+      "source": "./plugins/engineering-standards",
+      "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
+      "version": "0.1.0",
+      "category": "Developer Tools",
+      "keywords": ["standards", "tdd", "bdd", "architecture", "quality"]
+    },
+    {
+      "name": "babysit-pr",
+      "source": "./plugins/babysit-pr",
+      "description": "Babysit a pull/merge request to completion across GitHub, Forgejo, and GitLab.",
+      "version": "0.1.0",
+      "category": "Developer Tools",
+      "keywords": ["pr", "ci", "review"]
+    }
+  ]
 }

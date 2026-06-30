@@ -1,0 +1,37 @@
+---
+name: babysit-pr
+description: Use when a pull request or merge request needs to be driven to merge — watching CI, responding to review feedback, and merging once green and approved, across GitHub, Forgejo, or GitLab.
+---
+
+# Babysit a PR/MR to merge
+
+Watch a pull/merge request and drive it to merge. Forge-agnostic: detect the
+forge with `scripts/detect-forge.sh` and use the matching tooling. None is
+preferred over the others.
+
+| Forge   | Tooling                                                  |
+| ------- | -------------------------------------------------------- |
+| GitHub  | `gh`                                                     |
+| Forgejo | Forgejo MCP tools (`forgejo_*`); `tea` as a CLI fallback |
+| GitLab  | `glab`                                                   |
+
+## Loop (until merged, or blocked needing a human)
+
+1. **Poll status** — CI checks, review threads, and mergeability.
+2. **On CI failure** — fetch the logs, diagnose, and push a fix to the branch.
+3. **On review feedback** — apply the receiving-code-review discipline: verify
+   each point against the code, push back with technical reasoning or implement
+   it, and reply in the thread. Re-request review once addressed.
+4. **Merge** — enable auto-merge if the project allows it; otherwise merge once
+   the PR is green and approved.
+5. **Blocked needing a human** (a required gate you cannot fix, a missing signing
+   key, an auth prompt) — stop and notify. Do not spin.
+
+For the survive-laptop-off case, this can be backed by a scheduled/cloud agent
+(e.g. a Claude Cloud Routine) rather than a local loop.
+
+## Notes
+
+- Treat the project's default branch as protected: never push to it directly or
+  merge manually when a required review/CI gate exists.
+- One PR at a time: don't start new work while a PR is still mid-flight.

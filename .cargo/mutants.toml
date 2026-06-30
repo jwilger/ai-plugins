@@ -1,0 +1,15 @@
+# cargo-mutants configuration.
+#
+# The project requires a 100% mutant kill rate. The single exclusion below is
+# for code whose mutation is unkillable *by construction*, not a coverage gap:
+#
+# `init_tracing` installs a process-global tracing subscriber (to stderr) for
+# the MCP server binary. It is a pure side effect with no test-observable
+# behavior, and `tracing_subscriber::fmt().init()` panics if called twice, so it
+# cannot be exercised from a test alongside the running binary. Its mutation
+# ("replace with ()") therefore cannot be caught by any test.
+#
+# Everything else must achieve a 100% kill rate; do not add coverage gaps here.
+exclude_re = [
+    "replace init_tracing with",
+]

@@ -1,0 +1,62 @@
+name: Release PR
+
+# Phase 1: on every push to main (except release-PR merges), open or update a
+# *signed* release PR (version bumps + changelog). `main` rejects unverified
+# commits, so the commit is signed by our helper scripts rather than by
+# release-plz directly. Phase 2 (publish.yml) publishes when that PR merges.
+#
+# Secrets/vars (organization-level, available to the repo):
+#   RELEASE_PLZ_TOKEN     forge PAT (push + open PRs; triggers downstream CI)
+#   RELEASE_SIGNING_KEY   SSH or GPG private signing key
+#   RELEASE_SIGNING_NAME / RELEASE_SIGNING_EMAIL   signer identity (vars)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-pr:
+    name: Create/Update signed release PR
+    runs-on: ubuntu-24.04
+    # Skip release-PR-merge commits to avoid an open/merge loop.
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      GIT_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      RELEASE_SIGNING_NAME: ${{ vars.RELEASE_SIGNING_NAME }}
+      RELEASE_SIGNING_EMAIL: ${{ vars.RELEASE_SIGNING_EMAIL }}
+    steps:
+      - name: Skip when release secrets are unavailable
+        if: ${{ env.GIT_TOKEN == '' || env.RELEASE_SIGNING_KEY == '' }}
+        run: |
+          echo "release PR skipped: set RELEASE_PLZ_TOKEN and RELEASE_SIGNING_KEY to create signed release PRs"
+
+      - name: Checkout
+        if: ${{ env.GIT_TOKEN != '' && env.RELEASE_SIGNING_KEY != '' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          persist-credentials: false
+
+      - name: Install Nix
+        if: ${{ env.GIT_TOKEN != '' && env.RELEASE_SIGNING_KEY != '' }}
+        uses: ./.forgejo/actions/setup-nix
+
+      - name: Create/update signed release PR
+        if: ${{ env.GIT_TOKEN != '' && env.RELEASE_SIGNING_KEY != '' }}
+        run: |
+          nix develop -c bash -c '
+            . ./.forgejo/scripts/configure-release-plz-git-auth.sh
+            . ./.forgejo/scripts/configure-release-plz-git-signing.sh
+            git config --global user.name "${RELEASE_SIGNING_NAME:-release-plz-bot}"
+            git config --global user.email "${RELEASE_SIGNING_EMAIL:-release-plz-bot@noreply.git.johnwilger.com}"
+            sh ./.forgejo/scripts/create-release-plz-release-pr.sh
+          '

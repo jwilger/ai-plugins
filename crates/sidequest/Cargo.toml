@@ -1,0 +1,36 @@
+[package]
+name = "sidequest"
+description = "The sidequest control plane: the imperative shell (trampoline interpreter, process supervision, git/worktree, registry, forge port, notifications) with an MCP stdio server and a CLI."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+rmcp = { version = "1.7", features = ["server", "transport-io"] }
+rmcp-macros = "1.8"
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sidequest-core = { version = "0.1.0", path = "../sidequest-core" }
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "signal", "fs", "process"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+cucumber = "0.21"
+rmcp = { version = "1.7", features = ["client", "transport-child-process"] }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# Cucumber owns its own runner, so disable the libtest harness for this target.
+[[test]]
+name = "cucumber"
+harness = false

@@ -10,22 +10,33 @@ supports.
 
 ## Plugin catalog
 
+Every plugin ships both a `.claude-plugin/` and a `.codex-plugin/` manifest and
+is registered in both marketplace manifests, so all four target **Claude Code
+and Codex**. (Codex runtime verification via the `codex` CLI is in progress; the
+manifests and skills are authored for both.)
+
 ### Claude Code
 
-| Plugin     | Description                                               | Status |
-| ---------- | --------------------------------------------------------- | ------ |
-| _none yet_ | The marketplace is live but no plugins are published yet. | —      |
+| Plugin                                                           | Description                                                                                   | Version |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
+| [side-quest](plugins/side-quest/README.md)                       | Launch backgrounded side-quests that implement changes in isolated git worktrees.             | 0.1.0   |
+| [worktrees](plugins/worktrees/README.md)                         | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.           | 0.1.0   |
+| [babysit-pr](plugins/babysit-pr/README.md)                       | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                          | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md) | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill. | 0.1.0   |
 
 ### Codex
 
-| Plugin    | Description                                                      | Status |
-| --------- | ---------------------------------------------------------------- | ------ |
-| _planned_ | Codex does not yet consume this marketplace; support is planned. | —      |
+| Plugin                                                           | Description                                                                                   | Version |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
+| [side-quest](plugins/side-quest/README.md)                       | Launch backgrounded side-quests that implement changes in isolated git worktrees.             | 0.1.0   |
+| [worktrees](plugins/worktrees/README.md)                         | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.           | 0.1.0   |
+| [babysit-pr](plugins/babysit-pr/README.md)                       | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                          | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md) | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill. | 0.1.0   |
 
-> When a plugin is added under [`plugins/`](plugins/) and registered in
-> [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json), add a
-> row to the matching harness table above with a link to the plugin's own
-> `README.md` and the harness(es) it targets.
+> When a plugin is added under [`plugins/`](plugins/) and registered in both
+> [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) and
+> [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json), add a
+> row to each harness table above with a link to the plugin's own `README.md`.
 
 ## Using the marketplace (Claude Code)
 

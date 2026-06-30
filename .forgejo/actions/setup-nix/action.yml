@@ -1,0 +1,50 @@
+name: Install or reuse Nix
+description: Install Nix once per runner volume and recreate build users per job.
+runs:
+  using: composite
+  steps:
+    - name: Install or reuse Nix
+      shell: bash
+      run: |
+        set -euo pipefail
+        NIX_BIN_DIR="/nix/var/nix/profiles/default/bin"
+        if [ -x "$NIX_BIN_DIR/nix" ]; then
+          echo "Nix already present at $NIX_BIN_DIR (volume cache hit)"
+        else
+          echo "Installing Nix (cold start or fresh volume)"
+          curl --proto '=https' --tlsv1.2 -sSf -L \
+            https://install.determinate.systems/nix \
+            | sh -s -- install linux \
+              --init none \
+              --no-confirm \
+              --extra-conf "experimental-features = nix-command flakes" \
+              --extra-conf "accept-flake-config = true"
+        fi
+        if ! getent group nixbld > /dev/null; then
+          groupadd -r nixbld
+        fi
+        for i in $(seq 1 32); do
+          if ! id -u "nixbld$i" > /dev/null 2>&1; then
+            useradd -r -g nixbld -G nixbld -d /var/empty \
+              -s /usr/sbin/nologin -c "Nix build user $i" "nixbld$i"
+          fi
+        done
+        echo "$NIX_BIN_DIR" >> "$GITHUB_PATH"
+        # The act_runner container's `/` is world-writable, which makes nix
+        # refuse to build any derivation ("Path / is world-writable or a symlink.
+        # That's not allowed for security."), with or without a sandbox. Remove
+        # the world/group-write bits so builds (e.g. an uncached nodejs) proceed.
+        chmod go-w / 2>/dev/null || true
+        # Make nix config authoritative every job (warm volumes reuse whatever a
+        # prior install wrote): disable the sandbox (the container can't set one
+        # up), pin the public binary cache + its key, and don't insist on
+        # signatures so a warm volume missing the key still substitutes instead
+        # of rebuilding everything from source.
+        {
+          echo 'NIX_CONFIG<<NIXEOF'
+          echo 'sandbox = false'
+          echo 'substituters = https://cache.nixos.org/'
+          echo 'trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY='
+          echo 'require-sigs = false'
+          echo 'NIXEOF'
+        } >> "$GITHUB_ENV"
