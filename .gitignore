@@ -12,6 +12,9 @@
 # Side-quest worktrees (default location; configurable via sidequest.toml).
 /.worktrees/
 
+# Claude Code native worktree checkouts (runtime artifact; never committed).
+/.claude/worktrees/
+
 # direnv
 .direnv/
 
