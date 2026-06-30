@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "plugin-dev@claude-plugins-official": true,
+    "mcp-server-dev@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true
+  }
+}
