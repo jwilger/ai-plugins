@@ -96,6 +96,12 @@
           # (npm -g, cargo install, etc.) is redirected into ./.dependencies/
           # by the shellHook below so it never leaks into your home directory.
           packages = with pkgs; [
+            # The sidequest control plane itself, installed into the devshell so
+            # the side-quest plugin's MCP server (`sidequest-mcp`, run as a bare
+            # command on PATH) and the `sidequest` CLI are available — i.e. you
+            # can launch side-quests in this project from `nix develop`.
+            sidequest
+
             # Core
             git
             jq            # validate / manipulate marketplace + plugin manifests
@@ -151,6 +157,7 @@
             echo "  rust:  $(rustc --version)"
             echo "  just:  $(just --version) · node $(node --version) · npm $(npm --version)"
             echo "  Global installs (npm -g / cargo install) -> ./.dependencies/ (git-ignored)"
+            echo "  sidequest + sidequest-mcp on PATH · side-quests runnable from this shell"
           '';
         };
       }
