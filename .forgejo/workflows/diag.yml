@@ -15,21 +15,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.forgejo/actions/setup-nix
-      - name: Run nix develop and report the error as a commit status
+      - name: Probe substituters + nix develop, report via commit status
         run: |
           set +e
+          subs="$(nix config show 2>/dev/null | grep -E '^(substituters|sandbox) ' | tr '\n' ';' | cut -c1-120)"
+          t0=$(date +%s)
           nix develop --command true > /tmp/o.txt 2>&1
           ec=$?
+          t1=$(date +%s)
           {
-            echo "exit=$ec"
-            grep -iE 'error|fatal|killed|cannot|denied|failed|no space|out of memory|dubious|attribute|recursion' /tmp/o.txt | head -4
-            echo "TAIL:"; tail -3 /tmp/o.txt
+            echo "exit=$ec dur=$((t1-t0))s cfg=[$subs]"
+            grep -iE 'error|fatal|killed|cannot|denied|failed|no space|out of memory|dubious|building|substitut' /tmp/o.txt | head -4
+            echo "TAIL:"; tail -2 /tmp/o.txt
           } > /tmp/msg.txt
-          desc="$(python3 -c "import sys; print(open('/tmp/msg.txt').read().replace(chr(10),' | '))" | cut -c1-240)"
-          python3 -c "import json,sys; print(json.dumps({'state':'error','context':'diag-error','description':sys.argv[1]}))" "$desc" > /tmp/payload.json
+          desc="$(python3 -c "print(open('/tmp/msg.txt').read().replace(chr(10),' | '))" | cut -c1-240)"
+          state="error"; [ "$ec" -eq 0 ] && state="success"
+          python3 -c "import json,sys; print(json.dumps({'state':sys.argv[1],'context':'diag-error','description':sys.argv[2]}))" "$state" "$desc" > /tmp/payload.json
           curl -sS -X POST \
             -H "Authorization: token ${{ github.token }}" \
             -H "Content-Type: application/json" \
             -d @/tmp/payload.json \
             "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/statuses/${{ github.sha }}"
-          echo "reported: $desc"
+          echo "reported [$state]: $desc"

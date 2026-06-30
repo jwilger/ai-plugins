@@ -30,3 +30,8 @@ runs:
           fi
         done
         echo "$NIX_BIN_DIR" >> "$GITHUB_PATH"
+        # The act_runner container's `/` is world-writable, which trips nix's
+        # build sandbox ("Path / is world-writable ... not allowed"). Disable the
+        # sandbox for CI builds (we trust our own inputs). NIX_CONFIG applies to
+        # every later step regardless of whether the volume was warm or cold.
+        printf 'NIX_CONFIG=%s\n' "sandbox = false" >> "$GITHUB_ENV"
