@@ -12,28 +12,23 @@ jobs:
   diag-report:
     name: diag report error via status
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: ./.forgejo/actions/setup-nix
-      - name: Probe substituters + nix develop, report via commit status
+      - name: Probe substitution + nix develop, report via commit status
         run: |
           set +e
-          subs="$(nix config show 2>/dev/null | grep -E '^(substituters|sandbox) ' | tr '\n' ';' | cut -c1-120)"
-          t0=$(date +%s)
-          nix develop --command true > /tmp/o.txt 2>&1
-          ec=$?
-          t1=$(date +%s)
-          {
-            echo "exit=$ec dur=$((t1-t0))s cfg=[$subs]"
-            grep -iE 'error|fatal|killed|cannot|denied|failed|no space|out of memory|dubious|building|substitut' /tmp/o.txt | head -4
-            echo "TAIL:"; tail -2 /tmp/o.txt
-          } > /tmp/msg.txt
-          desc="$(python3 -c "print(open('/tmp/msg.txt').read().replace(chr(10),' | '))" | cut -c1-240)"
-          state="error"; [ "$ec" -eq 0 ] && state="success"
-          python3 -c "import json,sys; print(json.dumps({'state':sys.argv[1],'context':'diag-error','description':sys.argv[2]}))" "$state" "$desc" > /tmp/payload.json
-          curl -sS -X POST \
-            -H "Authorization: token ${{ github.token }}" \
-            -H "Content-Type: application/json" \
-            -d @/tmp/payload.json \
-            "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/statuses/${{ github.sha }}"
+          cfg="$(nix config show 2>/dev/null | grep -E '^(substituters|require-sigs|trusted-public-keys) ' | sed 's/ =.*=/=/' | tr '\n' ';' | cut -c1-90)"
+          # Directly test substituting nodejs by store path (cache HAS it).
+          nix-store -r --no-build-output /nix/store/znxrv89969njb8fxyyn8rz4ygmmcjpw9-nodejs-22.23.1 > /tmp/sub.txt 2>&1
+          subec=$?
+          subline="$(grep -iE 'building|copying|error|cannot|refused|download' /tmp/sub.txt | head -1)"
+          t0=$(date +%s); nix develop --command true > /tmp/o.txt 2>&1; ec=$?; t1=$(date +%s)
+          msg="dev_ec=$ec dur=$((t1-t0))s sub_ec=$subec sub=[$subline] cfg=[$cfg] $(tail -1 /tmp/o.txt)"
+          desc="$(python3 -c "import sys;print(sys.argv[1])" "$msg" | cut -c1-240)"
+          state=error; [ "$ec" -eq 0 ] && state=success
+          python3 -c "import json,sys;print(json.dumps({'state':sys.argv[1],'context':'diag-error','description':sys.argv[2]}))" "$state" "$desc" > /tmp/p.json
+          curl -sS -X POST -H "Authorization: token ${{ github.token }}" -H "Content-Type: application/json" \
+            -d @/tmp/p.json "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/statuses/${{ github.sha }}"
           echo "reported [$state]: $desc"
