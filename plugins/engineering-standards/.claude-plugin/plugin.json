@@ -1,0 +1,11 @@
+{
+  "name": "engineering-standards",
+  "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
+  "version": "0.1.0",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["standards", "tdd", "bdd", "architecture", "quality"]
+}

@@ -1,0 +1,56 @@
+{
+  "name": "ai-plugins",
+  "interface": {
+    "displayName": "ai-plugins"
+  },
+  "plugins": [
+    {
+      "name": "side-quest",
+      "source": {
+        "source": "local",
+        "path": "./plugins/side-quest"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "worktrees",
+      "source": {
+        "source": "local",
+        "path": "./plugins/worktrees"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "engineering-standards",
+      "source": {
+        "source": "local",
+        "path": "./plugins/engineering-standards"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "babysit-pr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/babysit-pr"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
