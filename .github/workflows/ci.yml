@@ -1,0 +1,155 @@
+name: CI
+
+# Public repo: pull_request is reachable from forks, so every job below stays
+# on GitHub-hosted ubuntu-latest (never self-hosted-gregor). merge_group is
+# included alongside pull_request so the "CI gate" required check also runs
+# on the temporary merge-queue commit -- without this a merge queue entry
+# would hang forever waiting on a check that only ever fires on pull_request.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.dependencies/cargo
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: quality
+          # The devshell's shellHook redirects CARGO_HOME to
+          # ./.dependencies/cargo (see flake.nix); point the cache at the
+          # same path so it actually hits.
+          cache-directories: |
+            .dependencies/cargo/registry
+            .dependencies/cargo/git
+
+      - name: Full gate (build, fmt, clippy -D warnings, nextest, doctests, bdd, bats)
+        run: nix develop -c just ci
+
+      - name: Marketplace validation (jq + manifest sync + prettier)
+        run: nix develop -c just validate-marketplace
+
+  security-audit:
+    name: Security audit (cargo-audit)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.dependencies/cargo
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: security-audit
+          cache-directories: |
+            .dependencies/cargo/registry
+            .dependencies/cargo/git
+
+      - name: Audit dependencies for known advisories
+        run: nix develop -c just audit
+
+  mutation:
+    name: Mutation testing (release PRs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.dependencies/cargo
+    # Release PRs are opened on a `release-plz-*` branch (see
+    # slipstream-code-new/gha-workflows's rust-release-plz.yml reusable
+    # workflow); a manual `release` label also triggers it. Not reachable on
+    # merge_group (no pull_request.labels / head_ref there), so it's simply
+    # skipped for merge-queue runs -- same as any non-release PR.
+    if: ${{ startsWith(github.head_ref, 'release-plz-') || contains(github.event.pull_request.labels.*.name, 'release') }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mutation
+          cache-directories: |
+            .dependencies/cargo/registry
+            .dependencies/cargo/git
+
+      - name: 100% mutant kill
+        run: nix develop -c just mutants
+
+  codex-cross-harness:
+    name: Codex cross-harness manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      # Structural check: every Codex manifest is valid. Full `codex`-CLI
+      # runtime verification (codex mcp add + codex exec) runs where a Codex
+      # login is available.
+      - name: Codex manifests are valid JSON
+        run: |
+          nix develop -c bash -c '
+            jq empty .agents/plugins/marketplace.json
+            find plugins -path "*/.codex-plugin/plugin.json" -exec jq empty {} \;
+          '
+
+  # Single required status check for branch protection: succeeds only when
+  # every required job did. `mutation` (release PRs only) may be skipped but
+  # never failed.
+  gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    needs: [quality, security-audit, mutation, codex-cross-harness]
+    if: always()
+    steps:
+      - name: Require all required jobs to have succeeded
+        run: |
+          required="${{ needs.quality.result }} ${{ needs.security-audit.result }} ${{ needs.codex-cross-harness.result }}"
+          echo "required job results: $required"
+          for result in $required; do
+            if [ "$result" != "success" ]; then
+              echo "a required job did not succeed: $result"
+              exit 1
+            fi
+          done
+          mutation="${{ needs.mutation.result }}"
+          echo "mutation result: $mutation"
+          if [ "$mutation" = "failure" ]; then
+            echo "mutation testing failed"
+            exit 1
+          fi
