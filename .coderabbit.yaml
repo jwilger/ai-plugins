@@ -1,0 +1,37 @@
+reviews:
+  # Required for this repo's branch protection: without this, CodeRabbit only
+  # posts comments and never submits a real GitHub "Approve," which would
+  # leave the required-approving-review rule permanently unsatisfiable.
+  request_changes_workflow: true
+
+  path_filters:
+    # Large generated/vendored lockfiles -- reviewing diffs here is noise.
+    - "!**/Cargo.lock"
+    - "!**/flake.lock"
+
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: >
+        This workspace enforces an unusually strict clippy policy as a hard CI
+        gate (`cargo clippy --workspace --all-targets --all-features -- -D
+        warnings`, with clippy::all, clippy::pedantic, and clippy::nursery all
+        denied, plus a long allowlist of deliberate, documented exceptions in
+        the workspace Cargo.toml). Do not flag routine style/lint nits that
+        clippy already enforces in CI -- focus review on logic correctness,
+        security, and design issues instead.
+    - path: "plugins/**/plugin.json"
+      instructions: >
+        These are AI-plugin marketplace manifest files (Claude Code /
+        Codex plugin schema). Review for manifest-shape correctness (required
+        fields, valid references to skills/commands/hooks declared elsewhere
+        in the same plugin directory) rather than generic JSON style.
+    - path: ".agents/plugins/marketplace.json"
+      instructions: >
+        This is the Codex-harness marketplace manifest aggregating all
+        plugins in this repo. Review for consistency with the individual
+        plugins/**/plugin.json and .claude-plugin/marketplace.json manifests.
+    - path: ".claude-plugin/marketplace.json"
+      instructions: >
+        This is the Claude Code marketplace manifest aggregating all plugins
+        in this repo. Review for consistency with the individual
+        plugins/**/plugin.json and .agents/plugins/marketplace.json manifests.
