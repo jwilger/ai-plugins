@@ -14,8 +14,14 @@ pub enum SideQuestState {
     AwaitingInput,
     /// The work was delivered per the project's delivery mode.
     Delivered,
-    /// The work finished without delivery (left on its branch).
+    /// The work finished, produced commits, but the project has no delivery
+    /// mode configured (left on its branch).
     Done,
+    /// The goal session ran to completion but produced no new commits, so
+    /// there was nothing to deliver.
+    DoneNoChanges,
+    /// The session or delivery step failed; see `detail`.
+    Failed,
 }
 
 /// A registry record for one launched side-quest.
@@ -38,4 +44,8 @@ pub struct SideQuestRecord {
     /// The harness the side-quest runs in, if specified.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
+    /// Human-readable context for `Failed` or `DoneNoChanges` states (e.g. why
+    /// the session failed, or that no session command could be resolved).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }

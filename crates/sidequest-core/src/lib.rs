@@ -9,5 +9,6 @@
 //! behavioral slices require them.
 
 pub mod config;
+pub mod harness;
 pub mod launch;
 pub mod side_quest;

@@ -19,7 +19,7 @@ use serde::Deserialize;
 use sidequest_core::launch::{BranchName, Goal, branch_for_goal};
 use sidequest_core::side_quest::{SideQuestRecord, SideQuestState};
 
-use crate::{config, registry, steer, worktree};
+use crate::{config, logs, registry, steer, worktree};
 
 /// Parameters for the `launch` tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -39,6 +39,16 @@ pub struct AnswerParams {
     pub branch: String,
     /// The answer to the side-quest's pending question.
     pub answer: String,
+}
+
+/// Parameters for the `logs` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LogsParams {
+    /// The side-quest's branch (its identifier).
+    pub branch: String,
+    /// How many trailing lines of the log to return (defaults to 200).
+    #[serde(default)]
+    pub lines: Option<usize>,
 }
 
 /// The sidequest control-plane MCP server, rooted at the repository its
@@ -107,6 +117,7 @@ impl SidequestServer {
                 question: None,
                 answer: None,
                 harness,
+                detail: None,
             },
         )
         .await
@@ -135,8 +146,10 @@ impl SidequestServer {
         let records = registry::list(self.project_root.as_ref())
             .await
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        let value = serde_json::to_value(&records)
-            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        // MCP structured content must be a JSON object, not a bare array — wrap
+        // it, or clients that validate structuredContent (e.g. Claude Code)
+        // reject the response with "expected record, received array".
+        let value = serde_json::json!({ "side_quests": records });
         Ok(CallToolResult::structured(value))
     }
 
@@ -152,6 +165,37 @@ impl SidequestServer {
             .await
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![Content::text("answered")]))
+    }
+
+    /// Read a side-quest's session log: the harness's captured stdout/stderr,
+    /// written live as it runs, so a running or finished side-quest's progress
+    /// can be inspected.
+    #[tool(
+        description = "Read a side-quest's session log (its harness's captured output), most recent lines last."
+    )]
+    async fn logs(
+        &self,
+        Parameters(params): Parameters<LogsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let branch = BranchName::try_new(params.branch)
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
+        let path = logs::path(self.project_root.as_ref(), &branch);
+        let contents = match logs::read_tail(&path).await {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(McpError::internal_error(error.to_string(), None)),
+        };
+        let limit = params.lines.unwrap_or(200);
+        let tail = contents
+            .lines()
+            .rev()
+            .take(limit)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(CallToolResult::success(vec![Content::text(tail)]))
     }
 }
 
