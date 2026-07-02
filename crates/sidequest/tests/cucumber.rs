@@ -36,6 +36,12 @@ struct SideQuestWorld {
     launch_error: Option<bool>,
     /// Whether the most recent `list` attempt surfaced an error.
     list_error: Option<bool>,
+    /// When true, `SIDEQUEST_SESSION_COMMAND` is left entirely unset rather
+    /// than defaulted to a no-op, so a scenario can exercise the config-level
+    /// override or the "no command resolved" fallback. Only ever paired with
+    /// a harness name unrecognized by sidequest's built-in defaults, so a real
+    /// `claude`/`codex` invocation is never actually reachable.
+    allow_unset_session_command: bool,
 }
 
 /// Build a `sidequest-mcp` command. Asserting the sibling `sidequest` worker
@@ -48,6 +54,28 @@ fn sidequest_mcp_command() -> Command {
         "the sidequest worker binary should be built for the test"
     );
     Command::new(env!("CARGO_BIN_EXE_sidequest-mcp"))
+}
+
+/// Set `SIDEQUEST_SESSION_COMMAND` on `command` per the scenario's
+/// configuration. Defaults to a safe no-op (`true`) unless the scenario has
+/// explicitly opted into leaving it unset (see
+/// `allow_unset_session_command`), so a scenario can never accidentally fall
+/// through to a harness's real built-in default command.
+fn set_session_command_env(world: &SideQuestWorld, command: &mut Command) {
+    match (&world.session_command, world.allow_unset_session_command) {
+        (Some(session_command), _) => {
+            command.env("SIDEQUEST_SESSION_COMMAND", session_command);
+        }
+        (None, true) => {}
+        (None, false) => {
+            command.env("SIDEQUEST_SESSION_COMMAND", "true");
+        }
+    }
+}
+
+#[given("no session command is configured anywhere")]
+fn no_session_command_configured(world: &mut SideQuestWorld) {
+    world.allow_unset_session_command = true;
 }
 
 #[when("a harness connects to the sidequest control plane over MCP")]
@@ -105,9 +133,7 @@ async fn launches(world: &mut SideQuestWorld, goal: String) {
     let repo = world.repo.as_ref().expect("a git repository exists");
     let mut command = sidequest_mcp_command();
     command.arg(repo.path());
-    if let Some(session_command) = world.session_command.as_deref() {
-        command.env("SIDEQUEST_SESSION_COMMAND", session_command);
-    }
+    set_session_command_env(world, &mut command);
     let transport =
         TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
     let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
@@ -150,6 +176,33 @@ fn worktree_exists(world: &mut SideQuestWorld, branch: String) {
         head.trim(),
         branch,
         "the worktree should be checked out on the side-quest branch"
+    );
+}
+
+#[then("an isolated worktree exists with a branch name short enough for git")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+fn worktree_branch_name_is_git_safe(world: &mut SideQuestWorld) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let worktrees = repo.path().join(".worktrees");
+    let entry = std::fs::read_dir(&worktrees)
+        .expect("the worktrees directory exists")
+        .next()
+        .expect("a worktree was created")
+        .expect("the worktree entry is readable");
+    assert!(entry.path().is_dir(), "the worktree entry is a directory");
+    let head = git_stdout(&entry.path(), &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let branch = head.trim();
+    assert!(
+        branch.len() <= 100,
+        "the branch name {branch:?} ({} chars) should be well within git's ref-name limits",
+        branch.len()
+    );
+    assert!(
+        branch.starts_with("side-quest/"),
+        "the branch should still carry the side-quest/ prefix: {branch:?}"
     );
 }
 
@@ -243,7 +296,7 @@ async fn lists(world: &mut SideQuestWorld) {
 )]
 fn list_includes_branch(world: &mut SideQuestWorld, branch: String) {
     let listing = world.listing.as_ref().expect("a listing was retrieved");
-    let records = listing.as_array().expect("the listing is a JSON array");
+    let records = side_quests(listing);
     let found = records.iter().any(|record| {
         record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
     });
@@ -348,7 +401,7 @@ fn listing_fails(world: &mut SideQuestWorld) {
 )]
 fn targets_harness(world: &mut SideQuestWorld, branch: String, harness: String) {
     let listing = world.listing.as_ref().expect("a listing was retrieved");
-    let records = listing.as_array().expect("the listing is a JSON array");
+    let records = side_quests(listing);
     let found = records.iter().any(|record| {
         record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
             && record.get("harness").and_then(serde_json::Value::as_str) == Some(harness.as_str())
@@ -376,6 +429,7 @@ async fn try_launch(world: &SideQuestWorld, goal: &str, harness: Option<&str>) -
     let repo = world.repo.as_ref().expect("a git repository exists");
     let mut command = sidequest_mcp_command();
     command.arg(repo.path());
+    set_session_command_env(world, &mut command);
     let transport =
         TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
     let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
@@ -487,7 +541,7 @@ fn signal_finish(world: &mut SideQuestWorld) {
 )]
 fn quest_is_running(world: &mut SideQuestWorld, branch: String) {
     let listing = world.listing.as_ref().expect("a listing was retrieved");
-    let records = listing.as_array().expect("the listing is a JSON array");
+    let records = side_quests(listing);
     let found = records.iter().any(|record| {
         record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
             && record.get("state").and_then(serde_json::Value::as_str) == Some("running")
@@ -510,11 +564,9 @@ async fn quest_is_delivered(world: &mut SideQuestWorld, branch: String) {
     let mut found = false;
     for _ in 0..200u32 {
         let listing = fetch_listing(&repo).await;
-        if listing.as_array().is_some_and(|records| {
-            records.iter().any(|record| {
-                record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
-                    && record.get("state").and_then(serde_json::Value::as_str) == Some("delivered")
-            })
+        if side_quests(&listing).iter().any(|record| {
+            record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+                && record.get("state").and_then(serde_json::Value::as_str) == Some("delivered")
         }) {
             found = true;
             break;
@@ -522,6 +574,94 @@ async fn quest_is_delivered(world: &mut SideQuestWorld, branch: String) {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert!(found, "the side-quest {branch} should be delivered");
+}
+
+#[then(expr = "the side-quest {string} has state {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn quest_has_state(world: &mut SideQuestWorld, branch: String, state: String) {
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    let mut found = false;
+    for _ in 0..200u32 {
+        let listing = fetch_listing(&repo).await;
+        if side_quests(&listing).iter().any(|record| {
+            record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+                && record.get("state").and_then(serde_json::Value::as_str) == Some(state.as_str())
+        }) {
+            found = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(found, "the side-quest {branch} should have state {state}");
+}
+
+#[then(expr = "the side-quest {string} has a detail containing {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn quest_has_detail_containing(
+    world: &mut SideQuestWorld,
+    branch: String,
+    substring: String,
+) {
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    let mut found = false;
+    for _ in 0..200u32 {
+        let listing = fetch_listing(&repo).await;
+        if side_quests(&listing).iter().any(|record| {
+            record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+                && record
+                    .get("detail")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|detail| detail.contains(&substring))
+        }) {
+            found = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        found,
+        "the side-quest {branch} should have a detail containing {substring:?}"
+    );
+}
+
+#[given(expr = "a project configured with harness command {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions receive &mut World and own their parsed parameters"
+)]
+fn configured_with_harness_command(world: &mut SideQuestWorld, command: String) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    std::fs::write(
+        repo.path().join("sidequest.toml"),
+        format!("[harness]\nallow_cross = true\ncommand = \"{command}\"\n"),
+    )
+    .expect("the config file is writable");
+}
+
+#[given(expr = "a session runner that fails with {string}")]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions own their parsed parameters"
+)]
+fn a_session_runner_that_fails(world: &mut SideQuestWorld, message: String) {
+    world.session_command = Some(format!("echo '{message}' >&2; exit 1"));
 }
 
 #[given(expr = "a session runner that asks {string} and records the answer to {string}")]
@@ -550,14 +690,11 @@ async fn awaiting_input(world: &mut SideQuestWorld, branch: String, question: St
     let mut found = false;
     for _ in 0..200u32 {
         let listing = fetch_listing(&repo).await;
-        if listing.as_array().is_some_and(|records| {
-            records.iter().any(|record| {
-                record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
-                    && record.get("state").and_then(serde_json::Value::as_str)
-                        == Some("awaiting-input")
-                    && record.get("question").and_then(serde_json::Value::as_str)
-                        == Some(question.as_str())
-            })
+        if side_quests(&listing).iter().any(|record| {
+            record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+                && record.get("state").and_then(serde_json::Value::as_str) == Some("awaiting-input")
+                && record.get("question").and_then(serde_json::Value::as_str)
+                    == Some(question.as_str())
         }) {
             found = true;
             break;
@@ -602,39 +739,206 @@ async fn operator_answers(world: &mut SideQuestWorld, answer: String, branch: St
         .expect("the client should shut down cleanly");
 }
 
-/// Whether a `list` tool call against `repo` succeeds (no transport error and no
-/// tool-level error).
-async fn list_call_succeeds(repo: &Path) -> bool {
-    let mut command = sidequest_mcp_command();
-    command.arg(repo);
-    let transport =
-        TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
-    let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
-    let result = client.call_tool(CallToolRequestParams::new("list")).await;
-    client
-        .cancel()
-        .await
-        .expect("the client should shut down cleanly");
-    result.is_ok_and(|outcome| outcome.is_error != Some(true))
-}
-
-async fn fetch_listing(repo: &Path) -> serde_json::Value {
+/// Connect to `sidequest-mcp` for `repo`, call `tool` with `arguments`, and
+/// return the raw result -- callers decide how to interpret success (which
+/// can fail either as an `Err` here, e.g. a protocol-level error response, or
+/// as `Ok(result)` with `result.is_error == Some(true)`), content, or
+/// structured content.
+async fn call_tool(
+    repo: &Path,
+    tool: &'static str,
+    arguments: serde_json::Map<String, serde_json::Value>,
+) -> Result<rmcp::model::CallToolResult, rmcp::service::ServiceError> {
     let mut command = sidequest_mcp_command();
     command.arg(repo);
     let transport =
         TokioChildProcess::new(command).expect("spawning the sidequest-mcp binary should succeed");
     let client = ().serve(transport).await.expect("the MCP initialize handshake should succeed");
     let result = client
-        .call_tool(CallToolRequestParams::new("list"))
-        .await
-        .expect("the list tool call should succeed");
+        .call_tool(CallToolRequestParams::new(tool).with_arguments(arguments))
+        .await;
     client
         .cancel()
         .await
         .expect("the client should shut down cleanly");
     result
+}
+
+async fn list_call_succeeds(repo: &Path) -> bool {
+    call_tool(repo, "list", serde_json::Map::new())
+        .await
+        .is_ok_and(|outcome| outcome.is_error != Some(true))
+}
+
+async fn fetch_listing(repo: &Path) -> serde_json::Value {
+    call_tool(repo, "list", serde_json::Map::new())
+        .await
+        .expect("the list tool call should succeed")
         .structured_content
-        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
+        .unwrap_or_else(|| serde_json::json!({ "side_quests": [] }))
+}
+
+/// The `side_quests` array out of a `list` tool result's structured content.
+/// The server wraps the listing in an object because MCP structured content
+/// must be a JSON object, never a bare array.
+fn side_quests(listing: &serde_json::Value) -> &[serde_json::Value] {
+    listing
+        .get("side_quests")
+        .and_then(serde_json::Value::as_array)
+        .expect("the list result's structured content should be an object with a side_quests array")
+}
+
+#[given(expr = "a session runner that prints {string}")]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions own their parsed parameters"
+)]
+fn a_session_runner_that_prints(world: &mut SideQuestWorld, message: String) {
+    world.session_command = Some(format!("echo '{message}'"));
+}
+
+#[given("a session runner that writes a very large log")]
+fn a_session_runner_that_writes_a_large_log(world: &mut SideQuestWorld) {
+    world.session_command = Some("head -c 400000 /dev/zero | tr '\\0' 'A'".to_owned());
+}
+
+#[then(expr = "the side-quest {string}'s log is at most 300000 characters")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn quest_log_is_bounded(world: &mut SideQuestWorld, branch: String) {
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    let mut logs = String::new();
+    for _ in 0..200u32 {
+        logs = fetch_logs(&repo, &branch).await;
+        if !logs.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        logs.len() <= 300_000,
+        "the logs tool should never return more than a bounded tail, got {} characters",
+        logs.len()
+    );
+}
+
+#[then(expr = "the side-quest {string}'s log contains {string}")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn quest_log_contains(world: &mut SideQuestWorld, branch: String, substring: String) {
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    let mut found = false;
+    let mut last_seen = String::new();
+    for _ in 0..200u32 {
+        let logs = fetch_logs(&repo, &branch).await;
+        if logs.contains(&substring) {
+            found = true;
+            break;
+        }
+        last_seen = logs;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        found,
+        "the side-quest {branch}'s log should contain {substring:?}; last seen: {last_seen:?}"
+    );
+}
+
+#[then(expr = "the side-quest {string}'s log is empty")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn quest_log_is_empty(world: &mut SideQuestWorld, branch: String) {
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    let logs = fetch_logs(&repo, &branch).await;
+    assert_eq!(
+        logs, "",
+        "a side-quest with no log file yet should return an empty log, not error"
+    );
+}
+
+#[given(expr = "the log path for {string} is a directory")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    clippy::needless_pass_by_value,
+    reason = "cucumber step functions receive &mut World and own their parsed parameters"
+)]
+fn log_path_is_a_directory(world: &mut SideQuestWorld, branch: String) {
+    let repo = world.repo.as_ref().expect("a git repository exists");
+    let file_name = format!("{}.log", branch.replace('/', "-"));
+    let path = repo
+        .path()
+        .join(".git")
+        .join("sidequest")
+        .join("logs")
+        .join(file_name);
+    std::fs::create_dir_all(&path).expect("the log path can be made a directory");
+}
+
+#[then(expr = "reading the logs for {string} fails")]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "cucumber step functions receive &mut World"
+)]
+async fn reading_logs_fails(world: &mut SideQuestWorld, branch: String) {
+    let repo = world
+        .repo
+        .as_ref()
+        .expect("a git repository exists")
+        .path()
+        .to_owned();
+    let ok = logs_call_succeeds(&repo, &branch).await;
+    assert!(
+        !ok,
+        "reading logs for a directory-shaped log path should surface an error, not silently \
+         return an empty log"
+    );
+}
+
+fn branch_argument(branch: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut arguments = serde_json::Map::new();
+    arguments.insert(
+        "branch".to_owned(),
+        serde_json::Value::String(branch.to_owned()),
+    );
+    arguments
+}
+
+async fn logs_call_succeeds(repo: &Path, branch: &str) -> bool {
+    call_tool(repo, "logs", branch_argument(branch))
+        .await
+        .is_ok_and(|outcome| outcome.is_error != Some(true))
+}
+
+async fn fetch_logs(repo: &Path, branch: &str) -> String {
+    call_tool(repo, "logs", branch_argument(branch))
+        .await
+        .expect("the logs tool call should succeed")
+        .content
+        .first()
+        .and_then(|content| content.as_text())
+        .map(|text| text.text.clone())
+        .unwrap_or_default()
 }
 
 fn wait_for<T>(probe: impl Fn() -> Option<T>) -> Option<T> {

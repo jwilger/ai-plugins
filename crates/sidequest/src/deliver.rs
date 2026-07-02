@@ -17,7 +17,8 @@ pub enum DeliverError {
     Git(String),
 }
 
-async fn git(project_root: &Path, args: &[&str]) -> Result<(), DeliverError> {
+/// Run `git` with `args` in `project_root`, returning its stdout.
+async fn git(project_root: &Path, args: &[&str]) -> Result<String, DeliverError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(project_root)
@@ -26,12 +27,33 @@ async fn git(project_root: &Path, args: &[&str]) -> Result<(), DeliverError> {
         .await
         .map_err(|error| DeliverError::Spawn(error.to_string()))?;
     if output.status.success() {
-        Ok(())
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
         Err(DeliverError::Git(
             String::from_utf8_lossy(&output.stderr).into_owned(),
         ))
     }
+}
+
+/// Whether `branch` has any commits not reachable from the project's current
+/// `HEAD` — i.e. whether its goal session actually produced work worth
+/// delivering.
+///
+/// # Errors
+///
+/// Returns a [`DeliverError`] if git cannot be spawned or the check fails.
+pub async fn has_new_commits(
+    project_root: &Path,
+    branch: &BranchName,
+) -> Result<bool, DeliverError> {
+    let branch_ref: &str = branch.as_ref();
+    let stdout = git(
+        project_root,
+        &["rev-list", "--count", &format!("HEAD..{branch_ref}")],
+    )
+    .await?;
+    let count = stdout.trim().parse::<u64>().unwrap_or(0);
+    Ok(count > 0)
 }
 
 /// Merge the side-quest `branch` into the project's current branch (the local
@@ -42,7 +64,8 @@ async fn git(project_root: &Path, args: &[&str]) -> Result<(), DeliverError> {
 /// Returns a [`DeliverError`] if git cannot be spawned or the merge fails.
 pub async fn local_merge(project_root: &Path, branch: &BranchName) -> Result<(), DeliverError> {
     let branch_ref: &str = branch.as_ref();
-    git(project_root, &["merge", "--no-edit", branch_ref]).await
+    git(project_root, &["merge", "--no-edit", branch_ref]).await?;
+    Ok(())
 }
 
 /// Merge the side-quest `branch` into the current branch, then push it to the
@@ -53,7 +76,8 @@ pub async fn local_merge(project_root: &Path, branch: &BranchName) -> Result<(),
 /// Returns a [`DeliverError`] if git cannot be spawned or the merge or push fails.
 pub async fn push_origin(project_root: &Path, branch: &BranchName) -> Result<(), DeliverError> {
     local_merge(project_root, branch).await?;
-    git(project_root, &["push", "origin", "HEAD"]).await
+    git(project_root, &["push", "origin", "HEAD"]).await?;
+    Ok(())
 }
 
 /// Push the side-quest `branch` to origin as a feature branch (without merging
@@ -64,5 +88,6 @@ pub async fn push_origin(project_root: &Path, branch: &BranchName) -> Result<(),
 /// Returns a [`DeliverError`] if git cannot be spawned or the push fails.
 pub async fn push_branch(project_root: &Path, branch: &BranchName) -> Result<(), DeliverError> {
     let branch_ref: &str = branch.as_ref();
-    git(project_root, &["push", "origin", branch_ref]).await
+    git(project_root, &["push", "origin", branch_ref]).await?;
+    Ok(())
 }

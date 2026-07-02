@@ -34,3 +34,33 @@ and delivers its work according to `sidequest.toml`, e.g.:
 [delivery]
 mode = "local-merge"
 ```
+
+## Which harness actually does the work
+
+A side-quest's goal session is driven by a real headless invocation of a
+harness. `claude` and `codex` have built-in default invocations, so most
+projects need no configuration at all. To use a different command (a
+different harness, extra flags, etc.), set an explicit override:
+
+```toml
+[harness]
+command = "claude --print \"$SIDEQUEST_GOAL\" --dangerously-skip-permissions"
+```
+
+`$SIDEQUEST_GOAL` must stay as a literal environment-variable reference (never
+paste the goal text directly into the command) — the shell substitutes it
+safely as a single argument, however the goal is phrased. If no override is
+configured and the targeted harness has no built-in default, the side-quest
+fails immediately with a clear reason instead of silently reporting success
+having done nothing.
+
+## Checking on a running side-quest
+
+- `list` shows every side-quest's branch and state: `running`,
+  `awaiting-input`, `delivered`, `done`, `done-no-changes` (the session ran but
+  produced no commits, so there was nothing to deliver), or `failed` (with a
+  `detail` explaining why).
+- `logs` reads back a side-quest's captured session output (its harness's
+  stdout/stderr, written live as it runs), tail-first. Call it with the
+  side-quest's branch to see what it's actually doing, whether it's still
+  running or already finished.
