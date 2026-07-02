@@ -44,6 +44,9 @@ pub struct HarnessSection {
     pub default: Option<String>,
     /// Whether launching a side-quest in a non-default harness is allowed.
     pub allow_cross: bool,
+    /// The shell command run inside a side-quest's worktree as its goal
+    /// session, overriding the harness's built-in default template.
+    pub command: Option<String>,
 }
 
 /// Parsed `sidequest.toml`.
@@ -83,6 +86,12 @@ impl Config {
     #[must_use]
     pub fn allow_cross_harness(&self) -> bool {
         self.harness.allow_cross
+    }
+
+    /// The project's configured session-command override, if any.
+    #[must_use]
+    pub fn harness_command(&self) -> Option<&str> {
+        self.harness.command.as_deref()
     }
 }
 
@@ -161,6 +170,23 @@ mod tests {
         assert!(
             !config.allow_cross_harness(),
             "cross-harness spawning is disabled by default"
+        );
+        assert_eq!(
+            config.harness_command(),
+            None,
+            "an unconfigured project has no session-command override"
+        );
+    }
+
+    #[test]
+    fn reads_the_harness_command_override() {
+        let config =
+            Config::from_toml("[harness]\ncommand = \"my-agent --goal \\\"$SIDEQUEST_GOAL\\\"\"\n")
+                .expect("valid config parses");
+        assert_eq!(
+            config.harness_command(),
+            Some("my-agent --goal \"$SIDEQUEST_GOAL\""),
+            "the configured session-command override is read verbatim"
         );
     }
 }
