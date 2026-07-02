@@ -27,9 +27,11 @@ name: Release (release-plz)
 # release-pr command force-updates its own branch in place, and GitHub
 # branch protection only guards the default branch.
 #
-# push-to-main / workflow_dispatch only (never pull_request), so this stays
-# on self-hosted-gregor even though the repo is public: it's never
-# fork-reachable, and it holds the crates.io publish token.
+# Runs on GitHub-hosted ubuntu-latest: the self-hosted-gregor runner is
+# deprioritized for now, and this job was never fork-reachable anyway
+# (push-to-main / workflow_dispatch only, never pull_request), so moving it
+# off gregor doesn't change its exposure even though it holds the crates.io
+# publish token.
 
 on:
   push:
@@ -46,7 +48,7 @@ jobs:
     name: release-plz
     uses: slipstream-eng/gha-workflows/.github/workflows/rust-release-plz.yml@main
     with:
-      runs-on: self-hosted-gregor
+      runs-on: ubuntu-latest
     secrets:
       cargo-registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       release-signing-key: ${{ secrets.RELEASE_SIGNING_KEY }}
