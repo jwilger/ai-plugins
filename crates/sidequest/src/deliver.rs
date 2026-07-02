@@ -52,8 +52,16 @@ pub async fn has_new_commits(
         &["rev-list", "--count", &format!("HEAD..{branch_ref}")],
     )
     .await?;
-    let count = stdout.trim().parse::<u64>().unwrap_or(0);
-    Ok(count > 0)
+    Ok(parse_commit_count(&stdout)? > 0)
+}
+
+/// Parse `git rev-list --count`'s stdout. A non-numeric result (which should
+/// never happen on a successful `rev-list --count`, but would otherwise be
+/// silently treated as "zero commits") is surfaced as an error instead.
+fn parse_commit_count(stdout: &str) -> Result<u64, DeliverError> {
+    stdout.trim().parse().map_err(|error| {
+        DeliverError::Git(format!("unexpected rev-list output {stdout:?}: {error}"))
+    })
 }
 
 /// Merge the side-quest `branch` into the project's current branch (the local
@@ -90,4 +98,27 @@ pub async fn push_branch(project_root: &Path, branch: &BranchName) -> Result<(),
     let branch_ref: &str = branch.as_ref();
     git(project_root, &["push", "origin", branch_ref]).await?;
     Ok(())
+}
+
+#[cfg(test)]
+#[expect(clippy::expect_used, reason = "unit tests use expect() for clarity")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_a_valid_count() {
+        assert_eq!(
+            parse_commit_count("5\n").expect("a numeric count parses"),
+            5,
+            "rev-list --count's trailing newline is trimmed"
+        );
+    }
+
+    #[test]
+    fn unexpected_output_is_an_error_not_a_silent_zero() {
+        assert!(
+            parse_commit_count("fatal: ambiguous argument").is_err(),
+            "non-numeric rev-list output must not be silently treated as zero commits"
+        );
+    }
 }

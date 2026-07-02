@@ -814,14 +814,28 @@ async fn quest_log_is_bounded(world: &mut SideQuestWorld, branch: String) {
         .expect("a git repository exists")
         .path()
         .to_owned();
-    let mut logs = String::new();
+    // Wait for the side-quest to reach a terminal state, not just for the log
+    // to have *some* content -- the session streams its output live, so
+    // checking too early could see a partial write and pass vacuously without
+    // ever exercising the tail-bounding behavior against the full log.
+    let mut finished = false;
     for _ in 0..200u32 {
-        logs = fetch_logs(&repo, &branch).await;
-        if !logs.is_empty() {
+        let listing = fetch_listing(&repo).await;
+        if side_quests(&listing).iter().any(|record| {
+            record.get("branch").and_then(serde_json::Value::as_str) == Some(branch.as_str())
+                && record.get("state").and_then(serde_json::Value::as_str) != Some("running")
+        }) {
+            finished = true;
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
+    assert!(
+        finished,
+        "the side-quest {branch} should reach a terminal state before its log is checked"
+    );
+
+    let logs = fetch_logs(&repo, &branch).await;
     assert!(
         logs.len() <= 300_000,
         "the logs tool should never return more than a bounded tail, got {} characters",

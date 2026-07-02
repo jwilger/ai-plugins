@@ -44,9 +44,14 @@ pub async fn run(
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| SessionError::Spawn(error.to_string()))?;
     }
+    // Truncate rather than append: a branch name is deterministic from its
+    // goal, so relaunching the same goal after a prior run reuses the same
+    // log path -- each run's log must reflect only that run, not be a
+    // mixture of stale content from a previous one.
     let log_out = std::fs::OpenOptions::new()
         .create(true)
-        .append(true)
+        .write(true)
+        .truncate(true)
         .open(&log_path)
         .map_err(|error| SessionError::Spawn(error.to_string()))?;
     let log_err = log_out
