@@ -81,7 +81,7 @@ jobs:
     env:
       CARGO_HOME: ${{ github.workspace }}/.dependencies/cargo
     # Release PRs are opened on a `release-plz-*` branch (see
-    # slipstream-code-new/gha-workflows's rust-release-plz.yml reusable
+    # slipstream-eng/gha-workflows's rust-release-plz.yml reusable
     # workflow); a manual `release` label also triggers it. Not reachable on
     # merge_group (no pull_request.labels / head_ref there), so it's simply
     # skipped for merge-queue runs -- same as any non-release PR.

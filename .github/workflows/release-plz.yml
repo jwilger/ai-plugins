@@ -4,7 +4,7 @@ name: Release (release-plz)
 #
 # Replaces the former two-file Forgejo pair (release-plz.yml + publish.yml)
 # with a single call into the org's shared two-phase release-plz reusable
-# workflow (slipstream-code-new/gha-workflows), which already implements
+# workflow (slipstream-eng/gha-workflows), which already implements
 # both phases as independent, idempotent jobs:
 #
 #   - release-pr: runs `release-plz release-pr` on every push to main. It is
@@ -44,7 +44,7 @@ permissions:
 jobs:
   release-plz:
     name: release-plz
-    uses: slipstream-code-new/gha-workflows/.github/workflows/rust-release-plz.yml@main
+    uses: slipstream-eng/gha-workflows/.github/workflows/rust-release-plz.yml@main
     with:
       runs-on: self-hosted-gregor
     secrets:
