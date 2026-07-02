@@ -5,11 +5,19 @@ name: CI
 # included alongside pull_request so the "CI gate" required check also runs
 # on the temporary merge-queue commit -- without this a merge queue entry
 # would hang forever waiting on a check that only ever fires on pull_request.
+#
+# Deliberately no `push: branches: [main]` trigger: main's ruleset requires
+# the merge queue (squash-only, "CI gate" required), so merge_group already
+# re-validates the exact commit that's about to land before the queue merges
+# it. A push-triggered rerun of the same fmt/clippy/test/audit/manifest
+# checks against that identical, already-validated commit would just burn
+# runner-minutes for no additional confidence. Every job in this file is pure
+# pre-merge validation (no badge/coverage-upload/artifact-publish step that
+# would need to run post-merge), so there's nothing here that push:main would
+# uniquely provide.
 
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
   merge_group:
     types: [checks_requested]
@@ -67,9 +75,16 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: security-audit
+          # cargo-audit clones the RustSec advisory-db git repo into
+          # $CARGO_HOME/advisory-db on first use and only fetches/updates it
+          # afterwards -- rust-cache's own defaults don't know about this
+          # path (it's specific to cargo-audit, not cargo/rustc), so without
+          # it listed here explicitly every run re-clones the full advisory
+          # database from scratch instead of hitting the cache.
           cache-directories: |
             .dependencies/cargo/registry
             .dependencies/cargo/git
+            .dependencies/cargo/advisory-db
 
       - name: Audit dependencies for known advisories
         run: nix develop -c just audit
