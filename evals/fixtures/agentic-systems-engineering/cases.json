@@ -1,0 +1,93 @@
+[
+  {
+    "case_id": "agentic-router-triggers",
+    "behavior": "The router skill covers LLM and agentic-system work and points users to focused references.",
+    "files": [
+      "plugins/agentic-systems-engineering/skills/agentic-systems-engineering/SKILL.md"
+    ],
+    "mustContain": [
+      "LLM-backed or agentic systems",
+      "structured outputs",
+      "RAG",
+      "agent loops",
+      "cost/provider routing",
+      "Load only the references needed"
+    ]
+  },
+  {
+    "case_id": "stochastic-eval-discipline",
+    "behavior": "Eval guidance requires rate-over-set measurement, adversarial fixtures, repeated stochastic samples, thresholds, and regression growth.",
+    "files": [
+      "plugins/agentic-systems-engineering/skills/evaluate-stochastic-systems/SKILL.md",
+      "plugins/agentic-systems-engineering/skills/evaluate-stochastic-systems/references/eval-design.md"
+    ],
+    "mustContain": [
+      "Measure rates over an eval set",
+      "adversarial fixtures",
+      "k samples",
+      "Set thresholds before running",
+      "Track regressions",
+      "one successful run"
+    ]
+  },
+  {
+    "case_id": "single-run-not-proof",
+    "behavior": "Guidance refuses to treat one good run or a demo as proof.",
+    "files": [
+      "plugins/agentic-systems-engineering/skills/evaluate-stochastic-systems/SKILL.md",
+      "plugins/agentic-systems-engineering/skills/agentic-systems-engineering/SKILL.md"
+    ],
+    "mustContain": [
+      "Refuse to treat one successful run",
+      "A single good run is a demo, not proof"
+    ]
+  },
+  {
+    "case_id": "force-push-refusal",
+    "behavior": "Engineering standards prohibit forced pushes without explicit human authorization.",
+    "files": [
+      "plugins/engineering-standards/skills/engineering-standards/SKILL.md"
+    ],
+    "mustContain": [
+      "Never force-push",
+      "case-by-case human authorization",
+      "git push --force",
+      "git push --force-with-lease",
+      "git push -f",
+      "forced refspec"
+    ]
+  },
+  {
+    "case_id": "delivery-data-story",
+    "behavior": "Delivery practice requires walking skeletons, experiment loops, demos plus data stories, and evidence beyond happy paths.",
+    "files": [
+      "plugins/agentic-systems-engineering/skills/agentic-delivery/SKILL.md",
+      "plugins/agentic-systems-engineering/skills/agentic-delivery/references/delivery.md"
+    ],
+    "mustContain": [
+      "walking skeleton",
+      "experiment loop",
+      "change one thing",
+      "Pair demos with data stories",
+      "failure-path case"
+    ]
+  },
+  {
+    "case_id": "eval-case-reporter-safety",
+    "behavior": "The standalone reporter recognizes reusable failures, scrubs sensitive data, asks before posting, and submits to GitHub issues.",
+    "files": [
+      "plugins/eval-case-reporter/skills/submit-eval-case/SKILL.md",
+      "plugins/eval-case-reporter/skills/submit-eval-case/references/scrubbing.md",
+      "plugins/eval-case-reporter/README.md"
+    ],
+    "mustContain": [
+      "Offer to submit an eval case",
+      "Scrub and anonymize",
+      "explicit approval",
+      "gh issue create",
+      "Never post without explicit user approval",
+      "If you cannot confidently scrub the data",
+      "standalone"
+    ]
+  }
+]

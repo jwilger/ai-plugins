@@ -1,0 +1,11 @@
+{
+  "name": "eval-case-reporter",
+  "description": "Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.",
+  "version": "0.1.0",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "MIT",
+  "keywords": ["evals", "github", "issues", "regression", "triage"]
+}

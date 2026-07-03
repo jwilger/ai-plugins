@@ -1,0 +1,57 @@
+name: Live evals
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  provider-backed-evals:
+    name: Provider-backed evals
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Check secrets
+        id: secrets
+        run: |
+          if [ -n "${OPENAI_API_KEY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Run live evals when secrets are available
+        if: steps.secrets.outputs.available == 'true'
+        run: nix develop -c scripts/evals/run.sh
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Explain skipped live evals
+        if: steps.secrets.outputs.available != 'true'
+        run: echo "Skipping provider-backed evals because OPENAI_API_KEY is unavailable."
+
+      - name: Upload live eval artifacts
+        if: steps.secrets.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-evals
+          retention-days: 30
+          path: |
+            evals/out/results.json
+            evals/out/report.html
+            evals/out/results.junit.xml

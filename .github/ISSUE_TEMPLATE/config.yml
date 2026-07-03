@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Plugin catalog
+    url: https://github.com/slipstream-eng/ai-plugins
+    about: Browse the marketplace and plugin source.

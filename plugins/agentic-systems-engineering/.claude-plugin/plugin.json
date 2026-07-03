@@ -1,0 +1,11 @@
+{
+  "name": "agentic-systems-engineering",
+  "description": "Portable guardrails for building, evaluating, and delivering LLM and agentic systems.",
+  "version": "0.1.0",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "MIT",
+  "keywords": ["agents", "llm", "evals", "rag", "delivery"]
+}

@@ -17,19 +17,23 @@ manifests and skills are authored for both.)
 
 ### Claude Code
 
-| Plugin                                                           | Description                                                                                   | Version |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                         | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.           | 0.1.0   |
-| [babysit-pr](plugins/babysit-pr/README.md)                       | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                          | 0.1.0   |
-| [engineering-standards](plugins/engineering-standards/README.md) | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill. | 0.1.0   |
+| Plugin                                                                       | Description                                                                                                    | Version |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
+| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
+| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.1.0   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.0   |
+| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 
 ### Codex
 
-| Plugin                                                           | Description                                                                                   | Version |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                         | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.           | 0.1.0   |
-| [babysit-pr](plugins/babysit-pr/README.md)                       | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                          | 0.1.0   |
-| [engineering-standards](plugins/engineering-standards/README.md) | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill. | 0.1.0   |
+| Plugin                                                                       | Description                                                                                                    | Version |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
+| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
+| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.1.0   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.0   |
+| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 
 > When a plugin is added under [`plugins/`](plugins/) and registered in both
 > [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) and
@@ -70,6 +74,17 @@ git-ignored `./.dependencies/` directory by the devshell, so it never pollutes
 your home directory. Delete that directory any time for a clean slate.
 
 See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
+
+## Reporting eval cases
+
+When a plugin, skill, prompt, or workflow behaves incorrectly or only partially
+works, file an **Eval case** issue in this repository. Eval cases are the intake
+path for future regression fixtures in `evals/fixtures/`.
+
+Include the sanitized input, actual behavior, expected behavior, expected eval
+outcome (`pass`, `fail`, `partial`, or `adversarial`), and the assertion or
+rubric that would catch the behavior. Do not include secrets, credentials,
+private client data, or raw proprietary source excerpts.
 
 ## Repository layout
 

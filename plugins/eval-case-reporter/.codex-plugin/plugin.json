@@ -1,0 +1,27 @@
+{
+  "name": "eval-case-reporter",
+  "version": "0.1.0",
+  "description": "Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "MIT",
+  "keywords": ["evals", "github", "issues", "regression", "triage"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Eval Case Reporter",
+    "shortDescription": "Turn surprising AI behavior into sanitized eval-case issues.",
+    "longDescription": "Use Eval Case Reporter when Codex should recognize a behavior that may deserve a future eval fixture, scrub or anonymize sensitive data, ask the user before posting, and submit a structured eval-case issue to the ai-plugins repository.",
+    "developerName": "John Wilger",
+    "category": "Developer Tools",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/slipstream-eng/ai-plugins",
+    "privacyPolicyURL": "https://github.com/slipstream-eng/ai-plugins/blob/main/README.md",
+    "termsOfServiceURL": "https://github.com/slipstream-eng/ai-plugins/blob/main/README.md",
+    "defaultPrompt": [
+      "This behavior should probably become an eval case.",
+      "Submit a sanitized eval case for what just happened."
+    ]
+  }
+}

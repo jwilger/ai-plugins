@@ -29,6 +29,30 @@
       "category": "Developer Tools"
     },
     {
+      "name": "agentic-systems-engineering",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agentic-systems-engineering"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "eval-case-reporter",
+      "source": {
+        "source": "local",
+        "path": "./plugins/eval-case-reporter"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
       "name": "babysit-pr",
       "source": {
         "source": "local",

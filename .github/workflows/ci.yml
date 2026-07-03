@@ -50,17 +50,46 @@ jobs:
             find plugins -path "*/.codex-plugin/plugin.json" -exec jq empty {} \;
           '
 
+  deterministic-evals:
+    name: Deterministic evals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Run promptfoo evals
+        run: nix develop -c scripts/evals/run.sh
+
+      - name: Build eval dashboard
+        run: nix develop -c node scripts/evals/build-site.mjs
+
+      - name: Upload eval artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deterministic-evals
+          retention-days: 30
+          path: |
+            evals/out/results.json
+            evals/out/report.html
+            evals/out/results.junit.xml
+            site/evals/
+
   # Single required status check for branch protection: succeeds only when
   # every required job did.
   gate:
     name: CI gate
     runs-on: ubuntu-latest
-    needs: [quality, codex-cross-harness]
+    needs: [quality, codex-cross-harness, deterministic-evals]
     if: always()
     steps:
       - name: Require all required jobs to have succeeded
         run: |
-          required="${{ needs.quality.result }} ${{ needs.codex-cross-harness.result }}"
+          required="${{ needs.quality.result }} ${{ needs.codex-cross-harness.result }} ${{ needs.deterministic-evals.result }}"
           echo "required job results: $required"
           for result in $required; do
             if [ "$result" != "success" ]; then

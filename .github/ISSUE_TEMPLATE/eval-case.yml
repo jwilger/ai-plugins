@@ -1,0 +1,82 @@
+name: Eval case
+description: Report a plugin, skill, or agent behavior that should become an eval fixture.
+title: "[eval-case]: "
+labels:
+  - eval-case
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when a plugin, skill, prompt, tool description, or agent workflow did not behave as expected and the case should be considered for the repo eval suite.
+
+        Do not include secrets, private client data, raw proprietary source excerpts, or credentials. Replace sensitive values with realistic placeholders.
+  - type: input
+    id: plugin
+    attributes:
+      label: Plugin or repo area
+      description: Name the plugin, skill, script, workflow, or repo area involved.
+      placeholder: agentic-systems-engineering / engineering-standards / marketplace manifest / other
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario
+      description: What were you trying to do, and what context matters?
+      placeholder: "I asked the skill to evaluate a prompt change that passed once, but it treated the single run as sufficient proof."
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Sanitized input
+      description: Paste the prompt, command, issue comment, fixture, or user request that triggered the behavior. Sanitize sensitive data.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What did the plugin, skill, or agent do?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should it have done instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Expected eval outcome
+      description: How should this case be represented in an eval suite?
+      options:
+        - pass
+        - fail
+        - partial
+        - adversarial
+        - unsure
+    validations:
+      required: true
+  - type: textarea
+    id: assertion
+    attributes:
+      label: Suggested assertion or rubric
+      description: What exact check would distinguish the expected behavior from the actual behavior?
+      placeholder: "The output must require rate-over-set evidence and must reject one successful run as proof."
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Supporting artifacts
+      description: Link logs, screenshots, traces, eval output, PRs, or commits if they are safe to share.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed secrets, credentials, private client data, and raw proprietary excerpts.
+          required: true
