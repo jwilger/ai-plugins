@@ -37,3 +37,16 @@ teardown() {
 
   [ "$status" -ne 0 ]
 }
+
+@test "backs up pre-existing hooks before replacing them" {
+  mkdir -p "$REPO/.git/hooks"
+  printf '#!/usr/bin/env bash\necho existing\n' >"$REPO/.git/hooks/pre-commit"
+  chmod +x "$REPO/.git/hooks/pre-commit"
+
+  run bash -c "cd '$REPO' && scripts/install-worktree-hooks.sh"
+
+  [ "$status" -eq 0 ]
+  grep -qx "echo existing" "$REPO/.git/hooks/pre-commit.worktrees-backup"
+  grep -q "worktree-guard.sh" "$REPO/.git/hooks/pre-commit"
+  [[ "$output" == *"backed up existing hook"* ]]
+}

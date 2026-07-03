@@ -42,7 +42,24 @@ teardown() {
 @test "warms project-local dependency cache" {
   git -C "$REPO" worktree add -q "$REPO/.worktrees/cache" -b cache
 
-  bash -c "cd '$REPO/.worktrees/cache' && scripts/worktree-bootstrap.sh"
+  run bash -c "cd '$REPO/.worktrees/cache' && scripts/worktree-bootstrap.sh"
 
+  [ "$status" -eq 0 ]
   [ -f "$REPO/.worktrees/cache/.dependencies/npm/bin/example-tool" ]
+}
+
+@test "does not mark bootstrap complete when cache warmup fails" {
+  git -C "$REPO" worktree add -q "$REPO/.worktrees/cp-fails" -b cp-fails
+  mkdir -p "$REPO/.worktrees/cp-fails/fake-bin"
+  cat >"$REPO/.worktrees/cp-fails/fake-bin/cp" <<'SH'
+#!/usr/bin/env bash
+exit 42
+SH
+  chmod +x "$REPO/.worktrees/cp-fails/fake-bin/cp"
+  marker="$(git -C "$REPO/.worktrees/cp-fails" rev-parse --git-dir)/.ai-plugins-worktree-bootstrapped"
+
+  run bash -c "cd '$REPO/.worktrees/cp-fails' && PATH='$REPO/.worktrees/cp-fails/fake-bin':\$PATH scripts/worktree-bootstrap.sh"
+
+  [ "$status" -eq 42 ]
+  [ ! -f "$marker" ]
 }

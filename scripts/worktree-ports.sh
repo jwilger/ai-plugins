@@ -2,7 +2,8 @@
 # Allocate stable, non-colliding host ports for a git worktree.
 set -euo pipefail
 
-worktree="${1:?usage: worktree-ports.sh <worktree-path>}"
+worktree_arg="${1:?usage: worktree-ports.sh <worktree-path>}"
+worktree="$(cd "$worktree_arg" && pwd -P)"
 base_http="${WORKTREE_PORT_BASE_HTTP:-4100}"
 base_pg="${WORKTREE_PORT_BASE_PG:-5500}"
 stride="${WORKTREE_PORT_STRIDE:-10}"

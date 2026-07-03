@@ -8,24 +8,37 @@ hooks_dir="$common_dir/hooks"
 
 mkdir -p "$hooks_dir"
 
-cat >"$hooks_dir/pre-commit" <<'HOOK'
+install_hook() {
+  hook_name="$1"
+  target="$hooks_dir/$hook_name"
+  tmp="$(mktemp "$hooks_dir/$hook_name.XXXXXX")"
+  cat >"$tmp"
+
+  if [ -e "$target" ] && ! cmp -s "$tmp" "$target"; then
+    cp -p "$target" "$target.worktrees-backup"
+    printf 'backed up existing hook: %s\n' "$target.worktrees-backup" >&2
+  fi
+
+  mv "$tmp" "$target"
+  chmod +x "$target"
+}
+
+install_hook pre-commit <<'HOOK'
 #!/usr/bin/env bash
 set -euo pipefail
 exec "$(git rev-parse --show-toplevel)/scripts/worktree-guard.sh" "$@"
 HOOK
 
-cat >"$hooks_dir/pre-push" <<'HOOK'
+install_hook pre-push <<'HOOK'
 #!/usr/bin/env bash
 set -euo pipefail
 exec "$(git rev-parse --show-toplevel)/scripts/worktree-guard.sh" "$@"
 HOOK
 
-cat >"$hooks_dir/post-checkout" <<'HOOK'
+install_hook post-checkout <<'HOOK'
 #!/usr/bin/env bash
 set -euo pipefail
 exec "$(git rev-parse --show-toplevel)/scripts/worktree-bootstrap.sh" "$@"
 HOOK
-
-chmod +x "$hooks_dir/pre-commit" "$hooks_dir/pre-push" "$hooks_dir/post-checkout"
 
 printf 'installed worktree hooks for %s\n' "$repo"

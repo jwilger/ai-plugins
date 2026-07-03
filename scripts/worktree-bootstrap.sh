@@ -17,7 +17,7 @@ main="$(cd "$common_dir/.." && pwd -P)"
 for cache_dir in .dependencies .direnv; do
   if [ -d "$main/$cache_dir" ] && [ ! -e "$worktree/$cache_dir" ]; then
     mkdir -p "$worktree/$cache_dir"
-    cp -a "$main/$cache_dir/." "$worktree/$cache_dir/" 2>/dev/null || true
+    cp -a "$main/$cache_dir/." "$worktree/$cache_dir/"
   fi
 done
 

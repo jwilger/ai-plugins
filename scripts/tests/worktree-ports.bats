@@ -38,3 +38,12 @@ teardown() {
   echo "$out" | grep -qx "PORT=8000"
   echo "$out" | grep -qx "PG_PORT=9000"
 }
+
+@test "canonicalizes worktree paths before registry lookup" {
+  first=$(bash "$ALLOC" "$REPO/.worktrees/a")
+  again=$(bash "$ALLOC" "$REPO/.worktrees/a/")
+  common_dir="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)"
+
+  [ "$first" = "$again" ]
+  [ "$(wc -l <"$common_dir/worktree-ports.tsv")" -eq 1 ]
+}
