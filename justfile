@@ -13,6 +13,15 @@ ci: validate-marketplace bats
 bats:
     bats $(find plugins scripts -name '*.bats' | sort)
 
+# Install shared git hooks for worktree bootstrap and main-checkout enforcement.
+worktree-hooks:
+    scripts/install-worktree-hooks.sh
+
+# Tear down generated runtime state before removing a linked worktree.
+worktree-teardown path:
+    scripts/worktree-teardown.sh "{{path}}"
+    git worktree remove "{{path}}"
+
 # Marketplace manifest + formatting validation.
 validate-marketplace:
     jq empty .claude-plugin/marketplace.json

@@ -35,6 +35,55 @@ Never commit `./.dependencies/`. If the environment looks broken, `rm -rf
 `.envrc` (`use flake`) is git-ignored here per the maintainer's global config;
 recreate it locally if you use direnv.
 
+## Worktree workflow
+
+This repo is configured for parallel development from linked worktrees. The main
+checkout is the coordination checkout; feature work should happen in worktrees
+created under the ignored repo-local `.worktrees/` directory:
+
+```shell
+git worktree add .worktrees/<branch-name> -b <branch-name>
+```
+
+Install the shared hooks once from the main checkout:
+
+```shell
+just worktree-hooks
+```
+
+The installed hooks do two things:
+
+- `pre-commit` and `pre-push` run `scripts/worktree-guard.sh`, which blocks
+  commits and pushes from the main checkout while allowing linked worktrees.
+- `post-checkout` runs `scripts/worktree-bootstrap.sh`, which is inert in the
+  main checkout and bootstraps linked worktrees once.
+
+For each linked worktree, the bootstrap:
+
+- copies warm local caches from the main checkout when present:
+  `.dependencies/` and `.direnv/`;
+- creates a local `.envrc` with `use flake` if the worktree does not already
+  have one;
+- writes `.env.worktree` with stable, slot-based `PORT`, `PG_PORT`,
+  `COMPOSE_PROJECT_NAME`, and `AI_PLUGINS_MAIN_CHECKOUT` values.
+
+This repo uses `just` as its local command wrapper. The underlying scripts are
+plain shell so the worktrees plugin can adapt to repositories that use Make,
+package-manager scripts, another runner, or no wrapper at all.
+
+There are no long-running services or containers in this repo today, so
+`scripts/worktree-teardown.sh` only loads `.env.worktree` and performs a Docker
+Compose shutdown if a future workflow adds `COMPOSE_PROJECT_NAME`-scoped
+services. Remove worktrees through:
+
+```shell
+just worktree-teardown .worktrees/<branch-name>
+```
+
+Port allocation is stable per worktree and recorded under Git's common
+directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
+`WORKTREE_PORT_BASE_PG`, and `WORKTREE_PORT_STRIDE` before bootstrap if needed.
+
 ## Adding a plugin
 
 1. Create `plugins/<plugin-name>/` (kebab-case, no spaces — the name is

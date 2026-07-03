@@ -2,6 +2,12 @@
 
 Make a repository worktree-ready, and protect the main checkout.
 
+By default, generated workflows place linked worktrees under the repo-local,
+git-ignored `./.worktrees/` directory. The scripts do not require `just`, Make,
+npm, or any other task runner: the setup skill detects what a project already
+uses, confirms the selected wrapper with the user, and falls back to direct shell
+usage when no wrapper should be added.
+
 ## Enforcement guard
 
 `scripts/worktree-guard.sh` blocks commits and pushes that originate from the
@@ -26,7 +32,8 @@ it defines the isolation goals (filesystem, secrets, warm caches, container/DB
 isolation, ports, lifecycle hooks, enforcement) and guides tailoring a
 project-specific bootstrap. Reusable building blocks: `scripts/worktree-ports.sh`
 (slot-based, idempotent port allocator) and the `templates/` bootstrap/teardown
-starting points.
+starting points. Generated convenience commands must adapt to the target repo's
+existing command surface rather than assuming this marketplace repo's tooling.
 
 ## Harnesses
 
