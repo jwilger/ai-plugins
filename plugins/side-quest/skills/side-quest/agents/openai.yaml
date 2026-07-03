@@ -1,0 +1,4 @@
+interface:
+  display_name: "Side-Quest"
+  short_description: "Launch and monitor background side-quests."
+  default_prompt: "Launch a side-quest for this goal:"
