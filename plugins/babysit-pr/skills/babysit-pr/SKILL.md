@@ -17,7 +17,9 @@ preferred over the others.
 
 ## Loop (until merged, or blocked needing a human)
 
-1. **Poll status** — CI checks, review threads, and mergeability.
+1. **Poll status** — CI checks, review threads, mergeability, auto-merge, and
+   merge queue state. Continue polling until the PR/MR is merged or a concrete
+   unfixable human gate is proven.
 2. **On CI failure** — fetch the logs, diagnose, and push a fix to the branch.
 3. **On review feedback** — apply the receiving-code-review discipline: verify
    each point against the code, push back with technical reasoning or implement
@@ -26,10 +28,16 @@ preferred over the others.
    and resolution state are handled with thread-aware tooling. Do not post a top-level PR comment
    when the feedback came from an inline review thread; reply directly to that
    inline review thread, then resolve or re-request review once addressed.
-4. **Merge** — enable auto-merge if the project allows it; otherwise merge once
-   the PR is green and approved.
-5. **Blocked needing a human** (a required gate you cannot fix, a missing signing
-   key, an auth prompt) — stop and notify. Do not spin.
+4. **Merge** — enable auto-merge or submit to the merge queue if the project
+   allows it; otherwise merge once the PR is green and approved. After enabling
+   auto-merge or queueing, keep polling until the PR/MR state is merged.
+5. **Waiting is not blocked** — Pending checks, bot reviews, auto-merge, and merge queue states are waiting states, not blockers.
+   Do not stop merely because there is nothing to do yet.
+6. **Blocked needing a human** — stop and notify only for a concrete unfixable human gate:
+   a required approval you cannot provide, a stale review you cannot dismiss, a
+   missing signing key, an auth prompt, a permission boundary, or another gate
+   that repeated polling cannot change. State the exact gate and the action a
+   human must take.
 
 For the survive-laptop-off case, this can be backed by a scheduled/cloud agent
 (e.g. a Claude Cloud Routine) rather than a local loop.
