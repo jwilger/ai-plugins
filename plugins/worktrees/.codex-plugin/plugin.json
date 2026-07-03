@@ -12,7 +12,16 @@
   "interface": {
     "displayName": "Worktrees",
     "shortDescription": "Worktree isolation and a main-checkout enforcement guard.",
+    "longDescription": "Use Worktrees when Codex needs to make a repository safe for isolated worktree-based development. The setup skill guides project-specific filesystem, secret, cache, port, service, lifecycle, and enforcement choices, while the bundled scripts provide reusable guard and port-allocation building blocks.",
+    "developerName": "John Wilger",
     "category": "Developer Tools",
-    "capabilities": ["Read", "Write"]
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
+    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "defaultPrompt": [
+      "Make this repository worktree-ready and install the main-checkout guard.",
+      "Design per-worktree isolation for this project and generate the bootstrap plan."
+    ]
   }
 }

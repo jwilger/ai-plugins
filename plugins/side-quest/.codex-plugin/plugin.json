@@ -8,11 +8,21 @@
   },
   "license": "AGPL-3.0-or-later",
   "keywords": ["worktree", "agents", "automation", "side-quest", "mcp"],
+  "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Side-Quest",
     "shortDescription": "Launch backgrounded side-quests in isolated git worktrees.",
+    "longDescription": "Use Side-Quest when Codex should delegate a change to a background worker running in its own isolated git worktree. The plugin exposes the sidequest MCP server for launching, listing, and inspecting side-quests, and includes a skill that maps user requests to those MCP tools.",
+    "developerName": "John Wilger",
     "category": "Developer Tools",
-    "capabilities": ["Read", "Write"]
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
+    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "defaultPrompt": [
+      "Launch a side-quest for this goal: improve the confusing action buttons.",
+      "List the running side-quests and show me the latest logs for one that is still active."
+    ]
   }
 }

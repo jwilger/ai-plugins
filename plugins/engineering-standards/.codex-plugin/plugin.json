@@ -12,7 +12,16 @@
   "interface": {
     "displayName": "Engineering Standards",
     "shortDescription": "A strict, portfolio-grade engineering regime for any project.",
+    "longDescription": "Use Engineering Standards when Codex needs reusable project guardrails or a scaffold for serious software work. The bundled skills encode John's stack-agnostic regime: functional-core/imperative-shell design, semantic types, railway-oriented errors, BDD and mutation testing, strict linting, ADRs, eval-driven context discipline, and PR-based delivery.",
+    "developerName": "John Wilger",
     "category": "Developer Tools",
-    "capabilities": ["Read"]
+    "capabilities": ["Read"],
+    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
+    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "defaultPrompt": [
+      "Apply the engineering standards to this repository.",
+      "Scaffold this project so it enforces John's engineering standards."
+    ]
   }
 }
