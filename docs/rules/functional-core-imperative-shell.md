@@ -9,7 +9,6 @@ pattern**: a pure state machine exposes `step()` / `resume(result)` returning
 the real I/O and feeds results back via `resume`. The core only ever _describes_
 effects — it never performs them.
 
-This is **compiler-enforced**: the pure core lives in `crates/sidequest-core`,
-whose `Cargo.toml` declares **no I/O dependencies** (no tokio, rmcp, git, http).
-If core code tries to do I/O, it will not compile. Keep it that way — never add
-an I/O dependency to `sidequest-core`.
+Enforce this with the strongest mechanism the stack supports: module boundaries,
+package boundaries, dependency rules, tests, or lints. Keep core code free of
+direct filesystem, process, network, database, and clock access.

@@ -11,7 +11,7 @@ supports.
 ## Plugin catalog
 
 Every plugin ships both a `.claude-plugin/` and a `.codex-plugin/` manifest and
-is registered in both marketplace manifests, so all four target **Claude Code
+is registered in both marketplace manifests, so all three target **Claude Code
 and Codex**. (Codex runtime verification via the `codex` CLI is in progress; the
 manifests and skills are authored for both.)
 
@@ -19,7 +19,6 @@ manifests and skills are authored for both.)
 
 | Plugin                                                           | Description                                                                                   | Version |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
-| [side-quest](plugins/side-quest/README.md)                       | Launch backgrounded side-quests that implement changes in isolated git worktrees.             | 0.1.0   |
 | [worktrees](plugins/worktrees/README.md)                         | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.           | 0.1.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                       | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                          | 0.1.0   |
 | [engineering-standards](plugins/engineering-standards/README.md) | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill. | 0.1.0   |
@@ -28,7 +27,6 @@ manifests and skills are authored for both.)
 
 | Plugin                                                           | Description                                                                                   | Version |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
-| [side-quest](plugins/side-quest/README.md)                       | Launch backgrounded side-quests that implement changes in isolated git worktrees.             | 0.1.0   |
 | [worktrees](plugins/worktrees/README.md)                         | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.           | 0.1.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                       | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                          | 0.1.0   |
 | [engineering-standards](plugins/engineering-standards/README.md) | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill. | 0.1.0   |
@@ -58,8 +56,8 @@ commands, regardless of the URL you added it from. List and manage with
 
 ## Developing in this repo
 
-A [Nix flake](flake.nix) provides a reproducible devshell with Node, npm, Rust
-(cargo), `jq`, `prettier`, `ripgrep`, and `fd`.
+A [Nix flake](flake.nix) provides a reproducible devshell with Node, npm, `jq`,
+`prettier`, `ripgrep`, `fd`, `just`, and `bats`.
 
 ```shell
 nix develop        # enter the devshell
@@ -67,42 +65,11 @@ nix develop        # enter the devshell
 echo "use flake" > .envrc && direnv allow
 ```
 
-Any **globally installed** tooling (`npm install -g …`, `cargo install …`) is
-redirected into a git-ignored `./.dependencies/` directory by the
-devshell, so it never pollutes your home directory. Delete that directory any
-time for a clean slate.
+Any **globally installed** npm tooling (`npm install -g …`) is redirected into a
+git-ignored `./.dependencies/` directory by the devshell, so it never pollutes
+your home directory. Delete that directory any time for a clean slate.
 
 See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
-
-## Installing `sidequest` via Nix
-
-The flake also exposes the [`sidequest`](crates/) control plane as a package, so
-other Nix projects can install the `sidequest` CLI and `sidequest-mcp` server
-without cloning this repo.
-
-```shell
-# Run it directly:
-nix run git+https://git.johnwilger.com/Slipstream/ai-plugins#sidequest -- --help
-
-# Or build/install the package (provides both `sidequest` and `sidequest-mcp`):
-nix build git+https://git.johnwilger.com/Slipstream/ai-plugins#sidequest
-```
-
-To consume it from another flake, add this repo as an input and pull the
-package out of its `packages.<system>` set:
-
-```nix
-{
-  inputs.ai-plugins.url = "git+https://git.johnwilger.com/Slipstream/ai-plugins";
-
-  outputs = { self, nixpkgs, ai-plugins }: {
-    # e.g. add to a devShell or home/system packages:
-    #   ai-plugins.packages.${system}.sidequest
-  };
-}
-```
-
-The package is built with the same pinned nightly toolchain as the devshell.
 
 ## Repository layout
 

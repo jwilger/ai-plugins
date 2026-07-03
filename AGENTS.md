@@ -18,17 +18,16 @@ the plugin concept.
 Use the Nix devshell — do not install global toolchains by hand.
 
 ```shell
-nix develop                       # provides node, npm, cargo, jq, prettier, rg, fd
+nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats
 ```
 
-**Critical convention:** anything a package manager would normally install
-"globally" must land in the git-ignored `./.dependencies/` directory, not in
-`$HOME`. The devshell enforces this by setting `NPM_CONFIG_PREFIX`,
-`NPM_CONFIG_CACHE`, and `CARGO_HOME` to point inside `./.dependencies/` and
-prepending their `bin/` dirs to `PATH`. So:
+**Critical convention:** anything npm would normally install "globally" must
+land in the git-ignored `./.dependencies/` directory, not in `$HOME`. The
+devshell enforces this by setting `NPM_CONFIG_PREFIX` and `NPM_CONFIG_CACHE` to
+point inside `./.dependencies/` and prepending the local npm `bin/` dir to
+`PATH`. So:
 
 - `npm install -g <pkg>` → installs to `./.dependencies/npm/`
-- `cargo install <crate>` → installs to `./.dependencies/cargo/`
 
 Never commit `./.dependencies/`. If the environment looks broken, `rm -rf
 .dependencies` and re-enter the devshell.
@@ -100,64 +99,26 @@ For an end-to-end check in Claude Code: `/plugin marketplace add .` then
   `marketplace.json`. Always note a plugin's supported harnesses in its README
   and the `README.md` catalog tables.
 
-## Rust control plane (`crates/`)
-
-The **sidequest** control plane lives in a Cargo workspace under `crates/`:
-
-- `crates/sidequest-core` — the pure functional core (no I/O dependencies, by
-  construction).
-- `crates/sidequest` — the imperative shell, with two binaries: `sidequest-mcp`
-  (the MCP stdio server, the primary surface) and `sidequest` (the CLI).
-
-Work inside the Nix devshell and use `just` as the command interface:
-
-```shell
-nix develop      # nightly toolchain (rust-toolchain.toml) + just + cargo-nextest/mutants/audit + release-plz
-just ci          # fmt-check + clippy -D warnings + nextest  (run before every commit)
-just mutants     # mutation testing — 100% mutant kill required
-```
-
-Rust dependencies are managed **only via `cargo add`** (never hand-edit
-`[dependencies]`).
-
 ## Engineering standards (harness-agnostic)
 
 This project follows a strict, documented engineering regime. The canonical rules
 live in [`docs/rules/`](docs/rules/) and every architectural decision is recorded
-in [`docs/adr/`](docs/adr/). In brief: functional-core/imperative-shell with a
-Step/Trampoline effect pattern; parse-don't-validate semantic types (`nutype`);
-railway-oriented errors (`thiserror`); strict clippy; BDD/Cucumber one step at a
-time in vertical slices; 100% mutation kill; eval-driven effectiveness and
-minimum-necessary context for skills/MCP; PR-based CI with required approval and
-managed release; Conventional Commits with **no `Co-Authored-By` trailers**; never
-take quality shortcuts. These rules apply to **both Claude Code and Codex**;
+in [`docs/adr/`](docs/adr/). In brief: functional-core/imperative-shell design,
+parse-don't-validate semantic types where the stack supports them,
+railway-oriented errors, strict linting, behavior-focused tests, eval-driven
+effectiveness and minimum-necessary context for skills/MCP, PR-based CI with
+required approval, Conventional Commits with **no `Co-Authored-By` trailers**,
+and no quality shortcuts. These rules apply to **both Claude Code and Codex**;
 `CLAUDE.md` is a thin pointer to this file.
 
 ## CI/CD and release
 
-CI and release run on Forgejo Actions (`.forgejo/workflows/`):
+CI runs on GitHub Actions (`.github/workflows/ci.yml`):
 
-- **`ci.yml`** (PR + push to `main`): the full `just ci` gate (build, fmt, clippy
-  `-D warnings`, nextest, doctests, BDD, bats), marketplace validation
-  (including the cross-harness manifest sync-validator), a `cargo-audit`
-  security job, Codex-manifest checks, mutation testing on release PRs (keyed on
-  the `release-plz-*` branch), and a final `gate` aggregator job so branch
-  protection has a single required check.
-- **Release is two-phase**, mirroring eventcore:
-  - **`release-plz.yml`** (Phase 1, push to `main` except `chore(release):`
-    commits): opens/updates a **signed** release PR. `main` rejects unverified
-    commits, so `release-plz update` makes the file changes and the helper
-    scripts in `.forgejo/scripts/` create the signed commit and open the PR via
-    the forge API.
-  - **`publish.yml`** (Phase 2, when the `chore(release):` merge lands): runs
-    `release-plz release` to publish to crates.io and cut the Forgejo release.
-
-Organization secrets/vars (available to the repo): `RELEASE_PLZ_TOKEN` (forge
-PAT), `RELEASE_SIGNING_KEY` (SSH or GPG key), `CARGO_REGISTRY_TOKEN` (crates.io),
-and `RELEASE_SIGNING_NAME` / `RELEASE_SIGNING_EMAIL` (vars). Publication order
-(`release-plz.toml`): `sidequest-core` before `sidequest`. Branch protection
-(≥1 approval, with auto_review contributing the approval) is a Forgejo
-server-side setting.
+- **`ci.yml`** (PR + push to `main` + merge queue): `just ci`, marketplace
+  validation (including the cross-harness manifest sync-validator), Codex
+  manifest checks, and a final `CI gate` aggregator job so branch protection has
+  a single required check.
 
 ## Reference
 

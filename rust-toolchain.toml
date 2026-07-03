@@ -1,8 +1,0 @@
-# Nightly: these crates are applications (a control-plane binary + tooling), so
-# there is no MSRV obligation. The floating "nightly" channel is pinned
-# bit-for-bit by flake.lock's rust-overlay revision, and read authoritatively by
-# the flake via `rust-bin.fromRustupToolchainFile`.
-[toolchain]
-channel = "nightly"
-components = ["rustfmt", "clippy", "rust-src", "rust-analyzer"]
-profile = "default"

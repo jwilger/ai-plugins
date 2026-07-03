@@ -4,7 +4,7 @@
 #   detect-forge.sh [repo-dir]
 #
 # Prints one of: github | gitlab | forgejo. Self-hosted remotes default to
-# forgejo; override with `[forge] kind = "..."` in sidequest.toml.
+# forgejo; override the detected forge in local automation config when needed.
 set -euo pipefail
 
 dir="${1:-.}"

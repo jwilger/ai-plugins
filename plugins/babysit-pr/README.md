@@ -4,8 +4,7 @@ Babysit a pull/merge request to completion: watch CI, respond to review
 feedback, and merge once green and approved — across **GitHub, Forgejo, and
 GitLab**, with no forge preferred over the others.
 
-Usable standalone (it only needs the forge's tooling), or as the PR phase of a
-side-quest's delivery.
+Usable standalone; it only needs the forge's tooling.
 
 ## What it provides
 

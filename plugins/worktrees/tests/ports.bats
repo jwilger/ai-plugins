@@ -32,6 +32,6 @@ teardown() {
 }
 
 @test "honors a configured base port" {
-  out=$(SIDEQUEST_PORT_BASE_HTTP=8000 bash "$ALLOC" "$REPO/.worktrees/a")
+  out=$(WORKTREE_PORT_BASE_HTTP=8000 bash "$ALLOC" "$REPO/.worktrees/a")
   echo "$out" | grep -qx "PORT=8000"
 }

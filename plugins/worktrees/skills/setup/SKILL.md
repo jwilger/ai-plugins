@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Use when making a repository worktree-ready for parallel/side-quest development — per-worktree isolation (ports, containers, caches, secrets), lifecycle hooks, and the main-checkout enforcement guard.
+description: Use when making a repository worktree-ready for parallel development — per-worktree isolation (ports, containers, caches, secrets), lifecycle hooks, and the main-checkout enforcement guard.
 ---
 
 # Worktree-ready setup
@@ -31,7 +31,7 @@ points to tailor, not drop-in solutions.
    teardown (`docker compose … down --volumes`, then `git worktree remove`)
    before deleting a worktree.
 7. **Enforcement** — install the main-checkout guard so commits and pushes only
-   originate from worktrees (this plugin's `scripts/sidequest-guard.sh`).
+   originate from worktrees (this plugin's `scripts/worktree-guard.sh`).
 
 ## How to apply
 
