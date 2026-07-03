@@ -32,6 +32,13 @@ When the user asks what side-quests are running or asks for status, call the
 - `done-no-changes`: ran successfully but produced no changes to deliver.
 - `failed`: failed; include the returned `detail`.
 
+## Answer
+
+When `list` reports `awaiting-input` and the user provides a decision or
+response, call the `answer` tool with the side-quest branch and the user's
+answer text. After answering, continue monitoring with `list` or `logs` as
+needed.
+
 ## Logs
 
 When the user asks what a side-quest is doing, asks why it is blocked, or asks
