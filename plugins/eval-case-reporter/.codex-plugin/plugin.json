@@ -15,7 +15,7 @@
     "longDescription": "Use Eval Case Reporter when Codex should recognize a behavior that may deserve a future eval fixture, scrub or anonymize sensitive data, ask the user before posting, and submit a structured eval-case issue to the ai-plugins repository.",
     "developerName": "John Wilger",
     "category": "Developer Tools",
-    "capabilities": ["Read"],
+    "capabilities": ["Read", "GitHub Issues Write"],
     "websiteURL": "https://github.com/slipstream-eng/ai-plugins",
     "privacyPolicyURL": "https://github.com/slipstream-eng/ai-plugins/blob/main/README.md",
     "termsOfServiceURL": "https://github.com/slipstream-eng/ai-plugins/blob/main/README.md",

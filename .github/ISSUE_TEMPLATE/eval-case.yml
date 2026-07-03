@@ -78,5 +78,5 @@ body:
     attributes:
       label: Safety check
       options:
-        - label: I removed secrets, credentials, private client data, and raw proprietary excerpts.
+        - label: I removed secrets, credentials, auth headers, cookies, session ids, private keys, private client data, private repository names, internal hostnames, and raw proprietary excerpts.
           required: true

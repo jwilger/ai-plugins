@@ -1,5 +1,4 @@
-const fs = require('fs');
-const path = require('path');
+const { fixtureFor } = require('./lib/cases.cjs');
 
 module.exports = function assertRequiredContent(output, context) {
   const configured = fixtureFor(context?.vars?.case_id).mustContain || [];
@@ -20,13 +19,3 @@ module.exports = function assertRequiredContent(output, context) {
     reason: 'All required content found',
   };
 };
-
-function fixtureFor(caseId) {
-  if (!caseId) return {};
-  const file = path.resolve(
-    process.cwd(),
-    'evals/fixtures/agentic-systems-engineering/cases.json',
-  );
-  const cases = JSON.parse(fs.readFileSync(file, 'utf8'));
-  return cases.find((testCase) => testCase.case_id === caseId) || {};
-}

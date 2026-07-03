@@ -38,13 +38,14 @@ while [ "$#" -gt 0 ]; do
       exit 2
       ;;
     *)
-      config="$1"
+      case "$1" in
+        /*) config="$1" ;;
+        *) config="$(pwd)/$1" ;;
+      esac
       shift
       ;;
   esac
 done
-
-mkdir -p "$out_dir"
 
 cmd=(
   npx
@@ -68,6 +69,7 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 cd "$root"
+mkdir -p "$out_dir"
 export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
 export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.dependencies/promptfoo-cache}"
 

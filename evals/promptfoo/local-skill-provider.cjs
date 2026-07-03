@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { fixtureFor } = require('./lib/cases.cjs');
 
 class LocalSkillProvider {
   id() {
@@ -25,14 +26,7 @@ class LocalSkillProvider {
 function caseVarsFromPrompt(prompt, context) {
   const caseId =
     context?.vars?.case_id || String(prompt).match(/^Case ([^:]+):/)?.[1];
-  if (!caseId) return {};
-
-  const file = path.resolve(
-    process.cwd(),
-    'evals/fixtures/agentic-systems-engineering/cases.json',
-  );
-  const cases = JSON.parse(fs.readFileSync(file, 'utf8'));
-  return cases.find((testCase) => testCase.case_id === caseId) || {};
+  return fixtureFor(caseId);
 }
 
 module.exports = LocalSkillProvider;

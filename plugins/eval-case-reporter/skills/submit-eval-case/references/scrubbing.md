@@ -37,6 +37,10 @@ portable scenario.
 Use this body shape:
 
 ````markdown
+## Issue title
+
+[eval-case]: <sanitized short title>
+
 ## Plugin or repo area
 
 <plugin, skill, command, workflow, or repo area>
@@ -73,6 +77,7 @@ Use this body shape:
 
 ## Safety check
 
-- [x] Secrets, credentials, private client data, and raw proprietary excerpts
-      were removed or replaced.
+- [x] Secrets, credentials, auth headers, cookies, session ids, private keys,
+      private client data, private repository names, internal hostnames, and raw
+      proprietary excerpts were removed or replaced.
 ````
