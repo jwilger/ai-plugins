@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# Tests for the sidequest enforcement guard.
+# Tests for the worktree enforcement guard.
 
 setup() {
-  GUARD="$BATS_TEST_DIRNAME/../scripts/sidequest-guard.sh"
+  GUARD="$BATS_TEST_DIRNAME/../scripts/worktree-guard.sh"
   REPO="$(mktemp -d)"
   git -C "$REPO" init -q
   git -C "$REPO" config user.email test@example.com

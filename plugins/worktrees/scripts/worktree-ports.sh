@@ -8,19 +8,19 @@
 # under the repository's common git dir maps each worktree to a stable slot, so
 # re-running for the same worktree is idempotent.
 #
-# Configure the bases/stride via SIDEQUEST_PORT_BASE_HTTP (default 4100),
-# SIDEQUEST_PORT_BASE_PG (5500), SIDEQUEST_PORT_STRIDE (10).
+# Configure the bases/stride via WORKTREE_PORT_BASE_HTTP (default 4100),
+# WORKTREE_PORT_BASE_PG (5500), WORKTREE_PORT_STRIDE (10).
 #
 # Note: `flock` is util-linux; on macOS install it or substitute an equivalent.
 set -euo pipefail
 
 worktree="${1:?usage: worktree-ports.sh <worktree-path>}"
-base_http="${SIDEQUEST_PORT_BASE_HTTP:-4100}"
-base_pg="${SIDEQUEST_PORT_BASE_PG:-5500}"
-stride="${SIDEQUEST_PORT_STRIDE:-10}"
+base_http="${WORKTREE_PORT_BASE_HTTP:-4100}"
+base_pg="${WORKTREE_PORT_BASE_PG:-5500}"
+stride="${WORKTREE_PORT_STRIDE:-10}"
 
 common_dir="$(cd "$(git -C "$worktree" rev-parse --git-common-dir)" && pwd -P)"
-registry="$common_dir/sidequest-ports.tsv"
+registry="$common_dir/worktree-ports.tsv"
 lock="$registry.lock"
 
 exec 9>"$lock"
