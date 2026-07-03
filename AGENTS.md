@@ -115,7 +115,7 @@ and no quality shortcuts. These rules apply to **both Claude Code and Codex**;
 
 CI runs on GitHub Actions (`.github/workflows/ci.yml`):
 
-- **`ci.yml`** (PR + push to `main` + merge queue): `just ci`, marketplace
+- **`ci.yml`** (PR + merge queue): `just ci`, marketplace
   validation (including the cross-harness manifest sync-validator), Codex
   manifest checks, and a final `CI gate` aggregator job so branch protection has
   a single required check.
