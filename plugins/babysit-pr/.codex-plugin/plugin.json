@@ -20,7 +20,16 @@
   "interface": {
     "displayName": "Babysit PR",
     "shortDescription": "Drive a PR/MR to merge across GitHub, Forgejo, and GitLab.",
+    "longDescription": "Use Babysit PR when Codex needs to keep a pull request or merge request moving until it is merged. The skill detects the forge, watches CI, inspects review feedback, applies requested changes when appropriate, waits for approval, and performs the merge only when the project's merge policy is satisfied.",
+    "developerName": "John Wilger",
     "category": "Developer Tools",
-    "capabilities": ["Read", "Write"]
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
+    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "defaultPrompt": [
+      "Babysit the current PR until it is green, approved, and merged.",
+      "Watch this merge request, respond to review feedback, and merge it when ready."
+    ]
   }
 }

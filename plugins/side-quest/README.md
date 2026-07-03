@@ -7,8 +7,9 @@ git worktree and delivers the result per the project's `sidequest.toml`.
 
 - **Claude Code** — provides the `/side-quest` command and the `sidequest` MCP
   server (this directory).
-- **Codex** — parallel manifest planned (the MCP server and command are
-  harness-agnostic; Codex consumes the same MCP server).
+- **Codex** — provides the `side-quest` skill and the same `sidequest` MCP
+  server. The skill maps natural-language requests to the MCP `launch`, `list`,
+  and `logs` tools.
 
 ## Requirements
 
