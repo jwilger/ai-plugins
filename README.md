@@ -1,19 +1,15 @@
 # ai-plugins
 
-A **multi-harness marketplace of AI coding-assistant plugins**.
-
-Today it is a [Claude Code](https://code.claude.com) plugin marketplace. It is
-deliberately structured so the same repository can also serve
-[Codex](https://openai.com/codex/) and other harnesses that adopt the plugin /
-marketplace concept. Each plugin below is tagged with the harness(es) it
-supports.
+A **multi-harness marketplace of AI coding-assistant plugins** for
+[Claude Code](https://code.claude.com), [Codex](https://openai.com/codex/), and
+other harnesses that adopt plugin or marketplace concepts.
 
 ## Plugin catalog
 
 Every plugin ships both a `.claude-plugin/` and a `.codex-plugin/` manifest and
-is registered in both marketplace manifests, so all three target **Claude Code
-and Codex**. (Codex runtime verification via the `codex` CLI is in progress; the
-manifests and skills are authored for both.)
+is registered in both marketplace manifests, so the catalog targets both
+**Claude Code and Codex**. Codex runtime verification via the `codex` CLI is in
+progress; the manifests and skills are authored for both harnesses.
 
 ### Claude Code
 
@@ -58,6 +54,35 @@ commands, regardless of the URL you added it from. List and manage with
 `/plugin list`, `/plugin marketplace update ai-plugins`, and
 `/plugin marketplace remove ai-plugins`.
 
+## Using the marketplace (Codex)
+
+Codex-facing marketplace metadata lives in
+[`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json), and each
+plugin has a `.codex-plugin/plugin.json` manifest. In a local checkout, install
+or sync the plugin from the matching directory under [`plugins/`](plugins/)
+using the Codex plugin flow available in your Codex environment.
+
+The plugin names are the directory names, for example:
+
+```text
+agentic-systems-engineering
+eval-case-reporter
+engineering-standards
+babysit-pr
+worktrees
+```
+
+Useful Codex entry points:
+
+- `agentic-systems-engineering`: route LLM, agent, RAG, tool-use, structured
+  output, provider-routing, observability, and delivery work through portable
+  agentic-system guardrails.
+- `eval-case-reporter`: recognize reusable failures or surprising assistant
+  behavior, scrub sensitive data, preview the complete GitHub issue payload, ask
+  before posting, and submit the sanitized issue with `gh issue create`.
+- `engineering-standards`: apply the repository's broader engineering regime,
+  including the no-force-push rule.
+
 ## Developing in this repo
 
 A [Nix flake](flake.nix) provides a reproducible devshell with Node, npm, `jq`,
@@ -75,6 +100,21 @@ your home directory. Delete that directory any time for a clean slate.
 
 See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
 
+## Eval reports
+
+The repo-owned eval dashboard is published through GitHub Pages at
+<https://slipstream-eng.github.io/ai-plugins/> after the Pages workflow runs on
+`main`. Repository Pages is configured for GitHub Actions deployments, and the
+workflow publishes the generated static dashboard from `site/evals/`. The
+durable record is repo-owned and does not depend on promptfoo hosted sharing.
+
+To produce the same artifacts locally:
+
+```shell
+nix develop -c scripts/evals/run.sh
+nix develop -c node scripts/evals/build-site.mjs
+```
+
 ## Reporting eval cases
 
 When a plugin, skill, prompt, or workflow behaves incorrectly or only partially
@@ -82,21 +122,38 @@ works, file an **Eval case** issue in this repository. Eval cases are the intake
 path for future regression fixtures in `evals/fixtures/`.
 
 Include the sanitized input, actual behavior, expected behavior, expected eval
-outcome (`pass`, `fail`, `partial`, or `adversarial`), and the assertion or
-rubric that would catch the behavior. Do not include secrets, credentials,
-private client data, or raw proprietary source excerpts.
+outcome (`pass`, `fail`, `partial`, `adversarial`, or `unsure`), and the
+assertion or rubric that would catch the behavior. Do not include secrets,
+credentials, auth headers, cookies, session ids, private keys, private client
+data, private repository names, internal hostnames, or raw proprietary source
+excerpts.
 
 ## Repository layout
 
 ```
 .
+├── .agents/
+│   └── plugins/
+│       └── marketplace.json  # Codex-facing marketplace manifest
 ├── .claude-plugin/
-│   └── marketplace.json   # the marketplace manifest (lists plugins)
-├── plugins/               # one subdirectory per plugin
-│   └── README.md          # plugin anatomy / conventions
-├── flake.nix              # Nix devshell
-├── AGENTS.md              # guidance for AI agents working in this repo
-└── README.md              # this file
+│   └── marketplace.json      # Claude Code marketplace manifest
+├── .github/
+│   ├── ISSUE_TEMPLATE/       # eval-case intake form
+│   └── workflows/            # CI, eval, and Pages workflows
+├── docs/
+│   └── superpowers/plans/    # implementation plans for larger changes
+├── evals/
+│   ├── fixtures/             # deterministic eval scenarios
+│   └── promptfoo/            # promptfoo configs, providers, and assertions
+├── plugins/                  # one subdirectory per plugin
+├── scripts/
+│   ├── evals/                # eval runner and dashboard builder
+│   └── tests/                # Bats tests
+├── site/
+│   └── evals/                # generated dashboard target, ignored except .gitkeep
+├── flake.nix                 # Nix devshell
+├── AGENTS.md                 # guidance for AI agents working in this repo
+└── README.md                 # this file
 ```
 
 ## License
