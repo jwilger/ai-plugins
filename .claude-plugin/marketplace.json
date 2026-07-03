@@ -8,14 +8,6 @@
   "version": "0.1.0",
   "plugins": [
     {
-      "name": "side-quest",
-      "source": "./plugins/side-quest",
-      "description": "Launch backgrounded side-quests that implement changes in isolated git worktrees and deliver per project config.",
-      "version": "0.1.0",
-      "category": "Productivity",
-      "keywords": ["worktree", "agents", "automation"]
-    },
-    {
       "name": "worktrees",
       "source": "./plugins/worktrees",
       "description": "Make a repository worktree-ready: per-worktree isolation plus an enforcement guard that protects the main checkout.",
