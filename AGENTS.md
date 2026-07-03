@@ -161,8 +161,15 @@ For an end-to-end check in Claude Code: `/plugin marketplace add .` then
 - **JSON** is 2-space indented; run `prettier --write` on changed `.json`/`.md`.
 - **Only `.claude-plugin/`** lives inside the `.claude-plugin/` folder. All
   component directories (`skills/`, `agents/`, …) live at the plugin root.
-- **Versioning:** set `version` in `plugin.json` to pin a release; if omitted,
-  the git commit SHA is used as the version.
+- **Versioning:** every plugin in this marketplace must carry a valid semver
+  `version` in both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`.
+  Keep those two manifest versions identical, and keep the Claude Code
+  marketplace entry version in `.claude-plugin/marketplace.json` identical to
+  the plugin manifest version. Bump the plugin version in the same PR as any
+  plugin behavior, skill, command, hook, script, or metadata change. Use semver:
+  patch for fixes/documentation-only behavior clarifications, minor for
+  backwards-compatible features or changed defaults, and major for breaking
+  changes.
 
 ## Multi-harness notes
 
