@@ -125,6 +125,32 @@ find plugins -name plugin.json -exec jq empty {} \;  # every plugin manifest val
 prettier --check "**/*.{json,md}"                 # formatting (use --write to fix)
 ```
 
+For every plugin in this marketplace, when modifying anything under `plugins/`
+that could affect plugin or skill behavior, run the full relevant eval set
+before claiming completion. For Codex skills, "full" means analysis plus
+benchmark setup, and benchmark execution when real scenarios and verifiers are
+available:
+
+```shell
+plugin-eval analyze plugins/<plugin-name>/skills/<skill-name> --format markdown
+plugin-eval init-benchmark plugins/<plugin-name>/skills/<skill-name>
+# After tailoring .plugin-eval/benchmark.json to real tasks:
+plugin-eval benchmark plugins/<plugin-name>/skills/<skill-name> --config <benchmark.json>
+```
+
+If `plugin-eval` is not on `PATH`, run the installed plugin-eval script directly
+from the local Codex plugin cache. If Claude Code has an equivalent evaluator for
+the changed plugin or skill, run that too. Include eval results in the PR notes
+alongside `just ci`. Do not wire evals into pre-commit hooks or CI gates unless
+that automation is explicitly requested.
+
+This applies across all marketplace plugins, not only the plugin currently being
+edited. Do not blanket-ignore `.plugin-eval/`. Stable benchmark configs and
+curated eval baselines are useful review artifacts and may be committed when
+they document how a plugin or skill is measured. Treat timestamped raw run logs
+as transient unless you are intentionally adding a baseline for future
+comparison.
+
 For an end-to-end check in Claude Code: `/plugin marketplace add .` then
 `/plugin install <plugin-name>@ai-plugins`.
 

@@ -21,7 +21,11 @@ preferred over the others.
 2. **On CI failure** — fetch the logs, diagnose, and push a fix to the branch.
 3. **On review feedback** — apply the receiving-code-review discipline: verify
    each point against the code, push back with technical reasoning or implement
-   it, and reply in the thread. Re-request review once addressed.
+   it, and reply in the thread. For GitHub inline review comments, route through
+   `github:gh-address-comments` so unresolved review threads, inline anchors,
+   and resolution state are handled with thread-aware tooling. Do not post a top-level PR comment
+   when the feedback came from an inline review thread; reply directly to that
+   inline review thread, then resolve or re-request review once addressed.
 4. **Merge** — enable auto-merge if the project allows it; otherwise merge once
    the PR is green and approved.
 5. **Blocked needing a human** (a required gate you cannot fix, a missing signing
