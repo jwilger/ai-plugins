@@ -4,7 +4,11 @@ set -euo pipefail
 
 worktree="${1:?usage: worktree-teardown.sh <worktree-path>}"
 worktree="$(cd "$worktree" && pwd -P)"
-git -C "$worktree" rev-parse --is-inside-work-tree >/dev/null
+top_level="$(cd "$(git -C "$worktree" rev-parse --show-toplevel)" && pwd -P)"
+if [ "$worktree" != "$top_level" ]; then
+  echo "worktree-teardown: expected a worktree root, got: $worktree" >&2
+  exit 1
+fi
 
 env_file="$worktree/.env.worktree"
 common_dir="$(cd "$(git -C "$worktree" rev-parse --git-common-dir)" && pwd -P)"

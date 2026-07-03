@@ -33,6 +33,21 @@ SH
   [ ! -f "$REPO/docker.log" ]
 }
 
+@test "rejects subdirectories before loading env or stopping services" {
+  mkdir -p "$REPO/.worktrees/a/subdir" "$REPO/fake-bin"
+  printf 'COMPOSE_PROJECT_NAME=must-not-run\n' >"$REPO/.worktrees/a/subdir/.env.worktree"
+  cat >"$REPO/fake-bin/docker" <<'SH'
+#!/usr/bin/env bash
+echo docker-called >>"$DOCKER_LOG"
+SH
+  chmod +x "$REPO/fake-bin/docker"
+
+  run bash -c "DOCKER_LOG='$REPO/docker.log' PATH='$REPO/fake-bin':\$PATH '$TEARDOWN' '$REPO/.worktrees/a/subdir'"
+
+  [ "$status" -ne 0 ]
+  [ ! -f "$REPO/docker.log" ]
+}
+
 @test "releases the worktree port slot during teardown" {
   first=$(bash "$ALLOC" "$REPO/.worktrees/a")
   bash "$ALLOC" "$REPO/.worktrees/b" >/dev/null
