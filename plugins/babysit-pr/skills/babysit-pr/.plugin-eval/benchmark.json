@@ -1,0 +1,54 @@
+{
+  "kind": "plugin-eval-benchmark",
+  "schemaVersion": 2,
+  "version": 2,
+  "targetKind": "skill",
+  "targetName": "babysit-pr",
+  "runner": {
+    "type": "codex-cli",
+    "model": "gpt-5.4-mini",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "extraArgs": []
+  },
+  "workspace": {
+    "sourcePath": ".",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
+  "verifiers": {
+    "commands": []
+  },
+  "notes": [
+    "Run this benchmark from the repository root.",
+    "Scenarios avoid real GitHub writes and require a concrete artifact in the copied benchmark workspace."
+  ],
+  "setupQuestions": [],
+  "scenarios": [
+    {
+      "id": "inline-review-routing",
+      "title": "Inline review routing",
+      "purpose": "Check that the babysit-pr skill routes GitHub inline review feedback through the thread-aware GitHub comment handler.",
+      "userInput": "Use the local Codex skill \"babysit-pr\" if it helps. In this copied workspace, inspect plugins/babysit-pr/skills/babysit-pr/SKILL.md and write .plugin-eval-benchmark/babysit-pr.md with the exact steps you would follow when CodeRabbit leaves an inline review thread on a GitHub PR. The artifact must explicitly state that GitHub inline review feedback routes through github:gh-address-comments and that a top-level PR comment is not an acceptable reply to an inline review thread.",
+      "successChecklist": [
+        "The artifact exists at .plugin-eval-benchmark/babysit-pr.md.",
+        "The artifact names github:gh-address-comments for GitHub inline review feedback.",
+        "The artifact rejects top-level PR comments for inline review thread replies."
+      ]
+    },
+    {
+      "id": "continuous-monitoring-boundary",
+      "title": "Continuous monitoring boundary",
+      "purpose": "Check that babysit-pr distinguishes ordinary waiting from a true human blocker.",
+      "userInput": "Use the local Codex skill \"babysit-pr\" if it helps. In this copied workspace, inspect plugins/babysit-pr/skills/babysit-pr/SKILL.md and write .plugin-eval-benchmark/babysit-pr.md with a PR babysitting loop for a PR that is green but waiting in merge queue. The artifact must say to keep polling until MERGED or a concrete unfixable human gate is proven, not to stop merely because checks, bot review, or merge queue are pending.",
+      "successChecklist": [
+        "The artifact exists at .plugin-eval-benchmark/babysit-pr.md.",
+        "The artifact says to continue monitoring through pending checks, bot review, or merge queue states.",
+        "The artifact defines a real blocker as a concrete unfixable human gate."
+      ]
+    }
+  ]
+}
