@@ -11,11 +11,12 @@ teardown() {
 }
 
 make_plugin() {
-  # make_plugin <name> [claude-name] [codex-name]
-  local name="$1" cc="${2:-$1}" cx="${3:-$1}"
+  # make_plugin <name> [claude-name] [codex-name] [claude-version] [codex-version]
+  local name="$1" cc="${2:-$1}" cx="${3:-$1}" cc_version="${4:-1.2.3}"
+  local cx_version="${5:-$cc_version}"
   mkdir -p "$ROOT/plugins/$name/.claude-plugin" "$ROOT/plugins/$name/.codex-plugin"
-  echo "{\"name\":\"$cc\"}" >"$ROOT/plugins/$name/.claude-plugin/plugin.json"
-  echo "{\"name\":\"$cx\"}" >"$ROOT/plugins/$name/.codex-plugin/plugin.json"
+  echo "{\"name\":\"$cc\",\"version\":\"$cc_version\"}" >"$ROOT/plugins/$name/.claude-plugin/plugin.json"
+  echo "{\"name\":\"$cx\",\"version\":\"$cx_version\"}" >"$ROOT/plugins/$name/.codex-plugin/plugin.json"
 }
 
 write_manifests() {
@@ -28,7 +29,7 @@ write_manifests() {
 manifest_for() {
   local entries=""
   for n in $1; do
-    entries="$entries{\"name\":\"$n\",\"source\":\"$n\"},"
+    entries="$entries{\"name\":\"$n\",\"source\":\"$n\",\"version\":\"1.2.3\"},"
   done
   echo "{\"plugins\":[${entries%,}]}"
 }
@@ -87,4 +88,28 @@ manifest_for() {
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"codex-plugin-name-mismatch"* ]]
+}
+
+@test "fails when plugin versions are not semver" {
+  make_plugin alpha alpha alpha not-semver not-semver
+  write_manifests "alpha" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid-claude-plugin-version"* ]]
+}
+
+@test "fails when claude and codex plugin versions differ" {
+  make_plugin alpha alpha alpha 1.2.3 1.2.4
+  write_manifests "alpha" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plugin-version-mismatch"* ]]
+}
+
+@test "fails when claude marketplace version differs from plugin version" {
+  make_plugin alpha alpha alpha 1.2.4
+  write_manifests "alpha" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"claude-marketplace-version-mismatch"* ]]
 }

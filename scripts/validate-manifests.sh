@@ -8,7 +8,8 @@
 #   - every name in the manifests has a matching plugins/<name>/ directory;
 #   - every plugins/<name>/ directory is registered in both manifests;
 #   - every plugin carries both .claude-plugin/plugin.json and
-#     .codex-plugin/plugin.json, each whose `name` matches the directory.
+#     .codex-plugin/plugin.json, each whose `name` matches the directory;
+#   - Claude Code and Codex plugin versions are valid semver and match.
 set -euo pipefail
 
 root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}"
@@ -18,6 +19,10 @@ codex="$root/.agents/plugins/marketplace.json"
 fail() {
   echo "manifest-sync: $*" >&2
   exit 1
+}
+
+is_semver() {
+  [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?(\+([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$ ]]
 }
 
 [ -f "$claude" ] || fail "missing-claude-manifest: $claude"
@@ -53,6 +58,18 @@ for dir in "$root"/plugins/*/; do
   cx_name="$(jq -r '.name' "$cx")"
   [ "$cc_name" = "$name" ] || fail "claude-plugin-name-mismatch: dir=$name json=$cc_name"
   [ "$cx_name" = "$name" ] || fail "codex-plugin-name-mismatch: dir=$name json=$cx_name"
+
+  cc_version="$(jq -r '.version // empty' "$cc")"
+  cx_version="$(jq -r '.version // empty' "$cx")"
+  [ -n "$cc_version" ] || fail "missing-claude-plugin-version: $name"
+  [ -n "$cx_version" ] || fail "missing-codex-plugin-version: $name"
+  is_semver "$cc_version" || fail "invalid-claude-plugin-version: $name version=$cc_version"
+  is_semver "$cx_version" || fail "invalid-codex-plugin-version: $name version=$cx_version"
+  [ "$cc_version" = "$cx_version" ] || fail "plugin-version-mismatch: $name claude=$cc_version codex=$cx_version"
+
+  marketplace_version="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .version // empty' "$claude")"
+  [ -n "$marketplace_version" ] || fail "missing-claude-marketplace-version: $name"
+  [ "$marketplace_version" = "$cc_version" ] || fail "claude-marketplace-version-mismatch: $name marketplace=$marketplace_version plugin=$cc_version"
 done
 
 echo "manifest-sync: ok"
