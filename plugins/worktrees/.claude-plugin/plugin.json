@@ -1,7 +1,7 @@
 {
   "name": "worktrees",
   "description": "Make a repository worktree-ready: goal-driven per-worktree isolation plus an enforcement guard that protects the main checkout.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "John Wilger",
     "email": "john@johnwilger.com"
