@@ -4,7 +4,7 @@
 
 **Goal:** Add a portable `agentic-systems-engineering` marketplace plugin plus free/OSS eval reporting for this repo's plugins and skills.
 
-**Architecture:** The new plugin is separate from `engineering-standards` and keeps short router skills at the plugin root with detailed doctrine in `references/` files. Eval reporting is local-first and repo-owned: promptfoo produces JSON, HTML, and JUnit artifacts, and a small Node script aggregates those artifacts into a static dashboard under `site/evals/`.
+**Architecture:** The new plugin is separate from `engineering-standards` and keeps short router skills at the plugin root with detailed doctrine in `references/` files. Eval reporting is local-first and repo-owned: promptfoo drives the real Claude Code and Codex harnesses with every repository plugin loaded, produces JSON, HTML, and JUnit artifacts, and a small Node script aggregates those artifacts into a static dashboard under `site/evals/`.
 
 **Tech Stack:** Claude Code plugin manifests, Codex plugin manifests, Markdown skills, shell scripts, Node `.mjs`, promptfoo, Bats, `jq`, Prettier, GitHub Actions, GitHub Pages, GitHub issue forms.
 
@@ -22,6 +22,7 @@
 
 - Create: `plugins/agentic-systems-engineering/.claude-plugin/plugin.json`
 - Create: `plugins/agentic-systems-engineering/.codex-plugin/plugin.json`
+- Create: `plugins/agentic-systems-engineering/.mcp.json`
 - Create: `plugins/agentic-systems-engineering/README.md`
 - Create: `plugins/agentic-systems-engineering/skills/agentic-systems-engineering/SKILL.md`
 - Create: `plugins/agentic-systems-engineering/skills/evaluate-stochastic-systems/SKILL.md`
@@ -41,12 +42,20 @@
 - Modify: `plugins/engineering-standards/README.md`
 - Create: `.github/ISSUE_TEMPLATE/config.yml`
 - Create: `.github/ISSUE_TEMPLATE/eval-case.yml`
-- Create: `evals/promptfoo/agentic-systems-engineering.yaml`
-- Create: `evals/fixtures/agentic-systems-engineering/*.json`
+- Create: `evals/fixtures/agentic-systems-engineering/cases.json`
+- Create: `evals/promptfoo/load-harness-cases.cjs`
+- Create: `evals/promptfoo/load-canary-cases.cjs`
+- Create: `evals/promptfoo/assert-hard-guards.cjs`
+- Create: `evals/promptfoo/assert-full-marketplace-canary.cjs`
+- Create: `scripts/evals/generate-config.mjs`
+- Create: `scripts/evals/prepare-codex-home.mjs`
 - Create: `scripts/evals/run.sh`
 - Create: `scripts/evals/build-site.mjs`
 - Create: `scripts/tests/evals-run.bats`
 - Create: `scripts/tests/evals-site.bats`
+- Create: `scripts/tests/evals-config.bats`
+- Create: `scripts/tests/evals-fixtures.bats`
+- Create: `scripts/tests/eval-pages-workflow.bats`
 - Create or modify: `.github/workflows/*.yml`
 - Create: `site/evals/.gitkeep` or generated dashboard files if the repo decides to commit a baseline.
 
@@ -164,31 +173,47 @@ Update engineering-standards docs so LLM and agentic-system guidance routes to `
 
 ## Task 6: Add Promptfoo Eval Harness
 
-- [x] **Step 1: Add deterministic fixtures**
+- [x] **Step 1: Add behavior fixtures**
 
-Create pass/fail/partial/adversarial fixtures for agentic skill triggering, stochastic eval guidance, single-run-proof refusal, and force-push refusal.
+Create pass/fail/partial/adversarial behavior fixtures for agentic skill triggering, stochastic eval guidance, single-run-proof refusal, eval-case intake, delivery practice, and force-push refusal.
 
-- [x] **Step 2: Add promptfoo config**
+- [x] **Step 2: Convert fixtures to semantic rubrics and hard guards**
 
-Create `evals/promptfoo/agentic-systems-engineering.yaml` that can run deterministic local assertions without secrets and emits JSON, HTML, and JUnit outputs.
+Replace phrase-list `requiredConcepts` with `semanticRubric`, `hardAssertions`, `minPassRate`, tags, and calibration examples. Preserve natural behavior prompts that do not tell the model to use `ai-plugins`.
 
-- [x] **Step 3: Add runner script**
+- [x] **Step 3: Generate promptfoo configs from the full marketplace**
+
+Generate promptfoo config from `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` so every scenario runs with every repository plugin, skill, command, agent, MCP config, hook, and relevant plugin metadata loaded. Add a separate canary config that is allowed to explicitly verify plugin and skill loading.
+
+- [x] **Step 4: Use native Promptfoo coding-agent providers first**
+
+Use `openai:codex-sdk` for Codex with prepared `CODEX_HOME`, `gpt-5.5`, medium reasoning, read-only sandbox, no approvals, streaming, and deep tracing. Use `anthropic:claude-agent-sdk` / Claude Code provider with repo root as `working_dir`, all local plugins, `skills: all`, the Sonnet alias, and safe read-only/default tool posture. The intended human-facing Claude Code posture remains Sonnet high effort with Opus 4.8 advisor where that harness exposes those controls; Promptfoo's current Claude Agent SDK provider does not expose those knobs in this repo's generated config. Custom CLI providers are fallback only if native-provider canaries cannot prove full-marketplace plugin loading.
+
+- [x] **Step 5: Add semantic and deterministic assertions**
+
+Use promptfoo `llm-rubric` for semantic behavior grading. Use JavaScript assertions only for hard invariants such as no unauthorized force-push, no raw secret/transcript posting, and threshold aggregation. Prefer trajectory, trace, or `skill-used` assertions for canaries when the provider exposes them.
+
+- [x] **Step 6: Add runner script**
 
 Create `scripts/evals/run.sh`. It must install or invoke promptfoo through the repo's Nix/npm sandbox, write artifacts under `evals/out/`, and avoid hosted sharing as the durable record.
 
-- [x] **Step 4: Add dashboard builder**
+- [x] **Step 6A: Add Codex Promptfoo MCP server**
 
-Create `scripts/evals/build-site.mjs`. It must read eval artifacts, generate trend-ready JSON summaries, and write static self-contained pages under `site/evals/`.
+Add optional Promptfoo MCP server wiring for Codex in `agentic-systems-engineering` so agents can validate configs, run focused evals, inspect results, and develop eval cases. Keep this separate from the canonical runner and static report artifacts.
 
-- [x] **Step 5: Add Bats tests**
+- [x] **Step 7: Add full-marketplace dashboard builder**
 
-Add tests that verify the runner's dry-run/help behavior and the dashboard builder's behavior against fixture artifacts.
+Create `scripts/evals/build-site.mjs`. It must read eval artifacts, generate trend-ready JSON summaries, show per-provider/per-case/per-sample pass rates and thresholds, and write static self-contained pages under `site/evals/`.
+
+- [x] **Step 8: Add Bats tests**
+
+Add tests that verify the runner's dry-run/help behavior, dependency installation plan, generated config contents, fixture schema, hard-guard assertions, threshold summaries, and dashboard builder behavior against fixture artifacts.
 
 ## Task 7: Add CI And Reporting
 
-- [x] **Step 1: Add deterministic CI job**
+- [x] **Step 1: Add PR eval config job**
 
-Update CI to run deterministic evals that do not require secrets and upload artifacts with retention.
+Update CI to validate promptfoo configuration with a secret-free dry run on pull requests. Do not claim behavior evidence from this dry run.
 
 - [x] **Step 2: Add trusted live eval workflow**
 
@@ -224,13 +249,28 @@ Run: `just ci`
 
 Expected: marketplace validation and Bats tests pass.
 
-- [x] **Step 5: Run evals**
+- [ ] **Step 5: Run full-marketplace canaries**
+
+Run the native-provider canary suite through Claude Code and Codex.
+
+Expected: canaries prove every repository plugin is loaded and representative skills are discoverable through native Promptfoo providers. If a native provider cannot prove this, record the evidence and fallback decision in this plan.
+
+Status: Codex native-provider canary passed locally with the prepared isolated
+`CODEX_EVAL_HOME`, absolute plugin paths, and representative-skill assertions.
+Claude Code canary requires `ANTHROPIC_API_KEY`, which is not present in this
+local environment.
+
+- [ ] **Step 6: Run evals**
 
 Run: `scripts/evals/run.sh`
 
-Expected: JSON, HTML, and JUnit artifacts are generated under `evals/out/`.
+Expected: full provider-backed behavior evals run with `EVAL_SAMPLES=3` through both harnesses, no cache/no share, and JSON, HTML, and JUnit artifacts are generated under `evals/out/`.
 
-- [x] **Step 6: Build eval dashboard**
+Status: blocked locally because `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are
+absent. The trusted `live-evals` and `eval-pages` workflows run this path when
+those repository secrets are available.
+
+- [x] **Step 7: Build eval dashboard**
 
 Run: `node scripts/evals/build-site.mjs`
 
@@ -241,25 +281,55 @@ Expected: `site/evals/index.html` and `site/evals/summary.json` are generated an
 - The first implementation artifact is this plan file.
 - The active goal is to complete this plan by file reference.
 - This plan may be amended if implementation discovers facts that change scope, sequence, or acceptance criteria.
+- 2026-07-04 amendment: the eval harness must follow Promptfoo's documented coding-agent/provider patterns. Native `openai:codex-sdk` and `anthropic:claude-agent-sdk` providers are the target path; custom CLI providers are fallback only after a canary demonstrates that native providers cannot faithfully load the full repository marketplace.
+- 2026-07-04 amendment: every behavior scenario runs with the complete repository plugin context, not only `agentic-systems-engineering`. The canary suite must prove full-marketplace loading, while behavior prompts remain natural and do not explicitly instruct the model to use `ai-plugins`.
+- 2026-07-04 source refresh: course guidance reinforced rate-over-set evals, k-sample repetition, pass/fail/partial/adversarial fixtures, fixture growth from real misses, cache bypass for behavior evidence, deterministic guardrails outside the model, trajectory checks, evidence-anchored rubric judging, and model-family/bias controls for LLM judges.
 - Source material inspected for implementation discipline and plugin content:
   `/home/jwilger/projects/course/docs/curriculum/*agentic-systems*`,
   `/home/jwilger/projects/course/docs/*/kb-alignment*`, and the cloned
   `thisisartium/agentic-systems-kb` under ignored `.dependencies/source/`.
   Shipped content is sanitized and paraphrased.
+- Promptfoo docs reviewed during implementation:
+  `https://www.promptfoo.dev/docs/getting-started/`,
+  `https://www.promptfoo.dev/docs/providers/openai-codex-sdk/`,
+  `https://www.promptfoo.dev/docs/providers/anthropic/`,
+  `https://www.promptfoo.dev/docs/providers/mcp/`, and
+  `https://www.promptfoo.dev/docs/integrations/mcp-server/`. The harness now
+  follows the relevant shape: generated YAML config with schema, native
+  `openai:codex-sdk` and `anthropic:claude-agent-sdk` providers, `llm-rubric`
+  semantic grading, JavaScript hard-guard assertions returning
+  pass/score/reason, JSON/HTML/JUnit outputs, trusted CI artifacts, pinned
+  `promptfoo@0.121.17`, hosted sharing disabled, prompt response caching
+  disabled for behavior evidence, and an optional Promptfoo MCP server for
+  Codex assistant workflows.
+- 2026-07-04 review fix: generated Claude Code plugin paths are absolute so the
+  generated config can live under `evals/out/generated/`; Codex eval-home
+  preparation refuses realpath/symlink targets for the real Codex home or auth
+  source home unless explicitly overridden; canary assertions require
+  representative skills, not only plugin names; unsupported Claude effort/advisor
+  env vars were removed from active workflow config; failed trusted eval runs
+  upload diagnostics when files exist.
 - Execution is following the course/KB practice, not just encoding it:
-  work is in a walking-skeleton loop, deterministic evals are run before claims,
-  the static dashboard is built as a data-story artifact, and reusable failures
-  are routed into the eval-case intake path.
+  work is in a walking-skeleton loop, deterministic checks protect hard safety
+  invariants, native-provider canaries run before behavior claims, the static
+  dashboard is built as a data-story artifact, and reusable failures are routed
+  into the eval-case intake path.
 - Verification evidence:
   - Baseline `nix develop --command just ci` passed before implementation.
   - `origin/main` was fetched and fast-forwarded into this worktree during
     implementation.
-  - `nix develop --command scripts/evals/run.sh` passed with 6/6 promptfoo
-    cases.
+  - `promptfoo validate config` passed for generated behavior and canary configs
+    from `scripts/evals/generate-config.mjs`.
+  - Native `openai:codex-sdk` canary passed locally with 5/5 marketplace plugins
+    and representative skills loaded from the prepared isolated
+    `CODEX_EVAL_HOME`.
+  - Full local behavior eval execution is blocked in this environment because
+    `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are absent. The trusted GitHub
+    Actions workflows run that path when repository secrets are available.
   - `nix develop --command node scripts/evals/build-site.mjs` generated
     `site/evals/index.html` and `site/evals/summary.json`; generated outputs are
     ignored and published by CI.
-  - `nix develop --command just ci` passed with 39 Bats tests.
+  - `nix develop --command just ci` passed with 52 Bats tests.
   - `plugin-eval analyze` returned grade A / 100 for the six changed skills:
     `agentic-systems-engineering`, `evaluate-stochastic-systems`,
     `scaffold-agentic-evals`, `agentic-delivery`, `submit-eval-case`, and

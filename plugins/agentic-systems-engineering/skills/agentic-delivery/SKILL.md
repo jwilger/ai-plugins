@@ -16,6 +16,10 @@ Load `references/delivery.md`.
   traces, and enough evals to compare changes.
 - Run an experiment loop: baseline, inspect failures, change one thing, rerun,
   compare against thresholds, and decide promote or iterate.
+- When the user asks for a delivery plan, give a concrete checkpoint plan, not
+  only delivery principles. Include what happens in the first day, the first
+  week, the final review, and what evidence decides whether to keep, change, or
+  stop the experiment.
 - Keep two tracks visible: product workflow discovery and technical reliability
   evidence.
 - Pair demos with data stories. A demo shows the workflow; the data story shows

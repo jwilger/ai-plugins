@@ -20,8 +20,14 @@ variance, blind spots, and maintenance cost.
 
 - One good run proves only that a path can succeed once.
 - Use rate-over-set metrics for routine quality.
-- Use repeated samples for stochastic paths. Report both the per-run success
-  rate and the user-facing reliability expectation for repeated use.
+- Prefer more distinct, representative examples when estimating population
+  quality.
+- Use repeated samples deliberately for per-input reliability, pass@k capability
+  (`at least one of k succeeds`), pass^k reliability (`all k succeed`),
+  stochastic judge variance, or close A/B comparisons.
+- Report both the per-run success rate and the user-facing reliability
+  expectation for repeated use.
+- Do not increase `k` as a ritual substitute for better fixtures.
 - Do not compare close scores as meaningful unless the set has enough cases to
   detect that difference.
 

@@ -1,9 +1,8 @@
 # `plugins/`
 
-Each subdirectory here is one plugin. Because the marketplace manifest sets
-`metadata.pluginRoot` to `./plugins`, a plugin's `source` in
-[`../.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json) is
-just the directory name (e.g. `"source": "my-plugin"`).
+Each subdirectory here is one plugin. The marketplace manifests point to plugin
+directories explicitly: Claude Code entries use `./plugins/<plugin-name>`, and
+Codex entries use `{ "source": "local", "path": "./plugins/<plugin-name>" }`.
 
 ## Anatomy of a plugin
 

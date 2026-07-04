@@ -8,8 +8,8 @@ other harnesses that adopt plugin or marketplace concepts.
 
 Every plugin ships both a `.claude-plugin/` and a `.codex-plugin/` manifest and
 is registered in both marketplace manifests, so the catalog targets both
-**Claude Code and Codex**. Codex runtime verification via the `codex` CLI is in
-progress; the manifests and skills are authored for both harnesses.
+**Claude Code and Codex**. Provider-backed promptfoo evals exercise both the
+Claude Code and Codex harnesses with the full marketplace loaded.
 
 ### Claude Code
 
@@ -17,7 +17,7 @@ progress; the manifests and skills are authored for both harnesses.
 | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
-| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
 | [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.0   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 
@@ -27,7 +27,7 @@ progress; the manifests and skills are authored for both harnesses.
 | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
-| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
 | [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.0   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 
@@ -104,16 +104,67 @@ See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
 
 The repo-owned eval dashboard is published through GitHub Pages at
 <https://slipstream-eng.github.io/ai-plugins/> after the Pages workflow runs on
-`main`. Repository Pages is configured for GitHub Actions deployments, and the
-workflow publishes the generated static dashboard from `site/evals/`. The
-durable record is repo-owned and does not depend on promptfoo hosted sharing.
+`main` with both `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` available. Repository
+Pages must be set to `Settings > Pages > Build and deployment > Source >
+GitHub Actions`; `Deploy from a branch` will not publish this dashboard. The
+workflow also runs `actions/configure-pages@v5` and publishes the generated
+static dashboard from `site/evals/`. The durable record is repo-owned and does
+not depend on promptfoo hosted sharing.
+
+The dashboard includes latest-run status, provider/case/sample pass rates,
+threshold status, and plugin/skill summaries so regressions can be traced back
+to the marketplace surface they exercise.
+
+The canonical promptfoo behavior evals run through Promptfoo's native coding
+agent providers: `anthropic:claude-agent-sdk` for Claude Code and
+`openai:codex-sdk` for Codex. The runner generates the promptfoo config from
+the current marketplace manifests, so each provider loads the full `ai-plugins`
+marketplace, not a single plugin in isolation. Routing and plugin composition
+are therefore part of the measured behavior. Promptfoo is pinned at `0.121.17`;
+the runner disables prompt response caching and hosted sharing so a behavior run
+is a fresh local record.
+
+Default eval harness posture:
+
+- Claude Code: `anthropic:claude-agent-sdk`, Sonnet 5 via the `sonnet` alias,
+  and all local plugins with `skills: all`. The intended human-facing Claude
+  Code posture remains Sonnet high effort with Opus 4.8 advisor where that harness
+  exposes those controls; Promptfoo's current Claude Agent SDK provider does
+  not expose those knobs in this repo's generated config.
+- Codex: `openai:codex-sdk`, `gpt-5.5` with
+  `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
+  deep tracing, and a generated `CODEX_EVAL_HOME` containing every repo plugin.
+
+The canary suite is separate from behavior evals. Canaries may explicitly ask
+the harness to prove plugin and skill loading. Behavior prompts stay natural and
+do not tell the model to use this repository's plugins.
+
+Repeated samples are a deliberate measurement choice, not a blanket rule. Use
+more distinct cases when estimating population quality; use repeated samples
+when measuring per-input reliability, pass@k capability, pass^k reliability, or
+small stochastic differences. Trusted release evidence for this repository
+defaults to `EVAL_SAMPLES=3`; PR dry-runs do not run live samples.
+
+Pull-request CI validates the eval configuration with `--dry-run` but does not
+claim behavior evidence. Provider-backed behavior evidence comes from local,
+scheduled, manual, or `main` runs where Claude Code and Codex authentication are
+available.
 
 To produce the same artifacts locally:
 
 ```shell
 nix develop -c scripts/evals/run.sh
+nix develop -c scripts/evals/run.sh --suite canary
 nix develop -c node scripts/evals/build-site.mjs
 ```
+
+Codex users who install `agentic-systems-engineering` also get an optional
+Promptfoo MCP server (`promptfoo@0.121.17 mcp --transport stdio`). Use it for
+agent-assisted config validation, focused eval runs, result inspection, and
+fixture development. It supplements the canonical runner; it does not replace
+the repo-owned artifact path above. Promptfoo's separate `mcp` provider is for
+testing MCP servers as systems under test and should be added only when a plugin
+or project exposes an MCP server to evaluate.
 
 ## Reporting eval cases
 
@@ -143,11 +194,11 @@ excerpts.
 ├── docs/
 │   └── superpowers/plans/    # implementation plans for larger changes
 ├── evals/
-│   ├── fixtures/             # deterministic eval scenarios
-│   └── promptfoo/            # promptfoo configs, providers, and assertions
+│   ├── fixtures/             # behavior eval scenarios
+│   └── promptfoo/            # promptfoo loaders and assertions
 ├── plugins/                  # one subdirectory per plugin
 ├── scripts/
-│   ├── evals/                # eval runner and dashboard builder
+│   ├── evals/                # eval config generator, runner, and dashboard builder
 │   └── tests/                # Bats tests
 ├── site/
 │   └── evals/                # generated dashboard target, ignored except .gitkeep
