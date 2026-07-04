@@ -34,17 +34,28 @@ jobs:
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Require provider credentials
+      - name: Check provider credentials
+        id: secrets
         run: |
-          if [ -z "${OPENAI_API_KEY:-}" ] || [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-            echo "GitHub Pages eval dashboard requires OPENAI_API_KEY and ANTHROPIC_API_KEY."
-            exit 1
+          if [ -n "${OPENAI_API_KEY:-}" ] && [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
           fi
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
+      - name: Record missing provider credentials
+        if: steps.secrets.outputs.available != 'true'
+        run: |
+          nix develop -c node scripts/evals/write-status.mjs \
+            --state skipped \
+            --reason "Provider-backed evals were not run because OPENAI_API_KEY and ANTHROPIC_API_KEY are not both configured for this repository." \
+            --provider-credentials missing
+
       - name: Run full-marketplace canaries
+        if: steps.secrets.outputs.available == 'true'
         run: |
           nix develop -c scripts/evals/run.sh --suite canary
           mkdir -p evals/out/canary
@@ -59,6 +70,7 @@ jobs:
           CODEX_EVAL_REASONING_EFFORT: medium
 
       - name: Run Claude Code and Codex behavior evals
+        if: steps.secrets.outputs.available == 'true'
         run: nix develop -c scripts/evals/run.sh
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -85,6 +97,7 @@ jobs:
             evals/out/canary/results.json
             evals/out/canary/report.html
             evals/out/canary/results.junit.xml
+            evals/out/status.json
             site/evals/index.html
             site/evals/summary.json
           if-no-files-found: ignore
