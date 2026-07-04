@@ -4,10 +4,21 @@ Guidance for AI agents (Claude Code, Codex, etc.) working in this repository.
 
 ## What this repo is
 
-`ai-plugins` is a **multi-harness AI plugin marketplace**. It currently
-implements the [Claude Code marketplace](https://code.claude.com/docs/en/plugin-marketplaces)
-format and is structured to also serve Codex and other harnesses as they adopt
-the plugin concept.
+`ai-plugins` is a **multi-harness AI plugin marketplace**. It implements the
+[Claude Code marketplace](https://code.claude.com/docs/en/plugin-marketplaces)
+format and carries Codex-facing marketplace metadata and plugin manifests for
+Codex and other harnesses that adopt the plugin concept.
+
+When this repository's marketplace plugins are installed in an agent harness,
+use the relevant installed skills for matching work rather than treating plugin
+content as inert documentation. In particular, route LLM, RAG, agent, tool-use,
+structured-output, stochastic-eval, and agentic-delivery work through
+`agentic-systems-engineering`; use `eval-case-reporter` when surprising or
+borderline assistant behavior should become a scrubbed eval-case issue; and use
+`engineering-standards` for the broader engineering regime. Eval-case reporting
+must scrub/anonymize sensitive details, show the sanitized issue preview, and
+require explicit user approval before posting. Never post raw secrets, private
+client data, proprietary excerpts, auth material, or private transcripts.
 
 - The marketplace manifest is [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json).
 - Each plugin is a subdirectory of [`plugins/`](plugins/).
@@ -127,9 +138,33 @@ prettier --check "**/*.{json,md}"                 # formatting (use --write to f
 
 For every plugin in this marketplace, when modifying anything under `plugins/`
 that could affect plugin or skill behavior, run the full relevant eval set
-before claiming completion. For Codex skills, "full" means analysis plus
-benchmark setup, and benchmark execution when real scenarios and verifiers are
-available:
+before claiming completion. Behavior evals for the marketplace run through
+promptfoo's native Claude Code and Codex coding-agent providers, loading the
+full plugin set together:
+
+```shell
+nix develop -c scripts/evals/run.sh
+nix develop -c node scripts/evals/build-site.mjs
+```
+
+`scripts/evals/run.sh --dry-run` only validates promptfoo wiring and is useful
+for pull-request CI without secrets; it is not behavior evidence. Provider-backed
+runs require working Claude Code and Codex authentication. The runner pins
+promptfoo plus the Codex/Claude SDK packages, generates promptfoo config from
+the current marketplace manifests, prepares a `CODEX_EVAL_HOME` with every repo
+plugin, and disables prompt response caching and hosted sharing so generated
+artifacts are fresh and repo-owned. Run `scripts/evals/run.sh --suite canary`
+to prove full-marketplace plugin loading before relying on behavior results. The
+optional Promptfoo MCP server in the `agentic-systems-engineering` Codex
+manifest is for agent-assisted validation, focused runs, and result inspection;
+it does not replace the canonical runner.
+
+The static dashboard summarizes latest-run status by provider, case, sample,
+plugin, and skill so PR notes can point to both aggregate quality and the
+marketplace surface exercised by a scenario.
+
+For Codex skills, "full" also includes analysis plus benchmark setup, and
+benchmark execution when real scenarios and verifiers are available:
 
 ```shell
 plugin-eval analyze plugins/<plugin-name>/skills/<skill-name> --format markdown
@@ -141,8 +176,8 @@ plugin-eval benchmark plugins/<plugin-name>/skills/<skill-name> --config <benchm
 If `plugin-eval` is not on `PATH`, run the installed plugin-eval script directly
 from the local Codex plugin cache. If Claude Code has an equivalent evaluator for
 the changed plugin or skill, run that too. Include eval results in the PR notes
-alongside `just ci`. Do not wire evals into pre-commit hooks or CI gates unless
-that automation is explicitly requested.
+alongside `just ci`. Do not wire provider-backed evals into untrusted PR gates
+unless that automation is explicitly requested and secrets are protected.
 
 This applies across all marketplace plugins, not only the plugin currently being
 edited. Do not blanket-ignore `.plugin-eval/`. Stable benchmark configs and
@@ -150,6 +185,12 @@ curated eval baselines are useful review artifacts and may be committed when
 they document how a plugin or skill is measured. Treat timestamped raw run logs
 as transient unless you are intentionally adding a baseline for future
 comparison.
+
+When choosing sample counts, name the metric being measured. Prefer more
+distinct cases for population quality. Use repeated samples deliberately for
+per-input reliability, pass@k capability, pass^k reliability, stochastic judge
+variance, or close A/B comparisons. Do not treat `k` as a ritual substitute for
+better fixtures.
 
 For an end-to-end check in Claude Code: `/plugin marketplace add .` then
 `/plugin install <plugin-name>@ai-plugins`.
@@ -199,8 +240,12 @@ CI runs on GitHub Actions (`.github/workflows/ci.yml`):
 
 - **`ci.yml`** (PR + merge queue): `just ci`, marketplace
   validation (including the cross-harness manifest sync-validator), Codex
-  manifest checks, and a final `CI gate` aggregator job so branch protection has
-  a single required check.
+  manifest checks, promptfoo eval dry-run wiring, and a final `CI gate`
+  aggregator job so branch protection has a single required check.
+- **`live-evals.yml`** and **`eval-pages.yml`** (trusted events): provider-backed
+  Claude Code and Codex promptfoo runs when both `OPENAI_API_KEY` and
+  `ANTHROPIC_API_KEY` are available, full-marketplace canaries, artifact upload,
+  and GitHub Pages deployment of `site/evals/`.
 
 ## Reference
 

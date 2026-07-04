@@ -1,35 +1,35 @@
 # ai-plugins
 
-A **multi-harness marketplace of AI coding-assistant plugins**.
-
-Today it is a [Claude Code](https://code.claude.com) plugin marketplace. It is
-deliberately structured so the same repository can also serve
-[Codex](https://openai.com/codex/) and other harnesses that adopt the plugin /
-marketplace concept. Each plugin below is tagged with the harness(es) it
-supports.
+A **multi-harness marketplace of AI coding-assistant plugins** for
+[Claude Code](https://code.claude.com), [Codex](https://openai.com/codex/), and
+other harnesses that adopt plugin or marketplace concepts.
 
 ## Plugin catalog
 
 Every plugin ships both a `.claude-plugin/` and a `.codex-plugin/` manifest and
-is registered in both marketplace manifests, so all three target **Claude Code
-and Codex**. (Codex runtime verification via the `codex` CLI is in progress; the
-manifests and skills are authored for both.)
+is registered in both marketplace manifests, so the catalog targets both
+**Claude Code and Codex**. Provider-backed promptfoo evals exercise both the
+Claude Code and Codex harnesses with the full marketplace loaded.
 
 ### Claude Code
 
-| Plugin                                                           | Description                                                                                   | Version |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                         | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.           | 0.1.0   |
-| [babysit-pr](plugins/babysit-pr/README.md)                       | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                          | 0.1.0   |
-| [engineering-standards](plugins/engineering-standards/README.md) | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill. | 0.1.0   |
+| Plugin                                                                       | Description                                                                                                    | Version |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
+| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
+| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.0   |
+| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 
 ### Codex
 
-| Plugin                                                           | Description                                                                                   | Version |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                         | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.           | 0.1.0   |
-| [babysit-pr](plugins/babysit-pr/README.md)                       | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                          | 0.1.0   |
-| [engineering-standards](plugins/engineering-standards/README.md) | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill. | 0.1.0   |
+| Plugin                                                                       | Description                                                                                                    | Version |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
+| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
+| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.0   |
+| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 
 > When a plugin is added under [`plugins/`](plugins/) and registered in both
 > [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) and
@@ -54,6 +54,35 @@ commands, regardless of the URL you added it from. List and manage with
 `/plugin list`, `/plugin marketplace update ai-plugins`, and
 `/plugin marketplace remove ai-plugins`.
 
+## Using the marketplace (Codex)
+
+Codex-facing marketplace metadata lives in
+[`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json), and each
+plugin has a `.codex-plugin/plugin.json` manifest. In a local checkout, install
+or sync the plugin from the matching directory under [`plugins/`](plugins/)
+using the Codex plugin flow available in your Codex environment.
+
+The plugin names are the directory names, for example:
+
+```text
+agentic-systems-engineering
+eval-case-reporter
+engineering-standards
+babysit-pr
+worktrees
+```
+
+Useful Codex entry points:
+
+- `agentic-systems-engineering`: route LLM, agent, RAG, tool-use, structured
+  output, provider-routing, observability, and delivery work through portable
+  agentic-system guardrails.
+- `eval-case-reporter`: recognize reusable failures or surprising assistant
+  behavior, scrub sensitive data, preview the complete GitHub issue payload, ask
+  before posting, and submit the sanitized issue with `gh issue create`.
+- `engineering-standards`: apply the repository's broader engineering regime,
+  including the no-force-push rule.
+
 ## Developing in this repo
 
 A [Nix flake](flake.nix) provides a reproducible devshell with Node, npm, `jq`,
@@ -71,17 +100,111 @@ your home directory. Delete that directory any time for a clean slate.
 
 See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
 
+## Eval reports
+
+The repo-owned eval dashboard is published through GitHub Pages at
+<https://slipstream-eng.github.io/ai-plugins/> after the Pages workflow runs on
+`main` with both `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` available. Repository
+Pages must be set to `Settings > Pages > Build and deployment > Source >
+GitHub Actions`; `Deploy from a branch` will not publish this dashboard. The
+workflow also runs `actions/configure-pages@v5` and publishes the generated
+static dashboard from `site/evals/`. The durable record is repo-owned and does
+not depend on promptfoo hosted sharing.
+
+The dashboard includes latest-run status, provider/case/sample pass rates,
+threshold status, and plugin/skill summaries so regressions can be traced back
+to the marketplace surface they exercise.
+
+The canonical promptfoo behavior evals run through Promptfoo's native coding
+agent providers: `anthropic:claude-agent-sdk` for Claude Code and
+`openai:codex-sdk` for Codex. The runner generates the promptfoo config from
+the current marketplace manifests, so each provider loads the full `ai-plugins`
+marketplace, not a single plugin in isolation. Routing and plugin composition
+are therefore part of the measured behavior. Promptfoo is pinned at `0.121.17`;
+the runner disables prompt response caching and hosted sharing so a behavior run
+is a fresh local record.
+
+Default eval harness posture:
+
+- Claude Code: `anthropic:claude-agent-sdk`, Sonnet 5 via the `sonnet` alias,
+  and all local plugins with `skills: all`. The intended human-facing Claude
+  Code posture remains Sonnet high effort with Opus 4.8 advisor where that harness
+  exposes those controls; Promptfoo's current Claude Agent SDK provider does
+  not expose those knobs in this repo's generated config.
+- Codex: `openai:codex-sdk`, `gpt-5.5` with
+  `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
+  deep tracing, and a generated `CODEX_EVAL_HOME` containing every repo plugin.
+
+The canary suite is separate from behavior evals. Canaries may explicitly ask
+the harness to prove plugin and skill loading. Behavior prompts stay natural and
+do not tell the model to use this repository's plugins.
+
+Repeated samples are a deliberate measurement choice, not a blanket rule. Use
+more distinct cases when estimating population quality; use repeated samples
+when measuring per-input reliability, pass@k capability, pass^k reliability, or
+small stochastic differences. Trusted release evidence for this repository
+defaults to `EVAL_SAMPLES=3`; PR dry-runs do not run live samples.
+
+Pull-request CI validates the eval configuration with `--dry-run` but does not
+claim behavior evidence. Provider-backed behavior evidence comes from local,
+scheduled, manual, or `main` runs where Claude Code and Codex authentication are
+available.
+
+To produce the same artifacts locally:
+
+```shell
+nix develop -c scripts/evals/run.sh
+nix develop -c scripts/evals/run.sh --suite canary
+nix develop -c node scripts/evals/build-site.mjs
+```
+
+Codex users who install `agentic-systems-engineering` also get an optional
+Promptfoo MCP server (`promptfoo@0.121.17 mcp --transport stdio`). Use it for
+agent-assisted config validation, focused eval runs, result inspection, and
+fixture development. It supplements the canonical runner; it does not replace
+the repo-owned artifact path above. Promptfoo's separate `mcp` provider is for
+testing MCP servers as systems under test and should be added only when a plugin
+or project exposes an MCP server to evaluate.
+
+## Reporting eval cases
+
+When a plugin, skill, prompt, or workflow behaves incorrectly or only partially
+works, file an **Eval case** issue in this repository. Eval cases are the intake
+path for future regression fixtures in `evals/fixtures/`.
+
+Include the sanitized input, actual behavior, expected behavior, expected eval
+outcome (`pass`, `fail`, `partial`, `adversarial`, or `unsure`), and the
+assertion or rubric that would catch the behavior. Do not include secrets,
+credentials, auth headers, cookies, session ids, private keys, private client
+data, private repository names, internal hostnames, or raw proprietary source
+excerpts.
+
 ## Repository layout
 
-```
+```text
 .
+├── .agents/
+│   └── plugins/
+│       └── marketplace.json  # Codex-facing marketplace manifest
 ├── .claude-plugin/
-│   └── marketplace.json   # the marketplace manifest (lists plugins)
-├── plugins/               # one subdirectory per plugin
-│   └── README.md          # plugin anatomy / conventions
-├── flake.nix              # Nix devshell
-├── AGENTS.md              # guidance for AI agents working in this repo
-└── README.md              # this file
+│   └── marketplace.json      # Claude Code marketplace manifest
+├── .github/
+│   ├── ISSUE_TEMPLATE/       # eval-case intake form
+│   └── workflows/            # CI, eval, and Pages workflows
+├── docs/
+│   └── superpowers/plans/    # implementation plans for larger changes
+├── evals/
+│   ├── fixtures/             # behavior eval scenarios
+│   └── promptfoo/            # promptfoo loaders and assertions
+├── plugins/                  # one subdirectory per plugin
+├── scripts/
+│   ├── evals/                # eval config generator, runner, and dashboard builder
+│   └── tests/                # Bats tests
+├── site/
+│   └── evals/                # generated dashboard target, ignored except .gitkeep
+├── flake.nix                 # Nix devshell
+├── AGENTS.md                 # guidance for AI agents working in this repo
+└── README.md                 # this file
 ```
 
 ## License

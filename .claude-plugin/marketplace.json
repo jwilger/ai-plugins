@@ -4,7 +4,7 @@
     "name": "John Wilger",
     "email": "john@johnwilger.com"
   },
-  "description": "A multi-harness marketplace of AI coding-assistant plugins. Currently serves Claude Code; structured to also serve Codex and other harnesses that support the plugin concept.",
+  "description": "A multi-harness marketplace of AI coding-assistant plugins for Claude Code, Codex, and other harnesses that support the plugin concept.",
   "version": "0.1.0",
   "plugins": [
     {
@@ -19,9 +19,25 @@
       "name": "engineering-standards",
       "source": "./plugins/engineering-standards",
       "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "category": "Developer Tools",
       "keywords": ["standards", "tdd", "bdd", "architecture", "quality"]
+    },
+    {
+      "name": "agentic-systems-engineering",
+      "source": "./plugins/agentic-systems-engineering",
+      "description": "Portable guardrails for building, evaluating, and delivering LLM and agentic systems.",
+      "version": "0.1.0",
+      "category": "Developer Tools",
+      "keywords": ["agents", "llm", "evals", "rag", "delivery"]
+    },
+    {
+      "name": "eval-case-reporter",
+      "source": "./plugins/eval-case-reporter",
+      "description": "Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.",
+      "version": "0.1.0",
+      "category": "Developer Tools",
+      "keywords": ["evals", "github", "issues", "regression", "triage"]
     },
     {
       "name": "babysit-pr",

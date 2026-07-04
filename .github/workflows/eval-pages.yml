@@ -1,0 +1,110 @@
+name: Eval Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build eval dashboard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Require provider credentials
+        run: |
+          if [ -z "${OPENAI_API_KEY:-}" ] || [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "GitHub Pages eval dashboard requires OPENAI_API_KEY and ANTHROPIC_API_KEY."
+            exit 1
+          fi
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Run full-marketplace canaries
+        run: |
+          nix develop -c scripts/evals/run.sh --suite canary
+          mkdir -p evals/out/canary
+          cp evals/out/results.json evals/out/canary/results.json
+          cp evals/out/report.html evals/out/canary/report.html
+          cp evals/out/results.junit.xml evals/out/canary/results.junit.xml
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_EVAL_MODEL: sonnet
+          CODEX_EVAL_MODEL: gpt-5.5
+          CODEX_EVAL_REASONING_EFFORT: medium
+
+      - name: Run Claude Code and Codex behavior evals
+        run: nix develop -c scripts/evals/run.sh
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_EVAL_MODEL: sonnet
+          CODEX_EVAL_MODEL: gpt-5.5
+          CODEX_EVAL_REASONING_EFFORT: medium
+          EVAL_SAMPLES: 3
+
+      - name: Build dashboard
+        if: always()
+        run: nix develop -c node scripts/evals/build-site.mjs
+
+      - name: Upload eval diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-diagnostics
+          retention-days: 30
+          path: |
+            evals/out/results.json
+            evals/out/report.html
+            evals/out/results.junit.xml
+            evals/out/canary/results.json
+            evals/out/canary/report.html
+            evals/out/canary/results.junit.xml
+            site/evals/index.html
+            site/evals/summary.json
+          if-no-files-found: ignore
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/evals
+
+  deploy:
+    name: Deploy eval dashboard
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -26,6 +26,11 @@ Two complementary skills:
   approval and managed releases. Per-ecosystem recipes and templates live in
   `skills/scaffold/references/playbook.md`, loaded on demand.
 
+LLM and agentic-system guidance intentionally lives in the separate
+`agentic-systems-engineering` plugin. Use that plugin for prompts, RAG, agent
+loops, stochastic evals, observability, security, cost, and delivery practice
+instead of expanding this general engineering guardrail.
+
 ## Harnesses
 
 Harness-agnostic — both skills (`SKILL.md` + frontmatter) are consumed

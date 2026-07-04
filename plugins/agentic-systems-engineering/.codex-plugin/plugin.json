@@ -1,0 +1,29 @@
+{
+  "name": "agentic-systems-engineering",
+  "version": "0.1.0",
+  "description": "Portable guardrails for building, evaluating, and delivering LLM and agentic systems.",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "MIT",
+  "keywords": ["agents", "llm", "evals", "rag", "delivery"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Agentic Systems Engineering",
+    "shortDescription": "Build, evaluate, and deliver reliable LLM and agentic systems.",
+    "longDescription": "Use Agentic Systems Engineering when Codex needs portable guardrails for prompts, structured outputs, tool use, RAG, agent loops, orchestration, evals, observability, security, cost controls, and delivery practice for LLM-backed systems.",
+    "developerName": "John Wilger",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "MCP Tools"],
+    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
+    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "defaultPrompt": [
+      "Apply agentic systems engineering guardrails to this LLM feature.",
+      "Scaffold local evals for this agentic workflow.",
+      "Help me evaluate this stochastic system."
+    ]
+  }
+}

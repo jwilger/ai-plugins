@@ -9,6 +9,12 @@
 /mutants.out/
 /mutants.out.old/
 
+# Generated eval artifacts and static dashboard output. CI uploads/publishes
+# these from each run; source configs and fixtures stay tracked.
+/evals/out/
+/site/evals/*
+!/site/evals/.gitkeep
+
 # Side-quest worktrees (default location; configurable via sidequest.toml).
 /.worktrees/
 

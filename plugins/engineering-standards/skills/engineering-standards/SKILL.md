@@ -55,6 +55,10 @@ adapt the concrete tooling to the language while keeping the discipline.
 - **Minimum-necessary context** — skills, tool schemas, hooks, and injected
   context use the least context that stays effective across every supported
   harness.
+- For LLM and agentic-system work, use the `agentic-systems-engineering` plugin
+  for specialized guidance on prompts, RAG, agent loops, stochastic evals,
+  observability, security, cost, and delivery. Keep this skill focused on the
+  general engineering regime.
 - Pin the toolchain; manage dependencies through the package-manager CLI so
   versions and feature flags are checked at the time of change.
 
@@ -77,6 +81,9 @@ adapt the concrete tooling to the language while keeping the discipline.
 
 - **Never take quality shortcuts to save time.** Treat the work as a portfolio
   piece. Put in the effort and find a way to make it work.
+- **Never force-push to a remote without explicit case-by-case human
+  authorization (case-by-case human authorization).** This includes `git push --force`, `git push --force-with-lease`,
+  `git push -f`, and any forced refspec such as `+branch`.
 - Use **Conventional Commits**. Do **not** add AI-attribution commit trailers
   (e.g. `Co-Authored-By`).
 

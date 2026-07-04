@@ -1,6 +1,6 @@
 {
   "name": "engineering-standards",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
   "author": {
     "name": "John Wilger",
