@@ -1,19 +1,21 @@
 #!/usr/bin/env node
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-const root = path.resolve(import.meta.dirname, '../..');
-const outDir = path.join(root, 'evals/out');
-const siteDir = path.join(root, 'site/evals');
-const resultsPath = path.join(outDir, 'results.json');
+const root = path.resolve(import.meta.dirname, "../..");
+const outDir = path.join(root, "evals/out");
+const siteDir = path.join(root, "site/evals");
+const resultsPath = path.join(outDir, "results.json");
+const statusPath = path.join(outDir, "status.json");
 
 function readResults(file) {
-  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const raw = JSON.parse(fs.readFileSync(file, "utf8"));
   const results = raw.results?.results || raw.results || raw.prompts || [];
 
   if (Array.isArray(results)) {
     return results.map((result, index) => {
-      const testCase = result.testCase?.vars || result.testCase || result.vars || {};
+      const testCase =
+        result.testCase?.vars || result.testCase || result.vars || {};
       const grading = result.gradingResult || result;
       const pass = Boolean(grading.pass ?? result.success ?? result.pass);
       const provider =
@@ -21,18 +23,20 @@ function readResults(file) {
         result.provider?.id ||
         result.provider ||
         result.prompt?.provider ||
-        'unknown-provider';
+        "unknown-provider";
       return {
         id: testCase.case_id || result.description || `case-${index + 1}`,
-        behavior: testCase.behavior || '',
+        behavior: testCase.behavior || "",
         provider,
         plugins: normalizeList(testCase.plugins || testCase.plugin),
         skills: normalizeList(testCase.skills || testCase.skill),
         sampleIndex: Number(testCase.sample_index ?? 1),
-        minPassRate: Number(testCase.min_pass_rate ?? testCase.minPassRate ?? 1),
+        minPassRate: Number(
+          testCase.min_pass_rate ?? testCase.minPassRate ?? 1,
+        ),
         pass,
         score: Number(grading.score ?? (pass ? 1 : 0)),
-        reason: grading.reason || result.reason || '',
+        reason: grading.reason || result.reason || "",
       };
     });
   }
@@ -49,7 +53,7 @@ function normalizeList(value) {
     return [];
   }
 
-  if (typeof value === 'string' && value.trim().startsWith('[')) {
+  if (typeof value === "string" && value.trim().startsWith("[")) {
     try {
       const parsed = JSON.parse(value);
       if (Array.isArray(parsed)) {
@@ -61,7 +65,7 @@ function normalizeList(value) {
   }
 
   return String(value)
-    .split(',')
+    .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -105,11 +109,12 @@ function aggregateCases(cases) {
       ...group,
       passRate: group.total === 0 ? 0 : group.passed / group.total,
       thresholdMet:
-        group.total > 0 &&
-        group.passed / group.total >= group.minPassRate,
+        group.total > 0 && group.passed / group.total >= group.minPassRate,
     }))
     .sort((left, right) =>
-      `${left.provider}:${left.id}`.localeCompare(`${right.provider}:${right.id}`),
+      `${left.provider}:${left.id}`.localeCompare(
+        `${right.provider}:${right.id}`,
+      ),
     );
 }
 
@@ -155,23 +160,49 @@ function aggregateDimension(cases, field, idName) {
 
 function escapeHtml(value) {
   return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function readStatus(file, cases) {
+  if (fs.existsSync(file)) {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  }
+
+  if (cases.length > 0) {
+    return {
+      generatedAt: new Date().toISOString(),
+      suite: "agentic-systems-engineering",
+      state: "completed",
+      reason: "Promptfoo results were found and summarized.",
+      providerCredentials: "available",
+    };
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    suite: "agentic-systems-engineering",
+    state: "empty",
+    reason: "No Promptfoo results were found.",
+    providerCredentials: "unknown",
+  };
 }
 
 fs.mkdirSync(siteDir, { recursive: true });
 
 const cases = fs.existsSync(resultsPath) ? readResults(resultsPath) : [];
+const runStatus = readStatus(statusPath, cases);
 const aggregates = aggregateCases(cases);
-const pluginSummaries = aggregateDimension(cases, 'plugins', 'plugin');
-const skillSummaries = aggregateDimension(cases, 'skills', 'skill');
+const pluginSummaries = aggregateDimension(cases, "plugins", "plugin");
+const skillSummaries = aggregateDimension(cases, "skills", "skill");
 const passed = cases.filter((testCase) => testCase.pass).length;
 const failed = cases.length - passed;
 const summary = {
   generatedAt: new Date().toISOString(),
-  suite: 'agentic-systems-engineering',
+  suite: "agentic-systems-engineering",
+  status: runStatus,
   total: cases.length,
   passed,
   failed,
@@ -179,9 +210,9 @@ const summary = {
   thresholdsMet: aggregates.filter((group) => group.thresholdMet).length,
   thresholdsFailed: aggregates.filter((group) => !group.thresholdMet).length,
   artifacts: {
-    json: '../../evals/out/results.json',
-    html: '../../evals/out/report.html',
-    junit: '../../evals/out/results.junit.xml',
+    json: "../../evals/out/results.json",
+    html: "../../evals/out/report.html",
+    junit: "../../evals/out/results.junit.xml",
   },
   aggregates,
   pluginSummaries,
@@ -190,7 +221,7 @@ const summary = {
 };
 
 fs.writeFileSync(
-  path.join(siteDir, 'summary.json'),
+  path.join(siteDir, "summary.json"),
   `${JSON.stringify(summary, null, 2)}\n`,
 );
 
@@ -199,30 +230,39 @@ const rows = aggregates
     (testCase) => `<tr>
   <td>${escapeHtml(testCase.provider)}</td>
   <td>${escapeHtml(testCase.id)}</td>
-  <td>${testCase.thresholdMet ? 'pass' : 'fail'}</td>
+  <td>${testCase.thresholdMet ? "pass" : "fail"}</td>
   <td>${(testCase.passRate * 100).toFixed(1)}% / ${(testCase.minPassRate * 100).toFixed(1)}%</td>
   <td>${escapeHtml(testCase.behavior)}</td>
-  <td>${escapeHtml(testCase.samples.map((sample) => `#${sample.sampleIndex}: ${sample.reason}`).join(' | '))}</td>
+  <td>${escapeHtml(testCase.samples.map((sample) => `#${sample.sampleIndex}: ${sample.reason}`).join(" | "))}</td>
 </tr>`,
   )
-  .join('\n');
+  .join("\n");
+
+const caseRows =
+  rows ||
+  `<tr><td colspan="6">No eval samples are available for this run. ${escapeHtml(runStatus.reason)}</td></tr>`;
 
 function summaryRows(items, idName) {
-  return items
+  const rows = items
     .map(
       (item) => `<tr>
   <td>${escapeHtml(item.provider)}</td>
   <td>${escapeHtml(item[idName])}</td>
   <td>${item.passed} / ${item.total}</td>
   <td>${(item.passRate * 100).toFixed(1)}%</td>
-  <td>${escapeHtml(item.cases.join(', '))}</td>
+  <td>${escapeHtml(item.cases.join(", "))}</td>
 </tr>`,
     )
-    .join('\n');
+    .join("\n");
+
+  return (
+    rows ||
+    `<tr><td colspan="5">No ${escapeHtml(idName)} data is available for this run.</td></tr>`
+  );
 }
 
-const pluginRows = summaryRows(pluginSummaries, 'plugin');
-const skillRows = summaryRows(skillSummaries, 'skill');
+const pluginRows = summaryRows(pluginSummaries, "plugin");
+const skillRows = summaryRows(skillSummaries, "skill");
 
 const html = `<!doctype html>
 <html lang="en">
@@ -244,6 +284,7 @@ const html = `<!doctype html>
   <main>
     <h1>ai-plugins eval dashboard</h1>
     <p>Suite: ${escapeHtml(summary.suite)}. Generated: ${escapeHtml(summary.generatedAt)}.</p>
+    <p><strong>Status:</strong> ${escapeHtml(runStatus.state)}. ${escapeHtml(runStatus.reason)}</p>
     <section class="summary" aria-label="summary">
       <div class="metric"><strong>Total</strong><br>${summary.total}</div>
       <div class="metric"><strong>Passed</strong><br>${summary.passed}</div>
@@ -251,13 +292,14 @@ const html = `<!doctype html>
       <div class="metric"><strong>Pass rate</strong><br>${(summary.passRate * 100).toFixed(1)}%</div>
       <div class="metric"><strong>Thresholds met</strong><br>${summary.thresholdsMet}</div>
       <div class="metric"><strong>Thresholds failed</strong><br>${summary.thresholdsFailed}</div>
+      <div class="metric"><strong>Provider credentials</strong><br>${escapeHtml(runStatus.providerCredentials)}</div>
     </section>
     <table>
       <thead>
         <tr><th>Provider</th><th>Case</th><th>Status</th><th>Rate / threshold</th><th>Behavior</th><th>Samples</th></tr>
       </thead>
       <tbody>
-${rows}
+${caseRows}
       </tbody>
     </table>
     <h2>Plugin summary</h2>
@@ -283,5 +325,5 @@ ${skillRows}
 </html>
 `;
 
-fs.writeFileSync(path.join(siteDir, 'index.html'), html);
+fs.writeFileSync(path.join(siteDir, "index.html"), html);
 console.log(`wrote ${path.relative(root, siteDir)}/index.html`);

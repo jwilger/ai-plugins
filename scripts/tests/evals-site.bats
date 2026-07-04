@@ -102,6 +102,7 @@ teardown() {
   [ -f "$TMPROOT/site/evals/index.html" ]
   [ -f "$TMPROOT/site/evals/summary.json" ]
   [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "4" ]
+  [ "$(jq -r '.status.state' "$TMPROOT/site/evals/summary.json")" = "completed" ]
   [ "$(jq -r '.aggregates[] | select(.id == "fixture-pass") | .provider' "$TMPROOT/site/evals/summary.json")" = "codex-gpt-5.5" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-pass") | .passRate' "$TMPROOT/site/evals/summary.json")" = "0.6666666666666666" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .samples[0].sampleIndex' "$TMPROOT/site/evals/summary.json")" = "0" ]
@@ -116,4 +117,26 @@ teardown() {
   grep -q "66.7%" "$TMPROOT/site/evals/index.html"
   grep -q "Plugin summary" "$TMPROOT/site/evals/index.html"
   grep -q "Skill summary" "$TMPROOT/site/evals/index.html"
+}
+
+@test "eval dashboard builder surfaces skipped provider status" {
+  rm "$TMPROOT/evals/out/results.json"
+  cat >"$TMPROOT/evals/out/status.json" <<'JSON'
+{
+  "generatedAt": "2026-07-04T00:00:00.000Z",
+  "suite": "agentic-systems-engineering",
+  "state": "skipped",
+  "reason": "Provider-backed evals were not run because credentials are missing.",
+  "providerCredentials": "missing"
+}
+JSON
+
+  run node "$TMPROOT/scripts/evals/build-site.mjs"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "0" ]
+  [ "$(jq -r '.status.state' "$TMPROOT/site/evals/summary.json")" = "skipped" ]
+  [ "$(jq -r '.status.providerCredentials' "$TMPROOT/site/evals/summary.json")" = "missing" ]
+  grep -q "Provider-backed evals were not run" "$TMPROOT/site/evals/index.html"
+  grep -q "No eval samples are available" "$TMPROOT/site/evals/index.html"
 }

@@ -338,3 +338,15 @@ Expected: `site/evals/index.html` and `site/evals/summary.json` are generated an
     configs were generic starter templates with no real verifiers, so they were
     not committed and benchmark execution is deferred until curated scenarios
     and verifiers exist.
+
+Post-merge Pages follow-up:
+
+- PR #10 merged on 2026-07-04, and repository Pages is configured with
+  `build_type: workflow` at <https://slipstream-eng.github.io/ai-plugins/>.
+- The first post-merge `Eval Pages` run proved that repository Actions secrets
+  are not currently configured for `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
+- The Pages workflow must still publish a truthful dashboard when those secrets
+  are absent. It now records a skipped provider status and deploys the static
+  report instead of failing before artifact upload.
+- Provider-backed Claude Code and Codex eval results remain gated on the actual
+  repository secrets; skipped-status pages are not behavior evidence.

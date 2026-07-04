@@ -104,12 +104,16 @@ See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
 
 The repo-owned eval dashboard is published through GitHub Pages at
 <https://slipstream-eng.github.io/ai-plugins/> after the Pages workflow runs on
-`main` with both `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` available. Repository
-Pages must be set to `Settings > Pages > Build and deployment > Source >
-GitHub Actions`; `Deploy from a branch` will not publish this dashboard. The
-workflow also runs `actions/configure-pages@v5` and publishes the generated
+`main`. In the repository Pages settings, set **Build and deployment / Source**
+to **GitHub Actions**; **Deploy from a branch** will not publish this dashboard.
+The workflow also runs `actions/configure-pages@v5` and publishes the generated
 static dashboard from `site/evals/`. The durable record is repo-owned and does
 not depend on promptfoo hosted sharing.
+
+Provider-backed Claude Code and Codex results require both repository secrets:
+`OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. If either secret is absent, the Pages
+workflow publishes an explicit skipped-status dashboard instead of pretending
+that behavior evals ran.
 
 The dashboard includes latest-run status, provider/case/sample pass rates,
 threshold status, and plugin/skill summaries so regressions can be traced back
