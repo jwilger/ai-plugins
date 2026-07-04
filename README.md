@@ -108,7 +108,7 @@ The repo-owned eval dashboard is published through GitHub Pages at
 to **GitHub Actions**; **Deploy from a branch** will not publish this dashboard.
 The workflow also runs `actions/configure-pages@v5` and publishes the generated
 static dashboard from `site/evals/`. The durable record is repo-owned and does
-not depend on promptfoo hosted sharing.
+not depend on promptfoo-hosted sharing.
 
 Provider-backed Claude Code and Codex results require both repository secrets:
 `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. If either secret is absent, the Pages

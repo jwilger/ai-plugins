@@ -166,11 +166,7 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function readStatus(file, cases) {
-  if (fs.existsSync(file)) {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  }
-
+function defaultStatus(cases) {
   if (cases.length > 0) {
     return {
       generatedAt: new Date().toISOString(),
@@ -188,6 +184,18 @@ function readStatus(file, cases) {
     reason: "No Promptfoo results were found.",
     providerCredentials: "unknown",
   };
+}
+
+function readStatus(file, cases) {
+  if (!fs.existsSync(file)) {
+    return defaultStatus(cases);
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return defaultStatus(cases);
+  }
 }
 
 fs.mkdirSync(siteDir, { recursive: true });

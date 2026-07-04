@@ -140,3 +140,14 @@ JSON
   grep -q "Provider-backed evals were not run" "$TMPROOT/site/evals/index.html"
   grep -q "No eval samples are available" "$TMPROOT/site/evals/index.html"
 }
+
+@test "eval dashboard builder falls back when status file is malformed" {
+  printf '{not-json' >"$TMPROOT/evals/out/status.json"
+
+  run node "$TMPROOT/scripts/evals/build-site.mjs"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "4" ]
+  [ "$(jq -r '.status.state' "$TMPROOT/site/evals/summary.json")" = "completed" ]
+  grep -q "Promptfoo results were found and summarized" "$TMPROOT/site/evals/index.html"
+}
