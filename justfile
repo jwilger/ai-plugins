@@ -45,6 +45,14 @@ evals:
     fi
     exit "$share_status"
 
+# Run the plugin-instruction improvement loop with a plugin-only diff guard.
+improve-plugins:
+    scripts/evals/improve-plugins.sh
+
+# Run the eval-harness improvement loop with an eval-only diff guard.
+improve-evals:
+    scripts/evals/improve-evals.sh
+
 # Shell / plugin-script tests (CI gate).
 bats:
     bats $(find plugins scripts -name '*.bats' | sort)
