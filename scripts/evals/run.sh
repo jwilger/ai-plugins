@@ -5,13 +5,11 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 config="evals/promptfoo/agentic-systems-engineering.yaml"
 out_dir="$root/evals/out"
 generated_dir="$out_dir/generated"
-promptfoo_version="${PROMPTFOO_VERSION:-0.121.17}"
-codex_sdk_version="${CODEX_SDK_VERSION:-0.142.5}"
-claude_agent_sdk_version="${CLAUDE_AGENT_SDK_VERSION:-0.3.201}"
 max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-2}"
 suite="behavior"
 dry_run=0
 generated_config=0
+promptfoo_bin="${PROMPTFOO_BIN:-$root/node_modules/.bin/promptfoo}"
 
 usage() {
   cat <<'USAGE'
@@ -28,17 +26,15 @@ Environment overrides:
   CLAUDE_EVAL_MODEL
   CODEX_EVAL_MODEL
   CODEX_EVAL_REASONING_EFFORT
-  PROMPTFOO_GRADING_PROVIDER    (default: openai:gpt-5-mini)
+  CODEX_GRADER_MODEL            (default: gpt-5.5)
+  CODEX_GRADER_REASONING_EFFORT (default: medium)
   EVAL_SAMPLES
   EVAL_CASE_FILTER
-  PROMPTFOO_VERSION            (default: 0.121.17)
-  CODEX_SDK_VERSION            (default: 0.142.5)
-  CLAUDE_AGENT_SDK_VERSION     (default: 0.3.201)
   PROMPTFOO_MAX_CONCURRENCY    (default: 2)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
-Pinned eval packages: promptfoo@0.121.17, @openai/codex-sdk@0.142.5,
-@anthropic-ai/claude-agent-sdk@0.3.201.
+Pinned eval packages are managed by package.json and package-lock.json:
+promptfoo, @openai/codex-sdk, and @anthropic-ai/claude-agent-sdk.
 
 Requires working Claude Code and Codex model authentication.
 
@@ -97,15 +93,7 @@ if [ "$config" = "evals/promptfoo/agentic-systems-engineering.yaml" ]; then
 fi
 
 cmd=(
-  npx
-  "--yes"
-  "--package"
-  "promptfoo@${promptfoo_version}"
-  "--package"
-  "@openai/codex-sdk@${codex_sdk_version}"
-  "--package"
-  "@anthropic-ai/claude-agent-sdk@${claude_agent_sdk_version}"
-  promptfoo
+  "$promptfoo_bin"
   eval
   -c
   "$config"
@@ -122,6 +110,8 @@ cmd=(
 )
 
 if [ "$dry_run" -eq 1 ]; then
+  printf '%q ' "$root/scripts/evals/ensure-node-deps.sh"
+  printf '\n'
   if [ "$generated_config" -eq 1 ]; then
     printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config"
     printf '\n'
@@ -135,6 +125,7 @@ fi
 
 cd "$root"
 mkdir -p "$out_dir"
+"$root/scripts/evals/ensure-node-deps.sh"
 if [ "$generated_config" -eq 1 ]; then
   node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" >/dev/null
 fi
