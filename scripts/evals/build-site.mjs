@@ -18,6 +18,14 @@ function readResults(file) {
         result.testCase?.vars || result.testCase || result.vars || {};
       const grading = result.gradingResult || result;
       const pass = Boolean(grading.pass ?? result.success ?? result.pass);
+      const reason =
+        grading.reason ||
+        result.reason ||
+        grading.error ||
+        result.error ||
+        result.failureReason ||
+        "";
+      const blocked = isProviderUnavailable(reason);
       const provider =
         result.provider?.label ||
         result.provider?.id ||
@@ -35,8 +43,10 @@ function readResults(file) {
           testCase.min_pass_rate ?? testCase.minPassRate ?? 1,
         ),
         pass,
+        blocked,
+        status: pass ? "passed" : blocked ? "blocked" : "failed",
         score: Number(grading.score ?? (pass ? 1 : 0)),
-        reason: grading.reason || result.reason || "",
+        reason,
       };
     });
   }
@@ -70,6 +80,12 @@ function normalizeList(value) {
     .filter(Boolean);
 }
 
+function isProviderUnavailable(reason) {
+  return /\b(rate.?limit|weekly limit|session limit|usage limit|quota|insufficient_quota|too many requests|429|auth(?:entication)?|credentials?|api key|not logged in|login required|provider unavailable|could not be resolved)\b/i.test(
+    String(reason || ""),
+  );
+}
+
 function aggregateCases(cases) {
   const groups = new Map();
 
@@ -85,8 +101,11 @@ function aggregateCases(cases) {
         total: 0,
         passed: 0,
         failed: 0,
+        blocked: 0,
+        evaluated: 0,
         passRate: 0,
         thresholdMet: false,
+        status: "failed",
         samples: [],
       });
     }
@@ -94,11 +113,15 @@ function aggregateCases(cases) {
     const group = groups.get(key);
     group.total += 1;
     group.passed += testCase.pass ? 1 : 0;
-    group.failed += testCase.pass ? 0 : 1;
+    group.blocked += testCase.blocked ? 1 : 0;
+    group.failed += !testCase.pass && !testCase.blocked ? 1 : 0;
+    group.evaluated += testCase.blocked ? 0 : 1;
     group.minPassRate = Math.max(group.minPassRate, testCase.minPassRate);
     group.samples.push({
       sampleIndex: testCase.sampleIndex,
       pass: testCase.pass,
+      blocked: testCase.blocked,
+      status: testCase.status,
       score: testCase.score,
       reason: testCase.reason,
     });
@@ -107,9 +130,19 @@ function aggregateCases(cases) {
   return [...groups.values()]
     .map((group) => ({
       ...group,
-      passRate: group.total === 0 ? 0 : group.passed / group.total,
+      passRate: group.evaluated === 0 ? 0 : group.passed / group.evaluated,
       thresholdMet:
-        group.total > 0 && group.passed / group.total >= group.minPassRate,
+        group.evaluated > 0 &&
+        group.passed / group.evaluated >= group.minPassRate,
+      status:
+        group.blocked > 0 && group.evaluated === 0
+          ? "blocked"
+          : group.blocked > 0
+            ? "inconclusive"
+            : group.evaluated > 0 &&
+                group.passed / group.evaluated >= group.minPassRate
+              ? "pass"
+              : "fail",
     }))
     .sort((left, right) =>
       `${left.provider}:${left.id}`.localeCompare(
@@ -132,6 +165,8 @@ function aggregateDimension(cases, field, idName) {
           total: 0,
           passed: 0,
           failed: 0,
+          blocked: 0,
+          evaluated: 0,
           passRate: 0,
           cases: new Set(),
         });
@@ -140,7 +175,9 @@ function aggregateDimension(cases, field, idName) {
       const group = groups.get(key);
       group.total += 1;
       group.passed += testCase.pass ? 1 : 0;
-      group.failed += testCase.pass ? 0 : 1;
+      group.blocked += testCase.blocked ? 1 : 0;
+      group.failed += !testCase.pass && !testCase.blocked ? 1 : 0;
+      group.evaluated += testCase.blocked ? 0 : 1;
       group.cases.add(testCase.id);
     }
   }
@@ -148,7 +185,7 @@ function aggregateDimension(cases, field, idName) {
   return [...groups.values()]
     .map((group) => ({
       ...group,
-      passRate: group.total === 0 ? 0 : group.passed / group.total,
+      passRate: group.evaluated === 0 ? 0 : group.passed / group.evaluated,
       cases: [...group.cases].sort(),
     }))
     .sort((left, right) =>
@@ -206,7 +243,9 @@ const aggregates = aggregateCases(cases);
 const pluginSummaries = aggregateDimension(cases, "plugins", "plugin");
 const skillSummaries = aggregateDimension(cases, "skills", "skill");
 const passed = cases.filter((testCase) => testCase.pass).length;
-const failed = cases.length - passed;
+const blocked = cases.filter((testCase) => testCase.blocked).length;
+const failed = cases.length - passed - blocked;
+const evaluated = passed + failed;
 const summary = {
   generatedAt: new Date().toISOString(),
   suite: "agentic-systems-engineering",
@@ -214,9 +253,14 @@ const summary = {
   total: cases.length,
   passed,
   failed,
-  passRate: cases.length === 0 ? 0 : passed / cases.length,
+  blocked,
+  passRate: evaluated === 0 ? 0 : passed / evaluated,
   thresholdsMet: aggregates.filter((group) => group.thresholdMet).length,
-  thresholdsFailed: aggregates.filter((group) => !group.thresholdMet).length,
+  thresholdsFailed: aggregates.filter((group) => group.status === "fail")
+    .length,
+  thresholdsBlocked: aggregates.filter((group) =>
+    ["blocked", "inconclusive"].includes(group.status),
+  ).length,
   artifacts: {
     json: "../../evals/out/results.json",
     html: "../../evals/out/report.html",
@@ -238,10 +282,10 @@ const rows = aggregates
     (testCase) => `<tr>
   <td>${escapeHtml(testCase.provider)}</td>
   <td>${escapeHtml(testCase.id)}</td>
-  <td>${testCase.thresholdMet ? "pass" : "fail"}</td>
+  <td>${escapeHtml(testCase.status)}</td>
   <td>${(testCase.passRate * 100).toFixed(1)}% / ${(testCase.minPassRate * 100).toFixed(1)}%</td>
   <td>${escapeHtml(testCase.behavior)}</td>
-  <td>${escapeHtml(testCase.samples.map((sample) => `#${sample.sampleIndex}: ${sample.reason}`).join(" | "))}</td>
+  <td>${escapeHtml(testCase.samples.map((sample) => `#${sample.sampleIndex} ${sample.status}: ${sample.reason}`).join(" | "))}</td>
 </tr>`,
   )
   .join("\n");
@@ -256,7 +300,7 @@ function summaryRows(items, idName) {
       (item) => `<tr>
   <td>${escapeHtml(item.provider)}</td>
   <td>${escapeHtml(item[idName])}</td>
-  <td>${item.passed} / ${item.total}</td>
+  <td>${item.passed} / ${item.evaluated}${item.blocked > 0 ? ` (${item.blocked} blocked)` : ""}</td>
   <td>${(item.passRate * 100).toFixed(1)}%</td>
   <td>${escapeHtml(item.cases.join(", "))}</td>
 </tr>`,
@@ -297,9 +341,11 @@ const html = `<!doctype html>
       <div class="metric"><strong>Total</strong><br>${summary.total}</div>
       <div class="metric"><strong>Passed</strong><br>${summary.passed}</div>
       <div class="metric"><strong>Failed</strong><br>${summary.failed}</div>
+      <div class="metric"><strong>Blocked</strong><br>${summary.blocked}</div>
       <div class="metric"><strong>Pass rate</strong><br>${(summary.passRate * 100).toFixed(1)}%</div>
       <div class="metric"><strong>Thresholds met</strong><br>${summary.thresholdsMet}</div>
       <div class="metric"><strong>Thresholds failed</strong><br>${summary.thresholdsFailed}</div>
+      <div class="metric"><strong>Thresholds blocked</strong><br>${summary.thresholdsBlocked}</div>
       <div class="metric"><strong>Provider credentials</strong><br>${escapeHtml(runStatus.providerCredentials)}</div>
     </section>
     <table>

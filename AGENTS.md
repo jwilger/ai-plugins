@@ -43,6 +43,13 @@ point inside `./.dependencies/` and prepending the local npm `bin/` dir to
 Never commit `./.dependencies/`. If the environment looks broken, `rm -rf
 .dependencies` and re-enter the devshell.
 
+The Promptfoo eval runner is the exception to the "no root npm project" shape:
+`package.json` and `package-lock.json` are committed so Promptfoo can resolve
+its optional coding-harness provider SDKs from the project root. `node_modules/`
+is git-ignored and restored with `npm ci`; `scripts/evals/run.sh` and
+`scripts/evals/share.sh` run that restore automatically when Promptfoo, the
+Codex SDK, or the Claude Agent SDK is missing.
+
 `.envrc` (`use flake`) is git-ignored here per the maintainer's global config;
 recreate it locally if you use direnv.
 
@@ -143,21 +150,31 @@ promptfoo's native Claude Code and Codex coding-agent providers, loading the
 full plugin set together:
 
 ```shell
+just evals
 nix develop -c scripts/evals/run.sh
 nix develop -c node scripts/evals/build-site.mjs
 ```
 
+`just evals` is the convenience path for local provider-backed evals plus
+`promptfoo share`; it uploads the latest result and prints the share URL. Use
+the lower-level commands when you need local-only artifacts or `promptfoo view`.
+If Promptfoo writes artifacts and exits with failed evals, `just evals` still
+shares and then returns the eval failure status. If the run is interrupted
+with Ctrl-C, `just evals` exits immediately and does not share.
+
 `scripts/evals/run.sh --dry-run` only validates promptfoo wiring and is useful
 for pull-request CI without secrets; it is not behavior evidence. Provider-backed
-runs require working Claude Code and Codex authentication. The runner pins
-promptfoo plus the Codex/Claude SDK packages, generates promptfoo config from
-the current marketplace manifests, prepares a `CODEX_EVAL_HOME` with every repo
-plugin, and disables prompt response caching and hosted sharing so generated
-artifacts are fresh and repo-owned. Run `scripts/evals/run.sh --suite canary`
-to prove full-marketplace plugin loading before relying on behavior results. The
-optional Promptfoo MCP server in the `agentic-systems-engineering` Codex
-manifest is for agent-assisted validation, focused runs, and result inspection;
-it does not replace the canonical runner.
+runs require working Claude Code and Codex authentication. The runner restores
+the pinned npm dev dependencies from `package-lock.json`, generates promptfoo
+config from the current marketplace manifests, prepares a `CODEX_EVAL_HOME`
+with every repo plugin, configures Claude with `apiKeyRequired: false`, uses
+Codex as the default model-graded assertion provider, and disables prompt
+response caching and hosted sharing so generated artifacts are fresh and
+repo-owned. Run `scripts/evals/run.sh --suite canary` to prove full-marketplace
+plugin loading before relying on behavior results. The optional Promptfoo MCP
+server in the `agentic-systems-engineering` Codex manifest is for
+agent-assisted validation, focused runs, and result inspection; it does not
+replace the canonical runner.
 
 The static dashboard summarizes latest-run status by provider, case, sample,
 plugin, and skill so PR notes can point to both aggregate quality and the

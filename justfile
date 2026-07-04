@@ -9,6 +9,12 @@ default: ci
 # Full local quality gate.
 ci: validate-marketplace bats
 
+# Run provider-backed promptfoo evals locally, upload/share the latest result,
+# and print the share URL. This sends eval data to the configured promptfoo
+# sharing service.
+evals:
+    status=0; scripts/evals/run.sh || status=$?; if [ "$status" -ge 128 ]; then exit "$status"; fi; share_status=0; scripts/evals/share.sh || share_status=$?; if [ "$status" -ne 0 ]; then exit "$status"; fi; exit "$share_status"
+
 # Shell / plugin-script tests (CI gate).
 bats:
     bats $(find plugins scripts -name '*.bats' | sort)

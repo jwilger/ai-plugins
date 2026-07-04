@@ -13,10 +13,10 @@ setup() {
   [[ "$output" == *"Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all"* ]]
   [[ "$output" == *"Codex:       provider=openai:codex-sdk, model=gpt-5.5, model_reasoning_effort=medium"* ]]
   [[ "$output" == *"Full repository plugin marketplace is loaded for every scenario"* ]]
-  [[ "$output" == *"@openai/codex-sdk@0.142.5"* ]]
-  [[ "$output" == *"@anthropic-ai/claude-agent-sdk@0.3.201"* ]]
+  [[ "$output" == *"Pinned eval packages are managed by package.json and package-lock.json"* ]]
+  [[ "$output" == *"@openai/codex-sdk"* ]]
+  [[ "$output" == *"@anthropic-ai/claude-agent-sdk"* ]]
   [[ "$output" == *"Requires working Claude Code and Codex model authentication"* ]]
-  [[ "$output" == *"PROMPTFOO_VERSION            (default: 0.121.17)"* ]]
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
   [[ "$output" == *"results.junit.xml"* ]]
 }
@@ -25,7 +25,9 @@ setup() {
   run "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"promptfoo@0.121.17"* ]]
+  [[ "$output" == *"scripts/evals/ensure-node-deps.sh"* ]]
+  [[ "$output" == *"node_modules/.bin/promptfoo"* ]]
+  [[ "$output" != *"npx --yes"* ]]
   [[ "$output" == *"--max-concurrency 2"* ]]
   [[ "$output" == *"--no-cache"* ]]
   [[ "$output" == *"--no-share"* ]]
@@ -33,4 +35,26 @@ setup() {
   [[ "$output" == *"evals/out/results.json"* ]]
   [[ "$output" == *"evals/out/report.html"* ]]
   [[ "$output" == *"evals/out/results.junit.xml"* ]]
+}
+
+@test "package manifest pins promptfoo and coding harness provider SDKs" {
+  run node - "$ROOT/package.json" <<'NODE'
+const fs = require('fs');
+
+const pkg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const deps = pkg.devDependencies || {};
+const expected = {
+  promptfoo: '0.121.17',
+  '@openai/codex-sdk': '0.142.5',
+  '@anthropic-ai/claude-agent-sdk': '0.3.201',
+};
+
+for (const [name, version] of Object.entries(expected)) {
+  if (deps[name] !== version) {
+    throw new Error(`${name} should be pinned to ${version}, got ${deps[name] || 'missing'}`);
+  }
+}
+NODE
+
+  [ "$status" -eq 0 ]
 }
