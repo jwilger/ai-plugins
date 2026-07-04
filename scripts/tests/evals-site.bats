@@ -101,12 +101,12 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -f "$TMPROOT/site/evals/index.html" ]
   [ -f "$TMPROOT/site/evals/summary.json" ]
-  grep -q '"total": 4' "$TMPROOT/site/evals/summary.json"
-  grep -q '"provider": "codex-gpt-5.5"' "$TMPROOT/site/evals/summary.json"
-  grep -q '"passRate": 0.6666666666666666' "$TMPROOT/site/evals/summary.json"
-  grep -q '"sampleIndex": 0' "$TMPROOT/site/evals/summary.json"
-  grep -q '"minPassRate": 0' "$TMPROOT/site/evals/summary.json"
-  grep -q '"thresholdMet": false' "$TMPROOT/site/evals/summary.json"
+  [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "4" ]
+  [ "$(jq -r '.aggregates[] | select(.id == "fixture-pass") | .provider' "$TMPROOT/site/evals/summary.json")" = "codex-gpt-5.5" ]
+  [ "$(jq '.aggregates[] | select(.id == "fixture-pass") | .passRate' "$TMPROOT/site/evals/summary.json")" = "0.6666666666666666" ]
+  [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .samples[0].sampleIndex' "$TMPROOT/site/evals/summary.json")" = "0" ]
+  [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .minPassRate' "$TMPROOT/site/evals/summary.json")" = "0" ]
+  [ "$(jq '.aggregates[] | select(.id == "fixture-pass") | .thresholdMet' "$TMPROOT/site/evals/summary.json")" = "false" ]
   grep -q '"pluginSummaries"' "$TMPROOT/site/evals/summary.json"
   grep -q '"plugin": "agentic-systems-engineering"' "$TMPROOT/site/evals/summary.json"
   grep -q '"skillSummaries"' "$TMPROOT/site/evals/summary.json"
