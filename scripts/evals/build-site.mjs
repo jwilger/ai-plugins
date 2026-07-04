@@ -254,18 +254,29 @@ function valueGateSummaries(aggregates) {
         (group) => group.pluginMode === "targeted-plugins",
       );
       const reference = full || targeted || groups[0];
+      const fullComplete = full && full.evaluated > 0 && full.blocked === 0;
+      const baselineComplete =
+        baseline && baseline.evaluated > 0 && baseline.blocked === 0;
       const lift =
-        full && baseline ? full.passRate - baseline.passRate : null;
+        fullComplete && baselineComplete
+          ? full.passRate - baseline.passRate
+          : null;
       const status =
         reference.valueGateMode === "safety-critical"
-          ? full?.status === "pass" && baseline?.status !== "pass"
+          ? fullComplete &&
+            baselineComplete &&
+            full.status === "pass" &&
+            baseline.status !== "pass"
             ? "pass"
-            : full?.status === "pass" && !baseline
-              ? "pass"
+            : !fullComplete || !baselineComplete
+              ? "unsupported"
               : "fail"
-          : full && baseline && full.status === "pass" && lift >= reference.baselineLiftThreshold
+          : fullComplete &&
+              baselineComplete &&
+              full.status === "pass" &&
+              lift >= reference.baselineLiftThreshold
             ? "pass"
-            : full && !baseline && full.status === "pass"
+            : fullComplete && !baselineComplete && full.status === "pass"
               ? "unsupported"
               : "fail";
 

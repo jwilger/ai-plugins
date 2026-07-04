@@ -1,20 +1,15 @@
-const path = require('path');
 const {
   baselineLiftThreshold,
   coverageKinds,
+  fileUrl,
+  loadMatrix,
   loadBehaviorCases,
   valueGateMode,
 } = require('./fixtures.cjs');
 
-const MATRIX_FILE = path.resolve(process.cwd(), 'evals/matrix.json');
-
-function fileUrl(file) {
-  return `file://${path.resolve(__dirname, file)}`;
-}
-
 function matrix() {
   try {
-    return require(MATRIX_FILE);
+    return loadMatrix();
   } catch {
     return {};
   }
@@ -59,7 +54,7 @@ module.exports = function generateTests() {
       assert: [
         {
           type: 'javascript',
-          value: fileUrl('assert-hard-guards.cjs'),
+          value: fileUrl('assert-hard-guards.cjs', __dirname),
         },
         {
           type: 'llm-rubric',

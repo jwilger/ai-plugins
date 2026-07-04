@@ -47,9 +47,10 @@ function parseArgs(argv) {
 }
 
 function marketplacePlugins(selectedNames = null) {
+  const selected = selectedNames ? new Set(selectedNames) : null;
   const manifest = readJson(path.join(root, '.agents/plugins/marketplace.json'));
-  return manifest.plugins
-    .filter((plugin) => !selectedNames || selectedNames.includes(plugin.name))
+  const plugins = manifest.plugins
+    .filter((plugin) => !selected || selected.has(plugin.name))
     .map((plugin) => {
       const pluginPath = path.resolve(root, plugin.source.path);
       const pluginJson = readJson(
@@ -62,6 +63,16 @@ function marketplacePlugins(selectedNames = null) {
         path: pluginPath,
       };
     });
+
+  if (selected) {
+    const found = new Set(plugins.map((plugin) => plugin.name));
+    const missing = [...selected].filter((name) => !found.has(name));
+    if (missing.length > 0) {
+      throw new Error(`unknown targeted plugin(s): ${missing.join(', ')}`);
+    }
+  }
+
+  return plugins;
 }
 
 function copyDir(source, target) {
