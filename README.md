@@ -181,7 +181,7 @@ excerpts.
 
 ## Repository layout
 
-```
+```text
 .
 ├── .agents/
 │   └── plugins/
