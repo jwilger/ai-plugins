@@ -10,20 +10,58 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-function marketplacePlugins() {
-  const manifest = readJson(path.join(root, '.agents/plugins/marketplace.json'));
-  return manifest.plugins.map((plugin) => {
-    const pluginPath = path.resolve(root, plugin.source.path);
-    const pluginJson = readJson(
-      path.join(pluginPath, '.codex-plugin/plugin.json'),
-    );
+function parseArgs(argv) {
+  const args = {
+    codexHome: argv[0],
+    pluginMode: 'full-marketplace',
+    plugins: null,
+  };
 
-    return {
-      name: plugin.name,
-      version: pluginJson.version || 'local',
-      path: pluginPath,
-    };
-  });
+  for (let index = 1; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--plugin-mode') {
+      args.pluginMode = argv[++index];
+    } else if (arg === '--plugins') {
+      args.plugins = argv[++index]
+        .split(',')
+        .map((plugin) => plugin.trim())
+        .filter(Boolean);
+    } else {
+      throw new Error(`unknown argument: ${arg}`);
+    }
+  }
+
+  if (!args.codexHome) {
+    throw new Error(
+      'Usage: node scripts/evals/prepare-codex-home.mjs <codex-home> [--plugin-mode no-plugins|targeted-plugins|full-marketplace] [--plugins comma,list]',
+    );
+  }
+  if (!['no-plugins', 'targeted-plugins', 'full-marketplace'].includes(args.pluginMode)) {
+    throw new Error(`unknown plugin mode: ${args.pluginMode}`);
+  }
+  if (args.pluginMode === 'targeted-plugins' && (!args.plugins || args.plugins.length === 0)) {
+    throw new Error('targeted-plugins mode requires --plugins');
+  }
+
+  return args;
+}
+
+function marketplacePlugins(selectedNames = null) {
+  const manifest = readJson(path.join(root, '.agents/plugins/marketplace.json'));
+  return manifest.plugins
+    .filter((plugin) => !selectedNames || selectedNames.includes(plugin.name))
+    .map((plugin) => {
+      const pluginPath = path.resolve(root, plugin.source.path);
+      const pluginJson = readJson(
+        path.join(pluginPath, '.codex-plugin/plugin.json'),
+      );
+
+      return {
+        name: plugin.name,
+        version: pluginJson.version || 'local',
+        path: pluginPath,
+      };
+    });
 }
 
 function copyDir(source, target) {
@@ -116,17 +154,15 @@ function assertEvalHomeIsIsolated(resolvedHome) {
 }
 
 function main() {
-  const codexHome = process.argv[2];
+  const args = parseArgs(process.argv.slice(2));
 
-  if (!codexHome) {
-    console.error('Usage: node scripts/evals/prepare-codex-home.mjs <codex-home>');
-    process.exit(2);
-  }
-
-  const resolvedHome = path.resolve(codexHome);
+  const resolvedHome = path.resolve(args.codexHome);
   assertEvalHomeIsIsolated(resolvedHome);
 
-  const plugins = marketplacePlugins();
+  const plugins =
+    args.pluginMode === 'no-plugins'
+      ? []
+      : marketplacePlugins(args.pluginMode === 'targeted-plugins' ? args.plugins : null);
 
   fs.mkdirSync(resolvedHome, { recursive: true });
   seedAuth(resolvedHome);
@@ -144,7 +180,14 @@ function main() {
     );
   }
 
-  console.log(`prepared ${resolvedHome} with ${plugins.length} ai-plugins`);
+  console.log(
+    `prepared ${resolvedHome} with ${plugins.length} ai-plugins (${args.pluginMode})`,
+  );
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}

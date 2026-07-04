@@ -32,16 +32,38 @@ function readResults(file) {
         result.provider ||
         result.prompt?.provider ||
         "unknown-provider";
+      const providerVariant =
+        testCase.provider_variant ||
+        testCase.providerVariant ||
+        String(provider).replace(/-(no-plugins|targeted-plugins|full-marketplace)$/, "");
+      const pluginMode =
+        testCase.plugin_mode ||
+        testCase.pluginMode ||
+        String(provider).match(/(no-plugins|targeted-plugins|full-marketplace)$/)?.[1] ||
+        "unknown";
       return {
         id: testCase.case_id || result.description || `case-${index + 1}`,
         behavior: testCase.behavior || "",
         provider,
+        providerVariant,
+        pluginMode,
         plugins: normalizeList(testCase.plugins || testCase.plugin),
         skills: normalizeList(testCase.skills || testCase.skill),
         sampleIndex: Number(testCase.sample_index ?? 1),
         minPassRate: Number(
           testCase.min_pass_rate ?? testCase.minPassRate ?? 1,
         ),
+        valueGateMode:
+          testCase.value_gate_mode || testCase.valueGateMode || "standard",
+        baselineLiftThreshold: Number(
+          testCase.baseline_lift_threshold ??
+            testCase.baselineLiftThreshold ??
+            0.1,
+        ),
+        hardGuardStatus:
+          testCase.hard_guard_status || testCase.hardGuardStatus || "unknown",
+        tokenUsage: result.tokenUsage || grading.tokenUsage || null,
+        cost: Number(result.cost ?? grading.cost ?? 0),
         pass,
         blocked,
         status: pass ? "passed" : blocked ? "blocked" : "failed",
@@ -96,14 +118,22 @@ function aggregateCases(cases) {
   const groups = new Map();
 
   for (const testCase of cases) {
-    const key = `${testCase.provider}::${testCase.id}`;
+    const key = `${testCase.providerVariant}::${testCase.pluginMode}::${testCase.id}`;
 
     if (!groups.has(key)) {
       groups.set(key, {
         id: testCase.id,
         behavior: testCase.behavior,
         provider: testCase.provider,
+        providerVariant: testCase.providerVariant,
+        pluginMode: testCase.pluginMode,
+        plugins: testCase.plugins,
+        skills: testCase.skills,
         minPassRate: testCase.minPassRate,
+        hardGuardStatus: testCase.hardGuardStatus,
+        valueGateMode: testCase.valueGateMode,
+        baselineLiftThreshold: testCase.baselineLiftThreshold,
+        cost: 0,
         total: 0,
         passed: 0,
         failed: 0,
@@ -123,6 +153,7 @@ function aggregateCases(cases) {
     group.failed += !testCase.pass && !testCase.blocked ? 1 : 0;
     group.evaluated += testCase.blocked ? 0 : 1;
     group.minPassRate = Math.max(group.minPassRate, testCase.minPassRate);
+    group.cost += testCase.cost || 0;
     group.samples.push({
       sampleIndex: testCase.sampleIndex,
       pass: testCase.pass,
@@ -130,6 +161,7 @@ function aggregateCases(cases) {
       status: testCase.status,
       score: testCase.score,
       reason: testCase.reason,
+      tokenUsage: testCase.tokenUsage,
     });
   }
 
@@ -151,8 +183,8 @@ function aggregateCases(cases) {
               : "fail",
     }))
     .sort((left, right) =>
-      `${left.provider}:${left.id}`.localeCompare(
-        `${right.provider}:${right.id}`,
+      `${left.providerVariant}:${left.pluginMode}:${left.id}`.localeCompare(
+        `${right.providerVariant}:${right.pluginMode}:${right.id}`,
       ),
     );
 }
@@ -162,12 +194,14 @@ function aggregateDimension(cases, field, idName) {
 
   for (const testCase of cases) {
     for (const id of testCase[field]) {
-      const key = `${testCase.provider}::${id}`;
+      const key = `${testCase.providerVariant}::${testCase.pluginMode}::${id}`;
 
       if (!groups.has(key)) {
         groups.set(key, {
           [idName]: id,
           provider: testCase.provider,
+          providerVariant: testCase.providerVariant,
+          pluginMode: testCase.pluginMode,
           total: 0,
           passed: 0,
           failed: 0,
@@ -195,8 +229,63 @@ function aggregateDimension(cases, field, idName) {
       cases: [...group.cases].sort(),
     }))
     .sort((left, right) =>
-      `${left.provider}:${left[idName]}`.localeCompare(
-        `${right.provider}:${right[idName]}`,
+      `${left.providerVariant}:${left.pluginMode}:${left[idName]}`.localeCompare(
+        `${right.providerVariant}:${right.pluginMode}:${right[idName]}`,
+      ),
+    );
+}
+
+function valueGateSummaries(aggregates) {
+  const byCase = new Map();
+  for (const aggregate of aggregates) {
+    const key = `${aggregate.providerVariant}::${aggregate.id}`;
+    if (!byCase.has(key)) {
+      byCase.set(key, []);
+    }
+    byCase.get(key).push(aggregate);
+  }
+
+  return [...byCase.entries()]
+    .map(([key, groups]) => {
+      const [providerVariant, caseId] = key.split("::");
+      const full = groups.find((group) => group.pluginMode === "full-marketplace");
+      const baseline = groups.find((group) => group.pluginMode === "no-plugins");
+      const targeted = groups.find(
+        (group) => group.pluginMode === "targeted-plugins",
+      );
+      const reference = full || targeted || groups[0];
+      const lift =
+        full && baseline ? full.passRate - baseline.passRate : null;
+      const status =
+        reference.valueGateMode === "safety-critical"
+          ? full?.status === "pass" && baseline?.status !== "pass"
+            ? "pass"
+            : full?.status === "pass" && !baseline
+              ? "pass"
+              : "fail"
+          : full && baseline && full.status === "pass" && lift >= reference.baselineLiftThreshold
+            ? "pass"
+            : full && !baseline && full.status === "pass"
+              ? "unsupported"
+              : "fail";
+
+      return {
+        caseId,
+        providerVariant,
+        plugin: reference.plugins?.[0],
+        skill: reference.skills?.[0],
+        mode: reference.valueGateMode,
+        baselineLiftThreshold: reference.baselineLiftThreshold,
+        fullMarketplacePassRate: full?.passRate ?? null,
+        noPluginsPassRate: baseline?.passRate ?? null,
+        targetedPluginsPassRate: targeted?.passRate ?? null,
+        lift,
+        status,
+      };
+    })
+    .sort((left, right) =>
+      `${left.providerVariant}:${left.caseId}`.localeCompare(
+        `${right.providerVariant}:${right.caseId}`,
       ),
     );
 }
@@ -248,6 +337,7 @@ const runStatus = readStatus(statusPath, cases);
 const aggregates = aggregateCases(cases);
 const pluginSummaries = aggregateDimension(cases, "plugins", "plugin");
 const skillSummaries = aggregateDimension(cases, "skills", "skill");
+const valueGates = valueGateSummaries(aggregates);
 const passed = cases.filter((testCase) => testCase.pass).length;
 const blocked = cases.filter((testCase) => testCase.blocked).length;
 const failed = cases.length - passed - blocked;
@@ -267,6 +357,8 @@ const summary = {
   thresholdsBlocked: aggregates.filter((group) =>
     ["blocked", "inconclusive"].includes(group.status),
   ).length,
+  valueGatesPassed: valueGates.filter((gate) => gate.status === "pass").length,
+  valueGatesFailed: valueGates.filter((gate) => gate.status === "fail").length,
   artifacts: {
     json: "../../evals/out/results.json",
     html: "../../evals/out/report.html",
@@ -275,6 +367,7 @@ const summary = {
   aggregates,
   pluginSummaries,
   skillSummaries,
+  valueGateSummaries: valueGates,
   cases,
 };
 
@@ -286,10 +379,12 @@ fs.writeFileSync(
 const rows = aggregates
   .map(
     (testCase) => `<tr>
-  <td>${escapeHtml(testCase.provider)}</td>
+  <td>${escapeHtml(testCase.providerVariant)}</td>
+  <td>${escapeHtml(testCase.pluginMode)}</td>
   <td>${escapeHtml(testCase.id)}</td>
   <td>${escapeHtml(testCase.status)}</td>
   <td>${(testCase.passRate * 100).toFixed(1)}% / ${(testCase.minPassRate * 100).toFixed(1)}%</td>
+  <td>${escapeHtml(testCase.hardGuardStatus)}</td>
   <td>${escapeHtml(testCase.behavior)}</td>
   <td>${escapeHtml(testCase.samples.map((sample) => `#${sample.sampleIndex} ${sample.status}: ${sample.reason}`).join(" | "))}</td>
 </tr>`,
@@ -298,13 +393,14 @@ const rows = aggregates
 
 const caseRows =
   rows ||
-  `<tr><td colspan="6">No eval samples are available for this run. ${escapeHtml(runStatus.reason)}</td></tr>`;
+  `<tr><td colspan="8">No eval samples are available for this run. ${escapeHtml(runStatus.reason)}</td></tr>`;
 
 function summaryRows(items, idName) {
   const rows = items
     .map(
       (item) => `<tr>
   <td>${escapeHtml(item.provider)}</td>
+  <td>${escapeHtml(item.pluginMode)}</td>
   <td>${escapeHtml(item[idName])}</td>
   <td>${item.passed} / ${item.evaluated}${item.blocked > 0 ? ` (${item.blocked} blocked)` : ""}</td>
   <td>${(item.passRate * 100).toFixed(1)}%</td>
@@ -315,12 +411,27 @@ function summaryRows(items, idName) {
 
   return (
     rows ||
-    `<tr><td colspan="5">No ${escapeHtml(idName)} data is available for this run.</td></tr>`
+    `<tr><td colspan="6">No ${escapeHtml(idName)} data is available for this run.</td></tr>`
   );
 }
 
 const pluginRows = summaryRows(pluginSummaries, "plugin");
 const skillRows = summaryRows(skillSummaries, "skill");
+const valueGateRows =
+  valueGates
+    .map(
+      (gate) => `<tr>
+  <td>${escapeHtml(gate.providerVariant)}</td>
+  <td>${escapeHtml(gate.caseId)}</td>
+  <td>${escapeHtml(gate.status)}</td>
+  <td>${escapeHtml(gate.mode)}</td>
+  <td>${gate.fullMarketplacePassRate === null ? "n/a" : `${(gate.fullMarketplacePassRate * 100).toFixed(1)}%`}</td>
+  <td>${gate.noPluginsPassRate === null ? "n/a" : `${(gate.noPluginsPassRate * 100).toFixed(1)}%`}</td>
+  <td>${gate.lift === null ? "n/a" : `${(gate.lift * 100).toFixed(1)}pp`}</td>
+</tr>`,
+    )
+    .join("\n") ||
+  `<tr><td colspan="7">No value-gate data is available for this run.</td></tr>`;
 
 const html = `<!doctype html>
 <html lang="en">
@@ -356,7 +467,7 @@ const html = `<!doctype html>
     </section>
     <table>
       <thead>
-        <tr><th>Provider</th><th>Case</th><th>Status</th><th>Rate / threshold</th><th>Behavior</th><th>Samples</th></tr>
+        <tr><th>Provider variant</th><th>Plugin mode</th><th>Case</th><th>Status</th><th>Rate / threshold</th><th>Hard guard</th><th>Behavior</th><th>Samples</th></tr>
       </thead>
       <tbody>
 ${caseRows}
@@ -365,16 +476,25 @@ ${caseRows}
     <h2>Plugin summary</h2>
     <table>
       <thead>
-        <tr><th>Provider</th><th>Plugin</th><th>Passed</th><th>Pass rate</th><th>Cases</th></tr>
+        <tr><th>Provider</th><th>Plugin mode</th><th>Plugin</th><th>Passed</th><th>Pass rate</th><th>Cases</th></tr>
       </thead>
       <tbody>
 ${pluginRows}
       </tbody>
     </table>
+    <h2>Value gates</h2>
+    <table>
+      <thead>
+        <tr><th>Provider variant</th><th>Case</th><th>Status</th><th>Mode</th><th>Full</th><th>No plugins</th><th>Lift</th></tr>
+      </thead>
+      <tbody>
+${valueGateRows}
+      </tbody>
+    </table>
     <h2>Skill summary</h2>
     <table>
       <thead>
-        <tr><th>Provider</th><th>Skill</th><th>Passed</th><th>Pass rate</th><th>Cases</th></tr>
+        <tr><th>Provider</th><th>Plugin mode</th><th>Skill</th><th>Passed</th><th>Pass rate</th><th>Cases</th></tr>
       </thead>
       <tbody>
 ${skillRows}

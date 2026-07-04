@@ -1,0 +1,45 @@
+{
+  "providerVariants": [
+    {
+      "id": "claude-code-sonnet",
+      "provider": "anthropic:claude-agent-sdk",
+      "modelEnv": "CLAUDE_EVAL_MODEL",
+      "defaultModel": "sonnet"
+    },
+    {
+      "id": "codex-gpt-5.5",
+      "provider": "openai:codex-sdk",
+      "modelEnv": "CODEX_EVAL_MODEL",
+      "defaultModel": "gpt-5.5",
+      "reasoningEffortEnv": "CODEX_EVAL_REASONING_EFFORT",
+      "defaultReasoningEffort": "medium"
+    }
+  ],
+  "pluginModes": [
+    {
+      "id": "no-plugins",
+      "description": "Natural provider baseline with no marketplace plugins installed."
+    },
+    {
+      "id": "targeted-plugins",
+      "description": "Only the plugins mapped by each behavior case are considered target instructions."
+    },
+    {
+      "id": "full-marketplace",
+      "description": "The complete ai-plugins marketplace is installed."
+    }
+  ],
+  "valueGates": {
+    "defaultBaselineLiftThreshold": 0.1,
+    "defaultMode": "standard",
+    "safetyCriticalMode": "safety-critical"
+  },
+  "manualRunBudgets": {
+    "maxConcurrency": 2,
+    "samplesPerCase": 1
+  },
+  "improvementLoopBudgets": {
+    "maxIterations": 3,
+    "maxChangedFiles": 20
+  }
+}
