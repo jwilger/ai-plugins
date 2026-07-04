@@ -84,6 +84,44 @@ setup() {
           "score": 0,
           "reason": "zero"
         }
+      },
+      {
+        "description": "fixture-provider-limit",
+        "testCase": {
+          "case_id": "fixture-provider-limit",
+          "behavior": "provider limit fixture",
+          "plugins": ["agentic-systems-engineering"],
+          "skills": ["evaluate-stochastic-systems"],
+          "sample_index": 1,
+          "min_pass_rate": 1
+        },
+        "provider": {
+          "label": "claude-code-sonnet"
+        },
+        "gradingResult": {
+          "pass": false,
+          "score": 0,
+          "reason": "Error calling Claude Agent SDK: weekly limit reached for this session"
+        }
+      },
+      {
+        "description": "fixture-auth-guidance-failure",
+        "testCase": {
+          "case_id": "fixture-auth-guidance-failure",
+          "behavior": "normal failed rubric mentioning auth",
+          "plugins": ["agentic-systems-engineering"],
+          "skills": ["evaluate-stochastic-systems"],
+          "sample_index": 1,
+          "min_pass_rate": 1
+        },
+        "provider": {
+          "label": "claude-code-sonnet"
+        },
+        "gradingResult": {
+          "pass": false,
+          "score": 0,
+          "reason": "The answer discusses auth policy, but misses the required eval sampling guidance."
+        }
       }
     ]
   }
@@ -101,13 +139,19 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -f "$TMPROOT/site/evals/index.html" ]
   [ -f "$TMPROOT/site/evals/summary.json" ]
-  [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "4" ]
+  [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "6" ]
+  [ "$(jq '.blocked' "$TMPROOT/site/evals/summary.json")" = "1" ]
+  [ "$(jq '.failed' "$TMPROOT/site/evals/summary.json")" = "3" ]
   [ "$(jq -r '.status.state' "$TMPROOT/site/evals/summary.json")" = "completed" ]
   [ "$(jq -r '.aggregates[] | select(.id == "fixture-pass") | .provider' "$TMPROOT/site/evals/summary.json")" = "codex-gpt-5.5" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-pass") | .passRate' "$TMPROOT/site/evals/summary.json")" = "0.6666666666666666" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .samples[0].sampleIndex' "$TMPROOT/site/evals/summary.json")" = "0" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .minPassRate' "$TMPROOT/site/evals/summary.json")" = "0" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-pass") | .thresholdMet' "$TMPROOT/site/evals/summary.json")" = "false" ]
+  [ "$(jq -r '.aggregates[] | select(.id == "fixture-provider-limit") | .status' "$TMPROOT/site/evals/summary.json")" = "blocked" ]
+  [ "$(jq '.aggregates[] | select(.id == "fixture-provider-limit") | .blocked' "$TMPROOT/site/evals/summary.json")" = "1" ]
+  [ "$(jq -r '.aggregates[] | select(.id == "fixture-auth-guidance-failure") | .status' "$TMPROOT/site/evals/summary.json")" = "fail" ]
+  [ "$(jq '.thresholdsBlocked' "$TMPROOT/site/evals/summary.json")" = "1" ]
   grep -q '"pluginSummaries"' "$TMPROOT/site/evals/summary.json"
   grep -q '"plugin": "agentic-systems-engineering"' "$TMPROOT/site/evals/summary.json"
   grep -q '"skillSummaries"' "$TMPROOT/site/evals/summary.json"
@@ -115,6 +159,8 @@ teardown() {
   grep -q "fixture-pass" "$TMPROOT/site/evals/index.html"
   grep -q "codex-gpt-5.5" "$TMPROOT/site/evals/index.html"
   grep -q "66.7%" "$TMPROOT/site/evals/index.html"
+  grep -q "fixture-provider-limit" "$TMPROOT/site/evals/index.html"
+  grep -q "blocked" "$TMPROOT/site/evals/index.html"
   grep -q "Plugin summary" "$TMPROOT/site/evals/index.html"
   grep -q "Skill summary" "$TMPROOT/site/evals/index.html"
 }
@@ -147,7 +193,7 @@ JSON
   run node "$TMPROOT/scripts/evals/build-site.mjs"
 
   [ "$status" -eq 0 ]
-  [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "4" ]
+  [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "6" ]
   [ "$(jq -r '.status.state' "$TMPROOT/site/evals/summary.json")" = "completed" ]
   grep -q "Promptfoo results were found and summarized" "$TMPROOT/site/evals/index.html"
 }

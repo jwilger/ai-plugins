@@ -2,6 +2,9 @@
 # Provisioned by the Nix devshell; never committed.
 /.dependencies/
 
+# Project-local npm dependencies are restored from package-lock.json.
+/node_modules/
+
 # Rust build artifacts (workspace target dir at repo root).
 /target/
 

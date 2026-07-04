@@ -197,6 +197,12 @@ Use promptfoo `llm-rubric` for semantic behavior grading. Use JavaScript asserti
 
 Create `scripts/evals/run.sh`. It must install or invoke promptfoo through the repo's Nix/npm sandbox, write artifacts under `evals/out/`, and avoid hosted sharing as the durable record.
 
+Implementation note: Promptfoo's Claude Agent SDK provider requires
+`@anthropic-ai/claude-agent-sdk` to be installed as a project dependency.
+Commit `package.json` and `package-lock.json` with pinned Promptfoo, Codex SDK,
+and Claude Agent SDK dev dependencies; keep `node_modules/` ignored and have
+the eval scripts run `npm ci` when those local dependencies are missing.
+
 - [x] **Step 6A: Add Codex Promptfoo MCP server**
 
 Add optional Promptfoo MCP server wiring for Codex in `agentic-systems-engineering` so agents can validate configs, run focused evals, inspect results, and develop eval cases. Keep this separate from the canonical runner and static report artifacts.
@@ -299,9 +305,10 @@ Expected: `site/evals/index.html` and `site/evals/summary.json` are generated an
   `openai:codex-sdk` and `anthropic:claude-agent-sdk` providers, `llm-rubric`
   semantic grading, JavaScript hard-guard assertions returning
   pass/score/reason, JSON/HTML/JUnit outputs, trusted CI artifacts, pinned
-  `promptfoo@0.121.17`, hosted sharing disabled, prompt response caching
-  disabled for behavior evidence, and an optional Promptfoo MCP server for
-  Codex assistant workflows.
+  `promptfoo@0.121.17` plus pinned Codex/Claude SDK dev dependencies in
+  `package-lock.json`, hosted sharing disabled, prompt response caching disabled
+  for behavior evidence, and an optional Promptfoo MCP server for Codex
+  assistant workflows.
 - 2026-07-04 review fix: generated Claude Code plugin paths are absolute so the
   generated config can live under `evals/out/generated/`; Codex eval-home
   preparation refuses realpath/symlink targets for the real Codex home or auth

@@ -17,6 +17,16 @@ setup() {
   [[ "$output" == *"load-harness-cases.cjs"* ]]
 }
 
+@test "generated config uses local Claude Code and Codex auth for providers and graders" {
+  run node "$GENERATOR" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"apiKeyRequired: false"* ]]
+  [[ "$output" == *"provider:"*$'\n'"      id: openai:codex-sdk"* ]]
+  [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME"* ]]
+  [[ "$output" != *"openai:gpt-5-mini"* ]]
+}
+
 @test "generated configs load every marketplace plugin path" {
   run node - "$ROOT" "$GENERATOR" <<'NODE'
 const fs = require('fs');

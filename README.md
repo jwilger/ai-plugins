@@ -98,6 +98,11 @@ Any **globally installed** npm tooling (`npm install -g …`) is redirected into
 git-ignored `./.dependencies/` directory by the devshell, so it never pollutes
 your home directory. Delete that directory any time for a clean slate.
 
+This repo also has a committed `package.json`/`package-lock.json` for the local
+Promptfoo eval runner. `node_modules/` is ignored and restored with `npm ci`;
+the eval scripts run that automatically when the Promptfoo, Codex SDK, or
+Claude Agent SDK packages are missing.
+
 See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
 
 ## Eval reports
@@ -125,19 +130,23 @@ agent providers: `anthropic:claude-agent-sdk` for Claude Code and
 the current marketplace manifests, so each provider loads the full `ai-plugins`
 marketplace, not a single plugin in isolation. Routing and plugin composition
 are therefore part of the measured behavior. Promptfoo is pinned at `0.121.17`;
-the runner disables prompt response caching and hosted sharing so a behavior run
-is a fresh local record.
+the Promptfoo, Codex SDK, and Claude Agent SDK packages are pinned in
+`package.json` and `package-lock.json`. The runner disables prompt response
+caching and hosted sharing so a behavior run is a fresh local record.
 
 Default eval harness posture:
 
 - Claude Code: `anthropic:claude-agent-sdk`, Sonnet 5 via the `sonnet` alias,
-  and all local plugins with `skills: all`. The intended human-facing Claude
-  Code posture remains Sonnet high effort with Opus 4.8 advisor where that harness
-  exposes those controls; Promptfoo's current Claude Agent SDK provider does
-  not expose those knobs in this repo's generated config.
+  local Claude Code authentication via `apiKeyRequired: false`, and all local
+  plugins with `skills: all`. The intended human-facing Claude Code posture
+  remains Sonnet high effort with Opus 4.8 advisor where that harness exposes
+  those controls; Promptfoo's current Claude Agent SDK provider does not expose
+  those knobs in this repo's generated config.
 - Codex: `openai:codex-sdk`, `gpt-5.5` with
   `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
   deep tracing, and a generated `CODEX_EVAL_HOME` containing every repo plugin.
+  Model-graded assertions also use `openai:codex-sdk` by default so OpenAI
+  model access goes through local Codex auth rather than `OPENAI_API_KEY`.
 
 The canary suite is separate from behavior evals. Canaries may explicitly ask
 the harness to prove plugin and skill loading. Behavior prompts stay natural and
@@ -157,10 +166,18 @@ available.
 To produce the same artifacts locally:
 
 ```shell
+just evals  # runs provider-backed evals, shares the result, and prints the URL
 nix develop -c scripts/evals/run.sh
 nix develop -c scripts/evals/run.sh --suite canary
 nix develop -c node scripts/evals/build-site.mjs
 ```
+
+`just evals` uploads the latest eval result through `promptfoo share`. For a
+local-only report, run `scripts/evals/run.sh` and then
+`nix develop -c node_modules/.bin/promptfoo view`. If a behavior eval exits
+with Promptfoo's normal failure status after writing artifacts, `just evals`
+still attempts to share the report and then returns the original eval status. If
+the eval run is interrupted with Ctrl-C, `just evals` stops without sharing.
 
 Codex users who install `agentic-systems-engineering` also get an optional
 Promptfoo MCP server (`promptfoo@0.121.17 mcp --transport stdio`). Use it for
