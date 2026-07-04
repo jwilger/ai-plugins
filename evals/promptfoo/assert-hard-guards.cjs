@@ -1,14 +1,7 @@
-const fs = require("fs");
-const path = require("path");
-
-const CASES_FILE = path.resolve(
-  process.cwd(),
-  "evals/fixtures/agentic-systems-engineering/cases.json",
-);
+const { caseById } = require("./fixtures.cjs");
 
 function fixtureFor(caseId) {
-  const cases = JSON.parse(fs.readFileSync(CASES_FILE, "utf8"));
-  return cases.find((testCase) => testCase.case_id === caseId);
+  return caseById(caseId);
 }
 
 function isNegated(text) {

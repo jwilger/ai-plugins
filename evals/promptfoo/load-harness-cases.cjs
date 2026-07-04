@@ -1,19 +1,30 @@
-const fs = require('fs');
-const path = require('path');
+const {
+  baselineLiftThreshold,
+  coverageKinds,
+  fileUrl,
+  loadMatrix,
+  loadBehaviorCases,
+  valueGateMode,
+} = require('./fixtures.cjs');
 
-const CASES_FILE = path.resolve(
-  process.cwd(),
-  'evals/fixtures/agentic-systems-engineering/cases.json',
-);
+function matrix() {
+  try {
+    return loadMatrix();
+  } catch {
+    return {};
+  }
+}
 
-function fileUrl(file) {
-  return `file://${path.resolve(__dirname, file)}`;
+function pluginModeFromEnvironment() {
+  return process.env.EVAL_PLUGIN_MODE || 'full-marketplace';
 }
 
 module.exports = function generateTests() {
   const samples = Number.parseInt(process.env.EVAL_SAMPLES || '1', 10);
   const filter = process.env.EVAL_CASE_FILTER;
-  const cases = JSON.parse(fs.readFileSync(CASES_FILE, 'utf8')).filter(
+  const pluginMode = pluginModeFromEnvironment();
+  const evalMatrix = matrix();
+  const cases = loadBehaviorCases().filter(
     (testCase) => !filter || testCase.case_id.includes(filter),
   );
 
@@ -29,14 +40,21 @@ module.exports = function generateTests() {
         scenario_prompt: testCase.prompt,
         sample_index: index + 1,
         min_pass_rate: testCase.minPassRate,
+        fixture_file: testCase.fixture_file,
         plugins: testCase.plugins || [],
         skills: testCase.skills || [],
+        coverage_kinds: coverageKinds(testCase),
+        value_gate_mode: valueGateMode(testCase),
+        baseline_lift_threshold: baselineLiftThreshold(testCase, evalMatrix),
+        plugin_mode: pluginMode,
+        hard_guard_status:
+          (testCase.hardAssertions || []).length > 0 ? 'configured' : 'none',
         tags: (testCase.tags || []).join(','),
       },
       assert: [
         {
           type: 'javascript',
-          value: fileUrl('assert-hard-guards.cjs'),
+          value: fileUrl('assert-hard-guards.cjs', __dirname),
         },
         {
           type: 'llm-rubric',

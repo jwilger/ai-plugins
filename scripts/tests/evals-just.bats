@@ -3,6 +3,7 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   TMPROOT="$(mktemp -d)"
+  export JUST_TEMPDIR="$TMPROOT"
   mkdir -p "$TMPROOT/scripts/evals"
   cp "$ROOT/justfile" "$TMPROOT/justfile"
   cat >"$TMPROOT/scripts/evals/run.sh" <<'SH'

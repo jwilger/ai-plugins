@@ -49,6 +49,14 @@ function readPlugins(file) {
   }));
 }
 
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
+}
+
+function evalMatrix() {
+  return readJson("evals/matrix.json");
+}
+
 function marketplacePlugins() {
   const byName = new Map();
 
@@ -83,8 +91,67 @@ function indentedList(items, indent, render) {
   return items.map((item) => `${" ".repeat(indent)}${render(item)}`).join("\n");
 }
 
+function providerEnv(value, fallback) {
+  return `"{{ env.${value} | default('${fallback}') }}"`;
+}
+
+function claudeProvider(variant, pluginMode, plugins) {
+  const pluginLines =
+    pluginMode.id === "no-plugins"
+      ? ""
+      : `      plugins:
+${indentedList(plugins, 8, (plugin) => `- type: local\n${" ".repeat(10)}path: ${quote(plugin.absolutePath)}`)}
+`;
+
+  return `  - id: ${variant.provider}
+    label: ${variant.id}-${pluginMode.id}
+    pluginMode: ${pluginMode.id}
+    providerVariant: ${variant.id}
+    config:
+      apiKeyRequired: false
+      model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
+      working_dir: ${quote(root)}
+      permission_mode: dontAsk
+      skills: all
+      disallowed_tools:
+        - Write
+        - Edit
+        - MultiEdit
+${pluginLines}`.trimEnd();
+}
+
+function codexProvider(variant, pluginMode) {
+  const homeSuffix = pluginMode.id;
+  return `  - id: ${variant.provider}
+    label: ${variant.id}-${pluginMode.id}
+    pluginMode: ${pluginMode.id}
+    providerVariant: ${variant.id}
+    config:
+      model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
+      model_reasoning_effort: ${providerEnv(variant.reasoningEffortEnv, variant.defaultReasoningEffort)}
+      working_dir: ${quote(root)}
+      sandbox_mode: read-only
+      approval_policy: never
+      enable_streaming: true
+      deep_tracing: true
+      skip_git_repo_check: false
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.dependencies/evals/codex-home-${homeSuffix}`)}') }}"`;
+}
+
+function providerFor(variant, pluginMode, plugins) {
+  if (variant.provider === "anthropic:claude-agent-sdk") {
+    return claudeProvider(variant, pluginMode, plugins);
+  }
+  if (variant.provider === "openai:codex-sdk") {
+    return codexProvider(variant, pluginMode);
+  }
+  throw new Error(`unsupported provider variant: ${variant.id}`);
+}
+
 function configFor(suite) {
   const plugins = marketplacePlugins();
+  const matrix = evalMatrix();
   const testLoader = fileUrl(
     path.join(
       root,
@@ -96,6 +163,29 @@ function configFor(suite) {
     suite === "canary"
       ? "Full-marketplace canary for ai-plugins coding harnesses"
       : "Provider-backed behavior evals for the ai-plugins marketplace";
+  const providers =
+    suite === "behavior"
+      ? matrix.providerVariants.flatMap((variant) =>
+          matrix.pluginModes.map((pluginMode) =>
+            providerFor(variant, pluginMode, plugins),
+          ),
+        )
+      : [
+          providerFor(
+            matrix.providerVariants.find(
+              (variant) => variant.provider === "anthropic:claude-agent-sdk",
+            ),
+            { id: "full-marketplace" },
+            plugins,
+          ),
+          providerFor(
+            matrix.providerVariants.find(
+              (variant) => variant.provider === "openai:codex-sdk",
+            ),
+            { id: "full-marketplace" },
+            plugins,
+          ),
+        ];
 
   return `# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
 description: ${description}
@@ -105,33 +195,7 @@ prompts:
     {{scenario_prompt}}
 
 providers:
-  - id: anthropic:claude-agent-sdk
-    label: claude-code-sonnet
-    config:
-      apiKeyRequired: false
-      model: "{{ env.CLAUDE_EVAL_MODEL | default('sonnet') }}"
-      working_dir: ${quote(root)}
-      permission_mode: dontAsk
-      skills: all
-      disallowed_tools:
-        - Write
-        - Edit
-        - MultiEdit
-      plugins:
-${indentedList(plugins, 8, (plugin) => `- type: local\n${" ".repeat(10)}path: ${quote(plugin.absolutePath)}`)}
-  - id: openai:codex-sdk
-    label: codex-gpt-5.5
-    config:
-      model: "{{ env.CODEX_EVAL_MODEL | default('gpt-5.5') }}"
-      model_reasoning_effort: "{{ env.CODEX_EVAL_REASONING_EFFORT | default('medium') }}"
-      working_dir: ${quote(root)}
-      sandbox_mode: read-only
-      approval_policy: never
-      enable_streaming: true
-      deep_tracing: true
-      skip_git_repo_check: false
-      cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME | default('${path.join(root, ".dependencies/evals/codex-home")}') }}"
+${providers.join("\n")}
 
 tests: ${testLoader}
 
@@ -149,13 +213,19 @@ defaultTest:
         deep_tracing: true
         skip_git_repo_check: false
         cli_env:
-          CODEX_HOME: "{{ env.CODEX_EVAL_HOME | default('${path.join(root, ".dependencies/evals/codex-home")}') }}"
+          CODEX_HOME: "{{ env.CODEX_EVAL_HOME | default('${path.join(root, ".dependencies/evals/codex-home-full-marketplace")}') }}"
 
 tracing:
   enabled: true
 
 metadata:
   suite: ${suite}
+  testLoaderByPluginMode: ${suite === "behavior" ? `${testLoader}?pluginMode={{ provider.pluginMode }}` : testLoader}
+  matrix:
+    pluginModes:
+${indentedList(matrix.pluginModes, 6, (mode) => `- id: ${mode.id}`)}
+    providerVariants:
+${indentedList(matrix.providerVariants, 6, (variant) => `- id: ${variant.id}\n${" ".repeat(8)}provider: ${variant.provider}`)}
   fullMarketplacePlugins:
 ${indentedList(plugins, 4, (plugin) => `- name: ${plugin.name}\n${" ".repeat(6)}sourcePath: ${quote(plugin.path)}`)}
 

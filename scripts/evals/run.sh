@@ -110,12 +110,19 @@ cmd=(
 )
 
 if [ "$dry_run" -eq 1 ]; then
+  dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-full-marketplace}}"
+  dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
+  dry_targeted_home="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.dependencies/evals/codex-home-targeted-plugins}"
   printf '%q ' "$root/scripts/evals/ensure-node-deps.sh"
   printf '\n'
   if [ "$generated_config" -eq 1 ]; then
     printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config"
     printf '\n'
-    printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$root/.dependencies/evals/codex-home"
+    printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_full_home" --plugin-mode full-marketplace
+    printf '\n'
+    printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_no_plugins_home" --plugin-mode no-plugins
+    printf '\n'
+    printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_targeted_home" --plugin-mode targeted-plugins --plugins agentic-systems-engineering,babysit-pr,engineering-standards,eval-case-reporter,worktrees
     printf '\n'
   fi
   printf '%q ' "${cmd[@]}"
@@ -133,10 +140,15 @@ fi
 export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
 export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.dependencies/promptfoo-cache}"
 export PROMPTFOO_CACHE_TTL="${PROMPTFOO_CACHE_TTL:-86400}"
-export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home}"
+export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-full-marketplace}"
+export CODEX_EVAL_HOME_FULL_MARKETPLACE="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-$CODEX_EVAL_HOME}"
+export CODEX_EVAL_HOME_NO_PLUGINS="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
+export CODEX_EVAL_HOME_TARGETED_PLUGINS="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.dependencies/evals/codex-home-targeted-plugins}"
 
 if [ "$generated_config" -eq 1 ]; then
-  node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME" >/dev/null
+  node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_FULL_MARKETPLACE" --plugin-mode full-marketplace >/dev/null
+  node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_NO_PLUGINS" --plugin-mode no-plugins >/dev/null
+  node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins agentic-systems-engineering,babysit-pr,engineering-standards,eval-case-reporter,worktrees >/dev/null
 fi
 
 "${cmd[@]}"
