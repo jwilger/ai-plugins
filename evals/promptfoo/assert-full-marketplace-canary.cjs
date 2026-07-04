@@ -67,7 +67,12 @@ module.exports = function assertFullMarketplaceCanary(output) {
       return false;
     }
 
-    return !candidates.some((skill) => text.includes(skill.toLowerCase()));
+    return !candidates.some((skill) => {
+      const accepted = [skill, titleCase(skill)].map((candidate) =>
+        candidate.toLowerCase(),
+      );
+      return accepted.some((candidate) => text.includes(candidate));
+    });
   });
 
   if (missingSkills.length > 0) {

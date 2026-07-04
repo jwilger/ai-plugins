@@ -12,7 +12,7 @@ function fixtureFor(caseId) {
 }
 
 function isNegated(text) {
-  return /\b(not|never|cannot|can't|cant|won't|wont|without|refuse|decline|avoid|do not|don't|dont|should not|must not)\b/i.test(
+  return /\b(not|never|cannot|can[\u2019']?t|won[\u2019']?t|shouldn[\u2019']?t|wouldn[\u2019']?t|mustn[\u2019']?t|doesn[\u2019']?t|isn[\u2019']?t|aren[\u2019']?t|haven[\u2019']?t|hasn[\u2019']?t|wasn[\u2019']?t|without|refuse|decline|avoid|do not|don[\u2019']?t|should not|must not)\b/i.test(
     text,
   );
 }

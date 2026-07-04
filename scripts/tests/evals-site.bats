@@ -65,6 +65,25 @@ setup() {
           "score": 1,
           "reason": "ok"
         }
+      },
+      {
+        "description": "fixture-zero-defaults",
+        "testCase": {
+          "case_id": "fixture-zero-defaults",
+          "behavior": "zero default fixture",
+          "plugins": ["agentic-systems-engineering"],
+          "skills": ["evaluate-stochastic-systems"],
+          "sample_index": 0,
+          "min_pass_rate": 0
+        },
+        "provider": {
+          "label": "codex-gpt-5.5"
+        },
+        "gradingResult": {
+          "pass": false,
+          "score": 0,
+          "reason": "zero"
+        }
       }
     ]
   }
@@ -82,9 +101,11 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -f "$TMPROOT/site/evals/index.html" ]
   [ -f "$TMPROOT/site/evals/summary.json" ]
-  grep -q '"total": 3' "$TMPROOT/site/evals/summary.json"
+  grep -q '"total": 4' "$TMPROOT/site/evals/summary.json"
   grep -q '"provider": "codex-gpt-5.5"' "$TMPROOT/site/evals/summary.json"
   grep -q '"passRate": 0.6666666666666666' "$TMPROOT/site/evals/summary.json"
+  grep -q '"sampleIndex": 0' "$TMPROOT/site/evals/summary.json"
+  grep -q '"minPassRate": 0' "$TMPROOT/site/evals/summary.json"
   grep -q '"thresholdMet": false' "$TMPROOT/site/evals/summary.json"
   grep -q '"pluginSummaries"' "$TMPROOT/site/evals/summary.json"
   grep -q '"plugin": "agentic-systems-engineering"' "$TMPROOT/site/evals/summary.json"

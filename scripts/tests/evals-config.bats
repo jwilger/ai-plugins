@@ -110,6 +110,27 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "full marketplace canary accepts natural title-cased skill names" {
+  run node - <<'NODE'
+const assertCanary = require('./evals/promptfoo/assert-full-marketplace-canary.cjs');
+const natural = [
+  'Agentic Systems Engineering: Evaluate Stochastic Systems',
+  'Babysit PR: Babysit PR',
+  'Engineering Standards: Engineering Standards',
+  'Eval Case Reporter: Submit Eval Case',
+  'Worktrees: Setup',
+].join('\n');
+
+const result = assertCanary(natural);
+
+if (result.pass !== true) {
+  throw new Error(`expected title-cased skills to pass, got: ${JSON.stringify(result)}`);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "codex eval home preparation installs all marketplace plugins into cache" {
   tmp_home="$(mktemp -d)"
 
