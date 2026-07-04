@@ -17,11 +17,21 @@ setup() {
 @test "trusted eval workflows upload diagnostics even after provider failures" {
   grep -q "if: always()" "$WORKFLOW"
   grep -q "eval-diagnostics" "$WORKFLOW"
+  grep -q "evals/out/status.json" "$WORKFLOW"
   grep -q "if: always() && steps.secrets.outputs.available == 'true'" "$ROOT/.github/workflows/live-evals.yml"
 }
 
+@test "eval pages publishes an explicit skipped dashboard when provider secrets are absent" {
+  grep -q "id: secrets" "$WORKFLOW"
+  grep -q "available=false" "$WORKFLOW"
+  grep -q "Record missing provider credentials" "$WORKFLOW"
+  grep -q "steps.secrets.outputs.available != 'true'" "$WORKFLOW"
+  grep -q "steps.secrets.outputs.available == 'true'" "$WORKFLOW"
+  grep -q "scripts/evals/write-status.mjs" "$WORKFLOW"
+}
+
 @test "readme gives the required GitHub Pages source setting" {
-  grep -q "Settings > Pages" "$README"
-  grep -q "Source" "$README"
+  grep -q "repository Pages settings" "$README"
+  grep -q "Build and deployment / Source" "$README"
   grep -q "GitHub Actions" "$README"
 }
