@@ -1,0 +1,11 @@
+[package]
+name = "taskbranch-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+taskbranch-core = { path = "../taskbranch-core" }
+
+[lib]
+path = "src/lib.rs"

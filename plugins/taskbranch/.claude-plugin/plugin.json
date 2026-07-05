@@ -1,0 +1,11 @@
+{
+  "name": "taskbranch",
+  "description": "Git-backed task boards for coding agents: branch-local .tasks storage, CLI, stdio MCP, dry-run-first scaffolding with explicit approval, and read-only dashboard workflows.",
+  "version": "0.1.0",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["tasks", "git", "mcp", "dashboard", "planning"]
+}

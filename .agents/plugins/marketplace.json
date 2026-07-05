@@ -87,6 +87,29 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Developer Tools"
+    },
+    {
+      "name": "taskbranch",
+      "source": {
+        "source": "local",
+        "path": "./plugins/taskbranch"
+      },
+      "description": "Git-backed shared task tracking for agents across worktrees with taskbranch CLI, stdio MCP, validation, dry-run-first scaffold previews, and read-only dashboard workflows.",
+      "version": "0.1.0",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools",
+      "keywords": [
+        "tasks",
+        "git",
+        "mcp",
+        "worktrees",
+        "task-tracking",
+        "scaffold",
+        "validation"
+      ]
     }
   ]
 }

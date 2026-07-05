@@ -90,9 +90,20 @@ MD
   [ "$status" -eq 0 ]
   [[ "$output" == *"openai:codex-sdk"* ]]
   [[ "$output" == *"anthropic:claude-agent-sdk"* ]]
-  [[ "$output" == *"deep_tracing: true"* ]]
+  [[ "$output" == *"Use installed marketplace plugin and skill guidance when it is relevant"* ]]
+  [[ "$output" == *"When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording."* ]]
+  [[ "$output" == *"Do not run shell commands, start evals, mutate files, or inspect repository state."* ]]
+  [[ "$output" != *"deep_tracing: true"* ]]
+  [[ "$output" == *"deep_tracing: false"* ]]
+  [[ "$output" == *"tracing:"*$'\n'"  enabled: false"* ]]
+  [[ "$output" == *"Treat each scenario as stateless"* ]]
   [[ "$output" == *"sandbox_mode: read-only"* ]]
+  [[ "$output" == *"skip_git_repo_check: true"* ]]
+  [[ "$output" == *"working_dir: \"$ROOT/.dependencies/evals/agent-workspace\""* ]]
   [[ "$output" == *"skills: all"* ]]
+  [[ "$output" == *"setting_sources: []"* ]]
+  [[ "$output" == *"persist_session: false"* ]]
+  [[ "$output" == *"disallowed_tools:"*$'\n'"        - Bash"* ]]
   [[ "$output" == *"load-harness-cases.cjs"* ]]
 }
 
@@ -101,7 +112,7 @@ MD
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"apiKeyRequired: false"* ]]
-  [[ "$output" == *"provider:"*$'\n'"      id: openai:codex-sdk"* ]]
+  [[ "$output" == *"provider:"*$'\n'"      text:"*$'\n'"        id: openai:codex-sdk"* ]]
   [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME"* ]]
   [[ "$output" != *"openai:gpt-5-mini"* ]]
 }
@@ -146,6 +157,14 @@ if (missing.length > 0) {
 NODE
 
   [ "$status" -eq 0 ]
+}
+
+@test "generated behavior config uses runtime loader when case filter is set" {
+  run env EVAL_CASE_FILTER=taskbranch node "$GENERATOR" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
+  [[ "$output" != *"tests: file://$ROOT/evals/promptfoo/load-harness-cases.cjs"* ]]
 }
 
 @test "generated Claude provider config excludes Codex-only marketplace plugins" {
@@ -261,6 +280,7 @@ const namesOnly = [
   'babysit-pr',
   'engineering-standards',
   'eval-case-reporter',
+  'taskbranch',
   'worktrees',
   'development-discipline',
 ].join('\n');
@@ -285,6 +305,7 @@ const natural = [
   'Babysit PR: Babysit PR',
   'Engineering Standards: Engineering Standards',
   'Eval Case Reporter: Submit Eval Case',
+  'Taskbranch: Taskbranch',
   'Worktrees: Setup',
   'Development Discipline: Test Driven Development',
 ].join('\n');

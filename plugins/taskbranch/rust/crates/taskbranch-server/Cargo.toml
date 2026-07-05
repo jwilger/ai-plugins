@@ -1,0 +1,15 @@
+[package]
+name = "taskbranch-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axum = "0.8"
+http-body-util = "0.1"
+taskbranch-git = { path = "../taskbranch-git" }
+tokio = { version = "1", features = ["net"] }
+tower = { version = "0.5", features = ["util"] }
+
+[lib]
+path = "src/lib.rs"

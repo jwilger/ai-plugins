@@ -8,6 +8,9 @@
 # Rust build artifacts (workspace target dir at repo root).
 /target/
 
+# Browser smoke-test artifacts.
+/output/
+
 # cargo-mutants scratch output.
 /mutants.out/
 /mutants.out.old/
@@ -17,6 +20,10 @@
 /evals/out/
 /site/evals/*
 !/site/evals/.gitkeep
+
+# Generated plugin-eval benchmark runs; benchmark configs may be committed.
+/.plugin-eval/runs/
+/**/.plugin-eval/runs/
 
 # Side-quest worktrees (default location; configurable via sidequest.toml).
 /.worktrees/

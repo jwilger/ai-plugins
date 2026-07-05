@@ -7,7 +7,38 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace bats
+ci: validate-marketplace taskbranch-rust taskbranch-dashboard-smoke taskbranch-mutants taskbranch-release-manifest bats
+
+# Rust gates for the taskbranch plugin workspace.
+taskbranch-rust:
+    cargo fmt --manifest-path plugins/taskbranch/rust/Cargo.toml --all --check
+    cargo clippy --manifest-path plugins/taskbranch/rust/Cargo.toml --all-targets -- -D warnings
+    cargo test --manifest-path plugins/taskbranch/rust/Cargo.toml
+
+# Browser smoke coverage for the read-only taskbranch dashboard.
+taskbranch-dashboard-smoke:
+    scripts/evals/ensure-node-deps.sh
+    node scripts/taskbranch/dashboard-smoke.mjs
+
+# Build the taskbranch release binary for the current host target.
+taskbranch-release-host:
+    scripts/build-taskbranch-host-release.sh
+
+# Build every bundled taskbranch v1 release target.
+taskbranch-release-all:
+    scripts/build-taskbranch-release-all.sh
+
+# Mutation gate for the pure taskbranch core.
+taskbranch-mutants:
+    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/taskbranch-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/taskbranch-mutants-target" cargo mutants --manifest-path plugins/taskbranch/rust/Cargo.toml --package taskbranch-core --test-workspace true
+
+# Ensure the taskbranch release plan names every bundled v1 binary target.
+taskbranch-release-manifest:
+    bash scripts/check-taskbranch-release-manifest.sh
+
+# Require every listed taskbranch release binary to be present and executable.
+taskbranch-release-complete:
+    bash scripts/check-taskbranch-release-complete.sh
 
 # Run provider-backed promptfoo evals locally, upload/share the latest result,
 # and print the share URL. This sends eval data to the configured promptfoo

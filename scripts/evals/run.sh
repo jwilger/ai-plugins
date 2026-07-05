@@ -5,7 +5,9 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 config="evals/promptfoo/agentic-systems-engineering.yaml"
 out_dir="$root/evals/out"
 generated_dir="$out_dir/generated"
-max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-2}"
+runtime_options_file="$generated_dir/runtime-options.json"
+runtime_loader_file="$generated_dir/load-harness-cases.runtime.cjs"
+max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-1}"
 suite="behavior"
 dry_run=0
 generated_config=0
@@ -30,7 +32,9 @@ Environment overrides:
   CODEX_GRADER_REASONING_EFFORT (default: medium)
   EVAL_SAMPLES
   EVAL_CASE_FILTER
-  PROMPTFOO_MAX_CONCURRENCY    (default: 2)
+  EVAL_PROVIDER_FILTER         (filters tested providers by variant id or provider id;
+                                semantic grading still uses CODEX_GRADER_MODEL)
+  PROMPTFOO_MAX_CONCURRENCY    (default: 1)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
 Pinned eval packages are managed by package.json and package-lock.json:
@@ -66,6 +70,34 @@ codex_marketplace_plugins_csv() {
     return 2
   }
   printf '%s\n' "$plugins"
+}
+
+write_runtime_options() {
+  mkdir -p "$generated_dir"
+  node - "$runtime_options_file" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+const options = {};
+if (process.env.EVAL_CASE_FILTER) {
+  options.caseFilter = process.env.EVAL_CASE_FILTER;
+}
+if (process.env.EVAL_SAMPLES) {
+  options.samples = process.env.EVAL_SAMPLES;
+}
+fs.writeFileSync(file, JSON.stringify(options));
+NODE
+}
+
+write_runtime_loader() {
+  mkdir -p "$generated_dir"
+  node - "$runtime_loader_file" "$runtime_options_file" "$root/evals/promptfoo/load-harness-cases.cjs" <<'NODE'
+const fs = require('fs');
+const loaderFile = process.argv[2];
+const optionsFile = process.argv[3];
+const baseLoader = process.argv[4];
+const source = `process.env.EVAL_RUNTIME_OPTIONS_FILE = ${JSON.stringify(optionsFile)};\nmodule.exports = require(${JSON.stringify(baseLoader)});\n`;
+fs.writeFileSync(loaderFile, source);
+NODE
 }
 
 while [ "$#" -gt 0 ]; do
@@ -128,6 +160,10 @@ cmd=(
   "$out_dir/results.junit.xml"
 )
 
+if [ -n "${EVAL_CASE_FILTER:-}" ]; then
+  cmd+=(--filter-pattern "$EVAL_CASE_FILTER")
+fi
+
 if [ "$dry_run" -eq 1 ]; then
   dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-full-marketplace}}"
   dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
@@ -151,25 +187,45 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 cd "$root"
-mkdir -p "$out_dir"
+mkdir -p "$out_dir" "$root/.dependencies/evals/agent-workspace"
+rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml"
 "$root/scripts/evals/ensure-node-deps.sh"
 if [ "$generated_config" -eq 1 ]; then
   node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" >/dev/null
 fi
 
 export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
+export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$root/.dependencies/promptfoo}"
 export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.dependencies/promptfoo-cache}"
 export PROMPTFOO_CACHE_TTL="${PROMPTFOO_CACHE_TTL:-86400}"
 export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-full-marketplace}"
 export CODEX_EVAL_HOME_FULL_MARKETPLACE="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-$CODEX_EVAL_HOME}"
 export CODEX_EVAL_HOME_NO_PLUGINS="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
 export CODEX_EVAL_HOME_TARGETED_PLUGINS="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.dependencies/evals/codex-home-targeted-plugins}"
+mkdir -p "$PROMPTFOO_CONFIG_DIR"
 
 if [ "$generated_config" -eq 1 ]; then
+  write_runtime_options
+  write_runtime_loader
   node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_FULL_MARKETPLACE" --plugin-mode full-marketplace >/dev/null
   node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_NO_PLUGINS" --plugin-mode no-plugins >/dev/null
   targeted_plugins="${EVAL_TARGETED_PLUGINS:-$(codex_marketplace_plugins_csv)}"
   node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins "$targeted_plugins" >/dev/null
 fi
 
+set +e
 "${cmd[@]}"
+promptfoo_status="$?"
+set -e
+
+if [ "$promptfoo_status" -ne 0 ]; then
+  if [ ! -s "$out_dir/results.json" ]; then
+    exit "$promptfoo_status"
+  fi
+  node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
+  exit "$?"
+fi
+
+if [ -s "$out_dir/results.json" ]; then
+  node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
+fi
