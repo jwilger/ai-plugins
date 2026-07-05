@@ -12,7 +12,7 @@ without depending on a hosted dashboard.
 - `evals/out/`: generated JSON, HTML, and JUnit artifacts.
 - `scripts/evals/run.sh`: one command for local and CI execution.
 - `scripts/evals/build-site.mjs`: static dashboard aggregation.
-- `site/evals/`: generated reports for GitHub Pages.
+- `site/evals/`: generated local static reports.
 - Optional MCP wiring: Promptfoo's MCP server can expose eval operations to
   Codex or another MCP-capable agent, but the committed runner remains the
   release-evidence path.

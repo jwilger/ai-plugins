@@ -259,10 +259,9 @@ CI runs on GitHub Actions (`.github/workflows/ci.yml`):
   validation (including the cross-harness manifest sync-validator), Codex
   manifest checks, promptfoo eval dry-run wiring, and a final `CI gate`
   aggregator job so branch protection has a single required check.
-- **`live-evals.yml`** and **`eval-pages.yml`** (trusted events): provider-backed
-  Claude Code and Codex promptfoo runs when both `OPENAI_API_KEY` and
-  `ANTHROPIC_API_KEY` are available, full-marketplace canaries, artifact upload,
-  and GitHub Pages deployment of `site/evals/`.
+- **`live-evals.yml`** (trusted events): provider-backed Claude Code and Codex
+  promptfoo runs when both `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are
+  available, full-marketplace canaries, and artifact upload.
 
 ## Reference
 

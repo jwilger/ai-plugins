@@ -6,7 +6,7 @@
 
 **Architecture:** The new plugin is separate from `engineering-standards` and keeps short router skills at the plugin root with detailed doctrine in `references/` files. Eval reporting is local-first and repo-owned: promptfoo drives the real Claude Code and Codex harnesses with every repository plugin loaded, produces JSON, HTML, and JUnit artifacts, and a small Node script aggregates those artifacts into a static dashboard under `site/evals/`.
 
-**Tech Stack:** Claude Code plugin manifests, Codex plugin manifests, Markdown skills, shell scripts, Node `.mjs`, promptfoo, Bats, `jq`, Prettier, GitHub Actions, GitHub Pages, GitHub issue forms.
+**Tech Stack:** Claude Code plugin manifests, Codex plugin manifests, Markdown skills, shell scripts, Node `.mjs`, promptfoo, Bats, `jq`, Prettier, GitHub Actions, GitHub issue forms.
 
 ---
 
@@ -55,7 +55,6 @@
 - Create: `scripts/tests/evals-site.bats`
 - Create: `scripts/tests/evals-config.bats`
 - Create: `scripts/tests/evals-fixtures.bats`
-- Create: `scripts/tests/eval-pages-workflow.bats`
 - Create or modify: `.github/workflows/*.yml`
 - Create: `site/evals/.gitkeep` or generated dashboard files if the repo decides to commit a baseline.
 
@@ -209,7 +208,7 @@ Add optional Promptfoo MCP server wiring for Codex in `agentic-systems-engineeri
 
 - [x] **Step 7: Add full-marketplace dashboard builder**
 
-Create `scripts/evals/build-site.mjs`. It must read eval artifacts, generate trend-ready JSON summaries, show per-provider/per-case/per-sample pass rates and thresholds, and write static self-contained pages under `site/evals/`.
+Create `scripts/evals/build-site.mjs`. It must read eval artifacts, generate trend-ready JSON summaries, show per-provider/per-case/per-sample pass rates and thresholds, and write static self-contained HTML reports under `site/evals/`.
 
 - [x] **Step 8: Add Bats tests**
 
@@ -225,9 +224,9 @@ Update CI to validate promptfoo configuration with a secret-free dry run on pull
 
 Add scheduled/manual/main workflow coverage for provider-backed evals when secrets are available. Ensure untrusted PRs skip live provider evals.
 
-- [x] **Step 3: Add GitHub Pages deployment**
+- [x] **Step 3: Add trusted eval artifact reporting**
 
-Deploy the static eval dashboard to GitHub Pages from `main` only. Do not deploy from untrusted PRs.
+Preserve trusted eval artifacts from `main`, manual, or scheduled runs without running provider-backed evals on untrusted PRs.
 
 ## Task 8: Verify
 
@@ -273,8 +272,8 @@ Run: `scripts/evals/run.sh`
 Expected: full provider-backed behavior evals run with `EVAL_SAMPLES=3` through both harnesses, no cache/no share, and JSON, HTML, and JUnit artifacts are generated under `evals/out/`.
 
 Status: blocked locally because `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are
-absent. The trusted `live-evals` and `eval-pages` workflows run this path when
-those repository secrets are available.
+absent. The trusted `live-evals` workflow runs this path when those repository
+secrets are available.
 
 - [x] **Step 7: Build eval dashboard**
 
@@ -335,7 +334,7 @@ Expected: `site/evals/index.html` and `site/evals/summary.json` are generated an
     Actions workflows run that path when repository secrets are available.
   - `nix develop --command node scripts/evals/build-site.mjs` generated
     `site/evals/index.html` and `site/evals/summary.json`; generated outputs are
-    ignored and published by CI.
+    ignored and retained only as local artifacts unless uploaded by a workflow.
   - `nix develop --command just ci` passed with 52 Bats tests.
   - `plugin-eval analyze` returned grade A / 100 for the six changed skills:
     `agentic-systems-engineering`, `evaluate-stochastic-systems`,
@@ -346,14 +345,9 @@ Expected: `site/evals/index.html` and `site/evals/summary.json` are generated an
     not committed and benchmark execution is deferred until curated scenarios
     and verifiers exist.
 
-Post-merge Pages follow-up:
+Post-merge live-eval follow-up:
 
-- PR #10 merged on 2026-07-04, and repository Pages is configured with
-  `build_type: workflow` at <https://slipstream-eng.github.io/ai-plugins/>.
-- The first post-merge `Eval Pages` run proved that repository Actions secrets
-  are not currently configured for `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
-- The Pages workflow must still publish a truthful dashboard when those secrets
-  are absent. It now records a skipped provider status and deploys the static
-  report instead of failing before artifact upload.
+- The first post-merge trusted eval run proved that repository Actions secrets
+  were not configured for `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`.
 - Provider-backed Claude Code and Codex eval results remain gated on the actual
-  repository secrets; skipped-status pages are not behavior evidence.
+  repository secrets; skipped live-eval runs are not behavior evidence.

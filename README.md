@@ -18,7 +18,7 @@ Claude Code and Codex harnesses with the full marketplace loaded.
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.0   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.1   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 
 ### Codex
@@ -28,7 +28,7 @@ Claude Code and Codex harnesses with the full marketplace loaded.
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.0   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.1   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 
 > When a plugin is added under [`plugins/`](plugins/) and registered in both
@@ -107,18 +107,15 @@ See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
 
 ## Eval reports
 
-The repo-owned eval dashboard is published through GitHub Pages at
-<https://slipstream-eng.github.io/ai-plugins/> after the Pages workflow runs on
-`main`. In the repository Pages settings, set **Build and deployment / Source**
-to **GitHub Actions**; **Deploy from a branch** will not publish this dashboard.
-The workflow also runs `actions/configure-pages@v5` and publishes the generated
-static dashboard from `site/evals/`. The durable record is repo-owned and does
-not depend on promptfoo-hosted sharing.
+The repo-owned eval dashboard is generated under `site/evals/` by
+`node scripts/evals/build-site.mjs`. It is a local/static artifact for review
+and workflow uploads; the durable record is repo-owned and does not depend on
+promptfoo-hosted sharing.
 
 Provider-backed Claude Code and Codex results require both repository secrets:
-`OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. If either secret is absent, the Pages
-workflow publishes an explicit skipped-status dashboard instead of pretending
-that behavior evals ran.
+`OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. If either secret is absent, the live
+eval workflow skips provider-backed behavior evals instead of pretending they
+ran.
 
 The dashboard includes latest-run status, provider/case/sample pass rates,
 threshold status, and plugin/skill summaries so regressions can be traced back
@@ -211,7 +208,7 @@ excerpts.
 │   └── marketplace.json      # Claude Code marketplace manifest
 ├── .github/
 │   ├── ISSUE_TEMPLATE/       # eval-case intake form
-│   └── workflows/            # CI, eval, and Pages workflows
+│   └── workflows/            # CI and eval workflows
 ├── docs/
 │   └── superpowers/plans/    # implementation plans for larger changes
 ├── evals/
