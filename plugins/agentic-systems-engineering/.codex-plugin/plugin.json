@@ -17,9 +17,9 @@
     "developerName": "John Wilger",
     "category": "Developer Tools",
     "capabilities": ["Read", "MCP Tools"],
-    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
-    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
-    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "websiteURL": "https://github.com/jwilger/ai-plugins",
+    "privacyPolicyURL": "https://github.com/jwilger/ai-plugins/blob/main/README.md",
+    "termsOfServiceURL": "https://github.com/jwilger/ai-plugins/blob/main/README.md",
     "defaultPrompt": [
       "Apply agentic systems engineering guardrails to this LLM feature.",
       "Scaffold local evals for this agentic workflow.",
