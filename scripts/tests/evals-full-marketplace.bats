@@ -135,6 +135,43 @@ JSON
   [[ "$output" == *"missing coverage kinds"* ]]
 }
 
+@test "coverage checker accepts explicit decisions outside behavior fixtures" {
+  FIXTURE_TMP="$(mktemp -d)"
+  fixture="$FIXTURE_TMP"
+  mkdir -p "$fixture/plugins/example/skills/alpha" "$fixture/evals/fixtures"
+  mkdir -p "$fixture/.agents/plugins" "$fixture/.claude-plugin" "$fixture/plugins/example/.codex-plugin"
+  cat >"$fixture/.agents/plugins/marketplace.json" <<'JSON'
+{"plugins":[{"name":"example","source":{"source":"local","path":"./plugins/example"}}]}
+JSON
+  cat >"$fixture/.claude-plugin/marketplace.json" <<'JSON'
+{"plugins":[]}
+JSON
+  cat >"$fixture/plugins/example/.codex-plugin/plugin.json" <<'JSON'
+{"name":"example","version":"0.1.0"}
+JSON
+  cat >"$fixture/plugins/example/skills/alpha/SKILL.md" <<'MD'
+---
+name: alpha
+description: Example skill
+---
+MD
+  cat >"$fixture/evals/fixtures/coverage-decisions.json" <<'JSON'
+[
+  {
+    "plugin": "example",
+    "skill": "alpha",
+    "decision": "deferred",
+    "reason": "Codex-only behavior coverage is deferred until the harness supports provider-scoped behavior cases without running the same case in Claude Code."
+  }
+]
+JSON
+
+  run node "$ROOT/scripts/evals/check-coverage.mjs" --root "$fixture"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"coverage complete"* ]]
+}
+
 @test "generated behavior config expands provider variants across plugin modes" {
   run node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 

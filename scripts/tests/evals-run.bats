@@ -12,7 +12,7 @@ setup() {
   [[ "$output" == *"Usage: scripts/evals/run.sh"* ]]
   [[ "$output" == *"Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all"* ]]
   [[ "$output" == *"Codex:       provider=openai:codex-sdk, model=gpt-5.5, model_reasoning_effort=medium"* ]]
-  [[ "$output" == *"Full repository plugin marketplace is loaded for every scenario"* ]]
+  [[ "$output" == *"Each provider loads the relevant marketplace surface for its harness"* ]]
   [[ "$output" == *"Pinned eval packages are managed by package.json and package-lock.json"* ]]
   [[ "$output" == *"@openai/codex-sdk"* ]]
   [[ "$output" == *"@anthropic-ai/claude-agent-sdk"* ]]
@@ -35,6 +35,33 @@ setup() {
   [[ "$output" == *"evals/out/results.json"* ]]
   [[ "$output" == *"evals/out/report.html"* ]]
   [[ "$output" == *"evals/out/results.junit.xml"* ]]
+}
+
+@test "eval runner dry-run prepares targeted Codex home from Codex marketplace plugins" {
+  run "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  targeted_line="$(printf '%s\n' "$output" | grep -- '--plugin-mode targeted-plugins')"
+  [[ "$targeted_line" == *"prepare-codex-home.mjs"* ]]
+  [[ "$targeted_line" == *"--plugins"* ]]
+  [[ "$targeted_line" == *"\\,advisor"* || "$targeted_line" == *"advisor\\,"* || "$targeted_line" == *"--plugins advisor"* ]]
+}
+
+@test "eval runner fails when Codex marketplace has no plugin names" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/.agents/plugins"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/.agents/plugins/marketplace.json" <<'JSON'
+{
+  "plugins": []
+}
+JSON
+
+  run "$fixture_root/scripts/evals/run.sh" --dry-run
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Codex marketplace has no plugins"* ]]
 }
 
 @test "package manifest pins promptfoo and coding harness provider SDKs" {

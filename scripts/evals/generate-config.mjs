@@ -53,25 +53,35 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
 }
 
+function normalizePlugin(plugin) {
+  const pluginPath = plugin.path?.startsWith("./")
+    ? plugin.path
+    : `./${plugin.path || `plugins/${plugin.name}`}`;
+  return {
+    name: plugin.name,
+    path: pluginPath,
+    absolutePath: path.resolve(root, pluginPath),
+  };
+}
+
 function evalMatrix() {
   return readJson("evals/matrix.json");
 }
 
-function marketplacePlugins() {
+function manifestPlugins(file) {
+  return readPlugins(file)
+    .map(normalizePlugin)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function allMarketplacePlugins() {
   const byName = new Map();
 
   for (const plugin of [
-    ...readPlugins(".claude-plugin/marketplace.json"),
-    ...readPlugins(".agents/plugins/marketplace.json"),
+    ...manifestPlugins(".claude-plugin/marketplace.json"),
+    ...manifestPlugins(".agents/plugins/marketplace.json"),
   ]) {
-    const pluginPath = plugin.path?.startsWith("./")
-      ? plugin.path
-      : `./${plugin.path || `plugins/${plugin.name}`}`;
-    byName.set(plugin.name, {
-      name: plugin.name,
-      path: pluginPath,
-      absolutePath: path.resolve(root, pluginPath),
-    });
+    byName.set(plugin.name, plugin);
   }
 
   return [...byName.values()].sort((left, right) =>
@@ -150,7 +160,8 @@ function providerFor(variant, pluginMode, plugins) {
 }
 
 function configFor(suite) {
-  const plugins = marketplacePlugins();
+  const allPlugins = allMarketplacePlugins();
+  const claudePlugins = manifestPlugins(".claude-plugin/marketplace.json");
   const matrix = evalMatrix();
   const testLoader = fileUrl(
     path.join(
@@ -167,7 +178,7 @@ function configFor(suite) {
     suite === "behavior"
       ? matrix.providerVariants.flatMap((variant) =>
           matrix.pluginModes.map((pluginMode) =>
-            providerFor(variant, pluginMode, plugins),
+            providerFor(variant, pluginMode, claudePlugins),
           ),
         )
       : [
@@ -176,14 +187,14 @@ function configFor(suite) {
               (variant) => variant.provider === "anthropic:claude-agent-sdk",
             ),
             { id: "full-marketplace" },
-            plugins,
+            claudePlugins,
           ),
           providerFor(
             matrix.providerVariants.find(
               (variant) => variant.provider === "openai:codex-sdk",
             ),
             { id: "full-marketplace" },
-            plugins,
+            claudePlugins,
           ),
         ];
 
@@ -227,7 +238,7 @@ ${indentedList(matrix.pluginModes, 6, (mode) => `- id: ${mode.id}`)}
     providerVariants:
 ${indentedList(matrix.providerVariants, 6, (variant) => `- id: ${variant.id}\n${" ".repeat(8)}provider: ${variant.provider}`)}
   fullMarketplacePlugins:
-${indentedList(plugins, 4, (plugin) => `- name: ${plugin.name}\n${" ".repeat(6)}sourcePath: ${quote(plugin.path)}`)}
+${indentedList(allPlugins, 4, (plugin) => `- name: ${plugin.name}\n${" ".repeat(6)}sourcePath: ${quote(plugin.path)}`)}
 
 commandLineOptions:
   maxConcurrency: 2
