@@ -26,6 +26,15 @@ jobs:
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
 
+      - name: Load eval secrets
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OPENAI_API_KEY: op://Github Secrets/OPENAI_API_KEY/credential
+          ANTHROPIC_API_KEY: op://Github Secrets/ANTHROPIC_API_KEY/credential
+
       - name: Check secrets
         id: secrets
         run: |
@@ -34,9 +43,6 @@ jobs:
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
           fi
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Run full-marketplace canaries when secrets are available
         if: steps.secrets.outputs.available == 'true'
@@ -47,8 +53,6 @@ jobs:
           cp evals/out/report.html evals/out/canary/report.html
           cp evals/out/results.junit.xml evals/out/canary/results.junit.xml
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_EVAL_MODEL: sonnet
           CODEX_EVAL_MODEL: gpt-5.5
           CODEX_EVAL_REASONING_EFFORT: medium
@@ -57,8 +61,6 @@ jobs:
         if: steps.secrets.outputs.available == 'true'
         run: nix develop -c scripts/evals/run.sh
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_EVAL_MODEL: sonnet
           CODEX_EVAL_MODEL: gpt-5.5
           CODEX_EVAL_REASONING_EFFORT: medium
