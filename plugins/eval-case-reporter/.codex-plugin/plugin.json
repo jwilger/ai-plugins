@@ -16,9 +16,9 @@
     "developerName": "John Wilger",
     "category": "Developer Tools",
     "capabilities": ["Read", "GitHub Issues Write"],
-    "websiteURL": "https://github.com/slipstream-eng/ai-plugins",
-    "privacyPolicyURL": "https://github.com/slipstream-eng/ai-plugins/blob/main/README.md",
-    "termsOfServiceURL": "https://github.com/slipstream-eng/ai-plugins/blob/main/README.md",
+    "websiteURL": "https://github.com/jwilger/ai-plugins",
+    "privacyPolicyURL": "https://github.com/jwilger/ai-plugins/blob/main/README.md",
+    "termsOfServiceURL": "https://github.com/jwilger/ai-plugins/blob/main/README.md",
     "defaultPrompt": [
       "This behavior should probably become an eval case.",
       "Submit a sanitized eval case for what just happened."

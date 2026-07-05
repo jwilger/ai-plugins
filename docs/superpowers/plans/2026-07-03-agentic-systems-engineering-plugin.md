@@ -102,7 +102,7 @@ Create `eval-case-reporter` as a separate marketplace plugin so teams can instal
 
 - [x] **Step 2: Add safe submit workflow**
 
-Create `submit-eval-case` to recognize reusable failures, scrub/anonymize sensitive data, preview the sanitized issue, require explicit user approval, and post with `gh issue create --repo slipstream-eng/ai-plugins`.
+Create `submit-eval-case` to recognize reusable failures, scrub/anonymize sensitive data, preview the sanitized issue, require explicit user approval, and post with `gh issue create --repo jwilger/ai-plugins`.
 
 - [x] **Step 3: Add repo-level issue intake**
 
