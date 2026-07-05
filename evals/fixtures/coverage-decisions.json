@@ -1,0 +1,8 @@
+[
+  {
+    "plugin": "advisor",
+    "skill": "advisor",
+    "decision": "deferred",
+    "reason": "Advisor is a Codex-only plugin and the current provider-backed behavior harness runs each behavior case against Claude Code and Codex. Claude Code has built-in advisor mode, so advisor behavior coverage is deferred until the harness supports provider-scoped behavior cases that can run only in Codex."
+  }
+]

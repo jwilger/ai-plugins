@@ -1,0 +1,28 @@
+{
+  "name": "advisor",
+  "version": "0.1.0",
+  "description": "Read-only planning advisor for fuzzy product, design, engineering, scope, spec, and ticket-shaping work.",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["planning", "advisor", "tradeoffs", "scope", "specs", "tickets"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Advisor",
+    "shortDescription": "Read-only planning advisor for fuzzy tradeoffs and scope shaping.",
+    "longDescription": "Use Advisor when Codex needs a read-only second pass on fuzzy product, design, engineering, scope, spec, or ticket-planning work. The skill delegates broad planning to a dedicated advisor agent so the main thread stays focused on decisions and execution.",
+    "developerName": "John Wilger",
+    "category": "Developer Tools",
+    "capabilities": ["Read"],
+    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
+    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "defaultPrompt": [
+      "Challenge this plan and recommend the safer path.",
+      "Help scope this fuzzy idea into a ticket plan.",
+      "Think through the product and engineering tradeoffs."
+    ]
+  }
+}
