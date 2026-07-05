@@ -1,6 +1,6 @@
 {
   "name": "agentic-systems-engineering",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Portable guardrails for building, evaluating, and delivering LLM and agentic systems.",
   "author": {
     "name": "John Wilger",

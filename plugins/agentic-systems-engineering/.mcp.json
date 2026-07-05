@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "promptfoo": {
-      "command": "npx",
-      "args": ["--yes", "promptfoo@0.121.17", "mcp", "--transport", "stdio"],
+      "command": "promptfoo",
+      "args": ["mcp", "--transport", "stdio"],
       "description": "Promptfoo MCP server for validating configs, running focused evals, inspecting results, and developing eval cases from Codex."
     }
   }

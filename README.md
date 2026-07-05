@@ -19,7 +19,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.1   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.2   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 | [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, debugging, review handling, and skill authoring.               | 0.1.0   |
 
@@ -30,7 +30,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.1   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.2   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
 | [advisor](plugins/advisor/README.md)                                         | Read-only planning advisor for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                        | 0.1.0   |
 | [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, debugging, review handling, and skill authoring.               | 0.1.0   |
@@ -183,12 +183,16 @@ still attempts to share the report and then returns the original eval status. If
 the eval run is interrupted with Ctrl-C, `just evals` stops without sharing.
 
 Codex users who install `agentic-systems-engineering` also get an optional
-Promptfoo MCP server (`promptfoo@0.121.17 mcp --transport stdio`). Use it for
-agent-assisted config validation, focused eval runs, result inspection, and
-fixture development. It supplements the canonical runner; it does not replace
-the repo-owned artifact path above. Promptfoo's separate `mcp` provider is for
-testing MCP servers as systems under test and should be added only when a plugin
-or project exposes an MCP server to evaluate.
+Promptfoo MCP server (`promptfoo mcp --transport stdio`). Consuming projects
+must provide `promptfoo@0.121.17` on `PATH`; when the project uses `flake.nix`,
+prefer `pkgs.promptfoo` when nixpkgs provides the required version so updates
+flow through the flake lockfile, otherwise use the project's local
+package-manager sandbox. Use it for agent-assisted config validation, focused
+eval runs, result inspection, and fixture development. It supplements the
+canonical runner; it does not replace the repo-owned artifact path above.
+Promptfoo's separate `mcp` provider is for testing MCP servers as systems under
+test and should be added only when a plugin or project exposes an MCP server to
+evaluate.
 
 ## Reporting eval cases
 

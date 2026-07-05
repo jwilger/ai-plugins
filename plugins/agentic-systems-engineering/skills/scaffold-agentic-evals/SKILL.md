@@ -12,6 +12,11 @@ Use this skill to add a local-first eval harness.
 Load `references/scaffold.md`.
 
 - Default to promptfoo for OSS, CI-friendly behavior evals.
+- Ensure `promptfoo@0.121.17` is installed on `PATH` for both local eval
+  commands and optional MCP use. Prefer the consuming project's existing tool
+  provisioning: if it has `flake.nix` and nixpkgs provides a compatible
+  `pkgs.promptfoo`, add that package there so updates flow through the flake
+  lockfile; otherwise use the project-local package manager sandbox.
 - Store configs under `evals/promptfoo/`.
 - Store fixtures under `evals/fixtures/`.
 - Store generated artifacts under `evals/out/`.
