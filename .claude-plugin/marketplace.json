@@ -46,6 +46,14 @@
       "version": "0.1.1",
       "category": "Developer Tools",
       "keywords": ["pr", "ci", "review"]
+    },
+    {
+      "name": "development-discipline",
+      "source": "./plugins/development-discipline",
+      "description": "John's personal workflow discipline for test-first development, verification, debugging, review handling, and skill authoring.",
+      "version": "0.1.0",
+      "category": "Developer Tools",
+      "keywords": ["tdd", "verification", "debugging", "code-review", "skills"]
     }
   ]
 }

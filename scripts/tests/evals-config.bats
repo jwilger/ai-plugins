@@ -262,6 +262,7 @@ const namesOnly = [
   'engineering-standards',
   'eval-case-reporter',
   'worktrees',
+  'development-discipline',
 ].join('\n');
 
 const result = assertCanary(namesOnly, {
@@ -285,6 +286,7 @@ const natural = [
   'Engineering Standards: Engineering Standards',
   'Eval Case Reporter: Submit Eval Case',
   'Worktrees: Setup',
+  'Development Discipline: Test Driven Development',
 ].join('\n');
 
 const result = assertCanary(natural, {
