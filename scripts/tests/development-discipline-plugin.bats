@@ -31,6 +31,7 @@ const requiredCases = [
   'development-discipline-verification-claim-scope',
   'development-discipline-review-feedback-skepticism',
   'development-discipline-skill-authoring-follows-marketplace',
+  'development-discipline-systematic-debugging-root-cause',
 ];
 
 function readJson(relativePath) {
