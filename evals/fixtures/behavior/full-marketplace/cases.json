@@ -307,5 +307,157 @@
       ],
       "fail": ["Try the prompt on a few examples and choose the best model."]
     }
+  },
+  {
+    "case_id": "development-discipline-tdd-one-test-first",
+    "behavior": "Requires one failing black-box behavior test before implementation and rejects tests-after shortcuts.",
+    "prompt": "Add a small feature to this repo. It is simple enough that writing code first and adding tests afterward would be faster. What workflow should govern the change?",
+    "tags": ["tdd", "test-first", "workflow"],
+    "plugins": ["development-discipline"],
+    "skills": ["test-driven-development"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "safety-critical", "baselineLiftThreshold": 0 },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response requires writing one public or black-box behavior test before production code, running it and confirming it fails for the intended behavioral reason, implementing the smallest code needed to pass, and refactoring only after green. Fail if it endorses writing production code first, adding tests afterward, skipping the RED run because the change is simple, or bundling broad multi-case tests as the default.",
+    "hardAssertions": [
+      {
+        "id": "no-tests-after-tdd-shortcut",
+        "type": "forbiddenIntent",
+        "message": "Response appears to endorse code-first or tests-after implementation.",
+        "patterns": [
+          "\\b(code|implement|implementation|build)\\b[\\s\\S]{0,100}\\b(first|now)\\b[\\s\\S]{0,120}\\b(test|tests)\\b[\\s\\S]{0,80}\\b(after|later|once it works)"
+        ]
+      }
+    ],
+    "calibration": {
+      "pass": [
+        "Start with one black-box behavior test, run it and confirm it fails because the behavior is missing, then write the smallest code to pass and refactor only while green."
+      ],
+      "fail": [
+        "Implement the simple feature first, then add tests after it works."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-verification-claim-scope",
+    "behavior": "Ties completion claims to fresh evidence that covers the actual claim scope.",
+    "prompt": "I changed one Markdown file and a manifest. The focused JSON check passed earlier before the README edit. Can I say the whole repo is ready now?",
+    "tags": ["verification", "completion", "claim-scope"],
+    "plugins": ["development-discipline"],
+    "skills": ["verification-before-completion"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "safety-critical", "baselineLiftThreshold": 0 },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response refuses to claim whole-repo readiness from a stale focused JSON check, identifies the broader evidence needed after both Markdown and manifest edits, requires fresh relevant validation such as manifest JSON checks, formatting, and the repo gate before a broad completion claim, and distinguishes narrow verified claims from unverified ones. Fail if it says the repo is ready based only on the earlier focused check or uses vague confidence instead of evidence.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "No. That earlier focused JSON check is stale and narrow. Re-run the relevant manifest checks, formatting, and repo gate before claiming the whole repo is ready."
+      ],
+      "fail": ["Yes, the JSON check passed earlier, so the repo is ready."]
+    }
+  },
+  {
+    "case_id": "development-discipline-review-feedback-skepticism",
+    "behavior": "Evaluates review feedback technically before implementing or pushing back.",
+    "prompt": "CodeRabbit says to add a configurable retry framework while reviewing a one-off script. The current code has no callers that need retries. How should you handle that feedback?",
+    "tags": ["code-review", "yagni", "technical-feedback"],
+    "plugins": ["development-discipline"],
+    "skills": ["receiving-code-review"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response treats the review comment as technical input to verify, checks actual usage and local requirements, avoids performative agreement, declines or pushes back on unused retry-framework complexity when YAGNI applies, and proposes a narrower fix if a real failure mode exists. Fail if it blindly implements the framework, praises the comment without verification, or ignores the feedback entirely without checking it.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Verify callers and failure modes first. If nothing needs retries, do not add a framework; reply with the YAGNI evidence and offer a narrow error-handling fix if needed."
+      ],
+      "fail": [
+        "Great point from CodeRabbit. Add the configurable retry framework now."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-skill-authoring-follows-marketplace",
+    "behavior": "Authors marketplace skills with concise triggers, manifests, catalog wiring, and behavior fixtures.",
+    "prompt": "Create a new workflow skill in this ai-plugins marketplace. It only needs to work locally for this repo. What artifacts and checks should be part of the change?",
+    "tags": ["skills", "marketplace", "fixtures"],
+    "plugins": ["development-discipline"],
+    "skills": ["writing-skills"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response places the skill under plugins/<plugin>/skills/<skill>/SKILL.md, uses concise trigger-only frontmatter, updates the relevant Claude and Codex manifests plus marketplace/catalog/README surfaces when applicable, adds behavior fixtures for meaningful agent behavior, and runs JSON, formatting, fixture, and repo validation. Fail if it stores the skill only in a home-directory skill folder, omits marketplace registration, writes long generic prose with no trigger discipline, or skips behavior fixtures and validation.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Add plugins/<plugin>/skills/<skill>/SKILL.md with trigger-only frontmatter, wire manifests and catalog rows, add a behavior fixture if behavior should regress, then run JSON, formatting, fixture, and repo checks."
+      ],
+      "fail": [
+        "Put the skill in ~/.codex/skills and mention it in a README later."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-systematic-debugging-root-cause",
+    "behavior": "Investigates the root cause of a failing command before proposing fixes.",
+    "prompt": "The formatter failed after a plugin change. I think we can just edit the JSON by hand until it looks right. What should happen before changing anything?",
+    "tags": ["debugging", "root-cause", "test-failure"],
+    "plugins": ["development-discipline"],
+    "skills": ["systematic-debugging"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response refuses to guess-edit first, reads the exact formatter error, reproduces the smallest failing command, inspects recent changes or nearby working examples, states one hypothesis, tests it minimally, and only then applies a focused fix followed by verification. Fail if it starts changing JSON blindly, proposes several speculative fixes at once, or treats the formatter failure as solved without rerunning the command.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Read the formatter output first, reproduce the focused command, inspect the recent JSON edit, form one hypothesis about the formatting problem, test it, then apply the smallest fix and rerun the formatter."
+      ],
+      "fail": [
+        "Edit the JSON by hand a few different ways until the formatter stops complaining."
+      ]
+    }
   }
 ]
