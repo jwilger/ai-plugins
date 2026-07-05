@@ -6,7 +6,7 @@ description: Use when a plugin, skill, prompt, tool, command, or agent behavior 
 # Submit Eval Case
 
 Use this skill to turn observed AI-assistant behavior into a sanitized eval-case
-issue for `slipstream-eng/ai-plugins`.
+issue for `jwilger/ai-plugins`.
 
 ## When To Offer
 
@@ -37,7 +37,7 @@ reusable or diagnostic.
 
    ```shell
    gh issue create \
-     --repo slipstream-eng/ai-plugins \
+     --repo jwilger/ai-plugins \
      --title "[eval-case]: <short title>" \
      --label eval-case \
      --label needs-triage \

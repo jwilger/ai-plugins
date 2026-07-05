@@ -24,9 +24,9 @@
     "developerName": "John Wilger",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],
-    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
-    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
-    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "websiteURL": "https://github.com/jwilger/ai-plugins",
+    "privacyPolicyURL": "https://github.com/jwilger/ai-plugins/blob/main/README.md",
+    "termsOfServiceURL": "https://github.com/jwilger/ai-plugins/blob/main/README.md",
     "defaultPrompt": [
       "Babysit the current PR until it is green, approved, and merged.",
       "Watch this merge request, respond to review feedback, and merge it when ready."
