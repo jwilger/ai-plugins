@@ -20,7 +20,8 @@ must scrub/anonymize sensitive details, show the sanitized issue preview, and
 require explicit user approval before posting. Never post raw secrets, private
 client data, proprietary excerpts, auth material, or private transcripts.
 
-- The marketplace manifest is [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json).
+- The Claude Code marketplace manifest is [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json).
+- The Codex marketplace manifest is [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json).
 - Each plugin is a subdirectory of [`plugins/`](plugins/).
 - The user-facing catalog lives in [`README.md`](README.md), grouped by harness.
 
@@ -106,21 +107,26 @@ directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
 
 1. Create `plugins/<plugin-name>/` (kebab-case, no spaces — the name is
    public-facing and used for namespacing, e.g. `/<plugin-name>:<skill>`).
-2. Add `plugins/<plugin-name>/.claude-plugin/plugin.json`. Only `name` is
-   strictly required; prefer also setting `description`, `version` (semver),
-   `author`, and `license`.
+2. Add a per-harness manifest for every marketplace that will list the plugin:
+   `plugins/<plugin-name>/.claude-plugin/plugin.json` for Claude Code and
+   `plugins/<plugin-name>/.codex-plugin/plugin.json` for Codex. Codex-only
+   plugins must not carry a `.claude-plugin/plugin.json` or appear in the
+   Claude Code marketplace. Only `name` is strictly required by some harnesses;
+   prefer also setting `description`, `version` (semver), `author`, and
+   `license`.
 3. Put components at the **plugin root** (NOT inside `.claude-plugin/`):
    - `skills/<name>/SKILL.md` — adds to defaults; the primary mechanism for new work.
    - `agents/<name>.md` — subagents.
    - `commands/<name>.md` — legacy flat-file slash commands (prefer `skills/`).
    - `hooks/hooks.json`, `.mcp.json`, `.lsp.json`, `bin/` — as needed.
-4. Register the plugin in `.claude-plugin/marketplace.json` by appending to the
-   `plugins` array. `source` is the **explicit relative path** to the plugin
-   directory, `./plugins/<plugin-name>` (do not use a bare directory name with
+4. Register the plugin in the matching marketplace manifest(s). For Claude
+   Code, append to `.claude-plugin/marketplace.json`; `source` is the
+   **explicit relative path** to the plugin directory,
+   `./plugins/<plugin-name>` (do not use a bare directory name with
    `metadata.pluginRoot` — some Claude Code versions reject that as an
-   unsupported source type and treat the plugin as remote). Mirror the entry in
-   `.agents/plugins/marketplace.json` for Codex (which uses the
-   `{ "source": "local", "path": "./plugins/<plugin-name>" }` object form).
+   unsupported source type and treat the plugin as remote). For Codex, append to
+   `.agents/plugins/marketplace.json` using the
+   `{ "source": "local", "path": "./plugins/<plugin-name>" }` object form.
    ```json
    {
      "name": "<plugin-name>",
@@ -131,7 +137,8 @@ directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
      "category": "…"
    }
    ```
-5. Add a row to the matching harness table in `README.md`.
+5. Add a row to each matching harness table in `README.md`; for Codex-only
+   plugins, add only the Codex row.
 6. Give the plugin its own `README.md` stating what it does and which
    harness(es) it targets.
 
@@ -139,6 +146,7 @@ directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
 
 ```shell
 jq empty .claude-plugin/marketplace.json          # manifest is valid JSON
+jq empty .agents/plugins/marketplace.json         # Codex manifest is valid JSON
 find plugins -name plugin.json -exec jq empty {} \;  # every plugin manifest valid
 prettier --check "**/*.{json,md}"                 # formatting (use --write to fix)
 ```
@@ -147,7 +155,7 @@ For every plugin in this marketplace, when modifying anything under `plugins/`
 that could affect plugin or skill behavior, run the full relevant eval set
 before claiming completion. Behavior evals for the marketplace run through
 promptfoo's native Claude Code and Codex coding-agent providers, loading the
-full plugin set together:
+relevant marketplace surface for each harness:
 
 ```shell
 just evals
@@ -167,7 +175,7 @@ for pull-request CI without secrets; it is not behavior evidence. Provider-backe
 runs require working Claude Code and Codex authentication. The runner restores
 the pinned npm dev dependencies from `package-lock.json`, generates promptfoo
 config from the current marketplace manifests, prepares a `CODEX_EVAL_HOME`
-with every repo plugin, configures Claude with `apiKeyRequired: false`, uses
+with every Codex marketplace plugin, configures Claude with `apiKeyRequired: false`, uses
 Codex as the default model-graded assertion provider, and disables prompt
 response caching and hosted sharing so generated artifacts are fresh and
 repo-owned. Run `scripts/evals/run.sh --suite canary` to prove full-marketplace
@@ -209,8 +217,9 @@ per-input reliability, pass@k capability, pass^k reliability, stochastic judge
 variance, or close A/B comparisons. Do not treat `k` as a ritual substitute for
 better fixtures.
 
-For an end-to-end check in Claude Code: `/plugin marketplace add .` then
-`/plugin install <plugin-name>@ai-plugins`.
+For a Claude-supported plugin, an end-to-end check in Claude Code is
+`/plugin marketplace add .` then `/plugin install <plugin-name>@ai-plugins`.
+Skip this for Codex-only plugins.
 
 ## Conventions
 
@@ -219,20 +228,25 @@ For an end-to-end check in Claude Code: `/plugin marketplace add .` then
 - **JSON** is 2-space indented; run `prettier --write` on changed `.json`/`.md`.
 - **Only `.claude-plugin/`** lives inside the `.claude-plugin/` folder. All
   component directories (`skills/`, `agents/`, …) live at the plugin root.
-- **Versioning:** every plugin in this marketplace must carry a valid semver
-  `version` in both `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`.
-  Keep those two manifest versions identical, and keep the Claude Code
-  marketplace entry version in `.claude-plugin/marketplace.json` identical to
-  the plugin manifest version. Bump the plugin version in the same PR as any
-  plugin behavior, skill, command, hook, script, or metadata change. Use semver:
-  patch for fixes/documentation-only behavior clarifications, minor for
-  backwards-compatible features or changed defaults, and major for breaking
-  changes.
+- **Versioning:** every per-harness plugin manifest that exists must carry a
+  valid semver `version`. For plugins listed in both harnesses, keep
+  `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` versions
+  identical, and keep the Claude Code marketplace entry version in
+  `.claude-plugin/marketplace.json` identical to the Claude plugin manifest
+  version. Codex-only plugins carry only `.codex-plugin/plugin.json`. Bump the
+  plugin version in the same PR as any plugin behavior, skill, command, hook,
+  script, or metadata change. Use semver: patch for fixes/documentation-only
+  behavior clarifications, minor for backwards-compatible features or changed
+  defaults, and major for breaking changes.
 
 ## Multi-harness notes
 
 - Claude Code reads `.claude-plugin/marketplace.json` and per-plugin
   `.claude-plugin/plugin.json`. Keep these the source of truth.
+- Codex reads `.agents/plugins/marketplace.json` and per-plugin
+  `.codex-plugin/plugin.json`. Codex-only plugins are allowed when a harness
+  already provides equivalent built-in behavior; keep them out of Claude Code
+  marketplace metadata and Claude behavior eval coverage.
 - When adding Codex (or other-harness) support, do not break the Claude Code
   manifest. Prefer additive, harness-namespaced metadata and a parallel
   manifest if a harness needs a different format, rather than overloading

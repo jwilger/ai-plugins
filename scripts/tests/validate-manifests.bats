@@ -47,13 +47,22 @@ manifest_for() {
   [ "$status" -eq 0 ]
 }
 
-@test "fails when the plugin sets differ" {
+@test "passes when a plugin is registered only for Codex" {
+  make_plugin alpha
+  make_plugin codex-only
+  rm -rf "$ROOT/plugins/codex-only/.claude-plugin"
+  write_manifests "alpha" "alpha codex-only"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "fails when a plugin is registered only for Claude Code" {
   make_plugin alpha
   make_plugin beta
   write_manifests "alpha beta" "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"plugin-sets-differ"* ]]
+  [[ "$output" == *"claude-plugin-not-in-codex-marketplace"* ]]
 }
 
 @test "fails when a plugin directory is unregistered" {

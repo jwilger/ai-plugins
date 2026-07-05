@@ -6,10 +6,11 @@ other harnesses that adopt plugin or marketplace concepts.
 
 ## Plugin catalog
 
-Every plugin ships both a `.claude-plugin/` and a `.codex-plugin/` manifest and
-is registered in both marketplace manifests, so the catalog targets both
-**Claude Code and Codex**. Provider-backed promptfoo evals exercise both the
-Claude Code and Codex harnesses with the full marketplace loaded.
+Most plugins ship both a `.claude-plugin/` and a `.codex-plugin/` manifest and
+are registered in both marketplace manifests. Codex-only plugins are registered
+only in [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)
+and intentionally omitted from the Claude Code marketplace. Provider-backed
+promptfoo evals exercise the relevant marketplace surface for each harness.
 
 ### Claude Code
 
@@ -30,11 +31,11 @@ Claude Code and Codex harnesses with the full marketplace loaded.
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
 | [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.1   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
+| [advisor](plugins/advisor/README.md)                                         | Read-only planning advisor for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                        | 0.1.0   |
 
-> When a plugin is added under [`plugins/`](plugins/) and registered in both
-> [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) and
-> [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json), add a
-> row to each harness table above with a link to the plugin's own `README.md`.
+> When a plugin is added under [`plugins/`](plugins/), add catalog rows only for
+> the harness marketplaces that list it. Codex-only plugins must not be added to
+> the Claude Code table.
 
 ## Using the marketplace (Claude Code)
 
@@ -70,6 +71,7 @@ eval-case-reporter
 engineering-standards
 babysit-pr
 worktrees
+advisor
 ```
 
 Useful Codex entry points:
@@ -82,6 +84,8 @@ Useful Codex entry points:
   before posting, and submit the sanitized issue with `gh issue create`.
 - `engineering-standards`: apply the repository's broader engineering regime,
   including the no-force-push rule.
+- `advisor`: delegate fuzzy planning, tradeoff analysis, scope/spec shaping,
+  and ticket planning to a read-only advisor subagent.
 
 ## Developing in this repo
 

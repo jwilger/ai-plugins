@@ -5,7 +5,10 @@ import process from "node:process";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { coverageKinds, loadBehaviorCases } = require("../../evals/promptfoo/fixtures.cjs");
+const {
+  coverageKinds,
+  loadBehaviorCases,
+} = require("../../evals/promptfoo/fixtures.cjs");
 
 const REQUIRED_KINDS = [
   "natural-trigger",
@@ -72,18 +75,40 @@ function skillDirectories(plugin) {
     .filter((skill) => fs.existsSync(skill.path));
 }
 
-function explicitDecisionFor(cases, plugin, skill) {
-  return cases.some((testCase) => {
-    const decision = testCase.coverageDecision;
-    return (
-      decision &&
-      decision.plugin === plugin &&
-      decision.skill === skill &&
-      ["value-proven", "pruned", "deferred"].includes(decision.decision) &&
-      typeof decision.reason === "string" &&
-      decision.reason.length > 20
+function loadCoverageDecisions(root) {
+  const decisionsFile = path.join(
+    root,
+    "evals/fixtures/coverage-decisions.json",
+  );
+  if (!fs.existsSync(decisionsFile)) return [];
+
+  const parsed = readJson(decisionsFile);
+  const decisions = Array.isArray(parsed) ? parsed : parsed.decisions;
+  if (!Array.isArray(decisions)) {
+    throw new Error(
+      `${decisionsFile}: expected an array or object with decisions array`,
     );
-  });
+  }
+  return decisions;
+}
+
+function validDecision(decision, plugin, skill) {
+  return (
+    decision &&
+    decision.plugin === plugin &&
+    decision.skill === skill &&
+    ["value-proven", "pruned", "deferred"].includes(decision.decision) &&
+    typeof decision.reason === "string" &&
+    decision.reason.length > 20
+  );
+}
+
+function explicitDecisionFor(cases, decisions, plugin, skill) {
+  return (
+    cases.some((testCase) =>
+      validDecision(testCase.coverageDecision, plugin, skill),
+    ) || decisions.some((decision) => validDecision(decision, plugin, skill))
+  );
 }
 
 function coverageFor(cases, plugin, skill) {
@@ -106,10 +131,11 @@ function main() {
   const plugins = marketplacePlugins(args.root);
   const skills = plugins.flatMap(skillDirectories);
   const cases = loadBehaviorCases({ root: args.root });
+  const decisions = loadCoverageDecisions(args.root);
   const failures = [];
 
   for (const skill of skills) {
-    if (explicitDecisionFor(cases, skill.plugin, skill.skill)) {
+    if (explicitDecisionFor(cases, decisions, skill.plugin, skill.skill)) {
       continue;
     }
     const kinds = coverageFor(cases, skill.plugin, skill.skill);

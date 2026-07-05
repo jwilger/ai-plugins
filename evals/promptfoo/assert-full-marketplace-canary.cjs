@@ -1,14 +1,14 @@
-const fs = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
 const ROOT = path.resolve(process.cwd());
 
 function manifestPlugins(file) {
-  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, file), 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, file), "utf8"));
   return manifest.plugins.map((plugin) => ({
     name: plugin.name,
     source:
-      plugin.source && typeof plugin.source === 'object'
+      plugin.source && typeof plugin.source === "object"
         ? plugin.source.path
         : plugin.source,
   }));
@@ -16,9 +16,9 @@ function manifestPlugins(file) {
 
 function titleCase(name) {
   return name
-    .split('-')
+    .split("-")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+    .join(" ");
 }
 
 function pluginPath(plugin) {
@@ -27,7 +27,7 @@ function pluginPath(plugin) {
 }
 
 function skillNames(plugin) {
-  const skillsDir = path.join(pluginPath(plugin), 'skills');
+  const skillsDir = path.join(pluginPath(plugin), "skills");
 
   if (!fs.existsSync(skillsDir)) {
     return [];
@@ -39,12 +39,36 @@ function skillNames(plugin) {
     .map((entry) => entry.name);
 }
 
-module.exports = function assertFullMarketplaceCanary(output) {
-  const text = String(output || '').toLowerCase();
-  const plugins = new Map([
-    ...manifestPlugins('.claude-plugin/marketplace.json'),
-    ...manifestPlugins('.agents/plugins/marketplace.json'),
-  ].map((plugin) => [plugin.name, plugin]));
+function providerId(context) {
+  const provider = context?.provider;
+  if (!provider) return "";
+  if (typeof provider.id === "function") return provider.id();
+  if (typeof provider.id === "string") return provider.id;
+  return "";
+}
+
+function expectedPlugins(context) {
+  const id = providerId(context);
+
+  if (id.includes("anthropic:claude-agent-sdk")) {
+    return manifestPlugins(".claude-plugin/marketplace.json");
+  }
+
+  if (id.includes("openai:codex-sdk")) {
+    return manifestPlugins(".agents/plugins/marketplace.json");
+  }
+
+  return [
+    ...manifestPlugins(".claude-plugin/marketplace.json"),
+    ...manifestPlugins(".agents/plugins/marketplace.json"),
+  ];
+}
+
+module.exports = function assertFullMarketplaceCanary(output, context = {}) {
+  const text = String(output || "").toLowerCase();
+  const plugins = new Map(
+    expectedPlugins(context).map((plugin) => [plugin.name, plugin]),
+  );
   const missing = [...plugins.keys()].filter((name) => {
     const accepted = [name, titleCase(name)].map((candidate) =>
       candidate.toLowerCase(),
@@ -56,7 +80,7 @@ module.exports = function assertFullMarketplaceCanary(output) {
     return {
       pass: false,
       score: 0,
-      reason: `Missing plugin names in canary response: ${missing.join(', ')}`,
+      reason: `Missing plugin names in canary response: ${missing.join(", ")}`,
     };
   }
 
@@ -79,13 +103,14 @@ module.exports = function assertFullMarketplaceCanary(output) {
     return {
       pass: false,
       score: 0,
-      reason: `Missing representative skill(s) for plugin(s): ${missingSkills.map((plugin) => plugin.name).join(', ')}`,
+      reason: `Missing representative skill(s) for plugin(s): ${missingSkills.map((plugin) => plugin.name).join(", ")}`,
     };
   }
 
   return {
     pass: true,
     score: 1,
-    reason: 'Full marketplace canary named every plugin and representative skill',
+    reason:
+      "Full marketplace canary named every plugin and representative skill",
   };
 };

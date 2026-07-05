@@ -4,12 +4,14 @@
 #   validate-manifests.sh [repo-root]
 #
 # Enforces (exit non-zero with a kebab-case reason on the first violation):
-#   - both manifests exist and list the same set of plugin names;
-#   - every name in the manifests has a matching plugins/<name>/ directory;
-#   - every plugins/<name>/ directory is registered in both manifests;
-#   - every plugin carries both .claude-plugin/plugin.json and
-#     .codex-plugin/plugin.json, each whose `name` matches the directory;
-#   - Claude Code and Codex plugin versions are valid semver and match.
+#   - both marketplace manifests exist;
+#   - every Claude Code plugin is also available to Codex;
+#   - Codex may carry additional Codex-only plugins;
+#   - every name in either manifest has a matching plugins/<name>/ directory;
+#   - every plugins/<name>/ directory is registered in at least one manifest;
+#   - registered per-harness plugin manifests exist, use the directory name,
+#     and carry valid semver versions;
+#   - shared Claude Code + Codex plugin versions match.
 set -euo pipefail
 
 root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}"
@@ -30,46 +32,74 @@ is_semver() {
 
 names_claude="$(jq -r '.plugins[].name' "$claude" | sort -u)"
 names_codex="$(jq -r '.plugins[].name' "$codex" | sort -u)"
+names_all="$(printf '%s\n%s\n' "$names_claude" "$names_codex" | sed '/^$/d' | sort -u)"
 
-if [ "$names_claude" != "$names_codex" ]; then
-  fail "plugin-sets-differ: claude=[$(echo "$names_claude" | tr '\n' ' ')] codex=[$(echo "$names_codex" | tr '\n' ' ')]"
-fi
+has_name() {
+  local names="$1" name="$2"
+  grep -qx "$name" <<<"$names"
+}
+
+# Claude Code has a built-in advisor mode, so repo plugins may be Codex-only,
+# but this marketplace does not support Claude-only plugin entries.
+while read -r name; do
+  [ -n "$name" ] || continue
+  has_name "$names_codex" "$name" || fail "claude-plugin-not-in-codex-marketplace: $name"
+done <<<"$names_claude"
 
 # Every registered name has a matching plugin directory.
 while read -r name; do
   [ -n "$name" ] || continue
   [ -d "$root/plugins/$name" ] || fail "manifest-plugin-without-dir: $name"
-done <<<"$names_claude"
+done <<<"$names_all"
 
-# Every plugin directory is registered in both manifests and carries matching
-# per-harness manifests.
+# Every plugin directory is registered in at least one manifest and carries the
+# per-harness manifests required by its marketplace entries.
 for dir in "$root"/plugins/*/; do
   [ -d "$dir" ] || continue
   name="$(basename "$dir")"
+  in_claude=0
+  in_codex=0
+  has_name "$names_claude" "$name" && in_claude=1
+  has_name "$names_codex" "$name" && in_codex=1
 
-  echo "$names_claude" | grep -qx "$name" || fail "unregistered-plugin: $name"
+  [ "$in_claude" -eq 1 ] || [ "$in_codex" -eq 1 ] || fail "unregistered-plugin: $name"
 
   cc="${dir}.claude-plugin/plugin.json"
   cx="${dir}.codex-plugin/plugin.json"
-  [ -f "$cc" ] || fail "missing-claude-plugin-json: $name"
-  [ -f "$cx" ] || fail "missing-codex-plugin-json: $name"
 
-  cc_name="$(jq -r '.name' "$cc")"
-  cx_name="$(jq -r '.name' "$cx")"
-  [ "$cc_name" = "$name" ] || fail "claude-plugin-name-mismatch: dir=$name json=$cc_name"
-  [ "$cx_name" = "$name" ] || fail "codex-plugin-name-mismatch: dir=$name json=$cx_name"
+  if [ "$in_claude" -eq 1 ]; then
+    [ -f "$cc" ] || fail "missing-claude-plugin-json: $name"
+  elif [ -e "$cc" ]; then
+    fail "claude-plugin-json-without-marketplace: $name"
+  fi
 
-  cc_version="$(jq -r '.version // empty' "$cc")"
-  cx_version="$(jq -r '.version // empty' "$cx")"
-  [ -n "$cc_version" ] || fail "missing-claude-plugin-version: $name"
-  [ -n "$cx_version" ] || fail "missing-codex-plugin-version: $name"
-  is_semver "$cc_version" || fail "invalid-claude-plugin-version: $name version=$cc_version"
-  is_semver "$cx_version" || fail "invalid-codex-plugin-version: $name version=$cx_version"
-  [ "$cc_version" = "$cx_version" ] || fail "plugin-version-mismatch: $name claude=$cc_version codex=$cx_version"
+  if [ "$in_codex" -eq 1 ]; then
+    [ -f "$cx" ] || fail "missing-codex-plugin-json: $name"
+  fi
 
-  marketplace_version="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .version // empty' "$claude")"
-  [ -n "$marketplace_version" ] || fail "missing-claude-marketplace-version: $name"
-  [ "$marketplace_version" = "$cc_version" ] || fail "claude-marketplace-version-mismatch: $name marketplace=$marketplace_version plugin=$cc_version"
+  if [ "$in_claude" -eq 1 ]; then
+    cc_name="$(jq -r '.name' "$cc")"
+    [ "$cc_name" = "$name" ] || fail "claude-plugin-name-mismatch: dir=$name json=$cc_name"
+    cc_version="$(jq -r '.version // empty' "$cc")"
+    [ -n "$cc_version" ] || fail "missing-claude-plugin-version: $name"
+    is_semver "$cc_version" || fail "invalid-claude-plugin-version: $name version=$cc_version"
+
+    marketplace_version="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .version // empty' "$claude")"
+    [ -n "$marketplace_version" ] || fail "missing-claude-marketplace-version: $name"
+    [ "$marketplace_version" = "$cc_version" ] || fail "claude-marketplace-version-mismatch: $name marketplace=$marketplace_version plugin=$cc_version"
+  fi
+
+  if [ "$in_codex" -eq 1 ]; then
+    cx_name="$(jq -r '.name' "$cx")"
+    [ "$cx_name" = "$name" ] || fail "codex-plugin-name-mismatch: dir=$name json=$cx_name"
+    cx_version="$(jq -r '.version // empty' "$cx")"
+    [ -n "$cx_version" ] || fail "missing-codex-plugin-version: $name"
+    is_semver "$cx_version" || fail "invalid-codex-plugin-version: $name version=$cx_version"
+  fi
+
+  if [ "$in_claude" -eq 1 ] && [ "$in_codex" -eq 1 ]; then
+    [ "$cc_version" = "$cx_version" ] || fail "plugin-version-mismatch: $name claude=$cc_version codex=$cx_version"
+  fi
 done
 
 echo "manifest-sync: ok"

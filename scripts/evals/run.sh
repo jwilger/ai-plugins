@@ -16,7 +16,7 @@ usage() {
 Usage: scripts/evals/run.sh [--suite behavior|canary] [config]
 
 Runs provider-backed promptfoo evals through Claude Code and Codex.
-Full repository plugin marketplace is loaded for every scenario.
+Each provider loads the relevant marketplace surface for its harness.
 
 Default harness posture:
   Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all
@@ -47,6 +47,25 @@ Options:
   --help     Show this help.
   --dry-run  Print the promptfoo command without executing it.
 USAGE
+}
+
+codex_marketplace_plugins_csv() {
+  local marketplace="$root/.agents/plugins/marketplace.json"
+  local plugins
+  plugins="$(
+    jq -er '
+      if (.plugins | type) != "array" then
+        empty
+      else
+        [.plugins[].name | select(type == "string" and length > 0)] as $names
+        | if ($names | length) == 0 then empty else ($names | join(",")) end
+      end
+    ' "$marketplace"
+  )" || {
+    echo "Codex marketplace has no plugins: $marketplace" >&2
+    return 2
+  }
+  printf '%s\n' "$plugins"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -113,6 +132,7 @@ if [ "$dry_run" -eq 1 ]; then
   dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-full-marketplace}}"
   dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
   dry_targeted_home="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.dependencies/evals/codex-home-targeted-plugins}"
+  targeted_plugins="${EVAL_TARGETED_PLUGINS:-$(codex_marketplace_plugins_csv)}"
   printf '%q ' "$root/scripts/evals/ensure-node-deps.sh"
   printf '\n'
   if [ "$generated_config" -eq 1 ]; then
@@ -122,7 +142,7 @@ if [ "$dry_run" -eq 1 ]; then
     printf '\n'
     printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_no_plugins_home" --plugin-mode no-plugins
     printf '\n'
-    printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_targeted_home" --plugin-mode targeted-plugins --plugins agentic-systems-engineering,babysit-pr,engineering-standards,eval-case-reporter,worktrees
+    printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_targeted_home" --plugin-mode targeted-plugins --plugins "$targeted_plugins"
     printf '\n'
   fi
   printf '%q ' "${cmd[@]}"
@@ -148,7 +168,8 @@ export CODEX_EVAL_HOME_TARGETED_PLUGINS="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$ro
 if [ "$generated_config" -eq 1 ]; then
   node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_FULL_MARKETPLACE" --plugin-mode full-marketplace >/dev/null
   node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_NO_PLUGINS" --plugin-mode no-plugins >/dev/null
-  node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins agentic-systems-engineering,babysit-pr,engineering-standards,eval-case-reporter,worktrees >/dev/null
+  targeted_plugins="${EVAL_TARGETED_PLUGINS:-$(codex_marketplace_plugins_csv)}"
+  node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins "$targeted_plugins" >/dev/null
 fi
 
 "${cmd[@]}"

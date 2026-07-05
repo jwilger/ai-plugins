@@ -3,6 +3,85 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   GENERATOR="$ROOT/scripts/evals/generate-config.mjs"
+  FIXTURE_TMP=""
+}
+
+teardown() {
+  [ -z "$FIXTURE_TMP" ] || rm -rf "$FIXTURE_TMP"
+}
+
+make_codex_only_eval_fixture() {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p \
+    "$FIXTURE_TMP/scripts/evals" \
+    "$FIXTURE_TMP/evals/promptfoo" \
+    "$FIXTURE_TMP/.claude-plugin" \
+    "$FIXTURE_TMP/.agents/plugins" \
+    "$FIXTURE_TMP/plugins/shared/skills/shared-skill" \
+    "$FIXTURE_TMP/plugins/codex-only/skills/codex-skill"
+  cp "$GENERATOR" "$FIXTURE_TMP/scripts/evals/generate-config.mjs"
+  cp "$ROOT/evals/promptfoo/assert-full-marketplace-canary.cjs" "$FIXTURE_TMP/evals/promptfoo/assert-full-marketplace-canary.cjs"
+  cat >"$FIXTURE_TMP/evals/matrix.json" <<'JSON'
+{
+  "providerVariants": [
+    {
+      "id": "claude-code-sonnet",
+      "provider": "anthropic:claude-agent-sdk",
+      "modelEnv": "CLAUDE_EVAL_MODEL",
+      "defaultModel": "sonnet"
+    },
+    {
+      "id": "codex-gpt-5.5",
+      "provider": "openai:codex-sdk",
+      "modelEnv": "CODEX_EVAL_MODEL",
+      "defaultModel": "gpt-5.5",
+      "reasoningEffortEnv": "CODEX_EVAL_REASONING_EFFORT",
+      "defaultReasoningEffort": "medium"
+    }
+  ],
+  "pluginModes": [
+    {"id": "no-plugins"},
+    {"id": "full-marketplace"}
+  ]
+}
+JSON
+  cat >"$FIXTURE_TMP/.claude-plugin/marketplace.json" <<'JSON'
+{
+  "plugins": [
+    {
+      "name": "shared",
+      "source": "./plugins/shared",
+      "version": "0.1.0"
+    }
+  ]
+}
+JSON
+  cat >"$FIXTURE_TMP/.agents/plugins/marketplace.json" <<'JSON'
+{
+  "plugins": [
+    {
+      "name": "shared",
+      "source": {"source": "local", "path": "./plugins/shared"}
+    },
+    {
+      "name": "codex-only",
+      "source": {"source": "local", "path": "./plugins/codex-only"}
+    }
+  ]
+}
+JSON
+  cat >"$FIXTURE_TMP/plugins/shared/skills/shared-skill/SKILL.md" <<'MD'
+---
+name: shared-skill
+description: Shared skill.
+---
+MD
+  cat >"$FIXTURE_TMP/plugins/codex-only/skills/codex-skill/SKILL.md" <<'MD'
+---
+name: codex-skill
+description: Codex-only skill.
+---
+MD
 }
 
 @test "generated behavior config uses native Promptfoo coding-agent providers" {
@@ -27,7 +106,7 @@ setup() {
   [[ "$output" != *"openai:gpt-5-mini"* ]]
 }
 
-@test "generated configs load every marketplace plugin path" {
+@test "generated configs expose every marketplace plugin through the relevant harness surface" {
   run node - "$ROOT" "$GENERATOR" <<'NODE'
 const fs = require('fs');
 const path = require('path');
@@ -46,18 +125,57 @@ if (result.status !== 0) {
 
 const claude = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin/marketplace.json'), 'utf8')).plugins;
 const codex = JSON.parse(fs.readFileSync(path.join(root, '.agents/plugins/marketplace.json'), 'utf8')).plugins;
-const names = new Set([...claude, ...codex].map((plugin) => plugin.name));
 const missing = [];
 
-for (const name of names) {
+for (const { name } of claude) {
   if (!result.stdout.includes(path.join(root, 'plugins', name))) {
-    missing.push(name);
+    missing.push(`claude provider path for ${name}`);
+  }
+}
+
+for (const { name } of codex) {
+  if (!result.stdout.includes(`- name: ${name}`)) {
+    missing.push(`metadata entry for ${name}`);
   }
 }
 
 if (missing.length > 0) {
   console.error(`missing plugin paths: ${missing.join(', ')}`);
   process.exit(1);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
+@test "generated Claude provider config excludes Codex-only marketplace plugins" {
+  make_codex_only_eval_fixture
+
+  run node - "$FIXTURE_TMP" <<'NODE'
+const { spawnSync } = require('child_process');
+const path = require('path');
+
+const root = process.argv[2];
+const generator = path.join(root, 'scripts/evals/generate-config.mjs');
+const result = spawnSync(process.execPath, [generator, '--suite', 'behavior', '--stdout'], {
+  cwd: root,
+  encoding: 'utf8',
+});
+if (result.status !== 0) {
+  process.stderr.write(result.stderr || result.stdout);
+  process.exit(result.status);
+}
+
+const firstCodexProvider = result.stdout.indexOf('  - id: openai:codex-sdk');
+const claudeSection = result.stdout.slice(0, firstCodexProvider);
+const sharedPath = path.join(root, 'plugins/shared');
+const codexOnlyPath = path.join(root, 'plugins/codex-only');
+
+if (!claudeSection.includes(sharedPath)) {
+  throw new Error(`Claude config did not include shared plugin path: ${sharedPath}`);
+}
+if (claudeSection.includes(codexOnlyPath)) {
+  throw new Error(`Claude config included Codex-only plugin path: ${codexOnlyPath}`);
 }
 NODE
 
@@ -99,6 +217,42 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "full marketplace canary assertion uses the active provider marketplace" {
+  make_codex_only_eval_fixture
+
+  run node - "$FIXTURE_TMP" <<'NODE'
+const path = require('path');
+process.chdir(process.argv[2]);
+const assertCanary = require(path.join(process.argv[2], 'evals/promptfoo/assert-full-marketplace-canary.cjs'));
+
+const claudeResult = assertCanary(
+  'Shared: Shared Skill',
+  { provider: { id: () => 'anthropic:claude-agent-sdk' } },
+);
+if (claudeResult.pass !== true) {
+  throw new Error(`expected Claude canary to ignore Codex-only plugin: ${JSON.stringify(claudeResult)}`);
+}
+
+const codexMissingResult = assertCanary(
+  'Shared: Shared Skill',
+  { provider: { id: () => 'openai:codex-sdk' } },
+);
+if (codexMissingResult.pass !== false || !codexMissingResult.reason.includes('codex-only')) {
+  throw new Error(`expected Codex canary to require Codex-only plugin: ${JSON.stringify(codexMissingResult)}`);
+}
+
+const codexResult = assertCanary(
+  'Shared: Shared Skill\nCodex Only: Codex Skill',
+  { provider: { id: () => 'openai:codex-sdk' } },
+);
+if (codexResult.pass !== true) {
+  throw new Error(`expected Codex canary to accept Codex-only plugin: ${JSON.stringify(codexResult)}`);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "full marketplace canary requires representative skills, not only plugin names" {
   run node - <<'NODE'
 const assertCanary = require('./evals/promptfoo/assert-full-marketplace-canary.cjs');
@@ -110,7 +264,9 @@ const namesOnly = [
   'worktrees',
 ].join('\n');
 
-const result = assertCanary(namesOnly);
+const result = assertCanary(namesOnly, {
+  provider: { id: () => 'anthropic:claude-agent-sdk' },
+});
 
 if (result.pass !== false || !result.reason.includes('representative skill')) {
   throw new Error(`expected skill-level canary failure, got: ${JSON.stringify(result)}`);
@@ -131,7 +287,9 @@ const natural = [
   'Worktrees: Setup',
 ].join('\n');
 
-const result = assertCanary(natural);
+const result = assertCanary(natural, {
+  provider: { id: () => 'anthropic:claude-agent-sdk' },
+});
 
 if (result.pass !== true) {
   throw new Error(`expected title-cased skills to pass, got: ${JSON.stringify(result)}`);
