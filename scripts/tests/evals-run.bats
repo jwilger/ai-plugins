@@ -47,6 +47,23 @@ setup() {
   [[ "$targeted_line" == *"\\,advisor"* || "$targeted_line" == *"advisor\\,"* || "$targeted_line" == *"--plugins advisor"* ]]
 }
 
+@test "eval runner fails when Codex marketplace has no plugin names" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/.agents/plugins"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/.agents/plugins/marketplace.json" <<'JSON'
+{
+  "plugins": []
+}
+JSON
+
+  run "$fixture_root/scripts/evals/run.sh" --dry-run
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Codex marketplace has no plugins"* ]]
+}
+
 @test "package manifest pins promptfoo and coding harness provider SDKs" {
   run node - "$ROOT/package.json" <<'NODE'
 const fs = require('fs');

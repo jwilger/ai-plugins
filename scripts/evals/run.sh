@@ -50,7 +50,22 @@ USAGE
 }
 
 codex_marketplace_plugins_csv() {
-  jq -r '[.plugins[].name] | join(",")' "$root/.agents/plugins/marketplace.json"
+  local marketplace="$root/.agents/plugins/marketplace.json"
+  local plugins
+  plugins="$(
+    jq -er '
+      if (.plugins | type) != "array" then
+        empty
+      else
+        [.plugins[].name | select(type == "string" and length > 0)] as $names
+        | if ($names | length) == 0 then empty else ($names | join(",")) end
+      end
+    ' "$marketplace"
+  )" || {
+    echo "Codex marketplace has no plugins: $marketplace" >&2
+    return 2
+  }
+  printf '%s\n' "$plugins"
 }
 
 while [ "$#" -gt 0 ]; do
