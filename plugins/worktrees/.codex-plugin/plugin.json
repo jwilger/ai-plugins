@@ -16,9 +16,9 @@
     "developerName": "John Wilger",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],
-    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
-    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
-    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "websiteURL": "https://github.com/jwilger/ai-plugins",
+    "privacyPolicyURL": "https://github.com/jwilger/ai-plugins/blob/main/README.md",
+    "termsOfServiceURL": "https://github.com/jwilger/ai-plugins/blob/main/README.md",
     "defaultPrompt": [
       "Make this repository worktree-ready and install the main-checkout guard.",
       "Design per-worktree isolation for this project and generate the bootstrap plan."

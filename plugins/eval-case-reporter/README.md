@@ -7,7 +7,7 @@ sanitized GitHub issue that can later become a regression eval fixture.
 
 - **`submit-eval-case`** — recognizes when a scenario may deserve an eval case,
   scrubs or anonymizes sensitive data, asks for explicit approval, and posts a
-  structured issue to `slipstream-eng/ai-plugins`.
+  structured issue to `jwilger/ai-plugins`.
 
 The reporter is intentionally standalone so teams can install it without also
 installing any domain-specific plugin such as `agentic-systems-engineering`.
