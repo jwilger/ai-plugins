@@ -65,10 +65,14 @@ require provider-backed runs where the harnesses are authenticated.
 ## Codex Promptfoo MCP
 
 The Codex manifest includes an optional Promptfoo MCP server:
-`promptfoo@0.121.17 mcp --transport stdio`. Use it from Codex to validate
-promptfoo configs, run focused eval slices, inspect prior results, and develop
-new eval cases. Keep release evidence on the canonical runner and generated
-repo-owned artifacts.
+`promptfoo mcp --transport stdio`. Consuming projects must provide
+`promptfoo@0.121.17` on `PATH` before the MCP server starts. When a consuming
+project uses `flake.nix`, prefer `pkgs.promptfoo` when nixpkgs provides the
+required version so updates flow through the flake lockfile; otherwise provision
+the pinned version through the project's local package-manager sandbox. Use it
+from Codex to validate promptfoo configs, run focused eval slices, inspect prior
+results, and develop new eval cases. Keep release evidence on the canonical
+runner and generated repo-owned artifacts.
 
 Promptfoo's `mcp` provider is a different feature: it treats an MCP server as
 the system under test. Add that provider only for projects or plugins that
