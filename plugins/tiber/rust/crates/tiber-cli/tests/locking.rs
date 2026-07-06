@@ -21,10 +21,9 @@ fn write_commands_fail_when_tiber_lock_is_held() {
     assert!(!create.status.success(), "write command should fail");
     let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
     assert!(stderr.contains("tiber_lock_busy"));
-    assert!(!repo
-        .path()
-        .join(".tasks")
-        .join("todo")
-        .join("blocked-by-lock.md")
-        .exists());
+    let tree = repo.git_output(["ls-tree", "-r", "--name-only", "tasks", "backlog"]);
+    assert_success(tree.clone());
+    assert!(!String::from_utf8(tree.stdout)
+        .expect("tree output should be utf8")
+        .contains("blocked-by-lock"));
 }

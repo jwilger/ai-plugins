@@ -1,9 +1,8 @@
 # Tiber
 
 Tiber is a Git-backed task board for coding agents. It keeps task state in a
-dedicated orphan `tasks` branch, exposes the current worktree's board at
-`.tasks`, and gives agents a deterministic CLI plus stdio MCP tools for creating,
-ordering, validating, and closing repository-local work.
+dedicated orphan `tasks` branch and gives agents a deterministic CLI plus stdio
+MCP tools for creating, ordering, validating, and closing repository-local work.
 
 The goal is simple: multiple agents and worktrees can coordinate without turning
 task files into untracked side chatter or hand-edited markdown drift.
@@ -25,7 +24,7 @@ creating the top-level tasks for the rename/merge work.
 tiber init
 tiber create "Document release checklist"
 tiber list
-tiber show todo/document-release-checklist.md
+tiber show document-release-checklist
 tiber validate --fix
 tiber sync
 ```
@@ -36,17 +35,20 @@ not mutate the repository.
 ## What Tiber Stores
 
 - `tasks` is an orphan Git branch that owns task-board state.
-- Each worktree has its own canonical board under
-  `<worktree-name>/.tasks` on that branch.
-- The source checkout gets a `.tasks` symlink into Git's common directory so the
-  active worktree can read and write its board naturally.
-- Task status is represented by directories such as `todo/`, `doing/`, and
-  `done/`.
-- `order.md` records board order.
-- Task identity is the markdown filename, not the display title.
+- The branch stores a shared tree with `backlog/`, `in-progress/`,
+  `done/`, and `abandoned/` status directories.
+- Tiber reads and writes that branch through Git object/tree/ref operations. It
+  does not keep the `tasks` branch checked out locally and does not create a
+  persistent `.tasks` working copy.
+- Task files are named `<YYYYMMDD-xxxx>-<nickname>.md` and contain YAML
+  frontmatter plus standard Markdown sections.
+- `order.md` records one bare task stem per line for open work only.
+- CLI and MCP commands accept a task id, nickname, or full stem. Users do not
+  need to pass `.tasks` paths, status directories, or Markdown section names.
 
-This keeps task state versioned, syncable, and separate from the source branch
-while still making it inspectable from the worktree.
+This keeps task state versioned, syncable, and separate from the source branch.
+Inspect it through `tiber show`, `tiber list`, the read-only dashboard, or normal
+Git commands such as `git show tasks:order.md`.
 
 ## CLI Commands
 
@@ -68,8 +70,13 @@ tiber prioritize <task-ref> --before <task-ref>
 tiber link <task-ref> blocks <task-ref>
 tiber unlink <task-ref> blocks <task-ref>
 tiber subtask add <task-ref> "Subtask title"
-tiber subtask check <task-ref> 1
-tiber subtask uncheck <task-ref> 1
+tiber subtask add <task-ref> "Dependent subtask" --after s1,s2
+tiber subtask check <task-ref> s1
+tiber subtask uncheck <task-ref> s1
+tiber update <task-ref> --summary "New summary" --tags infra,docs
+tiber acceptance add <task-ref> "Observable condition"
+tiber acceptance check <task-ref> 1
+tiber note add <task-ref> "Progress note"
 ```
 
 Validation and integration:
@@ -77,6 +84,7 @@ Validation and integration:
 ```shell
 tiber validate --fix
 tiber close-from-trailers
+tiber install-bin --target-dir ~/.local/bin --dry-run
 tiber scaffold repo --dry-run
 tiber scaffold repo --apply
 ```
@@ -97,9 +105,10 @@ blindly. Preserve both sides, resolve the conflict deliberately, then rerun:
 tiber sync
 ```
 
-Read commands perform a soft remote sync attempt, but remote fetches are
-non-interactive and time-bounded so a slow or unreachable remote does not hang
-normal reads.
+Read commands sync before returning task data. If Tiber can merge remote task
+state automatically, the command continues with the merged board. If the sync
+cannot be resolved automatically, the read fails instead of returning stale or
+locally divergent task data.
 
 ## Stdio MCP
 
@@ -123,7 +132,8 @@ The plugin manifest registers this server as:
 ```
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,
-`tiber.list`, `tiber.transition`, and `tiber.validate_fix`.
+`tiber.list`, `tiber.transition`, `tiber.update`, `tiber.acceptance.add`,
+`tiber.note.add`, `tiber.install_bin`, and `tiber.validate_fix`.
 
 ## Dashboard
 
@@ -134,8 +144,9 @@ tiber dashboard serve
 ```
 
 Open `http://127.0.0.1:7417/` to inspect the board, task files, and repository
-docs. The dashboard intentionally does not expose write routes, `/mcp`, or SSE
-event routes. Task changes go through the CLI or stdio MCP tools.
+docs. The dashboard exposes a read-only `/events` SSE stream for live refreshes,
+but intentionally does not expose write routes or `/mcp`. Task changes go
+through the CLI or stdio MCP tools.
 
 ## Scaffold Workflow
 
@@ -147,7 +158,7 @@ tiber scaffold repo --dry-run
 
 The preview covers:
 
-- `.gitignore` entries for the local `.tasks` symlink
+- `.gitignore` entries preventing accidental source-branch `.tasks` checkouts
 - a post-commit hook for trailer-based closing
 - a GitHub workflow snippet for `tiber close-from-trailers`
 - an optional `just show-tasks` recipe when a `justfile` exists

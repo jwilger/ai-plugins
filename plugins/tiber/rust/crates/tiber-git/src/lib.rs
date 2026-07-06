@@ -6,11 +6,16 @@ use std::fs::OpenOptions;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiber_core::{
     BoardSnapshot, DependencyGraph, OrderReconciliation, TaskDependencies, TaskSnapshot, TaskTitle,
 };
+
+const STATUS_DIRS: &[&str] = &["backlog", "in-progress", "done", "abandoned"];
+const OPEN_STATUS_DIRS: &[&str] = &["backlog", "in-progress"];
+const TASK_ID_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -24,22 +29,27 @@ pub fn init_repository_at(root: impl Into<PathBuf>) -> Result<(), Error> {
 
 pub fn create_task_at(root: impl Into<PathBuf>, title: &str) -> Result<TaskPath, Error> {
     let repo = GitRepository::at(root);
-    repo.create_task(TaskTitle::parse(title)?)
+    repo.with_task_workspace(|repo| repo.create_task(TaskTitle::parse(title)?))
 }
 
 pub fn list_tasks_at(root: impl Into<PathBuf>) -> Result<Vec<TaskSummary>, Error> {
     let repo = GitRepository::at(root);
-    repo.list_tasks()
+    repo.with_task_workspace(|repo| repo.list_tasks())
 }
 
 pub fn show_task_at(root: impl Into<PathBuf>, task_ref: &str) -> Result<String, Error> {
     let repo = GitRepository::at(root);
-    repo.show_task(task_ref)
+    repo.with_task_workspace(|repo| repo.show_task(task_ref))
 }
 
 pub fn task_metadata_at(root: impl Into<PathBuf>, task_ref: &str) -> Result<TaskMetadata, Error> {
     let repo = GitRepository::at(root);
-    repo.task_metadata(task_ref)
+    repo.with_task_workspace(|repo| repo.task_metadata(task_ref))
+}
+
+pub fn task_documents_at(root: impl Into<PathBuf>) -> Result<Vec<TaskDocument>, Error> {
+    let repo = GitRepository::at(root);
+    repo.with_task_snapshot_workspace(|repo| repo.task_documents_snapshot())
 }
 
 pub fn list_docs_at(root: impl Into<PathBuf>) -> Result<Vec<String>, Error> {
@@ -55,36 +65,35 @@ pub fn read_doc_at(root: impl Into<PathBuf>, doc_ref: &str) -> Result<String, Er
 impl GitRepository {
     fn init_repository(&self) -> Result<(), Error> {
         let _lock = self.acquire_lock()?;
-        let worktree_name = self.current_branch()?;
-        self.ensure_tasks_branch(&worktree_name)?;
-        self.ensure_local_tasks_link(&worktree_name)?;
+        self.ensure_tasks_branch()?;
+        self.ignore_local_tasks_in_source_gitignore()?;
         Ok(())
     }
 }
 
 pub fn sync_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.sync_repository()
+    repo.with_task_workspace(|repo| repo.sync_repository())
 }
 
 pub fn create_task(title: &str) -> Result<TaskPath, Error> {
     let repo = GitRepository::discover()?;
-    repo.create_task(TaskTitle::parse(title)?)
+    repo.with_task_workspace(|repo| repo.create_task(TaskTitle::parse(title)?))
 }
 
 pub fn list_tasks() -> Result<Vec<TaskSummary>, Error> {
     let repo = GitRepository::discover()?;
-    repo.list_tasks()
+    repo.with_task_workspace(|repo| repo.list_tasks())
 }
 
 pub fn show_task(task_ref: &str) -> Result<String, Error> {
     let repo = GitRepository::discover()?;
-    repo.show_task(task_ref)
+    repo.with_task_workspace(|repo| repo.show_task(task_ref))
 }
 
 pub fn task_metadata(task_ref: &str) -> Result<TaskMetadata, Error> {
     let repo = GitRepository::discover()?;
-    repo.task_metadata(task_ref)
+    repo.with_task_workspace(|repo| repo.task_metadata(task_ref))
 }
 
 pub fn list_docs() -> Result<Vec<String>, Error> {
@@ -99,52 +108,100 @@ pub fn read_doc(doc_ref: &str) -> Result<String, Error> {
 
 pub fn next_task() -> Result<Option<TaskSummary>, Error> {
     let repo = GitRepository::discover()?;
-    repo.next_task()
+    repo.with_task_workspace(|repo| repo.next_task())
 }
 
 pub fn transition_task(task_ref: &str, status: &str) -> Result<TaskPath, Error> {
     let repo = GitRepository::discover()?;
-    repo.transition_task(task_ref, status)
+    repo.with_task_workspace(|repo| repo.transition_task(task_ref, status))
 }
 
 pub fn prioritize_before(task_ref: &str, before_ref: &str) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.prioritize_before(task_ref, before_ref)
+    repo.with_task_workspace(|repo| repo.prioritize_before(task_ref, before_ref))
 }
 
 pub fn link_blocks(from_ref: &str, to_ref: &str) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.link_blocks(from_ref, to_ref)
+    repo.with_task_workspace(|repo| repo.link_blocks(from_ref, to_ref))
 }
 
 pub fn unlink_blocks(from_ref: &str, to_ref: &str) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.unlink_blocks(from_ref, to_ref)
+    repo.with_task_workspace(|repo| repo.unlink_blocks(from_ref, to_ref))
 }
 
-pub fn add_subtask(task_ref: &str, title: &str) -> Result<(), Error> {
+pub fn add_subtask(task_ref: &str, title: &str, after_refs: &[String]) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.add_subtask(task_ref, title)
+    repo.with_task_workspace(|repo| repo.add_subtask(task_ref, title, after_refs))
 }
 
 pub fn set_subtask_checked(task_ref: &str, index: &str, checked: bool) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.set_subtask_checked(task_ref, index, checked)
+    repo.with_task_workspace(|repo| repo.set_subtask_checked(task_ref, index, checked))
+}
+
+pub fn update_task(
+    task_ref: &str,
+    title: Option<&str>,
+    summary: Option<&str>,
+    context: Option<&str>,
+    tags: Option<Vec<String>>,
+) -> Result<(), Error> {
+    let repo = GitRepository::discover()?;
+    repo.with_task_workspace(|repo| repo.update_task(task_ref, title, summary, context, tags))
+}
+
+pub fn add_acceptance(task_ref: &str, criterion: &str) -> Result<(), Error> {
+    let repo = GitRepository::discover()?;
+    repo.with_task_workspace(|repo| repo.add_acceptance(task_ref, criterion))
+}
+
+pub fn set_acceptance_checked(task_ref: &str, index: &str, checked: bool) -> Result<(), Error> {
+    let repo = GitRepository::discover()?;
+    repo.with_task_workspace(|repo| repo.set_acceptance_checked(task_ref, index, checked))
+}
+
+pub fn remove_acceptance(task_ref: &str, index: &str) -> Result<(), Error> {
+    let repo = GitRepository::discover()?;
+    repo.with_task_workspace(|repo| repo.remove_acceptance(task_ref, index))
+}
+
+pub fn add_note(task_ref: &str, note: &str) -> Result<(), Error> {
+    let repo = GitRepository::discover()?;
+    repo.with_task_workspace(|repo| repo.add_note(task_ref, note))
 }
 
 pub fn validate_fix() -> Result<Vec<ValidationMessage>, Error> {
     let repo = GitRepository::discover()?;
-    repo.validate_fix()
+    repo.with_task_workspace(|repo| repo.validate_fix())
 }
 
 pub fn close_from_trailers() -> Result<Vec<String>, Error> {
     let repo = GitRepository::discover()?;
-    repo.close_from_trailers()
+    repo.with_task_workspace(|repo| repo.close_from_trailers())
 }
 
 pub fn scaffold_repo(apply: bool) -> Result<Vec<String>, Error> {
     let repo = GitRepository::discover()?;
     repo.scaffold_repo(apply)
+}
+
+pub fn install_bin(target_dir: &str, apply: bool) -> Result<String, Error> {
+    let target_dir = expand_home(Path::new(target_dir))?;
+    let launcher = tiber_launcher_path()?;
+    let installed = target_dir.join("tiber");
+    if apply {
+        fs::create_dir_all(&target_dir)?;
+        if installed.exists() || installed.symlink_metadata().is_ok() {
+            return Err(Error::Parse(format!(
+                "install_target_exists path={}",
+                path_to_entry(&installed)?
+            )));
+        }
+        install_launcher(&launcher, &installed)?;
+    }
+    Ok(format!("{} -> {}", installed.display(), launcher.display()))
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -172,6 +229,14 @@ pub struct TaskMetadata {
     pub path: String,
     pub title: String,
     pub committed_at: Option<String>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct TaskDocument {
+    pub stem: String,
+    pub status: String,
+    pub rank: Option<usize>,
+    pub contents: String,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -235,17 +300,81 @@ impl From<tiber_core::CoreError> for Error {
 
 struct GitRepository {
     root: PathBuf,
+    tasks_dir: Option<PathBuf>,
 }
 
 impl GitRepository {
     fn at(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            tasks_dir: None,
+        }
     }
 
     fn discover() -> Result<Self, Error> {
         let root = git_output(["rev-parse", "--show-toplevel"], None)?;
         let root_path = PathBuf::from(root.trim());
         Ok(Self::at(root_path))
+    }
+
+    fn with_tasks_dir(&self, tasks_dir: PathBuf) -> Self {
+        Self {
+            root: self.root.clone(),
+            tasks_dir: Some(tasks_dir),
+        }
+    }
+
+    fn with_task_workspace<T>(
+        &self,
+        operation: impl FnOnce(&GitRepository) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let _lock = self.acquire_lock()?;
+        self.ensure_tasks_branch()?;
+        let workspace = TaskWorkspace::create()?;
+        self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+        let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+        operation(&repo)
+    }
+
+    fn with_task_snapshot_workspace<T>(
+        &self,
+        operation: impl FnOnce(&GitRepository) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let workspace = TaskWorkspace::create()?;
+        if git_status(
+            ["show-ref", "--verify", "refs/heads/tasks"],
+            Some(&self.root),
+        )
+        .is_err()
+        {
+            return operation(&self.with_tasks_dir(workspace.path().to_path_buf()));
+        }
+        self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+        let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+        operation(&repo)
+    }
+
+    fn materialize_tasks_ref(&self, task_ref: &str, destination: &Path) -> Result<(), Error> {
+        for status in STATUS_DIRS {
+            fs::create_dir_all(destination.join(status))?;
+        }
+        let order = destination.join("order.md");
+        if !order.exists() {
+            fs::write(&order, "")?;
+        }
+
+        let listing = self.git(["ls-tree", "-r", "--name-only", task_ref])?;
+        for path in listing.lines().filter(|line| !line.trim().is_empty()) {
+            if path == "order.md" || is_course_task_path(path) || path.ends_with("/.gitkeep") {
+                let contents = self.git(["show", &format!("{task_ref}:{path}")])?;
+                let destination = destination.join(path);
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(destination, contents)?;
+            }
+        }
+        Ok(())
     }
 
     fn current_branch(&self) -> Result<String, Error> {
@@ -257,7 +386,7 @@ impl GitRepository {
         Ok(branch.to_string())
     }
 
-    fn ensure_tasks_branch(&self, worktree_name: &str) -> Result<(), Error> {
+    fn ensure_tasks_branch(&self) -> Result<(), Error> {
         if git_status(
             ["show-ref", "--verify", "refs/heads/tasks"],
             Some(&self.root),
@@ -267,20 +396,18 @@ impl GitRepository {
             return Ok(());
         }
 
-        let order_blob = self.git_with_stdin(["hash-object", "-w", "--stdin"], "")?;
-        let tasks_tree = self.git_with_stdin(
+        let empty_blob = self.git_with_stdin(["hash-object", "-w", "--stdin"], "")?;
+        let status_tree = self.git_with_stdin(
             ["mktree"],
-            &format!("100644 blob {}\torder.md\n", order_blob.trim()),
+            &format!("100644 blob {}\t.gitkeep\n", empty_blob.trim()),
         )?;
-        let worktree_tree = self.git_with_stdin(
-            ["mktree"],
-            &format!("040000 tree {}\t.tasks\n", tasks_tree.trim()),
-        )?;
-        let root_tree = self.git_with_stdin(
-            ["mktree"],
-            &format!("040000 tree {}\t{worktree_name}\n", worktree_tree.trim()),
-        )?;
-        let commit = self.git(["commit-tree", root_tree.trim(), "-m", "Initialize tiber"])?;
+        let mut entries = vec![format!("100644 blob {}\torder.md\n", empty_blob.trim())];
+        for status in STATUS_DIRS {
+            entries.push(format!("040000 tree {}\t{status}\n", status_tree.trim()));
+        }
+        entries.sort();
+        let root_tree = self.git_with_stdin(["mktree"], &entries.concat())?;
+        let commit = self.commit_tree(root_tree.trim(), None, "Initialize tiber")?;
         self.git([
             "update-ref",
             "refs/heads/tasks",
@@ -290,30 +417,24 @@ impl GitRepository {
         Ok(())
     }
 
-    fn ensure_local_tasks_link(&self, worktree_name: &str) -> Result<(), Error> {
-        let target = self
-            .git_common_dir()?
-            .join("tiber")
-            .join(worktree_name)
-            .join(".tasks");
-        let canonical_tasks = target.clone();
-        fs::create_dir_all(&canonical_tasks)?;
-        let order = canonical_tasks.join("order.md");
-        if !order.exists() {
-            fs::write(order, "")?;
+    fn ignore_local_tasks_in_source_gitignore(&self) -> Result<(), Error> {
+        let gitignore = self.root.join(".gitignore");
+        let mut contents = fs::read_to_string(&gitignore).unwrap_or_default();
+        if !contents.lines().any(|line| line.trim() == ".tasks") {
+            if !contents.ends_with('\n') && !contents.is_empty() {
+                contents.push('\n');
+            }
+            contents.push_str(".tasks\n");
+            fs::write(gitignore, contents)?;
         }
-
-        let link = self.root.join(".tasks");
-        if link.exists() || link.symlink_metadata().is_ok() {
-            return Ok(());
-        }
-
-        create_symlink(&target, &link)?;
         Ok(())
     }
 
     fn sync_repository(&self) -> Result<(), Error> {
-        let _lock = self.acquire_lock()?;
+        self.sync_repository_unlocked()
+    }
+
+    fn sync_repository_unlocked(&self) -> Result<(), Error> {
         let worktree_name = self.current_branch()?;
         match self.sync_repository_once(&worktree_name) {
             Ok(()) => Ok(()),
@@ -325,37 +446,26 @@ impl GitRepository {
     }
 
     fn sync_repository_once(&self, worktree_name: &str) -> Result<(), Error> {
+        let local_parent = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
         let remote_parent = self.fetch_origin_tasks()?;
-        if remote_parent.is_some() {
+        if remote_parent
+            .as_deref()
+            .is_some_and(|parent| parent.trim() != local_parent.trim())
+        {
             self.merge_remote_tasks(worktree_name)?;
         }
         let tasks_tree = self.write_directory_tree(&self.tasks_dir())?;
-        let worktree_tree = self.git_with_stdin(
-            ["mktree"],
-            &format!("040000 tree {}\t.tasks\n", tasks_tree.trim()),
-        )?;
-        let root_tree = self.git_with_stdin(
-            ["mktree"],
-            &format!("040000 tree {}\t{worktree_name}\n", worktree_tree.trim()),
-        )?;
+        let root_tree = tasks_tree;
         let parent = match remote_parent {
             Some(parent) => parent,
-            None => self.git(["rev-parse", "--verify", "refs/heads/tasks"])?,
+            None => local_parent.clone(),
         };
-        let expected_ref = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
-        let commit = self.git([
-            "commit-tree",
-            root_tree.trim(),
-            "-p",
-            parent.trim(),
-            "-m",
-            "Sync tiber state",
-        ])?;
+        let commit = self.commit_tree(root_tree.trim(), Some(parent.trim()), "Sync tiber state")?;
         self.git([
             "update-ref",
             "refs/heads/tasks",
             commit.trim(),
-            expected_ref.trim(),
+            local_parent.trim(),
         ])?;
         self.push_tasks_branch_if_origin_exists()?;
         Ok(())
@@ -384,23 +494,12 @@ impl GitRepository {
         }
     }
 
-    fn merge_remote_tasks(&self, worktree_name: &str) -> Result<(), Error> {
-        let prefix = format!("{worktree_name}/.tasks/");
-        let listing = self.git([
-            "ls-tree",
-            "-r",
-            "--name-only",
-            "refs/remotes/origin/tasks",
-            "--",
-            format!("{worktree_name}/.tasks").as_str(),
-        ])?;
+    fn merge_remote_tasks(&self, _worktree_name: &str) -> Result<(), Error> {
+        let listing = self.git(["ls-tree", "-r", "--name-only", "refs/remotes/origin/tasks"])?;
         let mut remote_order = Vec::new();
         for path in listing.lines().filter(|line| !line.trim().is_empty()) {
-            let Some(relative) = path.strip_prefix(&prefix) else {
-                continue;
-            };
             let contents = self.git(["show", &format!("refs/remotes/origin/tasks:{path}")])?;
-            if relative == "order.md" {
+            if path == "order.md" {
                 remote_order = contents
                     .lines()
                     .filter(|line| !line.trim().is_empty())
@@ -408,7 +507,10 @@ impl GitRepository {
                     .collect();
                 continue;
             }
-            let destination = self.tasks_dir().join(parse_task_ref(relative)?);
+            if !is_course_task_path(path) {
+                continue;
+            }
+            let destination = self.tasks_dir().join(path);
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -417,9 +519,11 @@ impl GitRepository {
                 if local_contents != contents {
                     return Err(Error::Parse(format!(
                         "sync_conflict path={}",
-                        path_to_entry(Path::new(relative))?
+                        path_to_entry(Path::new(path))?
                     )));
                 }
+            } else if self.local_task_with_same_stem_exists(path)? {
+                continue;
             } else {
                 fs::write(destination, contents)?;
             }
@@ -440,12 +544,62 @@ impl GitRepository {
         Ok(())
     }
 
+    fn local_task_with_same_stem_exists(&self, remote_path: &str) -> Result<bool, Error> {
+        let Some(remote_stem) = Path::new(remote_path)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+        else {
+            return Ok(false);
+        };
+        Ok(self.task_file_refs()?.iter().any(|local_path| {
+            local_path != remote_path
+                && Path::new(local_path)
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .is_some_and(|local_stem| local_stem == remote_stem)
+        }))
+    }
+
     fn push_tasks_branch_if_origin_exists(&self) -> Result<(), Error> {
         if git_status(["remote", "get-url", "origin"], Some(&self.root)).is_err() {
             return Ok(());
         }
-        self.git(["push", "origin", "refs/heads/tasks:refs/heads/tasks"])?;
+        self.git([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "push",
+            "origin",
+            "refs/heads/tasks:refs/heads/tasks",
+        ])?;
         Ok(())
+    }
+
+    fn commit_tree(
+        &self,
+        tree: &str,
+        parent: Option<&str>,
+        message: &str,
+    ) -> Result<String, Error> {
+        let mut args = vec!["commit-tree".to_string()];
+        if self.commit_signing_enabled()? {
+            args.push("-S".to_string());
+        }
+        args.push(tree.to_string());
+        if let Some(parent) = parent {
+            args.push("-p".to_string());
+            args.push(parent.to_string());
+        }
+        args.push("-m".to_string());
+        args.push(message.to_string());
+        self.git(args)
+    }
+
+    fn commit_signing_enabled(&self) -> Result<bool, Error> {
+        match self.git(["config", "--bool", "commit.gpgsign"]) {
+            Ok(value) => Ok(value.trim() == "true"),
+            Err(Error::CommandFailed { .. }) => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 
     fn write_directory_tree(&self, directory: &Path) -> Result<String, Error> {
@@ -468,18 +622,22 @@ impl GitRepository {
     }
 
     fn create_task(&self, title: TaskTitle) -> Result<TaskPath, Error> {
-        let _lock = self.acquire_lock()?;
-        self.create_task_unlocked(title)
+        let task_path = self.create_task_unlocked(title)?;
+        self.sync_repository_unlocked()?;
+        Ok(task_path)
     }
 
     fn create_task_unlocked(&self, title: TaskTitle) -> Result<TaskPath, Error> {
-        let tasks_dir = self.root.join(".tasks");
-        let todo_dir = tasks_dir.join("todo");
-        fs::create_dir_all(&todo_dir)?;
+        let tasks_dir = self.tasks_dir();
+        let backlog_dir = tasks_dir.join("backlog");
+        fs::create_dir_all(&backlog_dir)?;
 
-        let task_path = format!("todo/{}.md", title.file_stem());
+        let nickname = self.unique_nickname(&title.file_stem())?;
+        let id = new_task_id();
+        let stem = format!("{id}-{nickname}");
+        let task_path = format!("backlog/{stem}.md");
         let absolute_task_path = tasks_dir.join(&task_path);
-        fs::write(&absolute_task_path, format!("# {}\n", title.as_str()))?;
+        fs::write(&absolute_task_path, new_task_document(title.as_str()))?;
 
         let order_path = tasks_dir.join("order.md");
         let mut order = if order_path.exists() {
@@ -487,13 +645,30 @@ impl GitRepository {
         } else {
             String::new()
         };
-        if !order.lines().any(|line| line == task_path) {
-            order.push_str(&task_path);
+        if !order.lines().any(|line| line == stem) {
+            order.push_str(&stem);
             order.push('\n');
             fs::write(order_path, order)?;
         }
 
-        Ok(TaskPath { path: task_path })
+        Ok(TaskPath { path: stem })
+    }
+
+    fn unique_nickname(&self, base: &str) -> Result<String, Error> {
+        let mut nickname = base.to_string();
+        let mut suffix = 2;
+        while self.nickname_exists(&nickname)? {
+            nickname = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+        Ok(nickname)
+    }
+
+    fn nickname_exists(&self, nickname: &str) -> Result<bool, Error> {
+        Ok(self
+            .task_file_refs()?
+            .iter()
+            .any(|task_ref| task_ref.ends_with(&format!("-{nickname}.md"))))
     }
 
     fn list_tasks(&self) -> Result<Vec<TaskSummary>, Error> {
@@ -506,32 +681,33 @@ impl GitRepository {
     }
 
     fn board_snapshot(&self) -> Result<BoardSnapshot, Error> {
-        self.soft_read_sync();
+        self.read_sync()?;
         let ordered_tasks = self
             .order_entries()?
             .into_iter()
-            .map(|path| {
+            .map(|stem| {
+                let path = self.resolve_task_ref(&stem)?;
                 let task = fs::read_to_string(self.tasks_dir().join(&path))?;
                 let title = parse_title(&task)?;
-                Ok(TaskSnapshot::new(path, title))
+                Ok(TaskSnapshot::new(stem, title))
             })
             .collect::<Result<Vec<_>, Error>>()?;
         Ok(BoardSnapshot::from_ordered_tasks(ordered_tasks))
     }
 
     fn show_task(&self, task_ref: &str) -> Result<String, Error> {
-        self.soft_read_sync();
+        self.read_sync()?;
         fs::read_to_string(self.tasks_dir().join(self.resolve_task_ref(task_ref)?))
             .map_err(Error::Io)
     }
 
     fn task_metadata(&self, task_ref: &str) -> Result<TaskMetadata, Error> {
-        self.soft_read_sync();
+        self.read_sync()?;
         let task_ref = self.resolve_task_ref(task_ref)?;
-        let path = path_to_entry(&task_ref)?;
+        let path = task_stem(&task_ref)?;
         let task = fs::read_to_string(self.tasks_dir().join(&task_ref))?;
         let title = parse_title(&task)?;
-        let committed_at = self.task_committed_at(&path)?;
+        let committed_at = self.task_committed_at(&path_to_entry(&task_ref)?)?;
         Ok(TaskMetadata {
             path,
             title,
@@ -539,9 +715,34 @@ impl GitRepository {
         })
     }
 
+    fn task_documents_snapshot(&self) -> Result<Vec<TaskDocument>, Error> {
+        let ranks = self
+            .order_entries()?
+            .into_iter()
+            .enumerate()
+            .map(|(index, stem)| (stem, index + 1))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        self.task_file_refs()?
+            .into_iter()
+            .map(|task_ref| {
+                let stem = task_stem(Path::new(&task_ref))?;
+                let status = task_ref
+                    .split_once('/')
+                    .map(|(status, _)| status.to_string())
+                    .ok_or_else(|| Error::Parse(format!("task_status_missing ref={task_ref}")))?;
+                let contents = fs::read_to_string(self.tasks_dir().join(&task_ref))?;
+                Ok(TaskDocument {
+                    rank: ranks.get(&stem).copied(),
+                    stem,
+                    status,
+                    contents,
+                })
+            })
+            .collect()
+    }
+
     fn task_committed_at(&self, task_ref: &str) -> Result<Option<String>, Error> {
-        let worktree_name = self.current_branch()?;
-        let branch_path = format!("{worktree_name}/.tasks/{task_ref}");
+        let branch_path = task_ref.to_string();
         let committed_at = self.git(vec![
             "log".to_string(),
             "-1".to_string(),
@@ -574,21 +775,42 @@ impl GitRepository {
     }
 
     fn next_task(&self) -> Result<Option<TaskSummary>, Error> {
-        Ok(self.board_snapshot()?.next_task().map(TaskSummary::from))
+        self.read_sync()?;
+        for stem in self.order_entries()? {
+            let path = self.resolve_task_ref(&stem)?;
+            let task = fs::read_to_string(self.tasks_dir().join(&path))?;
+            if self.task_is_ready(&task)? {
+                let title = parse_title(&task)?;
+                return Ok(Some(TaskSummary { path: stem, title }));
+            }
+        }
+        Ok(None)
     }
 
-    fn soft_read_sync(&self) {
-        let _ =
-            self.current_branch()
-                .and_then(|worktree_name| match self.fetch_origin_tasks()? {
-                    Some(_) => self.merge_remote_tasks(&worktree_name),
-                    None => Ok(()),
-                });
+    fn read_sync(&self) -> Result<(), Error> {
+        let worktree_name = self.current_branch()?;
+        if self.fetch_origin_tasks()?.is_some() {
+            self.merge_remote_tasks(&worktree_name)?;
+        }
+        Ok(())
+    }
+
+    fn task_is_ready(&self, task: &str) -> Result<bool, Error> {
+        for blocker_ref in frontmatter_array(task, "blocked_by")? {
+            let Ok(blocker_path) = self.resolve_task_ref(&blocker_ref) else {
+                return Ok(false);
+            };
+            if !blocker_path.starts_with("done") {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn transition_task(&self, task_ref: &str, status: &str) -> Result<TaskPath, Error> {
-        let _lock = self.acquire_lock()?;
-        self.transition_task_unlocked(task_ref, status)
+        let task_path = self.transition_task_unlocked(task_ref, status)?;
+        self.sync_repository_unlocked()?;
+        Ok(task_path)
     }
 
     fn transition_task_unlocked(&self, task_ref: &str, status: &str) -> Result<TaskPath, Error> {
@@ -599,39 +821,51 @@ impl GitRepository {
             .ok_or_else(|| Error::Parse("task_ref_filename_missing=true".to_string()))?;
         let new_ref = PathBuf::from(status).join(file_name);
 
-        let tasks_dir = self.root.join(".tasks");
+        let tasks_dir = self.tasks_dir();
         let from = tasks_dir.join(&task_ref);
         let to = tasks_dir.join(&new_ref);
         if let Some(parent) = to.parent() {
             fs::create_dir_all(parent)?;
         }
         fs::rename(from, &to)?;
+        let task = fs::read_to_string(&to)?;
+        let task = if status == "in-progress" {
+            upsert_frontmatter_claim(&task)?
+        } else {
+            remove_frontmatter_claim(&task)?
+        };
+        fs::write(&to, task)?;
 
-        let old_entry = path_to_entry(&task_ref)?;
-        let new_entry = path_to_entry(&new_ref)?;
-        let order = self
-            .order_entries()?
-            .into_iter()
-            .map(|entry| {
-                if entry == old_entry {
-                    new_entry.clone()
-                } else {
-                    entry
+        let old_entry = task_stem(&task_ref)?;
+        let new_entry = task_stem(&new_ref)?;
+        let mut order = self.order_entries()?;
+        if is_open_status(status) {
+            if !order
+                .iter()
+                .any(|entry| entry == &old_entry || entry == &new_entry)
+            {
+                order.push(new_entry.clone());
+            }
+            for entry in &mut order {
+                if entry == &old_entry {
+                    *entry = new_entry.clone();
                 }
-            })
-            .collect::<Vec<_>>();
+            }
+        } else {
+            order.retain(|entry| entry != &old_entry && entry != &new_entry);
+        }
         self.write_order(&order)?;
         Ok(TaskPath { path: new_entry })
     }
 
     fn prioritize_before(&self, task_ref: &str, before_ref: &str) -> Result<(), Error> {
-        let _lock = self.acquire_lock()?;
-        self.prioritize_before_unlocked(task_ref, before_ref)
+        self.prioritize_before_unlocked(task_ref, before_ref)?;
+        self.sync_repository_unlocked()
     }
 
     fn prioritize_before_unlocked(&self, task_ref: &str, before_ref: &str) -> Result<(), Error> {
-        let task_ref = path_to_entry(&self.resolve_task_ref(task_ref)?)?;
-        let before_ref = path_to_entry(&self.resolve_task_ref(before_ref)?)?;
+        let task_ref = task_stem(&self.resolve_task_ref(task_ref)?)?;
+        let before_ref = task_stem(&self.resolve_task_ref(before_ref)?)?;
         let mut order = self
             .order_entries()?
             .into_iter()
@@ -646,27 +880,49 @@ impl GitRepository {
     }
 
     fn link_blocks(&self, from_ref: &str, to_ref: &str) -> Result<(), Error> {
-        let _lock = self.acquire_lock()?;
-        self.link_blocks_unlocked(from_ref, to_ref)
+        self.link_blocks_unlocked(from_ref, to_ref)?;
+        self.sync_repository_unlocked()
     }
 
     fn link_blocks_unlocked(&self, from_ref: &str, to_ref: &str) -> Result<(), Error> {
-        let from_ref = path_to_entry(&self.resolve_task_ref(from_ref)?)?;
-        let to_ref = path_to_entry(&self.resolve_task_ref(to_ref)?)?;
-        self.update_task_section(&from_ref, "Blocks", &to_ref, SectionOperation::Add)?;
-        self.update_task_section(&to_ref, "Blocked By", &from_ref, SectionOperation::Add)
+        let from_path = self.resolve_task_ref(from_ref)?;
+        let to_path = self.resolve_task_ref(to_ref)?;
+        let from_ref = task_stem(&from_path)?;
+        let to_ref = task_stem(&to_path)?;
+        self.update_task_frontmatter_array(&from_ref, "blocks", &to_ref, SectionOperation::Add)?;
+        self.update_task_frontmatter_array(&to_ref, "blocked_by", &from_ref, SectionOperation::Add)
     }
 
     fn unlink_blocks(&self, from_ref: &str, to_ref: &str) -> Result<(), Error> {
-        let _lock = self.acquire_lock()?;
-        self.unlink_blocks_unlocked(from_ref, to_ref)
+        self.unlink_blocks_unlocked(from_ref, to_ref)?;
+        self.sync_repository_unlocked()
     }
 
     fn unlink_blocks_unlocked(&self, from_ref: &str, to_ref: &str) -> Result<(), Error> {
-        let from_ref = path_to_entry(&self.resolve_task_ref(from_ref)?)?;
-        let to_ref = path_to_entry(&self.resolve_task_ref(to_ref)?)?;
-        self.update_task_section(&from_ref, "Blocks", &to_ref, SectionOperation::Remove)?;
-        self.update_task_section(&to_ref, "Blocked By", &from_ref, SectionOperation::Remove)
+        let from_path = self.resolve_task_ref(from_ref)?;
+        let to_path = self.resolve_task_ref(to_ref)?;
+        let from_ref = task_stem(&from_path)?;
+        let to_ref = task_stem(&to_path)?;
+        self.update_task_frontmatter_array(&from_ref, "blocks", &to_ref, SectionOperation::Remove)?;
+        self.update_task_frontmatter_array(
+            &to_ref,
+            "blocked_by",
+            &from_ref,
+            SectionOperation::Remove,
+        )
+    }
+
+    fn update_task_frontmatter_array(
+        &self,
+        task_ref: &str,
+        key: &str,
+        item: &str,
+        operation: SectionOperation,
+    ) -> Result<(), Error> {
+        let path = self.tasks_dir().join(self.resolve_task_ref(task_ref)?);
+        let task = fs::read_to_string(&path)?;
+        fs::write(path, update_frontmatter_array(&task, key, item, operation)?)?;
+        Ok(())
     }
 
     fn update_task_section(
@@ -685,12 +941,17 @@ impl GitRepository {
         Ok(())
     }
 
-    fn add_subtask(&self, task_ref: &str, title: &str) -> Result<(), Error> {
-        let _lock = self.acquire_lock()?;
-        self.add_subtask_unlocked(task_ref, title)
+    fn add_subtask(&self, task_ref: &str, title: &str, after_refs: &[String]) -> Result<(), Error> {
+        self.add_subtask_unlocked(task_ref, title, after_refs)?;
+        self.sync_repository_unlocked()
     }
 
-    fn add_subtask_unlocked(&self, task_ref: &str, title: &str) -> Result<(), Error> {
+    fn add_subtask_unlocked(
+        &self,
+        task_ref: &str,
+        title: &str,
+        after_refs: &[String],
+    ) -> Result<(), Error> {
         let title = title.trim();
         if title.is_empty() {
             return Err(Error::Parse("subtask_title_empty=true".to_string()));
@@ -698,17 +959,29 @@ impl GitRepository {
         if title.chars().any(char::is_control) {
             return Err(Error::Parse("subtask_title_invalid=true".to_string()));
         }
+        let after_refs = after_refs
+            .iter()
+            .map(|after_ref| parse_subtask_ref(after_ref))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let task_path = self.resolve_task_ref(task_ref)?;
+        let task = fs::read_to_string(self.tasks_dir().join(&task_path))?;
+        let subtask_id = next_subtask_id(&task);
+        let after_suffix = if after_refs.is_empty() {
+            String::new()
+        } else {
+            format!(" — after: {}", after_refs.join(", "))
+        };
         self.update_task_section(
-            &path_to_entry(&self.resolve_task_ref(task_ref)?)?,
+            &task_stem(&task_path)?,
             "Subtasks",
-            &format!("[ ] {title}"),
+            &format!("[ ] ({subtask_id}) {title}{after_suffix}"),
             SectionOperation::Add,
         )
     }
 
     fn set_subtask_checked(&self, task_ref: &str, index: &str, checked: bool) -> Result<(), Error> {
-        let _lock = self.acquire_lock()?;
-        self.set_subtask_checked_unlocked(task_ref, index, checked)
+        self.set_subtask_checked_unlocked(task_ref, index, checked)?;
+        self.sync_repository_unlocked()
     }
 
     fn set_subtask_checked_unlocked(
@@ -718,16 +991,121 @@ impl GitRepository {
         checked: bool,
     ) -> Result<(), Error> {
         let task_ref = self.resolve_task_ref(task_ref)?;
-        let index = parse_one_based_index(index)?;
+        let subtask_ref = parse_subtask_ref(index)?;
         let path = self.tasks_dir().join(&task_ref);
         let task = fs::read_to_string(&path)?;
-        fs::write(path, update_subtask_check_state(&task, index, checked)?)?;
+        fs::write(
+            path,
+            update_subtask_check_state(&task, &subtask_ref, checked)?,
+        )?;
         Ok(())
     }
 
+    fn update_task(
+        &self,
+        task_ref: &str,
+        title: Option<&str>,
+        summary: Option<&str>,
+        context: Option<&str>,
+        tags: Option<Vec<String>>,
+    ) -> Result<(), Error> {
+        let task_ref = self.resolve_task_ref(task_ref)?;
+        let path = self.tasks_dir().join(&task_ref);
+        let mut task = fs::read_to_string(&path)?;
+        if let Some(title) = title {
+            let title = TaskTitle::parse(title)?;
+            task = update_frontmatter_scalar(&task, "title", title.as_str())?;
+        }
+        if let Some(tags) = tags {
+            task = update_frontmatter_array_values(&task, "tags", tags)?;
+        }
+        if let Some(summary) = summary {
+            task = replace_markdown_section_body(&task, "Summary", summary)?;
+        }
+        if let Some(context) = context {
+            task = replace_markdown_section_body(&task, "Context / Why", context)?;
+        }
+        fs::write(path, task)?;
+        self.sync_repository_unlocked()
+    }
+
+    fn add_acceptance(&self, task_ref: &str, criterion: &str) -> Result<(), Error> {
+        let criterion = parse_nonempty_text(criterion, "acceptance")?;
+        let task_ref = self.resolve_task_ref(task_ref)?;
+        let path = self.tasks_dir().join(&task_ref);
+        let task = fs::read_to_string(&path)?;
+        fs::write(
+            path,
+            update_markdown_section(
+                &task,
+                "Acceptance criteria",
+                &format!("[ ] {criterion}"),
+                SectionOperation::Add,
+            ),
+        )?;
+        self.sync_repository_unlocked()
+    }
+
+    fn set_acceptance_checked(
+        &self,
+        task_ref: &str,
+        index: &str,
+        checked: bool,
+    ) -> Result<(), Error> {
+        let index = parse_one_based_usize(index, "acceptance")?;
+        let task_ref = self.resolve_task_ref(task_ref)?;
+        let path = self.tasks_dir().join(&task_ref);
+        let task = fs::read_to_string(&path)?;
+        fs::write(
+            path,
+            update_checklist_item(
+                &task,
+                "Acceptance criteria",
+                index,
+                ChecklistOperation::Set(checked),
+            )?,
+        )?;
+        self.sync_repository_unlocked()
+    }
+
+    fn remove_acceptance(&self, task_ref: &str, index: &str) -> Result<(), Error> {
+        let index = parse_one_based_usize(index, "acceptance")?;
+        let task_ref = self.resolve_task_ref(task_ref)?;
+        let path = self.tasks_dir().join(&task_ref);
+        let task = fs::read_to_string(&path)?;
+        fs::write(
+            path,
+            update_checklist_item(
+                &task,
+                "Acceptance criteria",
+                index,
+                ChecklistOperation::Remove,
+            )?,
+        )?;
+        self.sync_repository_unlocked()
+    }
+
+    fn add_note(&self, task_ref: &str, note: &str) -> Result<(), Error> {
+        let note = parse_nonempty_text(note, "note")?;
+        let task_ref = self.resolve_task_ref(task_ref)?;
+        let path = self.tasks_dir().join(&task_ref);
+        let task = fs::read_to_string(&path)?;
+        fs::write(
+            path,
+            update_markdown_section(
+                &task,
+                "Notes / Log",
+                &format!("{}: {note}", current_date_string()),
+                SectionOperation::Add,
+            ),
+        )?;
+        self.sync_repository_unlocked()
+    }
+
     fn validate_fix(&self) -> Result<Vec<ValidationMessage>, Error> {
-        let _lock = self.acquire_lock()?;
-        self.validate_fix_unlocked()
+        let messages = self.validate_fix_unlocked()?;
+        self.sync_repository_unlocked()?;
+        Ok(messages)
     }
 
     fn validate_fix_unlocked(&self) -> Result<Vec<ValidationMessage>, Error> {
@@ -743,30 +1121,19 @@ impl GitRepository {
     }
 
     fn close_from_trailers(&self) -> Result<Vec<String>, Error> {
-        let _lock = self.acquire_lock()?;
         let log = self.git(["log", "--format=%B%x00"])?;
         let mut closed = Vec::new();
         for task_ref in closes_trailers(&log) {
-            let Ok(task_path) = parse_task_ref(&task_ref) else {
-                continue;
-            };
-            let resolved = if self.tasks_dir().join(&task_path).exists() {
-                path_to_entry(&task_path)?
-            } else {
-                match task_path
-                    .file_name()
-                    .and_then(|file_name| file_name.to_str())
-                    .and_then(|file_name| self.resolve_task_ref(file_name).ok())
-                {
-                    Some(resolved) => path_to_entry(&resolved)?,
-                    None => continue,
-                }
+            let resolved = match self.resolve_task_ref(&task_ref) {
+                Ok(resolved) => task_stem(&resolved)?,
+                Err(_) => continue,
             };
             let done = self.transition_task_unlocked(&resolved, "done")?;
             closed.push(done.path);
         }
         closed.sort();
         closed.dedup();
+        self.sync_repository_unlocked()?;
         Ok(closed)
     }
 
@@ -832,9 +1199,13 @@ impl GitRepository {
     ) -> Result<(), Error> {
         for task_ref in task_refs {
             let task = fs::read_to_string(self.tasks_dir().join(task_ref))?;
+            let stem = task_stem(Path::new(task_ref))?;
             if parse_title(&task).is_err() {
+                messages.push(ValidationMessage(format!("schema title-missing {stem}")));
+            }
+            for forbidden_key in forbidden_frontmatter_keys(&task) {
                 messages.push(ValidationMessage(format!(
-                    "schema title-missing {task_ref}"
+                    "schema forbidden-key {stem} {forbidden_key}"
                 )));
             }
         }
@@ -847,16 +1218,17 @@ impl GitRepository {
         messages: &mut Vec<ValidationMessage>,
     ) -> Result<(), Error> {
         for task_ref in task_refs {
-            if task_ref.starts_with("doing/") {
+            if task_ref.starts_with("in-progress/") {
                 continue;
             }
             let path = self.tasks_dir().join(task_ref);
             let task = fs::read_to_string(&path)?;
-            let repaired = remove_markdown_section(&task, "Claims");
+            let repaired = remove_frontmatter_claim(&task)?;
             if repaired != task {
                 fs::write(path, repaired)?;
                 messages.push(ValidationMessage(format!(
-                    "fixed misplaced-claim {task_ref}"
+                    "fixed misplaced-claim {}",
+                    task_stem(Path::new(task_ref))?
                 )));
             }
         }
@@ -870,43 +1242,52 @@ impl GitRepository {
     ) -> Result<(), Error> {
         for task_ref in task_refs {
             let task = fs::read_to_string(self.tasks_dir().join(task_ref))?;
-            for blocked_ref in markdown_section_items(&task, "Blocks") {
-                if !task_refs.contains(&blocked_ref) {
+            let task_stem = task_stem(Path::new(task_ref))?;
+            for blocked_ref in frontmatter_array(&task, "blocks")? {
+                let Some(blocked_stem) = resolve_task_ref_to_stem(task_refs, &blocked_ref)? else {
                     messages.push(ValidationMessage(format!(
-                        "dangling link {task_ref} blocks {blocked_ref}"
+                        "dangling link {task_stem} blocks {blocked_ref}"
                     )));
                     continue;
-                }
-                let blocked_task = fs::read_to_string(self.tasks_dir().join(&blocked_ref))?;
-                if !markdown_section_items(&blocked_task, "Blocked By").contains(task_ref) {
-                    self.update_task_section(
-                        &blocked_ref,
-                        "Blocked By",
-                        task_ref,
+                };
+                let blocked_path = self.resolve_task_ref(&blocked_stem)?;
+                let blocked_task = fs::read_to_string(self.tasks_dir().join(&blocked_path))?;
+                if !frontmatter_array(&blocked_task, "blocked_by")?
+                    .iter()
+                    .any(|candidate| resolves_to(candidate, &task_stem))
+                {
+                    self.update_task_frontmatter_array(
+                        &blocked_stem,
+                        "blocked_by",
+                        &task_stem,
                         SectionOperation::Add,
                     )?;
                     messages.push(ValidationMessage(format!(
-                        "fixed reciprocal-link {blocked_ref} blocked-by {task_ref}"
+                        "fixed reciprocal-link {blocked_stem} blocked-by {task_stem}"
                     )));
                 }
             }
-            for blocker_ref in markdown_section_items(&task, "Blocked By") {
-                if !task_refs.contains(&blocker_ref) {
+            for blocker_ref in frontmatter_array(&task, "blocked_by")? {
+                let Some(blocker_stem) = resolve_task_ref_to_stem(task_refs, &blocker_ref)? else {
                     messages.push(ValidationMessage(format!(
-                        "dangling link {task_ref} blocked-by {blocker_ref}"
+                        "dangling link {task_stem} blocked-by {blocker_ref}"
                     )));
                     continue;
-                }
-                let blocker_task = fs::read_to_string(self.tasks_dir().join(&blocker_ref))?;
-                if !markdown_section_items(&blocker_task, "Blocks").contains(task_ref) {
-                    self.update_task_section(
-                        &blocker_ref,
-                        "Blocks",
-                        task_ref,
+                };
+                let blocker_path = self.resolve_task_ref(&blocker_stem)?;
+                let blocker_task = fs::read_to_string(self.tasks_dir().join(&blocker_path))?;
+                if !frontmatter_array(&blocker_task, "blocks")?
+                    .iter()
+                    .any(|candidate| resolves_to(candidate, &task_stem))
+                {
+                    self.update_task_frontmatter_array(
+                        &blocker_stem,
+                        "blocks",
+                        &task_stem,
                         SectionOperation::Add,
                     )?;
                     messages.push(ValidationMessage(format!(
-                        "fixed reciprocal-link {blocker_ref} blocks {task_ref}"
+                        "fixed reciprocal-link {blocker_stem} blocks {task_stem}"
                     )));
                 }
             }
@@ -924,10 +1305,16 @@ impl GitRepository {
                 .iter()
                 .map(|task_ref| {
                     let task = fs::read_to_string(self.tasks_dir().join(task_ref))?;
-                    Ok(TaskDependencies::new(
-                        task_ref,
-                        markdown_section_items(&task, "Blocks"),
-                    ))
+                    let task_stem = task_stem(Path::new(task_ref))?;
+                    let blocks = frontmatter_array(&task, "blocks")?
+                        .into_iter()
+                        .filter_map(|blocked_ref| {
+                            resolve_task_ref_to_stem(task_refs, &blocked_ref)
+                                .ok()
+                                .flatten()
+                        })
+                        .collect::<Vec<_>>();
+                    Ok(TaskDependencies::new(task_stem, blocks))
                 })
                 .collect::<Result<Vec<_>, Error>>()?,
         );
@@ -940,24 +1327,15 @@ impl GitRepository {
         task_refs: &[String],
         messages: &mut Vec<ValidationMessage>,
     ) -> Result<(), Error> {
-        let graph = DependencyGraph::from_tasks(
-            task_refs
-                .iter()
-                .map(|task_ref| {
-                    let task = fs::read_to_string(self.tasks_dir().join(task_ref))?;
-                    Ok(TaskDependencies::new(
-                        task_ref,
-                        subtask_refs(&task, task_refs),
-                    ))
-                })
-                .collect::<Result<Vec<_>, Error>>()?,
-        );
-        messages.extend(
-            graph
-                .cycle_messages_with_label("subtask")
-                .into_iter()
-                .map(ValidationMessage),
-        );
+        for task_ref in task_refs {
+            let task = fs::read_to_string(self.tasks_dir().join(task_ref))?;
+            let stem = task_stem(Path::new(task_ref))?;
+            messages.extend(
+                subtask_cycle_messages(&stem, &task)
+                    .into_iter()
+                    .map(ValidationMessage),
+            );
+        }
         Ok(())
     }
 
@@ -966,8 +1344,16 @@ impl GitRepository {
         task_refs: &[String],
         messages: &mut Vec<ValidationMessage>,
     ) -> Result<(), Error> {
-        let reconciliation =
-            OrderReconciliation::reconcile(self.order_entries()?, task_refs.to_vec());
+        let open_tasks = task_refs
+            .iter()
+            .filter(|task_ref| {
+                OPEN_STATUS_DIRS
+                    .iter()
+                    .any(|status| task_ref.starts_with(&format!("{status}/")))
+            })
+            .map(|task_ref| task_stem(Path::new(task_ref)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let reconciliation = OrderReconciliation::reconcile(self.order_entries()?, open_tasks);
         messages.extend(
             reconciliation
                 .messages()
@@ -984,13 +1370,12 @@ impl GitRepository {
         if !tasks_dir.exists() {
             return Ok(refs);
         }
-        for status in fs::read_dir(&tasks_dir)? {
-            let status = status?;
-            if !status.file_type()?.is_dir() {
+        for status_name in STATUS_DIRS {
+            let status_dir = tasks_dir.join(status_name);
+            if !status_dir.is_dir() {
                 continue;
             }
-            let status_name = status.file_name().to_string_lossy().into_owned();
-            for task in fs::read_dir(status.path())? {
+            for task in fs::read_dir(status_dir)? {
                 let task = task?;
                 if task.file_type()?.is_file()
                     && task
@@ -1010,31 +1395,41 @@ impl GitRepository {
     }
 
     fn resolve_task_ref(&self, task_ref: &str) -> Result<PathBuf, Error> {
-        let path = parse_safe_relative_path(task_ref, "task")?;
-        match path.components().count() {
-            1 => {
-                let file_name = path_to_entry(&path)?;
-                let mut matches = self
-                    .task_file_refs()?
-                    .into_iter()
-                    .filter(|candidate| {
-                        Path::new(candidate)
-                            .file_name()
-                            .is_some_and(|candidate_file| candidate_file == file_name.as_str())
+        if task_ref.contains('/') || task_ref.ends_with(".md") || task_ref.trim().is_empty() {
+            return Err(Error::Parse(format!("invalid_task_ref ref={task_ref}")));
+        }
+        let mut matches = self
+            .task_file_refs()?
+            .into_iter()
+            .filter(|candidate| {
+                let stem = candidate.trim_end_matches(".md");
+                let file_stem = Path::new(candidate)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default();
+                let id = file_stem
+                    .split_once('-')
+                    .and_then(|(date, rest)| {
+                        rest.split_once('-')
+                            .map(|(code, _nickname)| format!("{date}-{code}"))
                     })
-                    .collect::<Vec<_>>();
-                matches.sort();
-                match matches.as_slice() {
-                    [resolved] => Ok(PathBuf::from(resolved)),
-                    [] => Err(Error::Parse(format!("task_ref_missing ref={task_ref}"))),
-                    _ => Err(Error::Parse(format!(
-                        "ambiguous_task_ref ref={task_ref} matches={}",
-                        matches.join(",")
-                    ))),
-                }
-            }
-            2 => Ok(path),
-            _ => Err(Error::Parse(format!("invalid_task_ref ref={task_ref}"))),
+                    .unwrap_or_default();
+                let nickname = file_stem
+                    .split_once('-')
+                    .and_then(|(_date, rest)| rest.split_once('-'))
+                    .map(|(_code, nickname)| nickname)
+                    .unwrap_or_default();
+                stem == task_ref || file_stem == task_ref || id == task_ref || nickname == task_ref
+            })
+            .collect::<Vec<_>>();
+        matches.sort();
+        match matches.as_slice() {
+            [resolved] => Ok(PathBuf::from(resolved)),
+            [] => Err(Error::Parse(format!("task_ref_missing ref={task_ref}"))),
+            _ => Err(Error::Parse(format!(
+                "ambiguous_task_ref ref={task_ref} matches={}",
+                matches.join(",")
+            ))),
         }
     }
 
@@ -1046,8 +1441,14 @@ impl GitRepository {
 
         fs::read_to_string(order_path)?
             .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| path_to_entry(&parse_task_ref(line)?))
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                if line.contains('/') || line.ends_with(".md") {
+                    return Err(Error::Parse(format!("invalid_order_entry ref={line}")));
+                }
+                Ok(line.to_string())
+            })
             .collect::<Result<Vec<_>, Error>>()
     }
 
@@ -1063,7 +1464,9 @@ impl GitRepository {
     }
 
     fn tasks_dir(&self) -> PathBuf {
-        self.root.join(".tasks")
+        self.tasks_dir
+            .clone()
+            .expect("task operations require a materialized Git tree workspace")
     }
 
     fn acquire_lock(&self) -> Result<TiberLock, Error> {
@@ -1162,17 +1565,282 @@ impl Drop for TiberLock {
     }
 }
 
+struct TaskWorkspace {
+    path: PathBuf,
+}
+
+impl TaskWorkspace {
+    fn create() -> Result<Self, Error> {
+        static TASK_WORKSPACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let sequence = TASK_WORKSPACE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "tiber-task-tree-{}-{unique}-{sequence}",
+            std::process::id()
+        ));
+        fs::create_dir(&path)?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TaskWorkspace {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
 #[derive(Clone, Copy)]
 enum SectionOperation {
     Add,
     Remove,
 }
 
+enum ChecklistOperation {
+    Set(bool),
+    Remove,
+}
+
 fn parse_title(task: &str) -> Result<String, Error> {
+    if let Some(frontmatter) = task.strip_prefix("---\n") {
+        for line in frontmatter.lines() {
+            if line == "---" {
+                break;
+            }
+            if let Some(title) = line.strip_prefix("title: ") {
+                let title = title.trim();
+                if !title.is_empty() {
+                    return Ok(title.to_string());
+                }
+            }
+        }
+    }
     task.lines()
         .find_map(|line| line.strip_prefix("# "))
         .map(str::to_string)
         .ok_or_else(|| Error::Parse("task_title_missing=true".to_string()))
+}
+
+fn frontmatter(document: &str) -> Result<&str, Error> {
+    let Some(rest) = document.strip_prefix("---\n") else {
+        return Err(Error::Parse("frontmatter_missing=true".to_string()));
+    };
+    rest.split_once("\n---\n")
+        .map(|(frontmatter, _body)| frontmatter)
+        .ok_or_else(|| Error::Parse("frontmatter_unclosed=true".to_string()))
+}
+
+fn frontmatter_array(document: &str, key: &str) -> Result<Vec<String>, Error> {
+    let prefix = format!("{key}: ");
+    for line in frontmatter(document)?.lines() {
+        if let Some(value) = line.strip_prefix(&prefix) {
+            return parse_inline_array(value);
+        }
+    }
+    Ok(Vec::new())
+}
+
+fn forbidden_frontmatter_keys(document: &str) -> Vec<String> {
+    let forbidden = ["id", "nickname", "status", "created", "updated"];
+    let Ok(frontmatter) = frontmatter(document) else {
+        return Vec::new();
+    };
+    frontmatter
+        .lines()
+        .filter_map(|line| line.split_once(':').map(|(key, _value)| key.trim()))
+        .filter(|key| forbidden.contains(key))
+        .map(str::to_string)
+        .collect()
+}
+
+fn remove_frontmatter_claim(document: &str) -> Result<String, Error> {
+    let Some(rest) = document.strip_prefix("---\n") else {
+        return Ok(document.to_string());
+    };
+    let Some((frontmatter, body)) = rest.split_once("\n---\n") else {
+        return Ok(document.to_string());
+    };
+    let mut lines = Vec::new();
+    let mut skipping_claim = false;
+    let mut removed = false;
+    for line in frontmatter.lines() {
+        if line == "claim:" {
+            skipping_claim = true;
+            removed = true;
+            continue;
+        }
+        if skipping_claim {
+            if line.starts_with(' ') || line.starts_with('\t') || line.trim().is_empty() {
+                continue;
+            }
+            skipping_claim = false;
+        }
+        lines.push(line.to_string());
+    }
+    if removed {
+        Ok(format!("---\n{}\n---\n{body}", lines.join("\n")))
+    } else {
+        Ok(document.to_string())
+    }
+}
+
+fn upsert_frontmatter_claim(document: &str) -> Result<String, Error> {
+    let document = remove_frontmatter_claim(document)?;
+    let Some(rest) = document.strip_prefix("---\n") else {
+        return Err(Error::Parse("frontmatter_missing=true".to_string()));
+    };
+    let Some((frontmatter, body)) = rest.split_once("\n---\n") else {
+        return Err(Error::Parse("frontmatter_unclosed=true".to_string()));
+    };
+    let mut frontmatter = frontmatter.to_string();
+    if !frontmatter.is_empty() && !frontmatter.ends_with('\n') {
+        frontmatter.push('\n');
+    }
+    frontmatter.push_str("claim:\n");
+    frontmatter.push_str(&format!("  host: {}\n", claim_host()));
+    frontmatter.push_str(&format!("  session: {}\n", claim_session()));
+    Ok(format!("---\n{frontmatter}---\n{body}"))
+}
+
+fn claim_host() -> String {
+    std::env::var("TIBER_CLAIM_HOST")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .map(|value| frontmatter_scalar_value(&value))
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+fn claim_session() -> String {
+    std::env::var("TIBER_CLAIM_SESSION")
+        .or_else(|_| std::env::var("CODEX_SESSION_ID"))
+        .or_else(|_| std::env::var("CLAUDE_SESSION_ID"))
+        .map(|value| frontmatter_scalar_value(&value))
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+fn frontmatter_scalar_value(value: &str) -> String {
+    let sanitized = value
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                '-'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn new_task_document(title: &str) -> String {
+    format!(
+        "---\ntitle: {title}\nblocked_by: []\nblocks: []\ntags: []\n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
+    )
+}
+
+fn task_stem(task_path: &Path) -> Result<String, Error> {
+    task_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(str::to_string)
+        .ok_or_else(|| Error::Parse("task_stem_missing=true".to_string()))
+}
+
+fn is_open_status(status: &str) -> bool {
+    OPEN_STATUS_DIRS.contains(&status)
+}
+
+fn is_course_task_path(path: &str) -> bool {
+    let path = Path::new(path);
+    let mut components = path.components();
+    let Some(status) = components
+        .next()
+        .and_then(|component| component.as_os_str().to_str())
+    else {
+        return false;
+    };
+    STATUS_DIRS.contains(&status)
+        && components.next().is_some()
+        && components.next().is_none()
+        && path.extension().is_some_and(|extension| extension == "md")
+}
+
+fn stem_parts(stem: &str) -> Option<(&str, &str)> {
+    let (date, rest) = stem.split_once('-')?;
+    let (code, nickname) = rest.split_once('-')?;
+    if date.len() == 8 && code.len() == 4 && !nickname.is_empty() {
+        Some((&stem[..13], nickname))
+    } else {
+        None
+    }
+}
+
+fn resolves_to(candidate: &str, target_stem: &str) -> bool {
+    if candidate == target_stem {
+        return true;
+    }
+    let Some((id, nickname)) = stem_parts(target_stem) else {
+        return false;
+    };
+    candidate == id || candidate == nickname
+}
+
+fn resolve_task_ref_to_stem(task_refs: &[String], task_ref: &str) -> Result<Option<String>, Error> {
+    let mut matches = task_refs
+        .iter()
+        .filter_map(|candidate| task_stem(Path::new(candidate)).ok())
+        .filter(|stem| resolves_to(task_ref, stem))
+        .collect::<Vec<_>>();
+    matches.sort();
+    matches.dedup();
+    match matches.as_slice() {
+        [stem] => Ok(Some(stem.clone())),
+        [] => Ok(None),
+        _ => Err(Error::Parse(format!(
+            "ambiguous_task_ref ref={task_ref} matches={}",
+            matches.join(",")
+        ))),
+    }
+}
+
+fn new_task_id() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let days = (now.as_secs() / 86_400) as i64;
+    let (year, month, day) = civil_from_days(days);
+    let mut entropy = now.as_nanos() ^ u128::from(std::process::id());
+    let mut code = String::new();
+    for _ in 0..4 {
+        let index = (entropy % TASK_ID_ALPHABET.len() as u128) as usize;
+        code.push(TASK_ID_ALPHABET[index] as char);
+        entropy /= TASK_ID_ALPHABET.len() as u128;
+    }
+    format!("{year:04}{month:02}{day:02}-{code}")
+}
+
+fn civil_from_days(days_since_epoch: i64) -> (i32, u32, u32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if month <= 2 { 1 } else { 0 };
+    (year as i32, month as u32, day as u32)
 }
 
 fn update_markdown_section(
@@ -1198,7 +1866,7 @@ fn update_markdown_section(
         sections.push(before);
     }
     if !section.is_empty() {
-        sections.push(format!("{heading_line}\n{}", section.join("\n")));
+        sections.push(format!("{heading_line}\n\n{}", section.join("\n")));
     }
     let after = after.join("\n");
     if !after.is_empty() {
@@ -1231,25 +1899,91 @@ fn markdown_section_items(document: &str, heading: &str) -> Vec<String> {
     items
 }
 
-fn subtask_refs(document: &str, task_refs: &[String]) -> Vec<String> {
-    markdown_section_items(document, "Subtasks")
-        .into_iter()
-        .filter_map(|item| {
-            item.strip_prefix("[ ] ")
-                .or_else(|| item.strip_prefix("[x] "))
-                .map(str::to_string)
-        })
-        .filter(|item| task_refs.contains(item))
-        .collect()
+fn update_frontmatter_array(
+    document: &str,
+    key: &str,
+    item: &str,
+    operation: SectionOperation,
+) -> Result<String, Error> {
+    let Some(rest) = document.strip_prefix("---\n") else {
+        return Err(Error::Parse("frontmatter_missing=true".to_string()));
+    };
+    let Some((frontmatter, body)) = rest.split_once("\n---\n") else {
+        return Err(Error::Parse("frontmatter_unclosed=true".to_string()));
+    };
+    let prefix = format!("{key}: ");
+    let mut found = false;
+    let mut lines = Vec::new();
+    for line in frontmatter.lines() {
+        if let Some(raw_array) = line.strip_prefix(&prefix) {
+            found = true;
+            let mut values = parse_inline_array(raw_array)?;
+            values.retain(|value| value != item);
+            if matches!(operation, SectionOperation::Add) {
+                values.push(item.to_string());
+                values.sort();
+                values.dedup();
+            }
+            lines.push(format!("{key}: [{}]", values.join(", ")));
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if !found {
+        return Err(Error::Parse(format!("frontmatter_key_missing key={key}")));
+    }
+    Ok(format!("---\n{}\n---\n{body}", lines.join("\n")))
 }
 
-fn remove_markdown_section(document: &str, heading: &str) -> String {
-    let (mut before, _, mut after, found) = split_markdown_section(document, heading);
+fn update_frontmatter_scalar(document: &str, key: &str, value: &str) -> Result<String, Error> {
+    update_frontmatter_line(document, key, &format!("{key}: {value}"))
+}
 
+fn update_frontmatter_array_values(
+    document: &str,
+    key: &str,
+    values: Vec<String>,
+) -> Result<String, Error> {
+    update_frontmatter_line(document, key, &format!("{key}: [{}]", values.join(", ")))
+}
+
+fn update_frontmatter_line(document: &str, key: &str, replacement: &str) -> Result<String, Error> {
+    let Some(rest) = document.strip_prefix("---\n") else {
+        return Err(Error::Parse("frontmatter_missing=true".to_string()));
+    };
+    let Some((frontmatter, body)) = rest.split_once("\n---\n") else {
+        return Err(Error::Parse("frontmatter_unclosed=true".to_string()));
+    };
+    let prefix = format!("{key}:");
+    let mut found = false;
+    let lines = frontmatter
+        .lines()
+        .map(|line| {
+            if line.starts_with(&prefix) {
+                found = true;
+                replacement.to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>();
     if !found {
-        return document.to_string();
+        return Err(Error::Parse(format!("frontmatter_key_missing key={key}")));
     }
+    Ok(format!("---\n{}\n---\n{body}", lines.join("\n")))
+}
 
+fn replace_markdown_section_body(
+    document: &str,
+    heading: &str,
+    body: &str,
+) -> Result<String, Error> {
+    let body = parse_nonempty_text(body, "section")?;
+    let heading_line = format!("## {heading}");
+    let (mut before, _section, mut after, found) = split_markdown_section(document, heading);
+    if !found {
+        return Err(Error::Parse(format!("section_missing heading={heading}")));
+    }
     trim_blank_edges(&mut before);
     trim_blank_edges(&mut after);
     let mut sections = Vec::new();
@@ -1257,11 +1991,152 @@ fn remove_markdown_section(document: &str, heading: &str) -> String {
     if !before.is_empty() {
         sections.push(before);
     }
+    sections.push(format!("{heading_line}\n\n{body}"));
     let after = after.join("\n");
     if !after.is_empty() {
         sections.push(after);
     }
-    format!("{}\n", sections.join("\n\n"))
+    Ok(format!("{}\n", sections.join("\n\n")))
+}
+
+fn update_checklist_item(
+    document: &str,
+    heading: &str,
+    target_index: usize,
+    operation: ChecklistOperation,
+) -> Result<String, Error> {
+    let heading_line = format!("## {heading}");
+    let (mut before, mut section, mut after, found) = split_markdown_section(document, heading);
+    if !found {
+        return Err(Error::Parse(format!("section_missing heading={heading}")));
+    }
+    let mut current_index = 0;
+    let mut changed = false;
+    let mut updated = Vec::new();
+    for line in section.drain(..) {
+        let item = line
+            .strip_prefix("- [ ] ")
+            .or_else(|| line.strip_prefix("- [x] "));
+        if let Some(item) = item {
+            current_index += 1;
+            if current_index == target_index {
+                changed = true;
+                match operation {
+                    ChecklistOperation::Set(checked) => {
+                        updated.push(format!("- [{}] {item}", if checked { "x" } else { " " }));
+                    }
+                    ChecklistOperation::Remove => {}
+                }
+                continue;
+            }
+        }
+        updated.push(line);
+    }
+    if !changed {
+        return Err(Error::Parse(format!(
+            "checklist_item_missing index={target_index}"
+        )));
+    }
+    trim_blank_edges(&mut before);
+    trim_blank_edges(&mut after);
+    updated.retain(|line| !line.trim().is_empty());
+    let mut sections = Vec::new();
+    let before = before.join("\n");
+    if !before.is_empty() {
+        sections.push(before);
+    }
+    if updated.is_empty() {
+        sections.push(heading_line);
+    } else {
+        sections.push(format!("{heading_line}\n\n{}", updated.join("\n")));
+    }
+    let after = after.join("\n");
+    if !after.is_empty() {
+        sections.push(after);
+    }
+    Ok(format!("{}\n", sections.join("\n\n")))
+}
+
+fn parse_inline_array(value: &str) -> Result<Vec<String>, Error> {
+    let value = value.trim();
+    let Some(inner) = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+    else {
+        return Err(Error::Parse(format!("invalid_inline_array value={value}")));
+    };
+    if inner.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(inner
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+fn subtask_cycle_messages(task_stem: &str, document: &str) -> Vec<String> {
+    let dependencies = parse_subtask_dependencies(document);
+    let graph = DependencyGraph::from_tasks(
+        dependencies
+            .iter()
+            .map(|(subtask_id, after)| TaskDependencies::new(subtask_id.clone(), after.clone()))
+            .collect(),
+    );
+    graph
+        .cycle_messages_with_label("subtask")
+        .into_iter()
+        .map(|message| {
+            message
+                .strip_prefix("cycle subtask ")
+                .map(|cycle| format!("cycle subtask {task_stem}:{cycle}"))
+                .unwrap_or(message)
+        })
+        .collect()
+}
+
+fn parse_subtask_dependencies(document: &str) -> Vec<(String, Vec<String>)> {
+    markdown_section_items(document, "Subtasks")
+        .into_iter()
+        .filter_map(|item| {
+            let item = item
+                .strip_prefix("[ ] ")
+                .or_else(|| item.strip_prefix("[x] "))?;
+            let id_start = item.find("(s")?;
+            let after_id_start = id_start + 1;
+            let after_id_end = item[after_id_start..].find(')')? + after_id_start;
+            let subtask_id = item[after_id_start..after_id_end].to_string();
+            let after = item
+                .find("after:")
+                .map(|after_index| {
+                    item[after_index + "after:".len()..]
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            Some((subtask_id, after))
+        })
+        .collect()
+}
+
+fn next_subtask_id(document: &str) -> String {
+    let next = document
+        .lines()
+        .filter_map(|line| {
+            line.find("(s").and_then(|start| {
+                let rest = &line[start + 2..];
+                rest.find(')')
+                    .and_then(|end| rest[..end].parse::<usize>().ok())
+            })
+        })
+        .max()
+        .unwrap_or(0)
+        + 1;
+    format!("s{next}")
 }
 
 fn split_markdown_section(
@@ -1306,7 +2181,7 @@ fn closes_trailers(log: &str) -> Vec<String> {
 fn is_retryable_push_failure(error: &Error) -> bool {
     match error {
         Error::CommandFailed { args, stderr, .. } => {
-            args.first().is_some_and(|arg| arg == "push")
+            args.iter().any(|arg| arg == "push")
                 && (stderr.contains("non-fast-forward")
                     || stderr.contains("fetch first")
                     || stderr.contains("incorrect old value provided")
@@ -1324,18 +2199,19 @@ enum SectionSplit {
 
 fn update_subtask_check_state(
     document: &str,
-    target_index: usize,
+    target_ref: &str,
     checked: bool,
 ) -> Result<String, Error> {
-    let mut current_index = 0;
+    let target_marker = format!("({target_ref})");
+    let mut found = false;
     let mut lines = Vec::new();
     for line in document.lines() {
         let title = line
             .strip_prefix("- [ ] ")
             .or_else(|| line.strip_prefix("- [x] "));
         if let Some(title) = title {
-            current_index += 1;
-            if current_index == target_index {
+            if title.starts_with(&target_marker) {
+                found = true;
                 lines.push(format!("- [{}] {title}", if checked { "x" } else { " " }));
                 continue;
             }
@@ -1343,23 +2219,56 @@ fn update_subtask_check_state(
         lines.push(line.to_string());
     }
 
-    if current_index < target_index {
-        return Err(Error::Parse(format!(
-            "subtask_missing index={target_index}"
-        )));
+    if !found {
+        return Err(Error::Parse(format!("subtask_missing ref={target_ref}")));
     }
 
     Ok(format!("{}\n", lines.join("\n")))
 }
 
-fn parse_one_based_index(index: &str) -> Result<usize, Error> {
-    let index = index
+fn parse_subtask_ref(subtask_ref: &str) -> Result<String, Error> {
+    if let Some(number) = subtask_ref.strip_prefix('s') {
+        if !number.is_empty() && number.chars().all(|character| character.is_ascii_digit()) {
+            return Ok(subtask_ref.to_string());
+        }
+    }
+    let index = subtask_ref
         .parse::<usize>()
-        .map_err(|error| Error::Parse(format!("invalid_subtask_index source={error}")))?;
+        .map_err(|error| Error::Parse(format!("invalid_subtask_ref source={error}")))?;
     if index == 0 {
-        return Err(Error::Parse("invalid_subtask_index zero=true".to_string()));
+        return Err(Error::Parse("invalid_subtask_ref zero=true".to_string()));
+    }
+    Ok(format!("s{index}"))
+}
+
+fn parse_one_based_usize(input: &str, kind: &str) -> Result<usize, Error> {
+    let index = input
+        .parse::<usize>()
+        .map_err(|error| Error::Parse(format!("invalid_{kind}_index source={error}")))?;
+    if index == 0 {
+        return Err(Error::Parse(format!("invalid_{kind}_index zero=true")));
     }
     Ok(index)
+}
+
+fn parse_nonempty_text<'a>(input: &'a str, kind: &str) -> Result<&'a str, Error> {
+    let text = input.trim();
+    if text.is_empty() {
+        return Err(Error::Parse(format!("{kind}_empty=true")));
+    }
+    if text.chars().any(char::is_control) {
+        return Err(Error::Parse(format!("{kind}_invalid=true")));
+    }
+    Ok(text)
+}
+
+fn current_date_string() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let days = (now.as_secs() / 86_400) as i64;
+    let (year, month, day) = civil_from_days(days);
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 fn trim_blank_edges(lines: &mut Vec<String>) {
@@ -1369,14 +2278,6 @@ fn trim_blank_edges(lines: &mut Vec<String>) {
     while lines.first().is_some_and(|line| line.trim().is_empty()) {
         lines.remove(0);
     }
-}
-
-fn parse_task_ref(task_ref: &str) -> Result<PathBuf, Error> {
-    let path = parse_safe_relative_path(task_ref, "task")?;
-    if path.components().count() != 2 {
-        return Err(Error::Parse(format!("invalid_task_ref ref={task_ref}")));
-    }
-    Ok(path)
 }
 
 fn parse_safe_relative_path(path_ref: &str, kind: &str) -> Result<PathBuf, Error> {
@@ -1428,11 +2329,7 @@ fn collect_docs(root: &Path, directory: &Path, docs: &mut Vec<String>) -> Result
 }
 
 fn parse_status(status: &str) -> Result<&str, Error> {
-    if status.is_empty()
-        || status
-            .chars()
-            .any(|character| !(character.is_ascii_alphanumeric() || character == '-'))
-    {
+    if !STATUS_DIRS.contains(&status) {
         return Err(Error::Parse(format!("invalid_status status={status}")));
     }
     Ok(status)
@@ -1442,6 +2339,58 @@ fn path_to_entry(path: &Path) -> Result<String, Error> {
     path.to_str()
         .map(str::to_string)
         .ok_or_else(|| Error::Parse("path_utf8=false".to_string()))
+}
+
+fn expand_home(path: &Path) -> Result<PathBuf, Error> {
+    let path = path_to_entry(path)?;
+    if let Some(rest) = path.strip_prefix("~/") {
+        let home = std::env::var("HOME")
+            .map_err(|error| Error::Parse(format!("home_unavailable source={error}")))?;
+        Ok(PathBuf::from(home).join(rest))
+    } else {
+        Ok(PathBuf::from(path))
+    }
+}
+
+fn tiber_launcher_path() -> Result<PathBuf, Error> {
+    if let Ok(path) = std::env::var("TIBER_LAUNCHER_PATH") {
+        return Ok(PathBuf::from(path));
+    }
+
+    let current_exe = std::env::current_exe()?;
+    if current_exe
+        .components()
+        .any(|component| component.as_os_str() == "dist")
+    {
+        if let Some(plugin_root) = current_exe
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+        {
+            let launcher = plugin_root.join("bin").join("tiber");
+            if launcher.exists() {
+                return Ok(launcher);
+            }
+        }
+    }
+
+    let source_plugin_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .ok_or_else(|| Error::Parse("plugin_root_unavailable=true".to_string()))?;
+    Ok(source_plugin_root.join("bin").join("tiber"))
+}
+
+#[cfg(unix)]
+fn install_launcher(launcher: &Path, installed: &Path) -> Result<(), Error> {
+    create_symlink(launcher, installed)
+}
+
+#[cfg(not(unix))]
+fn install_launcher(launcher: &Path, installed: &Path) -> Result<(), Error> {
+    fs::copy(launcher, installed)?;
+    Ok(())
 }
 
 #[cfg(unix)]
