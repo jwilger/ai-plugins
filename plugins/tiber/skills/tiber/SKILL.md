@@ -10,6 +10,12 @@ Tiber state is Git-backed: an orphan `tasks` branch owns canonical
 `<worktree>/.tasks` data, while the source checkout exposes `.tasks` as a
 symlink into the local tiber workspace.
 
+## Tool selection
+
+- Check for an installed `tiber` MCP server before using CLI commands.
+- If the MCP tools are available, initialize the server with `tiber.init` only when setup is required, then use MCP tools for task reads and writes.
+- If MCP tools are unavailable or fail to expose the needed operation, fall back to the bundled `tiber` CLI.
+
 ## Operating rules
 
 - Do not mutate a repository merely because the plugin is installed or a session

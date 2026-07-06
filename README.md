@@ -22,7 +22,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.1.2   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                            | 0.1.0   |
 | [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, debugging, review handling, and skill authoring.                                          | 0.1.0   |
-| [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.1.0   |
+| [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.1.1   |
 
 ### Codex
 
@@ -35,7 +35,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                            | 0.1.0   |
 | [advisor](plugins/advisor/README.md)                                         | Read-only planning advisor for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                                                   | 0.1.0   |
 | [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, debugging, review handling, and skill authoring.                                          | 0.1.0   |
-| [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.1.0   |
+| [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.1.1   |
 
 > When a plugin is added under [`plugins/`](plugins/), add catalog rows only for
 > the harness marketplaces that list it. Codex-only plugins must not be added to
