@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tiber": {
+      "command": "./bin/tiber",
+      "args": ["mcp", "stdio"],
+      "description": "Tiber stdio MCP server for Git-backed task board reads and writes."
+    }
+  }
+}

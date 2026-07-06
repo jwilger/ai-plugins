@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "taskbranch": {
-      "command": "./bin/taskbranch",
-      "args": ["mcp", "stdio"],
-      "description": "Taskbranch stdio MCP server for Git-backed task board reads and writes."
-    }
-  }
-}

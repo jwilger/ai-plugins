@@ -50,10 +50,10 @@ setup() {
 }
 
 @test "eval runner passes case filter to Promptfoo CLI" {
-  run env EVAL_CASE_FILTER=taskbranch "$RUNNER" --dry-run
+  run env EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--filter-pattern taskbranch"* ]]
+  [[ "$output" == *"--filter-pattern tiber"* ]]
 }
 
 @test "generated eval config can filter providers" {
@@ -164,6 +164,35 @@ JSON
   [[ "$output" == *"Eval thresholds passed"* ]]
 }
 
+@test "eval threshold checker skips value gates when fixture marks them none" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": { "label": "codex-gpt-5.5-full-marketplace" },
+        "testCase": { "vars": { "case_id": "composition", "min_pass_rate": 1, "value_gate_mode": "none" } },
+        "gradingResult": { "pass": true, "score": 1 }
+      },
+      {
+        "provider": { "label": "codex-gpt-5.5-no-plugins" },
+        "testCase": { "vars": { "case_id": "composition", "min_pass_rate": 1, "value_gate_mode": "none" } },
+        "gradingResult": { "pass": true, "score": 1 }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Eval thresholds passed"* ]]
+}
+
 @test "eval runner exits successfully when promptfoo sample failures meet thresholds" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
@@ -230,12 +259,12 @@ cat evals/out/generated/runtime-options.json
 SH
   chmod +x "$fixture_bin/promptfoo"
 
-  run env PROMPTFOO_BIN="$fixture_bin/promptfoo" EVAL_CASE_FILTER=taskbranch "$RUNNER"
+  run env PROMPTFOO_BIN="$fixture_bin/promptfoo" EVAL_CASE_FILTER=tiber "$RUNNER"
 
   rm -rf "$fixture_bin"
   rm -f "$ROOT/evals/out/generated/runtime-options.json"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"caseFilter":"taskbranch"'* ]]
+  [[ "$output" == *'"caseFilter":"tiber"'* ]]
 }
 
 @test "eval runner fails when Codex marketplace has no plugin names" {

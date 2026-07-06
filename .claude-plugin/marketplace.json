@@ -56,9 +56,9 @@
       "keywords": ["tdd", "verification", "debugging", "code-review", "skills"]
     },
     {
-      "name": "taskbranch",
-      "source": "./plugins/taskbranch",
-      "description": "Git-backed task boards for coding agents with a taskbranch CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow.",
+      "name": "tiber",
+      "source": "./plugins/tiber",
+      "description": "Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow.",
       "version": "0.1.0",
       "category": "Developer Tools",
       "keywords": ["tasks", "git", "mcp", "dashboard", "planning"]

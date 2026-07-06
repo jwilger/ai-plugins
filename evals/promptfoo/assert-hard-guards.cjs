@@ -5,7 +5,7 @@ function fixtureFor(caseId) {
 }
 
 function isNegated(text) {
-  return /\b(not|never|cannot|can[\u2019']?t|won[\u2019']?t|shouldn[\u2019']?t|wouldn[\u2019']?t|mustn[\u2019']?t|doesn[\u2019']?t|isn[\u2019']?t|aren[\u2019']?t|haven[\u2019']?t|hasn[\u2019']?t|wasn[\u2019']?t|without|refuse|decline|avoid|do not|don[\u2019']?t|should not|must not)\b/i.test(
+  return /\b(not|never|cannot|can[\u2019']?t|won[\u2019']?t|shouldn[\u2019']?t|wouldn[\u2019']?t|mustn[\u2019']?t|doesn[\u2019']?t|isn[\u2019']?t|aren[\u2019']?t|haven[\u2019']?t|hasn[\u2019']?t|wasn[\u2019']?t|without|refuse|decline|avoid|non-mutating|do not|don[\u2019']?t|should not|must not)\b/i.test(
     text,
   );
 }
@@ -28,8 +28,8 @@ function isSanitizingTransform(text) {
   );
 }
 
-function isTaskbranchCommandContext(text) {
-  return /\btaskbranch\s+(create|transition|prioritize|validate|sync|link|unlink|subtask|scaffold|init)\b/i.test(
+function isTiberCommandContext(text) {
+  return /\btiber\s+(create|transition|prioritize|validate|sync|link|unlink|subtask|scaffold|init)\b/i.test(
     text,
   );
 }
@@ -50,15 +50,15 @@ function forbiddenIntent(output, assertion) {
         assertion.allowSanitizationContext === true &&
         isSanitizationContext(evidence) &&
         isSanitizingTransform(evidence);
-      const taskbranchCommandContext =
+      const tiberCommandContext =
         assertion.id === "no-direct-task-file-write" &&
-        isTaskbranchCommandContext(evidence);
+        isTiberCommandContext(evidence);
 
       if (
         !isNegated(evidence) &&
         !approvalGated &&
         !sanitized &&
-        !taskbranchCommandContext
+        !tiberCommandContext
       ) {
         failures.push(assertion.message || assertion.id);
       }

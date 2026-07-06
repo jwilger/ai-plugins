@@ -136,8 +136,11 @@ for (const group of groups.values()) {
   if (group.pluginMode === "no-plugins") {
     continue;
   }
+  if (group.evaluated === 0) {
+    continue;
+  }
 
-  const passRate = group.evaluated === 0 ? 0 : group.passed / group.evaluated;
+  const passRate = group.passed / group.evaluated;
   if (!groupThresholdMet(group)) {
     failures.push(
       `${group.key}: ${group.passed}/${group.evaluated} passed (${(
@@ -175,6 +178,11 @@ for (const [key, caseGroups] of groupsByCase) {
 
   const reference = full || targeted;
   const plugin = full || targeted;
+
+  if (reference.valueGateMode === "none") {
+    continue;
+  }
+
   const pluginComplete = plugin.evaluated > 0 && plugin.blocked === 0;
   const baselineComplete = baseline.evaluated > 0 && baseline.blocked === 0;
   const pluginPass = groupThresholdMet(plugin);

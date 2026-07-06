@@ -1,0 +1,38 @@
+{
+  "name": "tiber",
+  "version": "0.1.0",
+  "description": "Git-backed task boards for coding agents: shared cross-worktree task tracking, tiber CLI, stdio MCP, dry-run-first scaffold previews, validation, and read-only dashboard workflows.",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "tasks",
+    "git",
+    "mcp",
+    "dashboard",
+    "planning",
+    "worktrees",
+    "task-tracking",
+    "scaffold",
+    "validation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Tiber",
+    "shortDescription": "Git-backed shared task tracking for agent workflows.",
+    "longDescription": "Use Tiber when a user asks for repository task tracking, shared agent task state across worktrees, task creation, task ordering, validation, sync conflict handling, setup/scaffold guidance, or no-follow-up setup sequencing. It provides a tiber CLI, stdio MCP entry point, dry-run-first repo scaffolding, and source-included Rust implementation for deterministic task creation, ordering, validation, and read-only dashboard workflows. Plugin install and session start are non-mutating. For repo integration files, even when the user asks for no follow-up questions, run or recommend only tiber scaffold repo --dry-run, preview .gitignore, hook/workflow snippets, and optional just show-tasks changes, then stop until explicit approval of that preview.",
+    "developerName": "John Wilger",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
+    "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
+    "defaultPrompt": [
+      "Track repository tasks across worktrees with tiber.",
+      "Set up tiber in this repository with a dry-run scaffold preview first.",
+      "Use tiber to create, order, and validate repository tasks."
+    ]
+  }
+}

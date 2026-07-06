@@ -7,38 +7,38 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace taskbranch-rust taskbranch-dashboard-smoke taskbranch-mutants taskbranch-release-manifest bats
+ci: validate-marketplace tiber-rust tiber-dashboard-smoke tiber-mutants tiber-release-manifest bats
 
-# Rust gates for the taskbranch plugin workspace.
-taskbranch-rust:
-    cargo fmt --manifest-path plugins/taskbranch/rust/Cargo.toml --all --check
-    cargo clippy --manifest-path plugins/taskbranch/rust/Cargo.toml --all-targets -- -D warnings
-    cargo test --manifest-path plugins/taskbranch/rust/Cargo.toml
+# Rust gates for the tiber plugin workspace.
+tiber-rust:
+    cargo fmt --manifest-path plugins/tiber/rust/Cargo.toml --all --check
+    cargo clippy --manifest-path plugins/tiber/rust/Cargo.toml --all-targets -- -D warnings
+    cargo test --manifest-path plugins/tiber/rust/Cargo.toml
 
-# Browser smoke coverage for the read-only taskbranch dashboard.
-taskbranch-dashboard-smoke:
+# Browser smoke coverage for the read-only tiber dashboard.
+tiber-dashboard-smoke:
     scripts/evals/ensure-node-deps.sh
-    node scripts/taskbranch/dashboard-smoke.mjs
+    node scripts/tiber/dashboard-smoke.mjs
 
-# Build the taskbranch release binary for the current host target.
-taskbranch-release-host:
-    scripts/build-taskbranch-host-release.sh
+# Build the tiber release binary for the current host target.
+tiber-release-host:
+    scripts/build-tiber-host-release.sh
 
-# Build every bundled taskbranch v1 release target.
-taskbranch-release-all:
-    scripts/build-taskbranch-release-all.sh
+# Build every bundled tiber v1 release target.
+tiber-release-all:
+    scripts/build-tiber-release-all.sh
 
-# Mutation gate for the pure taskbranch core.
-taskbranch-mutants:
-    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/taskbranch-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/taskbranch-mutants-target" cargo mutants --manifest-path plugins/taskbranch/rust/Cargo.toml --package taskbranch-core --test-workspace true
+# Mutation gate for the pure tiber core.
+tiber-mutants:
+    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --manifest-path plugins/tiber/rust/Cargo.toml --package tiber-core --test-workspace true
 
-# Ensure the taskbranch release plan names every bundled v1 binary target.
-taskbranch-release-manifest:
-    bash scripts/check-taskbranch-release-manifest.sh
+# Ensure the tiber release plan names every bundled v1 binary target.
+tiber-release-manifest:
+    bash scripts/check-tiber-release-manifest.sh
 
-# Require every listed taskbranch release binary to be present and executable.
-taskbranch-release-complete:
-    bash scripts/check-taskbranch-release-complete.sh
+# Require every listed tiber release binary to be present and executable.
+tiber-release-complete:
+    bash scripts/check-tiber-release-complete.sh
 
 # Run provider-backed promptfoo evals locally, upload/share the latest result,
 # and print the share URL. This sends eval data to the configured promptfoo

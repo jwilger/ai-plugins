@@ -160,7 +160,7 @@ NODE
 }
 
 @test "generated behavior config uses runtime loader when case filter is set" {
-  run env EVAL_CASE_FILTER=taskbranch node "$GENERATOR" --suite behavior --stdout
+  run env EVAL_CASE_FILTER=tiber node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
@@ -280,7 +280,7 @@ const namesOnly = [
   'babysit-pr',
   'engineering-standards',
   'eval-case-reporter',
-  'taskbranch',
+  'tiber',
   'worktrees',
   'development-discipline',
 ].join('\n');
@@ -305,7 +305,7 @@ const natural = [
   'Babysit PR: Babysit PR',
   'Engineering Standards: Engineering Standards',
   'Eval Case Reporter: Submit Eval Case',
-  'Taskbranch: Taskbranch',
+  'Tiber: Tiber',
   'Worktrees: Setup',
   'Development Discipline: Test Driven Development',
 ].join('\n');
