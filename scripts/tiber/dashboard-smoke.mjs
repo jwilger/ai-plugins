@@ -222,7 +222,12 @@ async function assertText(locator, expected) {
   const deadline = Date.now() + timeoutMs;
   let text = "";
   while (Date.now() < deadline) {
-    text = (await locator.textContent({ timeout: 1000 })) ?? "";
+    try {
+      text = (await locator.textContent({ timeout: 1000 })) ?? "";
+    } catch (_error) {
+      await new Promise((resolveSleep) => setTimeout(resolveSleep, 100));
+      continue;
+    }
     if (text.includes(expected)) {
       return;
     }

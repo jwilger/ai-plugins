@@ -228,6 +228,45 @@ fn transition_sync_does_not_resurrect_stale_remote_status_path() {
 }
 
 #[test]
+fn sync_conflicts_when_remote_and_local_move_same_task_to_different_statuses() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let remote_mover = clone_repo(&origin);
+    let local_mover = clone_repo(&origin);
+    assert_success(remote_mover.tiber(["init"]));
+    assert_success(remote_mover.tiber(["create", "Divergent move task"]));
+    let stem = task_stem(&remote_mover, "backlog", "divergent-move-task");
+    local_mover.git(["fetch", "origin", "tasks:tasks"]);
+
+    assert_success(remote_mover.tiber(["transition", &stem, "in-progress"]));
+    let local_contents = local_mover.task_file("backlog", &stem);
+    local_mover.insert_task_file("done", &stem, &local_contents);
+    local_mover.remove_tasks_tree_file(&format!("backlog/{stem}.md"));
+
+    let sync = local_mover.tiber(["sync"]);
+
+    assert!(
+        !sync.status.success(),
+        "sync should fail instead of silently choosing one divergent status move"
+    );
+    let stderr = String::from_utf8(sync.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains(&format!("sync_conflict path=in-progress/{stem}.md")));
+}
+
+#[test]
 fn structured_update_syncs_existing_remote_task_without_self_conflict() {
     let origin = TempRepo::new();
     origin.git(["init", "--bare"]);

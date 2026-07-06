@@ -99,14 +99,8 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             tiber_git::unlink_blocks(from_ref, to_ref)?;
             Ok(())
         }
-        [command, action, task_ref, title] if command == "subtask" && action == "add" => {
-            tiber_git::add_subtask(task_ref, title, &[])?;
-            Ok(())
-        }
-        [command, action, task_ref, title, flag, after]
-            if command == "subtask" && action == "add" && flag == "--after" =>
-        {
-            let after_refs = parse_comma_list(after);
+        [command, action, task_ref, title, rest @ ..] if command == "subtask" && action == "add" => {
+            let after_refs = parse_subtask_add_args(rest)?;
             tiber_git::add_subtask(task_ref, title, &after_refs)?;
             Ok(())
         }
@@ -188,6 +182,16 @@ fn parse_comma_list(value: &str) -> Vec<String> {
         .filter(|item| !item.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+fn parse_subtask_add_args(args: &[String]) -> Result<Vec<String>, tiber_git::Error> {
+    match args {
+        [] => Ok(Vec::new()),
+        [flag, after] if flag == "--after" => Ok(parse_comma_list(after)),
+        _ => Err(tiber_git::Error::Usage(
+            "unknown subtask add arguments".to_string(),
+        )),
+    }
 }
 
 struct UpdateArgs {

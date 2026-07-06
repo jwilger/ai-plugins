@@ -38,3 +38,23 @@ fn subtask_add_check_and_uncheck_update_task_checklist() {
         .expect("task should be utf8")
         .contains("## Subtasks\n\n- [ ] (s1) Write tests\n"));
 }
+
+#[test]
+fn subtask_check_only_updates_subtasks_section() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Scoped subtask check"]));
+    assert_success(repo.tiber(["subtask", "add", "scoped-subtask-check", "Real subtask"]));
+    let task = support::task_stem(&repo, "backlog", "scoped-subtask-check");
+    let contents = repo.task_file("backlog", &task).replace(
+        "## Acceptance criteria\n\n",
+        "## Acceptance criteria\n\n- [ ] (s1) Acceptance item with matching marker\n\n",
+    );
+    repo.insert_task_file("backlog", &task, &contents);
+
+    assert_success(repo.tiber(["subtask", "check", "scoped-subtask-check", "s1"]));
+
+    let updated = repo.task_file("backlog", &task);
+    assert!(updated.contains("## Acceptance criteria\n\n- [ ] (s1) Acceptance item"));
+    assert!(updated.contains("## Subtasks\n\n- [x] (s1) Real subtask"));
+}

@@ -161,45 +161,62 @@ impl TempRepo {
 
     #[allow(dead_code)]
     pub fn insert_tasks_tree_file(&self, path: &str, contents: &str) {
-        let blob = Command::new("git")
-            .args(["hash-object", "-w", "--stdin"])
-            .current_dir(&self.path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                use std::io::Write;
-                child
-                    .stdin
-                    .as_mut()
-                    .expect("hash-object stdin")
-                    .write_all(contents.as_bytes())?;
-                child.wait_with_output()
-            })
-            .expect("write task blob");
-        assert_success_ref(&blob);
-        let blob = String::from_utf8(blob.stdout)
-            .expect("blob should be utf8")
-            .trim()
-            .to_string();
+        self.update_tasks_tree(|index| {
+            let blob = Command::new("git")
+                .args(["hash-object", "-w", "--stdin"])
+                .current_dir(&self.path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .and_then(|mut child| {
+                    use std::io::Write;
+                    child
+                        .stdin
+                        .as_mut()
+                        .expect("hash-object stdin")
+                        .write_all(contents.as_bytes())?;
+                    child.wait_with_output()
+                })
+                .expect("write task blob");
+            assert_success_ref(&blob);
+            let blob = String::from_utf8(blob.stdout)
+                .expect("blob should be utf8")
+                .trim()
+                .to_string();
+            assert_success(self.command_with_env(
+                "git",
+                [
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    "100644",
+                    &blob,
+                    path,
+                ],
+                [("GIT_INDEX_FILE", index.as_os_str())],
+            ));
+        });
+    }
+
+    #[allow(dead_code)]
+    pub fn remove_tasks_tree_file(&self, path: &str) {
+        self.update_tasks_tree(|index| {
+            assert_success(self.command_with_env(
+                "git",
+                ["update-index", "--force-remove", path],
+                [("GIT_INDEX_FILE", index.as_os_str())],
+            ));
+        });
+    }
+
+    fn update_tasks_tree(&self, update: impl FnOnce(&Path)) {
         let index = self.path.join(".git").join("tiber-test-index");
         assert_success(self.command_with_env(
             "git",
             ["read-tree", "tasks"],
             [("GIT_INDEX_FILE", index.as_os_str())],
         ));
-        assert_success(self.command_with_env(
-            "git",
-            [
-                "update-index",
-                "--add",
-                "--cacheinfo",
-                "100644",
-                &blob,
-                path,
-            ],
-            [("GIT_INDEX_FILE", index.as_os_str())],
-        ));
+        update(&index);
         let tree = self.command_with_env(
             "git",
             ["write-tree"],

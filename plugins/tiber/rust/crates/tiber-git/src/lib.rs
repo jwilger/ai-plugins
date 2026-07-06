@@ -522,8 +522,11 @@ impl GitRepository {
                         path_to_entry(Path::new(path))?
                     )));
                 }
-            } else if self.local_task_with_same_stem_exists(path)? {
-                continue;
+            } else if self.local_task_with_same_stem_path(path)?.is_some() {
+                return Err(Error::Parse(format!(
+                    "sync_conflict path={}",
+                    path_to_entry(Path::new(path))?
+                )));
             } else {
                 fs::write(destination, contents)?;
             }
@@ -544,15 +547,15 @@ impl GitRepository {
         Ok(())
     }
 
-    fn local_task_with_same_stem_exists(&self, remote_path: &str) -> Result<bool, Error> {
+    fn local_task_with_same_stem_path(&self, remote_path: &str) -> Result<Option<String>, Error> {
         let Some(remote_stem) = Path::new(remote_path)
             .file_stem()
             .and_then(|stem| stem.to_str())
         else {
-            return Ok(false);
+            return Ok(None);
         };
-        Ok(self.task_file_refs()?.iter().any(|local_path| {
-            local_path != remote_path
+        Ok(self.task_file_refs()?.into_iter().find(|local_path| {
+            local_path.as_str() != remote_path
                 && Path::new(local_path)
                     .file_stem()
                     .and_then(|stem| stem.to_str())
@@ -2202,28 +2205,53 @@ fn update_subtask_check_state(
     target_ref: &str,
     checked: bool,
 ) -> Result<String, Error> {
+    let heading = "Subtasks";
+    let heading_line = format!("## {heading}");
+    let (mut before, mut section, mut after, section_found) =
+        split_markdown_section(document, heading);
+    if !section_found {
+        return Err(Error::Parse(format!("section_missing heading={heading}")));
+    }
+
     let target_marker = format!("({target_ref})");
     let mut found = false;
-    let mut lines = Vec::new();
-    for line in document.lines() {
+    let mut updated = Vec::new();
+    for line in section.drain(..) {
         let title = line
             .strip_prefix("- [ ] ")
             .or_else(|| line.strip_prefix("- [x] "));
         if let Some(title) = title {
             if title.starts_with(&target_marker) {
                 found = true;
-                lines.push(format!("- [{}] {title}", if checked { "x" } else { " " }));
+                updated.push(format!("- [{}] {title}", if checked { "x" } else { " " }));
                 continue;
             }
         }
-        lines.push(line.to_string());
+        updated.push(line);
     }
 
     if !found {
         return Err(Error::Parse(format!("subtask_missing ref={target_ref}")));
     }
 
-    Ok(format!("{}\n", lines.join("\n")))
+    trim_blank_edges(&mut before);
+    trim_blank_edges(&mut after);
+    updated.retain(|line| !line.trim().is_empty());
+    let mut sections = Vec::new();
+    let before = before.join("\n");
+    if !before.is_empty() {
+        sections.push(before);
+    }
+    if updated.is_empty() {
+        sections.push(heading_line);
+    } else {
+        sections.push(format!("{heading_line}\n\n{}", updated.join("\n")));
+    }
+    let after = after.join("\n");
+    if !after.is_empty() {
+        sections.push(after);
+    }
+    Ok(format!("{}\n", sections.join("\n\n")))
 }
 
 fn parse_subtask_ref(subtask_ref: &str) -> Result<String, Error> {
