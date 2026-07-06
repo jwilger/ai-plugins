@@ -5,7 +5,9 @@ const {
   loadMatrix,
   loadBehaviorCases,
   valueGateMode,
-} = require('./fixtures.cjs');
+} = require("./fixtures.cjs");
+const fs = require("fs");
+const path = require("path");
 
 function matrix() {
   try {
@@ -15,14 +17,23 @@ function matrix() {
   }
 }
 
-function pluginModeFromEnvironment() {
-  return process.env.EVAL_PLUGIN_MODE || 'full-marketplace';
+function runtimeOptions() {
+  const optionsFile =
+    process.env.EVAL_RUNTIME_OPTIONS_FILE ||
+    path.join(process.cwd(), "evals/out/generated/runtime-options.json");
+  if (!fs.existsSync(optionsFile)) {
+    return {};
+  }
+  return JSON.parse(fs.readFileSync(optionsFile, "utf8"));
 }
 
 module.exports = function generateTests() {
-  const samples = Number.parseInt(process.env.EVAL_SAMPLES || '1', 10);
-  const filter = process.env.EVAL_CASE_FILTER;
-  const pluginMode = pluginModeFromEnvironment();
+  const runtime = runtimeOptions();
+  const samples = Number.parseInt(
+    process.env.EVAL_SAMPLES || runtime.samples || "1",
+    10,
+  );
+  const filter = process.env.EVAL_CASE_FILTER || runtime.caseFilter;
   const evalMatrix = matrix();
   const cases = loadBehaviorCases().filter(
     (testCase) => !filter || testCase.case_id.includes(filter),
@@ -46,18 +57,17 @@ module.exports = function generateTests() {
         coverage_kinds: coverageKinds(testCase),
         value_gate_mode: valueGateMode(testCase),
         baseline_lift_threshold: baselineLiftThreshold(testCase, evalMatrix),
-        plugin_mode: pluginMode,
         hard_guard_status:
-          (testCase.hardAssertions || []).length > 0 ? 'configured' : 'none',
-        tags: (testCase.tags || []).join(','),
+          (testCase.hardAssertions || []).length > 0 ? "configured" : "none",
+        tags: (testCase.tags || []).join(","),
       },
       assert: [
         {
-          type: 'javascript',
-          value: fileUrl('assert-hard-guards.cjs', __dirname),
+          type: "javascript",
+          value: fileUrl("assert-hard-guards.cjs", __dirname),
         },
         {
-          type: 'llm-rubric',
+          type: "llm-rubric",
           value: testCase.semanticRubric,
         },
       ],

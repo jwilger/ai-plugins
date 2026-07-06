@@ -14,26 +14,28 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 
 ### Claude Code
 
-| Plugin                                                                       | Description                                                                                                    | Version |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
-| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
-| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.2   |
-| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
-| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, debugging, review handling, and skill authoring.               | 0.1.0   |
+| Plugin                                                                       | Description                                                                                                                               | Version |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                                                       | 0.1.0   |
+| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                      | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                                             | 0.2.0   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.1.2   |
+| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                            | 0.1.0   |
+| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, debugging, review handling, and skill authoring.                                          | 0.1.0   |
+| [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.1.0   |
 
 ### Codex
 
-| Plugin                                                                       | Description                                                                                                    | Version |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                            | 0.1.0   |
-| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                           | 0.1.0   |
-| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                  | 0.2.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                          | 0.1.2   |
-| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace. | 0.1.0   |
-| [advisor](plugins/advisor/README.md)                                         | Read-only planning advisor for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                        | 0.1.0   |
-| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, debugging, review handling, and skill authoring.               | 0.1.0   |
+| Plugin                                                                       | Description                                                                                                                               | Version |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                                                       | 0.1.0   |
+| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                      | 0.1.0   |
+| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                                             | 0.2.0   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.1.2   |
+| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                            | 0.1.0   |
+| [advisor](plugins/advisor/README.md)                                         | Read-only planning advisor for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                                                   | 0.1.0   |
+| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, debugging, review handling, and skill authoring.                                          | 0.1.0   |
+| [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.1.0   |
 
 > When a plugin is added under [`plugins/`](plugins/), add catalog rows only for
 > the harness marketplaces that list it. Codex-only plugins must not be added to
@@ -74,6 +76,7 @@ engineering-standards
 babysit-pr
 worktrees
 advisor
+tiber
 ```
 
 Useful Codex entry points:
@@ -88,6 +91,8 @@ Useful Codex entry points:
   including the no-force-push rule.
 - `advisor`: delegate fuzzy planning, tradeoff analysis, scope/spec shaping,
   and ticket planning to a read-only advisor subagent.
+- `tiber`: manage repository-local task boards through a Git-backed
+  `tasks` branch, the `tiber` CLI, and stdio MCP.
 
 ## Developing in this repo
 

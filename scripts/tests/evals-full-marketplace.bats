@@ -50,8 +50,8 @@ for (const testCase of tests) {
   if (!['safety-critical', 'standard'].includes(vars.value_gate_mode)) {
     failures.push(`${vars.case_id}: invalid value_gate_mode`);
   }
-  if (vars.plugin_mode !== 'full-marketplace') {
-    failures.push(`${vars.case_id}: default loader should emit full-marketplace mode`);
+  if ('plugin_mode' in vars || 'pluginMode' in vars) {
+    failures.push(`${vars.case_id}: plugin mode should be inferred from provider label`);
   }
 }
 
@@ -224,6 +224,7 @@ JSON
   git init -q
   git config user.email test@example.com
   git config user.name Test
+  git config commit.gpgsign false
   echo 'skill' > plugins/example/skills/alpha/SKILL.md
   echo 'fixture' > evals/fixtures/behavior/cases.json
   git add .

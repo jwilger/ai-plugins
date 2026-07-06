@@ -1,0 +1,11 @@
+[package]
+name = "tiber-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tiber-core = { path = "../tiber-core" }
+
+[lib]
+path = "src/lib.rs"

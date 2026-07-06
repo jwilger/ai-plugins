@@ -8,6 +8,13 @@
 # Rust build artifacts (workspace target dir at repo root).
 /target/
 
+# Local Tiber task-board symlink. Canonical task state lives on the `tasks`
+# branch and in Git's common directory, not on source branches.
+/.tasks
+
+# Browser smoke-test artifacts.
+/output/
+
 # cargo-mutants scratch output.
 /mutants.out/
 /mutants.out.old/
@@ -17,6 +24,10 @@
 /evals/out/
 /site/evals/*
 !/site/evals/.gitkeep
+
+# Generated plugin-eval benchmark runs; benchmark configs may be committed.
+/.plugin-eval/runs/
+/**/.plugin-eval/runs/
 
 # Side-quest worktrees (default location; configurable via sidequest.toml).
 /.worktrees/
