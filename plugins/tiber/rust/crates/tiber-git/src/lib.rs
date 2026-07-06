@@ -342,6 +342,7 @@ impl GitRepository {
             Some(parent) => parent,
             None => self.git(["rev-parse", "--verify", "refs/heads/tasks"])?,
         };
+        let expected_ref = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
         let commit = self.git([
             "commit-tree",
             root_tree.trim(),
@@ -350,7 +351,12 @@ impl GitRepository {
             "-m",
             "Sync tiber state",
         ])?;
-        self.git(["update-ref", "refs/heads/tasks", commit.trim()])?;
+        self.git([
+            "update-ref",
+            "refs/heads/tasks",
+            commit.trim(),
+            expected_ref.trim(),
+        ])?;
         self.push_tasks_branch_if_origin_exists()?;
         Ok(())
     }
@@ -419,8 +425,12 @@ impl GitRepository {
             }
         }
         if !remote_order.is_empty() {
+            let local_order = self.order_entries()?;
+            if order_conflicts(&remote_order, &local_order) {
+                return Err(Error::Parse("sync_conflict path=order.md".to_string()));
+            }
             let mut merged_order = remote_order;
-            for local_entry in self.order_entries()? {
+            for local_entry in local_order {
                 if !merged_order.contains(&local_entry) {
                     merged_order.push(local_entry);
                 }
@@ -1123,6 +1133,9 @@ impl GitRepository {
         let mut child = Command::new("git")
             .args(&args)
             .current_dir(&self.root)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("LC_ALL", "C")
+            .env("LANGUAGE", "C")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1461,6 +1474,8 @@ where
         command.current_dir(cwd);
     }
     command.env("GIT_TERMINAL_PROMPT", "0");
+    command.env("LC_ALL", "C");
+    command.env("LANGUAGE", "C");
     command_output("git", &args, command.output()?)
 }
 
@@ -1480,6 +1495,8 @@ where
     let mut command = Command::new("git");
     command.args(&args);
     command.env("GIT_TERMINAL_PROMPT", "0");
+    command.env("LC_ALL", "C");
+    command.env("LANGUAGE", "C");
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
@@ -1548,12 +1565,27 @@ fn lock_contents_are_stale(contents: &str) -> bool {
     })
 }
 
-#[cfg(target_os = "linux")]
-fn process_is_gone(pid: u32) -> bool {
-    !Path::new("/proc").join(pid.to_string()).exists()
+fn order_conflicts(remote_order: &[String], local_order: &[String]) -> bool {
+    let local_common = local_order
+        .iter()
+        .filter(|entry| remote_order.contains(entry))
+        .collect::<Vec<_>>();
+    let remote_common = remote_order
+        .iter()
+        .filter(|entry| local_order.contains(entry))
+        .collect::<Vec<_>>();
+    local_common != remote_common
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(unix)]
+fn process_is_gone(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .is_ok_and(|status| !status.success())
+}
+
+#[cfg(not(unix))]
 fn process_is_gone(_pid: u32) -> bool {
     false
 }

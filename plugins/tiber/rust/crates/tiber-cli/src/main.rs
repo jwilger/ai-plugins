@@ -19,10 +19,15 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
         [command, action] if command == "dashboard" && action == "serve" => {
             let runtime = tokio::runtime::Runtime::new().map_err(tiber_git::Error::Io)?;
             runtime.block_on(async {
-                let listener = tokio::net::TcpListener::bind("127.0.0.1:7417")
+                let port = env::var("TIBER_DASHBOARD_PORT")
+                    .ok()
+                    .and_then(|value| value.parse::<u16>().ok())
+                    .unwrap_or(7417);
+                let addr = format!("127.0.0.1:{port}");
+                let listener = tokio::net::TcpListener::bind(&addr)
                     .await
                     .map_err(tiber_git::Error::Io)?;
-                println!("tiber dashboard listening on http://127.0.0.1:7417");
+                println!("tiber dashboard listening on http://{addr}");
                 tiber_server::serve(listener).await
             })
         }

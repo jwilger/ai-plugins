@@ -90,8 +90,9 @@ async fn task(
 }
 
 async fn docs(State(state): State<AppState>) -> Response {
-    match tiber_git::list_docs_at(state.root) {
-        Ok(docs) => Html(format!(
+    let root = state.root.clone();
+    match task::spawn_blocking(move || tiber_git::list_docs_at(root)).await {
+        Ok(Ok(docs)) => Html(format!(
             "<!doctype html><html><head><title>tiber docs</title></head><body><main><h1>tiber docs</h1><ul>{}</ul></main></body></html>",
             docs
                 .into_iter()
@@ -103,9 +104,14 @@ async fn docs(State(state): State<AppState>) -> Response {
                 .collect::<String>()
         ))
         .into_response(),
-        Err(error) => (
+        Ok(Err(error)) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!("{error}"),
+        )
+            .into_response(),
+        Err(error) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("dashboard_docs_join source={error}"),
         )
             .into_response(),
     }
@@ -113,14 +119,21 @@ async fn docs(State(state): State<AppState>) -> Response {
 
 async fn doc(State(state): State<AppState>, Path(path): Path<String>) -> Response {
     let doc_ref = format!("docs/{path}");
-    match tiber_git::read_doc_at(state.root, &doc_ref) {
-        Ok(doc) => Html(format!(
+    let root = state.root.clone();
+    let doc_ref_for_read = doc_ref.clone();
+    match task::spawn_blocking(move || tiber_git::read_doc_at(root, &doc_ref_for_read)).await {
+        Ok(Ok(doc)) => Html(format!(
             "<!doctype html><html><head><title>{}</title></head><body><main><pre>{}</pre></main></body></html>",
             escape_html(&doc_ref),
             escape_html(&doc)
         ))
         .into_response(),
-        Err(error) => (axum::http::StatusCode::NOT_FOUND, format!("{error}")).into_response(),
+        Ok(Err(error)) => (axum::http::StatusCode::NOT_FOUND, format!("{error}")).into_response(),
+        Err(error) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("dashboard_doc_join source={error}"),
+        )
+            .into_response(),
     }
 }
 

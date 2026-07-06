@@ -153,13 +153,16 @@ function findBrowserExecutable() {
 }
 
 async function waitForDashboard(targetUrl) {
-  const deadline = Date.now() + 60000;
+  const timeoutMs = 60000;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (server.exitCode !== null) {
       throw new Error(`dashboard server exited with status ${server.exitCode}`);
     }
     try {
-      const response = await fetch(targetUrl);
+      const remainingMs = Math.max(1, deadline - Date.now());
+      const signal = AbortSignal.timeout(Math.min(1000, remainingMs));
+      const response = await fetch(targetUrl, { signal });
       if (response.ok) {
         return;
       }
@@ -168,7 +171,7 @@ async function waitForDashboard(targetUrl) {
     }
     await new Promise((resolveSleep) => setTimeout(resolveSleep, 100));
   }
-  throw new Error("dashboard server did not start within 15s");
+  throw new Error(`dashboard server did not start within ${timeoutMs / 1000}s`);
 }
 
 async function assertText(locator, expected) {

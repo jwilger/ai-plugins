@@ -21,7 +21,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         .current_dir(repo.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()
         .expect("spawn tiber mcp stdio");
     let mut stdin = child.stdin.take().expect("mcp stdin should be available");

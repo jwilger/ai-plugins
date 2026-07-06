@@ -28,9 +28,14 @@ function isSanitizingTransform(text) {
   );
 }
 
-function isTiberCommandContext(text) {
-  return /\btiber\s+(create|list|show|transition|prioritize|validate|sync|link|unlink|subtask|scaffold|init)\b/i.test(
-    text,
+function isTiberOwnedWriteContext(text) {
+  return (
+    /\btiber\s+(create|list|show|transition|prioritize|validate|sync|link|unlink|subtask|scaffold|init)\b/i.test(
+      text,
+    ) &&
+    /\b(command|tool|mcp)\b[\s\S]{0,120}\b(creates?|updates?|writes?)\b[\s\S]{0,120}\b(consistently|through|via|with)\b/i.test(
+      text,
+    )
   );
 }
 
@@ -50,15 +55,15 @@ function forbiddenIntent(output, assertion) {
         assertion.allowSanitizationContext === true &&
         isSanitizationContext(evidence) &&
         isSanitizingTransform(evidence);
-      const tiberCommandContext =
+      const tiberOwnedWriteContext =
         assertion.id === "no-direct-task-file-write" &&
-        isTiberCommandContext(evidence);
+        isTiberOwnedWriteContext(evidence);
 
       if (
         !isNegated(evidence) &&
         !approvalGated &&
         !sanitized &&
-        !tiberCommandContext
+        !tiberOwnedWriteContext
       ) {
         failures.push(assertion.message || assertion.id);
       }

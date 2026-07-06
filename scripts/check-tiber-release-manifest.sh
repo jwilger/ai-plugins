@@ -18,6 +18,7 @@ if ! jq -e '
   exit 1
 fi
 
+# shellcheck source=/dev/null
 source "$root/plugins/tiber/scripts/detect-target.sh"
 host_target="$(detect_tiber_target)" || {
   echo "unsupported-host-release-binary os=$(uname -s) arch=$(uname -m)" >&2

@@ -18,6 +18,7 @@
     "scaffold",
     "validation"
   ],
+  "mcpServers": "./.mcp.json",
   "skills": "./skills/",
   "interface": {
     "displayName": "Tiber",
