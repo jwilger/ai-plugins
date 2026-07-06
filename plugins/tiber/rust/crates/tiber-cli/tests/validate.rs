@@ -1,8 +1,6 @@
 mod support;
 
-use std::fs;
-
-use support::{assert_success, assert_success_ref, TempRepo};
+use support::{assert_success, assert_success_ref, task_stem, TempRepo};
 
 #[test]
 fn validate_fix_repairs_missing_reciprocal_links_and_order_entries() {
@@ -10,36 +8,31 @@ fn validate_fix_repairs_missing_reciprocal_links_and_order_entries() {
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Build API"]));
     assert_success(repo.tiber(["create", "Build UI"]));
+    let api = task_stem(&repo, "backlog", "build-api");
+    let ui = task_stem(&repo, "backlog", "build-ui");
 
-    fs::write(
-        repo.path().join(".tasks").join("todo").join("build-api.md"),
-        "# Build API\n\n## Blocks\n- todo/build-ui.md\n",
-    )
-    .expect("write one-sided dependency");
-    fs::write(
-        repo.path().join(".tasks").join("order.md"),
-        "todo/build-api.md\ntodo/stale.md\n",
-    )
-    .expect("write stale order entry");
+    repo.insert_task_file(
+        "backlog",
+        &api,
+        &task_document("Build API", &[], &[&ui], &[], ""),
+    );
+    repo.insert_tasks_tree_file("order.md", &format!("{api}\nstale-task\n"));
 
     let validate = repo.tiber(["validate", "--fix"]);
 
     assert_success_ref(&validate);
     assert_eq!(
         String::from_utf8(validate.stdout).expect("validate output should be utf8"),
-        "fixed reciprocal-link todo/build-ui.md blocked-by todo/build-api.md\nfixed order stale todo/stale.md\nfixed order missing todo/build-ui.md\n"
+        format!("fixed reciprocal-link {ui} blocked-by {api}\nfixed order stale stale-task\nfixed order missing {ui}\n")
     );
 
-    let ui = repo.tiber(["show", "todo/build-ui.md"]);
-    assert_success_ref(&ui);
-    assert_eq!(
-        String::from_utf8(ui.stdout).expect("ui task should be utf8"),
-        "# Build UI\n\n## Blocked By\n- todo/build-api.md\n"
-    );
+    let ui_task = repo.tiber(["show", "build-ui"]);
+    assert_success_ref(&ui_task);
+    assert!(String::from_utf8(ui_task.stdout)
+        .expect("ui task should be utf8")
+        .contains(&format!("blocked_by: [{api}]")));
 
-    let order = fs::read_to_string(repo.path().join(".tasks").join("order.md"))
-        .expect("order should be readable");
-    assert_eq!(order, "todo/build-api.md\ntodo/build-ui.md\n");
+    assert_eq!(repo.order_file(), format!("{api}\n{ui}\n"));
 }
 
 #[test]
@@ -47,29 +40,25 @@ fn validate_fix_reports_dangling_dependency_refs_without_removing_them() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Dangling dependencies"]));
+    let task = task_stem(&repo, "backlog", "dangling-dependencies");
 
-    let task_path = repo
-        .path()
-        .join(".tasks")
-        .join("todo")
-        .join("dangling-dependencies.md");
-    fs::write(
-        &task_path,
-        "# Dangling dependencies\n\n## Blocks\n- todo/missing-blocked.md\n\n## Blocked By\n- todo/missing-blocker.md\n",
-    )
-    .expect("write dangling dependencies");
+    let contents = task_document(
+        "Dangling dependencies",
+        &["missing-blocker"],
+        &["missing-blocked"],
+        &[],
+        "",
+    );
+    repo.insert_task_file("backlog", &task, &contents);
 
     let validate = repo.tiber(["validate", "--fix"]);
 
     assert_success_ref(&validate);
     assert_eq!(
         String::from_utf8(validate.stdout).expect("validate output should be utf8"),
-        "dangling link todo/dangling-dependencies.md blocks todo/missing-blocked.md\ndangling link todo/dangling-dependencies.md blocked-by todo/missing-blocker.md\n"
+        format!("dangling link {task} blocks missing-blocked\ndangling link {task} blocked-by missing-blocker\n")
     );
-    assert_eq!(
-        fs::read_to_string(task_path).expect("task should be readable"),
-        "# Dangling dependencies\n\n## Blocks\n- todo/missing-blocked.md\n\n## Blocked By\n- todo/missing-blocker.md\n"
-    );
+    assert_eq!(repo.task_file("backlog", &task), contents);
 }
 
 #[test]
@@ -78,31 +67,28 @@ fn validate_fix_reports_dependency_cycles_without_rewriting_them() {
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Cycle A"]));
     assert_success(repo.tiber(["create", "Cycle B"]));
+    let cycle_a = task_stem(&repo, "backlog", "cycle-a");
+    let cycle_b = task_stem(&repo, "backlog", "cycle-b");
 
-    let cycle_a = repo.path().join(".tasks").join("todo").join("cycle-a.md");
-    let cycle_b = repo.path().join(".tasks").join("todo").join("cycle-b.md");
-    let cycle_a_contents =
-        "# Cycle A\n\n## Blocks\n- todo/cycle-b.md\n\n## Blocked By\n- todo/cycle-b.md\n";
-    let cycle_b_contents =
-        "# Cycle B\n\n## Blocks\n- todo/cycle-a.md\n\n## Blocked By\n- todo/cycle-a.md\n";
-    fs::write(&cycle_a, cycle_a_contents).expect("write cycle a");
-    fs::write(&cycle_b, cycle_b_contents).expect("write cycle b");
+    let cycle_a_contents = task_document("Cycle A", &[&cycle_b], &[&cycle_b], &[], "");
+    let cycle_b_contents = task_document("Cycle B", &[&cycle_a], &[&cycle_a], &[], "");
+    repo.insert_task_file("backlog", &cycle_a, &cycle_a_contents);
+    repo.insert_task_file("backlog", &cycle_b, &cycle_b_contents);
 
     let validate = repo.tiber(["validate", "--fix"]);
 
     assert_success_ref(&validate);
+    let expected_cycle = if cycle_a < cycle_b {
+        format!("cycle dependency {cycle_a} -> {cycle_b} -> {cycle_a}\n")
+    } else {
+        format!("cycle dependency {cycle_b} -> {cycle_a} -> {cycle_b}\n")
+    };
     assert_eq!(
         String::from_utf8(validate.stdout).expect("validate output should be utf8"),
-        "cycle dependency todo/cycle-a.md -> todo/cycle-b.md -> todo/cycle-a.md\n"
+        expected_cycle
     );
-    assert_eq!(
-        fs::read_to_string(cycle_a).expect("cycle a should be readable"),
-        cycle_a_contents
-    );
-    assert_eq!(
-        fs::read_to_string(cycle_b).expect("cycle b should be readable"),
-        cycle_b_contents
-    );
+    assert_eq!(repo.task_file("backlog", &cycle_a), cycle_a_contents);
+    assert_eq!(repo.task_file("backlog", &cycle_b), cycle_b_contents);
 }
 
 #[test]
@@ -110,67 +96,43 @@ fn validate_fix_reports_subtask_dag_cycles_without_rewriting_them() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Parent task"]));
-    assert_success(repo.tiber(["create", "Child task"]));
-
-    let parent = repo
-        .path()
-        .join(".tasks")
-        .join("todo")
-        .join("parent-task.md");
-    let child = repo
-        .path()
-        .join(".tasks")
-        .join("todo")
-        .join("child-task.md");
-    let parent_contents = "# Parent task\n\n## Subtasks\n- [ ] todo/child-task.md\n";
-    let child_contents = "# Child task\n\n## Subtasks\n- [ ] todo/parent-task.md\n";
-    fs::write(&parent, parent_contents).expect("write parent task");
-    fs::write(&child, child_contents).expect("write child task");
+    let parent = task_stem(&repo, "backlog", "parent-task");
+    let parent_contents = task_document(
+        "Parent task",
+        &[],
+        &[],
+        &[],
+        "## Subtasks\n\n- [ ] (s1) First step — after: s2\n- [ ] (s2) Second step — after: s1\n\n## Notes / Log\n",
+    );
+    repo.insert_task_file("backlog", &parent, &parent_contents);
 
     let validate = repo.tiber(["validate", "--fix"]);
 
     assert_success_ref(&validate);
     assert_eq!(
         String::from_utf8(validate.stdout).expect("validate output should be utf8"),
-        "cycle subtask todo/child-task.md -> todo/parent-task.md -> todo/child-task.md\n"
+        format!("cycle subtask {parent}:s1 -> s2 -> s1\n")
     );
-    assert_eq!(
-        fs::read_to_string(parent).expect("parent task should be readable"),
-        parent_contents
-    );
-    assert_eq!(
-        fs::read_to_string(child).expect("child task should be readable"),
-        child_contents
-    );
+    assert_eq!(repo.task_file("backlog", &parent), parent_contents);
 }
 
 #[test]
 fn validate_fix_reports_task_schema_errors_without_rewriting_them() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
-    fs::create_dir_all(repo.path().join(".tasks").join("todo")).expect("create todo directory");
-    let malformed = repo
-        .path()
-        .join(".tasks")
-        .join("todo")
-        .join("missing-title.md");
-    let contents = "body without a markdown title\n";
-    fs::write(&malformed, contents).expect("write malformed task");
-    fs::write(
-        repo.path().join(".tasks").join("order.md"),
-        "todo/missing-title.md\n",
-    )
-    .expect("write order");
+    let contents = "---\nstatus: backlog\nblocked_by: []\nblocks: []\ntags: []\n---\n";
+    repo.insert_task_file("backlog", "20260706-abcd-missing-title", contents);
+    repo.insert_tasks_tree_file("order.md", "20260706-abcd-missing-title\n");
 
     let validate = repo.tiber(["validate", "--fix"]);
 
     assert_success_ref(&validate);
     assert_eq!(
         String::from_utf8(validate.stdout).expect("validate output should be utf8"),
-        "schema title-missing todo/missing-title.md\n"
+        "schema title-missing 20260706-abcd-missing-title\nschema forbidden-key 20260706-abcd-missing-title status\n"
     );
     assert_eq!(
-        fs::read_to_string(malformed).expect("task should be readable"),
+        repo.task_file("backlog", "20260706-abcd-missing-title"),
         contents
     );
 }
@@ -180,45 +142,34 @@ fn validate_fix_removes_misplaced_claims_from_unclaimed_tasks() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Unclaimed work"]));
+    let task = task_stem(&repo, "backlog", "unclaimed-work");
 
-    let task_path = repo
-        .path()
-        .join(".tasks")
-        .join("todo")
-        .join("unclaimed-work.md");
-    fs::write(
-        &task_path,
-        "# Unclaimed work\n\n## Claims\n- stale-agent\n\n## Subtasks\n- [ ] Keep this work\n",
-    )
-    .expect("write misplaced claim");
+    let contents = "---\ntitle: Unclaimed work\nblocked_by: []\nblocks: []\ntags: []\nclaim:\n  host: stale\n  session: stale-session\n---\n\n## Summary\n\n## Subtasks\n\n- [ ] (s1) Keep this work\n\n## Notes / Log\n";
+    repo.insert_task_file("backlog", &task, contents);
 
     let validate = repo.tiber(["validate", "--fix"]);
 
     assert_success_ref(&validate);
     assert_eq!(
         String::from_utf8(validate.stdout).expect("validate output should be utf8"),
-        "fixed misplaced-claim todo/unclaimed-work.md\n"
+        format!("fixed misplaced-claim {task}\n")
     );
     assert_eq!(
-        fs::read_to_string(task_path).expect("task should be readable"),
-        "# Unclaimed work\n\n## Subtasks\n- [ ] Keep this work\n"
+        repo.task_file("backlog", &task),
+        "---\ntitle: Unclaimed work\nblocked_by: []\nblocks: []\ntags: []\n---\n\n## Summary\n\n## Subtasks\n\n- [ ] (s1) Keep this work\n\n## Notes / Log\n"
     );
 }
 
 #[test]
-fn validate_fix_preserves_claims_on_doing_tasks() {
+fn validate_fix_preserves_claims_on_in_progress_tasks() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Claimed work"]));
-    assert_success(repo.tiber(["transition", "todo/claimed-work.md", "doing"]));
+    let task = task_stem(&repo, "backlog", "claimed-work");
+    assert_success(repo.tiber(["transition", "claimed-work", "in-progress"]));
 
-    let task_path = repo
-        .path()
-        .join(".tasks")
-        .join("doing")
-        .join("claimed-work.md");
-    let contents = "# Claimed work\n\n## Claims\n- active-agent\n";
-    fs::write(&task_path, contents).expect("write claim");
+    let contents = "---\ntitle: Claimed work\nblocked_by: []\nblocks: []\ntags: []\nclaim:\n  host: active\n  session: active-session\n---\n";
+    repo.insert_task_file("in-progress", &task, contents);
 
     let validate = repo.tiber(["validate", "--fix"]);
 
@@ -227,8 +178,25 @@ fn validate_fix_preserves_claims_on_doing_tasks() {
         String::from_utf8(validate.stdout).expect("validate output should be utf8"),
         ""
     );
-    assert_eq!(
-        fs::read_to_string(task_path).expect("task should be readable"),
-        contents
-    );
+    assert_eq!(repo.task_file("in-progress", &task), contents);
+}
+
+fn task_document(
+    title: &str,
+    blocked_by: &[&str],
+    blocks: &[&str],
+    tags: &[&str],
+    body: &str,
+) -> String {
+    let body = if body.is_empty() {
+        "## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
+    } else {
+        body
+    };
+    format!(
+        "---\ntitle: {title}\nblocked_by: [{}]\nblocks: [{}]\ntags: [{}]\n---\n\n{body}",
+        blocked_by.join(", "),
+        blocks.join(", "),
+        tags.join(", ")
+    )
 }
