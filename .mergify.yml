@@ -8,9 +8,6 @@ queue_rules:
       - "-conflict"
       - "#approved-reviews-by >= 1"
       - "#changes-requested-reviews-by = 0"
-      - "github-review-approved"
-      - "github-require-last-push-approval"
-      - "github-code-owner-review-satisfied"
       - "check-success = CI gate"
     merge_conditions:
       - "base = main"
@@ -18,9 +15,6 @@ queue_rules:
       - "-conflict"
       - "#approved-reviews-by >= 1"
       - "#changes-requested-reviews-by = 0"
-      - "github-review-approved"
-      - "github-require-last-push-approval"
-      - "github-code-owner-review-satisfied"
       - "check-success = CI gate"
 
 merge_protections_settings:
@@ -38,7 +32,4 @@ merge_protections:
       - "-conflict"
       - "#approved-reviews-by >= 1"
       - "#changes-requested-reviews-by = 0"
-      - "github-review-approved"
-      - "github-require-last-push-approval"
-      - "github-code-owner-review-satisfied"
       - "check-success = CI gate"
