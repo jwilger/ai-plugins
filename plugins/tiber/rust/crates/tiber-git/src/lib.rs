@@ -778,7 +778,7 @@ impl GitRepository {
             ),
             (
                 ".github/workflows/tiber-close-from-trailers.yml",
-                "name: tiber close from trailers\n\non:\n  push:\n    branches: [main]\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: tiber close-from-trailers\n".to_string(),
+                "name: tiber close from trailers\n\non:\n  push:\n    branches: [main]\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Install Tiber\n        run: |\n          git clone --depth 1 https://github.com/jwilger/ai-plugins.git .tiber-src\n          cargo install --path .tiber-src/plugins/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n".to_string(),
             ),
         ];
         if let Some(justfile) = self.show_tasks_justfile()? {
@@ -1060,8 +1060,14 @@ impl GitRepository {
         let lock_dir = self.git_common_dir()?.join("tiber");
         fs::create_dir_all(&lock_dir)?;
         let lock_path = lock_dir.join("tiber.lock");
-        if lock_path.exists() && lock_is_stale(&lock_path) {
-            fs::remove_file(&lock_path)?;
+        if let Some(stale_contents) = stale_lock_contents(&lock_path)? {
+            if fs::read_to_string(&lock_path)
+                .ok()
+                .as_deref()
+                .is_some_and(|current_contents| current_contents == stale_contents)
+            {
+                let _ = fs::remove_file(&lock_path);
+            }
         }
         match OpenOptions::new()
             .write(true)
@@ -1509,10 +1515,20 @@ fn lock_metadata() -> String {
     format!("pid={}\ntimestamp={timestamp}\n", std::process::id())
 }
 
-fn lock_is_stale(path: &Path) -> bool {
-    let Ok(contents) = fs::read_to_string(path) else {
-        return false;
+fn stale_lock_contents(path: &Path) -> Result<Option<String>, Error> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(Error::Io(error)),
     };
+    if lock_contents_are_stale(&contents) {
+        Ok(Some(contents))
+    } else {
+        Ok(None)
+    }
+}
+
+fn lock_contents_are_stale(contents: &str) -> bool {
     let pid = contents
         .lines()
         .find_map(|line| line.strip_prefix("pid="))

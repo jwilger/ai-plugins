@@ -7,6 +7,11 @@ setup() {
   BUILD_ALL_SCRIPT="$ROOT/scripts/build-tiber-release-all.sh"
 }
 
+copy_detect_target_helper() {
+  mkdir -p "$1/plugins/tiber/scripts"
+  cp "$ROOT/plugins/tiber/scripts/detect-target.sh" "$1/plugins/tiber/scripts/detect-target.sh"
+}
+
 @test "real release manifest has an executable host binary" {
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -eq 0 ]
@@ -16,6 +21,7 @@ setup() {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/tiber"
   cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
 
   run bash "$SCRIPT" "$fixture"
 
@@ -28,15 +34,12 @@ setup() {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/tiber"
   cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
   host_path="$(bash -c '
-    case "$(uname -s)-$(uname -m)" in
-      Linux-x86_64) host_target="x86_64-unknown-linux-gnu" ;;
-      Linux-aarch64 | Linux-arm64) host_target="aarch64-unknown-linux-gnu" ;;
-      Darwin-x86_64) host_target="x86_64-apple-darwin" ;;
-      Darwin-arm64 | Darwin-aarch64) host_target="aarch64-apple-darwin" ;;
-    esac
+    source "$1"
+    host_target="$(detect_tiber_target)"
     jq -r --arg target "$host_target" ".binaries[] | select(.target == \$target) | .path" "$0"
-  ' "$ROOT/plugins/tiber/release-binaries.json")"
+  ' "$ROOT/plugins/tiber/release-binaries.json" "$ROOT/plugins/tiber/scripts/detect-target.sh")"
   mkdir -p "$fixture/plugins/tiber/$(dirname "$host_path")"
   touch "$fixture/plugins/tiber/$host_path"
   chmod +x "$fixture/plugins/tiber/$host_path"
@@ -52,6 +55,7 @@ setup() {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/tiber"
   cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
   while IFS= read -r binary_path; do
     mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
     printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
@@ -68,6 +72,7 @@ setup() {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/tiber"
   cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
   while IFS= read -r binary_path; do
     if [ "$binary_path" = "dist/aarch64-apple-darwin/tiber" ]; then
       continue
@@ -88,6 +93,7 @@ setup() {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/tiber"
   cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
   while IFS= read -r binary_path; do
     mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
     if [ "$binary_path" != "dist/aarch64-apple-darwin/tiber" ]; then

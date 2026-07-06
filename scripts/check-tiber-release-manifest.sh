@@ -18,16 +18,11 @@ if ! jq -e '
   exit 1
 fi
 
-case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64) host_target="x86_64-unknown-linux-gnu" ;;
-  Linux-aarch64 | Linux-arm64) host_target="aarch64-unknown-linux-gnu" ;;
-  Darwin-x86_64) host_target="x86_64-apple-darwin" ;;
-  Darwin-arm64 | Darwin-aarch64) host_target="aarch64-apple-darwin" ;;
-  *)
-    echo "unsupported-host-release-binary os=$(uname -s) arch=$(uname -m)" >&2
-    exit 1
-    ;;
-esac
+source "$root/plugins/tiber/scripts/detect-target.sh"
+host_target="$(detect_tiber_target)" || {
+  echo "unsupported-host-release-binary os=$(uname -s) arch=$(uname -m)" >&2
+  exit 1
+}
 
 host_path="$(
   jq -r --arg target "$host_target" \

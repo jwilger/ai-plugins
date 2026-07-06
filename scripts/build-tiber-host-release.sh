@@ -3,16 +3,11 @@ set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
-  Linux-aarch64 | Linux-arm64) target="aarch64-unknown-linux-gnu" ;;
-  Darwin-x86_64) target="x86_64-apple-darwin" ;;
-  Darwin-arm64 | Darwin-aarch64) target="aarch64-apple-darwin" ;;
-  *)
-    echo "tiber.unsupported_release_host os=$(uname -s) arch=$(uname -m)" >&2
-    exit 1
-    ;;
-esac
+source "$root/plugins/tiber/scripts/detect-target.sh"
+target="$(detect_tiber_target)" || {
+  echo "tiber.unsupported_release_host os=$(uname -s) arch=$(uname -m)" >&2
+  exit 1
+}
 
 cargo build \
   --release \

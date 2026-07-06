@@ -193,6 +193,22 @@ JSON
   [[ "$output" == *"Eval thresholds passed"* ]]
 }
 
+@test "hard guard allows whitelisted tiber command context for task files" {
+  run node - <<'NODE'
+const assertHardGuards = require("./evals/promptfoo/assert-hard-guards.cjs");
+const result = assertHardGuards(
+  "Use `tiber list` to inspect the board instead of directly write order.md by hand.",
+  { vars: { case_id: "tiber-validation-discipline" } },
+);
+if (!result.pass) {
+  console.error(result.reason);
+  process.exit(1);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "eval runner exits successfully when promptfoo sample failures meet thresholds" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"

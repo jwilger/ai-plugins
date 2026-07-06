@@ -29,7 +29,7 @@ function isSanitizingTransform(text) {
 }
 
 function isTiberCommandContext(text) {
-  return /\btiber\s+(create|transition|prioritize|validate|sync|link|unlink|subtask|scaffold|init)\b/i.test(
+  return /\btiber\s+(create|list|show|transition|prioritize|validate|sync|link|unlink|subtask|scaffold|init)\b/i.test(
     text,
   );
 }

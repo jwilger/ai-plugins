@@ -32,11 +32,17 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         &mut stdin,
         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.0.0"}}}"#,
     );
-    let initialize = read_message(&mut stdout);
-    assert!(initialize.contains(r#""id":1"#));
-    assert!(initialize.contains(r#""name":"tiber""#));
-    assert!(initialize.contains(r#""tools":{}"#));
-    assert!(initialize.contains(r#""resources":{}"#));
+    let initialize = read_json_message(&mut stdout);
+    assert_eq!(initialize["id"], 1);
+    assert_eq!(initialize["result"]["serverInfo"]["name"], "tiber");
+    assert_eq!(
+        initialize["result"]["capabilities"]["tools"],
+        serde_json::json!({})
+    );
+    assert_eq!(
+        initialize["result"]["capabilities"]["resources"],
+        serde_json::json!({})
+    );
 
     write_message(
         &mut stdin,
@@ -211,6 +217,39 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(scaffold.contains(r#""id":20"#));
     assert!(scaffold.contains("would write .gitignore"));
 
+    write_message(&mut stdin, r#"{"jsonrpc":"2.0","id":21}"#);
+    let missing_method = read_json_message(&mut stdout);
+    assert_eq!(missing_method["id"], 21);
+    assert_eq!(missing_method["error"]["code"], -32600);
+    assert!(missing_method["error"]["message"]
+        .as_str()
+        .expect("error message")
+        .contains("mcp_method_missing"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"arguments":{}}}"#,
+    );
+    let missing_tool_name = read_json_message(&mut stdout);
+    assert_eq!(missing_tool_name["id"], 22);
+    assert_eq!(missing_tool_name["error"]["code"], -32602);
+    assert!(missing_tool_name["error"]["message"]
+        .as_str()
+        .expect("error message")
+        .contains("mcp_tool_name_missing"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":23,"method":"resources/read","params":{}}"#,
+    );
+    let missing_resource_uri = read_json_message(&mut stdout);
+    assert_eq!(missing_resource_uri["id"], 23);
+    assert_eq!(missing_resource_uri["error"]["code"], -32602);
+    assert!(missing_resource_uri["error"]["message"]
+        .as_str()
+        .expect("error message")
+        .contains("mcp_resource_uri_missing"));
+
     drop(stdin);
     let status = child.wait().expect("wait for mcp process");
     assert!(status.success());
@@ -229,4 +268,22 @@ fn read_message(stdout: &mut impl BufRead) -> String {
         serde_json::from_str(&line).expect("mcp response should be valid json");
     assert_eq!(parsed["jsonrpc"], "2.0");
     line
+}
+
+fn read_json_message(stdout: &mut impl BufRead) -> serde_json::Value {
+    let line = read_message(stdout);
+    serde_json::from_str(&line).expect("mcp response should be valid json")
+}
+
+#[test]
+fn mcp_stdio_ignores_json_rpc_notifications() {
+    let input = std::io::Cursor::new(
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+"#,
+    );
+    let mut output = Vec::new();
+
+    tiber_mcp::run_stdio(std::io::BufReader::new(input), &mut output).expect("run stdio");
+
+    assert_eq!(output, b"");
 }

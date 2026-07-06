@@ -25,6 +25,7 @@ async fn dashboard_routes_render_board_and_task_pages() {
     assert!(board.contains("todo/render-dashboard.md"));
 
     let task = app
+        .clone()
         .oneshot(
             Request::get("/tasks/todo/render-dashboard.md")
                 .body(Body::empty())
@@ -35,6 +36,16 @@ async fn dashboard_routes_render_board_and_task_pages() {
     assert_eq!(task.status(), StatusCode::OK);
     let task = body_text(task).await;
     assert!(task.contains("# Render dashboard"));
+
+    let traversal = app
+        .oneshot(
+            Request::get("/tasks/../render-dashboard.md")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("traversal response");
+    assert_eq!(traversal.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

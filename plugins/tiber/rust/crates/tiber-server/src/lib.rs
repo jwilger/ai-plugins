@@ -4,6 +4,7 @@ use axum::routing::get;
 use axum::Router;
 use std::path::PathBuf;
 use tokio::net::TcpListener;
+use tokio::task;
 
 pub fn router() -> Router {
     router_at(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
@@ -30,8 +31,9 @@ struct AppState {
 }
 
 async fn board(State(state): State<AppState>) -> Response {
-    match tiber_git::list_tasks_at(state.root) {
-        Ok(tasks) => {
+    let root = state.root.clone();
+    match task::spawn_blocking(move || tiber_git::list_tasks_at(root)).await {
+        Ok(Ok(tasks)) => {
             let task_items = tasks
                 .into_iter()
                 .map(|task| {
@@ -51,9 +53,14 @@ async fn board(State(state): State<AppState>) -> Response {
             ))
             .into_response()
         }
-        Err(error) => (
+        Ok(Err(error)) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!("{error}"),
+        )
+            .into_response(),
+        Err(error) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("dashboard_task_join source={error}"),
         )
             .into_response(),
     }
@@ -64,14 +71,21 @@ async fn task(
     Path((status, file)): Path<(String, String)>,
 ) -> Response {
     let task_ref = format!("{status}/{file}");
-    match tiber_git::show_task_at(state.root, &task_ref) {
-        Ok(task) => Html(format!(
+    let root = state.root.clone();
+    let task_ref_for_read = task_ref.clone();
+    match task::spawn_blocking(move || tiber_git::show_task_at(root, &task_ref_for_read)).await {
+        Ok(Ok(task)) => Html(format!(
             "<!doctype html><html><head><title>{}</title></head><body><main><pre>{}</pre></main></body></html>",
             escape_html(&task_ref),
             escape_html(&task)
         ))
         .into_response(),
-        Err(error) => (axum::http::StatusCode::NOT_FOUND, format!("{error}")).into_response(),
+        Ok(Err(error)) => (axum::http::StatusCode::NOT_FOUND, format!("{error}")).into_response(),
+        Err(error) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("dashboard_task_join source={error}"),
+        )
+            .into_response(),
     }
 }
 

@@ -31,6 +31,9 @@ pub fn run_stdio(input: impl BufRead, mut output: impl Write) -> Result<(), tibe
                 continue;
             }
         };
+        if request.get("id").is_none() {
+            continue;
+        }
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let response = match handle_json_rpc(&request) {
             Ok(response) => response,
@@ -44,10 +47,9 @@ pub fn run_stdio(input: impl BufRead, mut output: impl Write) -> Result<(), tibe
 
 pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
-    let method = request
-        .get("method")
-        .and_then(Value::as_str)
-        .ok_or_else(|| tiber_git::Error::Parse("mcp_method_missing=true".to_string()))?;
+    let Some(method) = request.get("method").and_then(Value::as_str) else {
+        return Ok(error_response(id, -32600, "mcp_method_missing=true"));
+    };
 
     let result = match method {
         "initialize" => json!({
@@ -64,10 +66,9 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
         "tools/list" => json!({ "tools": tools() }),
         "resources/list" => json!({ "resources": resources()? }),
         "tools/call" => {
-            let name = request
-                .pointer("/params/name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| tiber_git::Error::Parse("mcp_tool_name_missing=true".to_string()))?;
+            let Some(name) = request.pointer("/params/name").and_then(Value::as_str) else {
+                return Ok(error_response(id, -32602, "mcp_tool_name_missing=true"));
+            };
             let arguments = request
                 .pointer("/params/arguments")
                 .cloned()
@@ -75,12 +76,9 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
             call_tool(name, &arguments)?
         }
         "resources/read" => {
-            let uri = request
-                .pointer("/params/uri")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    tiber_git::Error::Parse("mcp_resource_uri_missing=true".to_string())
-                })?;
+            let Some(uri) = request.pointer("/params/uri").and_then(Value::as_str) else {
+                return Ok(error_response(id, -32602, "mcp_resource_uri_missing=true"));
+            };
             json!({
                 "contents": [
                     {

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn assert_success(output: Output) {
@@ -23,12 +24,16 @@ pub struct TempRepo {
 
 impl TempRepo {
     pub fn new() -> Self {
+        static TEMP_REPO_SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock after epoch")
             .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("tiber-cli-test-{}-{unique}", std::process::id()));
+        let sequence = TEMP_REPO_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "tiber-cli-test-{}-{unique}-{sequence}",
+            std::process::id()
+        ));
         fs::create_dir(&path).expect("create temp repo");
         Self { path }
     }

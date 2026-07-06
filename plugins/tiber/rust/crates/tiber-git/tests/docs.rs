@@ -9,8 +9,7 @@ fn docs_are_listed_read_and_constrained_to_repo_docs_tree() {
     fs::write(repo.path.join("docs/guides/tiber.md"), "# Tiber guide\n").expect("write doc");
     fs::write(repo.path.join("docs/notes.txt"), "not markdown\n").expect("write text file");
 
-    let previous = std::env::current_dir().expect("current dir");
-    std::env::set_current_dir(&repo.path).expect("enter temp repo");
+    let _cwd = CurrentDirGuard::enter(&repo.path);
 
     let docs = tiber_git::list_docs().expect("list docs");
     assert_eq!(docs, vec!["docs/guides/tiber.md"]);
@@ -20,8 +19,24 @@ fn docs_are_listed_read_and_constrained_to_repo_docs_tree() {
 
     let traversal = tiber_git::read_doc("docs/../README.md").expect_err("reject traversal");
     assert!(traversal.to_string().contains("invalid_doc_ref"));
+}
 
-    std::env::set_current_dir(previous).expect("restore current dir");
+struct CurrentDirGuard {
+    previous: std::path::PathBuf,
+}
+
+impl CurrentDirGuard {
+    fn enter(path: &std::path::Path) -> Self {
+        let previous = std::env::current_dir().expect("current dir");
+        std::env::set_current_dir(path).expect("enter temp repo");
+        Self { previous }
+    }
+}
+
+impl Drop for CurrentDirGuard {
+    fn drop(&mut self) {
+        std::env::set_current_dir(&self.previous).expect("restore current dir");
+    }
 }
 
 struct TempRepo {
