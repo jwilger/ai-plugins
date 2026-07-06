@@ -35,11 +35,16 @@ function readResults(file) {
       const providerVariant =
         testCase.provider_variant ||
         testCase.providerVariant ||
-        String(provider).replace(/-(no-plugins|targeted-plugins|full-marketplace)$/, "");
+        String(provider).replace(
+          /-(no-plugins|targeted-plugins|full-marketplace)$/,
+          "",
+        );
       const pluginMode =
+        String(provider).match(
+          /(no-plugins|targeted-plugins|full-marketplace)$/,
+        )?.[1] ||
         testCase.plugin_mode ||
         testCase.pluginMode ||
-        String(provider).match(/(no-plugins|targeted-plugins|full-marketplace)$/)?.[1] ||
         "unknown";
       return {
         id: testCase.case_id || result.description || `case-${index + 1}`,
@@ -105,12 +110,16 @@ function normalizeList(value) {
 function isProviderUnavailable(reason) {
   const message = String(reason || "");
 
-  return /\b(rate.?limit|weekly limit|session limit|usage limit|insufficient_quota|quota (?:exceeded|exhausted)|(?:exceeded|exhausted) quota|too many requests|429|provider unavailable|could not be resolved)\b/i.test(
-    message,
-  ) || /\b(?:Error calling (?:Claude Agent SDK|OpenAI Codex SDK)|provider error)\b[\s\S]{0,180}\b(?:not logged in|login required|authentication required|credentials? (?:missing|required)|api key (?:missing|required|not set)|unauthorized|forbidden|401|403)\b/i.test(
-    message,
-  ) || /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY)\b[\s\S]{0,80}\b(?:missing|required|not set)\b/i.test(
-    message,
+  return (
+    /\b(rate.?limit|weekly limit|session limit|usage limit|insufficient_quota|quota (?:exceeded|exhausted)|(?:exceeded|exhausted) quota|too many requests|429|provider unavailable|could not be resolved)\b/i.test(
+      message,
+    ) ||
+    /\b(?:Error calling (?:Claude Agent SDK|OpenAI Codex SDK)|provider error)\b[\s\S]{0,180}\b(?:not logged in|login required|authentication required|credentials? (?:missing|required)|api key (?:missing|required|not set)|unauthorized|forbidden|401|403)\b/i.test(
+      message,
+    ) ||
+    /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY)\b[\s\S]{0,80}\b(?:missing|required|not set)\b/i.test(
+      message,
+    )
   );
 }
 
@@ -248,8 +257,12 @@ function valueGateSummaries(aggregates) {
   return [...byCase.entries()]
     .map(([key, groups]) => {
       const [providerVariant, caseId] = key.split("::");
-      const full = groups.find((group) => group.pluginMode === "full-marketplace");
-      const baseline = groups.find((group) => group.pluginMode === "no-plugins");
+      const full = groups.find(
+        (group) => group.pluginMode === "full-marketplace",
+      );
+      const baseline = groups.find(
+        (group) => group.pluginMode === "no-plugins",
+      );
       const targeted = groups.find(
         (group) => group.pluginMode === "targeted-plugins",
       );

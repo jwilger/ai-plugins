@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+plugin_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "$plugin_root/scripts/detect-target.sh"
+target="$(detect_tiber_target)" || {
+  echo "tiber.unsupported_platform os=$(uname -s) arch=$(uname -m)" >&2
+  exit 1
+}
+
+binary="$plugin_root/dist/$target/tiber"
+if [ -x "$binary" ]; then
+  exec "$binary" "$@"
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "tiber.missing_cargo binary=$binary" >&2
+  exit 1
+fi
+
+exec cargo run --quiet --manifest-path "$plugin_root/rust/Cargo.toml" --bin tiber -- "$@"

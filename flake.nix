@@ -26,6 +26,15 @@
             ripgrep
             fd
             nodejs_22
+            cargo
+            cargo-mutants
+            cargo-zigbuild
+            chromium
+            clippy
+            rustc
+            rustfmt
+            rustup
+            zig
             just
             prettier
             bats

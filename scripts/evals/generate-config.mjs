@@ -4,6 +4,9 @@ import path from "node:path";
 import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "../..");
+const evalWorkspace = path.join(root, ".dependencies/evals/agent-workspace");
+const advisoryPromptPrefix =
+  "Answer the scenario as an advisory behavior question. Treat each scenario as stateless: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Use installed marketplace plugin and skill guidance when it is relevant, naming the relevant plugin or skill in the answer. When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording. Apply plugin-specific safety gates and documented commands exactly instead of replacing them with generic setup or validation advice. Do not run shell commands, start evals, mutate files, or inspect repository state.";
 
 function usage() {
   console.log(`Usage: node scripts/evals/generate-config.mjs [--suite behavior|canary] [--output path] [--stdout]
@@ -97,6 +100,15 @@ function fileUrl(file) {
   return `file://${path.resolve(file)}`;
 }
 
+function behaviorTestLoader() {
+  if (process.env.EVAL_CASE_FILTER || process.env.EVAL_SAMPLES) {
+    return fileUrl(
+      path.join(root, "evals/out/generated/load-harness-cases.runtime.cjs"),
+    );
+  }
+  return fileUrl(path.join(root, "evals/promptfoo/load-harness-cases.cjs"));
+}
+
 function indentedList(items, indent, render) {
   return items.map((item) => `${" ".repeat(indent)}${render(item)}`).join("\n");
 }
@@ -120,10 +132,13 @@ ${indentedList(plugins, 8, (plugin) => `- type: local\n${" ".repeat(10)}path: ${
     config:
       apiKeyRequired: false
       model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
-      working_dir: ${quote(root)}
+      working_dir: ${quote(evalWorkspace)}
       permission_mode: dontAsk
       skills: all
+      setting_sources: []
+      persist_session: false
       disallowed_tools:
+        - Bash
         - Write
         - Edit
         - MultiEdit
@@ -139,12 +154,12 @@ function codexProvider(variant, pluginMode) {
     config:
       model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
       model_reasoning_effort: ${providerEnv(variant.reasoningEffortEnv, variant.defaultReasoningEffort)}
-      working_dir: ${quote(root)}
+      working_dir: ${quote(evalWorkspace)}
       sandbox_mode: read-only
       approval_policy: never
       enable_streaming: true
-      deep_tracing: true
-      skip_git_repo_check: false
+      deep_tracing: false
+      skip_git_repo_check: true
       cli_env:
         CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.dependencies/evals/codex-home-${homeSuffix}`)}') }}"`;
 }
@@ -159,50 +174,55 @@ function providerFor(variant, pluginMode, plugins) {
   throw new Error(`unsupported provider variant: ${variant.id}`);
 }
 
+function providerVariantsFor(matrix) {
+  const filter = process.env.EVAL_PROVIDER_FILTER;
+  const variants = filter
+    ? matrix.providerVariants.filter(
+        (variant) =>
+          variant.id.includes(filter) || variant.provider.includes(filter),
+      )
+    : matrix.providerVariants;
+
+  if (variants.length === 0) {
+    throw new Error(
+      `no provider variants match EVAL_PROVIDER_FILTER=${filter}`,
+    );
+  }
+
+  return variants;
+}
+
 function configFor(suite) {
   const allPlugins = allMarketplacePlugins();
   const claudePlugins = manifestPlugins(".claude-plugin/marketplace.json");
   const matrix = evalMatrix();
-  const testLoader = fileUrl(
-    path.join(
-      root,
-      "evals/promptfoo",
-      suite === "canary" ? "load-canary-cases.cjs" : "load-harness-cases.cjs",
-    ),
-  );
+  const providerVariants = providerVariantsFor(matrix);
+  const testLoader =
+    suite === "canary"
+      ? fileUrl(path.join(root, "evals/promptfoo/load-canary-cases.cjs"))
+      : behaviorTestLoader();
   const description =
     suite === "canary"
       ? "Full-marketplace canary for ai-plugins coding harnesses"
       : "Provider-backed behavior evals for the ai-plugins marketplace";
   const providers =
     suite === "behavior"
-      ? matrix.providerVariants.flatMap((variant) =>
+      ? providerVariants.flatMap((variant) =>
           matrix.pluginModes.map((pluginMode) =>
             providerFor(variant, pluginMode, claudePlugins),
           ),
         )
-      : [
-          providerFor(
-            matrix.providerVariants.find(
-              (variant) => variant.provider === "anthropic:claude-agent-sdk",
-            ),
-            { id: "full-marketplace" },
-            claudePlugins,
-          ),
-          providerFor(
-            matrix.providerVariants.find(
-              (variant) => variant.provider === "openai:codex-sdk",
-            ),
-            { id: "full-marketplace" },
-            claudePlugins,
-          ),
-        ];
+      : providerVariants.map((variant) =>
+          providerFor(variant, { id: "full-marketplace" }, claudePlugins),
+        );
 
   return `# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
 description: ${description}
 
 prompts:
   - |
+    ${advisoryPromptPrefix}
+
     {{scenario_prompt}}
 
 providers:
@@ -213,21 +233,22 @@ tests: ${testLoader}
 defaultTest:
   options:
     provider:
-      id: openai:codex-sdk
-      config:
-        model: "{{ env.CODEX_GRADER_MODEL | default('gpt-5.5') }}"
-        model_reasoning_effort: "{{ env.CODEX_GRADER_REASONING_EFFORT | default('medium') }}"
-        working_dir: ${quote(root)}
-        sandbox_mode: read-only
-        approval_policy: never
-        enable_streaming: true
-        deep_tracing: true
-        skip_git_repo_check: false
-        cli_env:
-          CODEX_HOME: "{{ env.CODEX_EVAL_HOME | default('${path.join(root, ".dependencies/evals/codex-home-full-marketplace")}') }}"
+      text:
+        id: openai:codex-sdk
+        config:
+          model: "{{ env.CODEX_GRADER_MODEL | default('gpt-5.5') }}"
+          model_reasoning_effort: "{{ env.CODEX_GRADER_REASONING_EFFORT | default('medium') }}"
+          working_dir: ${quote(evalWorkspace)}
+          sandbox_mode: read-only
+          approval_policy: never
+          enable_streaming: true
+          deep_tracing: false
+          skip_git_repo_check: true
+          cli_env:
+            CODEX_HOME: "{{ env.CODEX_EVAL_HOME | default('${path.join(root, ".dependencies/evals/codex-home-full-marketplace")}') }}"
 
 tracing:
-  enabled: true
+  enabled: false
 
 metadata:
   suite: ${suite}
@@ -236,12 +257,12 @@ metadata:
     pluginModes:
 ${indentedList(matrix.pluginModes, 6, (mode) => `- id: ${mode.id}`)}
     providerVariants:
-${indentedList(matrix.providerVariants, 6, (variant) => `- id: ${variant.id}\n${" ".repeat(8)}provider: ${variant.provider}`)}
+${indentedList(providerVariants, 6, (variant) => `- id: ${variant.id}\n${" ".repeat(8)}provider: ${variant.provider}`)}
   fullMarketplacePlugins:
 ${indentedList(allPlugins, 4, (plugin) => `- name: ${plugin.name}\n${" ".repeat(6)}sourcePath: ${quote(plugin.path)}`)}
 
 commandLineOptions:
-  maxConcurrency: 2
+  maxConcurrency: 1
   share: false
   cache: false
   write: true

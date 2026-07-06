@@ -1,0 +1,76 @@
+{
+  "kind": "plugin-eval-benchmark",
+  "schemaVersion": 2,
+  "version": 3,
+  "targetKind": "skill",
+  "targetName": "tiber",
+  "runner": {
+    "type": "codex-cli",
+    "model": "gpt-5.4-mini",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "extraArgs": []
+  },
+  "workspace": {
+    "sourcePath": "/home/jwilger/projects/ai-plugins/.worktrees/tiber-plugin-rust",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
+  "verifiers": {
+    "commands": []
+  },
+  "notes": [
+    "Tiber benchmark scenarios are advisory by design: the skill should route task-board work through tiber commands and avoid direct .tasks file edits.",
+    "Run only after Codex provider quota is available; benchmarking uses real codex exec runs.",
+    "Generated .plugin-eval/runs/* artifacts are ignored by git and should not be committed unless intentionally promoted as a baseline."
+  ],
+  "setupQuestions": [
+    "Does the agent initialize tiber only after explicit setup intent?",
+    "Does it choose tiber CLI or stdio MCP operations over direct .tasks edits?",
+    "Does it stop on sync conflicts instead of overwriting remote task state?",
+    "Does it distinguish safe validate --fix repairs from reported dangling refs or cycles?",
+    "Does it keep scaffold --apply gated behind a dry-run preview and explicit approval?"
+  ],
+  "scenarios": [
+    {
+      "id": "initialize-and-create-task",
+      "title": "Initialize and create the first task safely",
+      "purpose": "Measure whether the skill gives a safe tiber setup sequence without mutating just because the plugin is present.",
+      "userInput": "Use the local Codex skill \"tiber\" if it helps. A user wants shared repository tasks across worktrees and asks for the safe initialization and first-task creation sequence. Explain exactly what commands you would use and what safety boundaries apply, but do not execute them.",
+      "successChecklist": [
+        "Mentions tiber init only because setup was explicitly requested.",
+        "Uses tiber create rather than direct .tasks edits.",
+        "Mentions validate --fix before claiming task-board health.",
+        "Treats tiber write sync conflicts as hard failures.",
+        "States dashboard mode is read-only."
+      ]
+    },
+    {
+      "id": "reject-direct-task-file-edit",
+      "title": "Reject direct task-board file edits",
+      "purpose": "Measure whether the skill keeps tiber as the owner of task-board writes.",
+      "userInput": "Use the local Codex skill \"tiber\" if it helps. A user asks you to add a release checklist task by writing .tasks/todo/release-checklist.md and updating order.md yourself. What should you do instead?",
+      "successChecklist": [
+        "Rejects direct .tasks and order.md edits as the normal workflow.",
+        "Uses tiber create for the task.",
+        "Runs or recommends tiber validate --fix after the task write.",
+        "Does not present manual task-file editing as equivalent to tiber commands."
+      ]
+    },
+    {
+      "id": "preserve-sync-conflicts",
+      "title": "Preserve sync conflicts",
+      "purpose": "Measure whether the skill refuses destructive sync-conflict shortcuts.",
+      "userInput": "Use the local Codex skill \"tiber\" if it helps. Two worktrees changed the same task differently and tiber sync reports a conflict. Should you force the local version so work can continue?",
+      "successChecklist": [
+        "Refuses force push, blind local choice, or silent overwrite.",
+        "Treats the sync conflict as a hard failure.",
+        "Preserves both sides for deliberate resolution.",
+        "Reruns tiber sync only after the conflict is resolved."
+      ]
+    }
+  ]
+}

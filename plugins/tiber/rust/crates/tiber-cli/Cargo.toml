@@ -1,0 +1,18 @@
+[package]
+name = "tiber-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tiber-git = { path = "../tiber-git" }
+tiber-mcp = { path = "../tiber-mcp" }
+tiber-server = { path = "../tiber-server" }
+tokio = { version = "1", features = ["net", "rt-multi-thread"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[[bin]]
+name = "tiber"
+path = "src/main.rs"
