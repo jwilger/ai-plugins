@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiber_core::{
     BoardSnapshot, DependencyGraph, OrderReconciliation, TaskDependencies, TaskSnapshot, TaskTitle,
 };
@@ -17,6 +17,8 @@ const STATUS_DIRS: &[&str] = &["backlog", "in-progress", "done", "abandoned"];
 const OPEN_STATUS_DIRS: &[&str] = &["backlog", "in-progress"];
 const TASK_ID_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
 const TASK_ID_GENERATION_ATTEMPTS: usize = 32;
+const DEFAULT_LOCK_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
+const DEFAULT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -1552,6 +1554,30 @@ impl GitRepository {
     }
 
     fn acquire_lock(&self) -> Result<TiberLock, Error> {
+        let timeout =
+            lock_retry_duration("TIBER_LOCK_RETRY_TIMEOUT_MS", DEFAULT_LOCK_RETRY_TIMEOUT);
+        let interval =
+            lock_retry_duration("TIBER_LOCK_RETRY_INTERVAL_MS", DEFAULT_LOCK_RETRY_INTERVAL);
+        let interval = if interval.is_zero() {
+            DEFAULT_LOCK_RETRY_INTERVAL
+        } else {
+            interval
+        };
+        let started_at = Instant::now();
+        loop {
+            match self.try_acquire_lock_once() {
+                Ok(lock) => return Ok(lock),
+                Err(error)
+                    if is_tiber_lock_busy(&error) && lock_retry_remaining(started_at, timeout) =>
+                {
+                    thread::sleep(interval);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn try_acquire_lock_once(&self) -> Result<TiberLock, Error> {
         let lock_dir = self.git_common_dir()?.join("tiber");
         fs::create_dir_all(&lock_dir)?;
         let lock_path = lock_dir.join("tiber.lock");
@@ -2631,6 +2657,22 @@ fn lock_metadata() -> String {
         .unwrap_or_default()
         .as_secs();
     format!("pid={}\ntimestamp={timestamp}\n", std::process::id())
+}
+
+fn lock_retry_duration(env_name: &str, default: Duration) -> Duration {
+    std::env::var(env_name)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(default)
+}
+
+fn lock_retry_remaining(started_at: Instant, timeout: Duration) -> bool {
+    started_at.elapsed() < timeout
+}
+
+fn is_tiber_lock_busy(error: &Error) -> bool {
+    matches!(error, Error::Parse(message) if message.starts_with("tiber_lock_busy "))
 }
 
 fn stale_lock_contents(path: &Path) -> Result<Option<String>, Error> {

@@ -33,6 +33,9 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   lowercase statuses such as `draft`, `open`, `review-required`,
   `checks-pending`, `checks-passing`, `checks-failing`, `approved`, `merged`,
   `closed`, or `blocked`.
+- Before actively working on an existing Tiber task, move it to `in-progress`
+  with `tiber transition <ref> in-progress`; do not leave active work in the
+  backlog as an informal reservation.
 - Treat write-sync conflicts as hard failures: do not force push, choose local,
   or silently overwrite `tasks`. Preserve both sides, resolve deliberately, then
   rerun `tiber sync`.

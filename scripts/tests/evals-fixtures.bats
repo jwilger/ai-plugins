@@ -84,8 +84,8 @@ JSON
 delete process.env.EVAL_CASE_FILTER;
 const generateTests = require('./evals/promptfoo/load-harness-cases.cjs');
 const tests = generateTests();
-if (tests.length !== 7) {
-  throw new Error(`expected 7 tiber tests, got ${tests.length}`);
+if (tests.length !== 8) {
+  throw new Error(`expected 8 tiber tests, got ${tests.length}`);
 }
 if (!tests.every((testCase) => testCase.description.includes('tiber'))) {
   throw new Error(`runtime filter returned non-tiber tests: ${tests.map((testCase) => testCase.description).join(', ')}`);
