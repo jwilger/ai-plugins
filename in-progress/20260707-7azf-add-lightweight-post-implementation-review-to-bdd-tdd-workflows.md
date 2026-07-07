@@ -26,3 +26,4 @@ In the development-discipline plugin, update BDD/TDD practice guidance so that a
 ## Notes / Log
 
 - 2026-07-07: In progress on branch development-discipline-tdd-light-review. Local signed commit e7fe1d1 created with focused validation; stacked on PR #36 and waiting for #36 to merge before rebasing/opening PR.
+- 2026-07-07: Opened stacked PR #41 against development-discipline-final-review: https://github.com/jwilger/ai-plugins/pull/41. Branch rebased onto current PR #36 head d92b75f; validation passed with development-discipline plugin bats test, focused dry-run eval case, marketplace validation, plugin-eval analysis 100/100, and git diff --check.
