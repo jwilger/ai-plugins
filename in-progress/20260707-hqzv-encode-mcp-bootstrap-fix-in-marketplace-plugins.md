@@ -22,3 +22,5 @@ After the tiber and promptfoo MCP startup failures are actually fixed, encode th
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-07: Implemented locally as stacked branch mcp-bootstrap-upgrade-docs at commit 66c152e, based on mcp-startup-direct-launchers. Documents upgrading to agentic-systems-engineering 0.1.4 and tiber 0.2.3 as the marketplace bootstrap path. Verification run: nix develop -c just validate-marketplace.
