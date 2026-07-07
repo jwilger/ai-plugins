@@ -82,6 +82,7 @@ tiber subtask add <task-ref> "Dependent subtask" --after s1,s2
 tiber subtask check <task-ref> s1
 tiber subtask uncheck <task-ref> s1
 tiber update <task-ref> --summary "New summary" --tags infra,docs
+tiber update <task-ref> --pr-mr-url https://github.com/org/repo/pull/42 --pr-mr-status checks-pending
 tiber acceptance add <task-ref> "Observable condition"
 tiber acceptance check <task-ref> 1
 tiber note add <task-ref> "Progress note"

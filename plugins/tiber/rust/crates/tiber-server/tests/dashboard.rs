@@ -145,6 +145,34 @@ async fn dashboard_board_renders_course_columns_badges_dependencies_and_modal_co
 }
 
 #[tokio::test]
+async fn dashboard_in_progress_cards_show_pr_mr_status_badges() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    repo.tiber(["create", "Review badge"]);
+    let stem = repo.task_stem("backlog", "review-badge");
+    repo.move_task("backlog", "in-progress", &stem);
+    let mut task = repo.task_file("in-progress", &stem);
+    task = task
+        .replace(
+            "pr_mr_url: \n",
+            "pr_mr_url: https://github.com/example/repo/pull/42\n",
+        )
+        .replace("pr_mr_status: \n", "pr_mr_status: checks-failing\n");
+    repo.insert_tasks_tree_file(&format!("in-progress/{stem}.md"), &task);
+
+    let response = tiber_server::router_at(repo.path.clone())
+        .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+        .await
+        .expect("board response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let board = body_text(response).await;
+    assert!(board.contains("data-pr-mr-status=\"checks-failing\""));
+    assert!(board.contains("PR/MR checks failing"));
+    assert!(board.contains("pr-status-checks-failing"));
+}
+
+#[tokio::test]
 async fn dashboard_exposes_read_only_sse_events_route() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);

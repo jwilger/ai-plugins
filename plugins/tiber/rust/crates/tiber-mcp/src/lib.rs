@@ -199,10 +199,14 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
             let task_ref = required_string(arguments, "ref")?;
             tiber_git::update_task(
                 task_ref,
-                optional_string(arguments, "title"),
-                optional_string(arguments, "summary"),
-                optional_string(arguments, "context"),
-                optional_tags(arguments)?,
+                tiber_git::TaskUpdate {
+                    title: optional_string(arguments, "title"),
+                    summary: optional_string(arguments, "summary"),
+                    context: optional_string(arguments, "context"),
+                    tags: optional_tags(arguments)?,
+                    pr_mr_url: optional_string(arguments, "pr_mr_url"),
+                    pr_mr_status: optional_string(arguments, "pr_mr_status"),
+                },
             )?;
             Ok(text_content(format!("updated {task_ref}")))
         }
@@ -423,13 +427,15 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.update",
             "Update task",
-            "Update task title, summary, context, or tags.",
+            "Update task title, summary, context, tags, or PR/MR tracking fields.",
             json!({
                 "ref": { "type": "string" },
                 "title": { "type": "string" },
                 "summary": { "type": "string" },
                 "context": { "type": "string" },
-                "tags": { "type": "array", "items": { "type": "string" } }
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "pr_mr_url": { "type": "string" },
+                "pr_mr_status": { "type": "string" }
             }),
             vec!["ref"],
         ),
