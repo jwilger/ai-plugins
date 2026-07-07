@@ -33,6 +33,29 @@ fn update_edits_title_summary_context_and_tags_without_raw_markdown_paths() {
 }
 
 #[test]
+fn update_edits_pr_mr_tracking_frontmatter() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Review tracked"]));
+
+    let update = repo.tiber([
+        "update",
+        "review-tracked",
+        "--pr-mr-url",
+        "https://github.com/example/repo/pull/42",
+        "--pr-mr-status",
+        "review-required",
+    ]);
+
+    assert_success(update);
+    let show = repo.tiber(["show", "review-tracked"]);
+    assert_success_ref(&show);
+    let task = String::from_utf8(show.stdout).expect("show output should be utf8");
+    assert!(task.contains("pr_mr_url: https://github.com/example/repo/pull/42\n"));
+    assert!(task.contains("pr_mr_status: review-required\n"));
+}
+
+#[test]
 fn acceptance_add_check_uncheck_and_remove_edits_acceptance_section() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

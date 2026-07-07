@@ -120,6 +120,8 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
                 update.summary.as_deref(),
                 update.context.as_deref(),
                 update.tags,
+                update.pr_mr_url.as_deref(),
+                update.pr_mr_status.as_deref(),
             )?;
             Ok(())
         }
@@ -170,7 +172,7 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             Ok(())
         }
         _ => Err(tiber_git::Error::Usage(
-            "usage: tiber init|sync|dashboard serve|mcp stdio|install-bin --target-dir <dir> --dry-run|--apply|create <title>|show <ref>|metadata <ref>|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add <ref> <title> [--after s1,s2]|subtask check|uncheck|update <ref> [--title|--summary|--context|--tags]|acceptance add|check|uncheck|remove|note add|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
+            "usage: tiber init|sync|dashboard serve|mcp stdio|install-bin --target-dir <dir> --dry-run|--apply|create <title>|show <ref>|metadata <ref>|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add <ref> <title> [--after s1,s2]|subtask check|uncheck|update <ref> [--title|--summary|--context|--tags|--pr-mr-url|--pr-mr-status]|acceptance add|check|uncheck|remove|note add|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
         )),
     }
 }
@@ -199,6 +201,8 @@ struct UpdateArgs {
     summary: Option<String>,
     context: Option<String>,
     tags: Option<Vec<String>>,
+    pr_mr_url: Option<String>,
+    pr_mr_status: Option<String>,
 }
 
 fn parse_update_args(args: &[String]) -> Result<UpdateArgs, tiber_git::Error> {
@@ -207,6 +211,8 @@ fn parse_update_args(args: &[String]) -> Result<UpdateArgs, tiber_git::Error> {
         summary: None,
         context: None,
         tags: None,
+        pr_mr_url: None,
+        pr_mr_status: None,
     };
     let mut index = 0;
     while index < args.len() {
@@ -221,6 +227,8 @@ fn parse_update_args(args: &[String]) -> Result<UpdateArgs, tiber_git::Error> {
             "--tags" => {
                 update.tags = Some(parse_comma_list(value));
             }
+            "--pr-mr-url" => update.pr_mr_url = Some(value.clone()),
+            "--pr-mr-status" => update.pr_mr_status = Some(value.clone()),
             _ => {
                 return Err(tiber_git::Error::Usage(format!(
                     "unknown update flag {flag}"
@@ -233,6 +241,8 @@ fn parse_update_args(args: &[String]) -> Result<UpdateArgs, tiber_git::Error> {
         && update.summary.is_none()
         && update.context.is_none()
         && update.tags.is_none()
+        && update.pr_mr_url.is_none()
+        && update.pr_mr_status.is_none()
     {
         return Err(tiber_git::Error::Usage(
             "update requires at least one field".to_string(),

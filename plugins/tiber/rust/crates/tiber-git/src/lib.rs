@@ -148,9 +148,21 @@ pub fn update_task(
     summary: Option<&str>,
     context: Option<&str>,
     tags: Option<Vec<String>>,
+    pr_mr_url: Option<&str>,
+    pr_mr_status: Option<&str>,
 ) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(|repo| repo.update_task(task_ref, title, summary, context, tags))
+    repo.with_task_workspace(|repo| {
+        repo.update_task(
+            task_ref,
+            title,
+            summary,
+            context,
+            tags,
+            pr_mr_url,
+            pr_mr_status,
+        )
+    })
 }
 
 pub fn add_acceptance(task_ref: &str, criterion: &str) -> Result<(), Error> {
@@ -1012,6 +1024,8 @@ impl GitRepository {
         summary: Option<&str>,
         context: Option<&str>,
         tags: Option<Vec<String>>,
+        pr_mr_url: Option<&str>,
+        pr_mr_status: Option<&str>,
     ) -> Result<(), Error> {
         let task_ref = self.resolve_task_ref(task_ref)?;
         let path = self.tasks_dir().join(&task_ref);
@@ -1022,6 +1036,12 @@ impl GitRepository {
         }
         if let Some(tags) = tags {
             task = update_frontmatter_array_values(&task, "tags", tags)?;
+        }
+        if let Some(pr_mr_url) = pr_mr_url {
+            task = upsert_frontmatter_scalar(&task, "pr_mr_url", pr_mr_url)?;
+        }
+        if let Some(pr_mr_status) = pr_mr_status {
+            task = upsert_frontmatter_scalar(&task, "pr_mr_status", pr_mr_status)?;
         }
         if let Some(summary) = summary {
             task = replace_markdown_section_body(&task, "Summary", summary)?;
@@ -1823,7 +1843,7 @@ fn frontmatter_scalar_value(value: &str) -> String {
 
 fn new_task_document(title: &str) -> String {
     format!(
-        "---\ntitle: {title}\nblocked_by: []\nblocks: []\ntags: []\n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
+        "---\ntitle: {title}\nblocked_by: []\nblocks: []\ntags: []\npr_mr_url: \npr_mr_status: \n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
     )
 }
 
@@ -2018,6 +2038,17 @@ fn update_frontmatter_scalar(document: &str, key: &str, value: &str) -> Result<S
     update_frontmatter_line(document, key, &format!("{key}: {value}"))
 }
 
+fn upsert_frontmatter_scalar(document: &str, key: &str, value: &str) -> Result<String, Error> {
+    let value = frontmatter_scalar_value(value);
+    match update_frontmatter_scalar(document, key, &value) {
+        Ok(updated) => Ok(updated),
+        Err(Error::Parse(message)) if message == format!("frontmatter_key_missing key={key}") => {
+            insert_frontmatter_line(document, &format!("{key}: {value}"))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn update_frontmatter_array_values(
     document: &str,
     key: &str,
@@ -2050,6 +2081,22 @@ fn update_frontmatter_line(document: &str, key: &str, replacement: &str) -> Resu
         return Err(Error::Parse(format!("frontmatter_key_missing key={key}")));
     }
     Ok(format!("---\n{}\n---\n{body}", lines.join("\n")))
+}
+
+fn insert_frontmatter_line(document: &str, line: &str) -> Result<String, Error> {
+    let Some(rest) = document.strip_prefix("---\n") else {
+        return Err(Error::Parse("frontmatter_missing=true".to_string()));
+    };
+    let Some((frontmatter, body)) = rest.split_once("\n---\n") else {
+        return Err(Error::Parse("frontmatter_unclosed=true".to_string()));
+    };
+    let mut frontmatter = frontmatter.to_string();
+    if !frontmatter.is_empty() && !frontmatter.ends_with('\n') {
+        frontmatter.push('\n');
+    }
+    frontmatter.push_str(line);
+    frontmatter.push('\n');
+    Ok(format!("---\n{frontmatter}---\n{body}"))
 }
 
 fn replace_markdown_section_body(

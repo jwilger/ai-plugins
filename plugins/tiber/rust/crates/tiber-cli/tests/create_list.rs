@@ -28,8 +28,9 @@ fn create_stores_course_shaped_task_in_backlog_and_list_prints_ordered_summary()
     assert_eq!(nickname, "write-tiber-docs");
 
     let task = repo.task_file("backlog", &stem);
-    assert!(task
-        .starts_with("---\ntitle: Write tiber docs\nblocked_by: []\nblocks: []\ntags: []\n---\n"));
+    assert!(task.starts_with(
+        "---\ntitle: Write tiber docs\nblocked_by: []\nblocks: []\ntags: []\npr_mr_url: \npr_mr_status: \n---\n"
+    ));
     assert!(task.contains("## Summary\n\n"));
     assert!(task.contains("## Context / Why\n\n"));
     assert!(task.contains("## Acceptance criteria\n\n"));
