@@ -13,6 +13,8 @@ In the development-discipline plugin, update BDD/TDD practice guidance so that a
 
 ## Acceptance criteria
 
+- [ ] The behavior is covered by development-discipline eval cases that exercise the lightweight post-implementation review loop.
+
 ## Subtasks
 
 ## Notes / Log
