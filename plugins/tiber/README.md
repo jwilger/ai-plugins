@@ -32,6 +32,14 @@ tiber sync
 `tiber init` is explicit. Installing the plugin or starting an agent session does
 not mutate the repository.
 
+When you start working on an existing task, move it out of the backlog first:
+
+```shell
+tiber transition <task-ref> in-progress
+```
+
+Backlog tasks are unclaimed work, not informal reservations.
+
 ## What Tiber Stores
 
 - `tasks` is an orphan Git branch that owns task-board state.
@@ -74,6 +82,7 @@ tiber subtask add <task-ref> "Dependent subtask" --after s1,s2
 tiber subtask check <task-ref> s1
 tiber subtask uncheck <task-ref> s1
 tiber update <task-ref> --summary "New summary" --tags infra,docs
+tiber update <task-ref> --pr-mr-url https://github.com/org/repo/pull/42 --pr-mr-status checks-pending
 tiber acceptance add <task-ref> "Observable condition"
 tiber acceptance check <task-ref> 1
 tiber note add <task-ref> "Progress note"

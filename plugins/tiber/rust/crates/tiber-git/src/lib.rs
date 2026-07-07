@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiber_core::{
     BoardSnapshot, DependencyGraph, OrderReconciliation, TaskDependencies, TaskSnapshot, TaskTitle,
 };
@@ -17,6 +17,8 @@ const STATUS_DIRS: &[&str] = &["backlog", "in-progress", "done", "abandoned"];
 const OPEN_STATUS_DIRS: &[&str] = &["backlog", "in-progress"];
 const TASK_ID_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
 const TASK_ID_GENERATION_ATTEMPTS: usize = 32;
+const DEFAULT_LOCK_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
+const DEFAULT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -142,15 +144,9 @@ pub fn set_subtask_checked(task_ref: &str, index: &str, checked: bool) -> Result
     repo.with_task_workspace(|repo| repo.set_subtask_checked(task_ref, index, checked))
 }
 
-pub fn update_task(
-    task_ref: &str,
-    title: Option<&str>,
-    summary: Option<&str>,
-    context: Option<&str>,
-    tags: Option<Vec<String>>,
-) -> Result<(), Error> {
+pub fn update_task(task_ref: &str, update: TaskUpdate<'_>) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(|repo| repo.update_task(task_ref, title, summary, context, tags))
+    repo.with_task_workspace(|repo| repo.update_task(task_ref, update))
 }
 
 pub fn add_acceptance(task_ref: &str, criterion: &str) -> Result<(), Error> {
@@ -247,6 +243,16 @@ impl fmt::Display for ValidationMessage {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
+}
+
+#[derive(Debug)]
+pub struct TaskUpdate<'a> {
+    pub title: Option<&'a str>,
+    pub summary: Option<&'a str>,
+    pub context: Option<&'a str>,
+    pub tags: Option<Vec<String>>,
+    pub pr_mr_url: Option<&'a str>,
+    pub pr_mr_status: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -1005,28 +1011,27 @@ impl GitRepository {
         Ok(())
     }
 
-    fn update_task(
-        &self,
-        task_ref: &str,
-        title: Option<&str>,
-        summary: Option<&str>,
-        context: Option<&str>,
-        tags: Option<Vec<String>>,
-    ) -> Result<(), Error> {
+    fn update_task(&self, task_ref: &str, update: TaskUpdate<'_>) -> Result<(), Error> {
         let task_ref = self.resolve_task_ref(task_ref)?;
         let path = self.tasks_dir().join(&task_ref);
         let mut task = fs::read_to_string(&path)?;
-        if let Some(title) = title {
+        if let Some(title) = update.title {
             let title = TaskTitle::parse(title)?;
             task = update_frontmatter_scalar(&task, "title", title.as_str())?;
         }
-        if let Some(tags) = tags {
+        if let Some(tags) = update.tags {
             task = update_frontmatter_array_values(&task, "tags", tags)?;
         }
-        if let Some(summary) = summary {
+        if let Some(pr_mr_url) = update.pr_mr_url {
+            task = upsert_frontmatter_optional_scalar(&task, "pr_mr_url", pr_mr_url)?;
+        }
+        if let Some(pr_mr_status) = update.pr_mr_status {
+            task = upsert_frontmatter_optional_scalar(&task, "pr_mr_status", pr_mr_status)?;
+        }
+        if let Some(summary) = update.summary {
             task = replace_markdown_section_body(&task, "Summary", summary)?;
         }
-        if let Some(context) = context {
+        if let Some(context) = update.context {
             task = replace_markdown_section_body(&task, "Context / Why", context)?;
         }
         fs::write(path, task)?;
@@ -1549,6 +1554,30 @@ impl GitRepository {
     }
 
     fn acquire_lock(&self) -> Result<TiberLock, Error> {
+        let timeout =
+            lock_retry_duration("TIBER_LOCK_RETRY_TIMEOUT_MS", DEFAULT_LOCK_RETRY_TIMEOUT);
+        let interval =
+            lock_retry_duration("TIBER_LOCK_RETRY_INTERVAL_MS", DEFAULT_LOCK_RETRY_INTERVAL);
+        let interval = if interval.is_zero() {
+            DEFAULT_LOCK_RETRY_INTERVAL
+        } else {
+            interval
+        };
+        let started_at = Instant::now();
+        loop {
+            match self.try_acquire_lock_once() {
+                Ok(lock) => return Ok(lock),
+                Err(error)
+                    if is_tiber_lock_busy(&error) && lock_retry_remaining(started_at, timeout) =>
+                {
+                    thread::sleep(interval);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn try_acquire_lock_once(&self) -> Result<TiberLock, Error> {
         let lock_dir = self.git_common_dir()?.join("tiber");
         fs::create_dir_all(&lock_dir)?;
         let lock_path = lock_dir.join("tiber.lock");
@@ -1823,7 +1852,7 @@ fn frontmatter_scalar_value(value: &str) -> String {
 
 fn new_task_document(title: &str) -> String {
     format!(
-        "---\ntitle: {title}\nblocked_by: []\nblocks: []\ntags: []\n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
+        "---\ntitle: {title}\nblocked_by: []\nblocks: []\ntags: []\npr_mr_url: \npr_mr_status: \n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
     )
 }
 
@@ -2018,6 +2047,35 @@ fn update_frontmatter_scalar(document: &str, key: &str, value: &str) -> Result<S
     update_frontmatter_line(document, key, &format!("{key}: {value}"))
 }
 
+fn upsert_frontmatter_optional_scalar(
+    document: &str,
+    key: &str,
+    value: &str,
+) -> Result<String, Error> {
+    let value = frontmatter_optional_scalar_value(value);
+    match update_frontmatter_scalar(document, key, &value) {
+        Ok(updated) => Ok(updated),
+        Err(Error::Parse(message)) if message == format!("frontmatter_key_missing key={key}") => {
+            insert_frontmatter_line(document, &format!("{key}: {value}"))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn frontmatter_optional_scalar_value(value: &str) -> String {
+    value
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                '-'
+            } else {
+                character
+            }
+        })
+        .collect::<String>()
+}
+
 fn update_frontmatter_array_values(
     document: &str,
     key: &str,
@@ -2050,6 +2108,22 @@ fn update_frontmatter_line(document: &str, key: &str, replacement: &str) -> Resu
         return Err(Error::Parse(format!("frontmatter_key_missing key={key}")));
     }
     Ok(format!("---\n{}\n---\n{body}", lines.join("\n")))
+}
+
+fn insert_frontmatter_line(document: &str, line: &str) -> Result<String, Error> {
+    let Some(rest) = document.strip_prefix("---\n") else {
+        return Err(Error::Parse("frontmatter_missing=true".to_string()));
+    };
+    let Some((frontmatter, body)) = rest.split_once("\n---\n") else {
+        return Err(Error::Parse("frontmatter_unclosed=true".to_string()));
+    };
+    let mut frontmatter = frontmatter.to_string();
+    if !frontmatter.is_empty() && !frontmatter.ends_with('\n') {
+        frontmatter.push('\n');
+    }
+    frontmatter.push_str(line);
+    frontmatter.push('\n');
+    Ok(format!("---\n{frontmatter}---\n{body}"))
 }
 
 fn replace_markdown_section_body(
@@ -2583,6 +2657,22 @@ fn lock_metadata() -> String {
         .unwrap_or_default()
         .as_secs();
     format!("pid={}\ntimestamp={timestamp}\n", std::process::id())
+}
+
+fn lock_retry_duration(env_name: &str, default: Duration) -> Duration {
+    std::env::var(env_name)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(default)
+}
+
+fn lock_retry_remaining(started_at: Instant, timeout: Duration) -> bool {
+    started_at.elapsed() < timeout
+}
+
+fn is_tiber_lock_busy(error: &Error) -> bool {
+    matches!(error, Error::Parse(message) if message.starts_with("tiber_lock_busy "))
 }
 
 fn stale_lock_contents(path: &Path) -> Result<Option<String>, Error> {

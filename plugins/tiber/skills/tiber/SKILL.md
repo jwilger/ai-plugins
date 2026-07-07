@@ -27,6 +27,15 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   needs an initialized board.
 - Use CLI/MCP writes, not direct edits to `.tasks` files or `order.md`.
 - Dashboard mode is read-only; all writes go through CLI or stdio MCP tools.
+- When you open or discover a PR/MR for an in-progress task, update the task
+  with `tiber update <ref> --pr-mr-url <url> --pr-mr-status <status>`, and keep
+  `pr_mr_status` current as checks/review/merge state changes. Use stable
+  lowercase statuses such as `draft`, `open`, `review-required`,
+  `checks-pending`, `checks-passing`, `checks-failing`, `approved`, `merged`,
+  `closed`, or `blocked`.
+- Before actively working on an existing Tiber task, move it to `in-progress`
+  with `tiber transition <ref> in-progress`; do not leave active work in the
+  backlog as an informal reservation.
 - Treat write-sync conflicts as hard failures: do not force push, choose local,
   or silently overwrite `tasks`. Preserve both sides, resolve deliberately, then
   rerun `tiber sync`.
@@ -55,6 +64,7 @@ tiber link <task-ref> blocks <task-ref>
 tiber unlink <task-ref> blocks <task-ref>
 tiber subtask add <task-ref> "Subtask title" --after s1,s2
 tiber update <task-ref> --summary "..."
+tiber update <task-ref> --pr-mr-url <url> --pr-mr-status checks-pending
 tiber acceptance add <task-ref> "Observable condition"
 tiber note add <task-ref> "Progress note"
 tiber validate --fix
