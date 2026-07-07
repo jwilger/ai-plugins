@@ -27,7 +27,7 @@
       "name": "agentic-systems-engineering",
       "source": "./plugins/agentic-systems-engineering",
       "description": "Portable guardrails for building, evaluating, and delivering LLM and agentic systems.",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "category": "Developer Tools",
       "keywords": ["agents", "llm", "evals", "rag", "delivery"]
     },
@@ -59,7 +59,7 @@
       "name": "tiber",
       "source": "./plugins/tiber",
       "description": "Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow.",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "category": "Developer Tools",
       "keywords": ["tasks", "git", "mcp", "dashboard", "planning"]
     }
