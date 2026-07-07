@@ -73,6 +73,11 @@ validate promptfoo configs, run focused eval slices, inspect prior results, and
 develop new eval cases. Keep release evidence on the canonical runner and
 generated repo-owned artifacts.
 
+The Codex MCP manifest starts through an absolute `/bin/sh` launcher so Codex
+does not need `bash` on its MCP startup `PATH`. Reinstall or upgrade the plugin
+from marketplace version `0.1.4` or newer if Codex reports `No such file or
+directory` while starting the `promptfoo` MCP server.
+
 Promptfoo's `mcp` provider is a different feature: it treats an MCP server as
 the system under test. Add that provider only for projects or plugins that
 expose MCP tools and need MCP-specific behavior or security coverage.

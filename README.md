@@ -199,6 +199,12 @@ Promptfoo's separate `mcp` provider is for testing MCP servers as systems under
 test and should be added only when a plugin or project exposes an MCP server to
 evaluate.
 
+If Codex reports `No such file or directory` for the `promptfoo` or `tiber` MCP
+client at startup, upgrade or reinstall the marketplace plugins so Codex loads
+`agentic-systems-engineering` `0.1.4` or newer and `tiber` `0.2.3` or newer.
+Those manifests bootstrap through an absolute `/bin/sh` launcher before
+resolving the bundled plugin command.
+
 ## Reporting eval cases
 
 When a plugin, skill, prompt, or workflow behaves incorrectly or only partially
