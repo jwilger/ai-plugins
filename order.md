@@ -13,3 +13,4 @@
 20260707-29i8-show-pr-mr-status-badges-on-in-progress-tiber-cards
 20260707-qsuz-mark-agent-unresolvable-blocked-tasks-on-the-tiber-board
 20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help
+20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
