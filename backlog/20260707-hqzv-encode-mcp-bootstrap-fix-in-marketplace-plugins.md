@@ -1,6 +1,6 @@
 ---
 title: Encode MCP bootstrap fix in marketplace plugins
-blocked_by: []
+blocked_by: [20260707-55ky-fix-codex-mcp-startup-failures-for-tiber-and-promptfoo]
 blocks: []
 tags: []
 ---
