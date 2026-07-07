@@ -179,7 +179,8 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
         "tiber.subtask.add" => {
             let task_ref = required_string(arguments, "ref")?;
             let title = required_string(arguments, "title")?;
-            tiber_git::add_subtask(task_ref, title)?;
+            let after_refs = optional_string_array(arguments, "after")?.unwrap_or_default();
+            tiber_git::add_subtask(task_ref, title, &after_refs)?;
             Ok(text_content(format!("updated {task_ref}")))
         }
         "tiber.subtask.check" => {
@@ -192,6 +193,47 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
             let task_ref = required_string(arguments, "ref")?;
             let index = required_string(arguments, "index")?;
             tiber_git::set_subtask_checked(task_ref, index, false)?;
+            Ok(text_content(format!("updated {task_ref}")))
+        }
+        "tiber.update" => {
+            let task_ref = required_string(arguments, "ref")?;
+            tiber_git::update_task(
+                task_ref,
+                optional_string(arguments, "title"),
+                optional_string(arguments, "summary"),
+                optional_string(arguments, "context"),
+                optional_tags(arguments)?,
+            )?;
+            Ok(text_content(format!("updated {task_ref}")))
+        }
+        "tiber.acceptance.add" => {
+            let task_ref = required_string(arguments, "ref")?;
+            let criterion = required_string(arguments, "criterion")?;
+            tiber_git::add_acceptance(task_ref, criterion)?;
+            Ok(text_content(format!("updated {task_ref}")))
+        }
+        "tiber.acceptance.check" => {
+            let task_ref = required_string(arguments, "ref")?;
+            let index = required_string(arguments, "index")?;
+            tiber_git::set_acceptance_checked(task_ref, index, true)?;
+            Ok(text_content(format!("updated {task_ref}")))
+        }
+        "tiber.acceptance.uncheck" => {
+            let task_ref = required_string(arguments, "ref")?;
+            let index = required_string(arguments, "index")?;
+            tiber_git::set_acceptance_checked(task_ref, index, false)?;
+            Ok(text_content(format!("updated {task_ref}")))
+        }
+        "tiber.acceptance.remove" => {
+            let task_ref = required_string(arguments, "ref")?;
+            let index = required_string(arguments, "index")?;
+            tiber_git::remove_acceptance(task_ref, index)?;
+            Ok(text_content(format!("updated {task_ref}")))
+        }
+        "tiber.note.add" => {
+            let task_ref = required_string(arguments, "ref")?;
+            let note = required_string(arguments, "note")?;
+            tiber_git::add_note(task_ref, note)?;
             Ok(text_content(format!("updated {task_ref}")))
         }
         "tiber.validate_fix" => Ok(text_content(
@@ -218,6 +260,19 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
                 .map(|written| format!("wrote {written}\n"))
                 .collect::<String>(),
         )),
+        "tiber.install_bin" => {
+            let target_dir = required_string(arguments, "target_dir")?;
+            let apply = arguments
+                .get("apply")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let installed = tiber_git::install_bin(target_dir, apply)?;
+            if apply {
+                Ok(text_content(format!("installed {installed}")))
+            } else {
+                Ok(text_content(format!("would install {installed}")))
+            }
+        }
         _ => Err(tiber_git::Error::Parse(format!(
             "unsupported_mcp_tool name={name}"
         ))),
@@ -229,6 +284,36 @@ fn required_string<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, tibe
         .get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_missing name={name}")))
+}
+
+fn optional_string<'a>(arguments: &'a Value, name: &str) -> Option<&'a str> {
+    arguments.get(name).and_then(Value::as_str)
+}
+
+fn optional_tags(arguments: &Value) -> Result<Option<Vec<String>>, tiber_git::Error> {
+    optional_string_array(arguments, "tags")
+}
+
+fn optional_string_array(
+    arguments: &Value,
+    name: &str,
+) -> Result<Option<Vec<String>>, tiber_git::Error> {
+    let Some(values) = arguments.get(name) else {
+        return Ok(None);
+    };
+    let values = values
+        .as_array()
+        .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}")))?;
+    Ok(Some(
+        values
+            .iter()
+            .map(|value| {
+                value.as_str().map(str::to_string).ok_or_else(|| {
+                    tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    ))
 }
 
 fn tools() -> Vec<Value> {
@@ -250,7 +335,7 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.create",
             "Create task",
-            "Create a tiber task in todo status.",
+            "Create a tiber task in backlog status.",
             json!({ "title": { "type": "string" } }),
             vec!["title"],
         ),
@@ -314,7 +399,11 @@ fn tools() -> Vec<Value> {
             "tiber.subtask.add",
             "Add subtask",
             "Add a checklist subtask to a task.",
-            json!({ "ref": { "type": "string" }, "title": { "type": "string" } }),
+            json!({
+                "ref": { "type": "string" },
+                "title": { "type": "string" },
+                "after": { "type": "array", "items": { "type": "string" } }
+            }),
             vec!["ref", "title"],
         ),
         tool(
@@ -330,6 +419,54 @@ fn tools() -> Vec<Value> {
             "Mark a subtask unchecked by one-based index.",
             json!({ "ref": { "type": "string" }, "index": { "type": "string" } }),
             vec!["ref", "index"],
+        ),
+        tool(
+            "tiber.update",
+            "Update task",
+            "Update task title, summary, context, or tags.",
+            json!({
+                "ref": { "type": "string" },
+                "title": { "type": "string" },
+                "summary": { "type": "string" },
+                "context": { "type": "string" },
+                "tags": { "type": "array", "items": { "type": "string" } }
+            }),
+            vec!["ref"],
+        ),
+        tool(
+            "tiber.acceptance.add",
+            "Add acceptance criterion",
+            "Add an acceptance criterion to a task.",
+            json!({ "ref": { "type": "string" }, "criterion": { "type": "string" } }),
+            vec!["ref", "criterion"],
+        ),
+        tool(
+            "tiber.acceptance.check",
+            "Check acceptance criterion",
+            "Mark an acceptance criterion checked by one-based index.",
+            json!({ "ref": { "type": "string" }, "index": { "type": "string" } }),
+            vec!["ref", "index"],
+        ),
+        tool(
+            "tiber.acceptance.uncheck",
+            "Uncheck acceptance criterion",
+            "Mark an acceptance criterion unchecked by one-based index.",
+            json!({ "ref": { "type": "string" }, "index": { "type": "string" } }),
+            vec!["ref", "index"],
+        ),
+        tool(
+            "tiber.acceptance.remove",
+            "Remove acceptance criterion",
+            "Remove an acceptance criterion by one-based index.",
+            json!({ "ref": { "type": "string" }, "index": { "type": "string" } }),
+            vec!["ref", "index"],
+        ),
+        tool(
+            "tiber.note.add",
+            "Add note",
+            "Append a dated note to a task.",
+            json!({ "ref": { "type": "string" }, "note": { "type": "string" } }),
+            vec!["ref", "note"],
         ),
         tool(
             "tiber.validate_fix",
@@ -358,6 +495,16 @@ fn tools() -> Vec<Value> {
             "Write repository files tiber scaffolds.",
             json!({}),
             vec![],
+        ),
+        tool(
+            "tiber.install_bin",
+            "Install tiber launcher",
+            "Preview or install the bundled tiber launcher into a target directory.",
+            json!({
+                "target_dir": { "type": "string" },
+                "apply": { "type": "boolean" }
+            }),
+            vec!["target_dir"],
         ),
     ]
 }

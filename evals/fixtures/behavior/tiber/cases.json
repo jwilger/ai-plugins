@@ -41,7 +41,7 @@
   {
     "case_id": "tiber-task-ownership",
     "behavior": "Treats tiber as the owner of repository task-board writes instead of editing .tasks files directly.",
-    "prompt": "A user asks you to add a task for documenting the release checklist and suggests writing .tasks/todo/release-checklist.md yourself and updating order.md. What should you do?",
+    "prompt": "A user asks you to add a task for documenting the release checklist and suggests writing .tasks/backlog/release-checklist.md yourself and updating order.md. What should you do?",
     "tags": ["tiber", "task-ownership", "tasks"],
     "plugins": ["tiber"],
     "skills": ["tiber"],
@@ -68,14 +68,14 @@
         "Use tiber create \"Document release checklist\" and then tiber validate --fix; do not hand-write .tasks files or order.md as the normal workflow."
       ],
       "fail": [
-        "I will write .tasks/todo/release-checklist.md and update order.md directly."
+        "I will write .tasks/backlog/release-checklist.md and update order.md directly."
       ]
     }
   },
   {
     "case_id": "tiber-claim-safety",
     "behavior": "Handles task claims through validation discipline and does not fabricate or preserve misplaced claims on unclaimed tasks.",
-    "prompt": "I want to reserve a todo task for myself by adding a Claims section to it, but I have not moved it into progress yet. How should an agent handle this with tiber?",
+    "prompt": "I want to reserve a backlog task for myself by adding a Claims section to it, but I have not moved it into in-progress yet. How should an agent handle this with tiber?",
     "tags": ["tiber", "claims", "validation"],
     "plugins": ["tiber"],
     "skills": ["tiber"],
@@ -84,24 +84,24 @@
     },
     "valueGate": { "mode": "none", "baselineLiftThreshold": 0 },
     "minPassRate": 1,
-    "semanticRubric": "Pass if the response rejects adding or preserving raw Claims metadata on a todo task, treats claims as belonging to active/in-progress work, and routes claim-bearing work through tiber transition/commands and validation. Mentioning that validate --fix removes misplaced todo claims while preserving in-progress claims is ideal but not required if the invalid todo-claim state is clearly rejected. Fail if it recommends manually adding a Claims section to a todo task, fabricates a claim without task state context, leaves a todo claim in place as a reservation, or says misplaced claims should be ignored.",
+    "semanticRubric": "Pass if the response rejects adding or preserving raw Claims metadata on a backlog task, treats claims as belonging to active/in-progress work, and routes claim-bearing work through tiber transition/commands and validation. Mentioning that validate --fix removes misplaced backlog claims while preserving in-progress claims is ideal but not required if the invalid backlog-claim state is clearly rejected. Fail if it recommends manually adding a Claims section to a backlog task, fabricates a claim without task state context, leaves a backlog claim in place as a reservation, or says misplaced claims should be ignored.",
     "hardAssertions": [
       {
-        "id": "no-raw-todo-claim",
+        "id": "no-raw-backlog-claim",
         "type": "forbiddenIntent",
-        "message": "Response appears to add raw Claims metadata to a todo task.",
+        "message": "Response appears to add raw Claims metadata to a backlog task.",
         "patterns": [
-          "\\b(add|write|create|insert)\\b[\\s\\S]{0,120}\\b## Claims\\b[\\s\\S]{0,120}\\btodo\\b",
-          "\\btodo/[^\\s]+\\.md\\b[\\s\\S]{0,120}\\b## Claims\\b"
+          "\\b(add|write|create|insert)\\b[\\s\\S]{0,120}\\b## Claims\\b[\\s\\S]{0,120}\\bbacklog\\b",
+          "\\bbacklog/[^\\s]+\\.md\\b[\\s\\S]{0,120}\\b## Claims\\b"
         ]
       }
     ],
     "calibration": {
       "pass": [
-        "Do not hand-add a Claims section to a todo task. Move work into doing with tiber transition when it is actually claimed, then run tiber validate --fix; misplaced claims on todo tasks are safe autofix removals."
+        "Do not hand-add a Claims section to a backlog task. Move work into in-progress with tiber transition when it is actually claimed, then run tiber validate --fix; misplaced claims on backlog tasks are safe autofix removals."
       ],
       "fail": [
-        "Add ## Claims to the todo task now and validate can ignore it later."
+        "Add ## Claims to the backlog task now and validate can ignore it later."
       ]
     }
   },
