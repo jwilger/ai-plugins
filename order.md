@@ -8,3 +8,4 @@
 20260707-sf8b-allow-drag-and-drop-reprioritization-in-the-tiber-dashboard-backlog
 20260707-s7q4-deselect-tiber-dashboard-task-when-clicking-outside-selected-task-actions
 20260707-b98q-preserve-selected-tiber-dashboard-task-across-dashboard-updates
+20260707-tcgz-remind-agents-to-move-tiber-tasks-to-in-progress-before-starting-work
