@@ -189,6 +189,7 @@ struct DashboardTask {
     tags: Vec<String>,
     blocked_by: Vec<String>,
     blocks: Vec<String>,
+    pr_mr: Option<PrMrStatus>,
     summary: String,
     context: String,
     acceptance: Vec<ChecklistItem>,
@@ -200,6 +201,12 @@ struct DashboardTask {
 struct ChecklistItem {
     checked: bool,
     text: String,
+}
+
+#[derive(Clone, Debug)]
+struct PrMrStatus {
+    url: String,
+    status: String,
 }
 
 fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
@@ -267,6 +274,7 @@ fn dashboard_tasks(root: &FsPath) -> Result<Vec<DashboardTask>, tiber_git::Error
                     .map(String::as_str)
                     .unwrap_or("[]"),
             ),
+            pr_mr: parse_pr_mr_status(&frontmatter),
             summary: sections.get("Summary").cloned().unwrap_or_default(),
             context: sections.get("Context / Why").cloned().unwrap_or_default(),
             acceptance: parse_checklist(
@@ -337,14 +345,16 @@ fn card_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> St
     } else {
         ""
     };
+    let pr_mr = pr_mr_badge_html(task);
     let dependency_attrs = dependency_attrs(task, tasks);
     format!(
-        "<article class=\"card\" data-task-link data-stem=\"{}\" {}><a href=\"/tasks/{}\"><div class=\"card-top\">{}{}</div><h3 class=\"card-title\">{}</h3><div class=\"card-meta\"><span class=\"mono\">{}</span><span class=\"link-counts\">{}{}</span></div><div class=\"card-tags\">{}</div></a><section class=\"card-summary\">{}</section></article>",
+        "<article class=\"card\" data-task-link data-stem=\"{}\" {}><a href=\"/tasks/{}\"><div class=\"card-top\">{}{}{}</div><h3 class=\"card-title\">{}</h3><div class=\"card-meta\"><span class=\"mono\">{}</span><span class=\"link-counts\">{}{}</span></div><div class=\"card-tags\">{}</div></a><section class=\"card-summary\">{}</section></article>",
         escape_html(&task.stem),
         dependency_attrs,
         escape_html(&task.stem),
         rank,
         recency,
+        pr_mr,
         escape_html(&task.title),
         escape_html(nickname(&task.stem)),
         if task.blocked_by.is_empty() {
@@ -363,6 +373,68 @@ fn card_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> St
             .collect::<String>(),
         render_prose(&task.summary, root)
     )
+}
+
+fn parse_pr_mr_status(frontmatter: &BTreeMap<String, String>) -> Option<PrMrStatus> {
+    let url = frontmatter.get("pr_mr_url")?.trim();
+    if url.is_empty() {
+        return None;
+    }
+    let status = frontmatter
+        .get("pr_mr_status")
+        .map(|status| status.trim())
+        .filter(|status| !status.is_empty())
+        .unwrap_or("unknown");
+    Some(PrMrStatus {
+        url: url.to_string(),
+        status: status.to_string(),
+    })
+}
+
+fn pr_mr_badge_html(task: &DashboardTask) -> String {
+    if task.status != "in-progress" {
+        return String::new();
+    }
+    let Some(pr_mr) = &task.pr_mr else {
+        return String::new();
+    };
+    let class = pr_mr_status_class(&pr_mr.status);
+    let label = pr_mr_status_label(&pr_mr.status);
+    format!(
+        "<span class=\"badge pr-status pr-status-{}\" data-pr-mr-status=\"{}\" title=\"{}\">PR/MR {}</span>",
+        class,
+        escape_html(&pr_mr.status),
+        escape_html(&pr_mr.url),
+        escape_html(&label)
+    )
+}
+
+fn pr_mr_status_class(status: &str) -> String {
+    let class = status
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if class.is_empty() {
+        "unknown".to_string()
+    } else {
+        class
+    }
+}
+
+fn pr_mr_status_label(status: &str) -> String {
+    status.trim().replace(['-', '_'], " ")
 }
 
 fn dependency_attrs(task: &DashboardTask, tasks: &[DashboardTask]) -> String {
@@ -893,6 +965,18 @@ a { color: inherit; text-decoration: none; }
   padding: 1px 7px;
 }
 .badge.rank { font-variant-numeric: tabular-nums; font-weight: 700; }
+.badge.pr-status { font-weight: 700; }
+.pr-status-approved,
+.pr-status-checks-passing,
+.pr-status-merged { background: #dcfce7; border-color: #86efac; color: #166534; }
+.pr-status-review-required,
+.pr-status-checks-pending,
+.pr-status-open { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+.pr-status-checks-failing,
+.pr-status-blocked { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+.pr-status-draft,
+.pr-status-closed,
+.pr-status-unknown { background: #e5e7eb; border-color: #cbd5e1; color: #334155; }
 .card-title { font-size: 14px; font-weight: 700; line-height: 1.35; margin: 6px 0 8px; }
 .card-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink-muted); font-size: 12px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }

@@ -428,7 +428,7 @@ fn sync_hard_fails_when_remote_and_local_task_contents_conflict() {
     assert_success_ref(&remote_task);
     assert_eq!(
         String::from_utf8(remote_task.stdout).expect("remote task should be utf8"),
-        "---\ntitle: Shared remote task\nblocked_by: []\nblocks: []\ntags: []\n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
+        "---\ntitle: Shared remote task\nblocked_by: []\nblocks: []\ntags: []\npr_mr_url: \npr_mr_status: \n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
     );
 }
 
