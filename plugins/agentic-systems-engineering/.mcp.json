@@ -1,10 +1,10 @@
 {
   "mcpServers": {
     "promptfoo": {
-      "command": "bash",
+      "command": "/bin/sh",
       "args": [
-        "-lc",
-        "set -euo pipefail; for candidate in ./bin/promptfoo-mcp ./plugins/agentic-systems-engineering/bin/promptfoo-mcp \"${CODEX_HOME:-$HOME/.codex}\"/plugins/cache/ai-plugins/agentic-systems-engineering/*/bin/promptfoo-mcp; do if [ -x \"$candidate\" ]; then exec \"$candidate\"; fi; done; echo \"promptfoo.mcp_launcher_missing\" >&2; exit 127"
+        "-c",
+        "set -eu; PATH=\"${PATH:-}:/bin:/usr/bin:/run/current-system/sw/bin\"; export PATH; for candidate in ./bin/promptfoo-mcp ./plugins/agentic-systems-engineering/bin/promptfoo-mcp \"${CODEX_HOME:-$HOME/.codex}\"/plugins/cache/ai-plugins/agentic-systems-engineering/*/bin/promptfoo-mcp; do if [ -x \"$candidate\" ]; then exec \"$candidate\"; fi; done; echo \"promptfoo.mcp_launcher_missing\" >&2; exit 127"
       ],
       "description": "Promptfoo MCP server for validating configs, running focused evals, inspecting results, and developing eval cases from Codex."
     }

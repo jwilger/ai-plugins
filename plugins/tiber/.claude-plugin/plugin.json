@@ -1,7 +1,7 @@
 {
   "name": "tiber",
   "description": "Git-backed task boards for coding agents: orphan tasks branch storage, temporary Git workspaces, CLI, stdio MCP, dry-run-first scaffolding with explicit approval, and read-only dashboard workflows.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "author": {
     "name": "John Wilger",
     "email": "john@johnwilger.com"
