@@ -138,6 +138,57 @@ fn validate_fix_reports_task_schema_errors_without_rewriting_them() {
 }
 
 #[test]
+fn validate_fix_assigns_ids_to_legacy_task_stems_and_rewrites_refs() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    let legacy_parent = "build-api";
+    let legacy_child = "build-ui";
+    repo.insert_task_file(
+        "backlog",
+        legacy_parent,
+        &task_document("Build API", &[], &[legacy_child], &[], ""),
+    );
+    repo.insert_task_file(
+        "in-progress",
+        legacy_child,
+        &task_document("Build UI", &[legacy_parent], &[], &[], ""),
+    );
+    repo.insert_tasks_tree_file("order.md", &format!("{legacy_parent}\n{legacy_child}\n"));
+
+    let validate = repo.tiber(["validate", "--fix"]);
+
+    assert_success_ref(&validate);
+    let output = String::from_utf8(validate.stdout).expect("validate output should be utf8");
+    let migrated = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("fixed task-id "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        migrated.len(),
+        2,
+        "expected two task-id migrations: {output}"
+    );
+    let parent = task_stem(&repo, "backlog", legacy_parent);
+    let child = task_stem(&repo, "in-progress", legacy_child);
+    assert!(parent.ends_with("-build-api"));
+    assert!(child.ends_with("-build-ui"));
+    assert_ne!(parent, legacy_parent);
+    assert_ne!(child, legacy_child);
+    assert_eq!(repo.order_file(), format!("{parent}\n{child}\n"));
+    assert!(repo
+        .task_file("backlog", &parent)
+        .contains(&format!("blocks: [{child}]")));
+    assert!(repo
+        .task_file("in-progress", &child)
+        .contains(&format!("blocked_by: [{parent}]")));
+    let parent_id = parent
+        .strip_suffix("-build-api")
+        .expect("parent has nickname suffix");
+    assert_success_ref(&repo.tiber(["show", parent_id]));
+    assert_success_ref(&repo.tiber(["show", "build-api"]));
+}
+
+#[test]
 fn validate_fix_removes_misplaced_claims_from_unclaimed_tasks() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

@@ -16,6 +16,7 @@ use tiber_core::{
 const STATUS_DIRS: &[&str] = &["backlog", "in-progress", "done", "abandoned"];
 const OPEN_STATUS_DIRS: &[&str] = &["backlog", "in-progress"];
 const TASK_ID_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
+const TASK_ID_GENERATION_ATTEMPTS: usize = 32;
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -1113,6 +1114,7 @@ impl GitRepository {
 
     fn validate_fix_unlocked(&self) -> Result<Vec<ValidationMessage>, Error> {
         let mut messages = Vec::new();
+        self.repair_legacy_task_ids(&mut messages)?;
         let task_refs = self.task_file_refs()?;
         self.report_schema_errors(&task_refs, &mut messages)?;
         self.repair_misplaced_claims(&task_refs, &mut messages)?;
@@ -1177,6 +1179,80 @@ impl GitRepository {
             .into_iter()
             .map(|(path, _contents)| path.to_string())
             .collect())
+    }
+
+    fn repair_legacy_task_ids(&self, messages: &mut Vec<ValidationMessage>) -> Result<(), Error> {
+        let task_refs = self.task_file_refs()?;
+        let mut migrations = std::collections::BTreeMap::new();
+        for task_ref in &task_refs {
+            let legacy_stem = task_stem(Path::new(task_ref))?;
+            if stem_parts(&legacy_stem).is_some() {
+                continue;
+            }
+            let status = task_ref
+                .split_once('/')
+                .map(|(status, _name)| status)
+                .ok_or_else(|| Error::Parse(format!("task_status_missing ref={task_ref}")))?;
+            let new_stem = self.unique_migration_stem(&legacy_stem, &migrations)?;
+            let from = self.tasks_dir().join(task_ref);
+            let to = self.tasks_dir().join(status).join(format!("{new_stem}.md"));
+            fs::rename(from, to)?;
+            migrations.insert(legacy_stem, new_stem);
+        }
+
+        if migrations.is_empty() {
+            return Ok(());
+        }
+
+        let order = self
+            .order_entries()?
+            .into_iter()
+            .map(|entry| migrations.get(&entry).cloned().unwrap_or(entry))
+            .collect::<Vec<_>>();
+        self.write_order(&order)?;
+
+        for task_ref in self.task_file_refs()? {
+            let path = self.tasks_dir().join(&task_ref);
+            let mut task = fs::read_to_string(&path)?;
+            for key in ["blocked_by", "blocks"] {
+                let values = frontmatter_array(&task, key)?
+                    .into_iter()
+                    .map(|value| migrations.get(&value).cloned().unwrap_or(value))
+                    .collect::<Vec<_>>();
+                task = update_frontmatter_array_values(&task, key, values)?;
+            }
+            fs::write(path, task)?;
+        }
+
+        messages.extend(
+            migrations
+                .into_iter()
+                .map(|(old, new)| ValidationMessage(format!("fixed task-id {old} {new}"))),
+        );
+        Ok(())
+    }
+
+    fn unique_migration_stem(
+        &self,
+        legacy_stem: &str,
+        migrations: &std::collections::BTreeMap<String, String>,
+    ) -> Result<String, Error> {
+        let existing = self
+            .task_file_refs()?
+            .into_iter()
+            .map(|task_ref| task_stem(Path::new(&task_ref)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        for _attempt in 0..TASK_ID_GENERATION_ATTEMPTS {
+            let candidate = format!("{}-{legacy_stem}", new_task_id());
+            if !existing.iter().any(|stem| stem == &candidate)
+                && !migrations.values().any(|stem| stem == &candidate)
+            {
+                return Ok(candidate);
+            }
+        }
+        Err(Error::Parse(format!(
+            "task_id_collision legacy_stem={legacy_stem}"
+        )))
     }
 
     fn show_tasks_justfile(&self) -> Result<Option<String>, Error> {
