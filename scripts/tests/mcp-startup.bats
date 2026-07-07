@@ -7,6 +7,78 @@ setup() {
   if [ ! -x "$ROOT/node_modules/.bin/promptfoo" ]; then
     "$ROOT/scripts/evals/ensure-node-deps.sh"
   fi
+
+  MCP_TEST_PATH="$TMPROOT/mcp-test-path"
+  mkdir -p "$MCP_TEST_PATH"
+  ln -s "$(command -v node)" "$MCP_TEST_PATH/node"
+
+  PROMPTFOO_FAKE_BIN="$TMPROOT/promptfoo-fake"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'case "$PATH" in' \
+    '  :*) echo "promptfoo.fake_leading_empty_path_segment PATH=$PATH" >&2; exit 42 ;;' \
+    'esac' \
+    'exit 0' >"$PROMPTFOO_FAKE_BIN"
+  chmod +x "$PROMPTFOO_FAKE_BIN"
+}
+
+run_manifest_server_with_restricted_path() {
+  local manifest="$1"
+  local server="$2"
+  local command
+  local args
+
+  command="$(jq -r ".mcpServers[\"$server\"].command" "$manifest")"
+  mapfile -t args < <(jq -r ".mcpServers[\"$server\"].args[]" "$manifest")
+
+  env -i \
+    PATH="$MCP_TEST_PATH" \
+    HOME="$HOME" \
+    CODEX_HOME="$TMPROOT/codex-home" \
+    PROMPTFOO_MCP_STATE_DIR="$TMPROOT/promptfoo-state" \
+    "$command" "${args[@]}"
+}
+
+run_promptfoo_manifest_server_with_restricted_path() {
+  run_manifest_server_with_restricted_path \
+    "$ROOT/plugins/agentic-systems-engineering/.mcp.json" \
+    promptfoo </dev/null
+}
+
+run_promptfoo_manifest_server_with_empty_path() {
+  local command
+  local args
+
+  command="$(jq -r '.mcpServers.promptfoo.command' "$ROOT/plugins/agentic-systems-engineering/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.promptfoo.args[]' "$ROOT/plugins/agentic-systems-engineering/.mcp.json")
+
+  env -i \
+    PATH= \
+    HOME="$HOME" \
+    CODEX_HOME="$TMPROOT/codex-home" \
+    PROMPTFOO_BIN="$PROMPTFOO_FAKE_BIN" \
+    PROMPTFOO_MCP_STATE_DIR="$TMPROOT/promptfoo-state-empty-path" \
+    "$command" "${args[@]}" </dev/null
+}
+
+run_tiber_manifest_server_with_restricted_path() {
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    run_manifest_server_with_restricted_path "$ROOT/plugins/tiber/.mcp.json" tiber
+}
+
+run_tiber_manifest_server_with_empty_path() {
+  local command
+  local args
+
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    env -i \
+      PATH= \
+      HOME="$HOME" \
+      CODEX_HOME="$TMPROOT/codex-home" \
+      "$command" "${args[@]}"
 }
 
 @test "promptfoo MCP launcher starts with repo-local promptfoo and writable state" {
@@ -32,6 +104,25 @@ setup() {
   [[ "$output" != *"EROFS"* ]]
 }
 
+@test "promptfoo MCP manifest command starts without relying on PATH bash" {
+  cd "$ROOT"
+
+  run run_promptfoo_manifest_server_with_restricted_path
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"No such file or directory"* ]]
+  [[ "$output" != *"EROFS"* ]]
+}
+
+@test "promptfoo MCP manifest command does not create a leading empty PATH segment" {
+  cd "$ROOT"
+
+  run run_promptfoo_manifest_server_with_empty_path
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"promptfoo.fake_leading_empty_path_segment"* ]]
+}
+
 @test "tiber MCP manifest command starts from the plugin root" {
   cd "$ROOT/plugins/tiber"
 
@@ -50,4 +141,26 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'"name":"tiber"'* ]]
   [[ "$output" == *'"tools":{}'* ]]
+}
+
+@test "tiber MCP manifest command starts without relying on PATH bash" {
+  cd "$ROOT"
+
+  run run_tiber_manifest_server_with_restricted_path
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"tiber"'* ]]
+  [[ "$output" == *'"tools":{}'* ]]
+  [[ "$output" != *"No such file or directory"* ]]
+}
+
+@test "tiber MCP manifest command starts with an empty PATH" {
+  cd "$ROOT"
+
+  run run_tiber_manifest_server_with_empty_path
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"tiber"'* ]]
+  [[ "$output" == *'"tools":{}'* ]]
+  [[ "$output" != *"No such file or directory"* ]]
 }
