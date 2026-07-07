@@ -3,6 +3,9 @@ title: Fix Codex MCP startup failures for tiber and promptfoo
 blocked_by: []
 blocks: [20260707-hqzv-encode-mcp-bootstrap-fix-in-marketplace-plugins]
 tags: []
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
