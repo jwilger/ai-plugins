@@ -3,3 +3,4 @@
 20260707-hqzv-encode-mcp-bootstrap-fix-in-marketplace-plugins
 20260707-xmi7-add-final-review-skill-to-development-discipline
 20260707-7azf-add-lightweight-post-implementation-review-to-bdd-tdd-workflows
+20260707-jm8j-create-invokable-new-task-command-for-tiber-backlog-capture
