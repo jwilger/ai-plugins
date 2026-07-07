@@ -34,6 +34,7 @@ const requiredCases = [
   'development-discipline-skill-authoring-follows-marketplace',
   'development-discipline-systematic-debugging-root-cause',
   'development-discipline-final-review-clean-iterations',
+  'development-discipline-tdd-lightweight-post-implementation-review',
 ];
 
 function readJson(relativePath) {
