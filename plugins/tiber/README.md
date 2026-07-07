@@ -118,18 +118,9 @@ Tiber exposes the same task operations over stdio MCP:
 tiber mcp stdio
 ```
 
-The plugin manifest registers this server as:
-
-```json
-{
-  "mcpServers": {
-    "tiber": {
-      "command": "./bin/tiber",
-      "args": ["mcp", "stdio"]
-    }
-  }
-}
-```
+The plugin manifest registers this server through a small `bash -lc` launcher
+that resolves the bundled `bin/tiber` from the plugin root, marketplace root, or
+Codex plugin cache before running `tiber mcp stdio`.
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,
 `tiber.list`, `tiber.transition`, `tiber.update`, `tiber.acceptance.add`,

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+plugin_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+workspace_root="$(pwd -P)"
+
+if [ -n "${PROMPTFOO_BIN:-}" ]; then
+  promptfoo_bin="$PROMPTFOO_BIN"
+elif [ -x "$workspace_root/node_modules/.bin/promptfoo" ]; then
+  promptfoo_bin="$workspace_root/node_modules/.bin/promptfoo"
+elif [ -x "$plugin_root/../../node_modules/.bin/promptfoo" ]; then
+  promptfoo_bin="$(cd -- "$plugin_root/../.." && pwd -P)/node_modules/.bin/promptfoo"
+elif command -v promptfoo >/dev/null 2>&1; then
+  promptfoo_bin="$(command -v promptfoo)"
+else
+  echo "promptfoo.missing_binary expected=promptfoo@0.121.17 hint='install promptfoo or set PROMPTFOO_BIN'" >&2
+  exit 127
+fi
+
+state_root="${PROMPTFOO_MCP_STATE_DIR:-$workspace_root/.dependencies/promptfoo-mcp}"
+mkdir -p "$state_root/home" "$state_root/config" "$state_root/cache"
+
+export HOME="${PROMPTFOO_MCP_HOME:-$state_root/home}"
+export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$state_root/config}"
+export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$state_root/cache}"
+export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
+
+exec "$promptfoo_bin" mcp --transport stdio
