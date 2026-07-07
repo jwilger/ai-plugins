@@ -22,3 +22,4 @@ claim:
 - 2026-07-07: Opened PR #38: https://github.com/jwilger/ai-plugins/pull/38
 - 2026-07-07: Subagent review found stale Codex marketplace version; fixed in follow-up commit 2b9be39 and pushed to PR #38. Marketplace validation rerun and passed.
 - 2026-07-07: Requested CodeRabbit full review on PR #38 after the rate-limit window; CodeRabbit replied that the full review finished and status is success. PR remains blocked only on required human approval.
+- 2026-07-07: PR #38 was approved but became DIRTY after #36 merged. Merged origin/main into tiber-in-progress-reminder, resolved README catalog conflict to keep development-discipline 0.2.0 and Tiber 0.2.4, reran just validate-marketplace, and pushed merge commit 7268ce3.
