@@ -13,6 +13,8 @@ Tiber initialization should detect when MCP-backed task writes are likely to fai
 
 ## Acceptance criteria
 
+- [ ] Tiber MCP create/update/prioritize operations can be configured to execute outside the Codex sandbox without requiring the user to rerun equivalent Tiber CLI commands manually.
+
 ## Subtasks
 
 ## Notes / Log
