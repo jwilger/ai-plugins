@@ -25,3 +25,4 @@ Agents working from the coordination checkout can leave origin-equivalent or gen
 
 - 2026-07-07: Implemented locally on branch agent-main-checkout-guard at commit 73b96fc. Verification run: nix develop -c just bats validate-marketplace. Awaiting explicit approval to push/open PR.
 - 2026-07-07: PR publication gate: pushing agent-main-checkout-guard to origin was rejected by escalation policy until the user explicitly approves publishing the branch to GitHub.
+- 2026-07-07: PR #33 opened. CI failed on the new upstream-equivalent Bats case because the fixture bare remote HEAD was unset in CI; fixed with signed follow-up commit 56c1b74 and pushed.
