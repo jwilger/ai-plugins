@@ -16,6 +16,7 @@ use tiber_core::{
 const STATUS_DIRS: &[&str] = &["backlog", "in-progress", "done", "abandoned"];
 const OPEN_STATUS_DIRS: &[&str] = &["backlog", "in-progress"];
 const TASK_ID_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
+const TASK_ID_GENERATION_ATTEMPTS: usize = 32;
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -1241,7 +1242,7 @@ impl GitRepository {
             .into_iter()
             .map(|task_ref| task_stem(Path::new(&task_ref)))
             .collect::<Result<Vec<_>, Error>>()?;
-        loop {
+        for _attempt in 0..TASK_ID_GENERATION_ATTEMPTS {
             let candidate = format!("{}-{legacy_stem}", new_task_id());
             if !existing.iter().any(|stem| stem == &candidate)
                 && !migrations.values().any(|stem| stem == &candidate)
@@ -1249,6 +1250,9 @@ impl GitRepository {
                 return Ok(candidate);
             }
         }
+        Err(Error::Parse(format!(
+            "task_id_collision legacy_stem={legacy_stem}"
+        )))
     }
 
     fn show_tasks_justfile(&self) -> Result<Option<String>, Error> {
