@@ -27,3 +27,5 @@ Add a final-review skill to the development-discipline plugin. The skill should 
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-07: In progress on branch development-discipline-final-review, PR #36. Local validation passed; CodeRabbit approved; semver review fix pushed; waiting on refreshed CI/Mergify merge.
