@@ -45,6 +45,7 @@ teardown() {
   REMOTE="$(mktemp -d)"
   OTHER="$(mktemp -d)"
   git init -q --bare "$REMOTE"
+  git --git-dir="$REMOTE" symbolic-ref HEAD refs/heads/main
   git -C "$REPO" remote add origin "$REMOTE"
   git -C "$REPO" push -q -u origin main
 
