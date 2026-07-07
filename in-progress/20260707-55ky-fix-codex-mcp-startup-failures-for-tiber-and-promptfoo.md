@@ -22,3 +22,5 @@ Codex startup still reports MCP client failures for tiber and promptfoo: MCP sta
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-07: Implemented locally on branch mcp-startup-direct-launchers at commit e064044. Fix changes plugin MCP manifests to launch via absolute /bin/sh and adds direct manifest startup regression coverage. Verification run: nix develop -c just bats validate-marketplace; nix develop -c scripts/evals/run.sh --dry-run --suite canary.
