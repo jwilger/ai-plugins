@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "tiber": {
-      "command": "./bin/tiber",
-      "args": ["mcp", "stdio"],
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; for candidate in ./bin/tiber ./plugins/tiber/bin/tiber \"${CODEX_HOME:-$HOME/.codex}\"/plugins/cache/ai-plugins/tiber/*/bin/tiber; do if [ -x \"$candidate\" ]; then exec \"$candidate\" mcp stdio; fi; done; echo \"tiber.mcp_launcher_missing\" >&2; exit 127"
+      ],
       "description": "Tiber stdio MCP server for Git-backed task board reads and writes."
     }
   }
