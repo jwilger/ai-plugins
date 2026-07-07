@@ -4,7 +4,7 @@
       "command": "/bin/sh",
       "args": [
         "-c",
-        "set -eu; PATH=\"${PATH:-}:/bin:/usr/bin:/run/current-system/sw/bin\"; export PATH; for candidate in ./bin/tiber ./plugins/tiber/bin/tiber \"${CODEX_HOME:-$HOME/.codex}\"/plugins/cache/ai-plugins/tiber/*/bin/tiber; do if [ -x \"$candidate\" ]; then exec \"$candidate\" mcp stdio; fi; done; echo \"tiber.mcp_launcher_missing\" >&2; exit 127"
+        "set -eu; if [ -n \"${PATH:-}\" ]; then PATH=\"$PATH:/bin:/usr/bin:/run/current-system/sw/bin\"; else PATH=\"/bin:/usr/bin:/run/current-system/sw/bin\"; fi; export PATH; for candidate in ./bin/tiber ./plugins/tiber/bin/tiber \"${CODEX_HOME:-$HOME/.codex}\"/plugins/cache/ai-plugins/tiber/*/bin/tiber; do if [ -x \"$candidate\" ]; then exec \"$candidate\" mcp stdio; fi; done; echo \"tiber.mcp_launcher_missing\" >&2; exit 127"
       ],
       "description": "Tiber stdio MCP server for Git-backed task board reads and writes."
     }
