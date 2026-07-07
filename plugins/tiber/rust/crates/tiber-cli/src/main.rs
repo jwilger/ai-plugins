@@ -36,6 +36,26 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             let stdout = std::io::stdout();
             tiber_mcp::run_stdio(stdin.lock(), stdout.lock())
         }
+        [command, target_flag, target_dir, mode]
+            if command == "install-bin" && target_flag == "--target-dir" =>
+        {
+            let apply = match mode.as_str() {
+                "--dry-run" => false,
+                "--apply" => true,
+                _ => {
+                    return Err(tiber_git::Error::Usage(
+                        "install-bin requires --dry-run or --apply".to_string(),
+                    ))
+                }
+            };
+            let installed = tiber_git::install_bin(target_dir, apply)?;
+            if apply {
+                println!("installed {installed}");
+            } else {
+                println!("would install {installed}");
+            }
+            Ok(())
+        }
         [command, title] if command == "create" => tiber_git::create_task(title).map(|_| ()),
         [command, task_ref] if command == "show" => {
             print!("{}", tiber_git::show_task(task_ref)?);
@@ -79,8 +99,9 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             tiber_git::unlink_blocks(from_ref, to_ref)?;
             Ok(())
         }
-        [command, action, task_ref, title] if command == "subtask" && action == "add" => {
-            tiber_git::add_subtask(task_ref, title)?;
+        [command, action, task_ref, title, rest @ ..] if command == "subtask" && action == "add" => {
+            let after_refs = parse_subtask_add_args(rest)?;
+            tiber_git::add_subtask(task_ref, title, &after_refs)?;
             Ok(())
         }
         [command, action, task_ref, index] if command == "subtask" && action == "check" => {
@@ -89,6 +110,39 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
         }
         [command, action, task_ref, index] if command == "subtask" && action == "uncheck" => {
             tiber_git::set_subtask_checked(task_ref, index, false)?;
+            Ok(())
+        }
+        [command, task_ref, rest @ ..] if command == "update" => {
+            let update = parse_update_args(rest)?;
+            tiber_git::update_task(
+                task_ref,
+                update.title.as_deref(),
+                update.summary.as_deref(),
+                update.context.as_deref(),
+                update.tags,
+            )?;
+            Ok(())
+        }
+        [command, action, task_ref, criterion]
+            if command == "acceptance" && action == "add" =>
+        {
+            tiber_git::add_acceptance(task_ref, criterion)?;
+            Ok(())
+        }
+        [command, action, task_ref, index] if command == "acceptance" && action == "check" => {
+            tiber_git::set_acceptance_checked(task_ref, index, true)?;
+            Ok(())
+        }
+        [command, action, task_ref, index] if command == "acceptance" && action == "uncheck" => {
+            tiber_git::set_acceptance_checked(task_ref, index, false)?;
+            Ok(())
+        }
+        [command, action, task_ref, index] if command == "acceptance" && action == "remove" => {
+            tiber_git::remove_acceptance(task_ref, index)?;
+            Ok(())
+        }
+        [command, action, task_ref, note] if command == "note" && action == "add" => {
+            tiber_git::add_note(task_ref, note)?;
             Ok(())
         }
         [command, flag] if command == "validate" && flag == "--fix" => {
@@ -116,7 +170,73 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             Ok(())
         }
         _ => Err(tiber_git::Error::Usage(
-            "usage: tiber init|sync|dashboard serve|mcp stdio|create <title>|show <ref>|metadata <ref>|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add|check|uncheck|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
+            "usage: tiber init|sync|dashboard serve|mcp stdio|install-bin --target-dir <dir> --dry-run|--apply|create <title>|show <ref>|metadata <ref>|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add <ref> <title> [--after s1,s2]|subtask check|uncheck|update <ref> [--title|--summary|--context|--tags]|acceptance add|check|uncheck|remove|note add|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
         )),
     }
+}
+
+fn parse_comma_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn parse_subtask_add_args(args: &[String]) -> Result<Vec<String>, tiber_git::Error> {
+    match args {
+        [] => Ok(Vec::new()),
+        [flag, after] if flag == "--after" => Ok(parse_comma_list(after)),
+        _ => Err(tiber_git::Error::Usage(
+            "unknown subtask add arguments".to_string(),
+        )),
+    }
+}
+
+struct UpdateArgs {
+    title: Option<String>,
+    summary: Option<String>,
+    context: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
+fn parse_update_args(args: &[String]) -> Result<UpdateArgs, tiber_git::Error> {
+    let mut update = UpdateArgs {
+        title: None,
+        summary: None,
+        context: None,
+        tags: None,
+    };
+    let mut index = 0;
+    while index < args.len() {
+        let flag = &args[index];
+        let value = args.get(index + 1).ok_or_else(|| {
+            tiber_git::Error::Usage(format!("missing value for update flag {flag}"))
+        })?;
+        match flag.as_str() {
+            "--title" => update.title = Some(value.clone()),
+            "--summary" => update.summary = Some(value.clone()),
+            "--context" => update.context = Some(value.clone()),
+            "--tags" => {
+                update.tags = Some(parse_comma_list(value));
+            }
+            _ => {
+                return Err(tiber_git::Error::Usage(format!(
+                    "unknown update flag {flag}"
+                )))
+            }
+        }
+        index += 2;
+    }
+    if update.title.is_none()
+        && update.summary.is_none()
+        && update.context.is_none()
+        && update.tags.is_none()
+    {
+        return Err(tiber_git::Error::Usage(
+            "update requires at least one field".to_string(),
+        ));
+    }
+    Ok(update)
 }

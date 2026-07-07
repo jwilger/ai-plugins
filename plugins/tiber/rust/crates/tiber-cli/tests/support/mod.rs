@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,6 +16,25 @@ pub fn assert_success_ref(output: &Output) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[allow(dead_code)]
+pub fn task_stem(repo: &TempRepo, status: &str, nickname: &str) -> String {
+    let tree = repo.git_output(["ls-tree", "-r", "--name-only", "tasks", status]);
+    assert_success_ref(&tree);
+    let mut matches = String::from_utf8(tree.stdout)
+        .expect("tree output should be utf8")
+        .lines()
+        .filter_map(|path| {
+            path.strip_prefix(&format!("{status}/"))
+                .and_then(|name| name.strip_suffix(".md"))
+                .filter(|stem| stem.ends_with(&format!("-{nickname}")))
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+    matches.sort();
+    assert_eq!(matches.len(), 1, "expected one task matching {nickname}");
+    matches.remove(0)
 }
 
 pub struct TempRepo {
@@ -54,6 +73,7 @@ impl TempRepo {
         &self.path
     }
 
+    #[allow(dead_code)]
     pub fn tiber<I, S>(&self, args: I) -> Output
     where
         I: IntoIterator<Item = S>,
@@ -88,6 +108,22 @@ impl TempRepo {
             .expect("run command")
     }
 
+    pub fn command_with_env<I, S, E, K, V>(&self, program: &str, args: I, envs: E) -> Output
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+        E: IntoIterator<Item = (K, V)>,
+        K: AsRef<std::ffi::OsStr>,
+        V: AsRef<std::ffi::OsStr>,
+    {
+        Command::new(program)
+            .args(args)
+            .envs(envs)
+            .current_dir(&self.path)
+            .output()
+            .expect("run command")
+    }
+
     pub fn git<I, S>(&self, args: I)
     where
         I: IntoIterator<Item = S>,
@@ -102,6 +138,110 @@ impl TempRepo {
         S: AsRef<std::ffi::OsStr>,
     {
         self.command("git", args)
+    }
+
+    #[allow(dead_code)]
+    pub fn task_file(&self, status: &str, stem: &str) -> String {
+        let output = self.git_output(["show", &format!("tasks:{status}/{stem}.md")]);
+        assert_success_ref(&output);
+        String::from_utf8(output.stdout).expect("task file should be utf8")
+    }
+
+    #[allow(dead_code)]
+    pub fn order_file(&self) -> String {
+        let output = self.git_output(["show", "tasks:order.md"]);
+        assert_success_ref(&output);
+        String::from_utf8(output.stdout).expect("order file should be utf8")
+    }
+
+    #[allow(dead_code)]
+    pub fn insert_task_file(&self, status: &str, stem: &str, contents: &str) {
+        self.insert_tasks_tree_file(&format!("{status}/{stem}.md"), contents);
+    }
+
+    #[allow(dead_code)]
+    pub fn insert_tasks_tree_file(&self, path: &str, contents: &str) {
+        self.update_tasks_tree(|index| {
+            let blob = Command::new("git")
+                .args(["hash-object", "-w", "--stdin"])
+                .current_dir(&self.path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .and_then(|mut child| {
+                    use std::io::Write;
+                    child
+                        .stdin
+                        .as_mut()
+                        .expect("hash-object stdin")
+                        .write_all(contents.as_bytes())?;
+                    child.wait_with_output()
+                })
+                .expect("write task blob");
+            assert_success_ref(&blob);
+            let blob = String::from_utf8(blob.stdout)
+                .expect("blob should be utf8")
+                .trim()
+                .to_string();
+            assert_success(self.command_with_env(
+                "git",
+                [
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    "100644",
+                    &blob,
+                    path,
+                ],
+                [("GIT_INDEX_FILE", index.as_os_str())],
+            ));
+        });
+    }
+
+    #[allow(dead_code)]
+    pub fn remove_tasks_tree_file(&self, path: &str) {
+        self.update_tasks_tree(|index| {
+            assert_success(self.command_with_env(
+                "git",
+                ["update-index", "--force-remove", path],
+                [("GIT_INDEX_FILE", index.as_os_str())],
+            ));
+        });
+    }
+
+    fn update_tasks_tree(&self, update: impl FnOnce(&Path)) {
+        let index = self.path.join(".git").join("tiber-test-index");
+        assert_success(self.command_with_env(
+            "git",
+            ["read-tree", "tasks"],
+            [("GIT_INDEX_FILE", index.as_os_str())],
+        ));
+        update(&index);
+        let tree = self.command_with_env(
+            "git",
+            ["write-tree"],
+            [("GIT_INDEX_FILE", index.as_os_str())],
+        );
+        assert_success_ref(&tree);
+        let tree = String::from_utf8(tree.stdout)
+            .expect("tree should be utf8")
+            .trim()
+            .to_string();
+        let commit = self.git_output([
+            "commit-tree",
+            &tree,
+            "-p",
+            "tasks",
+            "-m",
+            "Insert test task",
+        ]);
+        assert_success_ref(&commit);
+        let commit = String::from_utf8(commit.stdout)
+            .expect("commit should be utf8")
+            .trim()
+            .to_string();
+        assert_success(self.git_output(["update-ref", "refs/heads/tasks", &commit]));
+        let _ = fs::remove_file(index);
     }
 }
 

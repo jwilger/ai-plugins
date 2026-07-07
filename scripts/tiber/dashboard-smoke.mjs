@@ -2,6 +2,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
@@ -9,7 +10,8 @@ import { chromium } from "playwright";
 const root = resolve(new URL("../..", import.meta.url).pathname);
 const manifestPath = join(root, "plugins/tiber/rust/Cargo.toml");
 const repo = mkdtempSync(join(tmpdir(), "tiber-dashboard-smoke-"));
-const url = "http://127.0.0.1:7417/";
+const port = await findFreePort();
+const url = `http://127.0.0.1:${port}/`;
 let server;
 let browser;
 
@@ -29,6 +31,8 @@ try {
 
   tiber(["init"]);
   tiber(["create", "Inspect dashboard"]);
+  tiber(["create", "Blocked dashboard task"]);
+  tiber(["link", "inspect-dashboard", "blocks", "blocked-dashboard-task"]);
   run(
     "cargo",
     ["build", "--quiet", "--manifest-path", manifestPath, "--bin", "tiber"],
@@ -48,7 +52,11 @@ try {
       "dashboard",
       "serve",
     ],
-    { cwd: repo, stdio: ["ignore", "pipe", "pipe"] },
+    {
+      cwd: repo,
+      env: { ...process.env, TIBER_DASHBOARD_PORT: String(port) },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
   );
   server.stderr.on("data", (chunk) => process.stderr.write(chunk));
   server.stdout.on("data", (chunk) => process.stdout.write(chunk));
@@ -64,14 +72,32 @@ try {
   await page.goto(url);
   await assertText(page.locator("[data-dashboard-board]"), "Inspect dashboard");
 
-  await page.getByText("todo/inspect-dashboard.md Inspect dashboard").click();
+  const inspectCard = page.locator('[data-task-link][data-stem$="-inspect-dashboard"]');
+  const blockedCard = page.locator('[data-task-link][data-stem$="-blocked-dashboard-task"]');
+  await inspectCard.click();
+  await blockedCard.waitFor();
+  assert(
+    (await blockedCard.getAttribute("class")).includes("is-dependent"),
+    "single-click selection should highlight directly blocked tasks",
+  );
+  await assertText(blockedCard, "blocks");
+
+  await inspectCard.dblclick();
   await page.locator("[data-task-modal][open]").waitFor();
-  await assertText(page.locator("[data-modal-content]"), "# Inspect dashboard");
+  await assertText(page.locator("[data-modal-content]"), "Inspect dashboard");
+  await assertText(page.locator("[data-modal-content]"), "Blocked dashboard task");
   await page.locator("[data-modal-close]").click();
 
   await page.getByRole("link", { name: "Docs" }).click();
   await page.waitForURL("**/docs");
   await assertText(page.locator("body"), "docs/guides/tiber.md");
+  await page.getByRole("link", { name: "docs/guides/tiber.md" }).click();
+  await page.waitForURL("**/docs/guides/tiber.md");
+  await assertText(page.locator(".docs-content"), "Tiber guide");
+  assert(
+    (await page.locator(".docs-content h1").textContent()) === "Tiber guide",
+    "docs markdown should render the document heading",
+  );
 
   await page.goto(url);
   await page.locator("[data-external-link]").click();
@@ -152,6 +178,23 @@ function findBrowserExecutable() {
   return undefined;
 }
 
+async function findFreePort() {
+  return new Promise((resolvePort, reject) => {
+    const probe = createServer();
+    probe.on("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      probe.close(() => {
+        if (address && typeof address === "object") {
+          resolvePort(address.port);
+        } else {
+          reject(new Error("could not allocate dashboard smoke port"));
+        }
+      });
+    });
+  });
+}
+
 async function waitForDashboard(targetUrl) {
   const timeoutMs = 60000;
   const deadline = Date.now() + timeoutMs;
@@ -175,11 +218,22 @@ async function waitForDashboard(targetUrl) {
 }
 
 async function assertText(locator, expected) {
-  const text = await locator.textContent({ timeout: 5000 });
-  assert(
-    text?.includes(expected),
-    `expected text ${JSON.stringify(expected)} in ${JSON.stringify(text)}`,
-  );
+  const timeoutMs = 5000;
+  const deadline = Date.now() + timeoutMs;
+  let text = "";
+  while (Date.now() < deadline) {
+    try {
+      text = (await locator.textContent({ timeout: 1000 })) ?? "";
+    } catch (_error) {
+      await new Promise((resolveSleep) => setTimeout(resolveSleep, 100));
+      continue;
+    }
+    if (text.includes(expected)) {
+      return;
+    }
+    await new Promise((resolveSleep) => setTimeout(resolveSleep, 100));
+  }
+  assert(false, `expected text ${JSON.stringify(expected)} in ${JSON.stringify(text)}`);
 }
 
 function assert(condition, message) {

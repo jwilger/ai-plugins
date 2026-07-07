@@ -3,13 +3,19 @@ mod support;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
-use support::{assert_success, TempRepo};
+use support::{assert_success, task_stem, TempRepo};
 
 #[test]
 fn mcp_stdio_exposes_tools_and_task_resources() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Expose MCP task"]));
+    let expose_mcp_task = task_stem(&repo, "backlog", "expose-mcp-task");
+    let install_target_dir = repo.path().join("bin");
+    let launcher = repo.path().join("plugin/bin/tiber");
+    std::fs::create_dir_all(launcher.parent().expect("launcher parent"))
+        .expect("create launcher dir");
+    std::fs::write(&launcher, "#!/usr/bin/env bash\n").expect("write fake launcher");
     std::fs::create_dir_all(repo.path().join("docs/guides")).expect("create docs directory");
     std::fs::write(
         repo.path().join("docs/guides/tiber.md"),
@@ -19,6 +25,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
         .args(["mcp", "stdio"])
         .current_dir(repo.path())
+        .env("TIBER_LAUNCHER_PATH", &launcher)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -62,9 +69,16 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(tools.contains(r#""name":"tiber.subtask.add""#));
     assert!(tools.contains(r#""name":"tiber.subtask.check""#));
     assert!(tools.contains(r#""name":"tiber.subtask.uncheck""#));
+    assert!(tools.contains(r#""name":"tiber.update""#));
+    assert!(tools.contains(r#""name":"tiber.acceptance.add""#));
+    assert!(tools.contains(r#""name":"tiber.acceptance.check""#));
+    assert!(tools.contains(r#""name":"tiber.acceptance.uncheck""#));
+    assert!(tools.contains(r#""name":"tiber.acceptance.remove""#));
+    assert!(tools.contains(r#""name":"tiber.note.add""#));
     assert!(tools.contains(r#""name":"tiber.validate_fix""#));
     assert!(tools.contains(r#""name":"tiber.close_from_trailers""#));
     assert!(tools.contains(r#""name":"tiber.scaffold_repo_dry_run""#));
+    assert!(tools.contains(r#""name":"tiber.install_bin""#));
 
     write_message(
         &mut stdin,
@@ -73,17 +87,19 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     let resources = read_message(&mut stdout);
     assert!(resources.contains(r#""id":3"#));
     assert!(resources.contains(r#""uri":"tasks://board""#));
-    assert!(resources.contains(r#""uri":"tasks://task/todo/expose-mcp-task.md""#));
+    assert!(resources.contains(&format!(r#""uri":"tasks://task/{expose_mcp_task}""#)));
     assert!(resources.contains(r#""uri":"tasks://docs/tree""#));
     assert!(resources.contains(r#""uri":"tasks://docs/guides/tiber.md""#));
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"tasks://task/todo/expose-mcp-task.md"}}"#,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{{"uri":"tasks://task/{expose_mcp_task}"}}}}"#
+        ),
     );
     let task = read_message(&mut stdout);
     assert!(task.contains(r#""id":4"#));
-    assert!(task.contains("# Expose MCP task"));
+    assert!(task.contains("title: Expose MCP task"));
 
     write_message(
         &mut stdin,
@@ -91,7 +107,8 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let create = read_message(&mut stdout);
     assert!(create.contains(r#""id":5"#));
-    assert!(create.contains("todo/created-through-mcp.md"));
+    assert!(create.contains("-created-through-mcp"));
+    let created_through_mcp = task_stem(&repo, "backlog", "created-through-mcp");
 
     write_message(
         &mut stdin,
@@ -99,16 +116,18 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let list = read_message(&mut stdout);
     assert!(list.contains(r#""id":6"#));
-    assert!(list.contains("todo/expose-mcp-task.md"));
-    assert!(list.contains("todo/created-through-mcp.md"));
+    assert!(list.contains(&expose_mcp_task));
+    assert!(list.contains(&created_through_mcp));
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"tasks://task/todo/created-through-mcp.md"}}"#,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{{"uri":"tasks://task/{created_through_mcp}"}}}}"#
+        ),
     );
     let created = read_message(&mut stdout);
     assert!(created.contains(r#""id":7"#));
-    assert!(created.contains("# Created through MCP"));
+    assert!(created.contains("title: Created through MCP"));
 
     write_message(
         &mut stdin,
@@ -129,21 +148,21 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tiber.show","arguments":{"ref":"todo/expose-mcp-task.md"}}}"#,
+        r#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"tiber.show","arguments":{"ref":"expose-mcp-task"}}}"#,
     );
     let show = read_message(&mut stdout);
     assert!(show.contains(r#""id":10"#));
-    assert!(show.contains("# Expose MCP task"));
+    assert!(show.contains("title: Expose MCP task"));
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"tiber.metadata","arguments":{"ref":"todo/expose-mcp-task.md"}}}"#,
+        r#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"tiber.metadata","arguments":{"ref":"expose-mcp-task"}}}"#,
     );
     let metadata = read_message(&mut stdout);
     assert!(metadata.contains(r#""id":11"#));
-    assert!(
-        metadata.contains(r#"todo/expose-mcp-task.md\tExpose MCP task\tcommitted_at=uncommitted"#)
-    );
+    assert!(metadata.contains(&format!(
+        "{expose_mcp_task}\\tExpose MCP task\\tcommitted_at=20"
+    )));
 
     write_message(
         &mut stdin,
@@ -151,56 +170,107 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let next = read_message(&mut stdout);
     assert!(next.contains(r#""id":12"#));
-    assert!(next.contains("todo/expose-mcp-task.md"));
+    assert!(next.contains(&expose_mcp_task));
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"tiber.subtask.add","arguments":{"ref":"todo/created-through-mcp.md","title":"Write MCP mirror tests"}}}"#,
+        r#"{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"tiber.subtask.add","arguments":{"ref":"created-through-mcp","title":"Write MCP mirror tests"}}}"#,
     );
     let subtask_add = read_message(&mut stdout);
     assert!(subtask_add.contains(r#""id":13"#));
-    assert!(subtask_add.contains("updated todo/created-through-mcp.md"));
+    assert!(subtask_add.contains("updated created-through-mcp"));
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"tiber.subtask.check","arguments":{"ref":"todo/created-through-mcp.md","index":"1"}}}"#,
+        r#"{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"tiber.subtask.check","arguments":{"ref":"created-through-mcp","index":"1"}}}"#,
     );
     let subtask_check = read_message(&mut stdout);
     assert!(subtask_check.contains(r#""id":14"#));
-    assert!(subtask_check.contains("updated todo/created-through-mcp.md"));
+    assert!(subtask_check.contains("updated created-through-mcp"));
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"tiber.transition","arguments":{"ref":"todo/created-through-mcp.md","status":"doing"}}}"#,
+        r#"{"jsonrpc":"2.0","id":141,"method":"tools/call","params":{"name":"tiber.subtask.add","arguments":{"ref":"created-through-mcp","title":"Wire dependency","after":["s1"]}}}"#,
+    );
+    let dependent_subtask_add = read_message(&mut stdout);
+    assert!(dependent_subtask_add.contains(r#""id":141"#));
+    assert!(dependent_subtask_add.contains("updated created-through-mcp"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"tiber.transition","arguments":{"ref":"created-through-mcp","status":"in-progress"}}}"#,
     );
     let transition = read_message(&mut stdout);
     assert!(transition.contains(r#""id":15"#));
-    assert!(transition.contains("doing/created-through-mcp.md"));
+    assert!(transition.contains(&created_through_mcp));
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"tiber.link","arguments":{"from":"doing/created-through-mcp.md","to":"todo/expose-mcp-task.md"}}}"#,
+        r#"{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"tiber.link","arguments":{"from":"created-through-mcp","to":"expose-mcp-task"}}}"#,
     );
     let link = read_message(&mut stdout);
     assert!(link.contains(r#""id":16"#));
-    assert!(link.contains("linked doing/created-through-mcp.md blocks todo/expose-mcp-task.md"));
+    assert!(link.contains("linked created-through-mcp blocks expose-mcp-task"));
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"tiber.unlink","arguments":{"from":"doing/created-through-mcp.md","to":"todo/expose-mcp-task.md"}}}"#,
+        r#"{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"tiber.unlink","arguments":{"from":"created-through-mcp","to":"expose-mcp-task"}}}"#,
     );
     let unlink = read_message(&mut stdout);
     assert!(unlink.contains(r#""id":17"#));
-    assert!(unlink.contains("unlinked doing/created-through-mcp.md blocks todo/expose-mcp-task.md"));
+    assert!(unlink.contains("unlinked created-through-mcp blocks expose-mcp-task"));
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{"name":"tiber.prioritize","arguments":{"ref":"doing/created-through-mcp.md","before":"todo/expose-mcp-task.md"}}}"#,
+        r#"{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{"name":"tiber.prioritize","arguments":{"ref":"created-through-mcp","before":"expose-mcp-task"}}}"#,
     );
     let prioritize = read_message(&mut stdout);
     assert!(prioritize.contains(r#""id":18"#));
-    assert!(prioritize
-        .contains("prioritized doing/created-through-mcp.md before todo/expose-mcp-task.md"));
+    assert!(prioritize.contains("prioritized created-through-mcp before expose-mcp-task"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":181,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp","summary":"MCP summary","context":"MCP context","tags":["mcp","structured"]}}}"#,
+    );
+    let update = read_message(&mut stdout);
+    assert!(update.contains(r#""id":181"#));
+    assert!(update.contains("updated created-through-mcp"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":182,"method":"tools/call","params":{"name":"tiber.acceptance.add","arguments":{"ref":"created-through-mcp","criterion":"MCP criterion"}}}"#,
+    );
+    let acceptance_add = read_message(&mut stdout);
+    assert!(acceptance_add.contains(r#""id":182"#));
+    assert!(acceptance_add.contains("updated created-through-mcp"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":183,"method":"tools/call","params":{"name":"tiber.acceptance.check","arguments":{"ref":"created-through-mcp","index":"1"}}}"#,
+    );
+    let acceptance_check = read_message(&mut stdout);
+    assert!(acceptance_check.contains(r#""id":183"#));
+    assert!(acceptance_check.contains("updated created-through-mcp"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":184,"method":"tools/call","params":{"name":"tiber.note.add","arguments":{"ref":"created-through-mcp","note":"MCP note"}}}"#,
+    );
+    let note_add = read_message(&mut stdout);
+    assert!(note_add.contains(r#""id":184"#));
+    assert!(note_add.contains("updated created-through-mcp"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":185,"method":"tools/call","params":{"name":"tiber.show","arguments":{"ref":"created-through-mcp"}}}"#,
+    );
+    let structured_show = read_message(&mut stdout);
+    assert!(structured_show.contains(r#""id":185"#));
+    assert!(structured_show.contains("MCP summary"));
+    assert!(structured_show.contains("tags: [mcp, structured]"));
+    assert!(structured_show.contains("- [x] MCP criterion"));
+    assert!(structured_show.contains("- [ ] (s2) Wire dependency — after: s1"));
+    assert!(structured_show.contains("MCP note"));
 
     write_message(
         &mut stdin,
@@ -249,6 +319,22 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         .as_str()
         .expect("error message")
         .contains("mcp_resource_uri_missing"));
+
+    write_message(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":24,"method":"tools/call","params":{{"name":"tiber.install_bin","arguments":{{"target_dir":"{}","apply":false}}}}}}"#,
+            install_target_dir.display()
+        ),
+    );
+    let install_bin = read_message(&mut stdout);
+    assert!(install_bin.contains(r#""id":24"#));
+    assert!(install_bin.contains(&format!(
+        "would install {} -> {}",
+        install_target_dir.join("tiber").display(),
+        launcher.display()
+    )));
+    assert!(!install_target_dir.join("tiber").exists());
 
     drop(stdin);
     let status = child.wait().expect("wait for mcp process");

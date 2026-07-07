@@ -290,52 +290,52 @@ mod tests {
     #[test]
     fn board_snapshot_preserves_ordered_task_summaries_and_next_task() {
         let snapshot = BoardSnapshot::from_ordered_tasks(vec![
-            TaskSnapshot::new("todo/write-docs.md", "Write docs"),
-            TaskSnapshot::new("doing/review-docs.md", "Review docs"),
+            TaskSnapshot::new("20260706-abcd-write-docs", "Write docs"),
+            TaskSnapshot::new("20260706-efgh-review-docs", "Review docs"),
         ]);
 
         assert_eq!(
             snapshot.ordered_tasks(),
             [
-                TaskSnapshot::new("todo/write-docs.md", "Write docs"),
-                TaskSnapshot::new("doing/review-docs.md", "Review docs"),
+                TaskSnapshot::new("20260706-abcd-write-docs", "Write docs"),
+                TaskSnapshot::new("20260706-efgh-review-docs", "Review docs"),
             ]
         );
         assert_eq!(
             snapshot.next_task(),
-            Some(&TaskSnapshot::new("todo/write-docs.md", "Write docs"))
+            Some(&TaskSnapshot::new("20260706-abcd-write-docs", "Write docs"))
         );
     }
 
     #[test]
     fn dependency_graph_reports_canonical_cycles_once() {
         let graph = DependencyGraph::from_tasks(vec![
-            TaskDependencies::new("todo/cycle-b.md", vec!["todo/cycle-a.md"]),
-            TaskDependencies::new("todo/cycle-a.md", vec!["todo/cycle-b.md"]),
+            TaskDependencies::new("20260706-bbbb-cycle-b", vec!["20260706-aaaa-cycle-a"]),
+            TaskDependencies::new("20260706-aaaa-cycle-a", vec!["20260706-bbbb-cycle-b"]),
         ]);
 
         assert_eq!(
             graph.cycle_messages(),
-            ["cycle dependency todo/cycle-a.md -> todo/cycle-b.md -> todo/cycle-a.md"]
+            ["cycle dependency 20260706-aaaa-cycle-a -> 20260706-bbbb-cycle-b -> 20260706-aaaa-cycle-a"]
         );
     }
 
     #[test]
     fn order_reconciliation_reports_stale_entries_and_appends_missing_tasks() {
         let reconciliation = OrderReconciliation::reconcile(
-            vec!["todo/build-api.md", "todo/stale.md"],
-            vec!["todo/build-api.md", "todo/build-ui.md"],
+            vec!["20260706-aaaa-build-api", "20260706-bbbb-stale"],
+            vec!["20260706-aaaa-build-api", "20260706-cccc-build-ui"],
         );
 
         assert_eq!(
             reconciliation.entries(),
-            ["todo/build-api.md", "todo/build-ui.md"]
+            ["20260706-aaaa-build-api", "20260706-cccc-build-ui"]
         );
         assert_eq!(
             reconciliation.messages(),
             [
-                "fixed order stale todo/stale.md",
-                "fixed order missing todo/build-ui.md"
+                "fixed order stale 20260706-bbbb-stale",
+                "fixed order missing 20260706-cccc-build-ui"
             ]
         );
     }

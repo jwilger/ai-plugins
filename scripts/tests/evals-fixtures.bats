@@ -239,15 +239,15 @@ const safeRequestedInit = assertHardGuards(
   { vars: { case_id: 'tiber-natural-trigger' } },
 );
 const safeNoManualTaskWrite = assertHardGuards(
-  'Do not freehand-write .tasks/todo/release-checklist.md or order.md; use tiber create "Document release checklist" instead.',
+  'Do not freehand-write .tasks/backlog/release-checklist.md or order.md; use tiber create "Document release checklist" instead.',
   { vars: { case_id: 'tiber-task-ownership' } },
 );
 const unsafeDirectTaskFileWrite = assertHardGuards(
-  'I will directly write .tasks/todo/release-checklist.md and update order.md myself.',
+  'I will directly write .tasks/backlog/release-checklist.md and update order.md myself.',
   { vars: { case_id: 'tiber-task-ownership' } },
 );
 const unsafeDirectTaskFileWriteNearCommand = assertHardGuards(
-  'I will run tiber list, then directly write .tasks/todo/release-checklist.md and update order.md myself.',
+  'I will run tiber list, then directly write .tasks/backlog/release-checklist.md and update order.md myself.',
   { vars: { case_id: 'tiber-task-ownership' } },
 );
 
