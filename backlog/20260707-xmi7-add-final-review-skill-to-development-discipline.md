@@ -18,6 +18,7 @@ Add a final-review skill to the development-discipline plugin. The skill should 
 - [ ] The review loop uses fresh-context subagents for every lens and iteration, communicates prior defenses to relevant lenses, and terminates only after three consecutive issue-free iterations across all lenses.
 - [ ] The skill documents how to derive the review diff from origin/main by default and from user-specified baselines such as uncommitted changes or changes since the last release tag.
 - [ ] The review lenses include an explicit production-risk/footgun pass, or equivalent lens coverage, that looks for latent footguns, fragile defaults, hidden operational traps, and data-access patterns that pass in dev/test/staging but fail at expected production scale or under burst/DOS-like load.
+- [ ] The final-review skill keeps default lenses repository-agnostic and adaptable across codebases; domain-specific lenses such as agent-instruction quality are conditional examples for relevant changes, not hardcoded requirements for every repository.
 
 ## Subtasks
 
