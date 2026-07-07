@@ -118,9 +118,11 @@ Tiber exposes the same task operations over stdio MCP:
 tiber mcp stdio
 ```
 
-The plugin manifest registers this server through a small `bash -lc` launcher
+The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the bundled `bin/tiber` from the plugin root, marketplace root, or
-Codex plugin cache before running `tiber mcp stdio`.
+Codex plugin cache before running `tiber mcp stdio`. Reinstall or upgrade the
+plugin from marketplace version `0.2.3` or newer if Codex reports `No such file
+or directory` while starting the `tiber` MCP server.
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,
 `tiber.list`, `tiber.transition`, `tiber.update`, `tiber.acceptance.add`,
