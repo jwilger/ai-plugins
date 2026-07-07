@@ -24,3 +24,5 @@ In the development-discipline plugin, update BDD/TDD practice guidance so that a
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-07: In progress on branch development-discipline-tdd-light-review. Local signed commit e7fe1d1 created with focused validation; stacked on PR #36 and waiting for #36 to merge before rebasing/opening PR.
