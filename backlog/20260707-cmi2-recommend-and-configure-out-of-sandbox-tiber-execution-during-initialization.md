@@ -7,6 +7,8 @@ tags: []
 
 ## Summary
 
+Tiber initialization should detect when MCP-backed task writes are likely to fail inside the Codex sandbox, recommend configuring Tiber MCP calls to execute outside the sandbox, and offer to set up that permission/workflow for the user so MCP task operations do not require manual CLI fallback.
+
 ## Context / Why
 
 ## Acceptance criteria
