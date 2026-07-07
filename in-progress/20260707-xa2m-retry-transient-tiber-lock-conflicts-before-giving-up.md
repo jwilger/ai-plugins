@@ -23,3 +23,4 @@ claim:
 - 2026-07-07: Subagent review found stale cross-platform bundled binaries; rebuilt all four release binaries in cb08486 and verified each contains TIBER_LOCK_RETRY_TIMEOUT_MS.
 - 2026-07-07: Requested CodeRabbit full review on PR #39 after the rate-limit window; CodeRabbit replied that the full review finished and status is success. PR remains blocked only on required human approval.
 - 2026-07-07: PR #39 was approved but became DIRTY after #36 merged. Merged origin/main into tiber-lock-retry, resolved README catalog conflict to keep development-discipline 0.2.0 and Tiber 0.3.0, reran just validate-marketplace, and pushed merge commit 924df60.
+- 2026-07-07: After PR #38 merged, PR #39 became DIRTY again. Merged origin/main containing #38 into tiber-lock-retry, resolved Tiber version conflicts to keep 0.3.0 while retaining #38 changes, reran just validate-marketplace and check-tiber-release-complete, then pushed merge commit de76b51.
