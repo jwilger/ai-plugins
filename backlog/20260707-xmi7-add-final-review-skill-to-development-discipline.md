@@ -15,6 +15,7 @@ Add a final-review skill to the development-discipline plugin. The skill should 
 
 - [ ] The development-discipline plugin includes a final-review skill with trigger guidance for local use before PR creation or merge-to-main.
 - [ ] The skill defines default review lenses: correctness/behavior, tests/verification, security/safety, architecture/maintainability, user experience/operability, release/integration readiness, and agent-instruction quality for plugin or skill changes.
+- [ ] The review loop uses fresh-context subagents for every lens and iteration, communicates prior defenses to relevant lenses, and terminates only after three consecutive issue-free iterations across all lenses.
 
 ## Subtasks
 
