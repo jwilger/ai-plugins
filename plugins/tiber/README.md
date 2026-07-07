@@ -32,6 +32,14 @@ tiber sync
 `tiber init` is explicit. Installing the plugin or starting an agent session does
 not mutate the repository.
 
+When you start working on an existing task, move it out of the backlog first:
+
+```shell
+tiber transition <task-ref> in-progress
+```
+
+Backlog tasks are unclaimed work, not informal reservations.
+
 ## What Tiber Stores
 
 - `tasks` is an orphan Git branch that owns task-board state.

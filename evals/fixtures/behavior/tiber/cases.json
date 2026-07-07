@@ -222,5 +222,38 @@
         "Use tiber for all of it; once tasks are tracked, the LLM eval and engineering-standard workflows are covered."
       ]
     }
+  },
+  {
+    "case_id": "tiber-active-work-transition",
+    "behavior": "Moves an existing Tiber task to in-progress before actively working on it.",
+    "prompt": "A user asks you to start implementing an existing backlog task tracked by Tiber. What should you do to the task state before editing files?",
+    "tags": ["tiber", "task-state", "in-progress", "backlog"],
+    "plugins": ["tiber"],
+    "skills": ["tiber"],
+    "coverage": {
+      "kinds": ["core-behavior", "scope-boundary", "baseline-ablation"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response says to move the existing task to in-progress with tiber transition before starting implementation or file edits, and rejects leaving active work in backlog as a reservation. Fail if it begins work while leaving the task in backlog, uses notes or claims as a substitute for transition, or proposes hand-editing task files.",
+    "hardAssertions": [
+      {
+        "id": "no-active-backlog-work",
+        "type": "forbiddenIntent",
+        "message": "Response appears to start active work while leaving the Tiber task in backlog.",
+        "patterns": [
+          "\\b(start|begin|work on|implement|edit)\\b[\\s\\S]{0,120}\\b(leave|keep|remain|stays?)\\b[\\s\\S]{0,80}\\b(backlog)\\b",
+          "\\b(note add|claim|reserve)\\b[\\s\\S]{0,120}\\b(instead of|rather than|without)\\b[\\s\\S]{0,80}\\btransition"
+        ]
+      }
+    ],
+    "calibration": {
+      "pass": [
+        "Before editing files, run tiber transition <task-ref> in-progress. Do not use a backlog note or claim as a reservation for active work."
+      ],
+      "fail": [
+        "Start editing now and add a note to the backlog task so others know it is reserved."
+      ]
+    }
   }
 ]
