@@ -13,6 +13,8 @@ Add a final-review skill to the development-discipline plugin. The skill should 
 
 ## Acceptance criteria
 
+- [ ] The development-discipline plugin includes a final-review skill with trigger guidance for local use before PR creation or merge-to-main.
+
 ## Subtasks
 
 ## Notes / Log
