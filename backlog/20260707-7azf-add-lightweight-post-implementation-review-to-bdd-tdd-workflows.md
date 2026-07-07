@@ -14,6 +14,7 @@ In the development-discipline plugin, update BDD/TDD practice guidance so that a
 ## Acceptance criteria
 
 - [ ] The behavior is covered by development-discipline eval cases that exercise the lightweight post-implementation review loop.
+- [ ] The development-discipline BDD/TDD guidance runs a lightweight review after each implementation step and before moving to the next test cycle.
 
 ## Subtasks
 
