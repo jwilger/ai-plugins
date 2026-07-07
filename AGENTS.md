@@ -64,6 +64,17 @@ created under the ignored repo-local `.worktrees/` directory:
 git worktree add .worktrees/<branch-name> -b <branch-name>
 ```
 
+Before making edits, agents should run:
+
+```shell
+scripts/agent-checkout-guard.sh
+```
+
+The guard exits successfully only from a linked worktree. In the main checkout
+it blocks feature work, points to the linked-worktree command above, and
+distinguishes ordinary local changes from the common case where the dirty
+worktree already matches the upstream branch after a fetch.
+
 Install the shared hooks once from the main checkout:
 
 ```shell

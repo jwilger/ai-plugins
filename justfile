@@ -92,6 +92,10 @@ bats:
 worktree-hooks:
     scripts/install-worktree-hooks.sh
 
+# Fail unless the current checkout is a linked worktree suitable for agent edits.
+agent-checkout-guard:
+    scripts/agent-checkout-guard.sh
+
 # Tear down generated runtime state before removing a linked worktree.
 worktree-teardown path:
     scripts/worktree-teardown.sh "{{path}}"
