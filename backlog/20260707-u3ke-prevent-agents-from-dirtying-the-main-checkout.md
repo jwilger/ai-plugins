@@ -13,6 +13,8 @@ Agents working from the coordination checkout can leave origin-equivalent or gen
 
 ## Acceptance criteria
 
+- [ ] Starting agent work from the main checkout does not leave modified or untracked project files unless the user explicitly requested main-checkout edits.
+
 ## Subtasks
 
 ## Notes / Log
