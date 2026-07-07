@@ -17,6 +17,7 @@ const requiredSkills = [
   'systematic-debugging',
   'receiving-code-review',
   'writing-skills',
+  'final-review',
 ];
 const forbiddenSkills = [
   'using-superpowers',
@@ -32,6 +33,7 @@ const requiredCases = [
   'development-discipline-review-feedback-skepticism',
   'development-discipline-skill-authoring-follows-marketplace',
   'development-discipline-systematic-debugging-root-cause',
+  'development-discipline-final-review-clean-iterations',
 ];
 
 function readJson(relativePath) {
