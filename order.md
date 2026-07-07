@@ -9,3 +9,4 @@
 20260707-s7q4-deselect-tiber-dashboard-task-when-clicking-outside-selected-task-actions
 20260707-b98q-preserve-selected-tiber-dashboard-task-across-dashboard-updates
 20260707-tcgz-remind-agents-to-move-tiber-tasks-to-in-progress-before-starting-work
+20260707-xa2m-retry-transient-tiber-lock-conflicts-before-giving-up
