@@ -13,6 +13,8 @@ After the tiber and promptfoo MCP startup failures are actually fixed, encode th
 
 ## Acceptance criteria
 
+- [ ] The relevant plugin manifests, launchers, scripts, or README bootstrap instructions include the durable fix required for tiber and promptfoo MCP startup.
+
 ## Subtasks
 
 ## Notes / Log
