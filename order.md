@@ -6,3 +6,4 @@
 20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
 20260707-bssn-suggest-opening-a-draft-pr-for-the-tasks-branch-after-tiber-init
 20260707-sf8b-allow-drag-and-drop-reprioritization-in-the-tiber-dashboard-backlog
+20260707-s7q4-deselect-tiber-dashboard-task-when-clicking-outside-selected-task-actions
