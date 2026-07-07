@@ -7,7 +7,7 @@ tags: []
 
 ## Summary
 
-Tiber initialization should detect when MCP-backed task writes are likely to fail inside the Codex sandbox, recommend configuring Tiber MCP calls to execute outside the sandbox, and offer to set up that permission/workflow for the user so MCP task operations do not require manual CLI fallback.
+Tiber initialization should detect when MCP-backed task writes are likely to fail because Tiber's Git write/sync operations need host access for signed commits, SSH/GPG agents, or push credentials. It should recommend and offer setup for the narrowest safe out-of-sandbox permission: allowing only the Git commands or Tiber-internal Git equivalents required for signed commit-tree/commit and push/sync, rather than running the entire Tiber MCP server or all MCP calls outside the sandbox.
 
 ## Context / Why
 
