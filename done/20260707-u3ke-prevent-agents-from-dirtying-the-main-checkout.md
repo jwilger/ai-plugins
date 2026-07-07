@@ -3,9 +3,6 @@ title: Prevent agents from dirtying the main checkout
 blocked_by: []
 blocks: []
 tags: []
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
