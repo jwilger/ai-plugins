@@ -50,8 +50,8 @@
     {
       "name": "development-discipline",
       "source": "./plugins/development-discipline",
-      "description": "John's personal workflow discipline for test-first development, verification, debugging, review handling, and skill authoring.",
-      "version": "0.1.0",
+      "description": "John's personal workflow discipline for test-first development, verification, final review, debugging, review handling, and skill authoring.",
+      "version": "0.2.0",
       "category": "Developer Tools",
       "keywords": ["tdd", "verification", "debugging", "code-review", "skills"]
     },

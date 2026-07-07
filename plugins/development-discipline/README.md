@@ -11,6 +11,8 @@ generality.
   one smallest implementation step, then refactor only after green.
 - `verification-before-completion` - evidence-before-claims discipline tied to
   the actual claim scope.
+- `final-review` - fresh-context, multi-lens local review cycles before PR
+  creation, merge, or readiness claims.
 - `systematic-debugging` - compact root-cause debugging before fixes.
 - `receiving-code-review` - technical evaluation of review feedback before
   implementing or pushing back.
