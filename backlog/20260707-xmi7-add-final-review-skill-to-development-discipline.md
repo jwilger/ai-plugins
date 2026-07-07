@@ -7,6 +7,8 @@ tags: []
 
 ## Summary
 
+Add a final-review skill to the development-discipline plugin. The skill should run locally before creating any pull request or merging to main. It should review a change scope against a baseline, defaulting to origin/main but respecting user-specified scopes such as uncommitted changes, changes since a release tag, or another explicit base. Each review cycle should spawn fresh-context subagents for each review lens and iteration, address valid findings or write a technical defense for intentionally not addressing them, then repeat until three consecutive iterations produce no issues from any lens.
+
 ## Context / Why
 
 ## Acceptance criteria
