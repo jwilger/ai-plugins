@@ -19,3 +19,4 @@ claim:
 ## Notes / Log
 
 - 2026-07-07: In progress on branch tiber-lock-retry. Committed 90b45e9 with bounded lock retry, focused and full Rust tests passing, marketplace validation passing, and host release binary rebuilt.
+- 2026-07-07: Opened PR #39: https://github.com/jwilger/ai-plugins/pull/39. Note: may need rebase after PR #38 because both touch Tiber version metadata.
