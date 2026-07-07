@@ -53,6 +53,21 @@ fn update_edits_pr_mr_tracking_frontmatter() {
     let task = String::from_utf8(show.stdout).expect("show output should be utf8");
     assert!(task.contains("pr_mr_url: https://github.com/example/repo/pull/42\n"));
     assert!(task.contains("pr_mr_status: review-required\n"));
+
+    assert_success(repo.tiber([
+        "update",
+        "review-tracked",
+        "--pr-mr-url",
+        "",
+        "--pr-mr-status",
+        "",
+    ]));
+    let cleared = repo.tiber(["show", "review-tracked"]);
+    assert_success_ref(&cleared);
+    let task = String::from_utf8(cleared.stdout).expect("show output should be utf8");
+    assert!(task.contains("pr_mr_url: \n"));
+    assert!(task.contains("pr_mr_status: \n"));
+    assert!(!task.contains("pr_mr_url: unknown\n"));
 }
 
 #[test]

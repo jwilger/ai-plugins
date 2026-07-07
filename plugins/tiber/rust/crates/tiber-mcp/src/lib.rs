@@ -199,12 +199,14 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
             let task_ref = required_string(arguments, "ref")?;
             tiber_git::update_task(
                 task_ref,
-                optional_string(arguments, "title"),
-                optional_string(arguments, "summary"),
-                optional_string(arguments, "context"),
-                optional_tags(arguments)?,
-                optional_string(arguments, "pr_mr_url"),
-                optional_string(arguments, "pr_mr_status"),
+                tiber_git::TaskUpdate {
+                    title: optional_string(arguments, "title"),
+                    summary: optional_string(arguments, "summary"),
+                    context: optional_string(arguments, "context"),
+                    tags: optional_tags(arguments)?,
+                    pr_mr_url: optional_string(arguments, "pr_mr_url"),
+                    pr_mr_status: optional_string(arguments, "pr_mr_status"),
+                },
             )?;
             Ok(text_content(format!("updated {task_ref}")))
         }

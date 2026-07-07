@@ -116,12 +116,14 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             let update = parse_update_args(rest)?;
             tiber_git::update_task(
                 task_ref,
-                update.title.as_deref(),
-                update.summary.as_deref(),
-                update.context.as_deref(),
-                update.tags,
-                update.pr_mr_url.as_deref(),
-                update.pr_mr_status.as_deref(),
+                tiber_git::TaskUpdate {
+                    title: update.title.as_deref(),
+                    summary: update.summary.as_deref(),
+                    context: update.context.as_deref(),
+                    tags: update.tags,
+                    pr_mr_url: update.pr_mr_url.as_deref(),
+                    pr_mr_status: update.pr_mr_status.as_deref(),
+                },
             )?;
             Ok(())
         }
