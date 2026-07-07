@@ -14,6 +14,7 @@ Codex startup still reports MCP client failures for tiber and promptfoo: MCP sta
 ## Acceptance criteria
 
 - [ ] Launching Codex in the ai-plugins checkout no longer prints MCP startup failures for tiber or promptfoo.
+- [ ] A regression check covers the startup path that failed with os error 2, or the task documents why such a check cannot be automated.
 
 ## Subtasks
 
