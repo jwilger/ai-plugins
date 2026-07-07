@@ -14,6 +14,7 @@ Add a final-review skill to the development-discipline plugin. The skill should 
 ## Acceptance criteria
 
 - [ ] The development-discipline plugin includes a final-review skill with trigger guidance for local use before PR creation or merge-to-main.
+- [ ] The skill defines default review lenses: correctness/behavior, tests/verification, security/safety, architecture/maintainability, user experience/operability, release/integration readiness, and agent-instruction quality for plugin or skill changes.
 
 ## Subtasks
 
