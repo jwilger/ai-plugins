@@ -22,3 +22,5 @@ Agents working from the coordination checkout can leave origin-equivalent or gen
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-07: Implemented locally on branch agent-main-checkout-guard at commit 73b96fc. Verification run: nix develop -c just bats validate-marketplace. Awaiting explicit approval to push/open PR.
