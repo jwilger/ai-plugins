@@ -16,6 +16,10 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
     match args.as_slice() {
         [command] if command == "init" => tiber_git::init_repository(),
         [command] if command == "sync" => tiber_git::sync_repository(),
+        [command, mode] if command == "codex-sandbox" && mode == "--dry-run" => {
+            print!("{}", tiber_mcp::codex_sandbox_setup());
+            Ok(())
+        }
         [command, action] if command == "dashboard" && action == "serve" => {
             let runtime = tokio::runtime::Runtime::new().map_err(tiber_git::Error::Io)?;
             runtime.block_on(async {
@@ -178,7 +182,7 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             Ok(())
         }
         _ => Err(tiber_git::Error::Usage(
-            "usage: tiber init|sync|dashboard serve|mcp stdio|install-bin --target-dir <dir> --dry-run|--apply|create <title>|show <ref>|metadata <ref>|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add <ref> <title> [--after s1,s2]|subtask check|uncheck|update <ref> [--title|--summary|--context|--tags|--pr-mr-url|--pr-mr-status]|acceptance add|check|uncheck|remove|note add|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
+            "usage: tiber init|sync|codex-sandbox --dry-run|dashboard serve|mcp stdio|install-bin --target-dir <dir> --dry-run|--apply|create <title>|show <ref>|metadata <ref>|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add <ref> <title> [--after s1,s2]|subtask check|uncheck|update <ref> [--title|--summary|--context|--tags|--pr-mr-url|--pr-mr-status]|acceptance add|check|uncheck|remove|note add|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
         )),
     }
 }

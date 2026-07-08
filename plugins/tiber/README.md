@@ -32,6 +32,21 @@ tiber sync
 `tiber init` is explicit. Installing the plugin or starting an agent session does
 not mutate the repository.
 
+For Codex sandboxed sessions, preview the narrow host-access setup before
+granting broad permissions:
+
+```shell
+tiber codex-sandbox --dry-run
+```
+
+The preview treats raw Git prefix approvals as case-by-case, including
+`hash-object`, `mktree`, `commit-tree -S`, `update-ref`, fetch, and push.
+Persist approval only when the harness can scope it to the exact Tiber-internal
+operation rather than a reusable raw `git` prefix. Prefer the narrowest approval
+that lets the same structured Tiber MCP operation be retried. Do not run the
+whole Tiber MCP server outside the sandbox unless the narrow Git permissions are
+insufficient.
+
 When you start working on an existing task, move it out of the backlog first:
 
 ```shell
@@ -111,6 +126,7 @@ Validation and integration:
 ```shell
 tiber validate --fix
 tiber close-from-trailers
+tiber codex-sandbox --dry-run
 tiber install-bin --target-dir ~/.local/bin --dry-run
 tiber scaffold repo --dry-run
 tiber scaffold repo --apply
@@ -147,7 +163,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.5.0` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.5.1` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -158,12 +174,17 @@ explicit `${CODEX_HOME}` fall back to `$HOME/.codex`.
 It intentionally does not execute repo-relative launchers such as `./bin/tiber`
 or `./plugins/tiber/bin/tiber`, so the same MCP configuration is safe to load
 from any checkout. Reinstall or upgrade the plugin from marketplace version
-`0.5.0` or newer if Codex reports `No such file or directory` or one of the
+`0.5.1` or newer if Codex reports `No such file or directory` or one of the
 `tiber.mcp_*` startup sentinel errors while starting the `tiber` MCP server.
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,
 `tiber.list`, `tiber.transition`, `tiber.update`, `tiber.acceptance.add`,
-`tiber.note.add`, `tiber.install_bin`, and `tiber.validate_fix`.
+`tiber.note.add`, `tiber.codex_sandbox_setup`, `tiber.install_bin`, and
+`tiber.validate_fix`.
+
+The `initialize` response also points Codex agents at
+`tiber.codex_sandbox_setup` and `tasks://codex-sandbox` so sandbox setup can be
+discovered through MCP before retrying a failed write.
 
 ## Dashboard
 

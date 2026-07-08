@@ -35,3 +35,47 @@ fn init_creates_tasks_branch_and_ignores_accidental_tasks_checkout() {
     assert!(tree_names.lines().any(|line| line == "order.md"));
     assert!(tree_names.lines().any(|line| line == "backlog/.gitkeep"));
 }
+
+#[test]
+fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
+    let repo = TempRepo::initialized();
+
+    let output = repo.tiber(["codex-sandbox", "--dry-run"]);
+
+    assert_success_ref(&output);
+    let stdout = String::from_utf8(output.stdout).expect("preview output should be utf8");
+    assert!(stdout.contains("Tiber Codex sandbox setup preview"));
+    assert!(stdout.contains("Prefer the narrowest approval"));
+    assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"hash-object\"]"));
+    assert!(stdout.contains("prefix_rule [\"git\", \"hash-object\"]"));
+    assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"mktree\"]"));
+    assert!(stdout.contains("prefix_rule [\"git\", \"mktree\"]"));
+    assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"commit-tree\"]"));
+    assert!(stdout.contains("prefix_rule [\"git\", \"commit-tree\"]"));
+    assert!(stdout.contains("signed commit-tree -S"));
+    assert!(stdout.contains(
+        "case-by-case approval for prefix_rule [\"git\", \"update-ref\", \"refs/heads/tasks\"]"
+    ));
+    assert!(stdout.contains("prefix_rule [\"git\", \"update-ref\", \"refs/heads/tasks\"]"));
+    assert!(stdout.contains(
+        "case-by-case approval for prefix_rule [\"git\", \"fetch\", \"origin\", \"tasks:refs/remotes/origin/tasks\"]"
+    ));
+    assert!(stdout.contains(
+        "prefix_rule [\"git\", \"fetch\", \"origin\", \"tasks:refs/remotes/origin/tasks\"]"
+    ));
+    assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"-c\", \"core.hooksPath=/dev/null\", \"push\", \"origin\", \"refs/heads/tasks:refs/heads/tasks\"]"));
+    assert!(stdout.contains(
+        "prefix_rule [\"git\", \"-c\", \"core.hooksPath=/dev/null\", \"push\", \"origin\", \"refs/heads/tasks:refs/heads/tasks\"]"
+    ));
+    assert!(stdout.contains(
+        "Persist approval only when the harness can scope it to the exact Tiber-internal operation"
+    ));
+    assert!(stdout.contains(
+        "Never persist a raw git, wildcard git, bash, sh, or whole-MCP-server permission"
+    ));
+    assert!(stdout.contains("retry the same structured Tiber MCP operation"));
+    assert!(stdout.contains("Do not run the whole Tiber MCP server outside the sandbox"));
+    assert!(
+        stdout.contains("Do not ask the user to rerun an equivalent tiber CLI command manually")
+    );
+}

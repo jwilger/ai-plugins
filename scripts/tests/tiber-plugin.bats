@@ -17,6 +17,7 @@ const readmePath = path.join(root, 'plugins/tiber/README.md');
 const casesPath = path.join(root, 'evals/fixtures/behavior/tiber/cases.json');
 
 const skill = fs.readFileSync(skillPath, 'utf8');
+const normalizedSkill = skill.replace(/\s+/g, ' ');
 const newTaskSkill = fs.readFileSync(newTaskSkillPath, 'utf8');
 const readme = fs.readFileSync(readmePath, 'utf8');
 const cases = JSON.parse(fs.readFileSync(casesPath, 'utf8'));
@@ -68,6 +69,7 @@ expectExactSet('allowed-tools', listValuesAfter('allowed-tools'), [
   'mcp__tiber__tiber_transition',
   'mcp__tiber__tiber_validate_fix',
   'mcp__tiber__tiber_sync',
+  'mcp__tiber__tiber_codex_sandbox_setup',
   'mcp__tiber__tiber_list',
   'mcp__tiber__tiber_show',
   'mcp__plugin_tiber_tiber__tiber_create',
@@ -77,6 +79,7 @@ expectExactSet('allowed-tools', listValuesAfter('allowed-tools'), [
   'mcp__plugin_tiber_tiber__tiber_transition',
   'mcp__plugin_tiber_tiber__tiber_validate_fix',
   'mcp__plugin_tiber_tiber__tiber_sync',
+  'mcp__plugin_tiber_tiber__tiber_codex_sandbox_setup',
   'mcp__plugin_tiber_tiber__tiber_list',
   'mcp__plugin_tiber_tiber__tiber_show',
 ]);
@@ -98,6 +101,7 @@ expectPattern('wildcard Bash prohibition', /wildcard Bash permission/);
 expectPattern('partial sync created ref recovery', /tiber\.create_sync_failed created=<task-ref>/);
 expectPattern('partial sync duplicate-create prohibition', /do not run\s+create again/);
 expectPattern('structured sync recovery', /run the structured Tiber MCP\s+sync tool/);
+expectPattern('structured sandbox setup recovery', /structured Tiber MCP sandbox setup\s+tool/);
 expectPattern('default backlog status', /Leave the new task in `backlog`/);
 for (const forbidden of [
   'Bash(<plugin-root>/bin/tiber init)',
@@ -131,11 +135,35 @@ for (const forbidden of [
 if (!skill.includes('Invoke the `tiber:new-task` skill')) {
   failures.push('tiber skill should advertise tiber:new-task');
 }
+if (!skill.includes('tiber.codex_sandbox_setup') || !skill.includes('tiber codex-sandbox --dry-run')) {
+  failures.push('tiber skill should advertise Codex sandbox setup discovery');
+}
+if (!skill.includes('case-by-case approval for raw Git prefixes')) {
+  failures.push('tiber skill should require case-by-case approval for raw Git prefixes');
+}
+if (!skill.includes('Persist approval only when the') || !skill.includes('exact Tiber-internal operation')) {
+  failures.push('tiber skill should only allow persisted approvals for exact Tiber-internal operations');
+}
+if (!skill.includes('not merely to a raw') || !skill.includes('`git` prefix')) {
+  failures.push('tiber skill should reject persisted raw git prefix approvals');
+}
+if (!/do not ask the user to rerun an equivalent/i.test(normalizedSkill)) {
+  failures.push('tiber skill should reject manual CLI reruns as normal MCP recovery');
+}
+if (!/do not recommend running the whole Tiber MCP server outside the sandbox/i.test(normalizedSkill)) {
+  failures.push('tiber skill should prefer narrow Git permissions over broad MCP-server escalation');
+}
 if (!readme.includes('tiber:new-task Document release checklist')) {
   failures.push('tiber README should document tiber:new-task usage');
 }
+if (!readme.includes('tiber codex-sandbox --dry-run')) {
+  failures.push('tiber README should document Codex sandbox setup preview');
+}
 if (!cases.some((testCase) => testCase.case_id === 'tiber-new-task-command-backlog-capture')) {
   failures.push('missing tiber new-task behavior eval case');
+}
+if (!cases.some((testCase) => testCase.case_id === 'tiber-codex-sandbox-narrow-setup')) {
+  failures.push('missing tiber Codex sandbox behavior eval case');
 }
 
 if (failures.length > 0) {

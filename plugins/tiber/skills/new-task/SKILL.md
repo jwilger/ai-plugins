@@ -10,6 +10,7 @@ allowed-tools:
   - mcp__tiber__tiber_transition
   - mcp__tiber__tiber_validate_fix
   - mcp__tiber__tiber_sync
+  - mcp__tiber__tiber_codex_sandbox_setup
   - mcp__tiber__tiber_list
   - mcp__tiber__tiber_show
   - mcp__plugin_tiber_tiber__tiber_create
@@ -19,6 +20,7 @@ allowed-tools:
   - mcp__plugin_tiber_tiber__tiber_transition
   - mcp__plugin_tiber_tiber__tiber_validate_fix
   - mcp__plugin_tiber_tiber__tiber_sync
+  - mcp__plugin_tiber_tiber__tiber_codex_sandbox_setup
   - mcp__plugin_tiber_tiber__tiber_list
   - mcp__plugin_tiber_tiber__tiber_show
 ---
@@ -37,6 +39,10 @@ There is no CLI fallback for this skill. If the needed Tiber MCP tools are
 unavailable, stop and explain that Tiber MCP tools are required for backlog
 capture from chat. Do not pass user text through shell interpolation, command
 substitution, `eval`, a generated shell script, or a wildcard Bash permission.
+If a structured write fails because Codex sandboxing blocks Tiber's Git write,
+sync, signing, or push operations, call the structured Tiber MCP sandbox setup
+tool, request only the narrow case-by-case approval it identifies, and retry
+the same structured MCP operation.
 
 ## Workflow
 
@@ -63,6 +69,9 @@ summary, do not echo raw remote URLs, tokens, usernames, hostnames, repository
 paths, or private stderr text, resolve or ask for help resolving the sync
 problem, run the structured Tiber MCP sync tool, and then continue any updates,
 acceptance criteria, notes, validation, or reporting against that same task ref.
+If the sync problem is a Codex sandbox permission boundary, use the structured
+Tiber MCP sandbox setup tool before retrying sync; do not ask the user to rerun
+an equivalent Tiber CLI command manually.
 
 If creation reports `tiber.create_sync_failed` without a `created=<task-ref>`
 field, the task was not persisted locally. Tell the user creation failed,

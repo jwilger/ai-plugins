@@ -51,6 +51,15 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         initialize["result"]["capabilities"]["resources"],
         serde_json::json!({})
     );
+    let instructions = initialize["result"]["instructions"]
+        .as_str()
+        .expect("initialize instructions should be a string");
+    assert!(instructions.contains("tiber.codex_sandbox_setup"));
+    assert!(instructions.contains("case-by-case approval for raw Git prefixes"));
+    assert!(instructions.contains("exact Tiber-internal operation"));
+    assert!(instructions
+        .to_lowercase()
+        .contains("do not run the whole tiber mcp server outside the sandbox"));
 
     write_message(
         &mut stdin,
@@ -58,6 +67,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let tools = read_message(&mut stdout);
     assert!(tools.contains(r#""id":2"#));
+    assert!(tools.contains(r#""name":"tiber.codex_sandbox_setup""#));
     assert!(tools.contains(r#""name":"tiber.create""#));
     assert!(tools.contains(r#""name":"tiber.list""#));
     assert!(tools.contains(r#""name":"tiber.show""#));
@@ -88,6 +98,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     let resources = read_message(&mut stdout);
     assert!(resources.contains(r#""id":3"#));
     assert!(resources.contains(r#""uri":"tasks://board""#));
+    assert!(resources.contains(r#""uri":"tasks://codex-sandbox""#));
     assert!(resources.contains(&format!(r#""uri":"tasks://task/{expose_mcp_task}""#)));
     assert!(resources.contains(r#""uri":"tasks://docs/tree""#));
     assert!(resources.contains(r#""uri":"tasks://docs/guides/tiber.md""#));
@@ -146,6 +157,33 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(doc.contains(r#""id":9"#));
     assert!(doc.contains("# Tiber guide"));
     assert!(doc.contains("tiber mcp stdio"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":91,"method":"tools/call","params":{"name":"tiber.codex_sandbox_setup","arguments":{}}}"#,
+    );
+    let codex_setup_tool = read_message(&mut stdout);
+    assert!(codex_setup_tool.contains(r#""id":91"#));
+    assert!(codex_setup_tool
+        .contains("case-by-case approval for prefix_rule [\\\"git\\\", \\\"hash-object\\\"]"));
+    assert!(codex_setup_tool.contains("prefix_rule [\\\"git\\\", \\\"commit-tree\\\"]"));
+    assert!(codex_setup_tool
+        .contains("case-by-case approval for prefix_rule [\\\"git\\\", \\\"update-ref\\\", \\\"refs/heads/tasks\\\"]"));
+    assert!(codex_setup_tool.contains(
+        "Persist approval only when the harness can scope it to the exact Tiber-internal operation"
+    ));
+    assert!(codex_setup_tool.contains("Never persist a raw git"));
+    assert!(codex_setup_tool.contains("retry the same structured Tiber MCP operation"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":92,"method":"resources/read","params":{"uri":"tasks://codex-sandbox"}}"#,
+    );
+    let codex_setup_resource = read_message(&mut stdout);
+    assert!(codex_setup_resource.contains(r#""id":92"#));
+    assert!(
+        codex_setup_resource.contains("Do not run the whole Tiber MCP server outside the sandbox")
+    );
 
     write_message(
         &mut stdin,
