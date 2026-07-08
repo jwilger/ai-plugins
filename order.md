@@ -1,4 +1,3 @@
-20260708-gd38-fix-hanging-provider-backed-behavior-evals
 20260707-cmi2-recommend-and-configure-out-of-sandbox-tiber-execution-during-initialization
 20260707-sxyb-show-copyable-ticket-ids-on-tiber-dashboard-cards
 20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
