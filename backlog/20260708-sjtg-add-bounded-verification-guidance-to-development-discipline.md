@@ -16,6 +16,7 @@ Teach agents that long-running verification, evals, and external checks must hav
 ## Acceptance criteria
 
 - [ ] development-discipline verification guidance requires bounded timeouts or explicit monitoring plans for long-running tests, evals, CI checks, and external tools.
+- [ ] Guidance tells agents to track broken verification infrastructure separately instead of treating an unbounded hang as permanent completion evidence or rediscovering it every review cycle.
 
 ## Subtasks
 
