@@ -5,9 +5,6 @@ blocks: []
 tags: []
 pr_mr_url: https://github.com/jwilger/ai-plugins/pull/47
 pr_mr_status: merged
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
