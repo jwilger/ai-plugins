@@ -20,7 +20,9 @@ setup() {
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
   [[ "$output" == *"EVAL_PROVIDER_FILTER"* ]]
   [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY    (default: 1)"* ]]
-  [[ "$output" == *"EVAL_TIMEOUT                 (default: 4h for full behavior runs, 45m otherwise;"* ]]
+  [[ "$output" == *"EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;"* ]]
+  [[ "$output" == *"EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)"* ]]
+  [[ "$output" == *"EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)"* ]]
   [[ "$output" == *"set to 0 to disable)"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)"* ]]
   [[ "$output" == *"results.junit.xml"* ]]
@@ -31,7 +33,7 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"scripts/evals/ensure-node-deps.sh"* ]]
-  [[ "$output" == *"timeout --kill-after 30s 4h"* ]]
+  [[ "$output" == *"timeout --kill-after 30s 90m"* ]]
   [[ "$output" == *"node_modules/.bin/promptfoo"* ]]
   [[ "$output" != *"npx --yes"* ]]
   [[ "$output" == *"--max-concurrency 1"* ]]
@@ -90,7 +92,7 @@ setup() {
   run env EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"timeout --kill-after 30s 45m"* ]]
+  [[ "$output" == *"timeout --kill-after 30s 20m"* ]]
   [[ "$output" == *"--filter-pattern tiber"* ]]
 }
 
@@ -100,6 +102,18 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" != *"timeout --kill-after"* ]]
   [[ "$output" == *"node_modules/.bin/promptfoo eval"* ]]
+}
+
+@test "eval runner dry-run supports shorter local default timeout overrides" {
+  run env EVAL_TIMEOUT_FULL_DEFAULT=30m EVAL_TIMEOUT_FOCUSED_DEFAULT=5m "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"timeout --kill-after 30s 30m"* ]]
+
+  run env EVAL_TIMEOUT_FULL_DEFAULT=30m EVAL_TIMEOUT_FOCUSED_DEFAULT=5m EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"timeout --kill-after 30s 5m"* ]]
 }
 
 @test "generated eval config can filter providers" {
@@ -334,6 +348,52 @@ SH
   [[ "$output" == *"Eval thresholds passed"* ]]
 }
 
+@test "eval runner clears stale timeout status before a successful run" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin" "$fixture_root/evals/out"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  cat >"$fixture_root/evals/out/status.json" <<'JSON'
+{
+  "state": "timed-out",
+  "reason": "stale timeout"
+}
+JSON
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+cat >evals/out/results.json <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "success": true,
+        "provider": { "id": "openai:codex-sdk" },
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 1 }
+      }
+    ]
+  }
+}
+JSON
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ "$status" -eq 0 ]
+  [ ! -e "$fixture_root/evals/out/status.json" ]
+  [[ "$output" == *"Eval thresholds passed"* ]]
+  rm -rf "$fixture_root"
+}
+
 @test "eval runner writes generated runtime filter options for real generated runs" {
   fixture_bin="$(mktemp -d)"
   mkdir -p "$fixture_bin"
@@ -371,9 +431,11 @@ SH
 
   run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" EVAL_TIMEOUT=1s "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
 
-  rm -rf "$fixture_root"
   [ "$status" -eq 124 ]
   [[ "$output" == *"promptfoo eval timed out after EVAL_TIMEOUT=1s"* ]]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "timed-out" ]
+  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval timed out after EVAL_TIMEOUT=1s" ]
+  rm -rf "$fixture_root"
 }
 
 @test "eval runner treats timeout as failure even when partial results pass thresholds" {
@@ -413,12 +475,13 @@ SH
 
   [ ! -e "$fixture_root/evals/out/results.json" ]
   [ -f "$fixture_root/evals/out/timeout-artifacts/"*/results.json ]
-  rm -rf "$fixture_root"
   [ "$status" -eq 124 ]
   [[ "$output" == *"promptfoo eval timed out after EVAL_TIMEOUT=1s"* ]]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "timed-out" ]
   [[ "$output" == *"retained partial eval artifacts in"* ]]
   [[ "$output" == *"-exit-124."* ]]
   [[ "$output" != *"Eval thresholds passed"* ]]
+  rm -rf "$fixture_root"
 }
 
 @test "eval runner treats interrupted promptfoo as failure even when partial results pass thresholds" {
@@ -458,10 +521,11 @@ SH
 
   [ ! -e "$fixture_root/evals/out/results.json" ]
   [ -f "$fixture_root/evals/out/timeout-artifacts/"*/results.json ]
-  rm -rf "$fixture_root"
   [ "$status" -eq 130 ]
   [[ "$output" == *"promptfoo eval was interrupted before completion with status 130"* ]]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "interrupted" ]
   [[ "$output" != *"Eval thresholds passed"* ]]
+  rm -rf "$fixture_root"
 }
 
 @test "eval runner force-kills a promptfoo process that ignores timeout termination" {
@@ -484,9 +548,10 @@ SH
 
   run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" EVAL_TIMEOUT=1s EVAL_TIMEOUT_KILL_AFTER=1s "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
 
-  rm -rf "$fixture_root"
   [ "$status" -eq 137 ]
   [[ "$output" == *"promptfoo eval timed out after EVAL_TIMEOUT=1s"* ]]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "timed-out" ]
+  rm -rf "$fixture_root"
 }
 
 @test "eval runner fails when Codex marketplace has no plugin names" {
