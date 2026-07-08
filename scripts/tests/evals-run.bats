@@ -151,6 +151,7 @@ setup() {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
   cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
 #!/usr/bin/env bash
@@ -297,6 +298,7 @@ NODE
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
   cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
 #!/usr/bin/env bash
@@ -416,6 +418,7 @@ SH
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
   cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
 #!/usr/bin/env bash
@@ -443,6 +446,7 @@ SH
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
   cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
 #!/usr/bin/env bash
@@ -478,6 +482,7 @@ SH
   [ "$status" -eq 124 ]
   [[ "$output" == *"promptfoo eval timed out after EVAL_TIMEOUT=1s"* ]]
   [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "timed-out" ]
+  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval timed out after EVAL_TIMEOUT=1s" ]
   [[ "$output" == *"retained partial eval artifacts in"* ]]
   [[ "$output" == *"-exit-124."* ]]
   [[ "$output" != *"Eval thresholds passed"* ]]
@@ -489,6 +494,7 @@ SH
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
   cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
 #!/usr/bin/env bash
@@ -524,6 +530,7 @@ SH
   [ "$status" -eq 130 ]
   [[ "$output" == *"promptfoo eval was interrupted before completion with status 130"* ]]
   [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "interrupted" ]
+  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval was interrupted before completion with status 130" ]
   [[ "$output" != *"Eval thresholds passed"* ]]
   rm -rf "$fixture_root"
 }
@@ -532,6 +539,7 @@ SH
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
   cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
 #!/usr/bin/env bash
@@ -551,6 +559,7 @@ SH
   [ "$status" -eq 137 ]
   [[ "$output" == *"promptfoo eval timed out after EVAL_TIMEOUT=1s"* ]]
   [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "timed-out" ]
+  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval timed out after EVAL_TIMEOUT=1s" ]
   rm -rf "$fixture_root"
 }
 
