@@ -19,3 +19,5 @@ pr_mr_status:
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-08: Observed while preparing the Tiber new-task PR: EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture hung in a Claude Agent SDK call after expanding to 60 cases; EVAL_PROVIDER_FILTER=codex-gpt-5.5 then hung in an OpenAI Codex SDK call after expanding to 30 cases. Both had to be interrupted and produced paused promptfoo eval IDs rather than usable behavior evidence.
