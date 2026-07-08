@@ -15,6 +15,8 @@ Provider-backed marketplace evals must be reliable enough to use as completion e
 
 ## Acceptance criteria
 
+- [ ] A reproduced or simulated hang is covered by tests or eval-runner fixtures that fail before the fix and pass after it.
+
 ## Subtasks
 
 ## Notes / Log
