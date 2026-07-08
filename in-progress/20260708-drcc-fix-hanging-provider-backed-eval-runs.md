@@ -3,8 +3,8 @@ title: Fix hanging provider-backed eval runs
 blocked_by: []
 blocks: []
 tags: []
-pr_mr_url: 
-pr_mr_status: 
+pr_mr_url: https://github.com/jwilger/ai-plugins/pull/46
+pr_mr_status: checks-pending
 claim:
   host: unknown
   session: unknown
