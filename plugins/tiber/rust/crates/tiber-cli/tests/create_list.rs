@@ -1,5 +1,8 @@
 mod support;
 
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use support::{assert_success, assert_success_ref, task_stem, TempRepo};
 
 #[test]
@@ -9,8 +12,12 @@ fn create_stores_course_shaped_task_in_backlog_and_list_prints_ordered_summary()
 
     let create = repo.tiber(["create", "Write tiber docs"]);
 
-    assert_success(create);
+    assert_success_ref(&create);
     let stem = task_stem(&repo, "backlog", "write-tiber-docs");
+    assert_eq!(
+        String::from_utf8(create.stdout).expect("create output should be utf8"),
+        format!("created {stem}\n")
+    );
     let file_name = format!("{stem}.md");
     assert!(file_name.ends_with("-write-tiber-docs.md"));
     let (date, rest) = stem
@@ -45,6 +52,146 @@ fn create_stores_course_shaped_task_in_backlog_and_list_prints_ordered_summary()
     assert_eq!(
         String::from_utf8(list.stdout).expect("list output should be utf8"),
         format!("{stem}\tWrite tiber docs\n")
+    );
+}
+
+#[test]
+fn create_failure_after_local_task_creation_reports_created_ref_for_recovery() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    let hook_path = origin.path().join("hooks/pre-receive");
+    fs::write(
+        &hook_path,
+        "#!/usr/bin/env sh\necho 'rejecting tiber push for https://user:secret@example.invalid/private/repo.git' >&2\nexit 1\n",
+    )
+    .expect("write rejecting hook");
+    #[cfg(unix)]
+    fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))
+        .expect("make rejecting hook executable");
+
+    let repo = TempRepo::initialized();
+    repo.git([
+        "remote",
+        "add",
+        "origin",
+        origin.path().to_str().expect("origin path should be utf8"),
+    ]);
+    assert_success(repo.tiber(["init"]));
+
+    let create = repo.tiber(["create", "Release smoke"]);
+
+    assert!(
+        !create.status.success(),
+        "create should surface sync failure"
+    );
+    let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
+    assert!(
+        stderr.contains("tiber.create_sync_failed created="),
+        "stderr should include partial-success error with created ref: {stderr}"
+    );
+    assert!(
+        stderr.contains("-release-smoke"),
+        "stderr should include the created task nickname: {stderr}"
+    );
+    assert!(
+        stderr.contains("run tiber sync after resolving the sync error"),
+        "stderr should include recovery guidance: {stderr}"
+    );
+    assert!(
+        stderr.contains("stderr_redacted=true"),
+        "stderr should report redaction instead of raw sync output: {stderr}"
+    );
+    assert!(
+        stderr.contains("args_redacted=true"),
+        "stderr should report redacted sync command arguments: {stderr}"
+    );
+    assert!(
+        !stderr.contains("secret@example.invalid"),
+        "stderr should not leak token-bearing remote details: {stderr}"
+    );
+    assert!(
+        !stderr.contains("private/repo.git"),
+        "stderr should not leak private remote paths: {stderr}"
+    );
+    assert!(
+        !stderr.contains(repo.path().to_str().expect("repo path should be utf8")),
+        "stderr should not leak local repository paths: {stderr}"
+    );
+    let stem = task_stem(&repo, "backlog", "release-smoke");
+    assert!(
+        stderr.contains(&stem),
+        "stderr should include the exact locally created task ref {stem}: {stderr}"
+    );
+
+    fs::remove_file(&hook_path).expect("remove rejecting hook");
+    assert_success(repo.tiber(["sync"]));
+
+    let remote_listing = origin.git_output(["ls-tree", "-r", "--name-only", "tasks"]);
+    assert_success_ref(&remote_listing);
+    assert!(
+        String::from_utf8(remote_listing.stdout)
+            .expect("remote task listing should be utf8")
+            .contains(&format!("backlog/{stem}.md")),
+        "tiber sync should recover the locally created task to origin/tasks"
+    );
+}
+
+#[test]
+fn create_failure_before_local_task_commit_does_not_report_unrecoverable_ref() {
+    let repo = TempRepo::initialized();
+    let missing_origin = repo
+        .path()
+        .join("private")
+        .join("user-secret@example.invalid")
+        .join("missing-origin.git");
+    repo.git([
+        "remote",
+        "add",
+        "origin",
+        missing_origin
+            .to_str()
+            .expect("missing origin path should be utf8"),
+    ]);
+    assert_success(repo.tiber(["init"]));
+
+    let create = repo.tiber(["create", "Lost before sync"]);
+
+    assert!(
+        !create.status.success(),
+        "create should surface sync failure"
+    );
+    let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
+    assert!(
+        !stderr.contains("tiber.create_sync_failed created="),
+        "stderr should not report a recoverable created ref when refs/heads/tasks was not updated: {stderr}"
+    );
+    assert!(
+        !stderr.contains("-lost-before-sync"),
+        "stderr should not include an unrecoverable task nickname: {stderr}"
+    );
+    assert!(
+        stderr.contains("stderr_redacted=true"),
+        "stderr should report redaction instead of raw sync output: {stderr}"
+    );
+    assert!(
+        stderr.contains("args_redacted=true"),
+        "stderr should report redacted sync command arguments: {stderr}"
+    );
+    assert!(
+        !stderr.contains("secret@example.invalid"),
+        "stderr should not leak token-bearing remote details: {stderr}"
+    );
+    assert!(
+        !stderr.contains("private/missing-origin.git"),
+        "stderr should not leak private remote paths: {stderr}"
+    );
+    let listing = repo.git_output(["ls-tree", "-r", "--name-only", "tasks"]);
+    assert_success_ref(&listing);
+    assert!(
+        !String::from_utf8(listing.stdout)
+            .expect("tasks listing should be utf8")
+            .contains("-lost-before-sync"),
+        "task should not be present in refs/heads/tasks when sync failed before local ref update"
     );
 }
 

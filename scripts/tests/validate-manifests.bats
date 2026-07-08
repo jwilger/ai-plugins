@@ -19,6 +19,26 @@ make_plugin() {
   echo "{\"name\":\"$cx\",\"version\":\"$cx_version\"}" >"$ROOT/plugins/$name/.codex-plugin/plugin.json"
 }
 
+add_codex_mcp_manifest() {
+  local name="$1" cache_version="$2"
+  jq '.mcpServers="./.mcp.json"' \
+    "$ROOT/plugins/$name/.codex-plugin/plugin.json" >"$ROOT/plugins/$name/.codex-plugin/plugin.json.tmp"
+  mv "$ROOT/plugins/$name/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/$name/.codex-plugin/plugin.json"
+  cat >"$ROOT/plugins/$name/.mcp.json" <<JSON
+{"mcpServers":{"$name":{"command":"/bin/sh","args":["-c","candidate=\"\${CODEX_HOME:-\$HOME/.codex}/plugins/cache/ai-plugins/$name/$cache_version/bin/$name\"; exec \"\$candidate\""]}}}
+JSON
+}
+
+add_codex_mcp_manifest_with_wildcard_cache() {
+  local name="$1"
+  jq '.mcpServers="./.mcp.json"' \
+    "$ROOT/plugins/$name/.codex-plugin/plugin.json" >"$ROOT/plugins/$name/.codex-plugin/plugin.json.tmp"
+  mv "$ROOT/plugins/$name/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/$name/.codex-plugin/plugin.json"
+  cat >"$ROOT/plugins/$name/.mcp.json" <<JSON
+{"mcpServers":{"$name":{"command":"/bin/sh","args":["-c","for candidate in \${CODEX_HOME:-\$HOME/.codex}/plugins/cache/ai-plugins/$name/*/bin/$name; do exec \"\$candidate\"; done"]}}}
+JSON
+}
+
 write_manifests() {
   # write_manifests "<claude names>" "<codex names>"
   mkdir -p "$ROOT/.claude-plugin" "$ROOT/.agents/plugins"
@@ -110,6 +130,9 @@ manifest_for() {
 @test "fails when claude and codex plugin versions differ" {
   make_plugin alpha alpha alpha 1.2.3 1.2.4
   write_manifests "alpha" "alpha"
+  jq '(.plugins[] | select(.name == "alpha") | .version) = "1.2.4"' \
+    "$ROOT/.agents/plugins/marketplace.json" >"$ROOT/.agents/plugins/marketplace.json.tmp"
+  mv "$ROOT/.agents/plugins/marketplace.json.tmp" "$ROOT/.agents/plugins/marketplace.json"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"plugin-version-mismatch"* ]]
@@ -121,4 +144,72 @@ manifest_for() {
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"claude-marketplace-version-mismatch"* ]]
+}
+
+@test "fails when codex marketplace version differs from plugin version" {
+  make_plugin alpha alpha alpha 1.2.3 1.2.4
+  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
+  write_manifests "" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"codex-marketplace-version-mismatch"* ]]
+}
+
+@test "fails when codex MCP manifest is declared but missing" {
+  make_plugin alpha
+  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
+  jq '.mcpServers="./.mcp.json"' \
+    "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
+  mv "$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
+  write_manifests "" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing-codex-mcp-manifest"* ]]
+}
+
+@test "fails when codex MCP manifest exists but is undeclared" {
+  make_plugin alpha
+  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
+  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/.mcp.json"
+  write_manifests "" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"codex-mcp-manifest-not-declared"* ]]
+}
+
+@test "fails when root codex MCP manifest exists but plugin declares another path" {
+  make_plugin alpha
+  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
+  jq '.mcpServers="./other.mcp.json"' \
+    "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
+  mv "$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
+  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/.mcp.json"
+  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/other.mcp.json"
+  write_manifests "" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"codex-mcp-manifest-not-declared"* ]]
+}
+
+@test "fails when codex MCP cache version differs from plugin version" {
+  make_plugin alpha alpha alpha 1.2.3 1.2.4
+  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
+  add_codex_mcp_manifest alpha 1.2.3
+  write_manifests "" "alpha"
+  jq '(.plugins[] | select(.name == "alpha") | .version) = "1.2.4"' \
+    "$ROOT/.agents/plugins/marketplace.json" >"$ROOT/.agents/plugins/marketplace.json.tmp"
+  mv "$ROOT/.agents/plugins/marketplace.json.tmp" "$ROOT/.agents/plugins/marketplace.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"codex-mcp-cache-version-mismatch"* ]]
+}
+
+@test "fails when codex MCP cache launcher uses wildcard version" {
+  make_plugin alpha
+  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
+  add_codex_mcp_manifest_with_wildcard_cache alpha
+  write_manifests "" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"codex-mcp-cache-version-missing"* ]]
 }

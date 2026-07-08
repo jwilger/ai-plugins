@@ -263,6 +263,13 @@ pub enum Error {
         status: String,
         stderr: String,
     },
+    TaskCreatedSyncFailed {
+        task_path: String,
+        source: Box<Error>,
+    },
+    TaskCreateSyncFailed {
+        source: Box<Error>,
+    },
     Io(std::io::Error),
     Parse(String),
     Core(tiber_core::CoreError),
@@ -283,6 +290,16 @@ impl fmt::Display for Error {
                 args.join(" "),
                 stderr.trim()
             ),
+            Self::TaskCreatedSyncFailed { task_path, source } => write!(
+                formatter,
+                "tiber.create_sync_failed created={task_path} recovery=\"run tiber sync after resolving the sync error\" source={}",
+                source.sanitized_sync_source()
+            ),
+            Self::TaskCreateSyncFailed { source } => write!(
+                formatter,
+                "tiber.create_sync_failed recovery=\"resolve the sync error before retrying create\" source={}",
+                source.sanitized_sync_source()
+            ),
             Self::Io(error) => write!(formatter, "tiber.io_error source={error}"),
             Self::Parse(message) => write!(formatter, "tiber.parse_error {message}"),
             Self::Core(error) => write!(formatter, "{error}"),
@@ -292,6 +309,32 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+impl Error {
+    fn sanitized_sync_source(&self) -> String {
+        match self {
+            Self::CommandFailed {
+                program,
+                status,
+                stderr,
+                ..
+            } => format!(
+                "tiber.command_failed program={program} args_redacted=true status={status} stderr_redacted={}",
+                !stderr.trim().is_empty()
+            ),
+            Self::TaskCreatedSyncFailed { .. } | Self::TaskCreateSyncFailed { .. } => {
+                "tiber.create_sync_failed nested=true".to_string()
+            }
+            Self::Io(_) => "tiber.io_error source_redacted=true".to_string(),
+            Self::Parse(message) if message.starts_with("sync_conflict ") => {
+                format!("tiber.parse_error {message}")
+            }
+            Self::Parse(_) => "tiber.parse_error source_redacted=true".to_string(),
+            Self::Core(error) => error.to_string(),
+            Self::Usage(message) => message.to_string(),
+        }
+    }
+}
 
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
@@ -633,8 +676,33 @@ impl GitRepository {
 
     fn create_task(&self, title: TaskTitle) -> Result<TaskPath, Error> {
         let task_path = self.create_task_unlocked(title)?;
-        self.sync_repository_unlocked()?;
+        if let Err(error) = self.sync_repository_unlocked() {
+            if !self.task_committed_to_tasks_ref(&task_path)? {
+                return Err(Error::TaskCreateSyncFailed {
+                    source: Box::new(error),
+                });
+            }
+            return Err(Error::TaskCreatedSyncFailed {
+                task_path: task_path.path,
+                source: Box::new(error),
+            });
+        }
         Ok(task_path)
+    }
+
+    fn task_committed_to_tasks_ref(&self, task_path: &TaskPath) -> Result<bool, Error> {
+        match git_status(
+            [
+                "cat-file",
+                "-e",
+                &format!("refs/heads/tasks:backlog/{}.md", task_path.path),
+            ],
+            Some(&self.root),
+        ) {
+            Ok(()) => Ok(true),
+            Err(Error::CommandFailed { .. }) => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 
     fn create_task_unlocked(&self, title: TaskTitle) -> Result<TaskPath, Error> {

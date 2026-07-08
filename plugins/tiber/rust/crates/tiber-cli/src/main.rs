@@ -56,7 +56,11 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             }
             Ok(())
         }
-        [command, title] if command == "create" => tiber_git::create_task(title).map(|_| ()),
+        [command, title] if command == "create" => {
+            let created = tiber_git::create_task(title)?;
+            println!("created {}", created.path);
+            Ok(())
+        }
         [command, task_ref] if command == "show" => {
             print!("{}", tiber_git::show_task(task_ref)?);
             Ok(())
