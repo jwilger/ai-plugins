@@ -9,6 +9,9 @@ import { chromium } from "playwright";
 
 const root = resolve(new URL("../..", import.meta.url).pathname);
 const manifestPath = join(root, "plugins/tiber/rust/Cargo.toml");
+const tiberBinary = process.env.TIBER_SMOKE_BIN
+  ? resolve(root, process.env.TIBER_SMOKE_BIN)
+  : null;
 const repo = mkdtempSync(join(tmpdir(), "tiber-dashboard-smoke-"));
 const port = await findFreePort();
 const url = `http://127.0.0.1:${port}/`;
@@ -33,25 +36,17 @@ try {
   tiber(["create", "Inspect dashboard"]);
   tiber(["create", "Blocked dashboard task"]);
   tiber(["link", "inspect-dashboard", "blocks", "blocked-dashboard-task"]);
-  run(
-    "cargo",
-    ["build", "--quiet", "--manifest-path", manifestPath, "--bin", "tiber"],
-    repo,
-  );
+  if (!tiberBinary) {
+    run(
+      "cargo",
+      ["build", "--quiet", "--manifest-path", manifestPath, "--bin", "tiber"],
+      repo,
+    );
+  }
 
   server = spawn(
-    "cargo",
-    [
-      "run",
-      "--quiet",
-      "--manifest-path",
-      manifestPath,
-      "--bin",
-      "tiber",
-      "--",
-      "dashboard",
-      "serve",
-    ],
+    tiberCommand(),
+    [...tiberCommandArgs(), "dashboard", "serve"],
     {
       cwd: repo,
       env: { ...process.env, TIBER_DASHBOARD_PORT: String(port) },
@@ -72,8 +67,55 @@ try {
   await page.goto(url);
   await assertText(page.locator("[data-dashboard-board]"), "Inspect dashboard");
 
-  const inspectCard = page.locator('[data-task-link][data-stem$="-inspect-dashboard"]');
-  const blockedCard = page.locator('[data-task-link][data-stem$="-blocked-dashboard-task"]');
+  const inspectCard = page.locator(
+    '[data-task-link][data-stem$="-inspect-dashboard"]',
+  );
+  const blockedCard = page.locator(
+    '[data-task-link][data-stem$="-blocked-dashboard-task"]',
+  );
+  const inspectStem = await inspectCard.getAttribute("data-stem");
+  const inspectId = inspectStem.slice(0, 13);
+  const copyButton = inspectCard.locator("[data-copy-task-id]");
+  await assertText(copyButton, inspectId);
+  await page
+    .context()
+    .grantPermissions(["clipboard-read", "clipboard-write"], { origin: url });
+  await copyButton.click();
+  assert(
+    (await page.evaluate(() => navigator.clipboard.readText())) === inspectId,
+    "copy button should write the ticket id to the clipboard",
+  );
+  await assertText(
+    page.locator("[data-copy-status]"),
+    `Copied ticket ID ${inspectId}`,
+  );
+  await assertText(copyButton, "Copied");
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      configurable: true,
+      value: () => Promise.reject(new Error("forced clipboard rejection")),
+    });
+    document.execCommand = (command) => {
+      if (command !== "copy") return false;
+      window.__copyFallbackText = document.activeElement?.value ?? "";
+      return true;
+    };
+  });
+  await copyButton.click();
+  assert(
+    (await page.evaluate(() => window.__copyFallbackText)) === inspectId,
+    "copy button should fall back when clipboard writes reject",
+  );
+  await assertText(
+    page.locator("[data-copy-status]"),
+    `Copied ticket ID ${inspectId}`,
+  );
+  await copyButton.dblclick();
+  assert(
+    (await page.locator("[data-task-modal][open]").count()) === 0,
+    "copy button double-click should not open the task modal",
+  );
+
   await inspectCard.click();
   await blockedCard.waitFor();
   assert(
@@ -85,7 +127,10 @@ try {
   await inspectCard.dblclick();
   await page.locator("[data-task-modal][open]").waitFor();
   await assertText(page.locator("[data-modal-content]"), "Inspect dashboard");
-  await assertText(page.locator("[data-modal-content]"), "Blocked dashboard task");
+  await assertText(
+    page.locator("[data-modal-content]"),
+    "Blocked dashboard task",
+  );
   await page.locator("[data-modal-close]").click();
 
   await page.getByRole("link", { name: "Docs" }).click();
@@ -123,20 +168,24 @@ try {
 }
 
 function tiber(args) {
-  run(
-    "cargo",
-    [
-      "run",
-      "--quiet",
-      "--manifest-path",
-      manifestPath,
-      "--bin",
-      "tiber",
-      "--",
-      ...args,
-    ],
-    repo,
-  );
+  run(tiberCommand(), [...tiberCommandArgs(), ...args], repo);
+}
+
+function tiberCommand() {
+  return tiberBinary || "cargo";
+}
+
+function tiberCommandArgs() {
+  if (tiberBinary) return [];
+  return [
+    "run",
+    "--quiet",
+    "--manifest-path",
+    manifestPath,
+    "--bin",
+    "tiber",
+    "--",
+  ];
 }
 
 function run(command, args, cwd) {
@@ -233,7 +282,10 @@ async function assertText(locator, expected) {
     }
     await new Promise((resolveSleep) => setTimeout(resolveSleep, 100));
   }
-  assert(false, `expected text ${JSON.stringify(expected)} in ${JSON.stringify(text)}`);
+  assert(
+    false,
+    `expected text ${JSON.stringify(expected)} in ${JSON.stringify(text)}`,
+  );
 }
 
 function assert(condition, message) {
