@@ -19,6 +19,7 @@ Add a compact development-workflow router skill to the development-discipline pl
 - [ ] The router skill delegates detailed mechanics to existing skills including test-driven-development, systematic-debugging, verification-before-completion, final-review, receiving-code-review, babysit-pr, and relevant external documentation/security/GitHub/OpenAI/browser skills.
 - [ ] development-discipline README, plugin manifests, marketplace metadata, and root catalog are updated consistently, including the appropriate semver bump.
 - [ ] Behavior fixtures cover normal implementation routing, CI failure routing, and PR-to-merge routing through the full-marketplace eval surface.
+- [ ] The change does not duplicate the full 17-step workflow across every plugin and does not embed project-specific implementation rules that belong in a consuming repo's AGENTS.md.
 
 ## Subtasks
 
