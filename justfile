@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace tiber-rust tiber-dashboard-smoke tiber-mutants tiber-release-manifest bats
+ci: validate-marketplace tiber-rust tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
 
 # Rust gates for the tiber plugin workspace.
 tiber-rust:

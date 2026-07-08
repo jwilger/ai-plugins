@@ -11,6 +11,7 @@
 #   - every plugins/<name>/ directory is registered in at least one manifest;
 #   - registered per-harness plugin manifests exist, use the directory name,
 #     and carry valid semver versions;
+#   - marketplace entry versions match their per-harness plugin manifests;
 #   - shared Claude Code + Codex plugin versions match.
 set -euo pipefail
 
@@ -95,7 +96,36 @@ for dir in "$root"/plugins/*/; do
     cx_version="$(jq -r '.version // empty' "$cx")"
     [ -n "$cx_version" ] || fail "missing-codex-plugin-version: $name"
     is_semver "$cx_version" || fail "invalid-codex-plugin-version: $name version=$cx_version"
-  fi
+
+	    codex_marketplace_version="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .version // empty' "$codex")"
+	    [ -n "$codex_marketplace_version" ] || fail "missing-codex-marketplace-version: $name"
+	    [ "$codex_marketplace_version" = "$cx_version" ] || fail "codex-marketplace-version-mismatch: $name marketplace=$codex_marketplace_version plugin=$cx_version"
+
+	    mcp_ref="$(jq -r '.mcpServers // empty' "$cx")"
+	    if [ -f "${dir}.mcp.json" ] && [ -z "$mcp_ref" ]; then
+	      fail "codex-mcp-manifest-not-declared: $name path=./.mcp.json"
+	    fi
+	    if [ -f "${dir}.mcp.json" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.mcp.json" ]; then
+	      fail "codex-mcp-manifest-not-declared: $name path=./.mcp.json declared=$mcp_ref"
+	    fi
+	    if [ -n "$mcp_ref" ]; then
+	      mcp_path="${mcp_ref#./}"
+	      mcp_file="$dir$mcp_path"
+	      [ -f "$mcp_file" ] || fail "missing-codex-mcp-manifest: $name path=$mcp_ref"
+	      codex_cache_version="$(
+	        { grep -Eo "plugins/cache/ai-plugins/$name/[0-9A-Za-z.+-]+/bin/" "$mcp_file" || true; } \
+	          | sed -E "s#.*$name/([^/]+)/bin/#\\1#" \
+	          | sort -u
+	      )"
+	      if grep -q "plugins/cache/ai-plugins/$name/" "$mcp_file" && [ -z "$codex_cache_version" ]; then
+	        fail "codex-mcp-cache-version-missing: $name"
+	      fi
+	      if [ -n "$codex_cache_version" ]; then
+	        [ "$(wc -l <<<"$codex_cache_version" | tr -d ' ')" = "1" ] || fail "codex-mcp-cache-version-ambiguous: $name versions=$(tr '\n' ',' <<<"$codex_cache_version" | sed 's/,$//')"
+	        [ "$codex_cache_version" = "$cx_version" ] || fail "codex-mcp-cache-version-mismatch: $name mcp=$codex_cache_version plugin=$cx_version"
+	      fi
+	    fi
+	  fi
 
   if [ "$in_claude" -eq 1 ] && [ "$in_codex" -eq 1 ]; then
     [ "$cc_version" = "$cx_version" ] || fail "plugin-version-mismatch: $name claude=$cc_version codex=$cx_version"

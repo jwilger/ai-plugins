@@ -73,3 +73,12 @@ copy_binary "$target_dir/x86_64-unknown-linux-gnu/release/tiber" x86_64-unknown-
 copy_binary "$target_dir/aarch64-unknown-linux-gnu/release/tiber" aarch64-unknown-linux-gnu
 copy_binary "$target_dir/universal2-apple-darwin/release/tiber" x86_64-apple-darwin
 copy_binary "$target_dir/universal2-apple-darwin/release/tiber" aarch64-apple-darwin
+
+checksums="$root/plugins/tiber/release-binaries.sha256"
+: >"$checksums"
+jq -r '.binaries[].path' "$root/plugins/tiber/release-binaries.json" |
+  while IFS= read -r binary_path; do
+    sha256sum "$root/plugins/tiber/$binary_path" |
+      awk -v path="$binary_path" '{ print $1 "  " path }' >>"$checksums"
+  done
+echo "wrote $checksums"

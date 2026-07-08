@@ -58,6 +58,24 @@ This keeps task state versioned, syncable, and separate from the source branch.
 Inspect it through `tiber show`, `tiber list`, the read-only dashboard, or normal
 Git commands such as `git show tasks:order.md`.
 
+## New Task Skill
+
+The plugin includes the manually invokable `tiber:new-task` skill for quick
+backlog capture from an agent session:
+
+```text
+tiber:new-task Document release checklist
+```
+
+The skill creates the task through structured Tiber MCP tools, records any
+obvious summary or acceptance details from the prompt, runs the structured Tiber
+MCP validation tool, and leaves the task in `backlog` unless the user explicitly
+asks to start work immediately.
+
+It relies only on structured Tiber MCP tools for creation, validation, and
+backlog handling. It does not fall back to the Tiber CLI, direct file edits, or
+shell commands.
+
 ## CLI Commands
 
 Common reads:
@@ -115,9 +133,9 @@ tiber sync
 ```
 
 Read commands sync before returning task data. If Tiber can merge remote task
-state automatically, the command continues with the merged board. If the sync
-cannot be resolved automatically, the read fails instead of returning stale or
-locally divergent task data.
+state automatically, the read continues with the merged board. If the sync cannot
+be resolved automatically, the read fails instead of returning stale or locally
+divergent task data.
 
 ## Stdio MCP
 
@@ -128,10 +146,20 @@ tiber mcp stdio
 ```
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
-that resolves the bundled `bin/tiber` from the plugin root, marketplace root, or
-Codex plugin cache before running `tiber mcp stdio`. Reinstall or upgrade the
-plugin from marketplace version `0.2.3` or newer if Codex reports `No such file
-or directory` while starting the `tiber` MCP server.
+that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
+when that variable is set, or from the exact `tiber/0.5.0` Codex plugin cache
+when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
+an executable `bin/tiber`, startup fails with
+`tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
+cache. If `${CODEX_HOME}` is set but the exact Codex cache entry is missing,
+startup fails with `tiber.mcp_codex_cache_missing`; only sessions without an
+explicit `${CODEX_HOME}` fall back to `$HOME/.codex`.
+
+It intentionally does not execute repo-relative launchers such as `./bin/tiber`
+or `./plugins/tiber/bin/tiber`, so the same MCP configuration is safe to load
+from any checkout. Reinstall or upgrade the plugin from marketplace version
+`0.5.0` or newer if Codex reports `No such file or directory` or one of the
+`tiber.mcp_*` startup sentinel errors while starting the `tiber` MCP server.
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,
 `tiber.list`, `tiber.transition`, `tiber.update`, `tiber.acceptance.add`,
@@ -179,9 +207,12 @@ The plugin ships:
 - a `bin/tiber` launcher
 - prebuilt binaries under `dist/<target>/tiber`
 - release metadata in `release-binaries.json`
+- checksum provenance in `release-binaries.sha256`
 
 The launcher prefers a matching bundled binary and falls back to
 `cargo run --manifest-path rust/Cargo.toml --bin tiber` for development.
+Generate the release metadata and checksums with
+`scripts/build-tiber-release-all.sh`.
 
 ## Harness Support
 
