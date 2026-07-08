@@ -240,7 +240,7 @@ fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
         ));
     }
     Ok(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-copy-status aria-live=\"polite\"></p><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
         dashboard_style(),
         column_html,
         tasks.iter().map(|task| modal_html(task, &tasks, root)).collect::<String>(),
@@ -347,8 +347,9 @@ fn card_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> St
     };
     let pr_mr = pr_mr_badge_html(task);
     let dependency_attrs = dependency_attrs(task, tasks);
+    let task_id = ticket_id(&task.stem);
     format!(
-        "<article class=\"card\" data-task-link data-stem=\"{}\" {}><a href=\"/tasks/{}\"><div class=\"card-top\">{}{}{}</div><h3 class=\"card-title\">{}</h3><div class=\"card-meta\"><span class=\"mono\">{}</span><span class=\"link-counts\">{}{}</span></div><div class=\"card-tags\">{}</div></a><section class=\"card-summary\">{}</section></article>",
+        "<article class=\"card\" data-task-link data-stem=\"{}\" {}><a href=\"/tasks/{}\"><div class=\"card-top\">{}{}{}</div><h3 class=\"card-title\">{}</h3></a><div class=\"card-meta\"><button type=\"button\" class=\"copy-id mono\" data-copy-task-id=\"{}\" aria-label=\"Copy ticket ID {}\" title=\"Copy ticket ID\">{}</button><span class=\"mono nickname\">{}</span><span class=\"link-counts\">{}{}</span></div><div class=\"card-tags\">{}</div><section class=\"card-summary\">{}</section></article>",
         escape_html(&task.stem),
         dependency_attrs,
         escape_html(&task.stem),
@@ -356,6 +357,9 @@ fn card_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> St
         recency,
         pr_mr,
         escape_html(&task.title),
+        escape_html(task_id),
+        escape_html(task_id),
+        escape_html(task_id),
         escape_html(nickname(&task.stem)),
         if task.blocked_by.is_empty() {
             String::new()
@@ -824,6 +828,25 @@ fn nickname(stem: &str) -> &str {
     stem.get(14..).unwrap_or(stem)
 }
 
+fn ticket_id(stem: &str) -> &str {
+    if is_modern_task_stem(stem) {
+        stem.get(..13).unwrap_or(stem)
+    } else {
+        stem
+    }
+}
+
+fn is_modern_task_stem(stem: &str) -> bool {
+    let bytes = stem.as_bytes();
+    bytes.len() > 13
+        && bytes[0..8].iter().all(u8::is_ascii_digit)
+        && bytes[8] == b'-'
+        && bytes[9..13]
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && bytes[13] == b'-'
+}
+
 fn dashboard_style() -> &'static str {
     r#"<style>
 :root {
@@ -980,6 +1003,28 @@ a { color: inherit; text-decoration: none; }
 .card-title { font-size: 14px; font-weight: 700; line-height: 1.35; margin: 6px 0 8px; }
 .card-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink-muted); font-size: 12px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.copy-id {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--ink-secondary);
+  cursor: copy;
+  padding: 2px 5px;
+}
+.copy-id:hover,
+.copy-id.is-copied {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.copy-id.is-copy-failed {
+  border-color: var(--dependent);
+  color: var(--ink);
+}
+.nickname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .link-counts { color: var(--ink-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
 .card-summary { display: none; }
@@ -1075,6 +1120,7 @@ fn dashboard_script() -> &'static str {
 const modal = document.querySelector('[data-task-modal]');
 const modalContent = document.querySelector('[data-modal-content]');
 const closeButton = document.querySelector('[data-modal-close]');
+const copyStatus = document.querySelector('[data-copy-status]');
 const interceptStatus = document.querySelector('[data-link-intercept-status]');
 const board = document.querySelector('[data-dashboard-board]');
 let selectedStem = null;
@@ -1132,7 +1178,57 @@ function openTaskModal(stem) {
   modal.showModal();
 }
 
+function resetCopyButton(copyButton) {
+  const taskId = copyButton.dataset.copyTaskId;
+  copyButton.textContent = taskId;
+  copyButton.setAttribute('aria-label', `Copy ticket ID ${taskId}`);
+  copyButton.title = 'Copy ticket ID';
+  copyButton.classList.remove('is-copied', 'is-copy-failed');
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_error) {
+      // Fall back for browser policies that expose the API but reject writes.
+    }
+  }
+  const input = document.createElement('textarea');
+  try {
+    input.value = text;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.append(input);
+    input.select();
+    return document.execCommand('copy');
+  } catch (_error) {
+    return false;
+  } finally {
+    input.remove();
+  }
+}
+
 document.addEventListener('click', async (event) => {
+  const copyButton = event.target.closest('[data-copy-task-id]');
+  if (copyButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    resetCopyButton(copyButton);
+    const copied = await copyText(copyButton.dataset.copyTaskId);
+    const taskId = copyButton.dataset.copyTaskId;
+    const message = copied ? `Copied ticket ID ${taskId}` : `Could not copy ticket ID ${taskId}`;
+    copyButton.classList.add(copied ? 'is-copied' : 'is-copy-failed');
+    copyButton.textContent = copied ? 'Copied' : 'Copy failed';
+    copyButton.setAttribute('aria-label', message);
+    copyButton.title = message;
+    copyStatus.textContent = message;
+    setTimeout(() => resetCopyButton(copyButton), 1200);
+    return;
+  }
+
   const taskLink = event.target.closest('[data-task-link]');
   if (taskLink) {
     event.preventDefault();
@@ -1149,6 +1245,7 @@ document.addEventListener('click', async (event) => {
 });
 
 board.addEventListener('dblclick', (event) => {
+  if (event.target.closest('[data-copy-task-id]')) return;
   const taskLink = event.target.closest('[data-task-link]');
   if (!taskLink) return;
   event.preventDefault();

@@ -24,6 +24,9 @@ async fn dashboard_routes_render_board_and_task_pages() {
     let board = body_text(board).await;
     assert!(board.contains("Render dashboard"));
     assert!(board.contains(&stem));
+    let ticket_id = &stem[..13];
+    assert!(board.contains(&format!("data-copy-task-id=\"{ticket_id}\"")));
+    assert!(board.contains(&format!("Copy ticket ID {ticket_id}")));
 
     let task = app
         .clone()
@@ -65,12 +68,35 @@ async fn dashboard_board_page_exposes_browser_smoke_controls() {
 
     assert!(board.contains("data-dashboard-board"));
     assert!(board.contains("data-task-link"));
+    assert!(board.contains("data-copy-task-id"));
+    assert!(board.contains("data-copy-status"));
     assert!(board.contains("data-task-modal"));
     assert!(board.contains("data-modal-content"));
     assert!(board.contains("href=\"/docs\""));
     assert!(board.contains("data-external-link"));
     assert!(board.contains("data-link-intercept-status"));
     assert!(board.contains("new EventSource(\"/events\")"));
+}
+
+#[tokio::test]
+async fn dashboard_copy_id_uses_full_legacy_stem() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    repo.insert_tasks_tree_file(
+        "backlog/build-dashboard-task.md",
+        &repo.task_document("Build dashboard task", &[], &[], &[], "Legacy summary.\n"),
+    );
+
+    let board = tiber_server::router_at(repo.path.clone())
+        .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+        .await
+        .expect("board response");
+
+    assert_eq!(board.status(), StatusCode::OK);
+    let board = body_text(board).await;
+    assert!(board.contains("data-copy-task-id=\"build-dashboard-task\""));
+    assert!(board.contains("Copy ticket ID build-dashboard-task"));
+    assert!(!board.contains("data-copy-task-id=\"build-dashboa\""));
 }
 
 #[tokio::test]
