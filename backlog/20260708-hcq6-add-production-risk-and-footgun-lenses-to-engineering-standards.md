@@ -15,6 +15,8 @@ Strengthen engineering-standards so agents routinely look for sneaky footguns an
 
 ## Acceptance criteria
 
+- [ ] engineering-standards guidance explicitly reviews for hidden footguns, unsafe defaults, partial failure states, unbounded retries, unbounded loops, lock contention, cache staleness, and cleanup hazards.
+
 ## Subtasks
 
 ## Notes / Log
