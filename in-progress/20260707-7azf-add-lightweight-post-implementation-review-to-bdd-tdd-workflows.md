@@ -19,7 +19,7 @@ In the development-discipline plugin, update BDD/TDD practice guidance so that a
 - [x] The behavior is covered by development-discipline eval cases that exercise the lightweight post-implementation review loop.
 - [x] The development-discipline BDD/TDD guidance runs a lightweight review after each implementation step and before moving to the next test cycle.
 - [x] The lightweight review uses the same general repository-agnostic review lenses as final-review, but combines them into one fresh-context review subagent per implementation step.
-- [ ] The lightweight review requires one clean review before the agent continues to the next red/green/refactor testing cycle, or records and addresses/defends any findings before continuing.
+- [x] The lightweight review requires one clean review before the agent continues to the next red/green/refactor testing cycle, or records and addresses/defends any findings before continuing.
 
 ## Subtasks
 
