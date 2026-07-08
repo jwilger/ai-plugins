@@ -64,6 +64,12 @@ paths, or private stderr text, resolve or ask for help resolving the sync
 problem, run the structured Tiber MCP sync tool, and then continue any updates,
 acceptance criteria, notes, validation, or reporting against that same task ref.
 
+If creation reports `tiber.create_sync_failed` without a `created=<task-ref>`
+field, the task was not persisted locally. Tell the user creation failed,
+preserve only a sanitized sync-error summary, do not run sync or any recovery
+against a task ref, and retry the structured Tiber MCP create tool only after
+the sync problem is resolved.
+
 Leave the new task in `backlog` unless the user explicitly asks to start working
 on it now. If they do ask to start immediately, transition it with the
 structured Tiber MCP transition tool before editing files.

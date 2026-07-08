@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -67,6 +69,22 @@ impl TempRepo {
         repo.git(["add", "README.md"]);
         repo.git(["commit", "-m", "Initial commit"]);
         repo
+    }
+
+    #[allow(dead_code)]
+    pub fn bare_with_rejecting_hook() -> (Self, PathBuf) {
+        let origin = Self::new();
+        origin.git(["init", "--bare"]);
+        let hook_path = origin.path().join("hooks/pre-receive");
+        fs::write(
+            &hook_path,
+            "#!/usr/bin/env sh\necho 'rejecting tiber push for https://user:secret@example.invalid/private/repo.git' >&2\nexit 1\n",
+        )
+        .expect("write rejecting hook");
+        #[cfg(unix)]
+        fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))
+            .expect("make rejecting hook executable");
+        (origin, hook_path)
     }
 
     pub fn path(&self) -> &Path {

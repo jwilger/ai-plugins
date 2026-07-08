@@ -72,6 +72,10 @@ obvious summary or acceptance details from the prompt, runs the structured Tiber
 MCP validation tool, and leaves the task in `backlog` unless the user explicitly
 asks to start work immediately.
 
+It relies only on structured Tiber MCP tools for creation, validation, and
+backlog handling. It does not fall back to the Tiber CLI, direct file edits, or
+shell commands.
+
 ## CLI Commands
 
 Common reads:

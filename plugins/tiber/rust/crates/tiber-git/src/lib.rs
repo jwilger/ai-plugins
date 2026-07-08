@@ -677,7 +677,8 @@ impl GitRepository {
     fn create_task(&self, title: TaskTitle) -> Result<TaskPath, Error> {
         let task_path = self.create_task_unlocked(title)?;
         if let Err(error) = self.sync_repository_unlocked() {
-            if !self.task_committed_to_tasks_ref(&task_path)? {
+            let committed = self.task_committed_to_tasks_ref(&task_path).unwrap_or(true);
+            if !committed {
                 return Err(Error::TaskCreateSyncFailed {
                     source: Box::new(error),
                 });

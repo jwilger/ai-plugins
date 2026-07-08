@@ -1,8 +1,6 @@
 mod support;
 
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use support::{assert_success, assert_success_ref, task_stem, TempRepo};
 
 #[test]
@@ -57,18 +55,7 @@ fn create_stores_course_shaped_task_in_backlog_and_list_prints_ordered_summary()
 
 #[test]
 fn create_failure_after_local_task_creation_reports_created_ref_for_recovery() {
-    let origin = TempRepo::new();
-    origin.git(["init", "--bare"]);
-    let hook_path = origin.path().join("hooks/pre-receive");
-    fs::write(
-        &hook_path,
-        "#!/usr/bin/env sh\necho 'rejecting tiber push for https://user:secret@example.invalid/private/repo.git' >&2\nexit 1\n",
-    )
-    .expect("write rejecting hook");
-    #[cfg(unix)]
-    fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))
-        .expect("make rejecting hook executable");
-
+    let (origin, hook_path) = TempRepo::bare_with_rejecting_hook();
     let repo = TempRepo::initialized();
     repo.git([
         "remote",

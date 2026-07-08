@@ -2,8 +2,6 @@ mod support;
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
 use support::{assert_success, assert_success_ref, task_stem, TempRepo};
@@ -379,18 +377,7 @@ fn mcp_stdio_ignores_json_rpc_notifications() {
 
 #[test]
 fn mcp_stdio_create_sync_failure_reports_created_ref_and_redacts_stderr() {
-    let origin = TempRepo::new();
-    origin.git(["init", "--bare"]);
-    let hook_path = origin.path().join("hooks/pre-receive");
-    fs::write(
-        &hook_path,
-        "#!/usr/bin/env sh\necho 'rejecting tiber push for https://user:secret@example.invalid/private/repo.git' >&2\nexit 1\n",
-    )
-    .expect("write rejecting hook");
-    #[cfg(unix)]
-    fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))
-        .expect("make rejecting hook executable");
-
+    let (origin, hook_path) = TempRepo::bare_with_rejecting_hook();
     let repo = TempRepo::initialized();
     repo.git([
         "remote",

@@ -21,9 +21,13 @@ write_release_checksums() {
   local fixture="$1"
   : >"$fixture/plugins/tiber/release-binaries.sha256"
   while IFS= read -r binary_path; do
-    [ -e "$fixture/plugins/tiber/$binary_path" ] || continue
-    sha256sum "$fixture/plugins/tiber/$binary_path" |
-      awk -v path="$binary_path" '{ print $1 "  " path }' >>"$fixture/plugins/tiber/release-binaries.sha256"
+    if [ -e "$fixture/plugins/tiber/$binary_path" ]; then
+      sha256sum "$fixture/plugins/tiber/$binary_path" |
+        awk -v path="$binary_path" '{ print $1 "  " path }' >>"$fixture/plugins/tiber/release-binaries.sha256"
+    else
+      printf '0000000000000000000000000000000000000000000000000000000000000000  %s\n' \
+        "$binary_path" >>"$fixture/plugins/tiber/release-binaries.sha256"
+    fi
   done < <(jq -r '.binaries[].path' "$fixture/plugins/tiber/release-binaries.json")
 }
 
@@ -121,7 +125,7 @@ host_release_path() {
 
   rm -rf "$fixture"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"release-checksum-paths-mismatch"* ]]
+  [[ "$output" == *"missing-release-binary target=aarch64-apple-darwin"* ]]
 }
 
 @test "complete release check fails when any target binary is empty" {
