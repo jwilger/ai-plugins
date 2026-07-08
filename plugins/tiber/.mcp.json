@@ -4,7 +4,7 @@
       "command": "/bin/sh",
       "args": [
         "-c",
-        "set -eu; if [ -n \"${PATH:-}\" ]; then PATH=\"$PATH:/bin:/usr/bin:/run/current-system/sw/bin\"; else PATH=\"/bin:/usr/bin:/run/current-system/sw/bin\"; fi; export PATH; for candidate in ./bin/tiber ./plugins/tiber/bin/tiber \"${CODEX_HOME:-$HOME/.codex}\"/plugins/cache/ai-plugins/tiber/*/bin/tiber; do if [ -x \"$candidate\" ]; then exec \"$candidate\" mcp stdio; fi; done; echo \"tiber.mcp_launcher_missing\" >&2; exit 127"
+        "set -eu; if [ -n \"${PATH:-}\" ]; then PATH=\"$PATH:/bin:/usr/bin:/run/current-system/sw/bin\"; else PATH=\"/bin:/usr/bin:/run/current-system/sw/bin\"; fi; export PATH; bash_bin=; for candidate_bash in /run/current-system/sw/bin/bash /bin/bash /usr/bin/bash; do if [ -x \"$candidate_bash\" ]; then bash_bin=\"$candidate_bash\"; break; fi; done; if [ -z \"$bash_bin\" ]; then echo \"tiber.mcp_bash_missing\" >&2; exit 127; fi; if [ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ]; then if [ -x \"$CLAUDE_PLUGIN_ROOT/bin/tiber\" ]; then exec \"$bash_bin\" \"$CLAUDE_PLUGIN_ROOT/bin/tiber\" mcp stdio; fi; echo \"tiber.mcp_claude_plugin_root_invalid\" >&2; exit 127; fi; if [ -n \"${CODEX_HOME:-}\" ]; then candidate=\"$CODEX_HOME/plugins/cache/ai-plugins/tiber/0.5.0/bin/tiber\"; if [ -x \"$candidate\" ]; then exec \"$bash_bin\" \"$candidate\" mcp stdio; fi; echo \"tiber.mcp_codex_cache_missing\" >&2; exit 127; fi; if [ -n \"${HOME:-}\" ]; then candidate=\"$HOME/.codex/plugins/cache/ai-plugins/tiber/0.5.0/bin/tiber\"; if [ -x \"$candidate\" ]; then exec \"$bash_bin\" \"$candidate\" mcp stdio; fi; fi; echo \"tiber.mcp_launcher_missing\" >&2; exit 127"
       ],
       "description": "Tiber stdio MCP server for Git-backed task board reads and writes."
     }

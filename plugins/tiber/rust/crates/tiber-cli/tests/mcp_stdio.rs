@@ -1,9 +1,10 @@
 mod support;
 
+use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
-use support::{assert_success, task_stem, TempRepo};
+use support::{assert_success, assert_success_ref, task_stem, TempRepo};
 
 #[test]
 fn mcp_stdio_exposes_tools_and_task_resources() {
@@ -372,4 +373,100 @@ fn mcp_stdio_ignores_json_rpc_notifications() {
     tiber_mcp::run_stdio(std::io::BufReader::new(input), &mut output).expect("run stdio");
 
     assert_eq!(output, b"");
+}
+
+#[test]
+fn mcp_stdio_create_sync_failure_reports_created_ref_and_redacts_stderr() {
+    let (origin, hook_path) = TempRepo::bare_with_rejecting_hook();
+    let repo = TempRepo::initialized();
+    repo.git([
+        "remote",
+        "add",
+        "origin",
+        origin.path().to_str().expect("origin path should be utf8"),
+    ]);
+    assert_success(repo.tiber(["init"]));
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tiber mcp stdio");
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.create","arguments":{"title":"MCP partial create"}}}"#,
+    );
+    let create = read_json_message(&mut stdout);
+
+    assert_eq!(create["id"], 1);
+    assert_eq!(create["error"]["code"], -32603);
+    let message = create["error"]["message"]
+        .as_str()
+        .expect("error message should be a string");
+    assert!(
+        message.contains("tiber.create_sync_failed created="),
+        "MCP error should include partial-success error with created ref: {message}"
+    );
+    assert!(
+        message.contains("-mcp-partial-create"),
+        "MCP error should include the created task nickname: {message}"
+    );
+    assert!(
+        message.contains("run tiber sync after resolving the sync error"),
+        "MCP error should include recovery guidance: {message}"
+    );
+    assert!(
+        message.contains("stderr_redacted=true"),
+        "MCP error should report redaction instead of raw sync output: {message}"
+    );
+    assert!(
+        message.contains("args_redacted=true"),
+        "MCP error should report redacted sync command arguments: {message}"
+    );
+    assert!(
+        !message.contains("secret@example.invalid"),
+        "MCP error should not leak token-bearing remote details: {message}"
+    );
+    assert!(
+        !message.contains("private/repo.git"),
+        "MCP error should not leak private remote paths: {message}"
+    );
+    assert!(
+        !message.contains(repo.path().to_str().expect("repo path should be utf8")),
+        "MCP error should not leak local repository paths: {message}"
+    );
+    let stem = task_stem(&repo, "backlog", "mcp-partial-create");
+    assert!(
+        message.contains(&stem),
+        "MCP error should include the exact locally created task ref {stem}: {message}"
+    );
+
+    fs::remove_file(&hook_path).expect("remove rejecting hook");
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tiber.sync","arguments":{}}}"#,
+    );
+    let sync = read_message(&mut stdout);
+    assert!(sync.contains(r#""id":2"#));
+    assert!(sync.contains("synced tiber"));
+
+    let remote_listing = origin.git_output(["ls-tree", "-r", "--name-only", "tasks"]);
+    assert_success_ref(&remote_listing);
+    assert!(
+        String::from_utf8(remote_listing.stdout)
+            .expect("remote task listing should be utf8")
+            .contains(&format!("backlog/{stem}.md")),
+        "tiber sync should recover the locally created MCP task to origin/tasks"
+    );
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
 }

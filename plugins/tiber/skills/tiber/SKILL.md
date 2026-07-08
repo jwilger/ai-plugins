@@ -27,6 +27,10 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   needs an initialized board.
 - Use CLI/MCP writes, not direct edits to `.tasks` files or `order.md`.
 - Dashboard mode is read-only; all writes go through CLI or stdio MCP tools.
+- Invoke the `tiber:new-task` skill for quick backlog capture when the user
+  wants a new task recorded from chat. That skill writes only through structured
+  Tiber MCP tools and leaves the task in `backlog` unless the user explicitly
+  asks to start work immediately.
 - When you open or discover a PR/MR for an in-progress task, update the task
   with `tiber update <ref> --pr-mr-url <url> --pr-mr-status <status>`, and keep
   `pr_mr_status` current as checks/review/merge state changes. Use stable

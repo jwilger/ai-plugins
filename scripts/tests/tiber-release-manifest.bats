@@ -12,6 +12,33 @@ copy_detect_target_helper() {
   cp "$ROOT/plugins/tiber/scripts/detect-target.sh" "$1/plugins/tiber/scripts/detect-target.sh"
 }
 
+copy_launcher_helper() {
+  mkdir -p "$1/plugins/tiber/bin"
+  cp "$ROOT/plugins/tiber/bin/tiber" "$1/plugins/tiber/bin/tiber"
+}
+
+write_release_checksums() {
+  local fixture="$1"
+  : >"$fixture/plugins/tiber/release-binaries.sha256"
+  while IFS= read -r binary_path; do
+    if [ -e "$fixture/plugins/tiber/$binary_path" ]; then
+      sha256sum "$fixture/plugins/tiber/$binary_path" |
+        awk -v path="$binary_path" '{ print $1 "  " path }' >>"$fixture/plugins/tiber/release-binaries.sha256"
+    else
+      printf '0000000000000000000000000000000000000000000000000000000000000000  %s\n' \
+        "$binary_path" >>"$fixture/plugins/tiber/release-binaries.sha256"
+    fi
+  done < <(jq -r '.binaries[].path' "$fixture/plugins/tiber/release-binaries.json")
+}
+
+host_release_path() {
+  bash -c '
+    source "$1"
+    host_target="$(detect_tiber_target)"
+    jq -r --arg target "$host_target" ".binaries[] | select(.target == \$target) | .path" "$0"
+  ' "$ROOT/plugins/tiber/release-binaries.json" "$ROOT/plugins/tiber/scripts/detect-target.sh"
+}
+
 @test "real release manifest has an executable host binary" {
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -eq 0 ]
@@ -56,15 +83,25 @@ copy_detect_target_helper() {
   mkdir -p "$fixture/plugins/tiber"
   cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
+  copy_launcher_helper "$fixture"
+  host_path="$(host_release_path)"
   while IFS= read -r binary_path; do
     mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
-    printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
-    chmod +x "$fixture/plugins/tiber/$binary_path"
+    if [ "$binary_path" = "$host_path" ]; then
+      cp "$ROOT/plugins/tiber/$binary_path" "$fixture/plugins/tiber/$binary_path"
+    else
+      printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
+      chmod +x "$fixture/plugins/tiber/$binary_path"
+    fi
   done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+  write_release_checksums "$fixture"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
 
   rm -rf "$fixture"
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output"
+  fi
   [ "$status" -eq 0 ]
 }
 
@@ -73,6 +110,7 @@ copy_detect_target_helper() {
   mkdir -p "$fixture/plugins/tiber"
   cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
+  copy_launcher_helper "$fixture"
   while IFS= read -r binary_path; do
     if [ "$binary_path" = "dist/aarch64-apple-darwin/tiber" ]; then
       continue
@@ -81,6 +119,7 @@ copy_detect_target_helper() {
     printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
     chmod +x "$fixture/plugins/tiber/$binary_path"
   done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+  write_release_checksums "$fixture"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
 
@@ -94,6 +133,7 @@ copy_detect_target_helper() {
   mkdir -p "$fixture/plugins/tiber"
   cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
+  copy_launcher_helper "$fixture"
   while IFS= read -r binary_path; do
     mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
     if [ "$binary_path" != "dist/aarch64-apple-darwin/tiber" ]; then
@@ -103,6 +143,7 @@ copy_detect_target_helper() {
     fi
     chmod +x "$fixture/plugins/tiber/$binary_path"
   done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+  write_release_checksums "$fixture"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
 
@@ -111,10 +152,137 @@ copy_detect_target_helper() {
   [[ "$output" == *"invalid-release-binary target=aarch64-apple-darwin"* ]]
 }
 
+@test "complete release check reports unsupported host target" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/plugins/tiber/scripts"
+  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  cat >"$fixture/plugins/tiber/scripts/detect-target.sh" <<'SH'
+detect_tiber_target() {
+  return 1
+}
+SH
+  while IFS= read -r binary_path; do
+    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
+    printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
+    chmod +x "$fixture/plugins/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+  write_release_checksums "$fixture"
+
+  run bash "$COMPLETE_SCRIPT" "$fixture"
+
+  rm -rf "$fixture"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-host-release-binary"* ]]
+}
+
+@test "complete release check fails when host manifest path differs from launcher path" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/plugins/tiber"
+  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
+  copy_launcher_helper "$fixture"
+  host_target="$(bash -c 'source "$1"; detect_tiber_target' _ "$ROOT/plugins/tiber/scripts/detect-target.sh")"
+  jq --arg target "$host_target" \
+    '(.binaries[] | select(.target == $target) | .path) = "dist/stale-host/tiber"' \
+    "$fixture/plugins/tiber/release-binaries.json" >"$fixture/plugins/tiber/release-binaries.json.tmp"
+  mv "$fixture/plugins/tiber/release-binaries.json.tmp" "$fixture/plugins/tiber/release-binaries.json"
+  while IFS= read -r binary_path; do
+    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
+    cp "$ROOT/plugins/tiber/dist/$host_target/tiber" "$fixture/plugins/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$fixture/plugins/tiber/release-binaries.json")
+  mkdir -p "$fixture/plugins/tiber/dist/$host_target"
+  cp "$ROOT/plugins/tiber/dist/$host_target/tiber" "$fixture/plugins/tiber/dist/$host_target/tiber"
+  write_release_checksums "$fixture"
+
+  run bash "$COMPLETE_SCRIPT" "$fixture"
+
+  rm -rf "$fixture"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid-release-manifest-shape"* ]]
+}
+
+@test "complete release check fails when launcher is missing" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/plugins/tiber"
+  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
+  while IFS= read -r binary_path; do
+    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
+    printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
+    chmod +x "$fixture/plugins/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+
+  run bash "$COMPLETE_SCRIPT" "$fixture"
+
+  rm -rf "$fixture"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing-release-launcher"* ]]
+}
+
+@test "complete release check fails when checksums are missing" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/plugins/tiber"
+  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
+  copy_launcher_helper "$fixture"
+  while IFS= read -r binary_path; do
+    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
+    cp "$ROOT/plugins/tiber/$binary_path" "$fixture/plugins/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+
+  run bash "$COMPLETE_SCRIPT" "$fixture"
+
+  rm -rf "$fixture"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing-release-checksums"* ]]
+}
+
+@test "complete release check fails when a binary does not match checksum provenance" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/plugins/tiber"
+  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
+  copy_launcher_helper "$fixture"
+  while IFS= read -r binary_path; do
+    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
+    cp "$ROOT/plugins/tiber/$binary_path" "$fixture/plugins/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+  write_release_checksums "$fixture"
+  printf '\n# stale binary\n' >>"$fixture/plugins/tiber/dist/aarch64-apple-darwin/tiber"
+
+  run bash "$COMPLETE_SCRIPT" "$fixture"
+
+  rm -rf "$fixture"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"stale-release-binary target=aarch64-apple-darwin"* ]]
+}
+
+@test "complete release check fails when checksum sidecar has stale entries" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/plugins/tiber"
+  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
+  copy_launcher_helper "$fixture"
+  while IFS= read -r binary_path; do
+    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
+    cp "$ROOT/plugins/tiber/$binary_path" "$fixture/plugins/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+  write_release_checksums "$fixture"
+  printf '0000000000000000000000000000000000000000000000000000000000000000  dist/stale/tiber\n' >>"$fixture/plugins/tiber/release-binaries.sha256"
+
+  run bash "$COMPLETE_SCRIPT" "$fixture"
+
+  rm -rf "$fixture"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"release-checksum-paths-mismatch"* ]]
+}
+
 @test "release build script reuses an already installed local toolchain" {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/scripts"
   cp "$BUILD_ALL_SCRIPT" "$fixture/scripts/build-tiber-release-all.sh"
+  mkdir -p "$fixture/plugins/tiber"
+  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
   cargo_home="$fixture/cargo"
   rustup_home="$fixture/rustup"
   target_dir="$fixture/target"
@@ -190,6 +358,7 @@ EOF
   for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin; do
     [ -x "$fixture/plugins/tiber/dist/$target/tiber" ]
   done
+  [ -s "$fixture/plugins/tiber/release-binaries.sha256" ]
 
   rm -rf "$fixture"
   [ "$status" -eq 0 ]
