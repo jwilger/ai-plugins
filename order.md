@@ -16,3 +16,4 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
+20260708-drcc-fix-hanging-provider-backed-eval-runs
