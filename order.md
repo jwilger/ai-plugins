@@ -1,4 +1,3 @@
-20260708-drcc-fix-hanging-provider-backed-eval-runs
 20260707-sxyb-show-copyable-ticket-ids-on-tiber-dashboard-cards
 20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
 20260707-sf8b-allow-drag-and-drop-reprioritization-in-the-tiber-dashboard-backlog
