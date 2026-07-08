@@ -11,3 +11,4 @@
 20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260708-puyh-add-development-workflow-router-skill
+20260708-u52t-add-single-command-detailed-task-creation-to-tiber
