@@ -347,6 +347,35 @@
     }
   },
   {
+    "case_id": "development-discipline-tdd-lightweight-post-implementation-review",
+    "behavior": "Runs a lightweight fresh-context review after each implementation step in a TDD/BDD cycle.",
+    "prompt": "We just made the smallest implementation change to pass the current RED test in a TDD cycle. The focused test is green. What should happen before starting the next failing test?",
+    "tags": ["tdd", "bdd", "review", "subagents"],
+    "plugins": ["development-discipline"],
+    "skills": ["test-driven-development"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response says that after GREEN and before the next RED cycle, the agent should run a lightweight review using one fresh-context subagent that combines the general final-review lenses, includes production-risk and footgun checks, addresses valid findings or records a technical defense, and requires one clean review before moving on. Fail if it skips review until the final PR, requires the full three-iteration final-review loop after every implementation step, omits the fresh-context subagent, or ignores findings without fixing or defending them.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Before the next RED test, run one fresh-context lightweight review over the just-completed step using the final-review lenses, including production footguns; fix or defend findings, then continue only after one clean review."
+      ],
+      "fail": [
+        "Now that the test is green, start the next failing test and save review for the final PR."
+      ]
+    }
+  },
+  {
     "case_id": "development-discipline-verification-claim-scope",
     "behavior": "Ties completion claims to fresh evidence that covers the actual claim scope.",
     "prompt": "I changed one Markdown file and a manifest. The focused JSON check passed earlier before the README edit. Can I say the whole repo is ready now?",
