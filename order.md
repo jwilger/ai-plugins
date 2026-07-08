@@ -1,4 +1,5 @@
 20260707-cmi2-recommend-and-configure-out-of-sandbox-tiber-execution-during-initialization
+20260708-drcc-fix-hanging-provider-backed-eval-runs
 20260707-sxyb-show-copyable-ticket-ids-on-tiber-dashboard-cards
 20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
 20260707-sf8b-allow-drag-and-drop-reprioritization-in-the-tiber-dashboard-backlog
@@ -16,4 +17,3 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
-20260708-drcc-fix-hanging-provider-backed-eval-runs
