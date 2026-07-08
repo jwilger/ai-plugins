@@ -13,6 +13,8 @@ pr_mr_status:
 
 ## Acceptance criteria
 
+- [ ] Case and provider filters produce the intended scoped run, with tests proving EVAL_CASE_FILTER and EVAL_PROVIDER_FILTER do not unexpectedly expand to long serial suites.
+
 ## Subtasks
 
 ## Notes / Log
