@@ -17,6 +17,7 @@ Add a Tiber CLI/MCP workflow for creating a backlog task with title, summary, ac
 
 - [ ] A single CLI invocation can create a backlog task with title, summary, multiple acceptance criteria, and optional notes without requiring follow-up update commands.
 - [ ] The Tiber MCP create surface supports the same detailed creation payload or exposes an equivalent single-call detailed create operation.
+- [ ] The detailed create interface is scriptable and documented, with clear handling for repeated acceptance criteria and multi-line summary/note input.
 
 ## Subtasks
 
