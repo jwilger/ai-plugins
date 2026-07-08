@@ -16,6 +16,7 @@ Strengthen the Tiber plugin guidance so agents in any repository handle task sta
 ## Acceptance criteria
 
 - [ ] Tiber guidance makes clear that backlog capture leaves tasks in backlog unless the user explicitly asks to start work.
+- [ ] Guidance requires active work to move tasks to in-progress and requires multiple in-progress tasks to be isolated by separate branches or worktrees.
 
 ## Subtasks
 
