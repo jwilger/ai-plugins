@@ -14,3 +14,4 @@
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-55yg-add-final-review-readiness-gate-to-development-discipline
+20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
