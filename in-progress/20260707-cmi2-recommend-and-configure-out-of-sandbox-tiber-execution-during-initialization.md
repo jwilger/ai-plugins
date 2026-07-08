@@ -7,7 +7,7 @@ claim:
   host: unknown
   session: unknown
 pr_mr_url: https://github.com/jwilger/ai-plugins/pull/45
-pr_mr_status: approved
+pr_mr_status: merged
 ---
 
 ## Summary
