@@ -16,6 +16,7 @@ Add a readiness gate before the intensive final-review loop so agents self-check
 ## Acceptance criteria
 
 - [ ] Final-review guidance requires a local readiness checklist before the multi-lens review loop begins.
+- [ ] Guidance tells agents how to carry forward defended findings or externally tracked blockers so later review iterations do not rediscover the same accepted exception as new work.
 
 ## Subtasks
 
