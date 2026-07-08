@@ -19,6 +19,15 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - Use `<plugin-root>/bin/tiber` before any `PATH` fallback.
 - Offer `tiber install-bin --target-dir ~/.local/bin --dry-run` on setup or
   upgrade. Run `--apply` only after explicit user approval.
+- During setup, or after a Tiber MCP write/sync fails because Git cannot write
+  refs, objects, signed commits, or push credentials from the Codex sandbox,
+  call `tiber.codex_sandbox_setup` or run `tiber codex-sandbox --dry-run`.
+  Use case-by-case approval for raw Git prefixes. Persist approval only when the
+  harness can scope it to the exact Tiber-internal operation, not merely to a raw
+  `git` prefix. Then retry the same structured MCP operation. Do not ask the
+  user to rerun an equivalent Tiber CLI command manually as the normal recovery
+  path, and do not recommend running the whole Tiber MCP server outside the
+  sandbox unless the narrow Git permissions are insufficient.
 
 ## Rules
 
@@ -57,6 +66,7 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 
 ```shell
 tiber init
+tiber codex-sandbox --dry-run
 tiber create "Task title"
 tiber list
 tiber show <task-ref>

@@ -1,6 +1,6 @@
 {
   "name": "tiber",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Git-backed task boards for coding agents: shared cross-worktree task tracking, tiber CLI, stdio MCP, dry-run-first scaffold previews, validation, and read-only dashboard workflows.",
   "author": {
     "name": "John Wilger",
