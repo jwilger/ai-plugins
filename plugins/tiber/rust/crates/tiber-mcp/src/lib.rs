@@ -2,6 +2,31 @@ use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
 
+pub fn codex_sandbox_setup() -> String {
+    [
+        "Tiber Codex sandbox setup preview",
+        "",
+        "Prefer the narrowest approval that can retry the same structured Tiber MCP operation.",
+        "Do not run the whole Tiber MCP server outside the sandbox unless these narrow permissions are insufficient.",
+        "",
+        "Request these approvals only when a Tiber MCP write/sync fails because Git cannot write refs, objects, signed commits, or push credentials from the sandbox:",
+        "- case-by-case approval for prefix_rule [\"git\", \"hash-object\"] because it can write arbitrary host-readable file contents into Git objects",
+        "- case-by-case approval for prefix_rule [\"git\", \"mktree\"] because it can construct arbitrary Git trees from stdin",
+        "- case-by-case approval for prefix_rule [\"git\", \"commit-tree\"] because it can create commits, including signed commit-tree -S when commit.gpgsign=true",
+        "- case-by-case approval for prefix_rule [\"git\", \"update-ref\", \"refs/heads/tasks\"] because raw prefix approval can still be reused outside the current Tiber operation",
+        "- case-by-case approval for prefix_rule [\"git\", \"fetch\", \"origin\", \"tasks:refs/remotes/origin/tasks\"] because raw prefix approval can be extended with additional Git arguments",
+        "- case-by-case approval for prefix_rule [\"git\", \"-c\", \"core.hooksPath=/dev/null\", \"push\", \"origin\", \"refs/heads/tasks:refs/heads/tasks\"] because raw prefix approval can be extended with additional refspecs or options",
+        "",
+        "Persist approval only when the harness can scope it to the exact Tiber-internal operation, not merely to a raw git prefix.",
+        "Never persist a raw git, wildcard git, bash, sh, or whole-MCP-server permission for Tiber recovery.",
+        "",
+        "After the user approves the needed narrow permissions, retry the same structured Tiber MCP operation.",
+        "Do not ask the user to rerun an equivalent tiber CLI command manually as the normal recovery path.",
+        "",
+    ]
+    .join("\n")
+}
+
 pub fn run_stdio(input: impl BufRead, mut output: impl Write) -> Result<(), tiber_git::Error> {
     for line in input.lines() {
         let line = match line {
@@ -61,7 +86,8 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
             "serverInfo": {
                 "name": "tiber",
                 "version": env!("CARGO_PKG_VERSION")
-            }
+            },
+            "instructions": "For Codex sandbox write failures, call tiber.codex_sandbox_setup or read tasks://codex-sandbox before retrying the same structured Tiber MCP operation. Use case-by-case approval for raw Git prefixes; persist approval only when the harness can scope it to the exact Tiber-internal operation. Do not run the whole Tiber MCP server outside the sandbox unless narrow Git permissions are insufficient."
         }),
         "tools/list" => json!({ "tools": tools() }),
         "resources/list" => json!({ "resources": resources()? }),
@@ -115,6 +141,7 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
             tiber_git::sync_repository()?;
             Ok(text_content("synced tiber".to_string()))
         }
+        "tiber.codex_sandbox_setup" => Ok(text_content(codex_sandbox_setup())),
         "tiber.create" => {
             let title = arguments
                 .get("title")
@@ -333,6 +360,13 @@ fn tools() -> Vec<Value> {
             "tiber.sync",
             "Sync tiber",
             "Sync local task state into the Git-backed tasks branch.",
+            json!({}),
+            vec![],
+        ),
+        tool(
+            "tiber.codex_sandbox_setup",
+            "Preview Codex sandbox setup",
+            "Preview the narrow Codex approval guidance for Tiber-owned Git write and sync operations.",
             json!({}),
             vec![],
         ),
@@ -564,6 +598,11 @@ fn resources() -> Result<Vec<Value>, tiber_git::Error> {
             "mimeType": "text/markdown"
         }),
         json!({
+            "uri": "tasks://codex-sandbox",
+            "name": "Codex sandbox setup",
+            "mimeType": "text/markdown"
+        }),
+        json!({
             "uri": "tasks://docs/tree",
             "name": "Tiber docs tree",
             "mimeType": "text/markdown"
@@ -594,6 +633,9 @@ fn read_resource(uri: &str) -> Result<String, tiber_git::Error> {
                 .map(|task| format!("{}\t{}\n", task.path, task.title))
                 .collect::<String>()
         });
+    }
+    if uri == "tasks://codex-sandbox" {
+        return Ok(codex_sandbox_setup());
     }
     if uri == "tasks://docs/tree" {
         return tiber_git::list_docs().map(|docs| {

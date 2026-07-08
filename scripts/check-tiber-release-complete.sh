@@ -91,6 +91,17 @@ git -C "$smoke_repo" config commit.gpgsign false
 
 (
   cd "$smoke_repo"
+  codex_sandbox_output="$("$launcher" codex-sandbox --dry-run)"
+  if ! printf '%s\n' "$codex_sandbox_output" | grep -Fq 'Tiber Codex sandbox setup preview'; then
+    echo "invalid-host-release-codex-sandbox-output target=$host_target path=plugins/tiber/bin/tiber" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' |
+    "$launcher" mcp stdio |
+    grep -Fq '"name":"tiber.codex_sandbox_setup"'; then
+    echo "invalid-host-release-mcp-tools target=$host_target path=plugins/tiber/bin/tiber" >&2
+    exit 1
+  fi
   "$launcher" init >/dev/null
   create_output="$("$launcher" create "Release smoke")"
   if ! printf '%s\n' "$create_output" | grep -Eq '^created [0-9]{8}-[abcdefghijkmnpqrstuvwxyz23456789]{4}-release-smoke$'; then
