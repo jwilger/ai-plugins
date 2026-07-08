@@ -15,6 +15,8 @@ Add a readiness gate before the intensive final-review loop so agents self-check
 
 ## Acceptance criteria
 
+- [ ] Final-review guidance requires a local readiness checklist before the multi-lens review loop begins.
+
 ## Subtasks
 
 ## Notes / Log
