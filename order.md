@@ -16,3 +16,4 @@
 20260708-55yg-add-final-review-readiness-gate-to-development-discipline
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
+20260708-n3sh-add-cross-project-worktree-safety-guidance
