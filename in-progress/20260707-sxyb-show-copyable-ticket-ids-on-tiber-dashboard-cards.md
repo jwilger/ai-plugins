@@ -6,6 +6,8 @@ tags: []
 claim:
   host: unknown
   session: unknown
+pr_mr_url: https://github.com/jwilger/ai-plugins/pull/48
+pr_mr_status: open
 ---
 
 ## Summary
