@@ -9,6 +9,8 @@ runtime_options_file="$generated_dir/runtime-options.json"
 runtime_loader_file="$generated_dir/load-harness-cases.runtime.cjs"
 max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-1}"
 eval_timeout="${EVAL_TIMEOUT:-}"
+eval_timeout_full_default="${EVAL_TIMEOUT_FULL_DEFAULT:-90m}"
+eval_timeout_focused_default="${EVAL_TIMEOUT_FOCUSED_DEFAULT:-20m}"
 eval_timeout_kill_after="${EVAL_TIMEOUT_KILL_AFTER:-30s}"
 suite="behavior"
 dry_run=0
@@ -39,8 +41,10 @@ Environment overrides:
                                 an exact variant id selects full-marketplace only;
                                 semantic grading still uses CODEX_GRADER_MODEL)
   PROMPTFOO_MAX_CONCURRENCY    (default: 1)
-  EVAL_TIMEOUT                 (default: 4h for full behavior runs, 45m otherwise;
+  EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;
                                 set to 0 to disable)
+  EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)
+  EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)
   EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
@@ -125,6 +129,24 @@ retain_partial_outputs() {
   else
     rmdir "$retention_dir"
   fi
+}
+
+write_eval_status() {
+  local state="$1"
+  local reason="$2"
+  mkdir -p "$out_dir"
+  node - "$out_dir/status.json" "$state" "$reason" "${EVAL_PROVIDER_CREDENTIALS_STATUS:-unknown}" <<'NODE'
+const fs = require('fs');
+const [file, state, reason, providerCredentials] = process.argv.slice(2);
+const status = {
+  generatedAt: new Date().toISOString(),
+  suite: 'agentic-systems-engineering',
+  state,
+  reason,
+  providerCredentials,
+};
+fs.writeFileSync(file, `${JSON.stringify(status, null, 2)}\n`);
+NODE
 }
 
 selected_codex_provider_plugin_modes() {
@@ -239,9 +261,9 @@ if [ -z "$eval_timeout" ]; then
     [ -z "${EVAL_CASE_FILTER:-}" ] &&
     [ -z "${EVAL_PROVIDER_FILTER:-}" ] &&
     [ -z "${EVAL_SAMPLES:-}" ]; then
-    eval_timeout="4h"
+    eval_timeout="$eval_timeout_full_default"
   else
-    eval_timeout="45m"
+    eval_timeout="$eval_timeout_focused_default"
   fi
 fi
 
@@ -297,7 +319,7 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 mkdir -p "$out_dir" "$root/.dependencies/evals/agent-workspace"
-rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml"
+rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml" "$out_dir/status.json"
 "$root/scripts/evals/ensure-node-deps.sh"
 if [ "$generated_config" -eq 1 ]; then
   node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file" >/dev/null
@@ -333,16 +355,19 @@ set -e
 if [ "$promptfoo_status" -ne 0 ]; then
   if [ "$promptfoo_status" -eq 124 ] || [ "$promptfoo_status" -eq 137 ]; then
     echo "promptfoo eval timed out after EVAL_TIMEOUT=$eval_timeout" >&2
+    write_eval_status timed-out "promptfoo eval timed out after EVAL_TIMEOUT=$eval_timeout"
     retain_partial_outputs "exit-$promptfoo_status"
     exit "$promptfoo_status"
   fi
   if [ "$promptfoo_status" -eq 143 ]; then
     echo "promptfoo eval was terminated before completion" >&2
+    write_eval_status interrupted "promptfoo eval was terminated before completion"
     retain_partial_outputs "exit-$promptfoo_status"
     exit "$promptfoo_status"
   fi
   if [ "$promptfoo_status" -ge 128 ]; then
     echo "promptfoo eval was interrupted before completion with status $promptfoo_status" >&2
+    write_eval_status interrupted "promptfoo eval was interrupted before completion with status $promptfoo_status"
     retain_partial_outputs "exit-$promptfoo_status"
     exit "$promptfoo_status"
   fi
