@@ -113,7 +113,7 @@ MD
   [ "$status" -eq 0 ]
   [[ "$output" == *"apiKeyRequired: false"* ]]
   [[ "$output" == *"provider:"*$'\n'"      text:"*$'\n'"        id: openai:codex-sdk"* ]]
-  [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME"* ]]
+  [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME)"* ]]
   [[ "$output" != *"openai:gpt-5-mini"* ]]
 }
 

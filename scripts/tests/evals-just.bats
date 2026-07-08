@@ -77,3 +77,19 @@ SH
   [ "$status" -eq 130 ]
   [ "$(cat "$TMPROOT/eval-order.log")" = "run" ]
 }
+
+@test "just evals does not share after eval timeout" {
+  cat >"$TMPROOT/scripts/evals/run.sh" <<'SH'
+#!/usr/bin/env bash
+echo run >> eval-order.log
+mkdir -p evals/out
+: > evals/out/results.json
+exit 124
+SH
+  chmod +x "$TMPROOT/scripts/evals/run.sh"
+
+  run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
+
+  [ "$status" -eq 124 ]
+  [ "$(cat "$TMPROOT/eval-order.log")" = "run" ]
+}

@@ -9,14 +9,19 @@ const advisoryPromptPrefix =
   "Answer the scenario as an advisory behavior question. Treat each scenario as stateless: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Use installed marketplace plugin and skill guidance when it is relevant, naming the relevant plugin or skill in the answer. When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording. Apply plugin-specific safety gates and documented commands exactly instead of replacing them with generic setup or validation advice. Do not run shell commands, start evals, mutate files, or inspect repository state.";
 
 function usage() {
-  console.log(`Usage: node scripts/evals/generate-config.mjs [--suite behavior|canary] [--output path] [--stdout]
+  console.log(`Usage: node scripts/evals/generate-config.mjs [--suite behavior|canary] [--output path] [--metadata-output path] [--stdout]
 
 Generates promptfoo configs from the current Claude and Codex marketplace manifests.
 `);
 }
 
 function parseArgs(argv) {
-  const args = { suite: "behavior", stdout: false, output: null };
+  const args = {
+    suite: "behavior",
+    stdout: false,
+    output: null,
+    metadataOutput: null,
+  };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -29,6 +34,8 @@ function parseArgs(argv) {
       args.suite = argv[++index];
     } else if (arg === "--output") {
       args.output = argv[++index];
+    } else if (arg === "--metadata-output") {
+      args.metadataOutput = argv[++index];
     } else {
       throw new Error(`unknown argument: ${arg}`);
     }
@@ -174,29 +181,61 @@ function providerFor(variant, pluginMode, plugins) {
   throw new Error(`unsupported provider variant: ${variant.id}`);
 }
 
-function providerVariantsFor(matrix) {
-  const filter = process.env.EVAL_PROVIDER_FILTER;
-  const variants = filter
-    ? matrix.providerVariants.filter(
-        (variant) =>
-          variant.id.includes(filter) || variant.provider.includes(filter),
-      )
-    : matrix.providerVariants;
+function providerEntry(variant, pluginMode, plugins) {
+  return {
+    label: `${variant.id}-${pluginMode.id}`,
+    variant,
+    pluginMode,
+    config: providerFor(variant, pluginMode, plugins),
+  };
+}
 
-  if (variants.length === 0) {
-    throw new Error(
-      `no provider variants match EVAL_PROVIDER_FILTER=${filter}`,
-    );
+function providerMatches(entry, term) {
+  if (term === entry.label) {
+    return true;
+  }
+  if (term === entry.variant.id) {
+    return entry.pluginMode.id === "full-marketplace";
+  }
+  if (term === entry.variant.provider || term === entry.pluginMode.id) {
+    return true;
+  }
+  return entry.label.includes(term) || entry.variant.provider.includes(term);
+}
+
+function filteredProviderEntries(entries) {
+  const filter = process.env.EVAL_PROVIDER_FILTER;
+  if (!filter) {
+    return entries;
   }
 
-  return variants;
+  const terms = filter
+    .split(",")
+    .map((term) => term.trim())
+    .filter(Boolean);
+  const filtered = entries.filter((entry) =>
+    terms.some((term) => providerMatches(entry, term)),
+  );
+
+  if (filtered.length === 0) {
+    throw new Error(`no providers match EVAL_PROVIDER_FILTER=${filter}`);
+  }
+
+  return filtered;
+}
+
+function uniqueById(items) {
+  const byId = new Map();
+  for (const item of items) {
+    byId.set(item.id, item);
+  }
+  return [...byId.values()];
 }
 
 function configFor(suite) {
   const allPlugins = allMarketplacePlugins();
   const claudePlugins = manifestPlugins(".claude-plugin/marketplace.json");
   const matrix = evalMatrix();
-  const providerVariants = providerVariantsFor(matrix);
   const testLoader =
     suite === "canary"
       ? fileUrl(path.join(root, "evals/promptfoo/load-canary-cases.cjs"))
@@ -205,18 +244,30 @@ function configFor(suite) {
     suite === "canary"
       ? "Full-marketplace canary for ai-plugins coding harnesses"
       : "Provider-backed behavior evals for the ai-plugins marketplace";
-  const providers =
+  const providerEntries =
     suite === "behavior"
-      ? providerVariants.flatMap((variant) =>
+      ? matrix.providerVariants.flatMap((variant) =>
           matrix.pluginModes.map((pluginMode) =>
-            providerFor(variant, pluginMode, claudePlugins),
+            providerEntry(variant, pluginMode, claudePlugins),
           ),
         )
-      : providerVariants.map((variant) =>
-          providerFor(variant, { id: "full-marketplace" }, claudePlugins),
+      : matrix.providerVariants.map((variant) =>
+          providerEntry(variant, { id: "full-marketplace" }, claudePlugins),
         );
+  const providers = filteredProviderEntries(providerEntries);
+  const providerVariants = uniqueById(providers.map((entry) => entry.variant));
+  const pluginModes = uniqueById(providers.map((entry) => entry.pluginMode));
+  const metadata = {
+    suite,
+    usesCodexGrader: true,
+    codexProviderPluginModes: uniqueById(
+      providers
+        .filter((entry) => entry.variant.provider === "openai:codex-sdk")
+        .map((entry) => entry.pluginMode),
+    ).map((mode) => mode.id),
+  };
 
-  return `# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+  const yaml = `# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
 description: ${description}
 
 prompts:
@@ -226,7 +277,7 @@ prompts:
     {{scenario_prompt}}
 
 providers:
-${providers.join("\n")}
+${providers.map((entry) => entry.config).join("\n")}
 
 tests: ${testLoader}
 
@@ -245,7 +296,7 @@ defaultTest:
           deep_tracing: false
           skip_git_repo_check: true
           cli_env:
-            CODEX_HOME: "{{ env.CODEX_EVAL_HOME | default('${path.join(root, ".dependencies/evals/codex-home-full-marketplace")}') }}"
+            CODEX_HOME: "{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME) | default('${path.join(root, ".dependencies/evals/codex-home-full-marketplace")}') }}"
 
 tracing:
   enabled: false
@@ -255,7 +306,7 @@ metadata:
   testLoaderByPluginMode: ${suite === "behavior" ? `${testLoader}?pluginMode={{ provider.pluginMode }}` : testLoader}
   matrix:
     pluginModes:
-${indentedList(matrix.pluginModes, 6, (mode) => `- id: ${mode.id}`)}
+${indentedList(pluginModes, 6, (mode) => `- id: ${mode.id}`)}
     providerVariants:
 ${indentedList(providerVariants, 6, (variant) => `- id: ${variant.id}\n${" ".repeat(8)}provider: ${variant.provider}`)}
   fullMarketplacePlugins:
@@ -267,6 +318,8 @@ commandLineOptions:
   cache: false
   write: true
 `;
+
+  return { yaml, metadata };
 }
 
 try {
@@ -277,7 +330,7 @@ try {
     process.exit(0);
   }
 
-  const yaml = configFor(args.suite);
+  const { yaml, metadata } = configFor(args.suite);
 
   if (args.stdout || !args.output) {
     process.stdout.write(yaml);
@@ -286,6 +339,14 @@ try {
   if (args.output) {
     fs.mkdirSync(path.dirname(args.output), { recursive: true });
     fs.writeFileSync(args.output, yaml);
+  }
+
+  if (args.metadataOutput) {
+    fs.mkdirSync(path.dirname(args.metadataOutput), { recursive: true });
+    fs.writeFileSync(
+      args.metadataOutput,
+      `${JSON.stringify(metadata, null, 2)}\n`,
+    );
   }
 } catch (error) {
   console.error(error.message);
