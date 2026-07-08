@@ -4,7 +4,7 @@ blocked_by: []
 blocks: []
 tags: []
 pr_mr_url: https://github.com/jwilger/ai-plugins/pull/44
-pr_mr_status: open
+pr_mr_status: merged
 claim:
   host: unknown
   session: unknown
