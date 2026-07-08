@@ -1,4 +1,5 @@
 20260707-jm8j-create-invokable-new-task-command-for-tiber-backlog-capture
+20260708-gd38-fix-hanging-provider-backed-behavior-evals
 20260707-cmi2-recommend-and-configure-out-of-sandbox-tiber-execution-during-initialization
 20260707-sxyb-show-copyable-ticket-ids-on-tiber-dashboard-cards
 20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
@@ -9,4 +10,3 @@
 20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help
 20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
-20260708-gd38-fix-hanging-provider-backed-behavior-evals
