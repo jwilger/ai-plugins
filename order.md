@@ -5,7 +5,6 @@
 20260707-sf8b-allow-drag-and-drop-reprioritization-in-the-tiber-dashboard-backlog
 20260707-s7q4-deselect-tiber-dashboard-task-when-clicking-outside-selected-task-actions
 20260707-b98q-preserve-selected-tiber-dashboard-task-across-dashboard-updates
-20260707-xa2m-retry-transient-tiber-lock-conflicts-before-giving-up
 20260707-29i8-show-pr-mr-status-badges-on-in-progress-tiber-cards
 20260707-qsuz-mark-agent-unresolvable-blocked-tasks-on-the-tiber-board
 20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help
