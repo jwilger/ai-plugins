@@ -3,8 +3,8 @@ title: Fix hanging provider-backed behavior evals
 blocked_by: []
 blocks: []
 tags: []
-pr_mr_url: 
-pr_mr_status: 
+pr_mr_url: https://github.com/jwilger/ai-plugins/pull/44
+pr_mr_status: open
 claim:
   host: unknown
   session: unknown
