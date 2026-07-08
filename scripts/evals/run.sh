@@ -134,19 +134,11 @@ retain_partial_outputs() {
 write_eval_status() {
   local state="$1"
   local reason="$2"
-  mkdir -p "$out_dir"
-  node - "$out_dir/status.json" "$state" "$reason" "${EVAL_PROVIDER_CREDENTIALS_STATUS:-unknown}" <<'NODE'
-const fs = require('fs');
-const [file, state, reason, providerCredentials] = process.argv.slice(2);
-const status = {
-  generatedAt: new Date().toISOString(),
-  suite: 'agentic-systems-engineering',
-  state,
-  reason,
-  providerCredentials,
-};
-fs.writeFileSync(file, `${JSON.stringify(status, null, 2)}\n`);
-NODE
+  node "$root/scripts/evals/write-status.mjs" \
+    --output "$out_dir/status.json" \
+    --state "$state" \
+    --reason "$reason" \
+    --provider-credentials "${EVAL_PROVIDER_CREDENTIALS_STATUS:-unknown}" >/dev/null
 }
 
 selected_codex_provider_plugin_modes() {
