@@ -15,6 +15,8 @@ Strengthen the Tiber plugin guidance so agents in any repository handle task sta
 
 ## Acceptance criteria
 
+- [ ] Tiber guidance makes clear that backlog capture leaves tasks in backlog unless the user explicitly asks to start work.
+
 ## Subtasks
 
 ## Notes / Log
