@@ -16,6 +16,7 @@ Add a cross-project development-discipline preflight that classifies a requested
 ## Acceptance criteria
 
 - [ ] development-discipline provides a preflight skill or equivalent guidance that classifies change type and lists affected surfaces before implementation begins.
+- [ ] Guidance covers at least behavior, tests, docs, config, packaging, release artifacts, migrations, operational startup, evals, and user workflows as possible affected surfaces.
 
 ## Subtasks
 
