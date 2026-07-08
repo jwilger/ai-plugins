@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "../..");
-const outDir = path.join(root, "evals/out");
+const defaultOutput = path.join(root, "evals/out/status.json");
 
 function readFlag(name, fallback = "") {
   const index = process.argv.indexOf(name);
@@ -22,9 +22,7 @@ const status = {
   providerCredentials: readFlag("--provider-credentials", "unknown"),
 };
 
-fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(
-  path.join(outDir, "status.json"),
-  `${JSON.stringify(status, null, 2)}\n`,
-);
-console.log(`wrote ${path.relative(root, path.join(outDir, "status.json"))}`);
+const output = path.resolve(readFlag("--output", defaultOutput));
+fs.mkdirSync(path.dirname(output), { recursive: true });
+fs.writeFileSync(output, `${JSON.stringify(status, null, 2)}\n`);
+console.log(`wrote ${path.relative(root, output)}`);
