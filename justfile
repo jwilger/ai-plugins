@@ -52,7 +52,7 @@ evals:
 
     scripts/evals/run.sh
     status=$?
-    if [ "$status" -ge 128 ]; then
+    if [ "$status" -eq 124 ] || [ "$status" -ge 128 ]; then
       exit "$status"
     fi
 
