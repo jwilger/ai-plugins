@@ -163,7 +163,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.5.2` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.6.0` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -174,7 +174,7 @@ explicit `${CODEX_HOME}` fall back to `$HOME/.codex`.
 It intentionally does not execute repo-relative launchers such as `./bin/tiber`
 or `./plugins/tiber/bin/tiber`, so the same MCP configuration is safe to load
 from any checkout. Reinstall or upgrade the plugin from marketplace version
-`0.5.2` or newer if Codex reports `No such file or directory` or one of the
+`0.6.0` or newer if Codex reports `No such file or directory` or one of the
 `tiber.mcp_*` startup sentinel errors while starting the `tiber` MCP server.
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,

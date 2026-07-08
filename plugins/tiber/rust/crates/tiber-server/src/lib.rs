@@ -1024,6 +1024,7 @@ a { color: inherit; text-decoration: none; }
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .link-counts { color: var(--ink-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
