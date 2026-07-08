@@ -8,6 +8,8 @@ generated_dir="$out_dir/generated"
 runtime_options_file="$generated_dir/runtime-options.json"
 runtime_loader_file="$generated_dir/load-harness-cases.runtime.cjs"
 max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-1}"
+eval_timeout="${EVAL_TIMEOUT:-}"
+eval_timeout_kill_after="${EVAL_TIMEOUT_KILL_AFTER:-30s}"
 suite="behavior"
 dry_run=0
 generated_config=0
@@ -32,9 +34,14 @@ Environment overrides:
   CODEX_GRADER_REASONING_EFFORT (default: medium)
   EVAL_SAMPLES
   EVAL_CASE_FILTER
-  EVAL_PROVIDER_FILTER         (filters tested providers by variant id or provider id;
+  EVAL_PROVIDER_FILTER         (filters tested providers by final label, variant id,
+                                provider id, plugin mode, or substring;
+                                an exact variant id selects full-marketplace only;
                                 semantic grading still uses CODEX_GRADER_MODEL)
   PROMPTFOO_MAX_CONCURRENCY    (default: 1)
+  EVAL_TIMEOUT                 (default: 4h for full behavior runs, 45m otherwise;
+                                set to 0 to disable)
+  EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
 Pinned eval packages are managed by package.json and package-lock.json:
@@ -100,6 +107,87 @@ fs.writeFileSync(loaderFile, source);
 NODE
 }
 
+retain_partial_outputs() {
+  local reason="$1"
+  local retention_parent="$out_dir/timeout-artifacts"
+  local retention_dir
+  local retained=0
+  mkdir -p "$retention_parent"
+  retention_dir="$(mktemp -d "$retention_parent/$(date -u +%Y%m%dT%H%M%SZ)-$reason.XXXXXX")"
+  for artifact in "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml"; do
+    if [ -e "$artifact" ]; then
+      mv "$artifact" "$retention_dir/"
+      retained=1
+    fi
+  done
+  if [ "$retained" -eq 1 ]; then
+    echo "retained partial eval artifacts in $retention_dir" >&2
+  else
+    rmdir "$retention_dir"
+  fi
+}
+
+selected_codex_provider_plugin_modes() {
+  node - "$generated_metadata_file" <<'NODE'
+const fs = require('fs');
+const metadata = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+for (const mode of metadata.codexProviderPluginModes || []) {
+  console.log(mode);
+}
+NODE
+}
+
+uses_codex_grader() {
+  node - "$generated_metadata_file" <<'NODE'
+const fs = require('fs');
+const metadata = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+process.exit(metadata.usesCodexGrader ? 0 : 1);
+NODE
+}
+
+prepare_codex_home_for_mode() {
+  local mode="$1"
+  case "$mode" in
+    full-marketplace)
+      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_FULL_MARKETPLACE" --plugin-mode full-marketplace >/dev/null
+      ;;
+    no-plugins)
+      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_NO_PLUGINS" --plugin-mode no-plugins >/dev/null
+      ;;
+    targeted-plugins)
+      targeted_plugins="${EVAL_TARGETED_PLUGINS:-$(codex_marketplace_plugins_csv)}"
+      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins "$targeted_plugins" >/dev/null
+      ;;
+    *)
+      echo "unknown Codex plugin mode in generated eval config: $mode" >&2
+      return 2
+      ;;
+  esac
+}
+
+print_prepare_codex_home_for_mode() {
+  local mode="$1"
+  case "$mode" in
+    full-marketplace)
+      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_full_home" --plugin-mode full-marketplace
+      printf '\n'
+      ;;
+    no-plugins)
+      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_no_plugins_home" --plugin-mode no-plugins
+      printf '\n'
+      ;;
+    targeted-plugins)
+      targeted_plugins="${EVAL_TARGETED_PLUGINS:-$(codex_marketplace_plugins_csv)}"
+      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_targeted_home" --plugin-mode targeted-plugins --plugins "$targeted_plugins"
+      printf '\n'
+      ;;
+    *)
+      echo "unknown Codex plugin mode in generated eval config: $mode" >&2
+      return 2
+      ;;
+  esac
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --help)
@@ -138,9 +226,23 @@ case "$suite" in
     ;;
 esac
 
+generated_metadata_file="$generated_dir/agentic-systems-engineering.${suite}.metadata.json"
+
 if [ "$config" = "evals/promptfoo/agentic-systems-engineering.yaml" ]; then
   config="$generated_dir/agentic-systems-engineering.${suite}.yaml"
   generated_config=1
+fi
+
+if [ -z "$eval_timeout" ]; then
+  if [ "$generated_config" -eq 1 ] &&
+    [ "$suite" = "behavior" ] &&
+    [ -z "${EVAL_CASE_FILTER:-}" ] &&
+    [ -z "${EVAL_PROVIDER_FILTER:-}" ] &&
+    [ -z "${EVAL_SAMPLES:-}" ]; then
+    eval_timeout="4h"
+  else
+    eval_timeout="45m"
+  fi
 fi
 
 cmd=(
@@ -164,34 +266,41 @@ if [ -n "${EVAL_CASE_FILTER:-}" ]; then
   cmd+=(--filter-pattern "$EVAL_CASE_FILTER")
 fi
 
+run_cmd=("${cmd[@]}")
+if [ -n "$eval_timeout" ] && [ "$eval_timeout" != "0" ]; then
+  run_cmd=(timeout --kill-after "$eval_timeout_kill_after" "$eval_timeout" "${cmd[@]}")
+fi
+
+cd "$root"
+
 if [ "$dry_run" -eq 1 ]; then
   dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-full-marketplace}}"
   dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
   dry_targeted_home="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.dependencies/evals/codex-home-targeted-plugins}"
-  targeted_plugins="${EVAL_TARGETED_PLUGINS:-$(codex_marketplace_plugins_csv)}"
   printf '%q ' "$root/scripts/evals/ensure-node-deps.sh"
   printf '\n'
   if [ "$generated_config" -eq 1 ]; then
-    printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config"
+    node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file" >/dev/null
+    printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file"
     printf '\n'
-    printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_full_home" --plugin-mode full-marketplace
-    printf '\n'
-    printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_no_plugins_home" --plugin-mode no-plugins
-    printf '\n'
-    printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_targeted_home" --plugin-mode targeted-plugins --plugins "$targeted_plugins"
-    printf '\n'
+    if uses_codex_grader; then
+      print_prepare_codex_home_for_mode full-marketplace
+    fi
+    while IFS= read -r mode; do
+      [ "$mode" != "full-marketplace" ] || continue
+      print_prepare_codex_home_for_mode "$mode"
+    done < <(selected_codex_provider_plugin_modes)
   fi
-  printf '%q ' "${cmd[@]}"
+  printf '%q ' "${run_cmd[@]}"
   printf '\n'
   exit 0
 fi
 
-cd "$root"
 mkdir -p "$out_dir" "$root/.dependencies/evals/agent-workspace"
 rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml"
 "$root/scripts/evals/ensure-node-deps.sh"
 if [ "$generated_config" -eq 1 ]; then
-  node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" >/dev/null
+  node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file" >/dev/null
 fi
 
 export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
@@ -207,18 +316,36 @@ mkdir -p "$PROMPTFOO_CONFIG_DIR"
 if [ "$generated_config" -eq 1 ]; then
   write_runtime_options
   write_runtime_loader
-  node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_FULL_MARKETPLACE" --plugin-mode full-marketplace >/dev/null
-  node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_NO_PLUGINS" --plugin-mode no-plugins >/dev/null
-  targeted_plugins="${EVAL_TARGETED_PLUGINS:-$(codex_marketplace_plugins_csv)}"
-  node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins "$targeted_plugins" >/dev/null
+  if uses_codex_grader; then
+    prepare_codex_home_for_mode full-marketplace
+  fi
+  while IFS= read -r mode; do
+    [ "$mode" != "full-marketplace" ] || continue
+    prepare_codex_home_for_mode "$mode"
+  done < <(selected_codex_provider_plugin_modes)
 fi
 
 set +e
-"${cmd[@]}"
+"${run_cmd[@]}"
 promptfoo_status="$?"
 set -e
 
 if [ "$promptfoo_status" -ne 0 ]; then
+  if [ "$promptfoo_status" -eq 124 ] || [ "$promptfoo_status" -eq 137 ]; then
+    echo "promptfoo eval timed out after EVAL_TIMEOUT=$eval_timeout" >&2
+    retain_partial_outputs "exit-$promptfoo_status"
+    exit "$promptfoo_status"
+  fi
+  if [ "$promptfoo_status" -eq 143 ]; then
+    echo "promptfoo eval was terminated before completion" >&2
+    retain_partial_outputs "exit-$promptfoo_status"
+    exit "$promptfoo_status"
+  fi
+  if [ "$promptfoo_status" -ge 128 ]; then
+    echo "promptfoo eval was interrupted before completion with status $promptfoo_status" >&2
+    retain_partial_outputs "exit-$promptfoo_status"
+    exit "$promptfoo_status"
+  fi
   if [ ! -s "$out_dir/results.json" ]; then
     exit "$promptfoo_status"
   fi

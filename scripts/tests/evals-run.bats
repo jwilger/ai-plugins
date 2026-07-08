@@ -20,6 +20,9 @@ setup() {
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
   [[ "$output" == *"EVAL_PROVIDER_FILTER"* ]]
   [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY    (default: 1)"* ]]
+  [[ "$output" == *"EVAL_TIMEOUT                 (default: 4h for full behavior runs, 45m otherwise;"* ]]
+  [[ "$output" == *"set to 0 to disable)"* ]]
+  [[ "$output" == *"EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)"* ]]
   [[ "$output" == *"results.junit.xml"* ]]
 }
 
@@ -28,6 +31,7 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"scripts/evals/ensure-node-deps.sh"* ]]
+  [[ "$output" == *"timeout --kill-after 30s 4h"* ]]
   [[ "$output" == *"node_modules/.bin/promptfoo"* ]]
   [[ "$output" != *"npx --yes"* ]]
   [[ "$output" == *"--max-concurrency 1"* ]]
@@ -37,6 +41,17 @@ setup() {
   [[ "$output" == *"evals/out/results.json"* ]]
   [[ "$output" == *"evals/out/report.html"* ]]
   [[ "$output" == *"evals/out/results.junit.xml"* ]]
+}
+
+@test "eval runner dry-run uses repo-owned generated paths from outside repo cwd" {
+  other_cwd="$(mktemp -d)"
+
+  run bash -c 'cd "$1" && "$2" --dry-run' _ "$other_cwd" "$RUNNER"
+
+  rm -rf "$other_cwd"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$ROOT/evals/out/generated/agentic-systems-engineering.behavior.yaml"* ]]
+  [[ "$output" != *"$other_cwd/evals/out/generated"* ]]
 }
 
 @test "eval runner dry-run prepares targeted Codex home from Codex marketplace plugins" {
@@ -49,11 +64,42 @@ setup() {
   [[ "$targeted_line" == *"\\,advisor"* || "$targeted_line" == *"advisor\\,"* || "$targeted_line" == *"--plugins advisor"* ]]
 }
 
+@test "eval runner dry-run prepares only Codex grader home for Claude-only provider filter" {
+  run env EVAL_PROVIDER_FILTER=claude "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"generate-config.mjs"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
+  [[ "$output" == *"--plugin-mode full-marketplace"* ]]
+  [[ "$output" != *"--plugin-mode no-plugins"* ]]
+  [[ "$output" != *"--plugin-mode targeted-plugins"* ]]
+  [[ "$output" == *"promptfoo eval"* ]]
+}
+
+@test "eval runner dry-run prepares only selected Codex plugin mode" {
+  run env EVAL_PROVIDER_FILTER=codex-gpt-5.5 "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
+  [[ "$output" == *"--plugin-mode full-marketplace"* ]]
+  [[ "$output" != *"--plugin-mode no-plugins"* ]]
+  [[ "$output" != *"--plugin-mode targeted-plugins"* ]]
+}
+
 @test "eval runner passes case filter to Promptfoo CLI" {
   run env EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
+  [[ "$output" == *"timeout --kill-after 30s 45m"* ]]
   [[ "$output" == *"--filter-pattern tiber"* ]]
+}
+
+@test "eval runner dry-run can disable the promptfoo timeout" {
+  run env EVAL_TIMEOUT=0 "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"timeout --kill-after"* ]]
+  [[ "$output" == *"node_modules/.bin/promptfoo eval"* ]]
 }
 
 @test "generated eval config can filter providers" {
@@ -62,6 +108,29 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"label: claude-code-sonnet-full-marketplace"* ]]
   [[ "$output" != *"label: codex-gpt-5.5-full-marketplace"* ]]
+}
+
+@test "generated eval config exact provider variant filter selects one full-marketplace provider" {
+  run env EVAL_PROVIDER_FILTER=codex-gpt-5.5 node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"label: codex-gpt-5.5-full-marketplace"* ]]
+  [[ "$output" != *"label: codex-gpt-5.5-targeted-plugins"* ]]
+  [[ "$output" != *"label: codex-gpt-5.5-no-plugins"* ]]
+  [[ "$output" != *"label: claude-code-sonnet"* ]]
+  [[ "$output" == *"pluginModes:"*$'\n'"      - id: full-marketplace"* ]]
+}
+
+@test "generated eval config combines case and provider filters without expanding provider modes" {
+  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture EVAL_PROVIDER_FILTER=codex-gpt-5.5 node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^  - id: openai:codex-sdk$')" -eq 1 ]
+  [[ "$output" == *"label: codex-gpt-5.5-full-marketplace"* ]]
+  [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
+  [[ "$output" != *"label: codex-gpt-5.5-targeted-plugins"* ]]
+  [[ "$output" != *"label: codex-gpt-5.5-no-plugins"* ]]
+  [[ "$output" != *"label: claude-code-sonnet"* ]]
 }
 
 @test "eval runner uses project-local Promptfoo state for real runs" {
@@ -283,11 +352,166 @@ SH
   [[ "$output" == *'"caseFilter":"tiber"'* ]]
 }
 
+@test "eval runner times out a hanging promptfoo invocation" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+sleep 5
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" EVAL_TIMEOUT=1s "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"promptfoo eval timed out after EVAL_TIMEOUT=1s"* ]]
+}
+
+@test "eval runner treats timeout as failure even when partial results pass thresholds" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+cat >evals/out/results.json <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "success": true,
+        "provider": { "id": "openai:codex-sdk" },
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 1 }
+      }
+    ]
+  }
+}
+JSON
+sleep 5
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" EVAL_TIMEOUT=1s "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ -f "$fixture_root/evals/out/timeout-artifacts/"*/results.json ]
+  rm -rf "$fixture_root"
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"promptfoo eval timed out after EVAL_TIMEOUT=1s"* ]]
+  [[ "$output" == *"retained partial eval artifacts in"* ]]
+  [[ "$output" == *"-exit-124."* ]]
+  [[ "$output" != *"Eval thresholds passed"* ]]
+}
+
+@test "eval runner treats interrupted promptfoo as failure even when partial results pass thresholds" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+cat >evals/out/results.json <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "success": true,
+        "provider": { "id": "openai:codex-sdk" },
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 1 }
+      }
+    ]
+  }
+}
+JSON
+exit 130
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ -f "$fixture_root/evals/out/timeout-artifacts/"*/results.json ]
+  rm -rf "$fixture_root"
+  [ "$status" -eq 130 ]
+  [[ "$output" == *"promptfoo eval was interrupted before completion with status 130"* ]]
+  [[ "$output" != *"Eval thresholds passed"* ]]
+}
+
+@test "eval runner force-kills a promptfoo process that ignores timeout termination" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+trap '' TERM
+while true; do sleep 1; done
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" EVAL_TIMEOUT=1s EVAL_TIMEOUT_KILL_AFTER=1s "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 137 ]
+  [[ "$output" == *"promptfoo eval timed out after EVAL_TIMEOUT=1s"* ]]
+}
+
 @test "eval runner fails when Codex marketplace has no plugin names" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/.agents/plugins"
   cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
   chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/scripts/evals/generate-config.mjs" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+const output = process.argv[process.argv.indexOf('--output') + 1];
+const metadataOutput = process.argv[process.argv.indexOf('--metadata-output') + 1];
+fs.mkdirSync(path.dirname(output), { recursive: true });
+fs.writeFileSync(output, `providers:
+  - id: openai:codex-sdk
+    label: codex-gpt-5.5-targeted-plugins
+    pluginMode: targeted-plugins
+`);
+fs.mkdirSync(path.dirname(metadataOutput), { recursive: true });
+fs.writeFileSync(metadataOutput, JSON.stringify({
+  usesCodexGrader: true,
+  codexProviderPluginModes: ['targeted-plugins'],
+}));
+NODE
   cat >"$fixture_root/.agents/plugins/marketplace.json" <<'JSON'
 {
   "plugins": []

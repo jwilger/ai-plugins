@@ -185,7 +185,9 @@ local-only report, run `scripts/evals/run.sh` and then
 `nix develop -c node_modules/.bin/promptfoo view`. If a behavior eval exits
 with Promptfoo's normal failure status after writing artifacts, `just evals`
 still attempts to share the report and then returns the original eval status. If
-the eval run is interrupted with Ctrl-C, `just evals` stops without sharing.
+the eval run is interrupted, terminated, or times out, `just evals` stops
+without sharing. Timed-out runs retain any partial artifacts under
+`evals/out/timeout-artifacts/` for debugging.
 
 Codex users who install `agentic-systems-engineering` also get an optional
 Promptfoo MCP server (`promptfoo mcp --transport stdio`). Consuming projects
