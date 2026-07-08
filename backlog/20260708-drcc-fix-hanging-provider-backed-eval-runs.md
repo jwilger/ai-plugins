@@ -16,6 +16,7 @@ Provider-backed marketplace evals must be reliable enough to use as completion e
 ## Acceptance criteria
 
 - [ ] A reproduced or simulated hang is covered by tests or eval-runner fixtures that fail before the fix and pass after it.
+- [ ] Provider-backed eval commands have bounded runtime behavior so a hung provider, harness, or child process cannot block indefinitely.
 
 ## Subtasks
 
