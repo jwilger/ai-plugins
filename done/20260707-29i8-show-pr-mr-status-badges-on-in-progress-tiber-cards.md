@@ -3,9 +3,6 @@ title: Show PR/MR status badges on in-progress Tiber cards
 blocked_by: []
 blocks: []
 tags: []
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
