@@ -16,6 +16,7 @@ Add a compact development-workflow router skill to the development-discipline pl
 ## Acceptance criteria
 
 - [ ] development-discipline includes a new development-workflow router skill that triggers for development tasks from initial request through implementation, PR, CI, review, and merge readiness.
+- [ ] The router skill delegates detailed mechanics to existing skills including test-driven-development, systematic-debugging, verification-before-completion, final-review, receiving-code-review, babysit-pr, and relevant external documentation/security/GitHub/OpenAI/browser skills.
 
 ## Subtasks
 
