@@ -17,3 +17,5 @@ claim:
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-09: Validated and pushed signed branch origin/tiber-opaque-host-repos at 4c030a6. PR creation is waiting on final-review fresh-subagent capacity; subagent spawn currently fails with thread limit reached.
