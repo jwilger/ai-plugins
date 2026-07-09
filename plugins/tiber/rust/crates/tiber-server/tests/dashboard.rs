@@ -282,6 +282,30 @@ async fn dashboard_exposes_read_only_sse_events_route() {
 }
 
 #[tokio::test]
+async fn dashboard_events_error_frames_are_valid_json() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    repo.insert_tasks_tree_file("order.md", "backlog/not-a-stem.md\n");
+
+    let response = tiber_server::router_at(repo.path.clone())
+        .oneshot(
+            Request::get("/events")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("events response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let frame = next_body_frame(&mut body).await;
+    let event = assert_json_event(&frame);
+    assert!(
+        event["error"].is_string(),
+        "error event should carry a JSON string error: {event}"
+    );
+}
+
+#[tokio::test]
 async fn dashboard_events_stream_board_changes_without_reconnecting() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);

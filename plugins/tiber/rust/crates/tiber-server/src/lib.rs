@@ -79,20 +79,15 @@ async fn events(State(state): State<AppState>) -> Response {
         let mut last_data = last_data;
         loop {
             let root_for_read = root.clone();
-            let data =
-                match task::spawn_blocking(move || dashboard_event_data(&root_for_read)).await {
-                    Ok(Ok(data)) => data,
-                    Ok(Err(error)) => {
-                        format!(
-                            "{{\"error\":\"{}\"}}",
-                            escape_json_string(&error.to_string())
-                        )
-                    }
-                    Err(error) => format!(
-                        "{{\"error\":\"dashboard_events_join source={}\"}}",
-                        escape_json_string(&error.to_string())
-                    ),
-                };
+            let data = match task::spawn_blocking(move || dashboard_event_data(&root_for_read))
+                .await
+            {
+                Ok(Ok(data)) => data,
+                Ok(Err(error)) => json!({ "error": error.to_string() }).to_string(),
+                Err(error) => {
+                    json!({ "error": format!("dashboard_events_join source={error}") }).to_string()
+                }
+            };
             if last_data.as_ref() != Some(&data) {
                 last_data = Some(data.clone());
                 return Some((
@@ -170,15 +165,6 @@ fn escape_html(input: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
-}
-
-fn escape_json_string(input: &str) -> String {
-    input
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }
 
 #[derive(Clone, Debug)]
@@ -519,7 +505,8 @@ fn dependency_attrs(task: &DashboardTask, tasks: &[DashboardTask]) -> String {
 
 fn modal_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> String {
     format!(
-        "<template data-modal-task=\"{}\"><section class=\"modal-task\"><h2>{}</h2><p class=\"status\">{}</p>{}<section><h4>Linked resources</h4>{}</section><section><h4>Summary</h4>{}</section><section><h4>Context / Why</h4>{}</section><section><h4>Acceptance criteria</h4>{}</section><section><h4>Subtasks</h4>{}</section><section><h4>Depends on</h4>{}</section><section><h4>Blocks</h4>{}</section><section><h4>Notes / Log</h4>{}</section></section></template>",
+        "<template data-modal-task=\"{}\"><section class=\"modal-task\" data-modal-stem=\"{}\"><h2>{}</h2><p class=\"status\">{}</p>{}<section><h4>Linked resources</h4>{}</section><section><h4>Summary</h4>{}</section><section><h4>Context / Why</h4>{}</section><section><h4>Acceptance criteria</h4>{}</section><section><h4>Subtasks</h4>{}</section><section><h4>Depends on</h4>{}</section><section><h4>Blocks</h4>{}</section><section><h4>Notes / Log</h4>{}</section></section></template>",
+        escape_html(&task.stem),
         escape_html(&task.stem),
         escape_html(&task.title),
         escape_html(&task.status),
@@ -1204,6 +1191,8 @@ const copyStatus = document.querySelector('[data-copy-status]');
 const interceptStatus = document.querySelector('[data-link-intercept-status]');
 const board = document.querySelector('[data-dashboard-board]');
 let selectedStem = null;
+const selectionStorageKey = 'tiber.dashboard.selectedStem';
+const modalStorageKey = 'tiber.dashboard.openModalStem';
 
 function splitRefs(value) {
   return (value || '').split(',').map((item) => item.trim()).filter(Boolean);
@@ -1251,10 +1240,20 @@ function applySelection() {
   });
 }
 
+function setSelectedStem(stem) {
+  selectedStem = stem;
+  if (selectedStem) {
+    sessionStorage.setItem(selectionStorageKey, selectedStem);
+  } else {
+    sessionStorage.removeItem(selectionStorageKey);
+  }
+}
+
 function openTaskModal(stem) {
   const template = document.querySelector(`[data-modal-task="${CSS.escape(stem)}"]`);
   if (!template) return;
   modalContent.replaceChildren(template.content.cloneNode(true));
+  sessionStorage.setItem(modalStorageKey, stem);
   modal.showModal();
 }
 
@@ -1312,7 +1311,7 @@ document.addEventListener('click', async (event) => {
   const taskLink = event.target.closest('[data-task-link]');
   if (taskLink) {
     event.preventDefault();
-    selectedStem = selectedStem === taskLink.dataset.stem ? null : taskLink.dataset.stem;
+    setSelectedStem(selectedStem === taskLink.dataset.stem ? null : taskLink.dataset.stem);
     applySelection();
     return;
   }
@@ -1335,10 +1334,29 @@ board.addEventListener('dblclick', (event) => {
 closeButton.addEventListener('click', () => {
   modal.close();
   modalContent.replaceChildren();
+  sessionStorage.removeItem(modalStorageKey);
 });
+modal.addEventListener('close', () => {
+  if (!modal.open) {
+    sessionStorage.removeItem(modalStorageKey);
+  }
+});
+setSelectedStem(sessionStorage.getItem(selectionStorageKey));
+applySelection();
+const restoredModalStem = sessionStorage.getItem(modalStorageKey);
+if (restoredModalStem) {
+  openTaskModal(restoredModalStem);
+}
 let seenInitialEvent = false;
 new EventSource("/events").onmessage = () => {
   if (seenInitialEvent) {
+    if (selectedStem) {
+      sessionStorage.setItem(selectionStorageKey, selectedStem);
+    }
+    if (modal.open) {
+      const openStem = modalContent.querySelector('[data-modal-stem]')?.dataset.modalStem;
+      if (openStem) sessionStorage.setItem(modalStorageKey, openStem);
+    }
     location.reload();
     return;
   }

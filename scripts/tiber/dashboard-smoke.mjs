@@ -131,6 +131,21 @@ try {
     page.locator("[data-modal-content]"),
     "Blocked dashboard task",
   );
+  tiber([
+    "update",
+    "inspect-dashboard",
+    "--agent-blocked-reason",
+    "Waiting on dashboard smoke refresh.",
+  ]);
+  await assertText(
+    page.locator("[data-modal-content]"),
+    "Waiting on dashboard smoke refresh.",
+  );
+  await page.locator("[data-task-modal][open]").waitFor();
+  assert(
+    (await inspectCard.getAttribute("class")).includes("is-selected"),
+    "SSE-triggered reload should preserve selected task highlighting",
+  );
   await page.locator("[data-modal-close]").click();
 
   await page.getByRole("link", { name: "Docs" }).click();
