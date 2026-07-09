@@ -232,18 +232,28 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
         }
         "tiber.update" => {
             let task_ref = required_string(arguments, "ref")?;
-            tiber_git::update_task(
-                task_ref,
-                tiber_git::TaskUpdate {
-                    title: optional_string(arguments, "title"),
-                    summary: optional_string(arguments, "summary"),
-                    context: optional_string(arguments, "context"),
-                    tags: optional_tags(arguments)?,
-                    pr_mr_url: optional_string(arguments, "pr_mr_url"),
-                    pr_mr_status: optional_string(arguments, "pr_mr_status"),
-                    agent_blocked_reason: optional_string(arguments, "agent_blocked_reason"),
-                },
-            )?;
+            let update = tiber_git::TaskUpdate {
+                title: optional_string(arguments, "title"),
+                summary: optional_string(arguments, "summary"),
+                context: optional_string(arguments, "context"),
+                tags: optional_tags(arguments)?,
+                pr_mr_url: optional_string(arguments, "pr_mr_url"),
+                pr_mr_status: optional_string(arguments, "pr_mr_status"),
+                agent_blocked_reason: optional_string(arguments, "agent_blocked_reason"),
+            };
+            if update.title.is_none()
+                && update.summary.is_none()
+                && update.context.is_none()
+                && update.tags.is_none()
+                && update.pr_mr_url.is_none()
+                && update.pr_mr_status.is_none()
+                && update.agent_blocked_reason.is_none()
+            {
+                return Err(tiber_git::Error::Usage(
+                    "mcp_update_requires_field".to_string(),
+                ));
+            }
+            tiber_git::update_task(task_ref, update)?;
             Ok(text_content(format!("updated {task_ref}")))
         }
         "tiber.acceptance.add" => {

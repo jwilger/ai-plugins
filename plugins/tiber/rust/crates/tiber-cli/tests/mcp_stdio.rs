@@ -273,6 +273,18 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
 
     write_message(
         &mut stdin,
+        r#"{"jsonrpc":"2.0","id":180,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp"}}}"#,
+    );
+    let empty_update = read_json_message(&mut stdout);
+    assert_eq!(empty_update["id"], 180);
+    assert_eq!(empty_update["error"]["code"], -32603);
+    assert!(empty_update["error"]["message"]
+        .as_str()
+        .expect("error message")
+        .contains("mcp_update_requires_field"));
+
+    write_message(
+        &mut stdin,
         r#"{"jsonrpc":"2.0","id":181,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp","summary":"MCP summary","context":"MCP context","tags":["mcp","structured"],"agent_blocked_reason":"Waiting on external account access."}}}"#,
     );
     let update = read_message(&mut stdout);
