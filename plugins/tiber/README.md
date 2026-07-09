@@ -163,7 +163,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.6.0` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.6.1` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -171,10 +171,21 @@ cache. If `${CODEX_HOME}` is set but the exact Codex cache entry is missing,
 startup fails with `tiber.mcp_codex_cache_missing`; only sessions without an
 explicit `${CODEX_HOME}` fall back to `$HOME/.codex`.
 
+The Codex MCP registration forwards `SSH_AUTH_SOCK` so Git SSH signing can use
+the user's existing agent, including 1Password SSH agent setups. If an older
+installed plugin still reports `Couldn't get agent socket?` during
+`git commit-tree -S`, reinstall Tiber or replace the plugin-provided server with
+an equivalent top-level `[mcp_servers.tiber]` registration that preserves the
+absolute installed launcher and includes `env_vars = ["SSH_AUTH_SOCK"]`. Do not
+forward `SSH_AUTH_SOCK` to `command = "tiber"`, repo-relative launchers, or any
+project-controlled executable. Codex plugin MCP policy overlays under
+`[plugins."tiber@ai-plugins".mcp_servers.tiber]` cannot change transport
+environment variables; they only control enablement and tool policy.
+
 It intentionally does not execute repo-relative launchers such as `./bin/tiber`
 or `./plugins/tiber/bin/tiber`, so the same MCP configuration is safe to load
 from any checkout. Reinstall or upgrade the plugin from marketplace version
-`0.6.0` or newer if Codex reports `No such file or directory` or one of the
+`0.6.1` or newer if Codex reports `No such file or directory` or one of the
 `tiber.mcp_*` startup sentinel errors while starting the `tiber` MCP server.
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,

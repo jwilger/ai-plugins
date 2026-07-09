@@ -207,7 +207,7 @@ run_tiber_manifest_server_with_default_home_codex_cache() {
   local home_cache="$TMPROOT/home/.codex/plugins/cache/ai-plugins/tiber"
 
   mkdir -p "$home_cache"
-  ln -sfn "$ROOT/plugins/tiber" "$home_cache/0.6.0"
+  ln -sfn "$ROOT/plugins/tiber" "$home_cache/0.6.1"
 
   command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
   mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
@@ -278,7 +278,7 @@ run_tiber_manifest_server_from_fixture_repo() {
 install_tiber_cache_launcher() {
   local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/tiber"
   mkdir -p "$cache_parent"
-  ln -sfn "$ROOT/plugins/tiber" "$cache_parent/0.6.0"
+  ln -sfn "$ROOT/plugins/tiber" "$cache_parent/0.6.1"
 }
 
 install_promptfoo_cache_launcher() {
@@ -498,4 +498,12 @@ install_stale_tiber_cache_launcher() {
   [[ "$output" == *"for candidate_bash in /run/current-system/sw/bin/bash /bin/bash /usr/bin/bash"* ]]
   [[ "$output" == *'exec "$bash_bin" "$candidate" mcp stdio'* ]]
   [[ "$output" != *"command -v bash"* ]]
+}
+
+@test "tiber MCP manifest forwards the SSH agent socket env var" {
+  cd "$ROOT"
+
+  run jq -e '.mcpServers.tiber.env_vars == ["SSH_AUTH_SOCK"]' "$ROOT/plugins/tiber/.mcp.json"
+
+  [ "$status" -eq 0 ]
 }
