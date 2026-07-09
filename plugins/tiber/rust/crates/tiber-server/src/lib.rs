@@ -335,7 +335,7 @@ fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
         ));
     }
     Ok(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><span class=\"sync-status\" data-sync-status aria-live=\"polite\" hidden></span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-copy-status aria-live=\"polite\"></p><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><span class=\"sync-status\" data-sync-status aria-live=\"polite\"></span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-copy-status aria-live=\"polite\"></p><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
         dashboard_style(),
         column_html,
         tasks.iter().map(|task| modal_html(task, &tasks, root)).collect::<String>(),
@@ -885,12 +885,14 @@ fn is_safe_markdown_href(target: &str) -> bool {
         return false;
     }
     let lower = target.to_ascii_lowercase();
-    if lower.starts_with("http://")
-        || lower.starts_with("https://")
-        || lower.starts_with('/')
-        || lower.starts_with('#')
-    {
+    if lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with('#') {
         return true;
+    }
+    if target.starts_with('/') {
+        return !target.starts_with("//");
+    }
+    if target.starts_with('\\') || target.starts_with("//") {
+        return false;
     }
     !target
         .chars()
@@ -950,13 +952,26 @@ fn rewrite_missing_doc_links(text: &str, root: &FsPath, doc_ref: &FsPath) -> Str
 }
 
 fn is_missing_doc(root: &FsPath, base_dir: &FsPath, target: &str) -> bool {
-    if target.contains("://") || !target.ends_with(".md") {
+    if target.contains("://") || target.starts_with('/') || !target.ends_with(".md") {
         return false;
     }
-    let candidate = if target.starts_with("docs/") {
-        root.join(target)
+    let target_path = FsPath::new(target);
+    if !target_path
+        .components()
+        .all(|component| matches!(component, std::path::Component::Normal(_)))
+    {
+        return false;
+    }
+    let candidate = if target_path.starts_with("docs") {
+        root.join(target_path)
     } else {
-        root.join(base_dir).join(target)
+        if !base_dir
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+        {
+            return false;
+        }
+        root.join(base_dir).join(target_path)
     };
     !candidate.is_file()
 }
@@ -1240,7 +1255,7 @@ code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
   background: rgba(245, 158, 11, 0.14);
   border: 1px solid rgba(245, 158, 11, 0.35);
   border-radius: 999px;
-  color: #92400e;
+  color: #fff7ed;
   font-size: 12px;
   max-width: min(42vw, 420px);
   overflow: hidden;
@@ -1248,6 +1263,7 @@ code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sync-status:empty { display: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .docs-view {
   display: grid;
@@ -1429,7 +1445,6 @@ new EventSource("/events").onmessage = (event) => {
       const payload = JSON.parse(event.data);
       if (Object.prototype.hasOwnProperty.call(payload, 'error')) {
         syncStatus.textContent = `Task sync delayed: ${payload.error}`;
-        syncStatus.hidden = false;
         return;
       }
     } catch (_error) {
@@ -1437,7 +1452,6 @@ new EventSource("/events").onmessage = (event) => {
     }
   }
   syncStatus.textContent = '';
-  syncStatus.hidden = true;
   if (!wasInitialEvent) {
     location.reload();
     return;
@@ -1449,7 +1463,8 @@ new EventSource("/events").onmessage = (event) => {
 #[cfg(test)]
 mod tests {
     use super::{
-        dashboard_script, is_safe_markdown_href, linked_resources_html, render_markdown_links,
+        dashboard_script, is_missing_doc, is_safe_markdown_href, linked_resources_html,
+        render_markdown_links, rewrite_missing_doc_links,
     };
     use std::path::Path;
 
@@ -1469,8 +1484,30 @@ mod tests {
         assert!(is_safe_markdown_href("/docs/guide.md"));
         assert!(is_safe_markdown_href("#section"));
         assert!(is_safe_markdown_href("https://example.invalid/tiber"));
+        assert!(!is_safe_markdown_href("//evil.example/path"));
         assert!(!is_safe_markdown_href("javascript:alert(1)"));
         assert!(!is_safe_markdown_href("data:text/html,boom"));
+    }
+
+    #[test]
+    fn missing_doc_checks_reject_parent_traversal() {
+        assert!(!is_missing_doc(
+            Path::new("/repo"),
+            Path::new("docs"),
+            "../README.md"
+        ));
+        assert!(!is_missing_doc(
+            Path::new("/repo"),
+            Path::new("docs/reference"),
+            "../../secret.md"
+        ));
+
+        let rendered = rewrite_missing_doc_links(
+            "[probe](../README.md)",
+            Path::new("/repo"),
+            Path::new("docs/index.md"),
+        );
+        assert_eq!(rendered, "[probe](../README.md)");
     }
 
     #[test]
@@ -1496,7 +1533,6 @@ mod tests {
         assert!(script.contains("seenInitialEvent = true;"));
         assert!(script.contains("if (!wasInitialEvent)"));
         assert!(script.contains("Task sync delayed: ${payload.error}"));
-        assert!(script.contains("syncStatus.hidden = false"));
-        assert!(script.contains("syncStatus.hidden = true"));
+        assert!(!script.contains("syncStatus.hidden"));
     }
 }

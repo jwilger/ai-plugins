@@ -19,6 +19,7 @@ const OPEN_STATUS_DIRS: &[&str] = &["backlog", "in-progress"];
 const TASK_ID_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
 const TASK_ID_GENERATION_ATTEMPTS: usize = 32;
 const DEFAULT_LOCK_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
+const REMOTE_IO_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_CONFLICT_SNAPSHOT_SIDE_BYTES: usize = 64 * 1024;
 const MAX_TASK_BLOB_BYTES: u64 = 1024 * 1024;
@@ -1010,7 +1011,7 @@ impl GitRepository {
         let had_local_task_state = had_local_tasks_ref && self.local_tasks_ref_has_tasks()?;
         match self.git_with_timeout(
             ["fetch", "origin", "tasks:refs/remotes/origin/tasks"],
-            Duration::from_secs(10),
+            REMOTE_IO_TIMEOUT,
         ) {
             Ok(_) => Ok(Some(self.git([
                 "rev-parse",
@@ -1159,7 +1160,11 @@ impl GitRepository {
             } else if self.local_task_with_same_stem_path(path)?.is_some() {
                 return Err(sync_conflict_error(path));
             } else {
-                fs::write(destination, contents)?;
+                match self.base_task_contents(base_ref, path)? {
+                    Some(base_contents) if contents == base_contents => {}
+                    Some(_) => return Err(sync_conflict_error(path)),
+                    None => fs::write(destination, contents)?,
+                }
             }
         }
         if let Some(base_ref) = base_ref {
@@ -1284,13 +1289,16 @@ impl GitRepository {
         if git_status(["remote", "get-url", "origin"], Some(&self.root)).is_err() {
             return Ok(());
         }
-        self.git([
-            "-c",
-            "core.hooksPath=/dev/null",
-            "push",
-            "origin",
-            "refs/heads/tasks:refs/heads/tasks",
-        ])?;
+        self.git_with_timeout(
+            [
+                "-c",
+                "core.hooksPath=/dev/null",
+                "push",
+                "origin",
+                "refs/heads/tasks:refs/heads/tasks",
+            ],
+            REMOTE_IO_TIMEOUT,
+        )?;
         Ok(())
     }
 

@@ -112,7 +112,7 @@ async fn dashboard_board_page_exposes_browser_smoke_controls() {
     assert!(board.contains("data-copy-task-id"));
     assert!(board.contains("data-copy-status"));
     assert!(board.contains("data-sync-status"));
-    assert!(board.contains("aria-live=\"polite\" hidden"));
+    assert!(board.contains("class=\"sync-status\" data-sync-status aria-live=\"polite\"></span>"));
     assert!(board.contains("data-task-modal"));
     assert!(board.contains("data-modal-content"));
     assert!(board.contains("href=\"/docs\""));

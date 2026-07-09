@@ -1173,6 +1173,108 @@ fn sync_does_not_resurrect_fast_forward_remote_task_deletion() {
 }
 
 #[test]
+fn sync_preserves_local_task_deletion_when_remote_task_is_unchanged() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let remote = clone_repo(&origin);
+    let local = clone_repo(&origin);
+    assert_success(remote.tiber(["init"]));
+    assert_success(remote.tiber(["create", "Locally deleted unchanged remote"]));
+    let deleted_stem = task_stem(&remote, "backlog", "locally-deleted-unchanged-remote");
+    assert_success(remote.tiber(["sync"]));
+    assert_success(local.tiber(["list"]));
+    local.git(["fetch", "origin", "tasks:refs/heads/tasks"]);
+
+    local.remove_tasks_tree_file(&format!("backlog/{deleted_stem}.md"));
+    assert_success(remote.tiber(["create", "Remote new task"]));
+    assert_success(remote.tiber(["sync"]));
+
+    assert_success(local.tiber(["sync"]));
+
+    let verification = clone_repo(&origin);
+    assert!(
+        !verification
+            .git_output([
+                "cat-file",
+                "-e",
+                &format!("origin/tasks:backlog/{deleted_stem}.md")
+            ])
+            .status
+            .success(),
+        "sync should publish the local deletion when remote kept the base contents"
+    );
+    let remote_listing =
+        verification.git_output(["ls-tree", "-r", "--name-only", "origin/tasks", "backlog"]);
+    assert_success_ref(&remote_listing);
+    assert!(
+        String::from_utf8(remote_listing.stdout)
+            .expect("remote listing should be utf8")
+            .contains("-remote-new-task.md"),
+        "sync should preserve unrelated remote additions"
+    );
+}
+
+#[test]
+fn sync_conflicts_when_local_deletes_task_that_remote_changed() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let remote = clone_repo(&origin);
+    let local = clone_repo(&origin);
+    assert_success(remote.tiber(["init"]));
+    assert_success(remote.tiber(["create", "Locally deleted remote edit"]));
+    let stem = task_stem(&remote, "backlog", "locally-deleted-remote-edit");
+    assert_success(remote.tiber(["sync"]));
+    assert_success(local.tiber(["list"]));
+    local.git(["fetch", "origin", "tasks:refs/heads/tasks"]);
+
+    local.remove_tasks_tree_file(&format!("backlog/{stem}.md"));
+    remote.insert_task_file(
+        "backlog",
+        &stem,
+        "---\ntitle: Remote changed deleted task\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+    remote.git(["push", "origin", "refs/heads/tasks:refs/heads/tasks"]);
+
+    let sync = local.tiber(["sync"]);
+
+    assert!(
+        !sync.status.success(),
+        "local deletion should conflict with a changed remote task"
+    );
+    let stderr = String::from_utf8(sync.stderr).expect("stderr utf8");
+    assert!(
+        stderr.contains("sync_conflict"),
+        "sync should report a conflict instead of resurrecting the task: {stderr}"
+    );
+}
+
+#[test]
 fn conflict_resolve_local_keeps_local_edit_when_remote_deleted_task() {
     let origin = TempRepo::new();
     origin.git(["init", "--bare"]);
