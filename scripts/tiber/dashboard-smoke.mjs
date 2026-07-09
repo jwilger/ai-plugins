@@ -160,6 +160,24 @@ try {
   );
 
   await page.goto(url);
+  await page.evaluate(() => {
+    sessionStorage.setItem("tiber.dashboard.selectedStem", "missing-selected-task");
+    sessionStorage.setItem("tiber.dashboard.openModalStem", "missing-modal-task");
+  });
+  await page.reload();
+  assert(
+    (await page.evaluate(() =>
+      sessionStorage.getItem("tiber.dashboard.selectedStem"),
+    )) === null,
+    "missing selected task should be removed from dashboard session storage",
+  );
+  assert(
+    (await page.evaluate(() =>
+      sessionStorage.getItem("tiber.dashboard.openModalStem"),
+    )) === null,
+    "missing modal task should be removed from dashboard session storage",
+  );
+
   await page.locator("[data-external-link]").click();
   assert(
     page.url() === url,

@@ -1219,7 +1219,7 @@ function applySelection() {
   if (!selectedStem) return;
   const selected = cards.find((card) => card.dataset.stem === selectedStem);
   if (!selected) {
-    selectedStem = null;
+    setSelectedStem(null);
     return;
   }
   const dependencies = new Set(splitRefs(selected.dataset.dependency));
@@ -1251,7 +1251,10 @@ function setSelectedStem(stem) {
 
 function openTaskModal(stem) {
   const template = document.querySelector(`[data-modal-task="${CSS.escape(stem)}"]`);
-  if (!template) return;
+  if (!template) {
+    sessionStorage.removeItem(modalStorageKey);
+    return;
+  }
   modalContent.replaceChildren(template.content.cloneNode(true));
   sessionStorage.setItem(modalStorageKey, stem);
   modal.showModal();
