@@ -15,4 +15,3 @@
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
-20260709-q6in-make-tiber-mcp-work-with-codex-ssh-signing-boundaries

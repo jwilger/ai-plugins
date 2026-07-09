@@ -5,9 +5,6 @@ blocks: []
 tags: [tiber, mcp, codex, ssh, signing, nixos]
 pr_mr_url: https://github.com/jwilger/ai-plugins/pull/49
 pr_mr_status: merged
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
