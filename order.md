@@ -15,3 +15,4 @@
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
+20260709-s6vr-tighten-final-review-relevance-using-auto-review-patterns
