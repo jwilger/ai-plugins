@@ -23,11 +23,15 @@ if ! git -C "$root" diff --quiet HEAD -- "${release_inputs[@]}"; then
 fi
 
 release_inputs_changed=1
+release_outputs_changed=1
 base_ref="${TIBER_RELEASE_FRESH_BASE:-origin/main}"
 if git -C "$root" rev-parse --verify --quiet "$base_ref" >/dev/null; then
   merge_base="$(git -C "$root" merge-base HEAD "$base_ref")"
   if git -C "$root" diff --quiet "$merge_base" HEAD -- "${release_inputs[@]}"; then
     release_inputs_changed=0
+  fi
+  if git -C "$root" diff --quiet "$merge_base" HEAD -- "${release_outputs[@]}"; then
+    release_outputs_changed=0
   fi
 fi
 
@@ -45,7 +49,7 @@ fi
 
 "$root/scripts/check-tiber-release-complete.sh" "$root"
 
-if [ "$release_inputs_changed" -eq 0 ]; then
+if [ "$release_inputs_changed" -eq 0 ] && [ "$release_outputs_changed" -eq 0 ]; then
   echo "release-freshness-skip reason=no-release-input-changes" >&2
   exit 0
 fi
