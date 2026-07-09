@@ -131,8 +131,19 @@ impl DependencyGraph {
         reported.dedup();
         reported
             .into_iter()
+            .filter(|cycle| self.is_valid_cycle(cycle, &task_refs))
             .map(|cycle| format!("cycle {label} {}", cycle.join(" -> ")))
             .collect()
+    }
+
+    fn is_valid_cycle(&self, cycle: &[String], task_refs: &[String]) -> bool {
+        if cycle.len() < 2 || cycle.first() != cycle.last() {
+            return false;
+        }
+        cycle.iter().all(|task_ref| task_refs.contains(task_ref))
+            && cycle
+                .windows(2)
+                .all(|edge| self.blocks_for(&edge[0]).contains(&edge[1]))
     }
 
     fn find_cycles(
@@ -305,6 +316,9 @@ mod tests {
             snapshot.next_task(),
             Some(&TaskSnapshot::new("20260706-abcd-write-docs", "Write docs"))
         );
+        let next = snapshot.next_task().expect("next task");
+        assert_eq!(next.path(), "20260706-abcd-write-docs");
+        assert_eq!(next.title(), "Write docs");
     }
 
     #[test]
@@ -318,6 +332,74 @@ mod tests {
             graph.cycle_messages(),
             ["cycle dependency 20260706-aaaa-cycle-a -> 20260706-bbbb-cycle-b -> 20260706-aaaa-cycle-a"]
         );
+    }
+
+    #[test]
+    fn dependency_graph_rejects_invalid_canonical_cycle_candidates() {
+        let task_refs = vec![
+            "20260706-aaaa-cycle-a".to_string(),
+            "20260706-bbbb-cycle-b".to_string(),
+            "20260706-cccc-cycle-c".to_string(),
+        ];
+        let graph = DependencyGraph::from_tasks(vec![
+            TaskDependencies::new("20260706-aaaa-cycle-a", vec!["20260706-bbbb-cycle-b"]),
+            TaskDependencies::new("20260706-bbbb-cycle-b", vec!["20260706-cccc-cycle-c"]),
+            TaskDependencies::new("20260706-cccc-cycle-c", vec!["20260706-aaaa-cycle-a"]),
+        ]);
+
+        assert!(graph.is_valid_cycle(
+            &[
+                "20260706-aaaa-cycle-a".to_string(),
+                "20260706-bbbb-cycle-b".to_string(),
+                "20260706-cccc-cycle-c".to_string(),
+                "20260706-aaaa-cycle-a".to_string()
+            ],
+            &task_refs
+        ));
+        let self_cycle_refs = vec!["20260706-dddd-cycle-d".to_string()];
+        let self_cycle = DependencyGraph::from_tasks(vec![TaskDependencies::new(
+            "20260706-dddd-cycle-d",
+            vec!["20260706-dddd-cycle-d"],
+        )]);
+        assert!(self_cycle.is_valid_cycle(
+            &[
+                "20260706-dddd-cycle-d".to_string(),
+                "20260706-dddd-cycle-d".to_string()
+            ],
+            &self_cycle_refs
+        ));
+        assert!(!graph.is_valid_cycle(
+            &[
+                "20260706-aaaa-cycle-a".to_string(),
+                "20260706-bbbb-cycle-b".to_string(),
+                "20260706-cccc-cycle-c".to_string()
+            ],
+            &task_refs
+        ));
+        assert!(!graph.is_valid_cycle(&["xyzzy".to_string()], &task_refs));
+        assert!(!graph.is_valid_cycle(
+            &[
+                "20260706-aaaa-cycle-a".to_string(),
+                "20260706-bbbb-cycle-b".to_string()
+            ],
+            &task_refs
+        ));
+        assert!(!graph.is_valid_cycle(
+            &[
+                "20260706-aaaa-cycle-a".to_string(),
+                "20260706-cccc-missing".to_string(),
+                "20260706-aaaa-cycle-a".to_string()
+            ],
+            &task_refs
+        ));
+        assert!(!graph.is_valid_cycle(
+            &[
+                "20260706-bbbb-cycle-b".to_string(),
+                "20260706-bbbb-cycle-b".to_string(),
+                "20260706-bbbb-cycle-b".to_string()
+            ],
+            &task_refs
+        ));
     }
 
     #[test]

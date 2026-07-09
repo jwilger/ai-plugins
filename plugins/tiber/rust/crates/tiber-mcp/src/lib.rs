@@ -2,6 +2,8 @@ use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
 
+const MAX_CONFLICT_RESOLVE_MANY_ITEMS: usize = 25;
+
 pub fn codex_sandbox_setup() -> String {
     [
         "Tiber Codex sandbox setup preview",
@@ -62,7 +64,7 @@ pub fn run_stdio(input: impl BufRead, mut output: impl Write) -> Result<(), tibe
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let response = match handle_json_rpc(&request) {
             Ok(response) => response,
-            Err(error) => error_response(id, -32603, &error.to_string()),
+            Err(error) => error_response(id, -32603, &error.sanitized_agent_source()),
         };
         writeln!(output, "{response}")?;
         output.flush()?;
@@ -171,6 +173,31 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
                     .committed_at
                     .unwrap_or_else(|| "uncommitted".to_string())
             )))
+        }
+        "tiber.conflict_show" => {
+            let conflict = tiber_git::conflict_snapshot(required_string(arguments, "path")?)?;
+            Ok(text_content(format_conflict_snapshot(conflict)))
+        }
+        "tiber.conflict_resolve" => {
+            let resolution = tiber_git::resolve_conflict(
+                required_string(arguments, "path")?,
+                required_string(arguments, "side")?,
+            )?;
+            Ok(text_content(format!(
+                "resolved {:?} side={}",
+                resolution.path, resolution.side
+            )))
+        }
+        "tiber.conflict_resolve_many" => {
+            let resolutions = required_resolution_array(arguments, "resolutions")?;
+            Ok(text_content(
+                tiber_git::resolve_conflicts(&resolutions)?
+                    .into_iter()
+                    .map(|resolution| {
+                        format!("resolved {:?} side={}\n", resolution.path, resolution.side)
+                    })
+                    .collect::<String>(),
+            ))
         }
         "tiber.next" => Ok(text_content(
             tiber_git::next_task()?
@@ -347,6 +374,33 @@ fn optional_string_array(
     ))
 }
 
+fn required_resolution_array(
+    arguments: &Value,
+    name: &str,
+) -> Result<Vec<tiber_git::ConflictResolutionRequest>, tiber_git::Error> {
+    let values = arguments
+        .get(name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_missing name={name}")))?;
+    if values.len() > MAX_CONFLICT_RESOLVE_MANY_ITEMS {
+        return Err(tiber_git::Error::Parse(format!(
+            "mcp_argument_too_many name={name} max_items={MAX_CONFLICT_RESOLVE_MANY_ITEMS}"
+        )));
+    }
+    values
+        .iter()
+        .map(|value| {
+            let path = value.get("path").and_then(Value::as_str).ok_or_else(|| {
+                tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}.path"))
+            })?;
+            let side = value.get("side").and_then(Value::as_str).ok_or_else(|| {
+                tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}.side"))
+            })?;
+            tiber_git::ConflictResolutionRequest::parse(path.to_string(), side)
+        })
+        .collect()
+}
+
 fn tools() -> Vec<Value> {
     vec![
         tool(
@@ -359,7 +413,7 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.sync",
             "Sync tiber",
-            "Sync local task state into the Git-backed tasks branch.",
+            "Sync local task state through Tiber-owned Git storage.",
             json!({}),
             vec![],
         ),
@@ -394,9 +448,52 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.metadata",
             "Read task metadata",
-            "Read task path, title, and tasks-branch commit time by ref.",
+            "Read task path, title, and Tiber storage commit time by ref.",
             json!({ "ref": { "type": "string" } }),
             vec!["ref"],
+        ),
+        tool(
+            "tiber.conflict_show",
+            "Show sync conflict",
+            "Read local and remote task-storage versions for a sync conflict path without running normal read sync.",
+            json!({ "path": { "type": "string" } }),
+            vec!["path"],
+        ),
+        tool(
+            "tiber.conflict_resolve",
+            "Resolve sync conflict",
+            "Resolve a sync conflict by choosing the local or remote side for a conflict path, then publish the resolved Tiber state.",
+            json!({
+                "path": { "type": "string" },
+                "side": {
+                    "type": "string",
+                    "enum": ["local", "remote"]
+                }
+            }),
+            vec!["path", "side"],
+        ),
+        tool(
+            "tiber.conflict_resolve_many",
+            "Resolve multiple sync conflicts",
+            "Resolve multiple sync conflicts atomically by choosing the local or remote side for every selected conflict path.",
+            json!({
+                "resolutions": {
+                    "type": "array",
+                    "maxItems": MAX_CONFLICT_RESOLVE_MANY_ITEMS,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" },
+                            "side": {
+                                "type": "string",
+                                "enum": ["local", "remote"]
+                            }
+                        },
+                        "required": ["path", "side"]
+                    }
+                }
+            }),
+            vec!["resolutions"],
         ),
         tool(
             "tiber.next",
@@ -577,6 +674,19 @@ fn text_content(text: String) -> Value {
             }
         ]
     })
+}
+
+fn format_conflict_snapshot(conflict: tiber_git::ConflictSnapshot) -> String {
+    format!(
+        "{}\n",
+        json!({
+            "path": conflict.path,
+            "local_path": conflict.local_path,
+            "remote_path": conflict.remote_path,
+            "local": conflict.local,
+            "remote": conflict.remote,
+        })
+    )
 }
 
 fn error_response(id: Value, code: i64, message: &str) -> Value {

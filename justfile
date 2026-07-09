@@ -20,7 +20,7 @@ tiber-dashboard-smoke:
     scripts/evals/ensure-node-deps.sh
     node scripts/tiber/dashboard-smoke.mjs
 
-# Build the tiber release binary for the current host target.
+# Build a dev-only tiber release binary for the current host target.
 tiber-release-host:
     scripts/build-tiber-host-release.sh
 
@@ -30,7 +30,18 @@ tiber-release-all:
 
 # Mutation gate for the pure tiber core.
 tiber-mutants:
-    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --manifest-path plugins/tiber/rust/Cargo.toml --package tiber-core --test-workspace true
+    #!/usr/bin/env bash
+    set -euo pipefail
+    diff_file="$(mktemp "${TMPDIR:-/tmp}/tiber-core-mutants-diff.XXXXXX")"
+    trap 'rm -f "$diff_file"' EXIT
+    base_ref="${TIBER_MUTANTS_BASE_REF:-origin/main}"
+    if git rev-parse --verify --quiet "$base_ref" >/dev/null; then
+      git diff --no-ext-diff --relative=plugins/tiber/rust "$base_ref"...HEAD -- plugins/tiber/rust/crates/tiber-core >"$diff_file"
+    else
+      : >"$diff_file"
+    fi
+    git diff --no-ext-diff --relative=plugins/tiber/rust -- plugins/tiber/rust/crates/tiber-core >>"$diff_file"
+    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --manifest-path plugins/tiber/rust/Cargo.toml --package tiber-core --test-workspace true --in-diff "$diff_file" --timeout 120 --minimum-test-timeout 30
 
 # Ensure the tiber release plan names every bundled v1 binary target.
 tiber-release-manifest:

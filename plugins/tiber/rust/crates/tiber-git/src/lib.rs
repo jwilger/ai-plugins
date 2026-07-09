@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
 use std::fs::OpenOptions;
+use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,8 @@ const TASK_ID_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
 const TASK_ID_GENERATION_ATTEMPTS: usize = 32;
 const DEFAULT_LOCK_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
 const DEFAULT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+const MAX_CONFLICT_SNAPSHOT_SIDE_BYTES: usize = 64 * 1024;
+const MAX_TASK_BLOB_BYTES: u64 = 1024 * 1024;
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -50,9 +53,39 @@ pub fn task_metadata_at(root: impl Into<PathBuf>, task_ref: &str) -> Result<Task
     repo.with_task_workspace(|repo| repo.task_metadata(task_ref))
 }
 
+pub fn conflict_snapshot_at(
+    root: impl Into<PathBuf>,
+    path: &str,
+) -> Result<ConflictSnapshot, Error> {
+    let repo = GitRepository::at(root);
+    repo.conflict_snapshot(path)
+}
+
+pub fn resolve_conflict_at(
+    root: impl Into<PathBuf>,
+    path: &str,
+    side: &str,
+) -> Result<ConflictResolution, Error> {
+    let repo = GitRepository::at(root);
+    repo.resolve_conflict(path, side)
+}
+
+pub fn resolve_conflicts_at(
+    root: impl Into<PathBuf>,
+    resolutions: &[ConflictResolutionRequest],
+) -> Result<Vec<ConflictResolution>, Error> {
+    let repo = GitRepository::at(root);
+    repo.resolve_conflicts(resolutions)
+}
+
 pub fn task_documents_at(root: impl Into<PathBuf>) -> Result<Vec<TaskDocument>, Error> {
     let repo = GitRepository::at(root);
     repo.with_task_snapshot_workspace(|repo| repo.task_documents_snapshot())
+}
+
+pub fn task_documents_local_at(root: impl Into<PathBuf>) -> Result<Vec<TaskDocument>, Error> {
+    let repo = GitRepository::at(root);
+    repo.with_local_task_snapshot_workspace(|repo| repo.task_documents_snapshot())
 }
 
 pub fn list_docs_at(root: impl Into<PathBuf>) -> Result<Vec<String>, Error> {
@@ -69,7 +102,6 @@ impl GitRepository {
     fn init_repository(&self) -> Result<(), Error> {
         let _lock = self.acquire_lock()?;
         self.ensure_tasks_branch()?;
-        self.ignore_local_tasks_in_source_gitignore()?;
         Ok(())
     }
 }
@@ -97,6 +129,23 @@ pub fn show_task(task_ref: &str) -> Result<String, Error> {
 pub fn task_metadata(task_ref: &str) -> Result<TaskMetadata, Error> {
     let repo = GitRepository::discover()?;
     repo.with_task_workspace(|repo| repo.task_metadata(task_ref))
+}
+
+pub fn conflict_snapshot(path: &str) -> Result<ConflictSnapshot, Error> {
+    let repo = GitRepository::discover()?;
+    repo.conflict_snapshot(path)
+}
+
+pub fn resolve_conflict(path: &str, side: &str) -> Result<ConflictResolution, Error> {
+    let repo = GitRepository::discover()?;
+    repo.resolve_conflict(path, side)
+}
+
+pub fn resolve_conflicts(
+    resolutions: &[ConflictResolutionRequest],
+) -> Result<Vec<ConflictResolution>, Error> {
+    let repo = GitRepository::discover()?;
+    repo.resolve_conflicts(resolutions)
 }
 
 pub fn list_docs() -> Result<Vec<String>, Error> {
@@ -146,7 +195,7 @@ pub fn set_subtask_checked(task_ref: &str, index: &str, checked: bool) -> Result
 
 pub fn update_task(task_ref: &str, update: TaskUpdate<'_>) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(|repo| repo.update_task(task_ref, update))
+    repo.with_task_workspace(|repo| repo.update_task(task_ref, update.clone()))
 }
 
 pub fn add_acceptance(task_ref: &str, criterion: &str) -> Result<(), Error> {
@@ -229,6 +278,128 @@ pub struct TaskMetadata {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+pub struct ConflictSnapshot {
+    pub path: String,
+    pub local_path: Option<String>,
+    pub remote_path: Option<String>,
+    pub local: Option<String>,
+    pub remote: Option<String>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct ConflictResolution {
+    pub path: String,
+    pub side: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConflictSideChoice {
+    Local,
+    Remote,
+}
+
+impl ConflictSideChoice {
+    pub fn parse(side: &str) -> Result<Self, Error> {
+        match side {
+            "local" => Ok(Self::Local),
+            "remote" => Ok(Self::Remote),
+            _ => Err(Error::Parse(format!(
+                "invalid_conflict_side side={}",
+                quoted_string(side)
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Remote => "remote",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConflictResolutionRequest {
+    pub path: String,
+    pub side: ConflictSideChoice,
+}
+
+impl ConflictResolutionRequest {
+    pub fn parse(path: impl Into<String>, side: &str) -> Result<Self, Error> {
+        Ok(Self {
+            path: path.into(),
+            side: ConflictSideChoice::parse(side)?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ConflictSide {
+    path: String,
+    contents: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ConflictPath {
+    value: String,
+    key: String,
+}
+
+impl ConflictPath {
+    fn parse(path: &str) -> Result<Self, Error> {
+        let trimmed = path.trim();
+        if trimmed.chars().any(char::is_control) {
+            return Err(invalid_conflict_path(trimmed));
+        }
+        if trimmed != "order.md" && !is_course_task_path(trimmed) {
+            return Err(invalid_conflict_path(trimmed));
+        }
+        let path = Path::new(trimmed);
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(invalid_conflict_path(trimmed));
+        }
+        let key = if trimmed == "order.md" {
+            trimmed.to_string()
+        } else {
+            format!("task:{}", task_stem(path)?)
+        };
+        Ok(Self {
+            value: trimmed.to_string(),
+            key,
+        })
+    }
+
+    fn as_str(&self) -> &str {
+        &self.value
+    }
+
+    fn key(&self) -> &str {
+        &self.key
+    }
+
+    fn into_string(self) -> String {
+        self.value
+    }
+
+    fn matches_storage_path(&self, path: &str) -> bool {
+        if self.value == path {
+            return true;
+        }
+        if self.value == "order.md" || path == "order.md" {
+            return false;
+        }
+        is_course_task_path(path)
+            && task_stem(Path::new(path))
+                .ok()
+                .is_some_and(|path_stem| self.key == format!("task:{path_stem}"))
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct TaskDocument {
     pub stem: String,
     pub status: String,
@@ -245,7 +416,7 @@ impl fmt::Display for ValidationMessage {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TaskUpdate<'a> {
     pub title: Option<&'a str>,
     pub summary: Option<&'a str>,
@@ -271,6 +442,19 @@ pub enum Error {
         source: Box<Error>,
     },
     Io(std::io::Error),
+    SyncConflict {
+        path: String,
+    },
+    TaskRefInvalid {
+        reference: String,
+    },
+    TaskRefMissing {
+        reference: String,
+    },
+    TaskRefAmbiguous {
+        reference: String,
+        matches: Vec<String>,
+    },
     Parse(String),
     Core(tiber_core::CoreError),
     Usage(String),
@@ -301,6 +485,26 @@ impl fmt::Display for Error {
                 source.sanitized_sync_source()
             ),
             Self::Io(error) => write!(formatter, "tiber.io_error source={error}"),
+            Self::SyncConflict { path } => {
+                write!(
+                    formatter,
+                    "tiber.parse_error {}",
+                    sync_conflict_guidance(path)
+                )
+            }
+            Self::TaskRefInvalid { reference } => write!(
+                formatter,
+                "tiber.parse_error invalid_task_ref ref={reference}"
+            ),
+            Self::TaskRefMissing { reference } => write!(
+                formatter,
+                "tiber.parse_error task_ref_missing ref={reference}"
+            ),
+            Self::TaskRefAmbiguous { reference, matches } => write!(
+                formatter,
+                "tiber.parse_error ambiguous_task_ref ref={reference} matches={}",
+                matches.join(",")
+            ),
             Self::Parse(message) => write!(formatter, "tiber.parse_error {message}"),
             Self::Core(error) => write!(formatter, "{error}"),
             Self::Usage(message) => write!(formatter, "{message}"),
@@ -311,6 +515,60 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl Error {
+    pub fn sanitized_dashboard_source(&self) -> String {
+        let source = match self {
+            Self::CommandFailed { .. } | Self::Io(_) => self.sanitized_sync_source(),
+            _ => self.sanitized_agent_source(),
+        };
+        format!("dashboard_task_load_failed source={}", source)
+    }
+
+    pub fn sanitized_agent_source(&self) -> String {
+        match self {
+            Self::SyncConflict { path } => {
+                format!("tiber.parse_error {}", sync_conflict_guidance(path))
+            }
+            Self::TaskRefInvalid { .. }
+            | Self::TaskRefMissing { .. }
+            | Self::TaskRefAmbiguous { .. } => self.to_string(),
+            Self::Parse(message) => format!("tiber.parse_error {message}"),
+            Self::CommandFailed {
+                program,
+                args,
+                status,
+                stderr,
+            } if command_failure_needs_redaction(args) => self.sanitized_sync_source(),
+            Self::CommandFailed {
+                program,
+                status,
+                stderr,
+                ..
+            } => format!(
+                "tiber.command_failed program={program} args_redacted=true status={status} stderr={}",
+                quoted_string(&sanitized_command_stderr(stderr))
+            ),
+            Self::Io(error) => format!("tiber.io_error source={}", quoted_string(&error.to_string())),
+            Self::TaskCreatedSyncFailed { .. } | Self::TaskCreateSyncFailed { .. } => {
+                self.to_string()
+            }
+            Self::Core(error) => error.to_string(),
+            Self::Usage(message) => message.to_string(),
+        }
+    }
+
+    pub fn is_task_ref_resolution_error(&self) -> bool {
+        matches!(
+            self,
+            Self::TaskRefInvalid { .. }
+                | Self::TaskRefMissing { .. }
+                | Self::TaskRefAmbiguous { .. }
+        )
+    }
+
+    fn is_task_ref_missing_error(&self) -> bool {
+        matches!(self, Self::TaskRefMissing { .. })
+    }
+
     fn sanitized_sync_source(&self) -> String {
         match self {
             Self::CommandFailed {
@@ -326,14 +584,99 @@ impl Error {
                 "tiber.create_sync_failed nested=true".to_string()
             }
             Self::Io(_) => "tiber.io_error source_redacted=true".to_string(),
-            Self::Parse(message) if message.starts_with("sync_conflict ") => {
-                format!("tiber.parse_error {message}")
+            Self::SyncConflict { path } => {
+                format!("tiber.parse_error {}", sync_conflict_guidance(path))
             }
+            Self::TaskRefInvalid { .. }
+            | Self::TaskRefMissing { .. }
+            | Self::TaskRefAmbiguous { .. } => self.to_string(),
             Self::Parse(_) => "tiber.parse_error source_redacted=true".to_string(),
             Self::Core(error) => error.to_string(),
             Self::Usage(message) => message.to_string(),
         }
     }
+}
+
+fn sync_conflict_guidance(path: &str) -> String {
+    format!(
+        "sync_conflict path={} recovery=\"run tiber conflict show <path>, preserve both versions, choose tiber conflict resolve <path> --local or --remote, then rerun tiber sync\" mcp_tool=tiber.conflict_show mcp_resolve_tool=tiber.conflict_resolve",
+        quoted_string(path)
+    )
+}
+
+fn sync_conflict_error(path: &str) -> Error {
+    Error::SyncConflict {
+        path: path_to_entry(Path::new(path)).unwrap_or_else(|_| path.to_string()),
+    }
+}
+
+fn task_ref_invalid(reference: &str) -> Error {
+    Error::TaskRefInvalid {
+        reference: reference.to_string(),
+    }
+}
+
+fn task_ref_missing(reference: &str) -> Error {
+    Error::TaskRefMissing {
+        reference: reference.to_string(),
+    }
+}
+
+fn task_ref_ambiguous(reference: &str, matches: Vec<String>) -> Error {
+    Error::TaskRefAmbiguous {
+        reference: reference.to_string(),
+        matches,
+    }
+}
+
+fn sanitized_command_stderr(stderr: &str) -> String {
+    let mut sanitized = stderr.trim().replace('\n', "\\n");
+    for marker in ["https://", "http://", "ssh://"] {
+        while let Some(start) = sanitized.find(marker) {
+            let end = sanitized[start..]
+                .find(char::is_whitespace)
+                .map(|offset| start + offset)
+                .unwrap_or(sanitized.len());
+            sanitized.replace_range(start..end, "<redacted-url>");
+        }
+    }
+    if sanitized.len() > 512 {
+        sanitized.truncate(512);
+        sanitized.push_str("...");
+    }
+    sanitized
+}
+
+fn command_failure_needs_redaction(args: &[String]) -> bool {
+    matches!(
+        git_subcommand(args),
+        Some("fetch" | "push" | "ls-remote" | "remote")
+    )
+}
+
+fn git_subcommand(args: &[String]) -> Option<&str> {
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if arg == "-c" {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with("-c") {
+            index += 1;
+            continue;
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        return Some(arg);
+    }
+    None
+}
+
+fn quoted_string(value: &str) -> String {
+    format!("{value:?}")
 }
 
 impl From<std::io::Error> for Error {
@@ -376,17 +719,56 @@ impl GitRepository {
 
     fn with_task_workspace<T>(
         &self,
-        operation: impl FnOnce(&GitRepository) -> Result<T, Error>,
+        mut operation: impl FnMut(&GitRepository) -> Result<T, Error>,
     ) -> Result<T, Error> {
         let _lock = self.acquire_lock()?;
-        self.ensure_tasks_branch()?;
+        self.ensure_tasks_branch_from_origin()?;
+        self.fast_forward_local_tasks_ref_from_origin(false)?;
         let workspace = TaskWorkspace::create()?;
         self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
         let repo = self.with_tasks_dir(workspace.path().to_path_buf());
-        operation(&repo)
+        match operation(&repo) {
+            Err(error) if error.is_task_ref_missing_error() => {
+                let workspace = TaskWorkspace::create()?;
+                self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+                let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+                repo.read_sync().map_err(implicit_remote_refresh_error)?;
+                repo.sync_repository_unlocked()?;
+                let workspace = TaskWorkspace::create()?;
+                self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+                let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+                operation(&repo)
+            }
+            result => result,
+        }
     }
 
     fn with_task_snapshot_workspace<T>(
+        &self,
+        operation: impl FnOnce(&GitRepository) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let lock = if self.has_origin_remote() {
+            Some(self.acquire_lock()?)
+        } else {
+            None
+        };
+        let workspace = TaskWorkspace::create()?;
+        if git_status(
+            ["show-ref", "--verify", "refs/heads/tasks"],
+            Some(&self.root),
+        )
+        .is_ok()
+        {
+            self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+        }
+        let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+        if lock.is_some() {
+            repo.read_sync()?;
+        }
+        operation(&repo)
+    }
+
+    fn with_local_task_snapshot_workspace<T>(
         &self,
         operation: impl FnOnce(&GitRepository) -> Result<T, Error>,
     ) -> Result<T, Error> {
@@ -395,13 +777,11 @@ impl GitRepository {
             ["show-ref", "--verify", "refs/heads/tasks"],
             Some(&self.root),
         )
-        .is_err()
+        .is_ok()
         {
-            return operation(&self.with_tasks_dir(workspace.path().to_path_buf()));
+            self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
         }
-        self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
-        let repo = self.with_tasks_dir(workspace.path().to_path_buf());
-        operation(&repo)
+        operation(&self.with_tasks_dir(workspace.path().to_path_buf()))
     }
 
     fn materialize_tasks_ref(&self, task_ref: &str, destination: &Path) -> Result<(), Error> {
@@ -413,10 +793,13 @@ impl GitRepository {
             fs::write(&order, "")?;
         }
 
-        let listing = self.git(["ls-tree", "-r", "--name-only", task_ref])?;
+        let resolved_task_ref = self.git(["rev-parse", "--verify", task_ref])?;
+        let resolved_task_ref = resolved_task_ref.trim();
+        let listing = self.git(["ls-tree", "-r", "--name-only", resolved_task_ref])?;
         for path in listing.lines().filter(|line| !line.trim().is_empty()) {
-            if path == "order.md" || is_course_task_path(path) || path.ends_with("/.gitkeep") {
-                let contents = self.git(["show", &format!("{task_ref}:{path}")])?;
+            if path == "order.md" || is_course_task_path(path) || is_status_gitkeep_path(path) {
+                self.ensure_git_blob_size(resolved_task_ref, path, MAX_TASK_BLOB_BYTES)?;
+                let contents = self.git(["show", &format!("{resolved_task_ref}:{path}")])?;
                 let destination = destination.join(path);
                 if let Some(parent) = destination.parent() {
                     fs::create_dir_all(parent)?;
@@ -425,15 +808,6 @@ impl GitRepository {
             }
         }
         Ok(())
-    }
-
-    fn current_branch(&self) -> Result<String, Error> {
-        let branch = git_output(["branch", "--show-current"], Some(&self.root))?;
-        let branch = branch.trim();
-        if branch.is_empty() {
-            return Err(Error::Parse("detached_head=true".to_string()));
-        }
-        Ok(branch.to_string())
     }
 
     fn ensure_tasks_branch(&self) -> Result<(), Error> {
@@ -457,7 +831,7 @@ impl GitRepository {
         }
         entries.sort();
         let root_tree = self.git_with_stdin(["mktree"], &entries.concat())?;
-        let commit = self.commit_tree(root_tree.trim(), None, "Initialize tiber")?;
+        let commit = self.commit_tree(root_tree.trim(), &[], "Initialize tiber")?;
         self.git([
             "update-ref",
             "refs/heads/tasks",
@@ -467,17 +841,29 @@ impl GitRepository {
         Ok(())
     }
 
-    fn ignore_local_tasks_in_source_gitignore(&self) -> Result<(), Error> {
-        let gitignore = self.root.join(".gitignore");
-        let mut contents = fs::read_to_string(&gitignore).unwrap_or_default();
-        if !contents.lines().any(|line| line.trim() == ".tasks") {
-            if !contents.ends_with('\n') && !contents.is_empty() {
-                contents.push('\n');
-            }
-            contents.push_str(".tasks\n");
-            fs::write(gitignore, contents)?;
+    fn ensure_tasks_branch_from_origin(&self) -> Result<(), Error> {
+        if git_status(
+            ["show-ref", "--verify", "refs/heads/tasks"],
+            Some(&self.root),
+        )
+        .is_ok()
+        {
+            return Ok(());
         }
-        Ok(())
+        let remote_parent = match self.fetch_origin_tasks(true) {
+            Ok(remote_parent) => remote_parent,
+            Err(error) => return Err(implicit_remote_refresh_error(error)),
+        };
+        if let Some(remote_parent) = remote_parent {
+            self.git([
+                "update-ref",
+                "refs/heads/tasks",
+                remote_parent.trim(),
+                "0000000000000000000000000000000000000000",
+            ])?;
+            return Ok(());
+        }
+        self.ensure_tasks_branch()
     }
 
     fn sync_repository(&self) -> Result<(), Error> {
@@ -485,46 +871,108 @@ impl GitRepository {
     }
 
     fn sync_repository_unlocked(&self) -> Result<(), Error> {
-        let worktree_name = self.current_branch()?;
-        match self.sync_repository_once(&worktree_name) {
-            Ok(()) => Ok(()),
-            Err(error) if is_retryable_push_failure(&error) => {
-                self.sync_repository_once(&worktree_name)
+        let allow_missing_remote_tasks = self.partial_create_marker_path()?.exists();
+        match self.sync_repository_unlocked_allowing_missing_remote(allow_missing_remote_tasks) {
+            Ok(()) => {
+                if allow_missing_remote_tasks {
+                    self.clear_partial_create_marker()?;
+                }
+                Ok(())
             }
             Err(error) => Err(error),
         }
     }
 
-    fn sync_repository_once(&self, worktree_name: &str) -> Result<(), Error> {
+    fn sync_repository_unlocked_allowing_missing_remote(
+        &self,
+        allow_missing_remote_tasks: bool,
+    ) -> Result<(), Error> {
+        match self.sync_repository_once(allow_missing_remote_tasks) {
+            Ok(()) => Ok(()),
+            Err(error) if is_retryable_push_failure(&error) => {
+                let workspace = TaskWorkspace::create()?;
+                self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+                let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+                repo.sync_repository_once(allow_missing_remote_tasks)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn sync_repository_once(&self, allow_missing_remote_tasks: bool) -> Result<(), Error> {
         let local_parent = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
-        let remote_parent = self.fetch_origin_tasks()?;
-        if remote_parent
+        self.ensure_local_task_sizes(&self.tasks_dir())?;
+        let remote_parent = self.fetch_origin_tasks(allow_missing_remote_tasks)?;
+        let remote_advanced = remote_parent
             .as_deref()
-            .is_some_and(|parent| parent.trim() != local_parent.trim())
-        {
-            self.merge_remote_tasks(worktree_name)?;
+            .is_some_and(|parent| parent.trim() != local_parent.trim());
+        let local_parent = if remote_advanced {
+            self.commit_tasks_workspace_if_changed(
+                local_parent.trim(),
+                "Record tiber local state before remote merge",
+            )?
+        } else {
+            local_parent.trim().to_string()
+        };
+        if remote_advanced {
+            let merge_base = self.task_merge_base(&local_parent, remote_parent.as_deref())?;
+            self.merge_remote_tasks(merge_base.as_deref())?;
         }
         let tasks_tree = self.write_directory_tree(&self.tasks_dir())?;
         let root_tree = tasks_tree;
-        let parent = match remote_parent {
-            Some(parent) => parent,
-            None => local_parent.clone(),
+        let parent = match &remote_parent {
+            Some(parent) => parent.trim(),
+            None => local_parent.trim(),
         };
-        let commit = self.commit_tree(root_tree.trim(), Some(parent.trim()), "Sync tiber state")?;
+        let parents = if remote_advanced {
+            vec![parent, local_parent.as_str()]
+        } else {
+            vec![parent]
+        };
+        let commit = self.commit_tree(root_tree.trim(), &parents, "Sync tiber state")?;
         self.git([
             "update-ref",
             "refs/heads/tasks",
             commit.trim(),
-            local_parent.trim(),
+            local_parent.as_str(),
         ])?;
         self.push_tasks_branch_if_origin_exists()?;
         Ok(())
     }
 
-    fn fetch_origin_tasks(&self) -> Result<Option<String>, Error> {
-        if git_status(["remote", "get-url", "origin"], Some(&self.root)).is_err() {
+    fn commit_tasks_workspace_if_changed(
+        &self,
+        parent: &str,
+        message: &str,
+    ) -> Result<String, Error> {
+        let workspace_tree = self.write_directory_tree(&self.tasks_dir())?;
+        let parent_tree = self.git(["rev-parse", &format!("{parent}^{{tree}}")])?;
+        if workspace_tree.trim() == parent_tree.trim() {
+            return Ok(parent.to_string());
+        }
+        let commit = self.commit_tree(workspace_tree.trim(), &[parent], message)?;
+        self.git(["update-ref", "refs/heads/tasks", commit.trim(), parent])?;
+        Ok(commit.trim().to_string())
+    }
+
+    fn fetch_origin_tasks(
+        &self,
+        allow_missing_remote_tasks: bool,
+    ) -> Result<Option<String>, Error> {
+        if !self.has_origin_remote() {
             return Ok(None);
         }
+        let had_tracking_ref = git_status(
+            ["show-ref", "--verify", "refs/remotes/origin/tasks"],
+            Some(&self.root),
+        )
+        .is_ok();
+        let had_local_tasks_ref = git_status(
+            ["show-ref", "--verify", "refs/heads/tasks"],
+            Some(&self.root),
+        )
+        .is_ok();
+        let had_local_task_state = had_local_tasks_ref && self.local_tasks_ref_has_tasks()?;
         match self.git_with_timeout(
             ["fetch", "origin", "tasks:refs/remotes/origin/tasks"],
             Duration::from_secs(10),
@@ -538,18 +986,109 @@ impl GitRepository {
                 if stderr.contains("couldn't find remote ref tasks")
                     || stderr.contains("could not find remote ref tasks") =>
             {
+                if had_tracking_ref || (!allow_missing_remote_tasks && had_local_task_state) {
+                    return Err(tasks_remote_rewritten_error());
+                }
+                self.git(["update-ref", "-d", "refs/remotes/origin/tasks"])?;
                 Ok(None)
+            }
+            Err(Error::CommandFailed { stderr, .. })
+                if is_non_fast_forward_fetch_rejection(&stderr) =>
+            {
+                Err(tasks_remote_rewritten_error())
             }
             Err(error) => Err(error),
         }
     }
 
-    fn merge_remote_tasks(&self, _worktree_name: &str) -> Result<(), Error> {
+    fn has_origin_remote(&self) -> bool {
+        git_status(["remote", "get-url", "origin"], Some(&self.root)).is_ok()
+    }
+
+    fn fast_forward_local_tasks_ref_from_origin(&self, allow_populated: bool) -> Result<(), Error> {
+        let local_parent = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
+        if !allow_populated && self.local_tasks_ref_has_tasks()? {
+            return Ok(());
+        }
+        let remote_parent = match self.fetch_origin_tasks(true) {
+            Ok(remote_parent) => remote_parent,
+            Err(error) => return Err(implicit_remote_refresh_error(error)),
+        };
+        let Some(remote_parent) = remote_parent else {
+            return Ok(());
+        };
+        if remote_parent.trim() == local_parent.trim() {
+            return Ok(());
+        }
+        if git_status(
+            [
+                "merge-base",
+                "--is-ancestor",
+                local_parent.trim(),
+                remote_parent.trim(),
+            ],
+            Some(&self.root),
+        )
+        .is_ok()
+        {
+            self.git([
+                "update-ref",
+                "refs/heads/tasks",
+                remote_parent.trim(),
+                local_parent.trim(),
+            ])?;
+        }
+        Ok(())
+    }
+
+    fn local_tasks_ref_has_tasks(&self) -> Result<bool, Error> {
+        if git_status(
+            ["show-ref", "--verify", "refs/heads/tasks"],
+            Some(&self.root),
+        )
+        .is_err()
+        {
+            return Ok(false);
+        }
+        let listing = self.git(["ls-tree", "-r", "--name-only", "refs/heads/tasks"])?;
+        Ok(listing.lines().any(is_course_task_path))
+    }
+
+    fn task_merge_base(
+        &self,
+        local_ref: &str,
+        remote_ref: Option<&str>,
+    ) -> Result<Option<String>, Error> {
+        let Some(remote_ref) = remote_ref else {
+            return Ok(None);
+        };
+        match self.git(["merge-base", local_ref.trim(), remote_ref.trim()]) {
+            Ok(merge_base) => Ok(Some(merge_base.trim().to_string())),
+            Err(Error::CommandFailed { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn merge_remote_tasks(&self, base_ref: Option<&str>) -> Result<(), Error> {
+        self.merge_remote_tasks_except(base_ref, &[])
+    }
+
+    fn merge_remote_tasks_except(
+        &self,
+        base_ref: Option<&str>,
+        ignored_conflict_paths: &[ConflictPath],
+    ) -> Result<(), Error> {
         let listing = self.git(["ls-tree", "-r", "--name-only", "refs/remotes/origin/tasks"])?;
+        let mut remote_task_paths = std::collections::BTreeSet::new();
+        let mut remote_task_stems = std::collections::BTreeSet::new();
         let mut remote_order = Vec::new();
         for path in listing.lines().filter(|line| !line.trim().is_empty()) {
+            self.ensure_git_blob_size("refs/remotes/origin/tasks", path, MAX_TASK_BLOB_BYTES)?;
             let contents = self.git(["show", &format!("refs/remotes/origin/tasks:{path}")])?;
             if path == "order.md" {
+                if conflict_path_is_selected(ignored_conflict_paths, path) {
+                    continue;
+                }
                 remote_order = contents
                     .lines()
                     .filter(|line| !line.trim().is_empty())
@@ -560,6 +1099,11 @@ impl GitRepository {
             if !is_course_task_path(path) {
                 continue;
             }
+            remote_task_paths.insert(path.to_string());
+            remote_task_stems.insert(task_stem(Path::new(path))?);
+            if conflict_path_is_selected(ignored_conflict_paths, path) {
+                continue;
+            }
             let destination = self.tasks_dir().join(path);
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent)?;
@@ -567,24 +1111,34 @@ impl GitRepository {
             if destination.exists() {
                 let local_contents = fs::read_to_string(&destination)?;
                 if local_contents != contents {
-                    return Err(Error::Parse(format!(
-                        "sync_conflict path={}",
-                        path_to_entry(Path::new(path))?
-                    )));
+                    match self.base_task_contents(base_ref, path)? {
+                        Some(base_contents) if local_contents == base_contents => {
+                            fs::write(destination, contents)?;
+                        }
+                        Some(base_contents) if contents == base_contents => {}
+                        _ => {
+                            return Err(sync_conflict_error(path));
+                        }
+                    }
                 }
             } else if self.local_task_with_same_stem_path(path)?.is_some() {
-                return Err(Error::Parse(format!(
-                    "sync_conflict path={}",
-                    path_to_entry(Path::new(path))?
-                )));
+                return Err(sync_conflict_error(path));
             } else {
                 fs::write(destination, contents)?;
             }
         }
+        if let Some(base_ref) = base_ref {
+            self.apply_remote_deletions(
+                base_ref,
+                &remote_task_paths,
+                &remote_task_stems,
+                ignored_conflict_paths,
+            )?;
+        }
         if !remote_order.is_empty() {
             let local_order = self.order_entries()?;
             if order_conflicts(&remote_order, &local_order) {
-                return Err(Error::Parse("sync_conflict path=order.md".to_string()));
+                return Err(sync_conflict_error("order.md"));
             }
             let mut merged_order = remote_order;
             for local_entry in local_order {
@@ -594,7 +1148,76 @@ impl GitRepository {
             }
             self.write_order(&merged_order)?;
         }
+        self.reconcile_open_order()?;
         Ok(())
+    }
+
+    fn base_task_contents(
+        &self,
+        base_ref: Option<&str>,
+        path: &str,
+    ) -> Result<Option<String>, Error> {
+        let Some(base_ref) = base_ref else {
+            return Ok(None);
+        };
+        if git_status(
+            ["cat-file", "-e", &format!("{base_ref}:{path}")],
+            Some(&self.root),
+        )
+        .is_err()
+        {
+            return Ok(None);
+        }
+        Ok(Some(self.git(["show", &format!("{base_ref}:{path}")])?))
+    }
+
+    fn apply_remote_deletions(
+        &self,
+        base_ref: &str,
+        remote_task_paths: &std::collections::BTreeSet<String>,
+        remote_task_stems: &std::collections::BTreeSet<String>,
+        ignored_conflict_paths: &[ConflictPath],
+    ) -> Result<(), Error> {
+        for local_path in self.task_file_refs()? {
+            if remote_task_paths.contains(&local_path) {
+                continue;
+            }
+            if conflict_path_is_selected(ignored_conflict_paths, &local_path) {
+                continue;
+            }
+            let local_stem = task_stem(Path::new(&local_path))?;
+            if remote_task_stems.contains(&local_stem) {
+                continue;
+            }
+            let Some(base_path) = self.base_task_path_with_stem(base_ref, &local_stem)? else {
+                continue;
+            };
+            if base_path != local_path {
+                return Err(sync_conflict_error(&local_path));
+            }
+            let base_contents = self.git(["show", &format!("{}:{base_path}", base_ref.trim())])?;
+            let local_file = self.tasks_dir().join(&local_path);
+            let local_contents = fs::read_to_string(&local_file)?;
+            if local_contents == base_contents {
+                fs::remove_file(local_file)?;
+            } else {
+                return Err(sync_conflict_error(&local_path));
+            }
+        }
+        Ok(())
+    }
+
+    fn base_task_path_with_stem(
+        &self,
+        base_ref: &str,
+        stem: &str,
+    ) -> Result<Option<String>, Error> {
+        let listing = self.git(["ls-tree", "-r", "--name-only", base_ref.trim()])?;
+        Ok(listing
+            .lines()
+            .filter(|path| is_course_task_path(path))
+            .find(|path| task_stem(Path::new(path)).is_ok_and(|candidate| candidate == stem))
+            .map(str::to_string))
     }
 
     fn local_task_with_same_stem_path(&self, remote_path: &str) -> Result<Option<String>, Error> {
@@ -613,6 +1236,15 @@ impl GitRepository {
         }))
     }
 
+    fn local_task_with_matching_conflict_path(
+        &self,
+        path: &ConflictPath,
+    ) -> Result<Option<String>, Error> {
+        Ok(self.task_file_refs()?.into_iter().find(|local_path| {
+            local_path.as_str() != path.as_str() && path.matches_storage_path(local_path)
+        }))
+    }
+
     fn push_tasks_branch_if_origin_exists(&self) -> Result<(), Error> {
         if git_status(["remote", "get-url", "origin"], Some(&self.root)).is_err() {
             return Ok(());
@@ -627,18 +1259,13 @@ impl GitRepository {
         Ok(())
     }
 
-    fn commit_tree(
-        &self,
-        tree: &str,
-        parent: Option<&str>,
-        message: &str,
-    ) -> Result<String, Error> {
+    fn commit_tree(&self, tree: &str, parents: &[&str], message: &str) -> Result<String, Error> {
         let mut args = vec!["commit-tree".to_string()];
         if self.commit_signing_enabled()? {
             args.push("-S".to_string());
         }
         args.push(tree.to_string());
-        if let Some(parent) = parent {
+        for parent in parents {
             args.push("-p".to_string());
             args.push(parent.to_string());
         }
@@ -665,8 +1292,15 @@ impl GitRepository {
                 let tree = self.write_directory_tree(&entry.path())?;
                 entries.push(format!("040000 tree {}\t{name}\n", tree.trim()));
             } else if file_type.is_file() {
+                let entry_path = entry.path();
+                let display_path = entry_path
+                    .strip_prefix(self.tasks_dir())
+                    .unwrap_or(entry_path.as_path())
+                    .to_string_lossy()
+                    .into_owned();
+                ensure_local_file_size(&entry_path, &display_path, MAX_TASK_BLOB_BYTES)?;
                 let blob =
-                    self.git(["hash-object", "-w", entry.path().to_string_lossy().as_ref()])?;
+                    self.git(["hash-object", "-w", entry_path.to_string_lossy().as_ref()])?;
                 entries.push(format!("100644 blob {}\t{name}\n", blob.trim()));
             }
         }
@@ -674,14 +1308,39 @@ impl GitRepository {
         self.git_with_stdin(["mktree"], &entries.concat())
     }
 
+    fn ensure_local_task_sizes(&self, directory: &Path) -> Result<(), Error> {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                self.ensure_local_task_sizes(&entry.path())?;
+            } else if file_type.is_file() {
+                let entry_path = entry.path();
+                let display_path = entry_path
+                    .strip_prefix(self.tasks_dir())
+                    .unwrap_or(entry_path.as_path())
+                    .to_string_lossy()
+                    .into_owned();
+                ensure_local_file_size(&entry_path, &display_path, MAX_TASK_BLOB_BYTES)?;
+            }
+        }
+        Ok(())
+    }
+
     fn create_task(&self, title: TaskTitle) -> Result<TaskPath, Error> {
+        let allow_missing_remote_tasks = !self.local_tasks_ref_has_tasks()?;
         let task_path = self.create_task_unlocked(title)?;
-        if let Err(error) = self.sync_repository_unlocked() {
+        if let Err(error) =
+            self.sync_repository_unlocked_allowing_missing_remote(allow_missing_remote_tasks)
+        {
             let committed = self.task_committed_to_tasks_ref(&task_path).unwrap_or(true);
             if !committed {
                 return Err(Error::TaskCreateSyncFailed {
                     source: Box::new(error),
                 });
+            }
+            if allow_missing_remote_tasks {
+                self.write_partial_create_marker(&task_path.path)?;
             }
             return Err(Error::TaskCreatedSyncFailed {
                 task_path: task_path.path,
@@ -794,6 +1453,459 @@ impl GitRepository {
         })
     }
 
+    fn conflict_snapshot(&self, path: &str) -> Result<ConflictSnapshot, Error> {
+        let _lock = self.acquire_lock()?;
+        let path = ConflictPath::parse(path)?;
+        if git_status(
+            ["show-ref", "--verify", "refs/heads/tasks"],
+            Some(&self.root),
+        )
+        .is_err()
+        {
+            return Err(Error::Parse("tiber_not_initialized=true".to_string()));
+        }
+        self.fetch_origin_tasks(false)?;
+        let local_side = self.task_ref_conflict_snapshot_side("refs/heads/tasks", &path)?;
+        let remote_path = self.remote_conflict_path(&path)?;
+        let remote = if let Some(path) = &remote_path {
+            Some(self.capped_git_blob(["show", &format!("refs/remotes/origin/tasks:{path}")])?)
+        } else {
+            None
+        };
+        Ok(ConflictSnapshot {
+            path: path.as_str().to_string(),
+            local_path: local_side.as_ref().map(|side| side.path.clone()),
+            remote_path,
+            local: local_side.map(|side| side.contents),
+            remote,
+        })
+    }
+
+    fn resolve_conflict(&self, path: &str, side: &str) -> Result<ConflictResolution, Error> {
+        Ok(self
+            .resolve_conflicts(&[ConflictResolutionRequest::parse(path, side)?])?
+            .remove(0))
+    }
+
+    fn resolve_conflicts(
+        &self,
+        resolutions: &[ConflictResolutionRequest],
+    ) -> Result<Vec<ConflictResolution>, Error> {
+        if resolutions.is_empty() {
+            return Err(Error::Usage(
+                "conflict resolve requires at least one path and side".to_string(),
+            ));
+        }
+        let _lock = self.acquire_lock()?;
+        let resolutions = resolutions
+            .iter()
+            .map(|resolution| Ok((ConflictPath::parse(&resolution.path)?, resolution.side)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let mut selected_keys = std::collections::BTreeSet::new();
+        for (path, _side) in &resolutions {
+            if !selected_keys.insert(path.key().to_string()) {
+                return Err(Error::Parse(format!(
+                    "duplicate_conflict_resolution path={}",
+                    quoted_string(path.as_str())
+                )));
+            }
+        }
+        let selected_paths = resolutions
+            .iter()
+            .map(|(path, _side)| path.clone())
+            .collect::<Vec<_>>();
+        if git_status(
+            ["show-ref", "--verify", "refs/heads/tasks"],
+            Some(&self.root),
+        )
+        .is_err()
+        {
+            return Err(Error::Parse("tiber_not_initialized=true".to_string()));
+        }
+        let initial_workspace = TaskWorkspace::create()?;
+        self.materialize_tasks_ref("refs/heads/tasks", initial_workspace.path())?;
+        let initial_repo = self.with_tasks_dir(initial_workspace.path().to_path_buf());
+        let original_selected_local_sides =
+            initial_repo.selected_local_conflict_sides(&selected_paths)?;
+        let original_local_parent = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
+        let mut previous_selected_remote_sides = None;
+        for attempt in 0..2 {
+            let local_parent = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
+            let remote_parent = self
+                .fetch_origin_tasks(false)?
+                .ok_or_else(|| Error::Parse("remote_tasks_missing=true".to_string()))?;
+            let merge_base = self.task_merge_base(&local_parent, Some(&remote_parent))?;
+            let selected_remote_sides = self.selected_remote_sides(&selected_paths)?;
+            if let Some(previous) = &previous_selected_remote_sides {
+                if previous != &selected_remote_sides {
+                    self.git([
+                        "update-ref",
+                        "refs/heads/tasks",
+                        original_local_parent.trim(),
+                        local_parent.trim(),
+                    ])?;
+                    return Err(sync_conflict_error(
+                        selected_paths
+                            .first()
+                            .map_or("order.md", ConflictPath::as_str),
+                    ));
+                }
+            }
+            let workspace = TaskWorkspace::create()?;
+            self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+            let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+            repo.restore_selected_local_conflict_sides(&original_selected_local_sides)?;
+            repo.ensure_selected_conflict_sides(&original_selected_local_sides)?;
+            repo.merge_remote_tasks_except(merge_base.as_deref(), &selected_paths)?;
+            for (path, side) in &resolutions {
+                match side {
+                    ConflictSideChoice::Local => {
+                        if let Some(local_side) = repo.local_conflict_side(path)? {
+                            let local_path = repo.tasks_dir().join(&local_side.path);
+                            ensure_file_size(&local_path, &local_side.path, MAX_TASK_BLOB_BYTES)?;
+                        } else {
+                            return Err(Error::Parse(format!(
+                                "local_conflict_side_missing path={}",
+                                quoted_string(path.as_str())
+                            )));
+                        }
+                    }
+                    ConflictSideChoice::Remote => {
+                        repo.apply_remote_conflict_side(path)?;
+                    }
+                }
+            }
+            repo.reconcile_open_order()?;
+            let root_tree = repo.write_directory_tree(&repo.tasks_dir())?;
+            let commit = repo.commit_tree(
+                root_tree.trim(),
+                &[remote_parent.trim(), local_parent.trim()],
+                "Resolve tiber conflict",
+            )?;
+            self.git([
+                "update-ref",
+                "refs/heads/tasks",
+                commit.trim(),
+                local_parent.trim(),
+            ])?;
+            match self.push_tasks_branch_if_origin_exists() {
+                Ok(()) => break,
+                Err(error) if attempt == 0 && is_retryable_push_failure(&error) => {
+                    self.git([
+                        "update-ref",
+                        "refs/heads/tasks",
+                        local_parent.trim(),
+                        commit.trim(),
+                    ])?;
+                    previous_selected_remote_sides = Some(selected_remote_sides);
+                }
+                Err(error) => {
+                    self.git([
+                        "update-ref",
+                        "refs/heads/tasks",
+                        local_parent.trim(),
+                        commit.trim(),
+                    ])?;
+                    return Err(error);
+                }
+            }
+        }
+        Ok(resolutions
+            .into_iter()
+            .map(|(path, side)| ConflictResolution {
+                path: path.into_string(),
+                side: side.as_str().to_string(),
+            })
+            .collect())
+    }
+
+    fn selected_remote_sides(
+        &self,
+        paths: &[ConflictPath],
+    ) -> Result<std::collections::BTreeMap<String, Option<ConflictSide>>, Error> {
+        paths
+            .iter()
+            .map(|path| {
+                let side = if let Some(remote_path) = self.remote_conflict_path(path)? {
+                    self.ensure_git_blob_size(
+                        "refs/remotes/origin/tasks",
+                        &remote_path,
+                        MAX_TASK_BLOB_BYTES,
+                    )?;
+                    Some(ConflictSide {
+                        contents: self
+                            .git(["show", &format!("refs/remotes/origin/tasks:{remote_path}")])?,
+                        path: remote_path,
+                    })
+                } else {
+                    None
+                };
+                Ok((path.as_str().to_string(), side))
+            })
+            .collect()
+    }
+
+    fn selected_local_conflict_sides(
+        &self,
+        paths: &[ConflictPath],
+    ) -> Result<Vec<(ConflictPath, ConflictSide)>, Error> {
+        paths
+            .iter()
+            .map(|path| {
+                Ok((
+                    path.clone(),
+                    self.local_conflict_side(path)?.ok_or_else(|| {
+                        Error::Parse(format!(
+                            "local_conflict_side_missing path={}",
+                            quoted_string(path.as_str())
+                        ))
+                    })?,
+                ))
+            })
+            .collect()
+    }
+
+    fn restore_selected_local_conflict_sides(
+        &self,
+        sides: &[(ConflictPath, ConflictSide)],
+    ) -> Result<(), Error> {
+        for (_selected_path, side) in sides {
+            if is_course_task_path(&side.path) {
+                if let Some(local_path) = self.local_task_with_same_stem_path(&side.path)? {
+                    if local_path != side.path {
+                        let local = self.tasks_dir().join(local_path);
+                        if local.exists() {
+                            fs::remove_file(local)?;
+                        }
+                    }
+                }
+            }
+            let destination = self.tasks_dir().join(&side.path);
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(destination, &side.contents)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_selected_conflict_sides(
+        &self,
+        sides: &[(ConflictPath, ConflictSide)],
+    ) -> Result<(), Error> {
+        for (selected_path, local) in sides {
+            self.ensure_selected_conflict_side(selected_path, local)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_selected_conflict_side(
+        &self,
+        selected_path: &ConflictPath,
+        local: &ConflictSide,
+    ) -> Result<(), Error> {
+        let Some(remote_path) = self.remote_conflict_path(selected_path)? else {
+            if self.local_deletion_conflict_path(selected_path)?.is_some() {
+                return Ok(());
+            }
+            return Err(Error::Parse(format!(
+                "remote_conflict_side_missing path={}",
+                quoted_string(selected_path.as_str())
+            )));
+        };
+        let remote_ref = format!("refs/remotes/origin/tasks:{remote_path}");
+        let remote = self
+            .git(["show", &remote_ref])
+            .map_err(|error| match error {
+                Error::CommandFailed { .. } => Error::Parse(format!(
+                    "remote_conflict_side_missing path={}",
+                    quoted_string(selected_path.as_str())
+                )),
+                other => other,
+            })?;
+        if local.path == remote_path && local.contents == remote {
+            return Err(Error::Parse(format!(
+                "conflict_side_not_in_conflict path={}",
+                quoted_string(selected_path.as_str())
+            )));
+        }
+        Ok(())
+    }
+
+    fn remote_conflict_path(&self, path: &ConflictPath) -> Result<Option<String>, Error> {
+        if git_status(
+            ["show-ref", "--verify", "refs/remotes/origin/tasks"],
+            Some(&self.root),
+        )
+        .is_err()
+        {
+            return Ok(None);
+        }
+        let remote_ref = format!("refs/remotes/origin/tasks:{}", path.as_str());
+        if git_status(["cat-file", "-e", &remote_ref], Some(&self.root)).is_ok() {
+            return Ok(Some(path.as_str().to_string()));
+        }
+        if path.as_str() == "order.md" {
+            return Ok(None);
+        }
+        let listing = self.git(["ls-tree", "-r", "--name-only", "refs/remotes/origin/tasks"])?;
+        Ok(listing
+            .lines()
+            .find(|remote_path| path.matches_storage_path(remote_path))
+            .map(str::to_string))
+    }
+
+    fn local_conflict_side(&self, path: &ConflictPath) -> Result<Option<ConflictSide>, Error> {
+        let direct = self.tasks_dir().join(path.as_str());
+        if direct.exists() {
+            return Ok(Some(ConflictSide {
+                path: path.as_str().to_string(),
+                contents: fs::read_to_string(direct)?,
+            }));
+        }
+        if path.as_str() != "order.md" {
+            if let Some(local_path) = self.local_task_with_matching_conflict_path(path)? {
+                return Ok(Some(ConflictSide {
+                    contents: fs::read_to_string(self.tasks_dir().join(&local_path))?,
+                    path: local_path,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    fn capped_git_blob<I, S>(&self, args: I) -> Result<String, Error>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        git_output_capped(args, Some(&self.root), MAX_CONFLICT_SNAPSHOT_SIDE_BYTES)
+    }
+
+    fn task_ref_conflict_snapshot_side(
+        &self,
+        task_ref: &str,
+        path: &ConflictPath,
+    ) -> Result<Option<ConflictSide>, Error> {
+        let direct_ref = format!("{task_ref}:{}", path.as_str());
+        if git_status(["cat-file", "-e", &direct_ref], Some(&self.root)).is_ok() {
+            return Ok(Some(ConflictSide {
+                path: path.as_str().to_string(),
+                contents: self.capped_git_blob(["show", &direct_ref])?,
+            }));
+        }
+        if path.as_str() != "order.md" {
+            if let Some(local_path) = self.task_ref_task_with_same_stem_path(task_ref, path)? {
+                let refspec = format!("{task_ref}:{local_path}");
+                return Ok(Some(ConflictSide {
+                    contents: self.capped_git_blob(["show", &refspec])?,
+                    path: local_path,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    fn task_ref_task_with_same_stem_path(
+        &self,
+        task_ref: &str,
+        path: &ConflictPath,
+    ) -> Result<Option<String>, Error> {
+        let listing = self.git(["ls-tree", "-r", "--name-only", task_ref])?;
+        Ok(listing
+            .lines()
+            .find(|candidate| *candidate != path.as_str() && path.matches_storage_path(candidate))
+            .map(str::to_string))
+    }
+
+    fn ensure_git_blob_size(&self, task_ref: &str, path: &str, limit: u64) -> Result<(), Error> {
+        let object = format!("{task_ref}:{path}");
+        let size = self.git(["cat-file", "-s", &object])?;
+        let size = size.trim().parse::<u64>().map_err(|_| {
+            Error::Parse(format!(
+                "invalid_task_blob_size path={}",
+                quoted_string(path)
+            ))
+        })?;
+        if size > limit {
+            return Err(Error::Parse(format!(
+                "task_blob_too_large path={} bytes={} max_bytes={} recovery=\"stop; inspect with tiber conflict show <path> when a conflict path is available; coordinate to shrink or remove the oversized Tiber task blob in refs/heads/tasks or origin/tasks without force-pushing or overwriting shared task state\"",
+                quoted_string(path),
+                size,
+                limit
+            )));
+        }
+        Ok(())
+    }
+
+    fn apply_remote_conflict_side(&self, path: &ConflictPath) -> Result<(), Error> {
+        let Some(remote_path) = self.remote_conflict_path(path)? else {
+            if let Some(local_path) = self.local_deletion_conflict_path(path)? {
+                let local = self.tasks_dir().join(local_path);
+                if local.exists() {
+                    fs::remove_file(local)?;
+                }
+                return Ok(());
+            }
+            return Err(Error::Parse(format!(
+                "remote_conflict_side_missing path={}",
+                quoted_string(path.as_str())
+            )));
+        };
+        let remote_ref = format!("refs/remotes/origin/tasks:{remote_path}");
+        self.ensure_git_blob_size(
+            "refs/remotes/origin/tasks",
+            &remote_path,
+            MAX_TASK_BLOB_BYTES,
+        )?;
+        let contents = self.git(["show", &remote_ref])?;
+        if remote_path == "order.md" {
+            fs::write(self.tasks_dir().join(remote_path), contents)?;
+            return Ok(());
+        }
+        if let Some(local_path) = self.local_task_with_same_stem_path(&remote_path)? {
+            if local_path != remote_path {
+                let local = self.tasks_dir().join(local_path);
+                if local.exists() {
+                    fs::remove_file(local)?;
+                }
+            }
+        }
+        let destination = self.tasks_dir().join(remote_path);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(destination, contents)?;
+        Ok(())
+    }
+
+    fn local_deletion_conflict_path(&self, path: &ConflictPath) -> Result<Option<String>, Error> {
+        let Some(local_path) = self.local_conflict_side(path)?.map(|side| side.path) else {
+            return Ok(None);
+        };
+        let remote_ref = format!("refs/remotes/origin/tasks:{local_path}");
+        match git_status(["cat-file", "-e", &remote_ref], Some(&self.root)) {
+            Ok(()) => Ok(None),
+            Err(Error::CommandFailed { .. }) => Ok(Some(local_path)),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn reconcile_open_order(&self) -> Result<(), Error> {
+        let open_tasks = self
+            .task_file_refs()?
+            .iter()
+            .filter(|task_ref| {
+                OPEN_STATUS_DIRS
+                    .iter()
+                    .any(|status| task_ref.starts_with(&format!("{status}/")))
+            })
+            .map(|task_ref| task_stem(Path::new(task_ref)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let reconciliation = OrderReconciliation::reconcile(self.order_entries()?, open_tasks);
+        self.write_order(reconciliation.entries())
+    }
+
     fn task_documents_snapshot(&self) -> Result<Vec<TaskDocument>, Error> {
         let ranks = self
             .order_entries()?
@@ -822,14 +1934,23 @@ impl GitRepository {
 
     fn task_committed_at(&self, task_ref: &str) -> Result<Option<String>, Error> {
         let branch_path = task_ref.to_string();
-        let committed_at = self.git(vec![
+        let mut args = vec![
             "log".to_string(),
             "-1".to_string(),
             "--format=%cI".to_string(),
             "refs/heads/tasks".to_string(),
-            "--".to_string(),
-            branch_path,
-        ])?;
+        ];
+        if git_status(
+            ["show-ref", "--verify", "refs/remotes/origin/tasks"],
+            Some(&self.root),
+        )
+        .is_ok()
+        {
+            args.push("refs/remotes/origin/tasks".to_string());
+        }
+        args.push("--".to_string());
+        args.push(branch_path);
+        let committed_at = self.git(args)?;
         let committed_at = committed_at.trim();
         if committed_at.is_empty() {
             Ok(None)
@@ -867,9 +1988,18 @@ impl GitRepository {
     }
 
     fn read_sync(&self) -> Result<(), Error> {
-        let worktree_name = self.current_branch()?;
-        if self.fetch_origin_tasks()?.is_some() {
-            self.merge_remote_tasks(&worktree_name)?;
+        let local_parent = match self.git(["rev-parse", "--verify", "refs/heads/tasks"]) {
+            Ok(local_parent) => Some(local_parent),
+            Err(Error::CommandFailed { .. }) => None,
+            Err(error) => return Err(error),
+        };
+        let remote_parent = self.fetch_origin_tasks(false)?;
+        if let Some(remote_parent) = remote_parent.as_deref() {
+            let merge_base = match local_parent.as_deref() {
+                Some(local_parent) => self.task_merge_base(local_parent, Some(remote_parent))?,
+                None => None,
+            };
+            self.merge_remote_tasks(merge_base.as_deref())?;
         }
         Ok(())
     }
@@ -1222,11 +2352,7 @@ impl GitRepository {
         } else {
             None
         };
-        let mut files = vec![
-            (
-                ".gitignore",
-                "# tiber local working copy\n.tasks\n".to_string(),
-            ),
+        let files = vec![
             (
                 ".githooks/post-commit.tiber",
                 "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n"
@@ -1237,9 +2363,6 @@ impl GitRepository {
                 "name: tiber close from trailers\n\non:\n  push:\n    branches: [main]\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Install Tiber\n        run: |\n          git clone --depth 1 https://github.com/jwilger/ai-plugins.git .tiber-src\n          cargo install --path .tiber-src/plugins/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n".to_string(),
             ),
         ];
-        if let Some(justfile) = self.show_tasks_justfile()? {
-            files.push(("justfile", justfile));
-        }
         if apply {
             for (path, contents) in &files {
                 let destination = self.root.join(path);
@@ -1327,22 +2450,6 @@ impl GitRepository {
         Err(Error::Parse(format!(
             "task_id_collision legacy_stem={legacy_stem}"
         )))
-    }
-
-    fn show_tasks_justfile(&self) -> Result<Option<String>, Error> {
-        let path = self.root.join("justfile");
-        if !path.exists() {
-            return Ok(None);
-        }
-        let mut contents = fs::read_to_string(path)?;
-        if contents.lines().any(|line| line.trim() == "show-tasks:") {
-            return Ok(None);
-        }
-        if !contents.ends_with('\n') {
-            contents.push('\n');
-        }
-        contents.push_str("\nshow-tasks:\n  tiber list\n");
-        Ok(Some(contents))
     }
 
     fn report_schema_errors(
@@ -1549,7 +2656,7 @@ impl GitRepository {
 
     fn resolve_task_ref(&self, task_ref: &str) -> Result<PathBuf, Error> {
         if task_ref.contains('/') || task_ref.ends_with(".md") || task_ref.trim().is_empty() {
-            return Err(Error::Parse(format!("invalid_task_ref ref={task_ref}")));
+            return Err(task_ref_invalid(task_ref));
         }
         let mut matches = self
             .task_file_refs()?
@@ -1578,11 +2685,8 @@ impl GitRepository {
         matches.sort();
         match matches.as_slice() {
             [resolved] => Ok(PathBuf::from(resolved)),
-            [] => Err(Error::Parse(format!("task_ref_missing ref={task_ref}"))),
-            _ => Err(Error::Parse(format!(
-                "ambiguous_task_ref ref={task_ref} matches={}",
-                matches.join(",")
-            ))),
+            [] => Err(task_ref_missing(task_ref)),
+            _ => Err(task_ref_ambiguous(task_ref, matches)),
         }
     }
 
@@ -1671,6 +2775,31 @@ impl GitRepository {
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(Error::Parse(
                 format!("tiber_lock_busy path={}", path_to_entry(&lock_path)?),
             )),
+            Err(error) => Err(Error::Io(error)),
+        }
+    }
+
+    fn partial_create_marker_path(&self) -> Result<PathBuf, Error> {
+        Ok(self
+            .git_common_dir()?
+            .join("tiber")
+            .join("partial-create-sync"))
+    }
+
+    fn write_partial_create_marker(&self, task_path: &str) -> Result<(), Error> {
+        let marker_path = self.partial_create_marker_path()?;
+        if let Some(parent) = marker_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(marker_path, task_path)?;
+        Ok(())
+    }
+
+    fn clear_partial_create_marker(&self) -> Result<(), Error> {
+        let marker_path = self.partial_create_marker_path()?;
+        match fs::remove_file(marker_path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(Error::Io(error)),
         }
     }
@@ -1952,6 +3081,49 @@ fn is_course_task_path(path: &str) -> bool {
         && path.extension().is_some_and(|extension| extension == "md")
 }
 
+fn is_status_gitkeep_path(path: &str) -> bool {
+    let path = Path::new(path);
+    let mut components = path.components();
+    let Some(status) = components
+        .next()
+        .and_then(|component| component.as_os_str().to_str())
+    else {
+        return false;
+    };
+    STATUS_DIRS.contains(&status)
+        && components
+            .next()
+            .is_some_and(|component| component.as_os_str() == ".gitkeep")
+        && components.next().is_none()
+}
+
+fn invalid_conflict_path(path: &str) -> Error {
+    Error::Parse(format!(
+        "invalid_conflict_path path={}",
+        quoted_string(path)
+    ))
+}
+
+fn conflict_path_is_selected(selected_paths: &[ConflictPath], path: &str) -> bool {
+    selected_paths
+        .iter()
+        .any(|selected| selected.matches_storage_path(path))
+}
+
+fn tasks_remote_rewritten_error() -> Error {
+    Error::Parse(
+        "tasks_remote_rewritten recovery=\"stop and inspect origin/tasks; do not force-push or overwrite shared task state without human coordination\""
+            .to_string(),
+    )
+}
+
+fn implicit_remote_refresh_error(error: Error) -> Error {
+    Error::Parse(format!(
+        "tasks_remote_refresh_failed source={}",
+        error.sanitized_sync_source()
+    ))
+}
+
 fn stem_parts(stem: &str) -> Option<(&str, &str)> {
     let (date, rest) = stem.split_once('-')?;
     let (code, nickname) = rest.split_once('-')?;
@@ -1983,10 +3155,7 @@ fn resolve_task_ref_to_stem(task_refs: &[String], task_ref: &str) -> Result<Opti
     match matches.as_slice() {
         [stem] => Ok(Some(stem.clone())),
         [] => Ok(None),
-        _ => Err(Error::Parse(format!(
-            "ambiguous_task_ref ref={task_ref} matches={}",
-            matches.join(",")
-        ))),
+        _ => Err(task_ref_ambiguous(task_ref, matches)),
     }
 }
 
@@ -2413,6 +3582,10 @@ fn is_retryable_push_failure(error: &Error) -> bool {
     }
 }
 
+fn is_non_fast_forward_fetch_rejection(stderr: &str) -> bool {
+    stderr.contains("non-fast-forward") || stderr.contains("would clobber existing")
+}
+
 enum SectionSplit {
     Before,
     Section,
@@ -2720,6 +3893,93 @@ where
     }
 }
 
+fn git_output_capped<I, S>(args: I, cwd: Option<&Path>, limit: usize) -> Result<String, Error>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let args = args
+        .into_iter()
+        .map(|arg| arg.as_ref().to_owned())
+        .collect::<Vec<_>>();
+    let mut command = Command::new("git");
+    command.args(&args);
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command.env("LC_ALL", "C");
+    command.env("LANGUAGE", "C");
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    let mut stdout = child.stdout.take().expect("stdout should be piped");
+    let mut bytes = Vec::new();
+    stdout
+        .by_ref()
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    drop(stdout);
+    let truncated = bytes.len() > limit;
+    if truncated {
+        let _ = child.kill();
+        let _ = child.wait();
+        bytes.truncate(limit);
+        return Ok(capped_utf8_text(bytes, limit, true));
+    }
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(Error::CommandFailed {
+            program: "git".to_string(),
+            args: args
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect(),
+            status: output.status.to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+    Ok(capped_utf8_text(bytes, limit, false))
+}
+
+fn ensure_file_size(path: &Path, display_path: &str, limit: u64) -> Result<(), Error> {
+    let size = fs::metadata(path)?.len();
+    if size > limit {
+        return Err(Error::Parse(format!(
+            "task_blob_too_large path={} bytes={} max_bytes={} recovery=\"stop; inspect with tiber conflict show <path> when a conflict path is available; coordinate to shrink or remove the oversized Tiber task blob in refs/heads/tasks or origin/tasks without force-pushing or overwriting shared task state\"",
+            quoted_string(display_path),
+            size,
+            limit
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_local_file_size(path: &Path, display_path: &str, limit: u64) -> Result<(), Error> {
+    let size = fs::metadata(path)?.len();
+    if size > limit {
+        return Err(Error::Parse(format!(
+            "task_blob_too_large path={} bytes={} max_bytes={} recovery=\"reduce this local Tiber task below the size limit, rerun the command, and do not publish the oversized task blob to shared refs\"",
+            quoted_string(display_path),
+            size,
+            limit
+        )));
+    }
+    Ok(())
+}
+
+fn capped_utf8_text(mut bytes: Vec<u8>, limit: usize, truncated: bool) -> String {
+    if !truncated {
+        return String::from_utf8_lossy(&bytes).into_owned();
+    }
+    while std::str::from_utf8(&bytes).is_err() {
+        bytes.pop();
+    }
+    format!(
+        "{}\n[truncated: conflict side exceeded {limit} bytes]",
+        String::from_utf8_lossy(&bytes)
+    )
+}
+
 fn lock_metadata() -> String {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2821,4 +4081,34 @@ fn command_output(
         status: output.status.to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{command_failure_needs_redaction, is_status_gitkeep_path};
+
+    #[test]
+    fn status_gitkeep_path_rejects_parent_components_and_non_status_paths() {
+        assert!(is_status_gitkeep_path("backlog/.gitkeep"));
+        assert!(is_status_gitkeep_path("in-progress/.gitkeep"));
+        assert!(!is_status_gitkeep_path("../.gitkeep"));
+        assert!(!is_status_gitkeep_path("backlog/../.gitkeep"));
+        assert!(!is_status_gitkeep_path("backlog/nested/.gitkeep"));
+        assert!(!is_status_gitkeep_path("unknown/.gitkeep"));
+    }
+
+    #[test]
+    fn remote_command_redaction_detects_git_config_prefixes() {
+        let args = vec![
+            "-c".to_string(),
+            "core.hooksPath=/dev/null".to_string(),
+            "push".to_string(),
+            "origin".to_string(),
+        ];
+        assert!(command_failure_needs_redaction(&args));
+        assert!(!command_failure_needs_redaction(&[
+            "commit-tree".to_string(),
+            "HEAD".to_string()
+        ]));
+    }
 }

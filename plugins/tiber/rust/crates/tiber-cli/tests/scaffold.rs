@@ -13,9 +13,8 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
     assert_success_ref(&dry_run);
     assert_eq!(
         String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8"),
-        "would write .gitignore\nwould write .githooks/post-commit.tiber\nwould write .github/workflows/tiber-close-from-trailers.yml\n"
+        "would write .githooks/post-commit.tiber\nwould write .github/workflows/tiber-close-from-trailers.yml\n"
     );
-    assert!(!repo.path().join(".gitignore").exists());
     assert!(!repo
         .path()
         .join(".githooks")
@@ -31,7 +30,7 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
     let apply = repo.tiber(["scaffold", "repo", "--apply"]);
 
     assert_success(apply);
-    assert!(repo.path().join(".gitignore").exists());
+    assert!(!repo.path().join(".gitignore").exists());
     assert_eq!(
         fs::read_to_string(repo.path().join(".githooks").join("post-commit.tiber"))
             .expect("read hook snippet"),
@@ -46,7 +45,7 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
 }
 
 #[test]
-fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
+fn scaffold_repo_preserves_existing_justfile_without_show_tasks_recipe() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join("justfile"), "test:\n  cargo test\n")
         .expect("write existing justfile");
@@ -56,7 +55,7 @@ fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     assert_success_ref(&dry_run);
     assert_eq!(
         String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8"),
-        "would write .gitignore\nwould write .githooks/post-commit.tiber\nwould write .github/workflows/tiber-close-from-trailers.yml\nwould write justfile\n"
+        "would write .githooks/post-commit.tiber\nwould write .github/workflows/tiber-close-from-trailers.yml\n"
     );
     assert_eq!(
         fs::read_to_string(repo.path().join("justfile")).expect("read justfile"),
@@ -68,13 +67,13 @@ fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     assert_success(apply);
     assert_eq!(
         fs::read_to_string(repo.path().join("justfile")).expect("read justfile"),
-        "test:\n  cargo test\n\nshow-tasks:\n  tiber list\n"
+        "test:\n  cargo test\n"
     );
 
     let second_apply = repo.tiber(["scaffold", "repo", "--apply"]);
     assert_success(second_apply);
     assert_eq!(
         fs::read_to_string(repo.path().join("justfile")).expect("read justfile"),
-        "test:\n  cargo test\n\nshow-tasks:\n  tiber list\n"
+        "test:\n  cargo test\n"
     );
 }

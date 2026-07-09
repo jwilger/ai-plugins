@@ -41,6 +41,19 @@ async fn dashboard_routes_render_board_and_task_pages() {
     let task = body_text(task).await;
     assert!(task.contains("title: Render dashboard"));
 
+    let missing = app
+        .clone()
+        .oneshot(
+            Request::get("/tasks/missing")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("missing task response");
+    let missing_status = missing.status();
+    let missing = body_text(missing).await;
+    assert_eq!(missing_status, StatusCode::NOT_FOUND, "{missing}");
+
     let traversal = app
         .oneshot(
             Request::get("/tasks/../render-dashboard.md")
@@ -50,6 +63,34 @@ async fn dashboard_routes_render_board_and_task_pages() {
         .await
         .expect("traversal response");
     assert_eq!(traversal.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn dashboard_board_fetches_remote_tasks_in_fresh_clone() {
+    let origin = TempRepo::bare();
+    let seed = TempRepo::initialized();
+    seed.git([
+        "remote",
+        "add",
+        "origin",
+        origin.path.to_str().expect("origin path utf8"),
+    ]);
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    seed.tiber(["init"]);
+    seed.tiber(["create", "Remote dashboard task"]);
+    seed.git(["push", "origin", "refs/heads/tasks:refs/heads/tasks"]);
+
+    let clone = TempRepo::clone_from(&origin);
+    let app = tiber_server::router_at(clone.path.clone());
+    let board = app
+        .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+        .await
+        .expect("board response");
+
+    assert_eq!(board.status(), StatusCode::OK);
+    let board = body_text(board).await;
+    assert!(board.contains("Remote dashboard task"));
 }
 
 #[tokio::test]
@@ -115,6 +156,66 @@ async fn dashboard_board_renders_while_tiber_writer_lock_exists() {
     let board = body_text(response).await;
     assert!(board.contains("Visible during write"));
     assert!(!board.contains("tiber_lock_busy"));
+}
+
+#[tokio::test]
+async fn dashboard_redacts_task_sync_errors_from_board_and_events() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    repo.git([
+        "remote",
+        "add",
+        "origin",
+        "https://user:secret-token@example.invalid/private/repo.git",
+    ]);
+
+    let app = tiber_server::router_at(repo.path.clone());
+    let board = app
+        .clone()
+        .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+        .await
+        .expect("board response");
+    assert_eq!(board.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let board = body_text(board).await;
+    assert!(board.contains("dashboard_task_load_failed"));
+    assert!(board.contains("args_redacted=true"));
+    assert!(board.contains("stderr_redacted=true"));
+    assert!(!board.contains("secret-token"));
+    assert!(!board.contains("private/repo.git"));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/events")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("events response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let event = next_body_frame(&mut body).await;
+    assert!(event.contains("dashboard_task_load_failed"));
+    assert!(event.contains("args_redacted=true"));
+    assert!(event.contains("stderr_redacted=true"));
+    assert!(!event.contains("secret-token"));
+    assert!(!event.contains("private/repo.git"));
+
+    let task = app
+        .oneshot(
+            Request::get("/tasks/missing")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("task response");
+    assert_eq!(task.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let task = body_text(task).await;
+    assert!(task.contains("dashboard_task_load_failed"));
+    assert!(task.contains("args_redacted=true"));
+    assert!(task.contains("stderr_redacted=true"));
+    assert!(!task.contains("secret-token"));
+    assert!(!task.contains("private/repo.git"));
 }
 
 #[tokio::test]
@@ -253,6 +354,58 @@ async fn dashboard_events_stream_board_changes_without_reconnecting() {
 }
 
 #[tokio::test]
+async fn dashboard_events_retry_remote_sync_after_failure() {
+    let origin = TempRepo::bare();
+    let seed = TempRepo::initialized();
+    seed.git([
+        "remote",
+        "add",
+        "origin",
+        origin.path.to_str().expect("origin path utf8"),
+    ]);
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    seed.tiber(["init"]);
+    seed.tiber(["create", "Remote stream task"]);
+    seed.git(["push", "origin", "refs/heads/tasks:refs/heads/tasks"]);
+
+    let clone = TempRepo::clone_from(&origin);
+    let missing_origin = clone.path.join("missing-origin.git");
+    clone.git([
+        "remote",
+        "set-url",
+        "origin",
+        missing_origin
+            .to_str()
+            .expect("missing origin path should be utf8"),
+    ]);
+
+    let response = tiber_server::router_at(clone.path.clone())
+        .oneshot(
+            Request::get("/events")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("events response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+
+    let failed = next_body_frame(&mut body).await;
+    assert!(failed.contains("dashboard_task_load_failed"));
+    assert!(failed.contains("args_redacted=true"));
+
+    clone.git([
+        "remote",
+        "set-url",
+        "origin",
+        origin.path.to_str().expect("origin path utf8"),
+    ]);
+    let recovered = next_body_frame(&mut body).await;
+    assert!(recovered.contains("Remote stream task"));
+}
+
+#[tokio::test]
 async fn dashboard_does_not_expose_http_mcp_route() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);
@@ -338,7 +491,7 @@ struct TempRepo {
 }
 
 impl TempRepo {
-    fn initialized() -> Self {
+    fn new() -> Self {
         static TEMP_REPO_SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -350,7 +503,11 @@ impl TempRepo {
             std::process::id(),
         ));
         fs::create_dir(&path).expect("create temp repo");
-        let repo = Self { path };
+        Self { path }
+    }
+
+    fn initialized() -> Self {
+        let repo = Self::new();
         repo.git(["init", "-b", "main"]);
         repo.git(["config", "user.email", "tiber@example.test"]);
         repo.git(["config", "user.name", "Tiber Test"]);
@@ -359,6 +516,27 @@ impl TempRepo {
         repo.git(["add", "README.md"]);
         repo.git(["commit", "-m", "Initial commit"]);
         repo
+    }
+
+    fn bare() -> Self {
+        let repo = Self::new();
+        repo.git(["init", "--bare"]);
+        repo
+    }
+
+    fn clone_from(origin: &Self) -> Self {
+        let clone = Self::new();
+        assert_success(
+            Command::new("git")
+                .args(["clone", origin.path.to_str().expect("origin path utf8")])
+                .arg(&clone.path)
+                .output()
+                .expect("clone repository"),
+        );
+        clone.git(["config", "user.email", "tiber@example.test"]);
+        clone.git(["config", "user.name", "Tiber Test"]);
+        clone.git(["config", "commit.gpgsign", "false"]);
+        clone
     }
 
     fn tiber<I, S>(&self, args: I)

@@ -5,7 +5,7 @@ fn main() -> ExitCode {
     match run(env::args().skip(1)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("{error}");
+            eprintln!("{}", error.sanitized_agent_source());
             ExitCode::FAILURE
         }
     }
@@ -77,6 +77,18 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
                 metadata.title,
                 metadata.committed_at.unwrap_or_else(|| "uncommitted".to_string())
             );
+            Ok(())
+        }
+        [command, action, path] if command == "conflict" && action == "show" => {
+            let conflict = tiber_git::conflict_snapshot(path)?;
+            print!("{}", format_conflict_snapshot(conflict));
+            Ok(())
+        }
+        [command, action, rest @ ..] if command == "conflict" && action == "resolve" => {
+            let resolutions = parse_conflict_resolve_args(rest)?;
+            for resolution in tiber_git::resolve_conflicts(&resolutions)? {
+                println!("resolved {:?} side={}", resolution.path, resolution.side);
+            }
             Ok(())
         }
         [command] if command == "list" => {
@@ -182,9 +194,22 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             Ok(())
         }
         _ => Err(tiber_git::Error::Usage(
-            "usage: tiber init|sync|codex-sandbox --dry-run|dashboard serve|mcp stdio|install-bin --target-dir <dir> --dry-run|--apply|create <title>|show <ref>|metadata <ref>|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add <ref> <title> [--after s1,s2]|subtask check|uncheck|update <ref> [--title|--summary|--context|--tags|--pr-mr-url|--pr-mr-status]|acceptance add|check|uncheck|remove|note add|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
+            "usage: tiber init|sync|codex-sandbox --dry-run|dashboard serve|mcp stdio|install-bin --target-dir <dir> --dry-run|--apply|create <title>|show <ref>|metadata <ref>|conflict show <path>|conflict resolve <path> --local|--remote|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add <ref> <title> [--after s1,s2]|subtask check|uncheck|update <ref> [--title|--summary|--context|--tags|--pr-mr-url|--pr-mr-status]|acceptance add|check|uncheck|remove|note add|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
         )),
     }
+}
+
+fn format_conflict_snapshot(conflict: tiber_git::ConflictSnapshot) -> String {
+    format!(
+        "{}\n",
+        serde_json::json!({
+            "path": conflict.path,
+            "local_path": conflict.local_path,
+            "remote_path": conflict.remote_path,
+            "local": conflict.local,
+            "remote": conflict.remote,
+        })
+    )
 }
 
 fn parse_comma_list(value: &str) -> Vec<String> {
@@ -204,6 +229,30 @@ fn parse_subtask_add_args(args: &[String]) -> Result<Vec<String>, tiber_git::Err
             "unknown subtask add arguments".to_string(),
         )),
     }
+}
+
+fn parse_conflict_resolve_args(
+    args: &[String],
+) -> Result<Vec<tiber_git::ConflictResolutionRequest>, tiber_git::Error> {
+    if args.is_empty() || !args.len().is_multiple_of(2) {
+        return Err(tiber_git::Error::Usage(
+            "conflict resolve requires one or more <path> --local|--remote pairs".to_string(),
+        ));
+    }
+    args.chunks_exact(2)
+        .map(|pair| {
+            let side = match pair[1].as_str() {
+                "--local" => "local",
+                "--remote" => "remote",
+                _ => {
+                    return Err(tiber_git::Error::Usage(
+                        "conflict resolve requires --local or --remote".to_string(),
+                    ))
+                }
+            };
+            tiber_git::ConflictResolutionRequest::parse(pair[0].clone(), side)
+        })
+        .collect()
 }
 
 struct UpdateArgs {

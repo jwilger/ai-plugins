@@ -11,6 +11,17 @@ fn create_stores_course_shaped_task_in_backlog_and_list_prints_ordered_summary()
     let create = repo.tiber(["create", "Write tiber docs"]);
 
     assert_success_ref(&create);
+    assert!(
+        !repo.path().join(".tasks").exists(),
+        "tiber create should not leave host source-tree task files behind"
+    );
+    let status = repo.git_output(["status", "--short"]);
+    assert_success_ref(&status);
+    assert_eq!(
+        String::from_utf8(status.stdout).expect("status output should be utf8"),
+        "",
+        "tiber create should not dirty the host source tree"
+    );
     let stem = task_stem(&repo, "backlog", "write-tiber-docs");
     assert_eq!(
         String::from_utf8(create.stdout).expect("create output should be utf8"),
@@ -205,4 +216,37 @@ fn show_resolves_by_id_nickname_or_full_stem_without_storage_paths() {
             "show should print task for ref {task_ref}"
         );
     }
+}
+
+#[test]
+fn list_redacts_generic_fetch_errors() {
+    let repo = TempRepo::initialized();
+    repo.git([
+        "remote",
+        "add",
+        "origin",
+        "https://user:secret-token@example.invalid/private/repo.git",
+    ]);
+    assert_success(repo.tiber(["init"]));
+
+    let list = repo.tiber(["list"]);
+
+    assert!(!list.status.success(), "list should surface sync failure");
+    let stderr = String::from_utf8(list.stderr).expect("stderr should be utf8");
+    assert!(
+        stderr.contains("args_redacted=true"),
+        "stderr should redact fetch command arguments: {stderr}"
+    );
+    assert!(
+        stderr.contains("stderr_redacted=true"),
+        "stderr should redact fetch stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("secret-token"),
+        "stderr should not leak token-bearing remote details: {stderr}"
+    );
+    assert!(
+        !stderr.contains("private/repo.git"),
+        "stderr should not leak private remote path details: {stderr}"
+    );
 }

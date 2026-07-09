@@ -1,6 +1,6 @@
 {
   "name": "tiber",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Git-backed task boards for coding agents: shared cross-worktree task tracking, tiber CLI, stdio MCP, dry-run-first scaffold previews, validation, and read-only dashboard workflows.",
   "author": {
     "name": "John Wilger",
@@ -23,7 +23,7 @@
   "interface": {
     "displayName": "Tiber",
     "shortDescription": "Git-backed shared task tracking for agent workflows.",
-    "longDescription": "Use Tiber when a user asks for repository task tracking, shared agent task state across worktrees, task creation, task ordering, validation, sync conflict handling, setup/scaffold guidance, or no-follow-up setup sequencing. It provides a tiber CLI, stdio MCP entry point, dry-run-first repo scaffolding, and source-included Rust implementation for deterministic task creation, ordering, validation, and read-only dashboard workflows. Plugin install and session start are non-mutating. For repo integration files, even when the user asks for no follow-up questions, run or recommend only tiber scaffold repo --dry-run, preview .gitignore, hook/workflow snippets, and optional just show-tasks changes, then stop until explicit approval of that preview.",
+    "longDescription": "Use Tiber when a user asks for repository task tracking, shared agent task state across worktrees, task creation, task ordering, validation, sync conflict handling, setup/scaffold guidance, or no-follow-up setup sequencing. It provides a tiber CLI, stdio MCP entry point, dry-run-first repo scaffolding, and source-included Rust implementation for deterministic task creation, ordering, validation, and read-only dashboard workflows. Plugin install and session start are non-mutating. For repo integration files, even when the user asks for no follow-up questions, run or recommend only tiber scaffold repo --dry-run, preview the planned hook and workflow integration files, then stop until explicit approval of that preview.",
     "developerName": "John Wilger",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],

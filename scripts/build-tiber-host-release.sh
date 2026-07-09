@@ -21,8 +21,9 @@ target_dir="$(
     --no-deps |
     jq -r .target_directory
 )"
-destination="$root/plugins/tiber/dist/$target/tiber"
+destination="$root/.dependencies/tiber-host-release/$target/tiber"
 mkdir -p "$(dirname "$destination")"
 cp "$target_dir/release/tiber" "$destination"
 chmod 0755 "$destination"
-echo "built $destination"
+echo "built dev-only host binary $destination"
+echo "bundled release artifacts are built by scripts/build-tiber-release-all.sh"

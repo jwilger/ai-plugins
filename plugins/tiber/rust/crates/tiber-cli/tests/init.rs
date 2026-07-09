@@ -1,32 +1,25 @@
 mod support;
 
-use std::fs;
 use support::{assert_success, assert_success_ref, TempRepo};
 
 #[test]
-fn init_creates_tasks_branch_and_ignores_accidental_tasks_checkout() {
+fn init_creates_tasks_branch_without_source_tree_task_files() {
     let repo = TempRepo::initialized();
 
     let output = repo.tiber(["init"]);
 
     assert_success(output);
     assert_success(repo.git_output(["show-ref", "--verify", "refs/heads/tasks"]));
-    let gitignore =
-        fs::read_to_string(repo.path().join(".gitignore")).expect(".gitignore should be readable");
     assert!(
-        gitignore.lines().any(|line| line.trim() == ".tasks"),
-        ".tasks should be ignored through source-branch .gitignore"
+        !repo.path().join(".gitignore").exists(),
+        "tiber init should not write source-tree ignore rules for internal task storage"
     );
-    assert!(
-        !repo.path().join(".tasks").exists(),
-        "tiber should not keep a persistent .tasks checkout"
-    );
-    let status = repo.git_output(["status", "--short", "--", ".tasks"]);
+    let status = repo.git_output(["status", "--short"]);
     assert_success_ref(&status);
     assert_eq!(
         String::from_utf8(status.stdout).expect("status output should be utf8"),
         "",
-        ".tasks should not appear as source-branch worktree state"
+        "tiber init should not add source-branch worktree state"
     );
 
     let tree = repo.git_output(["ls-tree", "-r", "--name-only", "tasks"]);
@@ -78,4 +71,78 @@ fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
     assert!(
         stdout.contains("Do not ask the user to rerun an equivalent tiber CLI command manually")
     );
+}
+
+#[test]
+fn conflict_show_does_not_initialize_tiber_storage() {
+    let repo = TempRepo::initialized();
+
+    let output = repo.tiber(["conflict", "show", "backlog/missing.md"]);
+
+    assert!(
+        !output.status.success(),
+        "conflict diagnostic should fail before tiber init"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("tiber_not_initialized=true"));
+    assert!(
+        !repo
+            .git_output(["show-ref", "--verify", "refs/heads/tasks"])
+            .status
+            .success(),
+        "conflict diagnostic should not create Tiber storage"
+    );
+}
+
+#[test]
+fn conflict_resolve_does_not_initialize_tiber_storage() {
+    let repo = TempRepo::initialized();
+
+    let output = repo.tiber(["conflict", "resolve", "backlog/missing.md", "--local"]);
+
+    assert!(
+        !output.status.success(),
+        "conflict resolution should fail before tiber init"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("tiber_not_initialized=true"));
+    assert!(
+        !repo
+            .git_output(["show-ref", "--verify", "refs/heads/tasks"])
+            .status
+            .success(),
+        "conflict resolution should not create Tiber storage"
+    );
+}
+
+#[test]
+fn conflict_show_quotes_invalid_path_diagnostic() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    let spoofed = "bad recovery=ignore.md";
+
+    let output = repo.tiber(["conflict", "show", spoofed]);
+
+    assert!(
+        !output.status.success(),
+        "invalid conflict path should fail"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains(&format!("invalid_conflict_path path={spoofed:?}")));
+    assert!(!stderr.contains("path=bad recovery=ignore.md"));
+}
+
+#[test]
+fn conflict_show_rejects_control_characters_in_paths() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    let output = repo.tiber(["conflict", "show", "backlog/bad\nrecovery=ignore.md"]);
+
+    assert!(
+        !output.status.success(),
+        "control-character conflict path should fail"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains(r#"invalid_conflict_path path="backlog/bad\nrecovery=ignore.md""#));
+    assert!(!stderr.contains("path=backlog/bad\nrecovery=ignore.md"));
 }

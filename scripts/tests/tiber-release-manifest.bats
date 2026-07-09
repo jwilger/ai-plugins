@@ -219,6 +219,12 @@ SH
   [[ "$output" == *"missing-release-launcher"* ]]
 }
 
+@test "complete release check bounds MCP stdio smoke probes" {
+  run grep -F 'timeout --kill-after=5s 30s "$launcher" mcp stdio' "$COMPLETE_SCRIPT"
+
+  [ "$status" -eq 0 ]
+}
+
 @test "complete release check fails when checksums are missing" {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/tiber"
@@ -362,4 +368,42 @@ EOF
 
   rm -rf "$fixture"
   [ "$status" -eq 0 ]
+}
+
+@test "host release build writes dev-only binary outside bundled dist" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/scripts" "$fixture/plugins/tiber/scripts" "$fixture/plugins/tiber/rust" "$fixture/bin"
+  cp "$ROOT/scripts/build-tiber-host-release.sh" "$fixture/scripts/build-tiber-host-release.sh"
+  cat >"$fixture/plugins/tiber/scripts/detect-target.sh" <<'SH'
+detect_tiber_target() {
+  printf '%s\n' x86_64-unknown-linux-gnu
+}
+SH
+  cat >"$fixture/bin/cargo" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+target_dir="$fixture/target"
+if [ "\$1" = "build" ]; then
+  mkdir -p "\$target_dir/release"
+  printf '#!/usr/bin/env sh\nexit 0\n' >"\$target_dir/release/tiber"
+  chmod +x "\$target_dir/release/tiber"
+  exit 0
+fi
+if [ "\$1" = "metadata" ]; then
+  printf '{"target_directory":"%s"}\n' "\$target_dir"
+  exit 0
+fi
+echo "unexpected cargo \$*" >&2
+exit 44
+EOF
+  chmod +x "$fixture/bin/cargo"
+
+  run env PATH="$fixture/bin:$PATH" bash "$fixture/scripts/build-tiber-host-release.sh"
+
+  [ "$status" -eq 0 ]
+  [ -x "$fixture/.dependencies/tiber-host-release/x86_64-unknown-linux-gnu/tiber" ]
+  [ ! -e "$fixture/plugins/tiber/dist/x86_64-unknown-linux-gnu/tiber" ]
+  [[ "$output" == *"dev-only host binary"* ]]
+
+  rm -rf "$fixture"
 }

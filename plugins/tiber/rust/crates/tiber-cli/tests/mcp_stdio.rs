@@ -72,6 +72,10 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(tools.contains(r#""name":"tiber.list""#));
     assert!(tools.contains(r#""name":"tiber.show""#));
     assert!(tools.contains(r#""name":"tiber.metadata""#));
+    assert!(tools.contains(r#""name":"tiber.conflict_show""#));
+    assert!(tools.contains(r#""name":"tiber.conflict_resolve""#));
+    assert!(tools.contains(r#""name":"tiber.conflict_resolve_many""#));
+    assert!(tools.contains(r#""maxItems":25"#));
     assert!(tools.contains(r#""name":"tiber.next""#));
     assert!(tools.contains(r#""name":"tiber.transition""#));
     assert!(tools.contains(r#""name":"tiber.prioritize""#));
@@ -205,6 +209,36 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
 
     write_message(
         &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":111,"method":"tools/call","params":{{"name":"tiber.conflict_show","arguments":{{"path":"backlog/{expose_mcp_task}.md"}}}}}}"#
+        ),
+    );
+    let conflict = read_message(&mut stdout);
+    assert!(conflict.contains(r#""id":111"#));
+    let conflict_response: serde_json::Value =
+        serde_json::from_str(&conflict).expect("conflict response should be json");
+    let conflict_text = conflict_response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("conflict tool text");
+    let conflict_payload: serde_json::Value =
+        serde_json::from_str(conflict_text).expect("conflict text should be json");
+    assert_eq!(
+        conflict_payload["path"],
+        format!("backlog/{expose_mcp_task}.md")
+    );
+    assert_eq!(
+        conflict_payload["local_path"],
+        format!("backlog/{expose_mcp_task}.md")
+    );
+    assert!(conflict_payload["remote_path"].is_null());
+    assert!(conflict_payload["local"]
+        .as_str()
+        .expect("local conflict side")
+        .contains("title: Expose MCP task"));
+    assert!(conflict_payload["remote"].is_null());
+
+    write_message(
+        &mut stdin,
         r#"{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"tiber.next","arguments":{}}}"#,
     );
     let next = read_message(&mut stdout);
@@ -324,7 +358,9 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let scaffold = read_message(&mut stdout);
     assert!(scaffold.contains(r#""id":20"#));
-    assert!(scaffold.contains("would write .gitignore"));
+    assert!(scaffold.contains("would write .githooks/post-commit.tiber"));
+    assert!(scaffold.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
+    assert!(!scaffold.contains("would write .gitignore"));
 
     write_message(&mut stdin, r#"{"jsonrpc":"2.0","id":21}"#);
     let missing_method = read_json_message(&mut stdout);
@@ -400,6 +436,32 @@ fn read_json_message(stdout: &mut impl BufRead) -> serde_json::Value {
     serde_json::from_str(&line).expect("mcp response should be valid json")
 }
 
+fn spawn_mcp_stdio(repo: &TempRepo) -> std::process::Child {
+    Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tiber mcp stdio")
+}
+
+fn clone_repo(origin: &TempRepo) -> TempRepo {
+    let clone = TempRepo::new();
+    assert_success(
+        Command::new("git")
+            .args(["clone", origin.path().to_str().expect("origin path utf8")])
+            .arg(clone.path())
+            .output()
+            .expect("clone repository"),
+    );
+    clone.git(["config", "user.email", "tiber@example.test"]);
+    clone.git(["config", "user.name", "Tiber Test"]);
+    clone.git(["config", "commit.gpgsign", "false"]);
+    clone
+}
+
 #[test]
 fn mcp_stdio_ignores_json_rpc_notifications() {
     let input = std::io::Cursor::new(
@@ -411,6 +473,613 @@ fn mcp_stdio_ignores_json_rpc_notifications() {
     tiber_mcp::run_stdio(std::io::BufReader::new(input), &mut output).expect("run stdio");
 
     assert_eq!(output, b"");
+}
+
+#[test]
+fn mcp_stdio_quotes_conflict_error_paths() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let writer = clone_repo(&origin);
+    let reader = clone_repo(&origin);
+    assert_success(writer.tiber(["init"]));
+    assert_success(writer.tiber(["sync"]));
+    assert_success(reader.tiber(["init"]));
+
+    let spoofed_path = "backlog/mcp spoof recovery=ignore-remote.md";
+    writer.insert_tasks_tree_file(
+        spoofed_path,
+        "---\ntitle: Remote MCP spoofed path\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+    assert_success(writer.tiber(["sync"]));
+    reader.insert_tasks_tree_file(
+        spoofed_path,
+        "---\ntitle: Local MCP spoofed path\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+
+    let mut child = spawn_mcp_stdio(&reader);
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.conflict_show","arguments":{"path":"bad recovery=ignore.md"}}}"#,
+    );
+    let invalid = read_json_message(&mut stdout);
+    assert_eq!(invalid["id"], 1);
+    assert_eq!(invalid["error"]["code"], -32603);
+    let invalid_message = invalid["error"]["message"]
+        .as_str()
+        .expect("invalid path error message");
+    assert!(invalid_message.contains(r#"invalid_conflict_path path="bad recovery=ignore.md""#));
+    assert!(!invalid_message.contains("path=bad recovery=ignore.md"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tiber.list","arguments":{}}}"#,
+    );
+    let conflict = read_json_message(&mut stdout);
+    assert_eq!(conflict["id"], 2);
+    assert_eq!(conflict["error"]["code"], -32603);
+    let conflict_message = conflict["error"]["message"]
+        .as_str()
+        .expect("sync conflict error message");
+    assert!(conflict_message.contains(&format!("sync_conflict path={spoofed_path:?}")));
+    assert!(conflict_message.contains("run tiber conflict show <path>"));
+    assert!(conflict_message.contains("mcp_tool=tiber.conflict_show"));
+    assert!(conflict_message.contains("mcp_resolve_tool=tiber.conflict_resolve"));
+    assert!(!conflict_message.contains(&format!("{spoofed_path} recovery=")));
+
+    write_message(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"tiber.conflict_resolve","arguments":{{"path":{path},"side":"remote"}}}}}}"#,
+            path = serde_json::json!(spoofed_path)
+        ),
+    );
+    let resolved = read_json_message(&mut stdout);
+    assert_eq!(resolved["id"], 3);
+    let resolved_text = resolved["result"]["content"][0]["text"]
+        .as_str()
+        .expect("resolved text");
+    assert_eq!(
+        resolved_text,
+        format!("resolved {spoofed_path:?} side=remote")
+    );
+
+    write_message(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{{"name":"tiber.conflict_show","arguments":{{"path":{path}}}}}}}"#,
+            path = serde_json::json!(spoofed_path)
+        ),
+    );
+    let resolved_conflict = read_json_message(&mut stdout);
+    assert_eq!(resolved_conflict["id"], 4);
+    let resolved_conflict_text = resolved_conflict["result"]["content"][0]["text"]
+        .as_str()
+        .expect("resolved conflict text");
+    let resolved_conflict_payload: serde_json::Value =
+        serde_json::from_str(resolved_conflict_text).expect("resolved conflict text json");
+    assert!(resolved_conflict_payload["local"]
+        .as_str()
+        .expect("local side")
+        .contains("Remote MCP spoofed path"));
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
+}
+
+#[test]
+fn mcp_stdio_redacts_generic_sync_errors() {
+    let repo = TempRepo::initialized();
+    repo.git([
+        "remote",
+        "add",
+        "origin",
+        "https://user:secret-token@example.invalid/private/repo.git",
+    ]);
+    assert_success(repo.tiber(["init"]));
+
+    let mut child = spawn_mcp_stdio(&repo);
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.list","arguments":{}}}"#,
+    );
+    let failed = read_json_message(&mut stdout);
+
+    assert_eq!(failed["id"], 1);
+    assert_eq!(failed["error"]["code"], -32603);
+    let message = failed["error"]["message"].as_str().expect("error message");
+    assert!(message.contains("args_redacted=true"));
+    assert!(message.contains("stderr_redacted=true"));
+    assert!(!message.contains("secret-token"));
+    assert!(!message.contains("private/repo.git"));
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
+}
+
+#[test]
+fn mcp_stdio_conflict_show_truncates_large_conflict_sides() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let writer = clone_repo(&origin);
+    let reader = clone_repo(&origin);
+    assert_success(writer.tiber(["init"]));
+    assert_success(reader.tiber(["init"]));
+    assert_success(writer.tiber(["create", "Large MCP conflict"]));
+    let stem = task_stem(&writer, "backlog", "large-mcp-conflict");
+    assert_success(writer.tiber(["sync"]));
+    assert_success(reader.tiber(["list"]));
+    writer.git(["fetch", "origin", "+tasks:refs/heads/tasks"]);
+
+    let remote_body = format!(
+        "---\ntitle: Remote large MCP conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n{}",
+        "R".repeat(5 * 1024 * 1024)
+    );
+    writer.insert_task_file("backlog", &stem, &remote_body);
+    writer.git(["push", "origin", "refs/heads/tasks:refs/heads/tasks"]);
+    let local_body = format!(
+        "---\ntitle: Local large MCP conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n{}",
+        "L".repeat(5 * 1024 * 1024)
+    );
+    reader.insert_task_file("backlog", &stem, &local_body);
+
+    let oversized_read = reader.tiber(["list"]);
+    assert!(
+        !oversized_read.status.success(),
+        "normal read sync should reject oversized remote task blobs before merging"
+    );
+    let oversized_read_stderr = String::from_utf8(oversized_read.stderr).expect("stderr utf8");
+    assert!(oversized_read_stderr.contains("task_blob_too_large"));
+    assert!(oversized_read_stderr.contains("recovery="));
+    assert!(oversized_read_stderr.contains("inspect with tiber conflict show <path>"));
+    assert!(
+        oversized_read_stderr.contains("without force-pushing or overwriting shared task state")
+    );
+
+    let cli_conflict = reader.tiber(["conflict", "show", &format!("backlog/{stem}.md")]);
+    assert_success_ref(&cli_conflict);
+    let cli_payload: serde_json::Value =
+        serde_json::from_slice(&cli_conflict.stdout).expect("cli conflict output should be json");
+    assert!(cli_payload["local"]
+        .as_str()
+        .expect("cli local side")
+        .contains("[truncated: conflict side exceeded 65536 bytes]"));
+    assert!(cli_payload["remote"]
+        .as_str()
+        .expect("cli remote side")
+        .contains("[truncated: conflict side exceeded 65536 bytes]"));
+
+    let oversized_remote_resolve = reader.tiber([
+        "conflict",
+        "resolve",
+        &format!("backlog/{stem}.md"),
+        "--remote",
+    ]);
+    assert!(
+        !oversized_remote_resolve.status.success(),
+        "oversized selected remote conflict side should be rejected before resolution"
+    );
+    let oversized_remote_resolve_stderr =
+        String::from_utf8(oversized_remote_resolve.stderr).expect("stderr should be utf8");
+    assert!(oversized_remote_resolve_stderr.contains("task_blob_too_large"));
+    assert!(oversized_remote_resolve_stderr.contains("recovery="));
+
+    let mut child = spawn_mcp_stdio(&reader);
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+
+    write_message(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"tiber.conflict_show","arguments":{{"path":"backlog/{stem}.md"}}}}}}"#
+        ),
+    );
+    let conflict = read_json_message(&mut stdout);
+    assert_eq!(conflict["id"], 1);
+    let conflict_text = conflict["result"]["content"][0]["text"]
+        .as_str()
+        .expect("conflict text");
+    let conflict_payload: serde_json::Value =
+        serde_json::from_str(conflict_text).expect("conflict text should be json");
+    let local = conflict_payload["local"]
+        .as_str()
+        .expect("local conflict side");
+    let remote = conflict_payload["remote"]
+        .as_str()
+        .expect("remote conflict side");
+    assert!(local.contains("[truncated: conflict side exceeded 65536 bytes]"));
+    assert!(remote.contains("[truncated: conflict side exceeded 65536 bytes]"));
+    let max_truncated_len = 65_536 + "\n[truncated: conflict side exceeded 65536 bytes]".len();
+    assert!(local.len() <= max_truncated_len);
+    assert!(remote.len() <= max_truncated_len);
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
+}
+
+#[test]
+fn conflict_resolve_local_rejects_oversized_selected_local_side() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let writer = clone_repo(&origin);
+    let reader = clone_repo(&origin);
+    assert_success(writer.tiber(["init"]));
+    assert_success(reader.tiber(["init"]));
+    assert_success(writer.tiber(["create", "Local oversized conflict"]));
+    let stem = task_stem(&writer, "backlog", "local-oversized-conflict");
+    assert_success(writer.tiber(["sync"]));
+    assert_success(reader.tiber(["list"]));
+    writer.git(["fetch", "origin", "+tasks:refs/heads/tasks"]);
+
+    writer.insert_task_file(
+        "in-progress",
+        &stem,
+        "---\ntitle: Remote small MCP conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+    writer.remove_tasks_tree_file(&format!("backlog/{stem}.md"));
+    writer.git(["push", "origin", "refs/heads/tasks:refs/heads/tasks"]);
+    let local_body = format!(
+        "---\ntitle: Local oversized MCP conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n{}",
+        "L".repeat(5 * 1024 * 1024)
+    );
+    reader.insert_task_file("done", &stem, &local_body);
+    reader.remove_tasks_tree_file(&format!("backlog/{stem}.md"));
+
+    let oversized_local_resolve = reader.tiber([
+        "conflict",
+        "resolve",
+        &format!("in-progress/{stem}.md"),
+        "--local",
+    ]);
+    assert!(
+        !oversized_local_resolve.status.success(),
+        "oversized selected local conflict side should be rejected before resolution"
+    );
+    let oversized_local_resolve_stderr =
+        String::from_utf8(oversized_local_resolve.stderr).expect("stderr should be utf8");
+    assert!(oversized_local_resolve_stderr.contains("task_blob_too_large"));
+    assert!(
+        oversized_local_resolve_stderr.contains(&format!("path={:?}", format!("done/{stem}.md")))
+    );
+    assert!(!oversized_local_resolve_stderr
+        .contains(&format!("path={:?}", format!("in-progress/{stem}.md"))));
+    assert!(oversized_local_resolve_stderr.contains("recovery="));
+}
+
+#[test]
+fn mcp_stdio_conflict_resolve_many_resolves_two_conflicts() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let writer = clone_repo(&origin);
+    let reader = clone_repo(&origin);
+    assert_success(writer.tiber(["init"]));
+    assert_success(writer.tiber(["create", "First MCP batch conflict"]));
+    let first = task_stem(&writer, "backlog", "first-mcp-batch-conflict");
+    assert_success(writer.tiber(["create", "Second MCP batch conflict"]));
+    let second = task_stem(&writer, "backlog", "second-mcp-batch-conflict");
+    assert_success(writer.tiber(["sync"]));
+    assert_success(reader.tiber(["list"]));
+
+    writer.insert_task_file(
+        "backlog",
+        &first,
+        "---\ntitle: Remote first MCP batch conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+    writer.insert_task_file(
+        "backlog",
+        &second,
+        "---\ntitle: Remote second MCP batch conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+    writer.git(["push", "origin", "refs/heads/tasks:refs/heads/tasks"]);
+    reader.insert_task_file(
+        "backlog",
+        &first,
+        "---\ntitle: Local first MCP batch conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+    reader.insert_task_file(
+        "backlog",
+        &second,
+        "---\ntitle: Local second MCP batch conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+
+    let mut child = spawn_mcp_stdio(&reader);
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+    let resolutions = serde_json::json!([
+        {"path": format!("backlog/{first}.md"), "side": "local"},
+        {"path": format!("backlog/{second}.md"), "side": "remote"}
+    ]);
+
+    write_message(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"tiber.conflict_resolve_many","arguments":{{"resolutions":{resolutions}}}}}}}"#,
+        ),
+    );
+    let resolved = read_json_message(&mut stdout);
+    assert_eq!(resolved["id"], 1);
+    let resolved_text = resolved["result"]["content"][0]["text"]
+        .as_str()
+        .expect("resolved text");
+    assert!(resolved_text.contains(&format!(
+        "resolved {:?} side=local",
+        format!("backlog/{first}.md")
+    )));
+    assert!(resolved_text.contains(&format!(
+        "resolved {:?} side=remote",
+        format!("backlog/{second}.md")
+    )));
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
+
+    let verification = clone_repo(&origin);
+    let first_task = verification.git_output(["show", &format!("origin/tasks:backlog/{first}.md")]);
+    assert_success_ref(&first_task);
+    assert!(String::from_utf8(first_task.stdout)
+        .expect("first task utf8")
+        .contains("title: Local first MCP batch conflict"));
+    let second_task =
+        verification.git_output(["show", &format!("origin/tasks:backlog/{second}.md")]);
+    assert_success_ref(&second_task);
+    assert!(String::from_utf8(second_task.stdout)
+        .expect("second task utf8")
+        .contains("title: Remote second MCP batch conflict"));
+}
+
+#[test]
+fn mcp_stdio_conflict_resolve_many_rejects_oversized_batches() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    let mut child = spawn_mcp_stdio(&repo);
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+    let resolutions = (0..26)
+        .map(|index| serde_json::json!({"path": format!("backlog/{index:02}-too-many.md"), "side": "local"}))
+        .collect::<Vec<_>>();
+
+    write_message(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"tiber.conflict_resolve_many","arguments":{{"resolutions":{}}}}}}}"#,
+            serde_json::Value::Array(resolutions)
+        ),
+    );
+    let failed = read_json_message(&mut stdout);
+    assert_eq!(failed["id"], 1);
+    assert_eq!(failed["error"]["code"], -32603);
+    let error_message = failed["error"]["message"].as_str().expect("error message");
+    assert!(
+        error_message.contains("mcp_argument_too_many name=resolutions max_items=25"),
+        "unexpected oversized batch failure: {error_message}"
+    );
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
+}
+
+#[test]
+fn mcp_stdio_conflict_resolve_many_accepts_max_sized_batch_for_validation() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    let mut child = spawn_mcp_stdio(&repo);
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+    let resolutions = (0..25)
+        .map(|index| serde_json::json!({"path": format!("backlog/{index:02}-max-sized.md"), "side": "local"}))
+        .collect::<Vec<_>>();
+
+    write_message(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"tiber.conflict_resolve_many","arguments":{{"resolutions":{}}}}}}}"#,
+            serde_json::Value::Array(resolutions)
+        ),
+    );
+    let failed = read_json_message(&mut stdout);
+    assert_eq!(failed["id"], 1);
+    assert_eq!(failed["error"]["code"], -32603);
+    let error_message = failed["error"]["message"].as_str().expect("error message");
+    assert!(
+        !error_message.contains("mcp_argument_too_many"),
+        "max-sized batch should pass MCP size validation: {error_message}"
+    );
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
+}
+
+#[test]
+fn mcp_stdio_conflict_resolve_many_failure_leaves_remote_unchanged() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let writer = clone_repo(&origin);
+    let reader = clone_repo(&origin);
+    assert_success(writer.tiber(["init"]));
+    assert_success(writer.tiber(["create", "Atomic MCP batch conflict"]));
+    let conflict_stem = task_stem(&writer, "backlog", "atomic-mcp-batch-conflict");
+    assert_success(writer.tiber(["create", "Atomic MCP non conflict"]));
+    let non_conflict_stem = task_stem(&writer, "backlog", "atomic-mcp-non-conflict");
+    assert_success(writer.tiber(["sync"]));
+    assert_success(reader.tiber(["list"]));
+
+    writer.insert_task_file(
+        "backlog",
+        &conflict_stem,
+        "---\ntitle: Remote atomic MCP conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+    writer.git(["push", "origin", "refs/heads/tasks:refs/heads/tasks"]);
+    reader.insert_task_file(
+        "backlog",
+        &conflict_stem,
+        "---\ntitle: Local atomic MCP conflict\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+
+    let before_conflict = clone_repo(&origin)
+        .git_output(["show", &format!("origin/tasks:backlog/{conflict_stem}.md")]);
+    assert_success_ref(&before_conflict);
+    let before_conflict = before_conflict.stdout;
+    let before_non_conflict = clone_repo(&origin).git_output([
+        "show",
+        &format!("origin/tasks:backlog/{non_conflict_stem}.md"),
+    ]);
+    assert_success_ref(&before_non_conflict);
+    let before_non_conflict = before_non_conflict.stdout;
+
+    let mut child = spawn_mcp_stdio(&reader);
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+    let resolutions = serde_json::json!([
+        {"path": format!("backlog/{conflict_stem}.md"), "side": "local"},
+        {"path": format!("backlog/{non_conflict_stem}.md"), "side": "remote"}
+    ]);
+
+    write_message(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"tiber.conflict_resolve_many","arguments":{{"resolutions":{resolutions}}}}}}}"#,
+        ),
+    );
+    let failed = read_json_message(&mut stdout);
+    assert_eq!(failed["id"], 1);
+    assert_eq!(failed["error"]["code"], -32603);
+    let error_message = failed["error"]["message"].as_str().expect("error message");
+    assert!(
+        error_message.contains("local_conflict_side_missing")
+            || error_message.contains("conflict_side_not_in_conflict"),
+        "unexpected MCP batch failure: {error_message}"
+    );
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
+
+    let verification = clone_repo(&origin);
+    let after_conflict =
+        verification.git_output(["show", &format!("origin/tasks:backlog/{conflict_stem}.md")]);
+    assert_success_ref(&after_conflict);
+    assert_eq!(after_conflict.stdout, before_conflict);
+    let after_non_conflict = verification.git_output([
+        "show",
+        &format!("origin/tasks:backlog/{non_conflict_stem}.md"),
+    ]);
+    assert_success_ref(&after_non_conflict);
+    assert_eq!(after_non_conflict.stdout, before_non_conflict);
+}
+
+#[test]
+fn mcp_stdio_conflict_resolve_does_not_initialize_tiber_storage() {
+    let repo = TempRepo::initialized();
+    let mut child = spawn_mcp_stdio(&repo);
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.conflict_resolve","arguments":{"path":"backlog/missing.md","side":"local"}}}"#,
+    );
+    let failed = read_json_message(&mut stdout);
+    assert_eq!(failed["id"], 1);
+    assert_eq!(failed["error"]["code"], -32603);
+    assert!(failed["error"]["message"]
+        .as_str()
+        .expect("error message")
+        .contains("tiber_not_initialized=true"));
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
+    assert!(
+        !repo
+            .git_output(["show-ref", "--verify", "refs/heads/tasks"])
+            .status
+            .success(),
+        "MCP conflict resolution should not create Tiber storage"
+    );
 }
 
 #[test]

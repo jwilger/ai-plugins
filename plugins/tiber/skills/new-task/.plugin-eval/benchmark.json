@@ -1,0 +1,74 @@
+{
+  "kind": "plugin-eval-benchmark",
+  "schemaVersion": 2,
+  "version": 2,
+  "targetKind": "skill",
+  "targetName": "new-task",
+  "runner": {
+    "type": "codex-cli",
+    "model": "gpt-5.4-mini",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "extraArgs": []
+  },
+  "workspace": {
+    "sourcePath": ".",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
+  "verifiers": {
+    "commands": [
+      "test -f .plugin-eval-benchmark/new-task.md",
+      "rg -q 'tiber:new-task|new-task' .plugin-eval-benchmark/new-task.md",
+      "node -e 'const fs=require(\"fs\"); const text=fs.readFileSync(\".plugin-eval-benchmark/new-task.md\",\"utf8\"); const has=(re)=>re.test(text); const fail=(message)=>{throw new Error(message)}; const singleResolve=/tiber\\.conflict_resolve(?!_many)/i; if(singleResolve.test(\"tiber.conflict_resolve_many\")) fail(\"single resolver verifier matches batch resolver\"); if(!singleResolve.test(\"tiber.conflict_resolve\")) fail(\"single resolver verifier calibration failed\"); const scenario=has(/Remember selected dashboard task after refresh|selection survives SSE updates/i)?\"capture\":has(/20260708-ab12-dashboard-refresh|create_sync_failed/i)?\"partial\":has(/sync_conflict|tiber\\.conflict_show/i)?\"conflict\":null; if(!scenario) fail(\"scenario not recognizable\"); if(scenario===\"capture\"){ if(!has(/tiber\\.create|structured Tiber MCP create/i)) fail(\"capture missing structured create\"); if(!has(/tiber\\.update|structured Tiber MCP update/i)) fail(\"capture missing structured update\"); if(!has(/tiber\\.acceptance_add|acceptance/i)) fail(\"capture missing acceptance operation\"); if(!has(/tiber\\.validate_fix/i)) fail(\"capture missing structured validation\"); if(!has(/backlog|leave[^\\n.]*backlog/i)) fail(\"capture missing backlog default\") } else if(scenario===\"partial\"){ if(!has(/20260708-ab12-dashboard-refresh/)) fail(\"partial recovery missing created ref\"); if(!has(/do not|don.t|never|reject|avoid|refuse/i)||!has(/retry create|create again/i)) fail(\"partial recovery missing duplicate-create refusal\"); if(!has(/tiber\\.sync|structured MCP sync/i)) fail(\"partial recovery missing structured sync recovery\"); if(!has(/tiber\\.validate_fix/i)) fail(\"partial recovery missing structured validation\") } else if(scenario===\"conflict\"){ if(!has(/tiber\\.conflict_show/i)) fail(\"conflict recovery missing structured conflict-show\"); if(!singleResolve.test(text)) fail(\"conflict recovery missing structured conflict-resolve\"); if(!has(/tiber\\.conflict_resolve_many/i)) fail(\"conflict recovery missing batch conflict-resolve\"); if(!has(/preserve both|both sides/i)) fail(\"conflict recovery missing both sides\"); if(!has(/tiber\\.sync|structured sync/i)) fail(\"conflict recovery missing structured post-resolution sync\") } const rawLeak=/(https?:\\/\\/|ssh:\\/\\/|git@|\\/home\\/|\\/Users\\/|\\/tmp\\/|stderr=(?!redacted)|stdout=)/i; if(rawLeak.test(text)) fail(\"raw sync detail leak\")'",
+      "node -e 'const fs=require(\"fs\"); const file=\".plugin-eval-benchmark/new-task.md\"; const original=fs.readFileSync(file,\"utf8\"); const masked=original.replace(/\\\\.tasks\\//g,\"__DOT_TASKS__/\").replace(/order\\\\.md/g,\"order__DOT__md\").replace(/\\.\\/plugins\\/tiber\\/bin\\/tiber/g,\"__PLUGIN_TIBER_BIN__\"); const danger=\"(?:shell command|(?:run|execute|use) tiber conflict show|(?:run|execute|use) tiber conflict resolve|(?:run|execute|use) tiber sync|(?:run|execute|use) tiber validate|(?:edit|write|modify|read) __DOT_TASKS__/|(?:edit|write|modify) order__DOT__md|direct files|__PLUGIN_TIBER_BIN__|retry create|create again)\"; if(!new RegExp(danger,\"i\").test(masked)) process.exit(0); const refusal=new RegExp(\"\\\\b(do not|don.t|never|reject|avoid|refuse)\\\\b[^\\\\n;.!?]{0,120}\"+danger,\"i\"); if(!refusal.test(masked)){throw new Error(\"missing unsafe-recovery refusal\")}; const stripped=masked.replace(new RegExp(\"\\\\b(do not|don.t|never|reject|avoid|refuse)\\\\b[^\\\\n;.!?]{0,160}\"+danger+\"[^\\\\n;.!?]*\",\"gi\"),\"\"); if(new RegExp(danger,\"i\").test(stripped)){throw new Error(\"unsafe recovery appears outside refusal context\")}'"
+    ]
+  },
+  "notes": [
+    "Run this benchmark from the repository root.",
+    "Scenarios avoid live MCP mutation; each writes a local benchmark artifact in the copied workspace.",
+    "The verifier checks that backlog capture stays structured-MCP-only, validates before claiming success, leaves tasks in backlog by default, and uses structured conflict recovery."
+  ],
+  "setupQuestions": [],
+  "scenarios": [
+    {
+      "id": "capture-backlog-ticket",
+      "title": "Capture backlog ticket from chat",
+      "purpose": "Check that the skill captures a chat request through structured Tiber MCP task operations without direct storage edits.",
+      "userInput": "Use the local Codex skill \"new-task\" if it helps. In this copied workspace, inspect plugins/tiber/skills/new-task/SKILL.md, then write .plugin-eval-benchmark/new-task.md with the exact safe workflow for a user who says: Add a backlog ticket titled \"Remember selected dashboard task after refresh\" with acceptance \"selection survives SSE updates\". The artifact must use structured Tiber MCP create/update/acceptance operations, run structured validation before claiming success, and leave the task in backlog unless the user explicitly asks to start work.",
+      "successChecklist": [
+        "The artifact exists at .plugin-eval-benchmark/new-task.md.",
+        "The workflow uses structured Tiber MCP task operations.",
+        "The workflow validates before reporting success.",
+        "The task stays in backlog by default."
+      ]
+    },
+    {
+      "id": "partial-create-recovery",
+      "title": "Partial create recovery",
+      "purpose": "Check that the skill handles a partial create sync failure without duplicate task creation or raw detail leakage.",
+      "userInput": "Use the local Codex skill \"new-task\" if it helps. In this copied workspace, inspect plugins/tiber/skills/new-task/SKILL.md, then write .plugin-eval-benchmark/new-task.md explaining what to do when structured Tiber MCP create returns `tiber.create_sync_failed created=20260708-ab12-dashboard-refresh recovery=\"run tiber sync after resolving the sync error\" source=tiber.command_failed program=git args_redacted=true status=exit status: 1 stderr_redacted=true`. The artifact must say not to create again, continue against the created ref after sync recovery, keep raw sync details sanitized, and use structured MCP sync/validation.",
+      "successChecklist": [
+        "The artifact says not to retry create.",
+        "The artifact keeps the created ref as the task identity.",
+        "The artifact avoids raw stderr/remote detail leakage.",
+        "The artifact uses structured MCP sync and validation recovery."
+      ]
+    },
+    {
+      "id": "sync-conflict-recovery",
+      "title": "Sync conflict recovery",
+      "purpose": "Check that the skill routes conflict recovery through structured Tiber MCP conflict tools.",
+      "userInput": "Use the local Codex skill \"new-task\" if it helps. In this copied workspace, inspect plugins/tiber/skills/new-task/SKILL.md, then write .plugin-eval-benchmark/new-task.md with guidance for a structured Tiber MCP write that fails with `sync_conflict path=backlog/20260708-ab12-dashboard-refresh.md mcp_tool=tiber.conflict_show mcp_resolve_tool=tiber.conflict_resolve`. The artifact must use structured Tiber MCP conflict-show for the path, preserve both sides, choose the intended side with structured conflict-resolve, use batch conflict-resolve when multiple conflicts are present, rerun structured sync only after resolution, and not use shell commands or direct files.",
+      "successChecklist": [
+        "The artifact names structured conflict-show.",
+        "The artifact names structured conflict-resolve and batch conflict-resolve.",
+        "The artifact treats conflict recovery as a hard stop before sync.",
+        "The artifact avoids shell and direct file recovery."
+      ]
+    }
+  ]
+}

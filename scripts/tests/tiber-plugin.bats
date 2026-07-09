@@ -69,6 +69,9 @@ expectExactSet('allowed-tools', listValuesAfter('allowed-tools'), [
   'mcp__tiber__tiber_transition',
   'mcp__tiber__tiber_validate_fix',
   'mcp__tiber__tiber_sync',
+  'mcp__tiber__tiber_conflict_show',
+  'mcp__tiber__tiber_conflict_resolve',
+  'mcp__tiber__tiber_conflict_resolve_many',
   'mcp__tiber__tiber_codex_sandbox_setup',
   'mcp__tiber__tiber_list',
   'mcp__tiber__tiber_show',
@@ -79,6 +82,9 @@ expectExactSet('allowed-tools', listValuesAfter('allowed-tools'), [
   'mcp__plugin_tiber_tiber__tiber_transition',
   'mcp__plugin_tiber_tiber__tiber_validate_fix',
   'mcp__plugin_tiber_tiber__tiber_sync',
+  'mcp__plugin_tiber_tiber__tiber_conflict_show',
+  'mcp__plugin_tiber_tiber__tiber_conflict_resolve',
+  'mcp__plugin_tiber_tiber__tiber_conflict_resolve_many',
   'mcp__plugin_tiber_tiber__tiber_codex_sandbox_setup',
   'mcp__plugin_tiber_tiber__tiber_list',
   'mcp__plugin_tiber_tiber__tiber_show',
@@ -94,13 +100,18 @@ expectPattern('structured list or show tools', /structured Tiber MCP list or sho
 expectPattern('structured transition tool', /structured Tiber MCP transition tool/);
 expectPattern('no CLI fallback', /There is no CLI fallback for this skill\./);
 expectPattern('missing MCP tools stop path', /If the needed Tiber MCP tools are\s+unavailable, stop/);
-expectPattern('no direct task-file edits', /Do not hand-edit `\.tasks`, `order\.md`, or task markdown files\./);
+expectPattern('no direct Tiber storage edits', /Do not hand-edit Tiber-owned storage, ordering files, or task\s+markdown files\./);
 expectPattern('no shell launchers', /Do not\s+run shell commands, repository-relative launchers/);
 expectPattern('untrusted task data handling', /untrusted task data/);
 expectPattern('wildcard Bash prohibition', /wildcard Bash permission/);
 expectPattern('partial sync created ref recovery', /tiber\.create_sync_failed created=<task-ref>/);
 expectPattern('partial sync duplicate-create prohibition', /do not run\s+create again/);
 expectPattern('structured sync recovery', /run the structured Tiber MCP\s+sync tool/);
+expectPattern('structured conflict-show recovery', /structured\s+Tiber MCP conflict-show tool/);
+expectPattern('structured conflict-resolve recovery', /structured Tiber MCP\s+conflict-resolve tool/);
+expectPattern('structured batch conflict-resolve recovery', /structured\s+batch conflict-resolve tool/);
+expectPattern('sync conflict diagnostic handling', /sync_conflict path=<path>/);
+expectPattern('MCP conflict-show diagnostic handling', /mcp_tool=tiber\.conflict_show/);
 expectPattern('structured sandbox setup recovery', /structured Tiber MCP sandbox setup\s+tool/);
 expectPattern('default backlog status', /Leave the new task in `backlog`/);
 for (const forbidden of [

@@ -92,6 +92,26 @@ fn validate_fix_reports_dependency_cycles_without_rewriting_them() {
 }
 
 #[test]
+fn validate_fix_reports_self_dependency_cycles_without_rewriting_them() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Self cycle"]));
+    let task = task_stem(&repo, "backlog", "self-cycle");
+
+    let contents = task_document("Self cycle", &[&task], &[&task], &[], "");
+    repo.insert_task_file("backlog", &task, &contents);
+
+    let validate = repo.tiber(["validate", "--fix"]);
+
+    assert_success_ref(&validate);
+    assert_eq!(
+        String::from_utf8(validate.stdout).expect("validate output should be utf8"),
+        format!("cycle dependency {task} -> {task}\n")
+    );
+    assert_eq!(repo.task_file("backlog", &task), contents);
+}
+
+#[test]
 fn validate_fix_reports_subtask_dag_cycles_without_rewriting_them() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

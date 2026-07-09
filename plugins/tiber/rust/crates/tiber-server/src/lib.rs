@@ -7,7 +7,8 @@ use futures_util::stream;
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::path::{Path as FsPath, PathBuf};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 use tokio::task;
 
@@ -22,7 +23,10 @@ pub fn router_at(root: PathBuf) -> Router {
         .route("/events", get(events))
         .route("/docs", get(docs))
         .route("/docs/{*path}", get(doc))
-        .with_state(AppState { root })
+        .with_state(AppState {
+            root,
+            remote_sync: Arc::new(Mutex::new(RemoteSyncState::default())),
+        })
 }
 
 pub async fn serve(listener: TcpListener) -> Result<(), tiber_git::Error> {
@@ -34,6 +38,61 @@ pub async fn serve(listener: TcpListener) -> Result<(), tiber_git::Error> {
 #[derive(Clone)]
 struct AppState {
     root: PathBuf,
+    remote_sync: Arc<Mutex<RemoteSyncState>>,
+}
+
+#[derive(Default)]
+struct RemoteSyncState {
+    last_success: Option<Instant>,
+    last_attempt: Option<Instant>,
+    in_flight: bool,
+    cached_event: Option<CachedEvent>,
+}
+
+struct CachedEvent {
+    generated_at: Instant,
+    data: String,
+}
+
+struct RemoteSyncLease {
+    remote_sync: Arc<Mutex<RemoteSyncState>>,
+}
+
+impl RemoteSyncLease {
+    fn acquire(remote_sync: Arc<Mutex<RemoteSyncState>>) -> Option<Self> {
+        let mut state = remote_sync
+            .lock()
+            .expect("dashboard remote sync state lock should not be poisoned");
+        if state.in_flight
+            || state
+                .last_attempt
+                .is_some_and(|last| last.elapsed() < Duration::from_secs(2))
+        {
+            return None;
+        }
+        state.in_flight = true;
+        state.last_attempt = Some(Instant::now());
+        drop(state);
+        Some(Self { remote_sync })
+    }
+
+    fn mark_success(&self) {
+        let mut state = self
+            .remote_sync
+            .lock()
+            .expect("dashboard remote sync state lock should not be poisoned");
+        state.last_success = Some(Instant::now());
+    }
+}
+
+impl Drop for RemoteSyncLease {
+    fn drop(&mut self) {
+        let mut state = self
+            .remote_sync
+            .lock()
+            .expect("dashboard remote sync state lock should not be poisoned");
+        state.in_flight = false;
+    }
 }
 
 async fn board(State(state): State<AppState>) -> Response {
@@ -42,7 +101,7 @@ async fn board(State(state): State<AppState>) -> Response {
         Ok(Ok(html)) => Html(html).into_response(),
         Ok(Err(error)) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{error}"),
+            error.sanitized_dashboard_source(),
         )
             .into_response(),
         Err(error) => (
@@ -63,7 +122,14 @@ async fn task(State(state): State<AppState>, Path(task_ref): Path<String>) -> Re
             escape_html(&task)
         ))
         .into_response(),
-        Ok(Err(error)) => (axum::http::StatusCode::NOT_FOUND, format!("{error}")).into_response(),
+        Ok(Err(error)) if error.is_task_ref_resolution_error() => {
+            (axum::http::StatusCode::NOT_FOUND, error.to_string()).into_response()
+        }
+        Ok(Err(error)) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            error.sanitized_dashboard_source(),
+        )
+            .into_response(),
         Err(error) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!("dashboard_task_join source={error}"),
@@ -74,34 +140,76 @@ async fn task(State(state): State<AppState>, Path(task_ref): Path<String>) -> Re
 
 async fn events(State(state): State<AppState>) -> Response {
     let root = state.root.clone();
-    let event_stream = stream::unfold((root, None::<String>), |(root, last_data)| async move {
-        let mut last_data = last_data;
-        loop {
-            let root_for_read = root.clone();
-            let data =
-                match task::spawn_blocking(move || dashboard_event_data(&root_for_read)).await {
-                    Ok(Ok(data)) => data,
-                    Ok(Err(error)) => {
-                        format!(
-                            "{{\"error\":\"{}\"}}",
-                            escape_json_string(&error.to_string())
-                        )
+    let remote_sync = state.remote_sync.clone();
+    let event_stream = stream::unfold(
+        (root, remote_sync, None::<String>),
+        |(root, remote_sync, last_data)| async move {
+            let mut last_data = last_data;
+            loop {
+                let root_for_read = root.clone();
+                if let Some(cached) = {
+                    let state = remote_sync
+                        .lock()
+                        .expect("dashboard remote sync state lock should not be poisoned");
+                    state
+                        .cached_event
+                        .as_ref()
+                        .filter(|event| event.generated_at.elapsed() < Duration::from_secs(2))
+                        .map(|event| event.data.clone())
+                } {
+                    if last_data.as_ref() != Some(&cached) {
+                        last_data = Some(cached.clone());
+                        return Some((
+                            Ok::<Event, Infallible>(Event::default().data(cached)),
+                            (root, remote_sync, last_data),
+                        ));
                     }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+                let sync_lease = RemoteSyncLease::acquire(remote_sync.clone());
+                let should_sync_remote = sync_lease.is_some();
+                let data = match task::spawn_blocking(move || {
+                    dashboard_event_data(&root_for_read, should_sync_remote)
+                })
+                .await
+                {
+                    Ok(Ok(data)) => {
+                        if let Some(lease) = sync_lease.as_ref() {
+                            lease.mark_success();
+                        }
+                        data
+                    }
+                    Ok(Err(error)) => format!(
+                        "{{\"error\":\"{}\"}}",
+                        escape_json_string(&error.sanitized_dashboard_source())
+                    ),
                     Err(error) => format!(
                         "{{\"error\":\"dashboard_events_join source={}\"}}",
                         escape_json_string(&error.to_string())
                     ),
                 };
-            if last_data.as_ref() != Some(&data) {
-                last_data = Some(data.clone());
-                return Some((
-                    Ok::<Event, Infallible>(Event::default().data(data)),
-                    (root, last_data),
-                ));
+                drop(sync_lease);
+                {
+                    let mut state = remote_sync
+                        .lock()
+                        .expect("dashboard remote sync state lock should not be poisoned");
+                    state.cached_event = Some(CachedEvent {
+                        generated_at: Instant::now(),
+                        data: data.clone(),
+                    });
+                }
+                if last_data.as_ref() != Some(&data) {
+                    last_data = Some(data.clone());
+                    return Some((
+                        Ok::<Event, Infallible>(Event::default().data(data)),
+                        (root, remote_sync, last_data),
+                    ));
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
-    });
+        },
+    );
     Sse::new(event_stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
         .into_response()
@@ -125,7 +233,7 @@ async fn docs(State(state): State<AppState>) -> Response {
         .into_response(),
         Ok(Err(error)) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("{error}"),
+            error.sanitized_dashboard_source(),
         )
             .into_response(),
         Err(error) => (
@@ -154,7 +262,8 @@ async fn doc(State(state): State<AppState>, Path(path): Path<String>) -> Respons
             render_markdown_document(&doc)
         ))
         .into_response(),
-        Ok(Err(error)) => (axum::http::StatusCode::NOT_FOUND, format!("{error}")).into_response(),
+        Ok(Err(error)) => (axum::http::StatusCode::NOT_FOUND, safe_dashboard_error(&error))
+            .into_response(),
         Err(error) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!("dashboard_doc_join source={error}"),
@@ -249,8 +358,14 @@ fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
 }
 
 fn dashboard_tasks(root: &FsPath) -> Result<Vec<DashboardTask>, tiber_git::Error> {
+    dashboard_tasks_from_documents(tiber_git::task_documents_at(root)?)
+}
+
+fn dashboard_tasks_from_documents(
+    documents: Vec<tiber_git::TaskDocument>,
+) -> Result<Vec<DashboardTask>, tiber_git::Error> {
     let mut tasks = Vec::new();
-    for document in tiber_git::task_documents_at(root)? {
+    for document in documents {
         let frontmatter = parse_frontmatter(&document.contents);
         let sections = parse_sections(&document.contents);
         tasks.push(DashboardTask {
@@ -307,8 +422,12 @@ fn dashboard_tasks(root: &FsPath) -> Result<Vec<DashboardTask>, tiber_git::Error
     Ok(tasks)
 }
 
-fn dashboard_event_data(root: &FsPath) -> Result<String, tiber_git::Error> {
-    let tasks = dashboard_tasks(root)?;
+fn dashboard_event_data(root: &FsPath, sync_remote: bool) -> Result<String, tiber_git::Error> {
+    let tasks = if sync_remote {
+        dashboard_tasks(root)?
+    } else {
+        dashboard_tasks_local(root)?
+    };
     Ok(format!(
         "{{\"tasks\":[{}]}}",
         tasks
@@ -322,6 +441,17 @@ fn dashboard_event_data(root: &FsPath) -> Result<String, tiber_git::Error> {
             .collect::<Vec<_>>()
             .join(",")
     ))
+}
+
+fn dashboard_tasks_local(root: &FsPath) -> Result<Vec<DashboardTask>, tiber_git::Error> {
+    dashboard_tasks_from_documents(tiber_git::task_documents_local_at(root)?)
+}
+
+fn safe_dashboard_error(error: &tiber_git::Error) -> String {
+    match error {
+        tiber_git::Error::CommandFailed { .. } => error.sanitized_dashboard_source(),
+        _ => error.to_string(),
+    }
 }
 
 fn status_sort_key(status: &str) -> usize {
@@ -529,7 +659,13 @@ fn linked_resources_html(text: &str, root: &FsPath) -> String {
     let resources = markdown_links(text)
         .into_iter()
         .map(|(label, target)| {
-            if is_missing_doc(root, FsPath::new(""), &target) {
+            if !is_safe_markdown_href(&target) {
+                format!(
+                    "<li>{} <span class=\"mono link-dest\">{}</span></li>",
+                    escape_html(&label),
+                    escape_html(&target)
+                )
+            } else if is_missing_doc(root, FsPath::new(""), &target) {
                 format!(
                     "<li>{} <span class=\"draft-marker\">(draft)</span> <span class=\"mono link-dest\">{}</span></li>",
                     escape_html(&label),
@@ -741,11 +877,34 @@ fn render_markdown_links(input: &str) -> String {
         let label = &after_start[..label_end];
         let target = &after_target_start[..target_end];
         output.push_str(&remaining[..start]);
-        output.push_str(&format!("<a href=\"{}\">{}</a>", target, label));
+        if is_safe_markdown_href(target) {
+            output.push_str(&format!("<a href=\"{}\">{}</a>", target, label));
+        } else {
+            output.push_str(label);
+        }
         remaining = &after_target_start[target_end + 1..];
     }
     output.push_str(remaining);
     output
+}
+
+fn is_safe_markdown_href(target: &str) -> bool {
+    let target = target.trim();
+    if target.is_empty() {
+        return false;
+    }
+    let lower = target.to_ascii_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with('/')
+        || lower.starts_with('#')
+    {
+        return true;
+    }
+    !target
+        .chars()
+        .take_while(|character| !matches!(character, '/' | '?' | '#'))
+        .any(|character| character == ':')
 }
 
 fn markdown_links(text: &str) -> Vec<(String, String)> {
@@ -1258,7 +1417,10 @@ closeButton.addEventListener('click', () => {
   modalContent.replaceChildren();
 });
 let seenInitialEvent = false;
-new EventSource("/events").onmessage = () => {
+new EventSource("/events").onmessage = (event) => {
+  if (event.data && event.data.includes('"error"')) {
+    return;
+  }
   if (seenInitialEvent) {
     location.reload();
     return;
@@ -1266,4 +1428,52 @@ new EventSource("/events").onmessage = () => {
   seenInitialEvent = true;
 };
 </script>"#
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        dashboard_script, is_safe_markdown_href, linked_resources_html, render_markdown_links,
+    };
+    use std::path::Path;
+
+    #[test]
+    fn markdown_link_rendering_rejects_executable_url_schemes() {
+        let rendered =
+            render_markdown_links("[run](javascript:alert(1)) [ok](https://example.invalid)");
+
+        assert!(!rendered.contains("javascript:"));
+        assert!(rendered.contains("run"));
+        assert!(rendered.contains("<a href=\"https://example.invalid\">ok</a>"));
+    }
+
+    #[test]
+    fn markdown_href_filter_allows_relative_and_http_links_only_with_no_scheme_tricks() {
+        assert!(is_safe_markdown_href("docs/guide.md"));
+        assert!(is_safe_markdown_href("/docs/guide.md"));
+        assert!(is_safe_markdown_href("#section"));
+        assert!(is_safe_markdown_href("https://example.invalid/tiber"));
+        assert!(!is_safe_markdown_href("javascript:alert(1)"));
+        assert!(!is_safe_markdown_href("data:text/html,boom"));
+    }
+
+    #[test]
+    fn linked_resources_reject_executable_url_schemes() {
+        let rendered = linked_resources_html(
+            "[run](javascript:alert(1)) [ok](https://example.invalid)",
+            Path::new("."),
+        );
+
+        assert!(!rendered.contains("href=\"javascript:"));
+        assert!(rendered.contains("run"));
+        assert!(rendered.contains("<a href=\"https://example.invalid\">ok</a>"));
+    }
+
+    #[test]
+    fn dashboard_script_ignores_sse_error_events_for_reload() {
+        let script = dashboard_script();
+
+        assert!(script.contains("event.data && event.data.includes('\"error\"')"));
+        assert!(script.contains("return;"));
+    }
 }
