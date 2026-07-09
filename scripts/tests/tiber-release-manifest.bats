@@ -5,6 +5,7 @@ setup() {
   SCRIPT="$ROOT/scripts/check-tiber-release-manifest.sh"
   COMPLETE_SCRIPT="$ROOT/scripts/check-tiber-release-complete.sh"
   BUILD_ALL_SCRIPT="$ROOT/scripts/build-tiber-release-all.sh"
+  FRESH_SCRIPT="$ROOT/scripts/check-tiber-release-fresh.sh"
 }
 
 copy_detect_target_helper() {
@@ -390,4 +391,71 @@ EOF
 
   rm -rf "$fixture"
   [ "$status" -eq 0 ]
+}
+
+@test "release freshness check fails when a clean checkout rebuild changes artifacts" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/scripts" "$fixture/plugins/tiber/dist/x86_64-unknown-linux-gnu"
+  git -C "$fixture" init
+  git -C "$fixture" config user.name "Tiber Test"
+  git -C "$fixture" config user.email "tiber@example.test"
+  git -C "$fixture" config commit.gpgsign false
+  cp "$FRESH_SCRIPT" "$fixture/scripts/check-tiber-release-fresh.sh"
+  cat >"$fixture/scripts/build-tiber-release-all.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+printf 'rebuilt\n' >"$root/plugins/tiber/release-binaries.sha256"
+SH
+  cat >"$fixture/scripts/check-tiber-release-complete.sh" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$fixture/scripts/"*.sh
+  mkdir -p "$fixture/plugins/tiber/rust"
+  printf 'source\n' >"$fixture/plugins/tiber/rust/Cargo.toml"
+  printf '{"binaries":[]}\n' >"$fixture/plugins/tiber/release-binaries.json"
+  printf 'old\n' >"$fixture/plugins/tiber/release-binaries.sha256"
+  git -C "$fixture" add .
+  git -C "$fixture" commit -m "fixture" >/dev/null
+
+  run bash "$fixture/scripts/check-tiber-release-fresh.sh"
+
+  rm -rf "$fixture"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"stale-release-artifacts reason=rebuild-changed-committed-outputs"* ]]
+}
+
+@test "release freshness check skips output diff when release inputs are dirty" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/scripts" "$fixture/plugins/tiber/dist/x86_64-unknown-linux-gnu"
+  git -C "$fixture" init
+  git -C "$fixture" config user.name "Tiber Test"
+  git -C "$fixture" config user.email "tiber@example.test"
+  git -C "$fixture" config commit.gpgsign false
+  cp "$FRESH_SCRIPT" "$fixture/scripts/check-tiber-release-fresh.sh"
+  cat >"$fixture/scripts/build-tiber-release-all.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+printf 'rebuilt\n' >"$root/plugins/tiber/release-binaries.sha256"
+SH
+  cat >"$fixture/scripts/check-tiber-release-complete.sh" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$fixture/scripts/"*.sh
+  mkdir -p "$fixture/plugins/tiber/rust"
+  printf 'source\n' >"$fixture/plugins/tiber/rust/Cargo.toml"
+  printf '{"binaries":[]}\n' >"$fixture/plugins/tiber/release-binaries.json"
+  printf 'old\n' >"$fixture/plugins/tiber/release-binaries.sha256"
+  git -C "$fixture" add .
+  git -C "$fixture" commit -m "fixture" >/dev/null
+  printf 'dirty source\n' >>"$fixture/plugins/tiber/rust/Cargo.toml"
+
+  run bash "$fixture/scripts/check-tiber-release-fresh.sh"
+
+  rm -rf "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"release-freshness-skip reason=dirty-release-inputs"* ]]
 }

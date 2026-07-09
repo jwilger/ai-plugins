@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace tiber-rust tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
+ci: validate-marketplace tiber-rust tiber-dashboard-smoke tiber-mutants tiber-release-fresh bats
 
 # Rust gates for the tiber plugin workspace.
 tiber-rust:
@@ -39,6 +39,10 @@ tiber-release-manifest:
 # Require every listed tiber release binary to be present and executable.
 tiber-release-complete:
     bash scripts/check-tiber-release-complete.sh
+
+# Rebuild every bundled tiber binary and require clean-checkout outputs to stay unchanged.
+tiber-release-fresh:
+    bash scripts/check-tiber-release-fresh.sh
 
 # Run provider-backed promptfoo evals locally, upload/share the latest result,
 # and print the share URL. This sends eval data to the configured promptfoo
