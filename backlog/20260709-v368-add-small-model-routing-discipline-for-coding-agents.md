@@ -19,6 +19,7 @@ Put the behavior in development-discipline, not agentic-systems-engineering. The
 
 - [ ] development-discipline includes a model-routing skill that defines conservative cheap/default/strong routing criteria for coding-agent work.
 - [ ] Codex and Claude Code get fast read-only helper-agent guidance, or the implementation documents why current harness support cannot do this yet.
+- [ ] Existing development workflow skills cross-reference model-routing where small-model delegation decisions naturally arise.
 
 ## Subtasks
 
