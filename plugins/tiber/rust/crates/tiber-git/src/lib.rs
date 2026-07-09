@@ -5,6 +5,8 @@ use std::fs::OpenOptions;
 use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -3934,6 +3936,8 @@ where
         command.current_dir(cwd);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    command.process_group(0);
     let mut child = command.spawn()?;
     let started = SystemTime::now();
     loop {
@@ -3941,7 +3945,7 @@ where
             return command_output("git", &args, child.wait_with_output()?);
         }
         if started.elapsed().unwrap_or_default() >= timeout {
-            let _ = child.kill();
+            terminate_timed_out_child(&mut child);
             let output = child.wait_with_output()?;
             return Err(Error::CommandFailed {
                 program: "git".to_string(),
@@ -3955,6 +3959,35 @@ where
         }
         thread::sleep(Duration::from_millis(25));
     }
+}
+
+#[cfg(unix)]
+fn terminate_timed_out_child(child: &mut std::process::Child) {
+    let process_group = -(child.id() as i32);
+    unsafe {
+        let _ = kill(process_group, SIGTERM);
+    }
+    thread::sleep(Duration::from_millis(100));
+    if child.try_wait().ok().flatten().is_none() {
+        unsafe {
+            let _ = kill(process_group, SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_timed_out_child(child: &mut std::process::Child) {
+    let _ = child.kill();
+}
+
+#[cfg(unix)]
+const SIGTERM: i32 = 15;
+#[cfg(unix)]
+const SIGKILL: i32 = 9;
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
 }
 
 fn git_output_capped<I, S>(args: I, cwd: Option<&Path>, limit: usize) -> Result<String, Error>

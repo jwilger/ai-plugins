@@ -112,7 +112,9 @@ async fn dashboard_board_page_exposes_browser_smoke_controls() {
     assert!(board.contains("data-copy-task-id"));
     assert!(board.contains("data-copy-status"));
     assert!(board.contains("data-sync-status"));
-    assert!(board.contains("class=\"sync-status\" data-sync-status aria-live=\"polite\"></span>"));
+    assert!(board.contains(
+        "class=\"sync-status\" data-sync-status role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"></span>"
+    ));
     assert!(board.contains("data-task-modal"));
     assert!(board.contains("data-modal-content"));
     assert!(board.contains("href=\"/docs\""));
@@ -184,13 +186,15 @@ async fn dashboard_board_renders_local_snapshot_while_origin_repo_is_locked() {
     assert_eq!(response.status(), StatusCode::OK);
     let board = body_text(response).await;
     assert!(board.contains("Visible during origin lock"));
-    assert!(!board.contains("tiber_lock_busy"));
+    assert!(board.contains("Task sync delayed:"));
+    assert!(board.contains("tiber_lock_busy"));
 }
 
 #[tokio::test]
 async fn dashboard_redacts_task_sync_errors_from_board_and_events() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);
+    repo.tiber(["create", "Local fallback task"]);
     repo.git([
         "remote",
         "add",
@@ -204,8 +208,10 @@ async fn dashboard_redacts_task_sync_errors_from_board_and_events() {
         .oneshot(Request::get("/").body(Body::empty()).expect("request"))
         .await
         .expect("board response");
-    assert_eq!(board.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(board.status(), StatusCode::OK);
     let board = body_text(board).await;
+    assert!(board.contains("Local fallback task"));
+    assert!(board.contains("Task sync delayed:"));
     assert!(board.contains("dashboard_task_load_failed"));
     assert!(board.contains("args_redacted=true"));
     assert!(board.contains("stderr_redacted=true"));

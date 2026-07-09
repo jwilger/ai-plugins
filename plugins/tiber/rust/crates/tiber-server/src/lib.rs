@@ -305,7 +305,10 @@ struct PrMrStatus {
 }
 
 fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
-    let tasks = dashboard_tasks(root)?;
+    let (tasks, sync_error) = dashboard_tasks_with_sync_status(root)?;
+    let sync_status = sync_error
+        .map(|error| format!("Task sync delayed: {}", escape_html(&error)))
+        .unwrap_or_default();
     let columns = [
         ("backlog", "Backlog"),
         ("in-progress", "In Progress"),
@@ -335,8 +338,9 @@ fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
         ));
     }
     Ok(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><span class=\"sync-status\" data-sync-status aria-live=\"polite\"></span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-copy-status aria-live=\"polite\"></p><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><span class=\"sync-status\" data-sync-status role=\"status\" aria-live=\"polite\" aria-atomic=\"true\">{}</span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-copy-status aria-live=\"polite\"></p><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
         dashboard_style(),
+        sync_status,
         column_html,
         tasks.iter().map(|task| modal_html(task, &tasks, root)).collect::<String>(),
         dashboard_script()
@@ -350,6 +354,21 @@ fn dashboard_tasks(root: &FsPath) -> Result<Vec<DashboardTask>, tiber_git::Error
         Err(error) => return Err(error),
     };
     dashboard_tasks_from_documents(documents)
+}
+
+fn dashboard_tasks_with_sync_status(
+    root: &FsPath,
+) -> Result<(Vec<DashboardTask>, Option<String>), tiber_git::Error> {
+    match tiber_git::task_documents_at(root) {
+        Ok(documents) => Ok((dashboard_tasks_from_documents(documents)?, None)),
+        Err(error) => match tiber_git::task_documents_local_at(root) {
+            Ok(documents) => Ok((
+                dashboard_tasks_from_documents(documents)?,
+                Some(safe_dashboard_error(&error)),
+            )),
+            Err(_) => Err(error),
+        },
+    }
 }
 
 fn dashboard_tasks_from_documents(
@@ -1263,7 +1282,16 @@ code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sync-status:empty { display: none; }
+.sync-status:empty {
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .docs-view {
   display: grid;
