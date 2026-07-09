@@ -20,6 +20,8 @@ Recent final-review cycles produced findings outside the active ticket's intende
 
 ## Acceptance criteria
 
+- [ ] Final-review skill preserves the existing review lenses and three-consecutive-clean rule.
+
 ## Subtasks
 
 ## Notes / Log
