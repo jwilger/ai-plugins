@@ -455,7 +455,9 @@ fn mcp_stdio_next_reports_agent_unresolvable_blocked_tasks() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "MCP externally blocked task"]));
+    assert_success(repo.tiber(["create", "MCP available task"]));
     let blocked = task_stem(&repo, "backlog", "mcp-externally-blocked-task");
+    let available = task_stem(&repo, "backlog", "mcp-available-task");
     assert_success(repo.tiber([
         "update",
         "mcp-externally-blocked-task",
@@ -481,7 +483,8 @@ fn mcp_stdio_next_reports_agent_unresolvable_blocked_tasks() {
     );
     let blocked_next = read_message(&mut stdout);
     assert!(blocked_next.contains(r#""id":1"#));
-    assert!(blocked_next.contains("no ready tasks; 1 task(s) have agent_blocked_reason"));
+    assert!(blocked_next.contains(&available));
+    assert!(blocked_next.contains("skipped 1 task(s) have agent_blocked_reason"));
     assert!(blocked_next.contains(&blocked));
     assert!(blocked_next.contains(&format!("tiber.show ref=\\\"{blocked}\\\"")));
     assert!(blocked_next.contains(&format!(

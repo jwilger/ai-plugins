@@ -430,6 +430,7 @@ dependencies = [
  "axum",
  "futures-util",
  "http-body-util",
+ "serde_json",
  "tiber-git",
  "tokio",
  "tower",

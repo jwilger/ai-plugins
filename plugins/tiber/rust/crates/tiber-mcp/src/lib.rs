@@ -174,27 +174,19 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
         }
         "tiber.next" => {
             let next = tiber_git::next_task_status()?;
-            Ok(text_content(if let Some(task) = next.task {
-                format!("{}\t{}\n", task.path, task.title)
-            } else if next.agent_blocked_count > 0 {
-                let first_ref = &next
-                    .agent_blocked_tasks
-                    .first()
-                    .expect("blocked count implies at least one blocked task")
-                    .path;
-                format!(
-                    "no ready tasks; {count} task(s) have agent_blocked_reason: {tasks}. Inspect with tiber.show ref=\"{first_ref}\"; clear resolved blockers with tiber.update ref=\"{first_ref}\" agent_blocked_reason=\"\".\n",
-                    count = next.agent_blocked_count,
-                    tasks = next
-                        .agent_blocked_tasks
-                        .iter()
-                        .map(|task| task.path.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            } else {
-                String::new()
-            }))
+            let mut output = String::new();
+            if let Some(ref task) = next.task {
+                output.push_str(&format!("{}\t{}\n", task.path, task.title));
+            }
+            if next.agent_blocked_count > 0 {
+                let prefix = if output.is_empty() {
+                    "no ready tasks;"
+                } else {
+                    "skipped"
+                };
+                output.push_str(&format!("{}\n", agent_blocked_warning(prefix, &next)));
+            }
+            Ok(text_content(output))
         }
         "tiber.transition" => {
             let task_ref = required_string(arguments, "ref")?;
@@ -600,6 +592,24 @@ fn tool(
             "required": required
         }
     })
+}
+
+fn agent_blocked_warning(prefix: &str, next: &tiber_git::NextTaskStatus) -> String {
+    let first_ref = &next
+        .agent_blocked_tasks
+        .first()
+        .expect("blocked count implies at least one blocked task")
+        .path;
+    format!(
+        "{prefix} {count} task(s) have agent_blocked_reason: {tasks}. Inspect with tiber.show ref=\"{first_ref}\"; clear resolved blockers with tiber.update ref=\"{first_ref}\" agent_blocked_reason=\"\".",
+        count = next.agent_blocked_count,
+        tasks = next
+            .agent_blocked_tasks
+            .iter()
+            .map(|task| task.path.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 fn text_content(text: String) -> Value {

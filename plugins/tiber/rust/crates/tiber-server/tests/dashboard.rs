@@ -300,11 +300,13 @@ async fn dashboard_events_stream_board_changes_without_reconnecting() {
 
     let initial = next_body_frame(&mut body).await;
     assert!(initial.contains("Initial stream task"));
+    assert_json_event(&initial);
 
     repo.tiber(["create", "Second stream task"]);
 
     let changed = next_body_frame(&mut body).await;
     assert!(changed.contains("Second stream task"));
+    assert_json_event(&changed);
 }
 
 #[tokio::test]
@@ -312,7 +314,15 @@ async fn dashboard_events_stream_agent_blocked_reason_changes() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);
     repo.tiber(["create", "Blocked stream task"]);
+    repo.tiber(["create", "Done stale event task"]);
     let stem = repo.task_stem("backlog", "blocked-stream-task");
+    let done_stem = repo.task_stem("backlog", "done-stale-event-task");
+    let done_task = repo.task_file("backlog", &done_stem).replace(
+        "agent_blocked_reason: \n",
+        "agent_blocked_reason: Hidden stale done reason.\n",
+    );
+    repo.insert_tasks_tree_file(&format!("backlog/{done_stem}.md"), &done_task);
+    repo.move_task("backlog", "done", &done_stem);
 
     let response = tiber_server::router_at(repo.path.clone())
         .oneshot(
@@ -328,6 +338,8 @@ async fn dashboard_events_stream_agent_blocked_reason_changes() {
     let initial = next_body_frame(&mut body).await;
     assert!(initial.contains(&stem));
     assert!(!initial.contains("Waiting on external account access."));
+    assert!(!initial.contains("Hidden stale done reason."));
+    assert_json_event(&initial);
 
     let task = repo.task_file("backlog", &stem).replace(
         "agent_blocked_reason: \n",
@@ -338,6 +350,17 @@ async fn dashboard_events_stream_agent_blocked_reason_changes() {
     let changed = next_body_frame(&mut body).await;
     assert!(changed.contains(&stem));
     assert!(changed.contains("Waiting on external account access."));
+    assert!(!changed.contains("Hidden stale done reason."));
+    let changed_json = assert_json_event(&changed);
+    assert_eq!(
+        changed_json["tasks"]
+            .as_array()
+            .expect("tasks array")
+            .iter()
+            .find(|task| task["stem"] == stem)
+            .expect("blocked task")["agent_blocked_reason"],
+        "Waiting on external account access."
+    );
 }
 
 #[tokio::test]
@@ -409,6 +432,14 @@ async fn next_body_frame(body: &mut Body) -> String {
         .into_data()
         .expect("dashboard event frame should contain data");
     String::from_utf8(bytes.to_vec()).expect("dashboard event should be utf8")
+}
+
+fn assert_json_event(frame: &str) -> serde_json::Value {
+    let data = frame
+        .strip_prefix("data: ")
+        .expect("dashboard event frame should start with data prefix")
+        .trim();
+    serde_json::from_str(data).expect("dashboard event data should be valid json")
 }
 
 async fn body_text(response: axum::response::Response) -> String {

@@ -87,24 +87,16 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
         }
         [command] if command == "next" => {
             let next = tiber_git::next_task_status()?;
-            if let Some(task) = next.task {
+            if let Some(ref task) = next.task {
                 println!("{}\t{}", task.path, task.title);
-            } else if next.agent_blocked_count > 0 {
-                let first_ref = &next
-                    .agent_blocked_tasks
-                    .first()
-                    .expect("blocked count implies at least one blocked task")
-                    .path;
-                eprintln!(
-                    "no ready tasks; {count} task(s) have agent_blocked_reason: {tasks}. Inspect with tiber show {first_ref}; clear resolved blockers with tiber update {first_ref} --agent-blocked-reason \"\".",
-                    count = next.agent_blocked_count,
-                    tasks = next
-                        .agent_blocked_tasks
-                        .iter()
-                        .map(|task| task.path.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
+            }
+            if next.agent_blocked_count > 0 {
+                let prefix = if next.task.is_some() {
+                    "skipped"
+                } else {
+                    "no ready tasks;"
+                };
+                eprintln!("{}", agent_blocked_warning(prefix, &next));
             }
             Ok(())
         }
@@ -212,6 +204,24 @@ fn parse_comma_list(value: &str) -> Vec<String> {
         .filter(|item| !item.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+fn agent_blocked_warning(prefix: &str, next: &tiber_git::NextTaskStatus) -> String {
+    let first_ref = &next
+        .agent_blocked_tasks
+        .first()
+        .expect("blocked count implies at least one blocked task")
+        .path;
+    format!(
+        "{prefix} {count} task(s) have agent_blocked_reason: {tasks}. Inspect with tiber show {first_ref}; clear resolved blockers with tiber update {first_ref} --agent-blocked-reason \"\".",
+        count = next.agent_blocked_count,
+        tasks = next
+            .agent_blocked_tasks
+            .iter()
+            .map(|task| task.path.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 fn parse_subtask_add_args(args: &[String]) -> Result<Vec<String>, tiber_git::Error> {
