@@ -165,6 +165,9 @@ if (!cases.some((testCase) => testCase.case_id === 'tiber-new-task-command-backl
 if (!cases.some((testCase) => testCase.case_id === 'tiber-codex-sandbox-narrow-setup')) {
   failures.push('missing tiber Codex sandbox behavior eval case');
 }
+if (!cases.some((testCase) => testCase.case_id === 'tiber-agent-unresolvable-blocked-reason')) {
+  failures.push('missing tiber agent-unresolvable blocked reason behavior eval case');
+}
 
 if (failures.length > 0) {
   console.error(failures.join('\n'));

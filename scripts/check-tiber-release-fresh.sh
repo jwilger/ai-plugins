@@ -21,6 +21,12 @@ source_clean=1
 if ! git -C "$root" diff --quiet HEAD -- "${release_inputs[@]}"; then
   source_clean=0
 fi
+untracked_inputs="$(
+  git -C "$root" ls-files --others --exclude-standard -- "${release_inputs[@]}"
+)"
+if [ -n "$untracked_inputs" ]; then
+  source_clean=0
+fi
 
 release_inputs_changed=1
 release_outputs_changed=1
@@ -39,6 +45,9 @@ if [ "$source_clean" -eq 0 ]; then
   if [ "${CI:-}" = "true" ]; then
     echo "dirty-release-inputs-in-ci" >&2
     git -C "$root" diff --stat HEAD -- "${release_inputs[@]}" >&2
+    if [ -n "$untracked_inputs" ]; then
+      printf '%s\n' "$untracked_inputs" >&2
+    fi
     exit 1
   fi
   "$root/scripts/build-tiber-release-all.sh"
