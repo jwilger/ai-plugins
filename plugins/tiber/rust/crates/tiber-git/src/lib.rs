@@ -253,6 +253,7 @@ pub struct TaskUpdate<'a> {
     pub tags: Option<Vec<String>>,
     pub pr_mr_url: Option<&'a str>,
     pub pr_mr_status: Option<&'a str>,
+    pub agent_blocked_reason: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -1097,6 +1098,13 @@ impl GitRepository {
         if let Some(pr_mr_status) = update.pr_mr_status {
             task = upsert_frontmatter_optional_scalar(&task, "pr_mr_status", pr_mr_status)?;
         }
+        if let Some(agent_blocked_reason) = update.agent_blocked_reason {
+            task = upsert_frontmatter_optional_scalar(
+                &task,
+                "agent_blocked_reason",
+                agent_blocked_reason,
+            )?;
+        }
         if let Some(summary) = update.summary {
             task = replace_markdown_section_body(&task, "Summary", summary)?;
         }
@@ -1921,7 +1929,7 @@ fn frontmatter_scalar_value(value: &str) -> String {
 
 fn new_task_document(title: &str) -> String {
     format!(
-        "---\ntitle: {title}\nblocked_by: []\nblocks: []\ntags: []\npr_mr_url: \npr_mr_status: \n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
+        "---\ntitle: {title}\nblocked_by: []\nblocks: []\ntags: []\npr_mr_url: \npr_mr_status: \nagent_blocked_reason: \n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
     )
 }
 

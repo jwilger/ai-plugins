@@ -46,6 +46,10 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   lowercase statuses such as `draft`, `open`, `review-required`,
   `checks-pending`, `checks-passing`, `checks-failing`, `approved`, `merged`,
   `closed`, or `blocked`.
+- Use `tiber update <ref> --agent-blocked-reason <reason>` only when the task is
+  blocked by something the agent cannot resolve, such as missing credentials,
+  external account access, or an owner decision. Do not use it for ordinary PR
+  checks, review waits, or merge approvals; keep those in `pr_mr_status`.
 - Before actively working on an existing Tiber task, move it to `in-progress`
   with `tiber transition <ref> in-progress`; do not leave active work in the
   backlog as an informal reservation.
@@ -79,6 +83,7 @@ tiber unlink <task-ref> blocks <task-ref>
 tiber subtask add <task-ref> "Subtask title" --after s1,s2
 tiber update <task-ref> --summary "..."
 tiber update <task-ref> --pr-mr-url <url> --pr-mr-status checks-pending
+tiber update <task-ref> --agent-blocked-reason "Waiting on credentials the agent cannot create"
 tiber acceptance add <task-ref> "Observable condition"
 tiber note add <task-ref> "Progress note"
 tiber validate --fix

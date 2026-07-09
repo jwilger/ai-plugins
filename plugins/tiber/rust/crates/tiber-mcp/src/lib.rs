@@ -233,6 +233,7 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
                     tags: optional_tags(arguments)?,
                     pr_mr_url: optional_string(arguments, "pr_mr_url"),
                     pr_mr_status: optional_string(arguments, "pr_mr_status"),
+                    agent_blocked_reason: optional_string(arguments, "agent_blocked_reason"),
                 },
             )?;
             Ok(text_content(format!("updated {task_ref}")))
@@ -461,7 +462,7 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.update",
             "Update task",
-            "Update task title, summary, context, tags, or PR/MR tracking fields.",
+            "Update task title, summary, context, tags, PR/MR tracking fields, or an agent-unresolvable blocked reason.",
             json!({
                 "ref": { "type": "string" },
                 "title": { "type": "string" },
@@ -469,7 +470,8 @@ fn tools() -> Vec<Value> {
                 "context": { "type": "string" },
                 "tags": { "type": "array", "items": { "type": "string" } },
                 "pr_mr_url": { "type": "string" },
-                "pr_mr_status": { "type": "string" }
+                "pr_mr_status": { "type": "string" },
+                "agent_blocked_reason": { "type": "string" }
             }),
             vec!["ref"],
         ),

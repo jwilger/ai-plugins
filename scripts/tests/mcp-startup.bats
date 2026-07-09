@@ -185,7 +185,7 @@ run_tiber_manifest_server_with_invalid_claude_plugin_root() {
 run_tiber_manifest_server_with_missing_codex_cache() {
   local command
   local args
-  local home_cache="$TMPROOT/home/.codex/plugins/cache/ai-plugins/tiber/0.6.0/bin"
+  local home_cache="$TMPROOT/home/.codex/plugins/cache/ai-plugins/tiber/0.7.0/bin"
 
   mkdir -p "$home_cache"
   printf '%s\n' '#!/bin/sh' 'echo home-codex-cache-used' 'exit 0' >"$home_cache/tiber"
@@ -207,7 +207,7 @@ run_tiber_manifest_server_with_default_home_codex_cache() {
   local home_cache="$TMPROOT/home/.codex/plugins/cache/ai-plugins/tiber"
 
   mkdir -p "$home_cache"
-  ln -sfn "$ROOT/plugins/tiber" "$home_cache/0.6.0"
+  ln -sfn "$ROOT/plugins/tiber" "$home_cache/0.7.0"
 
   command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
   mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
@@ -278,7 +278,7 @@ run_tiber_manifest_server_from_fixture_repo() {
 install_tiber_cache_launcher() {
   local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/tiber"
   mkdir -p "$cache_parent"
-  ln -sfn "$ROOT/plugins/tiber" "$cache_parent/0.6.0"
+  ln -sfn "$ROOT/plugins/tiber" "$cache_parent/0.7.0"
 }
 
 install_promptfoo_cache_launcher() {
