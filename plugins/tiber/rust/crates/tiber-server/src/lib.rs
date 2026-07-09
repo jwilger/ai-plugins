@@ -417,7 +417,8 @@ fn agent_blocked_badge_html(task: &DashboardTask) -> String {
         return String::new();
     };
     format!(
-        "<span class=\"badge agent-blocked\" data-agent-blocked title=\"{}\" aria-label=\"Agent-unresolvable blocked: {}\">Blocked</span>",
+        "<span class=\"badge agent-blocked\" data-agent-blocked title=\"{}\" aria-label=\"Agent-unresolvable blocked: {}\">Blocked: {}</span>",
+        escape_html(reason),
         escape_html(reason),
         escape_html(reason)
     )
@@ -1026,7 +1027,7 @@ a { color: inherit; text-decoration: none; }
 .card.is-dependent { box-shadow: 0 0 0 2px var(--dependent), var(--shadow); }
 .card.is-agent-blocked { border-color: #fca5a5; }
 .card.is-dim { opacity: 0.35; }
-.card-top { display: flex; gap: 6px; min-height: 18px; }
+.card-top { display: flex; flex-wrap: wrap; gap: 6px; min-height: 18px; }
 .badge, .pill {
   background: var(--surface-2);
   border: 1px solid var(--hairline);

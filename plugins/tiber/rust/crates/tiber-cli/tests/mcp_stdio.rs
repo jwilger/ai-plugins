@@ -81,7 +81,9 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(tools.contains(r#""name":"tiber.subtask.check""#));
     assert!(tools.contains(r#""name":"tiber.subtask.uncheck""#));
     assert!(tools.contains(r#""name":"tiber.update""#));
-    assert!(tools.contains(r#""agent_blocked_reason":{"type":"string"}"#));
+    assert!(tools.contains(r#""agent_blocked_reason""#));
+    assert!(tools.contains("Only for agent-unresolvable blockers"));
+    assert!(tools.contains("never include secrets or sensitive account details"));
     assert!(tools.contains(r#""name":"tiber.acceptance.add""#));
     assert!(tools.contains(r#""name":"tiber.acceptance.check""#));
     assert!(tools.contains(r#""name":"tiber.acceptance.uncheck""#));

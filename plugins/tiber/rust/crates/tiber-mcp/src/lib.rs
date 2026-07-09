@@ -462,7 +462,7 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.update",
             "Update task",
-            "Update task title, summary, context, tags, PR/MR tracking fields, or an agent-unresolvable blocked reason.",
+            "Update task title, summary, context, tags, PR/MR tracking fields, or an agent-unresolvable blocked reason. Use agent_blocked_reason only for blockers the agent cannot resolve, not PR checks, review waits, or merge approvals; never include secrets or sensitive account details.",
             json!({
                 "ref": { "type": "string" },
                 "title": { "type": "string" },
@@ -471,7 +471,10 @@ fn tools() -> Vec<Value> {
                 "tags": { "type": "array", "items": { "type": "string" } },
                 "pr_mr_url": { "type": "string" },
                 "pr_mr_status": { "type": "string" },
-                "agent_blocked_reason": { "type": "string" }
+                "agent_blocked_reason": {
+                    "type": "string",
+                    "description": "Only for agent-unresolvable blockers; do not use for PR checks, review waits, or merge approvals, and never include secrets or sensitive account details. Clear with an empty string when resolved."
+                }
             }),
             vec!["ref"],
         ),

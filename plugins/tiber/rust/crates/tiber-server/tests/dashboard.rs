@@ -230,7 +230,9 @@ async fn dashboard_marks_agent_unresolvable_blocked_tasks() {
     assert!(board.contains(
         "aria-label=\"Agent-unresolvable blocked: Waiting on account access that the agent cannot grant.\""
     ));
-    assert!(board.contains(">Blocked</span>"));
+    assert!(
+        board.contains(">Blocked: Waiting on account access that the agent cannot grant.</span>")
+    );
     assert!(board.contains("data-agent-blocked-reason"));
     assert!(board.contains("Blocked reason"));
     assert!(board.contains("Waiting on account access that the agent cannot grant."));
