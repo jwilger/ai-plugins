@@ -88,7 +88,9 @@ impl Drop for RemoteSyncLease {
 
 async fn board(State(state): State<AppState>) -> Response {
     let root = state.root.clone();
-    match task::spawn_blocking(move || dashboard_html(&root)).await {
+    let sync_lease = RemoteSyncLease::acquire(state.remote_sync.clone());
+    let sync_remote = sync_lease.is_some();
+    let response = match task::spawn_blocking(move || dashboard_html(&root, sync_remote)).await {
         Ok(Ok(html)) => Html(html).into_response(),
         Ok(Err(error)) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -100,7 +102,9 @@ async fn board(State(state): State<AppState>) -> Response {
             format!("dashboard_task_join source={error}"),
         )
             .into_response(),
-    }
+    };
+    drop(sync_lease);
+    response
 }
 
 async fn task(State(state): State<AppState>, Path(task_ref): Path<String>) -> Response {
@@ -304,8 +308,15 @@ struct PrMrStatus {
     status: String,
 }
 
-fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
-    let (tasks, sync_error) = dashboard_tasks_with_sync_status(root)?;
+fn dashboard_html(root: &FsPath, sync_remote: bool) -> Result<String, tiber_git::Error> {
+    let (tasks, sync_error) = if sync_remote {
+        dashboard_tasks_with_sync_status(root)?
+    } else {
+        (
+            dashboard_tasks_local(root)?,
+            Some("dashboard_remote_sync_deferred reason=in_flight_or_recent".to_string()),
+        )
+    };
     let sync_status = sync_error
         .map(|error| format!("Task sync delayed: {}", escape_html(&error)))
         .unwrap_or_default();
@@ -458,10 +469,7 @@ fn dashboard_tasks_local(root: &FsPath) -> Result<Vec<DashboardTask>, tiber_git:
 }
 
 fn safe_dashboard_error(error: &tiber_git::Error) -> String {
-    match error {
-        tiber_git::Error::CommandFailed { .. } => error.sanitized_dashboard_source(),
-        _ => error.to_string(),
-    }
+    error.sanitized_dashboard_source()
 }
 
 fn status_sort_key(status: &str) -> usize {
@@ -1066,7 +1074,7 @@ a { color: inherit; text-decoration: none; }
   border-bottom: 1px solid var(--hairline);
 }
 .topbar h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: 0; }
-.topbar-right { display: flex; align-items: center; gap: 16px; }
+.topbar-right { display: flex; align-items: center; gap: 16px; min-width: 0; }
 .topbar-meta { font-size: 13px; color: var(--ink-muted); white-space: nowrap; }
 .view-toggle {
   display: flex;
@@ -1276,6 +1284,7 @@ code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
   border-radius: 999px;
   color: #fff7ed;
   font-size: 12px;
+  min-width: 0;
   max-width: min(42vw, 420px);
   overflow: hidden;
   padding: 4px 10px;
@@ -1314,6 +1323,16 @@ code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
 .docs-content p, .docs-content li { color: var(--ink-secondary); font-size: 15px; line-height: 1.65; }
 .docs-content a { color: var(--dependency); text-decoration: underline; }
 @media (max-width: 980px) {
+  .topbar { align-items: flex-start; flex-direction: column; }
+  .topbar-right { flex-wrap: wrap; width: 100%; }
+  .sync-status:not(:empty) {
+    border-radius: 6px;
+    flex-basis: 100%;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
   .board { grid-template-columns: 1fr; }
   .column { max-height: none; }
   .docs-view { grid-template-columns: 1fr; }
@@ -1492,7 +1511,7 @@ new EventSource("/events").onmessage = (event) => {
 mod tests {
     use super::{
         dashboard_script, is_missing_doc, is_safe_markdown_href, linked_resources_html,
-        render_markdown_links, rewrite_missing_doc_links,
+        render_markdown_links, rewrite_missing_doc_links, safe_dashboard_error,
     };
     use std::path::Path;
 
@@ -1562,5 +1581,20 @@ mod tests {
         assert!(script.contains("if (!wasInitialEvent)"));
         assert!(script.contains("Task sync delayed: ${payload.error}"));
         assert!(!script.contains("syncStatus.hidden"));
+    }
+
+    #[test]
+    fn dashboard_error_status_redacts_io_sources() {
+        let error = tiber_git::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "/home/user/private/repo/.git/secret",
+        ));
+
+        let message = safe_dashboard_error(&error);
+
+        assert!(message.contains("dashboard_task_load_failed"));
+        assert!(message.contains("tiber.io_error source_redacted=true"));
+        assert!(!message.contains("/home/user/private"));
+        assert!(!message.contains("secret"));
     }
 }

@@ -2532,6 +2532,46 @@ fn read_commands_sync_remote_tasks_from_detached_head() {
 }
 
 #[test]
+fn missing_read_command_does_not_publish_local_task_state() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let repo = clone_repo(&origin);
+    assert_success(repo.tiber(["init"]));
+    repo.git(["push", "origin", "refs/heads/tasks:refs/heads/tasks"]);
+    repo.insert_task_file(
+        "backlog",
+        "20260709-abcd-local-only-task",
+        "---\ntitle: Local only task\nblocked_by: []\nblocks: []\ntags: []\n---\n",
+    );
+
+    let show = repo.tiber(["show", "missing-task"]);
+
+    assert!(!show.status.success(), "missing show should fail");
+    let stderr = String::from_utf8(show.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("task_ref_missing"));
+    let remote_tree = repo.git_output(["ls-tree", "-r", "--name-only", "origin/tasks"]);
+    assert_success_ref(&remote_tree);
+    let remote_tree = String::from_utf8(remote_tree.stdout).expect("remote tree should be utf8");
+    assert!(
+        !remote_tree.contains("20260709-abcd-local-only-task.md"),
+        "read-only missing-ref recovery must not publish local task state; remote tree:\n{remote_tree}"
+    );
+}
+
+#[test]
 fn read_commands_fail_when_remote_tasks_cannot_merge() {
     let origin = TempRepo::new();
     origin.git(["init", "--bare"]);

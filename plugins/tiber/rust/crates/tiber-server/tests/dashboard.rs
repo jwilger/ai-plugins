@@ -229,7 +229,10 @@ async fn dashboard_redacts_task_sync_errors_from_board_and_events() {
         .expect("events response");
     assert_eq!(response.status(), StatusCode::OK);
     let mut body = response.into_body();
-    let event = next_body_frame(&mut body).await;
+    let mut event = next_body_frame(&mut body).await;
+    if !event.contains("dashboard_task_load_failed") {
+        event = next_body_frame(&mut body).await;
+    }
     assert!(event.contains("dashboard_task_load_failed"));
     assert!(event.contains("args_redacted=true"));
     assert!(event.contains("stderr_redacted=true"));

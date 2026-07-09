@@ -25,6 +25,9 @@ const REMOTE_IO_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_CONFLICT_SNAPSHOT_SIDE_BYTES: usize = 64 * 1024;
 const MAX_TASK_BLOB_BYTES: u64 = 1024 * 1024;
+const MAX_DOC_DEPTH: usize = 8;
+const MAX_DOCS_LISTED: usize = 512;
+const MAX_DOC_BYTES: u64 = 512 * 1024;
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -43,17 +46,17 @@ pub fn create_task_at(root: impl Into<PathBuf>, title: &str) -> Result<TaskPath,
 
 pub fn list_tasks_at(root: impl Into<PathBuf>) -> Result<Vec<TaskSummary>, Error> {
     let repo = GitRepository::at(root);
-    repo.with_task_workspace(|repo| repo.list_tasks())
+    repo.with_task_read_workspace(|repo| repo.list_tasks())
 }
 
 pub fn show_task_at(root: impl Into<PathBuf>, task_ref: &str) -> Result<String, Error> {
     let repo = GitRepository::at(root);
-    repo.with_task_workspace(|repo| repo.show_task(task_ref))
+    repo.with_task_read_workspace(|repo| repo.show_task(task_ref))
 }
 
 pub fn task_metadata_at(root: impl Into<PathBuf>, task_ref: &str) -> Result<TaskMetadata, Error> {
     let repo = GitRepository::at(root);
-    repo.with_task_workspace(|repo| repo.task_metadata(task_ref))
+    repo.with_task_read_workspace(|repo| repo.task_metadata(task_ref))
 }
 
 pub fn conflict_snapshot_at(
@@ -121,17 +124,17 @@ pub fn create_task(title: &str) -> Result<TaskPath, Error> {
 
 pub fn list_tasks() -> Result<Vec<TaskSummary>, Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(|repo| repo.list_tasks())
+    repo.with_task_read_workspace(|repo| repo.list_tasks())
 }
 
 pub fn show_task(task_ref: &str) -> Result<String, Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(|repo| repo.show_task(task_ref))
+    repo.with_task_read_workspace(|repo| repo.show_task(task_ref))
 }
 
 pub fn task_metadata(task_ref: &str) -> Result<TaskMetadata, Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(|repo| repo.task_metadata(task_ref))
+    repo.with_task_read_workspace(|repo| repo.task_metadata(task_ref))
 }
 
 pub fn conflict_snapshot(path: &str) -> Result<ConflictSnapshot, Error> {
@@ -163,7 +166,7 @@ pub fn read_doc(doc_ref: &str) -> Result<String, Error> {
 
 pub fn next_task() -> Result<Option<TaskSummary>, Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(|repo| repo.next_task())
+    repo.with_task_read_workspace(|repo| repo.next_task())
 }
 
 pub fn transition_task(task_ref: &str, status: &str) -> Result<TaskPath, Error> {
@@ -772,6 +775,31 @@ impl GitRepository {
                 let repo = self.with_tasks_dir(workspace.path().to_path_buf());
                 repo.read_sync().map_err(implicit_remote_refresh_error)?;
                 repo.sync_repository_unlocked()?;
+                let workspace = TaskWorkspace::create()?;
+                self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+                let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+                operation(&repo)
+            }
+            result => result,
+        }
+    }
+
+    fn with_task_read_workspace<T>(
+        &self,
+        mut operation: impl FnMut(&GitRepository) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let _lock = self.acquire_lock()?;
+        self.ensure_tasks_branch_from_origin()?;
+        self.fast_forward_local_tasks_ref_from_origin(false)?;
+        let workspace = TaskWorkspace::create()?;
+        self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+        let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+        match operation(&repo) {
+            Err(error) if error.is_task_ref_missing_error() => {
+                let workspace = TaskWorkspace::create()?;
+                self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
+                let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+                repo.read_sync().map_err(implicit_remote_refresh_error)?;
                 let workspace = TaskWorkspace::create()?;
                 self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
                 let repo = self.with_tasks_dir(workspace.path().to_path_buf());
@@ -2008,7 +2036,7 @@ impl GitRepository {
         let docs_dir = self.root.join("docs");
         let mut docs = Vec::new();
         if docs_dir.exists() {
-            collect_docs(&docs_dir, &docs_dir, &mut docs)?;
+            collect_docs(&docs_dir, &docs_dir, 0, &mut docs)?;
         }
         docs.sort();
         Ok(docs.into_iter().map(|doc| format!("docs/{doc}")).collect())
@@ -2016,7 +2044,15 @@ impl GitRepository {
 
     fn read_doc(&self, doc_ref: &str) -> Result<String, Error> {
         let doc_ref = parse_doc_ref(doc_ref)?;
-        fs::read_to_string(self.root.join(doc_ref)).map_err(Error::Io)
+        let path = self.root.join(doc_ref);
+        let metadata = fs::metadata(&path)?;
+        if metadata.len() > MAX_DOC_BYTES {
+            return Err(Error::Parse(format!(
+                "doc_too_large bytes={} max_bytes={MAX_DOC_BYTES}",
+                metadata.len()
+            )));
+        }
+        fs::read_to_string(path).map_err(Error::Io)
     }
 
     fn next_task(&self) -> Result<Option<TaskSummary>, Error> {
@@ -3792,12 +3828,27 @@ fn parse_doc_ref(doc_ref: &str) -> Result<PathBuf, Error> {
     Ok(path)
 }
 
-fn collect_docs(root: &Path, directory: &Path, docs: &mut Vec<String>) -> Result<(), Error> {
+fn collect_docs(
+    root: &Path,
+    directory: &Path,
+    depth: usize,
+    docs: &mut Vec<String>,
+) -> Result<(), Error> {
+    if depth > MAX_DOC_DEPTH {
+        return Err(Error::Parse(format!(
+            "docs_depth_exceeded max_depth={MAX_DOC_DEPTH}"
+        )));
+    }
     for entry in fs::read_dir(directory)? {
+        if docs.len() >= MAX_DOCS_LISTED {
+            return Err(Error::Parse(format!(
+                "docs_count_exceeded max_docs={MAX_DOCS_LISTED}"
+            )));
+        }
         let entry = entry?;
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
-            collect_docs(root, &entry.path(), docs)?;
+            collect_docs(root, &entry.path(), depth + 1, docs)?;
         } else if file_type.is_file()
             && entry
                 .path()
@@ -3927,7 +3978,16 @@ where
         .into_iter()
         .map(|arg| arg.as_ref().to_owned())
         .collect::<Vec<_>>();
-    let mut command = Command::new("git");
+    command_output_with_timeout("git", args, cwd, timeout)
+}
+
+fn command_output_with_timeout(
+    program: &str,
+    args: Vec<std::ffi::OsString>,
+    cwd: Option<&Path>,
+    timeout: Duration,
+) -> Result<String, Error> {
+    let mut command = Command::new(program);
     command.args(&args);
     command.env("GIT_TERMINAL_PROMPT", "0");
     command.env("LC_ALL", "C");
@@ -3942,13 +4002,13 @@ where
     let started = SystemTime::now();
     loop {
         if let Some(_status) = child.try_wait()? {
-            return command_output("git", &args, child.wait_with_output()?);
+            return command_output(program, &args, child.wait_with_output()?);
         }
         if started.elapsed().unwrap_or_default() >= timeout {
             terminate_timed_out_child(&mut child);
             let output = child.wait_with_output()?;
             return Err(Error::CommandFailed {
-                program: "git".to_string(),
+                program: program.to_string(),
                 args: args
                     .iter()
                     .map(|arg| arg.to_string_lossy().into_owned())
@@ -4182,7 +4242,17 @@ fn command_output(
 
 #[cfg(test)]
 mod tests {
-    use super::{command_failure_needs_redaction, is_status_gitkeep_path};
+    use super::{
+        command_failure_needs_redaction, command_output_with_timeout, is_status_gitkeep_path,
+    };
+    #[cfg(unix)]
+    use super::{process_is_gone, Error};
+    #[cfg(unix)]
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn status_gitkeep_path_rejects_parent_components_and_non_status_paths() {
@@ -4207,5 +4277,57 @@ mod tests {
             "commit-tree".to_string(),
             "HEAD".to_string()
         ]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timed_out_command_terminates_child_process_group() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "tiber-timeout-cleanup-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir(&dir).expect("create temp dir");
+        let script = dir.join("hang-with-child");
+        let marker = dir.join("child.pid");
+        fs::write(
+            &script,
+            format!(
+                "#!/usr/bin/env sh\ntrap '' TERM\n(sleep 30) &\necho \"$!\" > {}\nwait \"$!\"\n",
+                marker.display()
+            ),
+        )
+        .expect("write helper script");
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
+            .expect("make helper executable");
+
+        let result = command_output_with_timeout(
+            script.to_str().expect("script path utf8"),
+            Vec::new(),
+            None,
+            Duration::from_millis(100),
+        );
+
+        assert!(matches!(
+            result,
+            Err(Error::CommandFailed { status, .. }) if status == "timeout"
+        ));
+        let child_pid = fs::read_to_string(&marker)
+            .expect("helper should record child pid")
+            .trim()
+            .parse::<u32>()
+            .expect("child pid should parse");
+        for _ in 0..20 {
+            if process_is_gone(child_pid) {
+                let _ = fs::remove_dir_all(&dir);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = fs::remove_dir_all(&dir);
+        panic!("timed-out helper child process {child_pid} was still running");
     }
 }

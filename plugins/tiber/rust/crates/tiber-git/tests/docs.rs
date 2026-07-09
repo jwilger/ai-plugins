@@ -21,6 +21,28 @@ fn docs_are_listed_read_and_constrained_to_repo_docs_tree() {
     assert!(traversal.to_string().contains("invalid_doc_ref"));
 }
 
+#[test]
+fn docs_listing_and_reads_are_bounded() {
+    let repo = TempRepo::initialized();
+    fs::create_dir_all(repo.path.join("docs/many")).expect("create docs directory");
+    for index in 0..513 {
+        fs::write(
+            repo.path.join(format!("docs/many/doc-{index:03}.md")),
+            "# generated\n",
+        )
+        .expect("write generated doc");
+    }
+    fs::write(repo.path.join("docs/huge.md"), "x".repeat((512 * 1024) + 1))
+        .expect("write huge doc");
+
+    let _cwd = CurrentDirGuard::enter(&repo.path);
+
+    let listing = tiber_git::list_docs().expect_err("too many docs should fail");
+    assert!(listing.to_string().contains("docs_count_exceeded"));
+    let huge = tiber_git::read_doc("docs/huge.md").expect_err("huge doc should fail");
+    assert!(huge.to_string().contains("doc_too_large"));
+}
+
 struct CurrentDirGuard {
     previous: std::path::PathBuf,
 }
