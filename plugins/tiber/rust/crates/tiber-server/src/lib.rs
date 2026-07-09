@@ -180,6 +180,32 @@ fn escape_json_string(input: &str) -> String {
         .replace('\t', "\\t")
 }
 
+fn json_string_array(values: &[String]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", escape_json_string(value)))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn checklist_event_data(items: &[ChecklistItem]) -> String {
+    format!(
+        "[{}]",
+        items
+            .iter()
+            .map(|item| format!(
+                "{{\"checked\":{},\"text\":\"{}\"}}",
+                item.checked,
+                escape_json_string(&item.text)
+            ))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
 #[derive(Clone, Debug)]
 struct DashboardTask {
     stem: String,
@@ -316,10 +342,33 @@ fn dashboard_event_data(root: &FsPath) -> Result<String, tiber_git::Error> {
         tasks
             .into_iter()
             .map(|task| format!(
-                "{{\"stem\":\"{}\",\"title\":\"{}\",\"status\":\"{}\"}}",
+                "{{\"stem\":\"{}\",\"title\":\"{}\",\"status\":\"{}\",\"rank\":{},\"tags\":{},\"blocked_by\":{},\"blocks\":{},\"pr_mr\":{},\"agent_blocked_reason\":{},\"summary\":\"{}\",\"context\":\"{}\",\"acceptance\":{},\"subtasks\":{},\"notes\":{}}}",
                 escape_json_string(&task.stem),
                 escape_json_string(&task.title),
-                escape_json_string(&task.status)
+                escape_json_string(&task.status),
+                task.rank
+                    .map(|rank| rank.to_string())
+                    .unwrap_or_else(|| "null".to_string()),
+                json_string_array(&task.tags),
+                json_string_array(&task.blocked_by),
+                json_string_array(&task.blocks),
+                task.pr_mr
+                    .as_ref()
+                    .map(|pr_mr| format!(
+                        "{{\"url\":\"{}\",\"status\":\"{}\"}}",
+                        escape_json_string(&pr_mr.url),
+                        escape_json_string(&pr_mr.status)
+                    ))
+                    .unwrap_or_else(|| "null".to_string()),
+                task.agent_blocked_reason
+                    .as_ref()
+                    .map(|reason| format!("\"{}\"", escape_json_string(reason)))
+                    .unwrap_or_else(|| "null".to_string()),
+                escape_json_string(&task.summary),
+                escape_json_string(&task.context),
+                checklist_event_data(&task.acceptance),
+                checklist_event_data(&task.subtasks),
+                json_string_array(&task.notes)
             ))
             .collect::<Vec<_>>()
             .join(",")

@@ -308,6 +308,39 @@ async fn dashboard_events_stream_board_changes_without_reconnecting() {
 }
 
 #[tokio::test]
+async fn dashboard_events_stream_agent_blocked_reason_changes() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    repo.tiber(["create", "Blocked stream task"]);
+    let stem = repo.task_stem("backlog", "blocked-stream-task");
+
+    let response = tiber_server::router_at(repo.path.clone())
+        .oneshot(
+            Request::get("/events")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("events response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+
+    let initial = next_body_frame(&mut body).await;
+    assert!(initial.contains(&stem));
+    assert!(!initial.contains("Waiting on external account access."));
+
+    let task = repo.task_file("backlog", &stem).replace(
+        "agent_blocked_reason: \n",
+        "agent_blocked_reason: Waiting on external account access.\n",
+    );
+    repo.insert_tasks_tree_file(&format!("backlog/{stem}.md"), &task);
+
+    let changed = next_body_frame(&mut body).await;
+    assert!(changed.contains(&stem));
+    assert!(changed.contains("Waiting on external account access."));
+}
+
+#[tokio::test]
 async fn dashboard_does_not_expose_http_mcp_route() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);

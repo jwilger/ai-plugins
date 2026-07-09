@@ -163,7 +163,10 @@ fn next_reports_when_all_open_tasks_are_agent_unresolvable_blocked() {
     let stderr = String::from_utf8(next.stderr).expect("next stderr should be utf8");
     assert!(stderr.contains("no ready tasks; 1 task(s) have agent_blocked_reason"));
     assert!(stderr.contains(&blocked));
-    assert!(stderr.contains("tiber update <ref> --agent-blocked-reason \"\""));
+    assert!(stderr.contains(&format!("tiber show {blocked}")));
+    assert!(stderr.contains(&format!(
+        "tiber update {blocked} --agent-blocked-reason \"\""
+    )));
 }
 
 #[test]

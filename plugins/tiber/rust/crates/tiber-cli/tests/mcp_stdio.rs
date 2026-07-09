@@ -483,7 +483,10 @@ fn mcp_stdio_next_reports_agent_unresolvable_blocked_tasks() {
     assert!(blocked_next.contains(r#""id":1"#));
     assert!(blocked_next.contains("no ready tasks; 1 task(s) have agent_blocked_reason"));
     assert!(blocked_next.contains(&blocked));
-    assert!(blocked_next.contains("tiber.update agent_blocked_reason=\\\"\\\""));
+    assert!(blocked_next.contains(&format!("tiber.show ref=\\\"{blocked}\\\"")));
+    assert!(blocked_next.contains(&format!(
+        "tiber.update ref=\\\"{blocked}\\\" agent_blocked_reason=\\\"\\\""
+    )));
 
     write_message(
         &mut stdin,

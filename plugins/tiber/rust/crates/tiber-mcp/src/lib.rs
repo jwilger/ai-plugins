@@ -177,8 +177,13 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
             Ok(text_content(if let Some(task) = next.task {
                 format!("{}\t{}\n", task.path, task.title)
             } else if next.agent_blocked_count > 0 {
+                let first_ref = &next
+                    .agent_blocked_tasks
+                    .first()
+                    .expect("blocked count implies at least one blocked task")
+                    .path;
                 format!(
-                    "no ready tasks; {count} task(s) have agent_blocked_reason: {tasks}. Use tiber.show to inspect them, and clear resolved blockers with tiber.update agent_blocked_reason=\"\".\n",
+                    "no ready tasks; {count} task(s) have agent_blocked_reason: {tasks}. Inspect with tiber.show ref=\"{first_ref}\"; clear resolved blockers with tiber.update ref=\"{first_ref}\" agent_blocked_reason=\"\".\n",
                     count = next.agent_blocked_count,
                     tasks = next
                         .agent_blocked_tasks
