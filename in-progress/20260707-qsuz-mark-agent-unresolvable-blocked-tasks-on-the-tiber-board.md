@@ -3,6 +3,9 @@ title: Mark agent-unresolvable blocked tasks on the Tiber board
 blocked_by: []
 blocks: []
 tags: []
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
