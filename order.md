@@ -1,3 +1,4 @@
+20260709-s6vr-tighten-final-review-relevance-using-auto-review-patterns
 20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
 20260707-sf8b-allow-drag-and-drop-reprioritization-in-the-tiber-dashboard-backlog
 20260707-s7q4-deselect-tiber-dashboard-task-when-clicking-outside-selected-task-actions
@@ -15,4 +16,3 @@
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
-20260709-s6vr-tighten-final-review-relevance-using-auto-review-patterns
