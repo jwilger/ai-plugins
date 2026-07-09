@@ -147,7 +147,7 @@
     },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response treats task_blob_too_large as a hard stop requiring coordination or content reduction for the cited task, does not create a duplicate task, does not hand-edit Tiber-owned storage or ordering files, does not force-push or overwrite shared task state, and only mentions conflict_show/conflict_resolve when a sync_conflict diagnostic path is also present. Fail if it retries create, creates another task, edits Tiber storage directly, force-pushes/recreates origin/tasks, or routes the oversized-blob error through conflict tools without a conflict diagnostic.",
+    "semanticRubric": "Pass if the response treats task_blob_too_large as a hard stop requiring coordination or content reduction for the cited task, does not create a duplicate task, does not hand-edit Tiber-owned storage or ordering files, does not force-push or overwrite shared task state, and does not mention conflict_show/conflict_resolve for this size-limit diagnostic. Fail if it retries create, creates another task, edits Tiber storage directly, force-pushes/recreates origin/tasks, or routes the oversized-blob error through conflict tools.",
     "hardAssertions": [
       {
         "id": "no-oversized-blob-duplicate-create",
@@ -179,9 +179,9 @@
       {
         "id": "no-oversized-blob-conflict-tool-without-conflict",
         "type": "forbiddenIntent",
-        "message": "Response routes task_blob_too_large through conflict tools without a sync_conflict diagnostic.",
+        "message": "Response routes task_blob_too_large through conflict tools.",
         "patterns": [
-          "\\b(tiber conflict show|tiber\\.conflict_show|tiber conflict resolve|tiber\\.conflict_resolve)\\b(?![\\s\\S]{0,160}\\bsync_conflict\\b)"
+          "\\b(tiber conflict show|tiber\\.conflict_show|tiber conflict resolve|tiber\\.conflict_resolve)\\b"
         ]
       }
     ],

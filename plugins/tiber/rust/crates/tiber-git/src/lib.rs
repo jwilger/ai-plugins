@@ -1864,7 +1864,7 @@ impl GitRepository {
         })?;
         if size > limit {
             return Err(Error::Parse(format!(
-                "task_blob_too_large path={} bytes={} max_bytes={} recovery=\"stop; inspect with tiber conflict show <path> when a conflict path is available; coordinate to shrink or remove the oversized Tiber task blob in refs/heads/tasks or origin/tasks without force-pushing or overwriting shared task state\"",
+                "task_blob_too_large path={} bytes={} max_bytes={} recovery=\"stop; coordinate to shrink or remove the oversized Tiber task blob in refs/heads/tasks or origin/tasks without force-pushing or overwriting shared task state\"",
                 quoted_string(path),
                 size,
                 limit
@@ -4001,7 +4001,7 @@ fn ensure_file_size(path: &Path, display_path: &str, limit: u64) -> Result<(), E
     let size = fs::metadata(path)?.len();
     if size > limit {
         return Err(Error::Parse(format!(
-            "task_blob_too_large path={} bytes={} max_bytes={} recovery=\"stop; inspect with tiber conflict show <path> when a conflict path is available; coordinate to shrink or remove the oversized Tiber task blob in refs/heads/tasks or origin/tasks without force-pushing or overwriting shared task state\"",
+            "task_blob_too_large path={} bytes={} max_bytes={} recovery=\"stop; coordinate to shrink or remove the oversized Tiber task blob in refs/heads/tasks or origin/tasks without force-pushing or overwriting shared task state\"",
             quoted_string(display_path),
             size,
             limit

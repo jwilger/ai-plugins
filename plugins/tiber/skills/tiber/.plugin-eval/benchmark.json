@@ -90,12 +90,12 @@
       "id": "task-blob-too-large",
       "title": "Oversized task blob boundary",
       "purpose": "Check that the skill treats oversized task blobs as a hard coordination stop instead of duplicate creation, direct storage edits, or overwrite recovery.",
-      "userInput": "Use the local Codex skill \"tiber\" if it helps. In this copied workspace, inspect plugins/tiber/skills/tiber/SKILL.md and plugins/tiber/README.md, then write .plugin-eval-benchmark/tiber.md beginning with \"Scenario: task-blob-too-large\" with guidance for a Tiber operation that fails with `task_blob_too_large path=backlog/20260709-ab12-large-task.md max_bytes=1048576 recovery=\"stop and coordinate; reduce the oversized task content before retrying\"`. The artifact must treat this as a hard stop, require coordination and content reduction for the cited task, reject creating another task, reject direct Tiber-owned storage edits, reject force-pushing or overwriting shared task state, avoid conflict show/resolve tools unless a sync_conflict diagnostic is also present, and still mention the normal launcher/install-bin/status/command-owned-write/validate workflow: <plugin-root>/bin/tiber before PATH, `tiber install-bin --target-dir ~/.local/bin --dry-run`, backlog/in-progress/done/abandoned, tiber create or tiber.create for normal writes, and tiber validate --fix.",
+      "userInput": "Use the local Codex skill \"tiber\" if it helps. In this copied workspace, inspect plugins/tiber/skills/tiber/SKILL.md and plugins/tiber/README.md, then write .plugin-eval-benchmark/tiber.md beginning with \"Scenario: task-blob-too-large\" with guidance for a Tiber operation that fails with `task_blob_too_large path=backlog/20260709-ab12-large-task.md max_bytes=1048576 recovery=\"stop and coordinate; reduce the oversized task content before retrying\"`. The artifact must treat this as a hard stop, require coordination and content reduction for the cited task, reject creating another task, reject direct Tiber-owned storage edits, reject force-pushing or overwriting shared task state, omit conflict show/resolve tools for this size-limit diagnostic, and still mention the normal launcher/install-bin/status/command-owned-write/validate workflow: <plugin-root>/bin/tiber before PATH, `tiber install-bin --target-dir ~/.local/bin --dry-run`, backlog/in-progress/done/abandoned, tiber create or tiber.create for normal writes, and tiber validate --fix.",
       "successChecklist": [
         "The artifact treats task_blob_too_large as a hard coordination stop.",
         "The artifact rejects duplicate task creation and direct Tiber-owned storage edits.",
         "The artifact rejects force-push or overwrite recovery.",
-        "The artifact avoids conflict tools unless there is a sync_conflict diagnostic."
+        "The artifact omits conflict tools for this size-limit diagnostic."
       ]
     }
   ]

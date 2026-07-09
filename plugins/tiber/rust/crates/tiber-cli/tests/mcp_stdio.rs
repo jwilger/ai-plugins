@@ -666,7 +666,8 @@ fn mcp_stdio_conflict_show_truncates_large_conflict_sides() {
     let oversized_read_stderr = String::from_utf8(oversized_read.stderr).expect("stderr utf8");
     assert!(oversized_read_stderr.contains("task_blob_too_large"));
     assert!(oversized_read_stderr.contains("recovery="));
-    assert!(oversized_read_stderr.contains("inspect with tiber conflict show <path>"));
+    assert!(oversized_read_stderr.contains("coordinate to shrink or remove"));
+    assert!(!oversized_read_stderr.contains("conflict show"));
     assert!(
         oversized_read_stderr.contains("without force-pushing or overwriting shared task state")
     );
