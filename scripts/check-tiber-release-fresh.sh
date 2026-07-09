@@ -4,6 +4,8 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 release_inputs=(
+  flake.lock
+  flake.nix
   plugins/tiber/rust
   plugins/tiber/bin
   plugins/tiber/scripts

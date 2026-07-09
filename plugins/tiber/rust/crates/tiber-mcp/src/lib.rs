@@ -178,8 +178,14 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
                 format!("{}\t{}\n", task.path, task.title)
             } else if next.agent_blocked_count > 0 {
                 format!(
-                    "no ready tasks; {count} task(s) have agent_blocked_reason. Use tiber.list/show to inspect them, and clear resolved blockers with tiber.update agent_blocked_reason=\"\".\n",
-                    count = next.agent_blocked_count
+                    "no ready tasks; {count} task(s) have agent_blocked_reason: {tasks}. Use tiber.show to inspect them, and clear resolved blockers with tiber.update agent_blocked_reason=\"\".\n",
+                    count = next.agent_blocked_count,
+                    tasks = next
+                        .agent_blocked_tasks
+                        .iter()
+                        .map(|task| task.path.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             } else {
                 String::new()

@@ -451,6 +451,62 @@ fn read_json_message(stdout: &mut impl BufRead) -> serde_json::Value {
 }
 
 #[test]
+fn mcp_stdio_next_reports_agent_unresolvable_blocked_tasks() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "MCP externally blocked task"]));
+    let blocked = task_stem(&repo, "backlog", "mcp-externally-blocked-task");
+    assert_success(repo.tiber([
+        "update",
+        "mcp-externally-blocked-task",
+        "--agent-blocked-reason",
+        "Waiting on account access that the agent cannot grant.",
+    ]));
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tiber mcp stdio");
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.next","arguments":{}}}"#,
+    );
+    let blocked_next = read_message(&mut stdout);
+    assert!(blocked_next.contains(r#""id":1"#));
+    assert!(blocked_next.contains("no ready tasks; 1 task(s) have agent_blocked_reason"));
+    assert!(blocked_next.contains(&blocked));
+    assert!(blocked_next.contains("tiber.update agent_blocked_reason=\\\"\\\""));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"mcp-externally-blocked-task","agent_blocked_reason":""}}}"#,
+    );
+    let clear = read_message(&mut stdout);
+    assert!(clear.contains(r#""id":2"#));
+    assert!(clear.contains("updated mcp-externally-blocked-task"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tiber.next","arguments":{}}}"#,
+    );
+    let ready_next = read_message(&mut stdout);
+    assert!(ready_next.contains(r#""id":3"#));
+    assert!(ready_next.contains(&blocked));
+
+    drop(stdin);
+    let status = child.wait().expect("wait for mcp process");
+    assert!(status.success());
+}
+
+#[test]
 fn mcp_stdio_ignores_json_rpc_notifications() {
     let input = std::io::Cursor::new(
         r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}

@@ -221,6 +221,7 @@ pub struct TaskSummary {
 pub struct NextTaskStatus {
     pub task: Option<TaskSummary>,
     pub agent_blocked_count: usize,
+    pub agent_blocked_tasks: Vec<TaskSummary>,
 }
 
 impl From<&TaskSnapshot> for TaskSummary {
@@ -867,14 +868,18 @@ impl GitRepository {
 
     fn next_task_status(&self) -> Result<NextTaskStatus, Error> {
         self.read_sync()?;
-        let mut agent_blocked_count = 0;
+        let mut agent_blocked_tasks = Vec::new();
         for stem in self.order_entries()? {
             let path = self.resolve_task_ref(&stem)?;
             let task = fs::read_to_string(self.tasks_dir().join(&path))?;
             let dependencies_ready = self.task_dependencies_are_ready(&task)?;
             if self.task_is_agent_blocked(&task)? {
                 if dependencies_ready {
-                    agent_blocked_count += 1;
+                    let title = parse_title(&task)?;
+                    agent_blocked_tasks.push(TaskSummary {
+                        path: stem.clone(),
+                        title,
+                    });
                 }
                 continue;
             }
@@ -882,13 +887,15 @@ impl GitRepository {
                 let title = parse_title(&task)?;
                 return Ok(NextTaskStatus {
                     task: Some(TaskSummary { path: stem, title }),
-                    agent_blocked_count,
+                    agent_blocked_count: agent_blocked_tasks.len(),
+                    agent_blocked_tasks,
                 });
             }
         }
         Ok(NextTaskStatus {
             task: None,
-            agent_blocked_count,
+            agent_blocked_count: agent_blocked_tasks.len(),
+            agent_blocked_tasks,
         })
     }
 

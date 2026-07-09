@@ -145,6 +145,7 @@ fn next_reports_when_all_open_tasks_are_agent_unresolvable_blocked() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Externally blocked task"]));
+    let blocked = task_stem(&repo, "backlog", "externally-blocked-task");
     assert_success(repo.tiber([
         "update",
         "externally-blocked-task",
@@ -161,6 +162,7 @@ fn next_reports_when_all_open_tasks_are_agent_unresolvable_blocked() {
     );
     let stderr = String::from_utf8(next.stderr).expect("next stderr should be utf8");
     assert!(stderr.contains("no ready tasks; 1 task(s) have agent_blocked_reason"));
+    assert!(stderr.contains(&blocked));
     assert!(stderr.contains("tiber update <ref> --agent-blocked-reason \"\""));
 }
 
@@ -170,6 +172,7 @@ fn next_does_not_report_agent_blocked_count_for_dependency_blocked_tasks() {
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Dependency blocked task"]));
     assert_success(repo.tiber(["create", "Open dependency"]));
+    let open_dependency = task_stem(&repo, "backlog", "open-dependency");
     assert_success(repo.tiber([
         "update",
         "dependency-blocked-task",
@@ -204,6 +207,8 @@ fn next_does_not_report_agent_blocked_count_for_dependency_blocked_tasks() {
     );
     let stderr = String::from_utf8(next.stderr).expect("next stderr should be utf8");
     assert!(stderr.contains("no ready tasks; 1 task(s) have agent_blocked_reason"));
+    assert!(stderr.contains(&open_dependency));
+    assert!(!stderr.contains("dependency-blocked-task"));
 }
 
 #[test]

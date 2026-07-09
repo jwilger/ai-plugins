@@ -91,8 +91,14 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
                 println!("{}\t{}", task.path, task.title);
             } else if next.agent_blocked_count > 0 {
                 eprintln!(
-                    "no ready tasks; {count} task(s) have agent_blocked_reason. Use tiber list/show to inspect them, and clear resolved blockers with tiber update <ref> --agent-blocked-reason \"\".",
-                    count = next.agent_blocked_count
+                    "no ready tasks; {count} task(s) have agent_blocked_reason: {tasks}. Use tiber show to inspect them, and clear resolved blockers with tiber update <ref> --agent-blocked-reason \"\".",
+                    count = next.agent_blocked_count,
+                    tasks = next
+                        .agent_blocked_tasks
+                        .iter()
+                        .map(|task| task.path.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
             }
             Ok(())
