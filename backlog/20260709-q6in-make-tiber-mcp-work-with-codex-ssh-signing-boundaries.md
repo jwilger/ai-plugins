@@ -19,6 +19,7 @@ Tiber MCP and CLI writes exposed SSH config, agent socket, Git fetch, and signed
 
 - [ ] Diagnose and document how Codex-launched Tiber MCP can inherit SSH and 1Password agent state differently from the user interactive shell.
 - [ ] Implement or document a narrow recovery path for NixOS/Home Manager SSH config symlink ownership, 1Password SSH signing, and Codex sandbox Git writes.
+- [ ] Tiber MCP can create and sync a backlog task from Codex with signed commits on refs/heads/tasks.
 
 ## Subtasks
 
