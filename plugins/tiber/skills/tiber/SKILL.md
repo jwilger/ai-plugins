@@ -72,12 +72,11 @@ before probing `PATH`.
   repository storage. Do not stop at generic "inspect and reconcile" guidance,
   and do not mention force overwrite as an acceptable fallback.
 - If Tiber reports `task_blob_too_large`, treat it as a hard coordination stop.
-  Use `tiber conflict show <path>` when the error gives a diagnostic conflict
-  path and the capped diagnostic is available. Otherwise coordinate with a
-  human/operator who can inspect Tiber's Git refs (`refs/heads/tasks` or
-  `origin/tasks`) and shrink or remove the oversized task blob. Do not
-  force-push, blindly overwrite shared task state, or hand-edit Tiber-owned
-  storage as an ordinary agent workflow.
+  Do not create a duplicate task, route it through conflict tools, force-push,
+  blindly overwrite shared task state, or hand-edit Tiber-owned storage as an
+  ordinary agent workflow. Coordinate with a human/operator who can repair
+  Tiber-owned state intentionally, shrink or remove the oversized task blob from
+  `refs/heads/tasks` or `origin/tasks`, then rerun Tiber validation/sync.
 - If Tiber reports `tasks_remote_rewritten`, treat it as a hard coordination
   stop. Inspect `origin/tasks` with a human/operator or a clean checkout before
   any recovery; do not force-push, recreate, or overwrite the shared tasks ref

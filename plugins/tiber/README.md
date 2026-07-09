@@ -188,11 +188,11 @@ be resolved automatically, the read fails instead of returning stale or locally
 divergent task data.
 
 If Tiber reports `task_blob_too_large`, stop and coordinate repair of the
-Tiber-owned task branch. Use `tiber conflict show <path>` when Tiber gives a
-conflict path and the capped diagnostic can show enough context. Otherwise ask a
-human/operator to inspect `refs/heads/tasks` or `origin/tasks` and shrink or
-remove the oversized task blob without force-pushing or overwriting shared task
-state.
+Tiber-owned task branch. Do not create a duplicate task, route the size-limit
+diagnostic through conflict tools, hand-edit Tiber-owned storage as an ordinary
+agent workflow, force-push, or overwrite shared task state. Ask a human/operator
+to intentionally inspect and repair `refs/heads/tasks` or `origin/tasks`, shrink
+or remove the oversized task blob, then rerun Tiber validation/sync.
 
 ## Stdio MCP
 

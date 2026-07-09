@@ -335,7 +335,7 @@ fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
         ));
     }
     Ok(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-copy-status aria-live=\"polite\"></p><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><span class=\"sync-status\" data-sync-status aria-live=\"polite\" hidden></span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-copy-status aria-live=\"polite\"></p><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
         dashboard_style(),
         column_html,
         tasks.iter().map(|task| modal_html(task, &tasks, root)).collect::<String>(),
@@ -1236,6 +1236,18 @@ a { color: inherit; text-decoration: none; }
 code { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; }
 .empty { color: var(--ink-muted); font-style: italic; }
 .draft-marker { color: var(--ink-muted); }
+.sync-status {
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 999px;
+  color: #92400e;
+  font-size: 12px;
+  max-width: min(42vw, 420px);
+  overflow: hidden;
+  padding: 4px 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .docs-view {
   display: grid;
@@ -1273,6 +1285,7 @@ const modalContent = document.querySelector('[data-modal-content]');
 const closeButton = document.querySelector('[data-modal-close]');
 const copyStatus = document.querySelector('[data-copy-status]');
 const interceptStatus = document.querySelector('[data-link-intercept-status]');
+const syncStatus = document.querySelector('[data-sync-status]');
 const board = document.querySelector('[data-dashboard-board]');
 let selectedStem = null;
 
@@ -1415,12 +1428,16 @@ new EventSource("/events").onmessage = (event) => {
     try {
       const payload = JSON.parse(event.data);
       if (Object.prototype.hasOwnProperty.call(payload, 'error')) {
+        syncStatus.textContent = `Task sync delayed: ${payload.error}`;
+        syncStatus.hidden = false;
         return;
       }
     } catch (_error) {
       // Fall through and reload on malformed data so stale UI is not hidden.
     }
   }
+  syncStatus.textContent = '';
+  syncStatus.hidden = true;
   if (!wasInitialEvent) {
     location.reload();
     return;
@@ -1478,5 +1495,8 @@ mod tests {
         assert!(script.contains("const wasInitialEvent = !seenInitialEvent;"));
         assert!(script.contains("seenInitialEvent = true;"));
         assert!(script.contains("if (!wasInitialEvent)"));
+        assert!(script.contains("Task sync delayed: ${payload.error}"));
+        assert!(script.contains("syncStatus.hidden = false"));
+        assert!(script.contains("syncStatus.hidden = true"));
     }
 }

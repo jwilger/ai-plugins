@@ -58,11 +58,11 @@ multiple conflicts are present, and rerun the structured Tiber MCP sync tool onl
 after the conflicts are resolved. That diagnostic path is not a normal task ref;
 do not invent it or use it with ordinary task commands.
 If Tiber reports `task_blob_too_large`, stop and coordinate repair rather than
-creating another task or editing Tiber-owned storage directly. Use the structured
-conflict-show tool when a diagnostic conflict path is available; otherwise ask
-for human/operator help inspecting Tiber's Git refs and shrinking or removing the
-oversized task blob in `refs/heads/tasks` or `origin/tasks` without force-pushing
-or overwriting shared task state.
+creating another task, using conflict tools, or editing Tiber-owned storage
+directly. Ask for human/operator help to intentionally repair Tiber-owned state,
+shrink or remove the oversized task blob in `refs/heads/tasks` or `origin/tasks`
+without force-pushing or overwriting shared task state, then retry structured
+Tiber validation/sync.
 
 ## Workflow
 
