@@ -46,6 +46,12 @@ fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
     let stdout = String::from_utf8(output.stdout).expect("preview output should be utf8");
     assert!(stdout.contains("Tiber Codex sandbox setup preview"));
     assert!(stdout.contains("Prefer the narrowest approval"));
+    assert!(stdout.contains("Couldn't get agent socket?"));
+    assert!(stdout.contains("forwards SSH_AUTH_SOCK"));
+    assert!(stdout.contains("env_vars = [\"SSH_AUTH_SOCK\"]"));
+    assert!(stdout.contains("plugin MCP policy overlays do not change transport env"));
+    assert!(stdout.contains("preserves the absolute installed launcher"));
+    assert!(stdout.contains("Never forward SSH_AUTH_SOCK to a PATH-resolved"));
     assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"hash-object\"]"));
     assert!(stdout.contains("prefix_rule [\"git\", \"hash-object\"]"));
     assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"mktree\"]"));
