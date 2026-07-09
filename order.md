@@ -17,3 +17,4 @@
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260709-77j3-route-advisor-skill-to-the-appropriate-gpt-5-6-model
+20260709-spx8-update-all-evals-to-use-gpt-5-6-model-family-when-running-against-codex
