@@ -1187,6 +1187,15 @@ function resetCopyButton(copyButton) {
   copyButton.classList.remove('is-copied', 'is-copy-failed');
 }
 
+function isSelectedTaskAction(target) {
+  return Boolean(
+    target.closest('[data-task-link]') ||
+    target.closest('[data-copy-task-id]') ||
+    target.closest('[data-task-modal]') ||
+    target.closest('[data-external-link]'),
+  );
+}
+
 async function copyText(text) {
   if (navigator.clipboard?.writeText) {
     try {
@@ -1242,6 +1251,12 @@ document.addEventListener('click', async (event) => {
   if (externalLink) {
     event.preventDefault();
     interceptStatus.textContent = `intercepted ${externalLink.href}`;
+    return;
+  }
+
+  if (selectedStem && !isSelectedTaskAction(event.target)) {
+    selectedStem = null;
+    applySelection();
   }
 });
 

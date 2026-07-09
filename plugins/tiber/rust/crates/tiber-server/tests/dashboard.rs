@@ -75,6 +75,8 @@ async fn dashboard_board_page_exposes_browser_smoke_controls() {
     assert!(board.contains("href=\"/docs\""));
     assert!(board.contains("data-external-link"));
     assert!(board.contains("data-link-intercept-status"));
+    assert!(board.contains("function isSelectedTaskAction(target)"));
+    assert!(board.contains("selectedStem = null;"));
     assert!(board.contains("new EventSource(\"/events\")"));
 }
 
