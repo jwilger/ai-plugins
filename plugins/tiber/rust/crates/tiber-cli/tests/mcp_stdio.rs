@@ -317,18 +317,34 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":186,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp","agent_blocked_reason":""}}}"#,
+        r#"{"jsonrpc":"2.0","id":186,"method":"tools/call","params":{"name":"tiber.validate_fix","arguments":{}}}"#,
     );
-    let clear_blocked_reason = read_message(&mut stdout);
-    assert!(clear_blocked_reason.contains(r#""id":186"#));
-    assert!(clear_blocked_reason.contains("updated created-through-mcp"));
+    let validate_with_blocked_reason = read_message(&mut stdout);
+    assert!(validate_with_blocked_reason.contains(r#""id":186"#));
+    assert!(!validate_with_blocked_reason.contains("agent_blocked_reason"));
 
     write_message(
         &mut stdin,
         r#"{"jsonrpc":"2.0","id":187,"method":"tools/call","params":{"name":"tiber.show","arguments":{"ref":"created-through-mcp"}}}"#,
     );
+    let validated_show = read_message(&mut stdout);
+    assert!(validated_show.contains(r#""id":187"#));
+    assert!(validated_show.contains("agent_blocked_reason: Waiting on external account access."));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":188,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp","agent_blocked_reason":""}}}"#,
+    );
+    let clear_blocked_reason = read_message(&mut stdout);
+    assert!(clear_blocked_reason.contains(r#""id":188"#));
+    assert!(clear_blocked_reason.contains("updated created-through-mcp"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":189,"method":"tools/call","params":{"name":"tiber.show","arguments":{"ref":"created-through-mcp"}}}"#,
+    );
     let cleared_show = read_message(&mut stdout);
-    assert!(cleared_show.contains(r#""id":187"#));
+    assert!(cleared_show.contains(r#""id":189"#));
     assert!(cleared_show.contains("agent_blocked_reason: "));
     assert!(!cleared_show.contains("Waiting on external account access."));
 
