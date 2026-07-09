@@ -22,6 +22,7 @@ Put the behavior in development-discipline, not agentic-systems-engineering. The
 - [ ] Existing development workflow skills cross-reference model-routing where small-model delegation decisions naturally arise.
 - [ ] Behavior fixtures cover accepted cheap-model delegation, rejected cheap-model delegation, and rejection of Claude /fast as a cost-saving substitute.
 - [ ] Marketplace docs and metadata are updated without hard-coding this ticket to a specific version bump number.
+- [ ] Validation includes JSON checks, formatting, relevant coverage checks, eval dry-run, and focused provider-backed evidence where credentials allow.
 
 ## Subtasks
 
