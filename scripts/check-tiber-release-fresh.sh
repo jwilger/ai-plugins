@@ -8,6 +8,9 @@ release_inputs=(
   plugins/tiber/bin
   plugins/tiber/scripts
   plugins/tiber/release-binaries.json
+  scripts/build-tiber-release-all.sh
+  scripts/check-tiber-release-complete.sh
+  scripts/check-tiber-release-fresh.sh
 )
 release_outputs=(
   plugins/tiber/dist
