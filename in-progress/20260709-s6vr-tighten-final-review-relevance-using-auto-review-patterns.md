@@ -12,7 +12,11 @@ claim:
 
 ## Summary
 
+Tighten the development-discipline final-review skill so subagent findings stay focused on the active change surface and the user's stated task, drawing useful relevance/filtering patterns from ../auto_review while preserving the existing review lenses and three-consecutive-clean rule.
+
 ## Context / Why
+
+Recent final-review cycles produced findings outside the active ticket's intended surface. The skill should keep broad lenses, but require reviewers and the main agent to connect each finding to the requested change, PR scope, acceptance criteria, or explicit user concern before treating it as actionable.
 
 ## Acceptance criteria
 
