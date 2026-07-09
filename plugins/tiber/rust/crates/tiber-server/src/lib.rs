@@ -416,12 +416,23 @@ fn agent_blocked_badge_html(task: &DashboardTask) -> String {
     let Some(reason) = agent_blocked_reason(task) else {
         return String::new();
     };
+    let badge_reason = summarize_agent_blocked_reason(reason);
     format!(
         "<span class=\"badge agent-blocked\" data-agent-blocked title=\"{}\" aria-label=\"Agent-unresolvable blocked: {}\">Blocked: {}</span>",
         escape_html(reason),
         escape_html(reason),
-        escape_html(reason)
+        escape_html(&badge_reason)
     )
+}
+
+fn summarize_agent_blocked_reason(reason: &str) -> String {
+    const MAX_BADGE_CHARS: usize = 96;
+    if reason.chars().count() <= MAX_BADGE_CHARS {
+        return reason.to_string();
+    }
+    let mut summary = reason.chars().take(MAX_BADGE_CHARS - 3).collect::<String>();
+    summary.push_str("...");
+    summary
 }
 
 fn pr_mr_badge_html(task: &DashboardTask) -> String {

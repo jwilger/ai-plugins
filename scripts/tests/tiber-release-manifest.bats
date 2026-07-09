@@ -715,3 +715,24 @@ SH
   [[ "$output" == *"untracked-release-artifacts"* ]]
   [[ "$output" == *"plugins/tiber/dist/new-target/tiber"* ]]
 }
+
+@test "ci quality checkout fetches release freshness base ref" {
+  run node - "$ROOT/.github/workflows/ci.yml" <<'NODE'
+const fs = require('fs');
+
+const workflow = fs.readFileSync(process.argv[2], 'utf8');
+const qualityJob = workflow.match(/quality:[\s\S]*?(?=\n  [a-zA-Z0-9_-]+:|\n\s*$)/)?.[0] ?? '';
+
+if (!qualityJob.includes('uses: actions/checkout@v6')) {
+  throw new Error('quality job should use actions/checkout');
+}
+if (!/fetch-depth:\s*0/.test(qualityJob)) {
+  throw new Error('quality checkout should fetch full history so origin/main exists for release freshness checks');
+}
+NODE
+
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output"
+  fi
+  [ "$status" -eq 0 ]
+}

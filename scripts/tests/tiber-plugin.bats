@@ -153,11 +153,17 @@ if (!/do not ask the user to rerun an equivalent/i.test(normalizedSkill)) {
 if (!/do not recommend running the whole Tiber MCP server outside the sandbox/i.test(normalizedSkill)) {
   failures.push('tiber skill should prefer narrow Git permissions over broad MCP-server escalation');
 }
+if (!skill.includes('`tiber next` skips tasks while this marker is set')) {
+  failures.push('tiber skill should document that tiber next skips agent-blocked tasks');
+}
 if (!readme.includes('tiber:new-task Document release checklist')) {
   failures.push('tiber README should document tiber:new-task usage');
 }
 if (!readme.includes('tiber codex-sandbox --dry-run')) {
   failures.push('tiber README should document Codex sandbox setup preview');
+}
+if (!readme.includes('`tiber next` skips tasks while this marker is set')) {
+  failures.push('tiber README should document that tiber next skips agent-blocked tasks');
 }
 if (!cases.some((testCase) => testCase.case_id === 'tiber-new-task-command-backlog-capture')) {
   failures.push('missing tiber new-task behavior eval case');

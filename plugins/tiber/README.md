@@ -130,6 +130,8 @@ Do not record secret values, tokens, passwords, private keys, cookies, or
 sensitive account details in the reason; describe the missing access or decision
 without exposing the underlying credential material. Clear the marker with
 `tiber update <task-ref> --agent-blocked-reason ""` when the blocker is resolved.
+`tiber next` skips tasks while this marker is set and reports when all otherwise
+ready work is being skipped for agent-unresolvable blockers.
 The dashboard shows open agent-unresolvable blocked tasks with a blocked badge
 and shows the reason in the task detail modal.
 

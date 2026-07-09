@@ -53,6 +53,8 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   not write secret values, tokens, passwords, private keys, cookies, or
   sensitive account details into the reason. Clear the marker with
   `tiber update <ref> --agent-blocked-reason ""` when the blocker is resolved.
+  `tiber next` skips tasks while this marker is set and reports when all ready
+  work is being skipped for agent-unresolvable blockers.
 - Before actively working on an existing Tiber task, move it to `in-progress`
   with `tiber transition <ref> in-progress`; do not leave active work in the
   backlog as an informal reservation.

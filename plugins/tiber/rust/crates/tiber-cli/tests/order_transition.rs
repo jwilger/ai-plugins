@@ -141,6 +141,30 @@ fn next_skips_agent_unresolvable_blocked_tasks_until_reason_is_cleared() {
 }
 
 #[test]
+fn next_reports_when_all_open_tasks_are_agent_unresolvable_blocked() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Externally blocked task"]));
+    assert_success(repo.tiber([
+        "update",
+        "externally-blocked-task",
+        "--agent-blocked-reason",
+        "Waiting on account access that the agent cannot grant.",
+    ]));
+
+    let next = repo.tiber(["next"]);
+
+    assert_success_ref(&next);
+    assert_eq!(
+        String::from_utf8(next.stdout).expect("next stdout should be utf8"),
+        ""
+    );
+    let stderr = String::from_utf8(next.stderr).expect("next stderr should be utf8");
+    assert!(stderr.contains("no ready tasks; 1 task(s) have agent_blocked_reason"));
+    assert!(stderr.contains("tiber update <ref> --agent-blocked-reason \"\""));
+}
+
+#[test]
 fn task_refs_can_use_unique_filename_identity_and_report_ambiguity() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

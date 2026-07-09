@@ -423,7 +423,6 @@
         "id": "no-sensitive-blocked-reason",
         "type": "forbiddenIntent",
         "message": "Response appears to store secrets or sensitive account details in agent_blocked_reason.",
-        "allowNegation": false,
         "patterns": [
           "\\bagent[_-]blocked[_-]reason\\b[\\s\\S]{0,160}\\b(API token|token|secret|password|private key|cookie)\\b[\\s\\S]{0,80}\\b(include|store|record|keep|preserve|paste)",
           "\\b(include|store|record|keep|preserve|paste)\\b[\\s\\S]{0,120}\\b(API token|token|secret|password|private key|cookie)\\b[\\s\\S]{0,120}\\bagent[_-]blocked[_-]reason\\b"

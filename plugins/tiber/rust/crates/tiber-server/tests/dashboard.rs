@@ -203,14 +203,22 @@ async fn dashboard_marks_agent_unresolvable_blocked_tasks() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);
     repo.tiber(["create", "Blocked externally"]);
+    repo.tiber(["create", "Blocked with a long reason"]);
     repo.tiber(["create", "Previously blocked done"]);
     let stem = repo.task_stem("backlog", "blocked-externally");
+    let long_stem = repo.task_stem("backlog", "blocked-with-a-long-reason");
     let done_stem = repo.task_stem("backlog", "previously-blocked-done");
     let task = repo.task_file("backlog", &stem).replace(
         "agent_blocked_reason: \n",
         "agent_blocked_reason: Waiting on account access that the agent cannot grant.\n",
     );
     repo.insert_tasks_tree_file(&format!("backlog/{stem}.md"), &task);
+    let long_reason = "Waiting on a production account owner to grant access after confirming the requester has completed the required approval workflow and audit checklist.";
+    let long_task = repo.task_file("backlog", &long_stem).replace(
+        "agent_blocked_reason: \n",
+        &format!("agent_blocked_reason: {long_reason}\n"),
+    );
+    repo.insert_tasks_tree_file(&format!("backlog/{long_stem}.md"), &long_task);
     repo.move_task("backlog", "done", &done_stem);
     let done_task = repo.task_file("done", &done_stem).replace(
         "agent_blocked_reason: \n",
@@ -233,9 +241,14 @@ async fn dashboard_marks_agent_unresolvable_blocked_tasks() {
     assert!(
         board.contains(">Blocked: Waiting on account access that the agent cannot grant.</span>")
     );
+    assert!(board.contains(
+        ">Blocked: Waiting on a production account owner to grant access after confirming the requester has comp...</span>"
+    ));
+    assert!(board.contains(&format!("title=\"{long_reason}\"")));
     assert!(board.contains("data-agent-blocked-reason"));
     assert!(board.contains("Blocked reason"));
     assert!(board.contains("Waiting on account access that the agent cannot grant."));
+    assert!(board.contains(long_reason));
     assert!(!board.contains("Stale external blocker."));
     assert!(!board.contains("PR/MR blocked"));
 }

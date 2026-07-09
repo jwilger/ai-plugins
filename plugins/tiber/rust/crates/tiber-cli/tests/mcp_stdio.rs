@@ -73,6 +73,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(tools.contains(r#""name":"tiber.show""#));
     assert!(tools.contains(r#""name":"tiber.metadata""#));
     assert!(tools.contains(r#""name":"tiber.next""#));
+    assert!(tools.contains("Tasks with agent_blocked_reason are skipped"));
     assert!(tools.contains(r#""name":"tiber.transition""#));
     assert!(tools.contains(r#""name":"tiber.prioritize""#));
     assert!(tools.contains(r#""name":"tiber.link""#));

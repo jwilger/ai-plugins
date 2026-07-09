@@ -172,11 +172,19 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
                     .unwrap_or_else(|| "uncommitted".to_string())
             )))
         }
-        "tiber.next" => Ok(text_content(
-            tiber_git::next_task()?
-                .map(|task| format!("{}\t{}\n", task.path, task.title))
-                .unwrap_or_default(),
-        )),
+        "tiber.next" => {
+            let next = tiber_git::next_task_status()?;
+            Ok(text_content(if let Some(task) = next.task {
+                format!("{}\t{}\n", task.path, task.title)
+            } else if next.agent_blocked_count > 0 {
+                format!(
+                    "no ready tasks; {count} task(s) have agent_blocked_reason. Use tiber.list/show to inspect them, and clear resolved blockers with tiber.update agent_blocked_reason=\"\".\n",
+                    count = next.agent_blocked_count
+                )
+            } else {
+                String::new()
+            }))
+        }
         "tiber.transition" => {
             let task_ref = required_string(arguments, "ref")?;
             let status = required_string(arguments, "status")?;
@@ -402,7 +410,7 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.next",
             "Next task",
-            "Read the next task in board order.",
+            "Read the next ready task in board order. Tasks with agent_blocked_reason are skipped until the reason is cleared.",
             json!({}),
             vec![],
         ),
