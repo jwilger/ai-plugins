@@ -131,6 +131,7 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
                     tags: update.tags,
                     pr_mr_url: update.pr_mr_url.as_deref(),
                     pr_mr_status: update.pr_mr_status.as_deref(),
+                    agent_blocked_reason: update.agent_blocked_reason.as_deref(),
                 },
             )?;
             Ok(())
@@ -182,7 +183,7 @@ fn run(args: impl IntoIterator<Item = String>) -> Result<(), tiber_git::Error> {
             Ok(())
         }
         _ => Err(tiber_git::Error::Usage(
-            "usage: tiber init|sync|codex-sandbox --dry-run|dashboard serve|mcp stdio|install-bin --target-dir <dir> --dry-run|--apply|create <title>|show <ref>|metadata <ref>|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add <ref> <title> [--after s1,s2]|subtask check|uncheck|update <ref> [--title|--summary|--context|--tags|--pr-mr-url|--pr-mr-status]|acceptance add|check|uncheck|remove|note add|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
+            "usage: tiber init|sync|codex-sandbox --dry-run|dashboard serve|mcp stdio|install-bin --target-dir <dir> --dry-run|--apply|create <title>|show <ref>|metadata <ref>|list|next|transition <ref> <status>|prioritize <ref> --before <ref>|link <ref> blocks <ref>|unlink <ref> blocks <ref>|subtask add <ref> <title> [--after s1,s2]|subtask check|uncheck|update <ref> [--title|--summary|--context|--tags|--pr-mr-url|--pr-mr-status|--agent-blocked-reason]|acceptance add|check|uncheck|remove|note add|validate --fix|close-from-trailers|scaffold repo --dry-run|--apply".to_string(),
         )),
     }
 }
@@ -213,6 +214,7 @@ struct UpdateArgs {
     tags: Option<Vec<String>>,
     pr_mr_url: Option<String>,
     pr_mr_status: Option<String>,
+    agent_blocked_reason: Option<String>,
 }
 
 fn parse_update_args(args: &[String]) -> Result<UpdateArgs, tiber_git::Error> {
@@ -223,6 +225,7 @@ fn parse_update_args(args: &[String]) -> Result<UpdateArgs, tiber_git::Error> {
         tags: None,
         pr_mr_url: None,
         pr_mr_status: None,
+        agent_blocked_reason: None,
     };
     let mut index = 0;
     while index < args.len() {
@@ -239,6 +242,7 @@ fn parse_update_args(args: &[String]) -> Result<UpdateArgs, tiber_git::Error> {
             }
             "--pr-mr-url" => update.pr_mr_url = Some(value.clone()),
             "--pr-mr-status" => update.pr_mr_status = Some(value.clone()),
+            "--agent-blocked-reason" => update.agent_blocked_reason = Some(value.clone()),
             _ => {
                 return Err(tiber_git::Error::Usage(format!(
                     "unknown update flag {flag}"
@@ -253,6 +257,7 @@ fn parse_update_args(args: &[String]) -> Result<UpdateArgs, tiber_git::Error> {
         && update.tags.is_none()
         && update.pr_mr_url.is_none()
         && update.pr_mr_status.is_none()
+        && update.agent_blocked_reason.is_none()
     {
         return Err(tiber_git::Error::Usage(
             "update requires at least one field".to_string(),

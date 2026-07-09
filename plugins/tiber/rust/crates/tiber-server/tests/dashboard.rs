@@ -199,6 +199,46 @@ async fn dashboard_in_progress_cards_show_pr_mr_status_badges() {
 }
 
 #[tokio::test]
+async fn dashboard_marks_agent_unresolvable_blocked_tasks() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    repo.tiber(["create", "Blocked externally"]);
+    repo.tiber(["create", "Previously blocked done"]);
+    let stem = repo.task_stem("backlog", "blocked-externally");
+    let done_stem = repo.task_stem("backlog", "previously-blocked-done");
+    let task = repo.task_file("backlog", &stem).replace(
+        "agent_blocked_reason: \n",
+        "agent_blocked_reason: Waiting on account access that the agent cannot grant.\n",
+    );
+    repo.insert_tasks_tree_file(&format!("backlog/{stem}.md"), &task);
+    repo.move_task("backlog", "done", &done_stem);
+    let done_task = repo.task_file("done", &done_stem).replace(
+        "agent_blocked_reason: \n",
+        "agent_blocked_reason: Stale external blocker.\n",
+    );
+    repo.insert_tasks_tree_file(&format!("done/{done_stem}.md"), &done_task);
+
+    let response = tiber_server::router_at(repo.path.clone())
+        .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+        .await
+        .expect("board response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let board = body_text(response).await;
+    assert!(board.contains("is-agent-blocked"));
+    assert!(board.contains("data-agent-blocked"));
+    assert!(board.contains(
+        "aria-label=\"Agent-unresolvable blocked: Waiting on account access that the agent cannot grant.\""
+    ));
+    assert!(board.contains(">Blocked</span>"));
+    assert!(board.contains("data-agent-blocked-reason"));
+    assert!(board.contains("Blocked reason"));
+    assert!(board.contains("Waiting on account access that the agent cannot grant."));
+    assert!(!board.contains("Stale external blocker."));
+    assert!(!board.contains("PR/MR blocked"));
+}
+
+#[tokio::test]
 async fn dashboard_exposes_read_only_sse_events_route() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);

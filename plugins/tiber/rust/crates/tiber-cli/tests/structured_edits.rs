@@ -71,6 +71,38 @@ fn update_edits_pr_mr_tracking_frontmatter() {
 }
 
 #[test]
+fn update_edits_agent_unresolvable_blocked_reason() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Blocked by external owner"]));
+
+    assert_success(repo.tiber([
+        "update",
+        "blocked-by-external-owner",
+        "--agent-blocked-reason",
+        "Waiting on account access that the agent cannot grant.",
+    ]));
+    let show = repo.tiber(["show", "blocked-by-external-owner"]);
+    assert_success_ref(&show);
+    let task = String::from_utf8(show.stdout).expect("show output should be utf8");
+    assert!(task.contains(
+        "agent_blocked_reason: Waiting on account access that the agent cannot grant.\n"
+    ));
+
+    assert_success(repo.tiber([
+        "update",
+        "blocked-by-external-owner",
+        "--agent-blocked-reason",
+        "",
+    ]));
+    let cleared = repo.tiber(["show", "blocked-by-external-owner"]);
+    assert_success_ref(&cleared);
+    let task = String::from_utf8(cleared.stdout).expect("show output should be utf8");
+    assert!(task.contains("agent_blocked_reason: \n"));
+    assert!(!task.contains("agent_blocked_reason: unknown\n"));
+}
+
+#[test]
 fn acceptance_add_check_uncheck_and_remove_edits_acceptance_section() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

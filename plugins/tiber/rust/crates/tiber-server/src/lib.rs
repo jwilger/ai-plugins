@@ -190,6 +190,7 @@ struct DashboardTask {
     blocked_by: Vec<String>,
     blocks: Vec<String>,
     pr_mr: Option<PrMrStatus>,
+    agent_blocked_reason: Option<String>,
     summary: String,
     context: String,
     acceptance: Vec<ChecklistItem>,
@@ -275,6 +276,7 @@ fn dashboard_tasks(root: &FsPath) -> Result<Vec<DashboardTask>, tiber_git::Error
                     .unwrap_or("[]"),
             ),
             pr_mr: parse_pr_mr_status(&frontmatter),
+            agent_blocked_reason: parse_optional_frontmatter(&frontmatter, "agent_blocked_reason"),
             summary: sections.get("Summary").cloned().unwrap_or_default(),
             context: sections.get("Context / Why").cloned().unwrap_or_default(),
             acceptance: parse_checklist(
@@ -345,17 +347,24 @@ fn card_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> St
     } else {
         ""
     };
+    let agent_blocked = agent_blocked_badge_html(task);
     let pr_mr = pr_mr_badge_html(task);
     let dependency_attrs = dependency_attrs(task, tasks);
     let task_id = ticket_id(&task.stem);
     format!(
-        "<article class=\"card\" data-task-link data-stem=\"{}\" {}><a href=\"/tasks/{}\"><div class=\"card-top\">{}{}{}</div><h3 class=\"card-title\">{}</h3></a><div class=\"card-meta\"><button type=\"button\" class=\"copy-id mono\" data-copy-task-id=\"{}\" aria-label=\"Copy ticket ID {}\" title=\"Copy ticket ID\">{}</button><span class=\"mono nickname\">{}</span><span class=\"link-counts\">{}{}</span></div><div class=\"card-tags\">{}</div><section class=\"card-summary\">{}</section></article>",
+        "<article class=\"card{}\" data-task-link data-stem=\"{}\" {}><a href=\"/tasks/{}\"><div class=\"card-top\">{}{}{}{}</div><h3 class=\"card-title\">{}</h3></a><div class=\"card-meta\"><button type=\"button\" class=\"copy-id mono\" data-copy-task-id=\"{}\" aria-label=\"Copy ticket ID {}\" title=\"Copy ticket ID\">{}</button><span class=\"mono nickname\">{}</span><span class=\"link-counts\">{}{}</span></div><div class=\"card-tags\">{}</div><section class=\"card-summary\">{}</section></article>",
+        if task_is_agent_blocked(task) {
+            " is-agent-blocked"
+        } else {
+            ""
+        },
         escape_html(&task.stem),
         dependency_attrs,
         escape_html(&task.stem),
         rank,
         recency,
         pr_mr,
+        agent_blocked,
         escape_html(&task.title),
         escape_html(task_id),
         escape_html(task_id),
@@ -379,6 +388,14 @@ fn card_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> St
     )
 }
 
+fn parse_optional_frontmatter(frontmatter: &BTreeMap<String, String>, key: &str) -> Option<String> {
+    frontmatter
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 fn parse_pr_mr_status(frontmatter: &BTreeMap<String, String>) -> Option<PrMrStatus> {
     let url = frontmatter.get("pr_mr_url")?.trim();
     if url.is_empty() {
@@ -393,6 +410,17 @@ fn parse_pr_mr_status(frontmatter: &BTreeMap<String, String>) -> Option<PrMrStat
         url: url.to_string(),
         status: status.to_string(),
     })
+}
+
+fn agent_blocked_badge_html(task: &DashboardTask) -> String {
+    let Some(reason) = agent_blocked_reason(task) else {
+        return String::new();
+    };
+    format!(
+        "<span class=\"badge agent-blocked\" data-agent-blocked title=\"{}\" aria-label=\"Agent-unresolvable blocked: {}\">Blocked</span>",
+        escape_html(reason),
+        escape_html(reason)
+    )
 }
 
 fn pr_mr_badge_html(task: &DashboardTask) -> String {
@@ -461,10 +489,11 @@ fn dependency_attrs(task: &DashboardTask, tasks: &[DashboardTask]) -> String {
 
 fn modal_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> String {
     format!(
-        "<template data-modal-task=\"{}\"><section class=\"modal-task\"><h2>{}</h2><p class=\"status\">{}</p><section><h4>Linked resources</h4>{}</section><section><h4>Summary</h4>{}</section><section><h4>Context / Why</h4>{}</section><section><h4>Acceptance criteria</h4>{}</section><section><h4>Subtasks</h4>{}</section><section><h4>Depends on</h4>{}</section><section><h4>Blocks</h4>{}</section><section><h4>Notes / Log</h4>{}</section></section></template>",
+        "<template data-modal-task=\"{}\"><section class=\"modal-task\"><h2>{}</h2><p class=\"status\">{}</p>{}<section><h4>Linked resources</h4>{}</section><section><h4>Summary</h4>{}</section><section><h4>Context / Why</h4>{}</section><section><h4>Acceptance criteria</h4>{}</section><section><h4>Subtasks</h4>{}</section><section><h4>Depends on</h4>{}</section><section><h4>Blocks</h4>{}</section><section><h4>Notes / Log</h4>{}</section></section></template>",
         escape_html(&task.stem),
         escape_html(&task.title),
         escape_html(&task.status),
+        agent_blocked_reason_html(task),
         linked_resources_html(&format!("{}\n{}", task.summary, task.context), root),
         render_prose(&task.summary, root),
         render_prose(&task.context, root),
@@ -474,6 +503,24 @@ fn modal_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> S
         link_refs_html(&task.blocks, tasks),
         bullet_list_html(&task.notes)
     )
+}
+
+fn agent_blocked_reason_html(task: &DashboardTask) -> String {
+    let Some(reason) = agent_blocked_reason(task) else {
+        return String::new();
+    };
+    format!(
+        "<section class=\"agent-blocked-reason\" data-agent-blocked-reason><h4>Blocked reason</h4><p>{}</p></section>",
+        escape_html(reason)
+    )
+}
+
+fn agent_blocked_reason(task: &DashboardTask) -> Option<&str> {
+    task_is_agent_blocked(task).then_some(task.agent_blocked_reason.as_deref())?
+}
+
+fn task_is_agent_blocked(task: &DashboardTask) -> bool {
+    matches!(task.status.as_str(), "backlog" | "in-progress") && task.agent_blocked_reason.is_some()
 }
 
 fn checklist_html(items: &[ChecklistItem]) -> String {
@@ -977,6 +1024,7 @@ a { color: inherit; text-decoration: none; }
 .card.is-selected { box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
 .card.is-dependency { box-shadow: 0 0 0 2px var(--dependency), var(--shadow); }
 .card.is-dependent { box-shadow: 0 0 0 2px var(--dependent), var(--shadow); }
+.card.is-agent-blocked { border-color: #fca5a5; }
 .card.is-dim { opacity: 0.35; }
 .card-top { display: flex; gap: 6px; min-height: 18px; }
 .badge, .pill {
@@ -989,6 +1037,7 @@ a { color: inherit; text-decoration: none; }
 }
 .badge.rank { font-variant-numeric: tabular-nums; font-weight: 700; }
 .badge.pr-status { font-weight: 700; }
+.badge.agent-blocked { background: #fee2e2; border-color: #fca5a5; color: #991b1b; font-weight: 700; }
 .pr-status-approved,
 .pr-status-checks-passing,
 .pr-status-merged { background: #dcfce7; border-color: #86efac; color: #166534; }

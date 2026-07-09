@@ -253,6 +253,7 @@ pub struct TaskUpdate<'a> {
     pub tags: Option<Vec<String>>,
     pub pr_mr_url: Option<&'a str>,
     pub pr_mr_status: Option<&'a str>,
+    pub agent_blocked_reason: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -875,6 +876,9 @@ impl GitRepository {
     }
 
     fn task_is_ready(&self, task: &str) -> Result<bool, Error> {
+        if frontmatter_optional_scalar(task, "agent_blocked_reason")?.is_some() {
+            return Ok(false);
+        }
         for blocker_ref in frontmatter_array(task, "blocked_by")? {
             let Ok(blocker_path) = self.resolve_task_ref(&blocker_ref) else {
                 return Ok(false);
@@ -1096,6 +1100,13 @@ impl GitRepository {
         }
         if let Some(pr_mr_status) = update.pr_mr_status {
             task = upsert_frontmatter_optional_scalar(&task, "pr_mr_status", pr_mr_status)?;
+        }
+        if let Some(agent_blocked_reason) = update.agent_blocked_reason {
+            task = upsert_frontmatter_optional_scalar(
+                &task,
+                "agent_blocked_reason",
+                agent_blocked_reason,
+            )?;
         }
         if let Some(summary) = update.summary {
             task = replace_markdown_section_body(&task, "Summary", summary)?;
@@ -1823,6 +1834,17 @@ fn frontmatter_array(document: &str, key: &str) -> Result<Vec<String>, Error> {
     Ok(Vec::new())
 }
 
+fn frontmatter_optional_scalar(document: &str, key: &str) -> Result<Option<String>, Error> {
+    let prefix = format!("{key}: ");
+    for line in frontmatter(document)?.lines() {
+        if let Some(value) = line.strip_prefix(&prefix) {
+            let value = value.trim();
+            return Ok((!value.is_empty()).then(|| value.to_string()));
+        }
+    }
+    Ok(None)
+}
+
 fn forbidden_frontmatter_keys(document: &str) -> Vec<String> {
     let forbidden = ["id", "nickname", "status", "created", "updated"];
     let Ok(frontmatter) = frontmatter(document) else {
@@ -1921,7 +1943,7 @@ fn frontmatter_scalar_value(value: &str) -> String {
 
 fn new_task_document(title: &str) -> String {
     format!(
-        "---\ntitle: {title}\nblocked_by: []\nblocks: []\ntags: []\npr_mr_url: \npr_mr_status: \n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
+        "---\ntitle: {title}\nblocked_by: []\nblocks: []\ntags: []\npr_mr_url: \npr_mr_status: \nagent_blocked_reason: \n---\n\n## Summary\n\n## Context / Why\n\n## Acceptance criteria\n\n## Subtasks\n\n## Notes / Log\n"
     )
 }
 

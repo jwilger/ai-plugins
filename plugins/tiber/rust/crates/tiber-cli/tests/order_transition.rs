@@ -97,6 +97,50 @@ fn next_skips_tasks_blocked_by_open_dependencies() {
 }
 
 #[test]
+fn next_skips_agent_unresolvable_blocked_tasks_until_reason_is_cleared() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Externally blocked task"]));
+    assert_success(repo.tiber(["create", "Available task"]));
+    let blocked = task_stem(&repo, "backlog", "externally-blocked-task");
+    let available = task_stem(&repo, "backlog", "available-task");
+    assert_success(repo.tiber([
+        "update",
+        "externally-blocked-task",
+        "--agent-blocked-reason",
+        "Waiting on account access that the agent cannot grant.",
+    ]));
+
+    let next = repo.tiber(["next"]);
+
+    assert_success_ref(&next);
+    assert_eq!(
+        String::from_utf8(next.stdout).expect("next output should be utf8"),
+        format!("{available}\tAvailable task\n")
+    );
+
+    assert_success(repo.tiber([
+        "update",
+        "externally-blocked-task",
+        "--agent-blocked-reason",
+        "",
+    ]));
+    assert_success(repo.tiber([
+        "prioritize",
+        "externally-blocked-task",
+        "--before",
+        "available-task",
+    ]));
+    let next_after_clear = repo.tiber(["next"]);
+
+    assert_success_ref(&next_after_clear);
+    assert_eq!(
+        String::from_utf8(next_after_clear.stdout).expect("next output should be utf8"),
+        format!("{blocked}\tExternally blocked task\n")
+    );
+}
+
+#[test]
 fn task_refs_can_use_unique_filename_identity_and_report_ambiguity() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

@@ -81,6 +81,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(tools.contains(r#""name":"tiber.subtask.check""#));
     assert!(tools.contains(r#""name":"tiber.subtask.uncheck""#));
     assert!(tools.contains(r#""name":"tiber.update""#));
+    assert!(tools.contains(r#""agent_blocked_reason":{"type":"string"}"#));
     assert!(tools.contains(r#""name":"tiber.acceptance.add""#));
     assert!(tools.contains(r#""name":"tiber.acceptance.check""#));
     assert!(tools.contains(r#""name":"tiber.acceptance.uncheck""#));
@@ -269,7 +270,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":181,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp","summary":"MCP summary","context":"MCP context","tags":["mcp","structured"]}}}"#,
+        r#"{"jsonrpc":"2.0","id":181,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp","summary":"MCP summary","context":"MCP context","tags":["mcp","structured"],"agent_blocked_reason":"Waiting on external account access."}}}"#,
     );
     let update = read_message(&mut stdout);
     assert!(update.contains(r#""id":181"#));
@@ -307,9 +308,27 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(structured_show.contains(r#""id":185"#));
     assert!(structured_show.contains("MCP summary"));
     assert!(structured_show.contains("tags: [mcp, structured]"));
+    assert!(structured_show.contains("agent_blocked_reason: Waiting on external account access."));
     assert!(structured_show.contains("- [x] MCP criterion"));
     assert!(structured_show.contains("- [ ] (s2) Wire dependency — after: s1"));
     assert!(structured_show.contains("MCP note"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":186,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp","agent_blocked_reason":""}}}"#,
+    );
+    let clear_blocked_reason = read_message(&mut stdout);
+    assert!(clear_blocked_reason.contains(r#""id":186"#));
+    assert!(clear_blocked_reason.contains("updated created-through-mcp"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":187,"method":"tools/call","params":{"name":"tiber.show","arguments":{"ref":"created-through-mcp"}}}"#,
+    );
+    let cleared_show = read_message(&mut stdout);
+    assert!(cleared_show.contains(r#""id":187"#));
+    assert!(cleared_show.contains("agent_blocked_reason: "));
+    assert!(!cleared_show.contains("Waiting on external account access."));
 
     write_message(
         &mut stdin,

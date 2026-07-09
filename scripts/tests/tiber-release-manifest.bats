@@ -44,6 +44,34 @@ host_release_path() {
   [ "$status" -eq 0 ]
 }
 
+@test "host release binary supports agent-unresolvable blocked reason updates" {
+  fixture="$(mktemp -d)"
+  host_path="$(host_release_path)"
+  tiber_bin="$ROOT/plugins/tiber/$host_path"
+  git -C "$fixture" init
+  git -C "$fixture" config user.name "Tiber Test"
+  git -C "$fixture" config user.email "tiber@example.test"
+  git -C "$fixture" config commit.gpgsign false
+  printf '# Fixture\n' >"$fixture/README.md"
+  git -C "$fixture" add README.md
+  git -C "$fixture" commit -m "init"
+
+  run bash -c 'cd "$1" && "$2" init' _ "$fixture" "$tiber_bin"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" create "Release binary blocked task"' _ "$fixture" "$tiber_bin"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" update release-binary-blocked-task --agent-blocked-reason "Waiting on external account access."' _ "$fixture" "$tiber_bin"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" show release-binary-blocked-task' _ "$fixture" "$tiber_bin"
+
+  rm -rf "$fixture"
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output"
+  fi
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"agent_blocked_reason: Waiting on external account access."* ]]
+}
+
 @test "release manifest check fails when the host binary is missing" {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/tiber"

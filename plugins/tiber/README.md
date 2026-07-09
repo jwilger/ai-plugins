@@ -116,10 +116,22 @@ tiber subtask check <task-ref> s1
 tiber subtask uncheck <task-ref> s1
 tiber update <task-ref> --summary "New summary" --tags infra,docs
 tiber update <task-ref> --pr-mr-url https://github.com/org/repo/pull/42 --pr-mr-status checks-pending
+tiber update <task-ref> --agent-blocked-reason "Waiting on credentials the agent cannot create"
 tiber acceptance add <task-ref> "Observable condition"
 tiber acceptance check <task-ref> 1
 tiber note add <task-ref> "Progress note"
 ```
+
+Use `--agent-blocked-reason` only when a task is blocked by something the agent
+cannot resolve, such as missing credentials, external account access, or a
+product decision that needs an owner. Do not use it for ordinary PR checks,
+review waits, or merge approvals; represent those with `pr_mr_status` instead.
+Do not record secret values, tokens, passwords, private keys, cookies, or
+sensitive account details in the reason; describe the missing access or decision
+without exposing the underlying credential material. Clear the marker with
+`tiber update <task-ref> --agent-blocked-reason ""` when the blocker is resolved.
+The dashboard shows open agent-unresolvable blocked tasks with a blocked badge
+and shows the reason in the task detail modal.
 
 Validation and integration:
 
@@ -163,7 +175,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.6.0` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.7.0` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -174,7 +186,7 @@ explicit `${CODEX_HOME}` fall back to `$HOME/.codex`.
 It intentionally does not execute repo-relative launchers such as `./bin/tiber`
 or `./plugins/tiber/bin/tiber`, so the same MCP configuration is safe to load
 from any checkout. Reinstall or upgrade the plugin from marketplace version
-`0.6.0` or newer if Codex reports `No such file or directory` or one of the
+`0.7.0` or newer if Codex reports `No such file or directory` or one of the
 `tiber.mcp_*` startup sentinel errors while starting the `tiber` MCP server.
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,
