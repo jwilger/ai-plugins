@@ -358,7 +358,12 @@ fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
 }
 
 fn dashboard_tasks(root: &FsPath) -> Result<Vec<DashboardTask>, tiber_git::Error> {
-    dashboard_tasks_from_documents(tiber_git::task_documents_at(root)?)
+    let documents = match tiber_git::task_documents_at(root) {
+        Ok(documents) => documents,
+        Err(error) if error.is_tiber_lock_busy() => tiber_git::task_documents_local_at(root)?,
+        Err(error) => return Err(error),
+    };
+    dashboard_tasks_from_documents(documents)
 }
 
 fn dashboard_tasks_from_documents(

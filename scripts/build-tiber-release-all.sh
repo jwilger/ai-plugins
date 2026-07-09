@@ -51,9 +51,11 @@ build_target() {
 copy_binary() {
   local source="$1" target="$2"
   local destination="$root/plugins/tiber/dist/$target/tiber"
+  local tmp="$destination.tmp.$$"
   mkdir -p "$(dirname "$destination")"
-  cp "$source" "$destination"
-  chmod 0755 "$destination"
+  cp "$source" "$tmp"
+  chmod 0755 "$tmp"
+  mv "$tmp" "$destination"
   echo "built $destination"
 }
 

@@ -159,6 +159,33 @@ async fn dashboard_board_renders_while_tiber_writer_lock_exists() {
 }
 
 #[tokio::test]
+async fn dashboard_board_renders_local_snapshot_while_origin_repo_is_locked() {
+    let origin = TempRepo::bare();
+    let repo = TempRepo::initialized();
+    repo.git([
+        "remote",
+        "add",
+        "origin",
+        origin.path.to_str().expect("origin path utf8"),
+    ]);
+    repo.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    repo.tiber(["init"]);
+    repo.tiber(["create", "Visible during origin lock"]);
+    repo.write_fresh_tiber_lock();
+
+    let response = tiber_server::router_at(repo.path.clone())
+        .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+        .await
+        .expect("board response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let board = body_text(response).await;
+    assert!(board.contains("Visible during origin lock"));
+    assert!(!board.contains("tiber_lock_busy"));
+}
+
+#[tokio::test]
 async fn dashboard_redacts_task_sync_errors_from_board_and_events() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);

@@ -515,6 +515,10 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl Error {
+    pub fn is_tiber_lock_busy(&self) -> bool {
+        is_tiber_lock_busy(self)
+    }
+
     pub fn sanitized_dashboard_source(&self) -> String {
         let source = match self {
             Self::CommandFailed { .. } | Self::Io(_) => self.sanitized_sync_source(),
