@@ -43,7 +43,6 @@ struct AppState {
 
 #[derive(Default)]
 struct RemoteSyncState {
-    last_success: Option<Instant>,
     last_attempt: Option<Instant>,
     in_flight: bool,
     cached_event: Option<CachedEvent>,
@@ -74,14 +73,6 @@ impl RemoteSyncLease {
         state.last_attempt = Some(Instant::now());
         drop(state);
         Some(Self { remote_sync })
-    }
-
-    fn mark_success(&self) {
-        let mut state = self
-            .remote_sync
-            .lock()
-            .expect("dashboard remote sync state lock should not be poisoned");
-        state.last_success = Some(Instant::now());
     }
 }
 
@@ -174,12 +165,7 @@ async fn events(State(state): State<AppState>) -> Response {
                 })
                 .await
                 {
-                    Ok(Ok(data)) => {
-                        if let Some(lease) = sync_lease.as_ref() {
-                            lease.mark_success();
-                        }
-                        data
-                    }
+                    Ok(Ok(data)) => data,
                     Ok(Err(error)) => format!(
                         "{{\"error\":\"{}\"}}",
                         escape_json_string(&error.sanitized_dashboard_source())
@@ -1423,8 +1409,15 @@ closeButton.addEventListener('click', () => {
 });
 let seenInitialEvent = false;
 new EventSource("/events").onmessage = (event) => {
-  if (event.data && event.data.includes('"error"')) {
-    return;
+  if (event.data) {
+    try {
+      const payload = JSON.parse(event.data);
+      if (Object.prototype.hasOwnProperty.call(payload, 'error')) {
+        return;
+      }
+    } catch (_error) {
+      // Fall through and reload on malformed data so stale UI is not hidden.
+    }
   }
   if (seenInitialEvent) {
     location.reload();
@@ -1478,7 +1471,8 @@ mod tests {
     fn dashboard_script_ignores_sse_error_events_for_reload() {
         let script = dashboard_script();
 
-        assert!(script.contains("event.data && event.data.includes('\"error\"')"));
-        assert!(script.contains("return;"));
+        assert!(script.contains("JSON.parse(event.data)"));
+        assert!(script.contains("hasOwnProperty.call(payload, 'error')"));
+        assert!(!script.contains("event.data.includes('\"error\"')"));
     }
 }
