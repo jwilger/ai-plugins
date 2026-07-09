@@ -871,11 +871,14 @@ impl GitRepository {
         for stem in self.order_entries()? {
             let path = self.resolve_task_ref(&stem)?;
             let task = fs::read_to_string(self.tasks_dir().join(&path))?;
+            let dependencies_ready = self.task_dependencies_are_ready(&task)?;
             if self.task_is_agent_blocked(&task)? {
-                agent_blocked_count += 1;
+                if dependencies_ready {
+                    agent_blocked_count += 1;
+                }
                 continue;
             }
-            if self.task_is_ready(&task)? {
+            if dependencies_ready {
                 let title = parse_title(&task)?;
                 return Ok(NextTaskStatus {
                     task: Some(TaskSummary { path: stem, title }),
@@ -897,10 +900,11 @@ impl GitRepository {
         Ok(())
     }
 
-    fn task_is_ready(&self, task: &str) -> Result<bool, Error> {
-        if self.task_is_agent_blocked(task)? {
-            return Ok(false);
-        }
+    fn task_is_agent_blocked(&self, task: &str) -> Result<bool, Error> {
+        Ok(frontmatter_optional_scalar(task, "agent_blocked_reason")?.is_some())
+    }
+
+    fn task_dependencies_are_ready(&self, task: &str) -> Result<bool, Error> {
         for blocker_ref in frontmatter_array(task, "blocked_by")? {
             let Ok(blocker_path) = self.resolve_task_ref(&blocker_ref) else {
                 return Ok(false);
@@ -910,10 +914,6 @@ impl GitRepository {
             }
         }
         Ok(true)
-    }
-
-    fn task_is_agent_blocked(&self, task: &str) -> Result<bool, Error> {
-        Ok(frontmatter_optional_scalar(task, "agent_blocked_reason")?.is_some())
     }
 
     fn transition_task(&self, task_ref: &str, status: &str) -> Result<TaskPath, Error> {

@@ -17,6 +17,26 @@ release_outputs=(
   plugins/tiber/release-binaries.sha256
 )
 
+check_release_outputs_unchanged() {
+  local reason="$1"
+  local untracked_outputs
+
+  untracked_outputs="$(
+    git -C "$root" ls-files --others --exclude-standard -- "${release_outputs[@]}"
+  )"
+  if [ -n "$untracked_outputs" ]; then
+    echo "untracked-release-artifacts" >&2
+    printf '%s\n' "$untracked_outputs" >&2
+    exit 1
+  fi
+
+  if ! git -C "$root" diff --quiet -- "${release_outputs[@]}"; then
+    echo "stale-release-artifacts reason=$reason" >&2
+    git -C "$root" diff --stat -- "${release_outputs[@]}" >&2
+    exit 1
+  fi
+}
+
 source_clean=1
 if ! git -C "$root" diff --quiet HEAD -- "${release_inputs[@]}"; then
   source_clean=0
@@ -52,6 +72,7 @@ if [ "$source_clean" -eq 0 ]; then
   fi
   "$root/scripts/build-tiber-release-all.sh"
   "$root/scripts/check-tiber-release-complete.sh" "$root"
+  check_release_outputs_unchanged "dirty-release-inputs-changed-outputs"
   echo "release-freshness-skip reason=dirty-release-inputs" >&2
   exit 0
 fi
@@ -65,18 +86,4 @@ fi
 
 "$root/scripts/build-tiber-release-all.sh"
 "$root/scripts/check-tiber-release-complete.sh" "$root"
-
-untracked_outputs="$(
-  git -C "$root" ls-files --others --exclude-standard -- "${release_outputs[@]}"
-)"
-if [ -n "$untracked_outputs" ]; then
-  echo "untracked-release-artifacts" >&2
-  printf '%s\n' "$untracked_outputs" >&2
-  exit 1
-fi
-
-if ! git -C "$root" diff --quiet -- "${release_outputs[@]}"; then
-  echo "stale-release-artifacts reason=rebuild-changed-committed-outputs" >&2
-  git -C "$root" diff --stat -- "${release_outputs[@]}" >&2
-  exit 1
-fi
+check_release_outputs_unchanged "rebuild-changed-committed-outputs"

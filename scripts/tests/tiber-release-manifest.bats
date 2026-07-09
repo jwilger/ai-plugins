@@ -523,7 +523,46 @@ SH
   [[ "$output" == *"stale-release-artifacts reason=rebuild-changed-committed-outputs"* ]]
 }
 
-@test "release freshness check skips output diff when release inputs are dirty" {
+@test "release freshness check passes when dirty release inputs rebuild unchanged outputs" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/scripts" "$fixture/plugins/tiber/dist/x86_64-unknown-linux-gnu"
+  git -C "$fixture" init
+  git -C "$fixture" config user.name "Tiber Test"
+  git -C "$fixture" config user.email "tiber@example.test"
+  git -C "$fixture" config commit.gpgsign false
+  cp "$FRESH_SCRIPT" "$fixture/scripts/check-tiber-release-fresh.sh"
+cat >"$fixture/scripts/build-tiber-release-all.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+echo build-ran
+printf 'old\n' >"$root/plugins/tiber/release-binaries.sha256"
+SH
+cat >"$fixture/scripts/check-tiber-release-complete.sh" <<'SH'
+#!/usr/bin/env bash
+echo complete-ran
+exit 0
+SH
+  chmod +x "$fixture/scripts/"*.sh
+  mkdir -p "$fixture/plugins/tiber/rust"
+  printf 'source\n' >"$fixture/plugins/tiber/rust/Cargo.toml"
+  printf '{"binaries":[]}\n' >"$fixture/plugins/tiber/release-binaries.json"
+  printf 'old\n' >"$fixture/plugins/tiber/release-binaries.sha256"
+  git -C "$fixture" add .
+  git -C "$fixture" commit -m "fixture" >/dev/null
+  git -C "$fixture" branch origin/main
+  printf 'dirty source\n' >>"$fixture/plugins/tiber/rust/Cargo.toml"
+
+  run bash "$fixture/scripts/check-tiber-release-fresh.sh"
+
+  rm -rf "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"build-ran"* ]]
+  [[ "$output" == *"complete-ran"* ]]
+  [[ "$output" == *"release-freshness-skip reason=dirty-release-inputs"* ]]
+}
+
+@test "release freshness check fails when dirty release inputs rebuild changed outputs" {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/scripts" "$fixture/plugins/tiber/dist/x86_64-unknown-linux-gnu"
   git -C "$fixture" init
@@ -556,10 +595,10 @@ SH
   run bash "$fixture/scripts/check-tiber-release-fresh.sh"
 
   rm -rf "$fixture"
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
   [[ "$output" == *"build-ran"* ]]
   [[ "$output" == *"complete-ran"* ]]
-  [[ "$output" == *"release-freshness-skip reason=dirty-release-inputs"* ]]
+  [[ "$output" == *"stale-release-artifacts reason=dirty-release-inputs-changed-outputs"* ]]
 }
 
 @test "release freshness check treats untracked release input files as dirty" {
@@ -575,7 +614,7 @@ cat >"$fixture/scripts/build-tiber-release-all.sh" <<'SH'
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 echo build-ran
-printf 'rebuilt\n' >"$root/plugins/tiber/release-binaries.sha256"
+printf 'old\n' >"$root/plugins/tiber/release-binaries.sha256"
 SH
 cat >"$fixture/scripts/check-tiber-release-complete.sh" <<'SH'
 #!/usr/bin/env bash
@@ -651,7 +690,7 @@ SH
 set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 echo build-ran
-printf 'rebuilt\n' >"$root/plugins/tiber/release-binaries.sha256"
+printf 'old\n' >"$root/plugins/tiber/release-binaries.sha256"
 SH
   cat >"$fixture/scripts/check-tiber-release-complete.sh" <<'SH'
 #!/usr/bin/env bash

@@ -165,6 +165,48 @@ fn next_reports_when_all_open_tasks_are_agent_unresolvable_blocked() {
 }
 
 #[test]
+fn next_does_not_report_agent_blocked_count_for_dependency_blocked_tasks() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Dependency blocked task"]));
+    assert_success(repo.tiber(["create", "Open dependency"]));
+    assert_success(repo.tiber([
+        "update",
+        "dependency-blocked-task",
+        "--agent-blocked-reason",
+        "Waiting on account access that the agent cannot grant.",
+    ]));
+    assert_success(repo.tiber([
+        "link",
+        "open-dependency",
+        "blocks",
+        "dependency-blocked-task",
+    ]));
+    assert_success(repo.tiber([
+        "prioritize",
+        "dependency-blocked-task",
+        "--before",
+        "open-dependency",
+    ]));
+    assert_success(repo.tiber([
+        "update",
+        "open-dependency",
+        "--agent-blocked-reason",
+        "Waiting on a user decision.",
+    ]));
+
+    let next = repo.tiber(["next"]);
+
+    assert_success_ref(&next);
+    assert_eq!(
+        String::from_utf8(next.stdout).expect("next stdout should be utf8"),
+        ""
+    );
+    let stderr = String::from_utf8(next.stderr).expect("next stderr should be utf8");
+    assert!(stderr.contains("no ready tasks; 1 task(s) have agent_blocked_reason"));
+}
+
+#[test]
 fn task_refs_can_use_unique_filename_identity_and_report_ambiguity() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
