@@ -103,6 +103,28 @@ fn update_edits_agent_unresolvable_blocked_reason() {
 }
 
 #[test]
+fn update_rejects_oversized_agent_unresolvable_blocked_reason() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Blocked task"]));
+    let oversized = "x".repeat(501);
+
+    let update = repo.tiber([
+        "update",
+        "blocked-task",
+        "--agent-blocked-reason",
+        oversized.as_str(),
+    ]);
+
+    assert!(
+        !update.status.success(),
+        "oversized blocked reason should fail"
+    );
+    let stderr = String::from_utf8(update.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("agent_blocked_reason_too_long max_chars=500"));
+}
+
+#[test]
 fn acceptance_add_check_uncheck_and_remove_edits_acceptance_section() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

@@ -19,6 +19,7 @@ const TASK_ID_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
 const TASK_ID_GENERATION_ATTEMPTS: usize = 32;
 const DEFAULT_LOCK_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
 const DEFAULT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+const AGENT_BLOCKED_REASON_MAX_CHARS: usize = 500;
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -1102,10 +1103,15 @@ impl GitRepository {
             task = upsert_frontmatter_optional_scalar(&task, "pr_mr_status", pr_mr_status)?;
         }
         if let Some(agent_blocked_reason) = update.agent_blocked_reason {
+            let agent_blocked_reason = parse_optional_scalar_text(
+                agent_blocked_reason,
+                "agent_blocked_reason",
+                AGENT_BLOCKED_REASON_MAX_CHARS,
+            )?;
             task = upsert_frontmatter_optional_scalar(
                 &task,
                 "agent_blocked_reason",
-                agent_blocked_reason,
+                &agent_blocked_reason,
             )?;
         }
         if let Some(summary) = update.summary {
@@ -2529,6 +2535,16 @@ fn parse_nonempty_text<'a>(input: &'a str, kind: &str) -> Result<&'a str, Error>
         return Err(Error::Parse(format!("{kind}_invalid=true")));
     }
     Ok(text)
+}
+
+fn parse_optional_scalar_text(input: &str, kind: &str, max_chars: usize) -> Result<String, Error> {
+    let text = input.trim();
+    if text.chars().count() > max_chars {
+        return Err(Error::Parse(format!(
+            "{kind}_too_long max_chars={max_chars}"
+        )));
+    }
+    Ok(text.to_string())
 }
 
 fn current_date_string() -> String {
