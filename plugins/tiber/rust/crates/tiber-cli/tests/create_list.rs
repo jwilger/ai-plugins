@@ -100,6 +100,10 @@ fn create_failure_after_local_task_creation_reports_created_ref_for_recovery() {
         "stderr should report redaction instead of raw sync output: {stderr}"
     );
     assert!(
+        stderr.contains("stderr_category=other"),
+        "stderr should include a scrubbed diagnostic category: {stderr}"
+    );
+    assert!(
         stderr.contains("args_redacted=true"),
         "stderr should report redacted sync command arguments: {stderr}"
     );
@@ -131,6 +135,50 @@ fn create_failure_after_local_task_creation_reports_created_ref_for_recovery() {
             .expect("remote task listing should be utf8")
             .contains(&format!("backlog/{stem}.md")),
         "tiber sync should recover the locally created task to origin/tasks"
+    );
+}
+
+#[test]
+fn stale_partial_create_marker_does_not_allow_missing_remote_recreation() {
+    let (origin, _hook_path) = TempRepo::bare_with_rejecting_hook();
+    let repo = TempRepo::initialized();
+    repo.git([
+        "remote",
+        "add",
+        "origin",
+        origin.path().to_str().expect("origin path should be utf8"),
+    ]);
+    assert_success(repo.tiber(["init"]));
+
+    let create = repo.tiber(["create", "Release smoke"]);
+
+    assert!(
+        !create.status.success(),
+        "create should surface sync failure"
+    );
+    let stem = task_stem(&repo, "backlog", "release-smoke");
+    repo.insert_task_file(
+        "backlog",
+        "20260709-abcd-local-only-edit",
+        "---\ntitle: Local only edit\nblocked_by: []\nblocks: []\ntags: []\npr_mr_url: \npr_mr_status: \n---\n\n## Summary\n\n",
+    );
+
+    let sync = repo.tiber(["sync"]);
+
+    assert!(!sync.status.success(), "sync should reject stale marker");
+    let stderr = String::from_utf8(sync.stderr).expect("stderr should be utf8");
+    assert!(
+        stderr.contains("tasks_remote_rewritten"),
+        "sync should preserve the missing-remote deletion guard after local tasks changed; stderr={stderr}"
+    );
+    let remote_listing = origin.git_output(["show-ref", "--verify", "refs/heads/tasks"]);
+    assert!(
+        !remote_listing.status.success(),
+        "stale partial-create marker must not recreate origin/tasks"
+    );
+    assert!(
+        repo.task_file("backlog", &stem).contains("Release smoke"),
+        "local partial-created task should remain recoverable for deliberate conflict resolution"
     );
 }
 
@@ -170,6 +218,10 @@ fn create_failure_before_local_task_commit_does_not_report_unrecoverable_ref() {
     assert!(
         stderr.contains("stderr_redacted=true"),
         "stderr should report redaction instead of raw sync output: {stderr}"
+    );
+    assert!(
+        stderr.contains("stderr_category=auth_or_permission"),
+        "stderr should include a scrubbed diagnostic category: {stderr}"
     );
     assert!(
         stderr.contains("args_redacted=true"),

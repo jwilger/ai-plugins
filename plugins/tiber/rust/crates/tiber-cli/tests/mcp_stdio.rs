@@ -1134,6 +1134,10 @@ fn mcp_stdio_create_sync_failure_reports_created_ref_and_redacts_stderr() {
         "MCP error should report redaction instead of raw sync output: {message}"
     );
     assert!(
+        message.contains("stderr_category=other"),
+        "MCP error should include a scrubbed diagnostic category: {message}"
+    );
+    assert!(
         message.contains("args_redacted=true"),
         "MCP error should report redacted sync command arguments: {message}"
     );

@@ -1409,6 +1409,8 @@ closeButton.addEventListener('click', () => {
 });
 let seenInitialEvent = false;
 new EventSource("/events").onmessage = (event) => {
+  const wasInitialEvent = !seenInitialEvent;
+  seenInitialEvent = true;
   if (event.data) {
     try {
       const payload = JSON.parse(event.data);
@@ -1419,11 +1421,10 @@ new EventSource("/events").onmessage = (event) => {
       // Fall through and reload on malformed data so stale UI is not hidden.
     }
   }
-  if (seenInitialEvent) {
+  if (!wasInitialEvent) {
     location.reload();
     return;
   }
-  seenInitialEvent = true;
 };
 </script>"#
 }
@@ -1474,5 +1475,8 @@ mod tests {
         assert!(script.contains("JSON.parse(event.data)"));
         assert!(script.contains("hasOwnProperty.call(payload, 'error')"));
         assert!(!script.contains("event.data.includes('\"error\"')"));
+        assert!(script.contains("const wasInitialEvent = !seenInitialEvent;"));
+        assert!(script.contains("seenInitialEvent = true;"));
+        assert!(script.contains("if (!wasInitialEvent)"));
     }
 }

@@ -580,10 +580,13 @@ impl Error {
                 status,
                 stderr,
                 ..
-            } => format!(
-                "tiber.command_failed program={program} args_redacted=true status={status} stderr_redacted={}",
-                !stderr.trim().is_empty()
-            ),
+            } => {
+                let category = git_stderr_category(stderr);
+                format!(
+                    "tiber.command_failed program={program} args_redacted=true status={status} stderr_redacted={} stderr_category={category}",
+                    !stderr.trim().is_empty()
+                )
+            }
             Self::TaskCreatedSyncFailed { .. } | Self::TaskCreateSyncFailed { .. } => {
                 "tiber.create_sync_failed nested=true".to_string()
             }
@@ -598,6 +601,34 @@ impl Error {
             Self::Core(error) => error.to_string(),
             Self::Usage(message) => message.to_string(),
         }
+    }
+}
+
+fn git_stderr_category(stderr: &str) -> &'static str {
+    let stderr = stderr.to_ascii_lowercase();
+    if stderr.trim().is_empty() {
+        "none"
+    } else if stderr.contains("permission denied")
+        || stderr.contains("authentication failed")
+        || stderr.contains("could not read from remote repository")
+        || stderr.contains("publickey")
+    {
+        "auth_or_permission"
+    } else if stderr.contains("could not resolve hostname")
+        || stderr.contains("name or service not known")
+        || stderr.contains("temporary failure in name resolution")
+    {
+        "network_name_resolution"
+    } else if stderr.contains("repository not found")
+        || stderr.contains("not appear to be a git repository")
+        || stderr.contains("couldn't find remote ref")
+        || stderr.contains("could not find remote ref")
+    {
+        "remote_missing_or_unavailable"
+    } else if stderr.contains("non-fast-forward") || stderr.contains("fetch first") {
+        "remote_rejected_non_fast_forward"
+    } else {
+        "other"
     }
 }
 
@@ -875,7 +906,7 @@ impl GitRepository {
     }
 
     fn sync_repository_unlocked(&self) -> Result<(), Error> {
-        let allow_missing_remote_tasks = self.partial_create_marker_path()?.exists();
+        let allow_missing_remote_tasks = self.partial_create_marker_allows_missing_remote()?;
         match self.sync_repository_unlocked_allowing_missing_remote(allow_missing_remote_tasks) {
             Ok(()) => {
                 if allow_missing_remote_tasks {
@@ -2795,8 +2826,29 @@ impl GitRepository {
         if let Some(parent) = marker_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(marker_path, task_path)?;
+        let local_parent = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
+        fs::write(
+            marker_path,
+            format!("task_path={task_path}\ntasks_ref={}", local_parent.trim()),
+        )?;
         Ok(())
+    }
+
+    fn partial_create_marker_allows_missing_remote(&self) -> Result<bool, Error> {
+        let marker_path = self.partial_create_marker_path()?;
+        let marker = match fs::read_to_string(marker_path) {
+            Ok(marker) => marker,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(Error::Io(error)),
+        };
+        let Some(marker_tasks_ref) = marker
+            .lines()
+            .find_map(|line| line.strip_prefix("tasks_ref="))
+        else {
+            return Ok(false);
+        };
+        let local_parent = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
+        Ok(local_parent.trim() == marker_tasks_ref.trim())
     }
 
     fn clear_partial_create_marker(&self) -> Result<(), Error> {
