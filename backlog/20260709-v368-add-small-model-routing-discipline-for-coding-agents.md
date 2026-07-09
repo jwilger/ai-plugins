@@ -17,6 +17,8 @@ Put the behavior in development-discipline, not agentic-systems-engineering. The
 
 ## Acceptance criteria
 
+- [ ] development-discipline includes a model-routing skill that defines conservative cheap/default/strong routing criteria for coding-agent work.
+
 ## Subtasks
 
 ## Notes / Log
