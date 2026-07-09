@@ -22,6 +22,7 @@ Tiber MCP and CLI writes exposed SSH config, agent socket, Git fetch, and signed
 - [ ] Tiber MCP can create and sync a backlog task from Codex with signed commits on refs/heads/tasks.
 - [ ] Avoid broad raw Git approvals, whole-MCP-server unsandboxing, forced private-key ssh -i workarounds, and manual task-branch commits as the normal path.
 - [ ] Add regression coverage or a smoke test where practical.
+- [ ] Docs explain how agents distinguish sandbox permission failures from host SSH-agent or SSH-config inheritance failures.
 
 ## Subtasks
 
