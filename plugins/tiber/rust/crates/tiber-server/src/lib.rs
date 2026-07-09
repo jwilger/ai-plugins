@@ -1124,7 +1124,8 @@ const closeButton = document.querySelector('[data-modal-close]');
 const copyStatus = document.querySelector('[data-copy-status]');
 const interceptStatus = document.querySelector('[data-link-intercept-status]');
 const board = document.querySelector('[data-dashboard-board]');
-let selectedStem = null;
+const selectedStorageKey = 'tiber-dashboard-selected-stem';
+let selectedStem = sessionStorage.getItem(selectedStorageKey);
 
 function splitRefs(value) {
   return (value || '').split(',').map((item) => item.trim()).filter(Boolean);
@@ -1148,12 +1149,17 @@ function applySelection() {
     card.classList.remove('is-selected', 'is-dependency', 'is-dependent', 'is-dim');
     removeRoleBadge(card);
   });
-  if (!selectedStem) return;
+  if (!selectedStem) {
+    sessionStorage.removeItem(selectedStorageKey);
+    return;
+  }
   const selected = cards.find((card) => card.dataset.stem === selectedStem);
   if (!selected) {
     selectedStem = null;
+    sessionStorage.removeItem(selectedStorageKey);
     return;
   }
+  sessionStorage.setItem(selectedStorageKey, selectedStem);
   const dependencies = new Set(splitRefs(selected.dataset.dependency));
   const dependents = new Set(splitRefs(selected.dataset.dependent));
   cards.forEach((card) => {
@@ -1260,10 +1266,14 @@ closeButton.addEventListener('click', () => {
 let seenInitialEvent = false;
 new EventSource("/events").onmessage = () => {
   if (seenInitialEvent) {
+    if (selectedStem) {
+      sessionStorage.setItem(selectedStorageKey, selectedStem);
+    }
     location.reload();
     return;
   }
   seenInitialEvent = true;
 };
+applySelection();
 </script>"#
 }

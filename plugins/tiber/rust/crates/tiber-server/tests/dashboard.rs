@@ -75,6 +75,9 @@ async fn dashboard_board_page_exposes_browser_smoke_controls() {
     assert!(board.contains("href=\"/docs\""));
     assert!(board.contains("data-external-link"));
     assert!(board.contains("data-link-intercept-status"));
+    assert!(board.contains("tiber-dashboard-selected-stem"));
+    assert!(board.contains("sessionStorage.getItem(selectedStorageKey)"));
+    assert!(board.contains("sessionStorage.setItem(selectedStorageKey, selectedStem)"));
     assert!(board.contains("new EventSource(\"/events\")"));
 }
 
