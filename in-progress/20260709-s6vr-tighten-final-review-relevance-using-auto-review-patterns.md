@@ -24,6 +24,7 @@ Recent final-review cycles produced findings outside the active ticket's intende
 - [ ] Behavior/eval cases cover the relevance-filtering behavior and defense/out-of-scope handling.
 - [ ] Skill instructs subagents to classify findings as actionable only when tied to the active task, PR/diff scope, acceptance criteria, explicit user concern, or a real cross-cutting safety/release risk.
 - [ ] Implementation reviews ../auto_review for relevant review-focus patterns and incorporates applicable ideas without coupling this plugin to that project.
+- [ ] This ticket is reviewed by dogfooding the development-discipline final-review runner rather than using the old manual final-review process.
 
 ## Subtasks
 
