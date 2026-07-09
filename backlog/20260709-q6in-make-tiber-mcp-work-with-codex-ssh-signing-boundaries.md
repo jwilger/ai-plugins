@@ -27,3 +27,5 @@ Tiber MCP and CLI writes exposed SSH config, agent socket, Git fetch, and signed
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-09: Known nuclear workaround: adding a Codex approval rule that allows all `git` commands to run unsandboxed appears to make this class of Tiber MCP task-branch operations work. Treat this as evidence for the failure boundary and as a last-resort diagnostic/workaround, not as the desired normal path; the ticket should still aim for a narrower Tiber-specific/sandbox-aware recovery path.
