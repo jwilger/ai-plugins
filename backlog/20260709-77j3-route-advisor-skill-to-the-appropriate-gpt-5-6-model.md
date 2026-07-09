@@ -17,6 +17,7 @@ Update the advisor skill's Codex model routing for the GPT-5.6 Sol, Terra, and L
 
 - [ ] The advisor skill uses an explicitly justified GPT-5.6 Codex model appropriate for high-value architecture and tradeoff advice.
 - [ ] The routing remains configurable and does not impose a Codex model on Claude or unsupported harnesses.
+- [ ] Behavior tests and eval cases cover the selected routing and fallback behavior.
 
 ## Subtasks
 
