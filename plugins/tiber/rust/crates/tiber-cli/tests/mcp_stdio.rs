@@ -164,6 +164,11 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let codex_setup_tool = read_message(&mut stdout);
     assert!(codex_setup_tool.contains(r#""id":91"#));
+    assert!(codex_setup_tool.contains("Couldn't get agent socket?"));
+    assert!(codex_setup_tool.contains("SSH_AUTH_SOCK"));
+    assert!(codex_setup_tool.contains("env_vars = [\\\"SSH_AUTH_SOCK\\\"]"));
+    assert!(codex_setup_tool.contains("preserves the absolute installed launcher"));
+    assert!(codex_setup_tool.contains("Never forward SSH_AUTH_SOCK to a PATH-resolved"));
     assert!(codex_setup_tool
         .contains("case-by-case approval for prefix_rule [\\\"git\\\", \\\"hash-object\\\"]"));
     assert!(codex_setup_tool.contains("prefix_rule [\\\"git\\\", \\\"commit-tree\\\"]"));
