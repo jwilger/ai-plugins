@@ -1075,9 +1075,11 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                     let disposition = unrelated_finding_disposition(&classified.value, state);
                     let mut value = classified.value;
                     value["unrelated_disposition"] = json!(disposition);
-                    if requires_security_escalation(&value) && disposition != "address-now" {
+                    if requires_security_escalation(&value) {
                         value = redact_security_escalation(&value);
-                        security_escalations_required.push(value.clone());
+                        if disposition != "address-now" {
+                            security_escalations_required.push(value.clone());
+                        }
                     }
                     if disposition == "address-now" {
                         out_of_scope.push(value.clone());
@@ -6280,6 +6282,8 @@ pre_filter = "project-pre"
             .as_array()
             .expect("escalations")
             .is_empty());
+        assert!(parsed["needs_human_decision"][0].get("message").is_none());
+        assert!(parsed["out_of_scope"][0].get("message").is_none());
     }
 
     #[test]
