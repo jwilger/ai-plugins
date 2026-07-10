@@ -557,7 +557,8 @@ fn tools() -> Value {
                                 },
                                 "lens": { "type": "string" },
                                 "decision": { "type": "string", "enum": ["fixed", "defended", "accepted-risk"] },
-                                "defense": { "type": "string", "maxLength": MAX_CALLER_DECISION_DEFENSE_CHARS }
+                                "defense": { "type": "string", "maxLength": MAX_CALLER_DECISION_DEFENSE_CHARS },
+                                "remediation_path": { "type": "string", "maxLength": 1024 }
                             },
                             "required": ["finding_id", "lens", "decision"],
                             "allOf": [{
@@ -573,6 +574,9 @@ fn tools() -> Value {
                                         "defense": { "pattern": "\\S" }
                                     }
                                 }
+                            }, {
+                                "if": { "properties": { "decision": { "const": "fixed" } }, "required": ["decision"] },
+                                "then": { "required": ["remediation_path"] }
                             }],
                             "additionalProperties": false
                         }
@@ -1059,13 +1063,20 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                 state,
             );
             match classified.bucket.as_str() {
-                "actionable" => actionable.push(classified.value),
+                "actionable" => {
+                    if requires_security_escalation(&classified.value) {
+                        actionable.push(redact_security_escalation(&classified.value));
+                    } else {
+                        actionable.push(classified.value);
+                    }
+                }
                 "defended_or_accepted" => defended_or_accepted.push(classified.value),
                 "out_of_scope" => {
                     let disposition = unrelated_finding_disposition(&classified.value, state);
                     let mut value = classified.value;
                     value["unrelated_disposition"] = json!(disposition);
                     if requires_security_escalation(&value) {
+                        value = redact_security_escalation(&value);
                         security_escalations_required.push(value.clone());
                     }
                     if disposition == "address-now" {
@@ -1157,6 +1168,17 @@ fn requires_security_escalation(finding: &Value) -> bool {
             finding.get("security_impact").and_then(Value::as_str),
             Some("major" | "critical")
         )
+}
+
+fn redact_security_escalation(finding: &Value) -> Value {
+    json!({
+        "id": finding.get("id").cloned().unwrap_or(Value::Null),
+        "lens": finding.get("lens").cloned().unwrap_or(Value::Null),
+        "severity": finding.get("severity").cloned().unwrap_or(Value::Null),
+        "security_impact": finding.get("security_impact").cloned().unwrap_or(Value::Null),
+        "suspected_pii": finding.get("suspected_pii").cloned().unwrap_or(Value::Null),
+        "unrelated_disposition": finding.get("unrelated_disposition").cloned().unwrap_or(Value::Null)
+    })
 }
 
 fn validate_security_escalations(required: &Value, supplied: Option<&Value>) -> Result<(), String> {
@@ -1539,7 +1561,14 @@ fn update_unresolved_findings(
 
     let mut decision_reset = false;
     unresolved.retain(|finding| {
-        let resolved = decision_resolves_finding(caller_decisions, finding, diff_changed);
+        let resolved = decision_resolves_finding(
+            caller_decisions,
+            finding,
+            diff_changed,
+            state
+                .pointer("/scope/changed_files")
+                .and_then(Value::as_array),
+        );
         if resolved && !diff_changed {
             decision_reset = true;
         }
@@ -1553,7 +1582,14 @@ fn update_unresolved_findings(
             .cloned()
             .unwrap_or_default()
         {
-            if decision_resolves_finding(caller_decisions, &finding, diff_changed) {
+            if decision_resolves_finding(
+                caller_decisions,
+                &finding,
+                diff_changed,
+                state
+                    .pointer("/scope/changed_files")
+                    .and_then(Value::as_array),
+            ) {
                 if !diff_changed {
                     decision_reset = true;
                 }
@@ -1594,7 +1630,7 @@ fn validate_caller_decisions(
         if fields.keys().any(|field| {
             !matches!(
                 field.as_str(),
-                "finding_id" | "lens" | "decision" | "defense"
+                "finding_id" | "lens" | "decision" | "defense" | "remediation_path"
             )
         }) {
             return Err("caller_decision_additional_properties=true".to_string());
@@ -1704,7 +1740,12 @@ fn upsert_unresolved_finding(unresolved: &mut Vec<Value>, finding: Value) {
     unresolved.push(finding);
 }
 
-fn decision_resolves_finding(decisions: &[Value], finding: &Value, diff_changed: bool) -> bool {
+fn decision_resolves_finding(
+    decisions: &[Value],
+    finding: &Value,
+    diff_changed: bool,
+    changed_files: Option<&Vec<Value>>,
+) -> bool {
     let id = finding.get("id").and_then(Value::as_str);
     let lens = finding.get("lens").and_then(Value::as_str);
     decisions.iter().any(|decision| {
@@ -1714,7 +1755,25 @@ fn decision_resolves_finding(decisions: &[Value], finding: &Value, diff_changed:
             .and_then(Value::as_str)
             .is_some_and(|value| !value.trim().is_empty());
         let kind_resolves = match decision_kind {
-            Some("fixed") => diff_changed,
+            Some("fixed") => {
+                let remediation_path = decision.get("remediation_path").and_then(Value::as_str);
+                diff_changed
+                    && remediation_path.and_then(|path| normalize_review_path(path, None))
+                        == finding
+                            .get("path")
+                            .and_then(Value::as_str)
+                            .and_then(|path| normalize_review_path(path, None))
+                    && remediation_path.is_some_and(|path| {
+                        let normalized = normalize_review_path(path, None);
+                        changed_files.is_some_and(|files| {
+                            files.iter().any(|file| {
+                                file.as_str()
+                                    .and_then(|file| normalize_review_path(file, None))
+                                    == normalized
+                            })
+                        })
+                    })
+            }
             Some("defended" | "accepted-risk") => has_rationale,
             _ => false,
         };
@@ -1833,7 +1892,6 @@ fn append_out_of_scope_report(
                 "security_escalation": disposition.cloned()
             }));
         }
-        retain_latest(report, MAX_RETAINED_HISTORY_ENTRIES);
     }
 }
 
@@ -6217,6 +6275,132 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn fixed_decision_requires_a_finding_bound_remediation_path() {
+        let finding = json!({
+            "id": "finding-1",
+            "lens": "correctness-behavior",
+            "path": "src/reviewed.rs"
+        });
+        let decision = json!({
+            "finding_id": "finding-1",
+            "lens": "correctness-behavior",
+            "decision": "fixed"
+        });
+
+        assert!(!decision_resolves_finding(
+            &[decision],
+            &finding,
+            true,
+            None
+        ));
+
+        let decision = json!({
+            "finding_id": "finding-1",
+            "lens": "correctness-behavior",
+            "decision": "fixed",
+            "remediation_path": "./src/reviewed.rs"
+        });
+        assert!(decision_resolves_finding(
+            &[decision],
+            &finding,
+            true,
+            Some(&vec![json!("src/reviewed.rs")])
+        ));
+    }
+
+    #[test]
+    fn filter_redacts_suspected_pii_from_general_reports() {
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/new.rs"],
+            "diff_hash": "same"
+        })))
+        .expect("plan json");
+        let state = planned["state"].clone();
+        let mut results = clean_lens_results_for(&state);
+        let security = results
+            .as_array_mut()
+            .expect("results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security");
+        security["status"] = json!("findings");
+        security["findings"] = json!([{
+            "id": "sensitive-finding",
+            "severity": "warning",
+            "path": "src/unchanged.rs",
+            "message": "email alice@example.test and exploit payload",
+            "scenario": "raw personal data",
+            "security_impact": "major",
+            "suspected_pii": true,
+            "relevance": { "category": "diff_changed_file", "explanation": "stale context" }
+        }]);
+
+        let filtered: Value = serde_json::from_str(
+            &filter_findings(&json!({
+                "state": state,
+                "lens_results": results
+            }))
+            .expect("filter"),
+        )
+        .expect("json");
+        assert!(filtered["out_of_scope"][0].get("message").is_none());
+        assert!(filtered["security_escalations_required"][0]
+            .get("scenario")
+            .is_none());
+    }
+
+    #[test]
+    fn filter_redacts_actionable_suspected_pii_from_general_state() {
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/new.rs"],
+            "diff_hash": "same"
+        })))
+        .expect("plan json");
+        let state = planned["state"].clone();
+        let mut results = clean_lens_results_for(&state);
+        let security = results
+            .as_array_mut()
+            .expect("results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security");
+        security["status"] = json!("findings");
+        security["findings"] = json!([{
+            "id": "sensitive-actionable",
+            "severity": "warning",
+            "path": "src/new.rs",
+            "message": "email alice@example.test and exploit payload",
+            "scenario": "raw personal data",
+            "security_impact": "major",
+            "suspected_pii": true,
+            "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
+        }]);
+
+        let filtered: Value = serde_json::from_str(
+            &filter_findings(&json!({ "state": state, "lens_results": results })).expect("filter"),
+        )
+        .expect("json");
+        assert!(filtered["actionable"][0].get("message").is_none());
+        assert!(filtered["actionable"][0].get("scenario").is_none());
+    }
+
+    #[test]
+    fn out_of_scope_report_retains_every_session_finding() {
+        let mut state = json!({ "iteration_index": 1, "out_of_scope_report": [] });
+        let findings = (0..65)
+            .map(|id| json!({ "id": format!("finding-{id}"), "lens": "release-integration" }))
+            .collect::<Vec<_>>();
+        append_out_of_scope_report(&mut state, &json!({ "out_of_scope": findings }), None);
+        assert_eq!(
+            state["out_of_scope_report"]
+                .as_array()
+                .expect("report")
+                .len(),
+            65
+        );
+    }
+
+    #[test]
     fn advance_requires_follow_up_ticket_for_matching_unrelated_policy() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"],
@@ -8195,7 +8379,8 @@ pre_filter = "project-pre"
             "caller_decisions": [{
                 "finding_id": "finding-1",
                 "lens": "correctness-behavior",
-                "decision": "fixed"
+                "decision": "fixed",
+                "remediation_path": "src/new.rs"
             }]
         }))
         .expect("advance after fix decision");
@@ -8261,7 +8446,8 @@ pre_filter = "project-pre"
             "caller_decisions": [{
                 "finding_id": "finding-1",
                 "lens": "correctness-behavior",
-                "decision": "fixed"
+                "decision": "fixed",
+                "remediation_path": "src/new.rs"
             }]
         }))
         .expect("advance after changed diff and fixed decision");
