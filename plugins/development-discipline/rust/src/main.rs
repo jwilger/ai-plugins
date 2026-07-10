@@ -1970,30 +1970,21 @@ fn append_out_of_scope_report(
             .cloned()
             .unwrap_or_default()
         {
-            let lens_documents = documented
-                .iter()
-                .filter(|entry| {
-                    entry.get("lens").and_then(Value::as_str)
+            let disposition = documented.iter().find(|entry| {
+                entry
+                    .get("finding_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|entry_id| {
+                        finding
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .is_some_and(|finding_id| {
+                                entry_id == finding_id || entry_id == fingerprint(finding_id)
+                            })
+                    })
+                    && entry.get("lens").and_then(Value::as_str)
                         == finding.get("lens").and_then(Value::as_str)
-                })
-                .collect::<Vec<_>>();
-            let disposition = lens_documents
-                .iter()
-                .copied()
-                .find(|entry| {
-                    entry
-                        .get("finding_id")
-                        .and_then(Value::as_str)
-                        .is_some_and(|entry_id| {
-                            finding
-                                .get("id")
-                                .and_then(Value::as_str)
-                                .is_some_and(|finding_id| {
-                                    entry_id == finding_id || entry_id == fingerprint(finding_id)
-                                })
-                        })
-                })
-                .or_else(|| (lens_documents.len() == 1).then(|| lens_documents[0]));
+            });
             let entry = json!({
                 "iteration": iteration,
                 "finding": finding,
