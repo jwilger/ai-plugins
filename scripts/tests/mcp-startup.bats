@@ -298,7 +298,7 @@ run_development_discipline_manifest_server_with_codex_cache() {
   local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
 
   mkdir -p "$cache_parent"
-  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.0"
+  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.1"
 
   command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
   mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
@@ -319,7 +319,7 @@ run_development_discipline_codex_cache_final_review_flow() {
   local project_root="$TMPROOT/final-review-project"
 
   mkdir -p "$cache_parent" "$project_root/.development-discipline"
-  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.0"
+  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.1"
   cat >"$project_root/.development-discipline/final-review.toml" <<'TOML'
 [final_review.models]
 pre_filter = "config-pre"
@@ -349,7 +349,7 @@ run_development_discipline_manifest_server_with_both_harness_markers() {
   local claude_root="$TMPROOT/claude-plugin-root"
 
   mkdir -p "$cache_parent" "$claude_root/bin"
-  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.0"
+  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.1"
   printf '%s\n' '#!/bin/sh' 'echo claude-plugin-root-used' >"$claude_root/bin/development-discipline-mcp"
   chmod +x "$claude_root/bin/development-discipline-mcp"
 
