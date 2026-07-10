@@ -2143,12 +2143,15 @@ fn durable_report_database_path(project_root: &str) -> Result<PathBuf, String> {
                 .map(|home| PathBuf::from(home).join(".local/state"))
         })
         .ok_or_else(|| "durable_report_state_home_required=true".to_string())?;
-    let mut hasher = DefaultHasher::new();
-    "development-discipline-final-review-report-v1".hash(&mut hasher);
-    project_root.hash(&mut hasher);
     Ok(state_root
         .join("development-discipline/final-review-reports")
-        .join(format!("{:016x}.sqlite", hasher.finish())))
+        .join(format!(
+            "{}.sqlite",
+            stable_storage_digest(&[
+                "development-discipline-final-review-report-v1",
+                project_root
+            ])
+        )))
 }
 
 fn initialize_durable_report_schema(connection: &Connection) -> Result<(), String> {
@@ -3139,12 +3142,25 @@ fn computed_report_binding_id(state: &Value) -> Option<String> {
     let project_root = state
         .pointer("/scope/project_root")
         .and_then(Value::as_str)?;
-    let mut hasher = DefaultHasher::new();
-    "final-review-report-v1".hash(&mut hasher);
-    scope.hash(&mut hasher);
-    base.hash(&mut hasher);
-    project_root.hash(&mut hasher);
-    Some(format!("review:{:016x}", hasher.finish()))
+    Some(format!(
+        "review:{}",
+        stable_storage_digest(&["final-review-report-v1", scope, base, project_root])
+    ))
+}
+
+fn stable_storage_digest(parts: &[&str]) -> String {
+    let mut digest = 0xcbf29ce484222325_u64;
+    for part in parts {
+        for byte in (part.len() as u64)
+            .to_be_bytes()
+            .iter()
+            .chain(part.as_bytes())
+        {
+            digest ^= u64::from(*byte);
+            digest = digest.wrapping_mul(0x100000001b3);
+        }
+    }
+    format!("{digest:016x}")
 }
 
 fn review_contract_is_valid(state: &Value) -> bool {
@@ -4542,6 +4558,14 @@ mod tests {
         assert_ne!(
             first["state"]["review_contract_id"],
             second["state"]["review_contract_id"]
+        );
+    }
+
+    #[test]
+    fn stable_storage_digest_has_a_fixed_cross_release_value() {
+        assert_eq!(
+            stable_storage_digest(&["final-review", "/tmp/worktree", "origin/main"]),
+            "a8f8b7b7751e283a"
         );
     }
 
