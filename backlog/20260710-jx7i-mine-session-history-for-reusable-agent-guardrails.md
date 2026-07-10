@@ -13,6 +13,8 @@ Add a skill that mines session history for durable guardrails and recommends the
 
 ## Context / Why
 
+The skill must inspect session history for recurring mistakes or user corrections, propose reusable guardrails, distinguish project-specific rules from marketplace/plugin-level guidance, and ask the user to choose the destination when the recommendation is not unambiguous. It must know how to make ai-plugins changes even when invoked from another project.
+
 ## Acceptance criteria
 
 - [ ] Skill identifies candidate guardrails from session history without treating transient chatter as durable policy.
