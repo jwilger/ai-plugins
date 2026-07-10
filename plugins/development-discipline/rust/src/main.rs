@@ -33,6 +33,7 @@ const MAX_LENS_DESCRIPTION_CHARS: usize = 512;
 const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_ACTIVE_REVIEW_SESSIONS: usize = 32;
 const MAX_RETAINED_HISTORY_ENTRIES: usize = 64;
+const MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES: usize = 128;
 const MAX_RETAINED_CALLER_DECISIONS: usize = 64;
 const MAX_RETAINED_DEFENSES_PER_LENS: usize = 8;
 const MAX_IMPORTED_PRIOR_DEFENSES: usize = MAX_RETAINED_CALLER_DECISIONS;
@@ -1964,6 +1965,12 @@ fn append_out_of_scope_report(
     {
         state["out_of_scope_report"] = json!([]);
     }
+    if !state
+        .get("out_of_scope_report_omitted_count")
+        .is_some_and(Value::is_u64)
+    {
+        state["out_of_scope_report_omitted_count"] = json!(0);
+    }
     let documented = security_escalations
         .and_then(Value::as_array)
         .cloned()
@@ -1990,6 +1997,15 @@ fn append_out_of_scope_report(
                 "finding": finding,
                 "security_escalation": disposition.map(sanitize_security_escalation_record)
             }));
+        }
+        if report.len() > MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES {
+            let omitted = report.len() - MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES;
+            report.drain(0..omitted);
+            state["out_of_scope_report_omitted_count"] = json!(state
+                ["out_of_scope_report_omitted_count"]
+                .as_u64()
+                .unwrap_or(0)
+                .saturating_add(omitted as u64));
         }
     }
 }
@@ -6769,6 +6785,23 @@ pre_filter = "project-pre"
                 .len(),
             65
         );
+    }
+
+    #[test]
+    fn out_of_scope_report_accounts_for_bounded_overflow() {
+        let mut state = json!({ "iteration_index": 1, "out_of_scope_report": [] });
+        let findings = (0..=MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES)
+            .map(|id| json!({ "id": format!("finding-{id}"), "lens": "release-integration" }))
+            .collect::<Vec<_>>();
+        append_out_of_scope_report(&mut state, &json!({ "out_of_scope": findings }), None);
+        assert_eq!(
+            state["out_of_scope_report"]
+                .as_array()
+                .expect("report")
+                .len(),
+            MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES
+        );
+        assert_eq!(state["out_of_scope_report_omitted_count"], 1);
     }
 
     #[test]
