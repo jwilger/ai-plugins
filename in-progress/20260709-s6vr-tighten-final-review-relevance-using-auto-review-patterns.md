@@ -29,6 +29,7 @@ Recent final-review cycles produced findings outside the active ticket's intende
 - [ ] Codex harness defaults account for gpt-5.6-luna, gpt-5.6-sol, and gpt-5.6-terra while remaining overridable by project TOML and explicit plan arguments.
 - [ ] Tests and behavior eval cases cover model-routing configuration and precedence without allowing the MCP server to spawn review agents.
 - [ ] At the start of one ticket or one multi-ticket automation, ask once how unrelated findings and non-blocking nits should be routed: current ticket, follow-up tickets, or report-only.
+- [ ] Always document major-or-higher security or PII findings as high-priority bug tickets unless they must be addressed by the current ticket.
 
 ## Subtasks
 
