@@ -1673,6 +1673,28 @@ fn validate_caller_decisions(
         {
             return Err("caller_decision_unknown_finding=true".to_string());
         }
+        let sensitive_security_finding = unresolved_findings(state)
+            .into_iter()
+            .chain(
+                ["actionable", "needs_human_decision"]
+                    .into_iter()
+                    .flat_map(|bucket| {
+                        filtered
+                            .get(bucket)
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .cloned()
+                    }),
+            )
+            .any(|finding| {
+                finding.get("lens").and_then(Value::as_str) == lens
+                    && finding.get("id").and_then(Value::as_str) == id
+                    && requires_security_escalation(&finding)
+            });
+        if sensitive_security_finding && !matches!(decision_kind, Some("fixed")) {
+            return Err("sensitive_security_finding_must_be_fixed=true".to_string());
+        }
         let defense = match decision.get("defense") {
             Some(defense) => {
                 let Some(defense) = defense.as_str() else {
@@ -6381,6 +6403,20 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn caller_rejects_defense_for_sensitive_security_finding() {
+        let state = json!({ "unresolved_findings": [{
+            "id": "security-1", "lens": "security-safety", "security_impact": "major", "suspected_pii": false
+        }] });
+        let error = validate_caller_decisions(
+            &state,
+            &json!({ "actionable": [], "needs_human_decision": [] }),
+            &[json!({ "finding_id": "security-1", "lens": "security-safety", "decision": "defended", "defense": "not fixing" })],
+        )
+        .expect_err("sensitive finding cannot be defended away");
+        assert_eq!(error, "sensitive_security_finding_must_be_fixed=true");
+    }
+
+    #[test]
     fn filter_redacts_suspected_pii_from_general_reports() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"],
@@ -6454,6 +6490,39 @@ pre_filter = "project-pre"
         .expect("json");
         assert!(filtered["actionable"][0].get("message").is_none());
         assert!(filtered["actionable"][0].get("scenario").is_none());
+    }
+
+    #[test]
+    fn filter_scrubs_malformed_security_output() {
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/new.rs"], "diff_hash": "same"
+        })))
+        .expect("plan json");
+        let state = planned["state"].clone();
+        let mut results = clean_lens_results_for(&state);
+        let security = results
+            .as_array_mut()
+            .expect("results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security");
+        security["status"] = json!("findings");
+        security["findings"] = json!([{
+            "id": "malformed-sensitive", "severity": "warning", "path": "src/new.rs",
+            "message": "alice@example.test exploit payload", "scenario": "private data",
+            "suspected_pii": true,
+            "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
+        }]);
+        let filtered: Value = serde_json::from_str(
+            &filter_findings(&json!({
+                "state": state, "lens_results": results
+            }))
+            .expect("filter"),
+        )
+        .expect("json");
+        assert!(filtered["malformed"][0].get("message").is_none());
+        assert!(filtered["malformed"][0].get("scenario").is_none());
+        assert_eq!(filtered["malformed"][0]["security_output_malformed"], true);
     }
 
     #[test]
