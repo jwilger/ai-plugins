@@ -321,12 +321,30 @@ const sensitiveAdvanceResponse = await request(
   false,
 );
 const sensitiveAdvanceText = sensitiveAdvanceResponse.result.content[0].text;
+const sensitiveAdvanced = JSON.parse(sensitiveAdvanceText);
+const sensitiveReportResponse = await request(
+  {
+    jsonrpc: "2.0",
+    id: 16,
+    method: "tools/call",
+    params: {
+      name: "final_review.out_of_scope_report",
+      arguments: { state: sensitiveAdvanced.state },
+    },
+  },
+  false,
+);
+const sensitiveReport = JSON.parse(
+  sensitiveReportResponse.result.content[0].text,
+);
+const retainedFinding = sensitiveReport.findings[0];
 if (
-  !sensitiveAdvanceText.includes("alice@example.test") ||
-  !sensitiveAdvanceText.includes("private data")
+  retainedFinding.message !== "alice@example.test exploit payload" ||
+  retainedFinding.scenario !== "private data" ||
+  retainedFinding.unrelated_disposition !== "report"
 ) {
   throw new Error(
-    "complete local final-review report details were not retained",
+    "complete local final-review report details were not returned",
   );
 }
 
