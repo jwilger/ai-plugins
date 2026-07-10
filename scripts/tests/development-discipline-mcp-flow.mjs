@@ -237,6 +237,88 @@ await request({
   },
 });
 
+const sensitivePlanResponse = await request({
+  jsonrpc: "2.0",
+  id: 13,
+  method: "tools/call",
+  params: {
+    name: "final_review.plan",
+    arguments: {
+      session_id: "bats-sensitive-persistence",
+      base: "HEAD",
+      scope: "uncommitted",
+      project_root: projectRoot,
+      changed_files: ["src/new.rs"],
+      diff_hash: "sensitive",
+      unrelated_finding_policy: { default: "report" },
+    },
+  },
+});
+const sensitiveState = JSON.parse(
+  sensitivePlanResponse.result.content[0].text,
+).state;
+const sensitiveResults = cleanLensResults(sensitiveState);
+const sensitiveSecurity = sensitiveResults.find(
+  (result) => result.lens === "security-safety",
+);
+sensitiveSecurity.status = "findings";
+sensitiveSecurity.findings = [
+  {
+    id: "sensitive-flow-id",
+    severity: "warning",
+    path: "src/old.rs",
+    message: "alice@example.test exploit payload",
+    scenario: "private data",
+    security_impact: "major",
+    suspected_pii: true,
+    relevance: {
+      category: "diff_changed_file",
+      explanation: "This file is not in the changed-file inventory.",
+    },
+  },
+];
+const sensitiveFilterResponse = await request({
+  jsonrpc: "2.0",
+  id: 14,
+  method: "tools/call",
+  params: {
+    name: "final_review.filter_findings",
+    arguments: { state: sensitiveState, lens_results: sensitiveResults },
+  },
+});
+const sensitiveFilter = JSON.parse(
+  sensitiveFilterResponse.result.content[0].text,
+);
+const opaqueFindingId = sensitiveFilter.security_escalations_required[0].id;
+const sensitiveAdvanceResponse = await request({
+  jsonrpc: "2.0",
+  id: 15,
+  method: "tools/call",
+  params: {
+    name: "final_review.advance",
+    arguments: {
+      state: sensitiveState,
+      lens_results: sensitiveResults,
+      current_diff_hash: "sensitive",
+      security_escalations: [
+        {
+          finding_id: opaqueFindingId,
+          lens: "security-safety",
+          disposition: "high-priority-ticket",
+          reference: "alice@example.test",
+        },
+      ],
+    },
+  },
+});
+const sensitiveAdvanceText = sensitiveAdvanceResponse.result.content[0].text;
+if (
+  sensitiveAdvanceText.includes("alice@example.test") ||
+  sensitiveAdvanceText.includes("private data")
+) {
+  throw new Error("sensitive final-review details leaked through advance");
+}
+
 child.stdin.end();
 const exitCode = await new Promise((resolve) => child.on("close", resolve));
 if (exitCode !== 0) {
