@@ -3,7 +3,7 @@ title: Tighten final-review relevance using auto_review patterns
 blocked_by: []
 blocks: []
 tags: []
-pr_mr_url: https://github.com/jwilger/ai-plugins/pull/51
+pr_mr_url: https://github.com/jwilger/ai-plugins/pull/50
 pr_mr_status: draft
 claim:
   host: unknown
