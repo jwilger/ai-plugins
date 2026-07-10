@@ -798,25 +798,29 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         .ok_or_else(|| "review_contract_build_failed=true".to_string())?);
     ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
 
-    let initial_assignments = assignments(
-        1,
-        state["session_id"]
-            .as_str()
-            .unwrap_or("final-review-unknown"),
-        &lenses,
-        &state["lens_objectives"],
-        &review_model_role,
-        "start_fresh",
-        &scope,
-        &base,
-        &project_root,
-        &diff_hash,
-        &user_request,
-        &acceptance_criteria,
-        &explicit_concerns,
-        &changed_files,
-        &state["prior_defenses_by_lens"],
-    )?;
+    let initial_assignments = if unrelated_finding_policy_confirmation_required {
+        Vec::new()
+    } else {
+        assignments(
+            1,
+            state["session_id"]
+                .as_str()
+                .unwrap_or("final-review-unknown"),
+            &lenses,
+            &state["lens_objectives"],
+            &review_model_role,
+            "start_fresh",
+            &scope,
+            &base,
+            &project_root,
+            &diff_hash,
+            &user_request,
+            &acceptance_criteria,
+            &explicit_concerns,
+            &changed_files,
+            &state["prior_defenses_by_lens"],
+        )?
+    };
 
     let response = json!({
         "state": state,
@@ -4839,7 +4843,8 @@ mod tests {
         let error = plan_result(&json!({
             "changed_files": ["src/lib.rs"],
             "diff_hash": "abc",
-            "user_request": "x".repeat(70 * 1024)
+            "user_request": "x".repeat(70 * 1024),
+            "unrelated_finding_policy": { "default": "report" }
         }))
         .expect_err("assignment context must have a bounded total size");
 
@@ -5075,7 +5080,8 @@ mod tests {
             "changed_files": ["src/lib.rs"],
             "diff_hash": "abc",
             "user_request": "Implement the active ticket only",
-            "acceptance_criteria": ["Preserve existing behavior"]
+            "acceptance_criteria": ["Preserve existing behavior"],
+            "unrelated_finding_policy": { "default": "report" }
         })))
         .expect("plan json");
         let prompt = parsed["assignments"][0]["prompt"].as_str().expect("prompt");
@@ -6495,6 +6501,10 @@ pre_filter = "project-pre"
             planned["state"]["unrelated_finding_policy_confirmation_required"],
             true
         );
+        assert!(planned["assignments"]
+            .as_array()
+            .expect("assignments")
+            .is_empty());
     }
 
     #[test]
