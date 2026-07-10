@@ -1228,7 +1228,9 @@ fn fingerprint(value: &str) -> String {
 }
 
 fn sanitize_malformed_security_finding(finding: Value) -> Value {
-    if finding.get("lens").and_then(Value::as_str) != Some("security-safety") {
+    if finding.get("lens").and_then(Value::as_str) != Some("security-safety")
+        && !requires_security_escalation(&finding)
+    {
         return finding;
     }
     json!({
@@ -6456,6 +6458,18 @@ pre_filter = "project-pre"
         }));
         assert!(value.get("message").is_none());
         assert!(value.get("scenario").is_none());
+        assert_eq!(value["security_output_malformed"], true);
+    }
+
+    #[test]
+    fn malformed_nonsecurity_pii_finding_is_scrubbed() {
+        let value = sanitize_malformed_security_finding(json!({
+            "lens": "tests-verification",
+            "message": "alice@example.test exploit payload",
+            "suspected_pii": true,
+            "filter_reason": "finding severity is invalid"
+        }));
+        assert!(value.get("message").is_none());
         assert_eq!(value["security_output_malformed"], true);
     }
 
