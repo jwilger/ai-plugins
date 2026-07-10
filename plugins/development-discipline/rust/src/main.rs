@@ -1091,7 +1091,13 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                     }
                     out_of_scope.push(value)
                 }
-                "needs_human_decision" => needs_human_decision.push(classified.value),
+                "needs_human_decision" => {
+                    if requires_security_escalation(&classified.value) {
+                        needs_human_decision.push(redact_security_escalation(&classified.value));
+                    } else {
+                        needs_human_decision.push(classified.value);
+                    }
+                }
                 _ => malformed.push(classified.value),
             }
         }
@@ -6527,6 +6533,40 @@ pre_filter = "project-pre"
         assert!(filtered["malformed"][0].get("message").is_none());
         assert!(filtered["malformed"][0].get("scenario").is_none());
         assert_eq!(filtered["malformed"][0]["security_output_malformed"], true);
+    }
+
+    #[test]
+    fn filter_redacts_sensitive_human_decision() {
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/new.rs"], "diff_hash": "same",
+            "context": { "user_request": "check PII", "acceptance_criteria": [], "explicit_concerns": ["protect PII"] }
+        }))).expect("plan json");
+        let state = planned["state"].clone();
+        let mut results = clean_lens_results_for(&state);
+        let security = results
+            .as_array_mut()
+            .expect("results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security");
+        security["status"] = json!("findings");
+        security["findings"] = json!([{
+            "id": "human-sensitive", "severity": "warning", "path": "src/new.rs",
+            "message": "alice@example.test exploit payload", "scenario": "private data",
+            "security_impact": "major", "suspected_pii": true,
+            "relevance": { "category": "explicit_user_concern", "matched_context": "protect PII", "explanation": "requires user decision" }
+        }]);
+        let filtered: Value = serde_json::from_str(
+            &filter_findings(&json!({
+                "state": state, "lens_results": results
+            }))
+            .expect("filter"),
+        )
+        .expect("json");
+        assert!(filtered["needs_human_decision"][0].get("message").is_none());
+        assert!(filtered["needs_human_decision"][0]
+            .get("scenario")
+            .is_none());
     }
 
     #[test]
