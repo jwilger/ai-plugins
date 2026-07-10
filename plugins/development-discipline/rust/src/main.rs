@@ -1119,6 +1119,10 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                 .iter()
                 .any(|key| key == &subagent_key(state, expected))
     });
+    let malformed = malformed
+        .into_iter()
+        .map(sanitize_malformed_security_finding)
+        .collect::<Vec<_>>();
     let clean = actionable.is_empty() && malformed.is_empty() && needs_human_decision.is_empty();
     Ok(json!({
         "actionable": actionable,
@@ -1171,13 +1175,37 @@ fn requires_security_escalation(finding: &Value) -> bool {
 }
 
 fn redact_security_escalation(finding: &Value) -> Value {
+    let remediation_path_fingerprint = finding
+        .get("path")
+        .and_then(Value::as_str)
+        .and_then(|path| normalize_review_path(path, None))
+        .map(|path| fingerprint(&path));
     json!({
         "id": finding.get("id").cloned().unwrap_or(Value::Null),
         "lens": finding.get("lens").cloned().unwrap_or(Value::Null),
         "severity": finding.get("severity").cloned().unwrap_or(Value::Null),
         "security_impact": finding.get("security_impact").cloned().unwrap_or(Value::Null),
         "suspected_pii": finding.get("suspected_pii").cloned().unwrap_or(Value::Null),
-        "unrelated_disposition": finding.get("unrelated_disposition").cloned().unwrap_or(Value::Null)
+        "unrelated_disposition": finding.get("unrelated_disposition").cloned().unwrap_or(Value::Null),
+        "remediation_path_fingerprint": remediation_path_fingerprint
+    })
+}
+
+fn fingerprint(value: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn sanitize_malformed_security_finding(finding: Value) -> Value {
+    if finding.get("lens").and_then(Value::as_str) != Some("security-safety") {
+        return finding;
+    }
+    json!({
+        "id": finding.get("id").cloned().unwrap_or(Value::Null),
+        "lens": "security-safety",
+        "filter_reason": finding.get("filter_reason").cloned().unwrap_or(Value::Null),
+        "security_output_malformed": true
     })
 }
 
@@ -1666,6 +1694,14 @@ fn validate_caller_decisions(
         {
             return Err("caller_decision_defense_required=true".to_string());
         }
+        if decision_kind == Some("fixed") {
+            let Some(path) = decision.get("remediation_path").and_then(Value::as_str) else {
+                return Err("caller_decision_fixed_remediation_path_required=true".to_string());
+            };
+            if path.len() > 1024 || normalize_review_path(path, None).is_none() {
+                return Err("caller_decision_fixed_remediation_path_invalid=true".to_string());
+            }
+        }
     }
     Ok(())
 }
@@ -1757,12 +1793,20 @@ fn decision_resolves_finding(
         let kind_resolves = match decision_kind {
             Some("fixed") => {
                 let remediation_path = decision.get("remediation_path").and_then(Value::as_str);
+                let normalized =
+                    remediation_path.and_then(|path| normalize_review_path(path, None));
+                let path_matches = normalized
+                    == finding
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .and_then(|path| normalize_review_path(path, None));
+                let fingerprint_matches = normalized.as_deref().map(fingerprint)
+                    == finding
+                        .get("remediation_path_fingerprint")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
                 diff_changed
-                    && remediation_path.and_then(|path| normalize_review_path(path, None))
-                        == finding
-                            .get("path")
-                            .and_then(Value::as_str)
-                            .and_then(|path| normalize_review_path(path, None))
+                    && (path_matches || fingerprint_matches)
                     && remediation_path.is_some_and(|path| {
                         let normalized = normalize_review_path(path, None);
                         changed_files.is_some_and(|files| {
@@ -6306,6 +6350,34 @@ pre_filter = "project-pre"
             true,
             Some(&vec![json!("src/reviewed.rs")])
         ));
+    }
+
+    #[test]
+    fn caller_rejects_fixed_decision_without_remediation_path() {
+        let state = json!({ "unresolved_findings": [{ "id": "finding-1", "lens": "correctness-behavior" }] });
+        let error = validate_caller_decisions(
+            &state,
+            &json!({ "actionable": [], "needs_human_decision": [] }),
+            &[json!({ "finding_id": "finding-1", "lens": "correctness-behavior", "decision": "fixed" })],
+        )
+        .expect_err("fixed decision must supply remediation path");
+        assert_eq!(
+            error,
+            "caller_decision_fixed_remediation_path_required=true"
+        );
+    }
+
+    #[test]
+    fn malformed_security_finding_is_scrubbed() {
+        let value = sanitize_malformed_security_finding(json!({
+            "lens": "security-safety",
+            "message": "alice@example.test exploit payload",
+            "scenario": "private data",
+            "filter_reason": "finding id is required"
+        }));
+        assert!(value.get("message").is_none());
+        assert!(value.get("scenario").is_none());
+        assert_eq!(value["security_output_malformed"], true);
     }
 
     #[test]
