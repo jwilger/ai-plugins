@@ -22,7 +22,7 @@ Recent final-review cycles produced findings outside the active ticket's intende
 
 - [x] Final-review skill preserves the existing review lenses and three-consecutive-clean rule.
 - [x] Behavior/eval cases cover the relevance-filtering behavior and defense/out-of-scope handling.
-- [ ] Skill instructs subagents to classify findings as actionable only when tied to the active task, PR/diff scope, acceptance criteria, explicit user concern, or a real cross-cutting safety/release risk.
+- [x] Skill instructs subagents to classify findings as actionable only when tied to the active task, PR/diff scope, acceptance criteria, explicit user concern, or a real cross-cutting safety/release risk.
 - [ ] Implementation reviews ../auto_review for relevant review-focus patterns and incorporates applicable ideas without coupling this plugin to that project.
 - [ ] This ticket is reviewed by dogfooding the development-discipline final-review runner rather than using the old manual final-review process.
 - [ ] Project-local TOML and explicit plan arguments resolve pre_filter, lens_review, post_filter, and verifier model roles with precedence explicit args, project config, harness defaults, then generic roles.
