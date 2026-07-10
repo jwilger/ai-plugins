@@ -4,7 +4,7 @@ blocked_by: []
 blocks: []
 tags: []
 pr_mr_url: https://github.com/jwilger/ai-plugins/pull/50
-pr_mr_status: draft
+pr_mr_status: ready
 claim:
   host: unknown
   session: unknown
