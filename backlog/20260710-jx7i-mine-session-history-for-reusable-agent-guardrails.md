@@ -15,6 +15,8 @@ Add a skill that mines session history for durable guardrails and recommends the
 
 ## Acceptance criteria
 
+- [ ] Skill identifies candidate guardrails from session history without treating transient chatter as durable policy.
+
 ## Subtasks
 
 ## Notes / Log
