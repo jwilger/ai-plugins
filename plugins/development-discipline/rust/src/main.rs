@@ -1034,6 +1034,23 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                 malformed.push(value);
                 continue;
             }
+            if lens == "security-safety"
+                && (finding
+                    .get("security_impact")
+                    .and_then(Value::as_str)
+                    .is_none_or(|impact| {
+                        !matches!(impact, "none" | "minor" | "moderate" | "major" | "critical")
+                    })
+                    || !finding.get("suspected_pii").is_some_and(Value::is_boolean))
+            {
+                let mut value = finding.clone();
+                value["lens"] = json!(lens);
+                value["filter_reason"] = json!(
+                    "security-safety findings require security_impact and suspected_pii classification"
+                );
+                malformed.push(value);
+                continue;
+            }
             let classified = classify_finding(
                 lens,
                 finding,
@@ -1142,12 +1159,7 @@ fn requires_security_escalation(finding: &Value) -> bool {
         )
 }
 
-fn validate_security_escalations(
-    required: &Value,
-    supplied: Option<&Value>,
-    caller_decisions: &[Value],
-    diff_changed: bool,
-) -> Result<(), String> {
+fn validate_security_escalations(required: &Value, supplied: Option<&Value>) -> Result<(), String> {
     let required = required
         .as_array()
         .ok_or_else(|| "security_escalations_required_must_be_array=true".to_string())?;
@@ -1172,13 +1184,7 @@ fn validate_security_escalations(
                     if Some(entry_id) == id && Some(entry_lens) == lens && !reference.trim().is_empty()
             )
         });
-        let fixed_in_current_ticket = diff_changed
-            && caller_decisions.iter().any(|decision| {
-                decision.get("finding_id").and_then(Value::as_str) == id
-                    && decision.get("lens").and_then(Value::as_str) == lens
-                    && decision.get("decision").and_then(Value::as_str) == Some("fixed")
-            });
-        if !documented && !fixed_in_current_ticket {
+        if !documented {
             return Err("security_escalation_documentation_required=true".to_string());
         }
     }
@@ -1299,8 +1305,6 @@ fn advance_with_contract_validation(
             .get("security_escalations_required")
             .unwrap_or(&Value::Array(Vec::new())),
         arguments.get("security_escalations"),
-        &caller_decisions,
-        diff_changed,
     )?;
     validate_follow_up_tickets(
         filtered
@@ -6139,6 +6143,7 @@ pre_filter = "project-pre"
                     "path": "src/unchanged.rs",
                     "message": "suspected PII exposure",
                     "suspected_pii": true,
+                    "security_impact": "moderate",
                     "relevance": { "category": "diff_changed_file", "explanation": "stale context" }
                 }]
             }]
@@ -6161,8 +6166,7 @@ pre_filter = "project-pre"
         }]);
 
         assert_eq!(
-            validate_security_escalations(&required, None, &[], false)
-                .expect_err("missing escalation"),
+            validate_security_escalations(&required, None).expect_err("missing escalation"),
             "security_escalation_documentation_required=true"
         );
         assert!(validate_security_escalations(
@@ -6172,9 +6176,7 @@ pre_filter = "project-pre"
                 "lens": "security-safety",
                 "disposition": "high-priority-ticket",
                 "reference": "20260710-abcd"
-            }])),
-            &[],
-            false
+            }]))
         )
         .is_ok());
     }
@@ -6201,6 +6203,7 @@ pre_filter = "project-pre"
             "path": "src/unchanged.rs",
             "message": "major issue outside this diff",
             "security_impact": "major",
+            "suspected_pii": false,
             "relevance": { "category": "diff_changed_file", "explanation": "stale context" }
         }]);
 
@@ -8985,6 +8988,8 @@ pre_filter = "project-pre"
                     {
                         "id": "absolute-path",
                         "severity": "warning",
+                        "security_impact": "none",
+                        "suspected_pii": false,
                         "path": absolute,
                         "message": "absolute path finding",
                         "relevance": { "category": "diff_changed_file", "explanation": "changed launcher" }
@@ -8992,6 +8997,8 @@ pre_filter = "project-pre"
                     {
                         "id": "dot-relative-path",
                         "severity": "warning",
+                        "security_impact": "none",
+                        "suspected_pii": false,
                         "path": "./plugins/development-discipline/bin/development-discipline-mcp",
                         "message": "dot relative finding",
                         "relevance": { "category": "diff_changed_file", "explanation": "changed launcher" }
