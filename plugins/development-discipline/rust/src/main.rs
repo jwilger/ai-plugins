@@ -1228,16 +1228,13 @@ fn fingerprint(value: &str) -> String {
 }
 
 fn sanitize_malformed_security_finding(finding: Value) -> Value {
-    if finding.get("lens").and_then(Value::as_str) != Some("security-safety")
-        && !requires_security_escalation(&finding)
-    {
-        return finding;
-    }
     json!({
         "id": finding.get("id").and_then(Value::as_str).map(fingerprint),
-        "lens": "security-safety",
+        "lens": finding.get("lens").and_then(Value::as_str).filter(|lens| {
+            all_lenses(&[]).iter().any(|expected| expected == lens)
+        }).unwrap_or("untrusted"),
         "filter_reason": finding.get("filter_reason").cloned().unwrap_or(Value::Null),
-        "security_output_malformed": true
+        "reviewer_output_malformed": true
     })
 }
 
@@ -6458,7 +6455,7 @@ pre_filter = "project-pre"
         }));
         assert!(value.get("message").is_none());
         assert!(value.get("scenario").is_none());
-        assert_eq!(value["security_output_malformed"], true);
+        assert_eq!(value["reviewer_output_malformed"], true);
     }
 
     #[test]
@@ -6470,7 +6467,7 @@ pre_filter = "project-pre"
             "filter_reason": "finding severity is invalid"
         }));
         assert!(value.get("message").is_none());
-        assert_eq!(value["security_output_malformed"], true);
+        assert_eq!(value["reviewer_output_malformed"], true);
     }
 
     #[test]
@@ -6607,7 +6604,30 @@ pre_filter = "project-pre"
         assert!(filtered["malformed"][0].get("message").is_none());
         assert!(filtered["malformed"][0].get("scenario").is_none());
         assert_ne!(filtered["malformed"][0]["id"], "alice@example.test");
-        assert_eq!(filtered["malformed"][0]["security_output_malformed"], true);
+        assert_eq!(filtered["malformed"][0]["reviewer_output_malformed"], true);
+    }
+
+    #[test]
+    fn filter_scrubs_unclassified_pii_from_nonsecurity_malformed_output() {
+        let state = json!({
+            "scope": { "changed_files": ["src/new.rs"], "diff_hash": "same" },
+            "session_id": "review-1", "iteration_index": 1,
+            "lenses": ["tests-verification"], "prior_defenses_by_lens": {}
+        });
+        let filtered: Value = serde_json::from_str(&filter_findings(&json!({
+            "state": state,
+            "lens_results": [{
+                "lens": "tests-verification", "subagent_key": "review-1:1:tests-verification",
+                "status": "findings", "findings": [{
+                    "id": "alice@example.test", "severity": "invalid", "path": "src/new.rs",
+                    "message": "alice@example.test", "scenario": "private data",
+                    "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
+                }]
+            }]
+        })).expect("filter")).expect("json");
+        assert!(filtered["malformed"][0].get("message").is_none());
+        assert!(filtered["malformed"][0].get("scenario").is_none());
+        assert_ne!(filtered["malformed"][0]["id"], "alice@example.test");
     }
 
     #[test]
