@@ -1075,7 +1075,7 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                     let disposition = unrelated_finding_disposition(&classified.value, state);
                     let mut value = classified.value;
                     value["unrelated_disposition"] = json!(disposition);
-                    if requires_security_escalation(&value) {
+                    if requires_security_escalation(&value) && disposition != "address-now" {
                         value = redact_security_escalation(&value);
                         security_escalations_required.push(value.clone());
                     }
@@ -6244,7 +6244,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn filter_keeps_pii_escalation_when_policy_routes_it_to_address_now() {
+    fn filter_allows_current_ticket_pii_remediation_without_follow_up_ticket() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"],
             "diff_hash": "same",
@@ -6276,10 +6276,10 @@ pre_filter = "project-pre"
         let parsed: Value = serde_json::from_str(&output).expect("json");
 
         assert_eq!(parsed["needs_human_decision"][0]["id"], "address-now-pii");
-        assert_eq!(
-            parsed["security_escalations_required"][0]["id"],
-            "address-now-pii"
-        );
+        assert!(parsed["security_escalations_required"]
+            .as_array()
+            .expect("escalations")
+            .is_empty());
     }
 
     #[test]
