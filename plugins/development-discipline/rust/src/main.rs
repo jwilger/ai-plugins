@@ -2059,7 +2059,10 @@ fn replace_durable_out_of_scope_report(
         .get("report_binding_id")
         .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
-    let path = durable_report_database_path(project_root)?;
+    let path = durable_report_database_path(
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
     let directory = path
         .parent()
         .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
@@ -2116,11 +2119,11 @@ fn replace_durable_out_of_scope_report(
                 params![
                     report_binding_id,
                     lens,
-                    finding_id,
+                    fingerprint(finding_id),
                     iteration,
                     finding.get("severity").and_then(Value::as_str),
                     finding.get("unrelated_disposition").and_then(Value::as_str),
-                    serde_json::to_string(finding).map_err(|error| format!("durable_report_finding_encode_failed source={error}"))?,
+                    serde_json::to_string(&sanitize_durable_finding(finding)).map_err(|error| format!("durable_report_finding_encode_failed source={error}"))?,
                     entry.get("security_escalation").map(serde_json::to_string).transpose().map_err(|error| format!("durable_report_escalation_encode_failed source={error}"))?,
                 ],
             )
@@ -2133,7 +2136,10 @@ fn replace_durable_out_of_scope_report(
     Ok(())
 }
 
-fn durable_report_database_path(project_root: &str) -> Result<PathBuf, String> {
+fn durable_report_database_path(
+    project_root: &str,
+    work_item_id: Option<&str>,
+) -> Result<PathBuf, String> {
     let state_root = env::var_os("XDG_STATE_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -2143,15 +2149,29 @@ fn durable_report_database_path(project_root: &str) -> Result<PathBuf, String> {
                 .map(|home| PathBuf::from(home).join(".local/state"))
         })
         .ok_or_else(|| "durable_report_state_home_required=true".to_string())?;
+    let storage_key = match work_item_id {
+        Some(work_item_id) => stable_storage_digest(&[
+            "development-discipline-final-review-ticket-report-v1",
+            work_item_id,
+        ]),
+        None => stable_storage_digest(&[
+            "development-discipline-final-review-report-v1",
+            project_root,
+        ]),
+    };
     Ok(state_root
         .join("development-discipline/final-review-reports")
-        .join(format!(
-            "{}.sqlite",
-            stable_storage_digest(&[
-                "development-discipline-final-review-report-v1",
-                project_root
-            ])
-        )))
+        .join(format!("{storage_key}.sqlite")))
+}
+
+fn sanitize_durable_finding(finding: &Value) -> Value {
+    json!({
+        "id_fingerprint": finding.get("id").and_then(Value::as_str).map(fingerprint),
+        "lens": finding.get("lens").cloned().unwrap_or(Value::Null),
+        "severity": finding.get("severity").cloned().unwrap_or(Value::Null),
+        "unrelated_disposition": finding.get("unrelated_disposition").cloned().unwrap_or(Value::Null),
+        "path_fingerprint": finding.get("path").and_then(Value::as_str).map(fingerprint)
+    })
 }
 
 fn initialize_durable_report_schema(connection: &Connection) -> Result<(), String> {
@@ -2165,22 +2185,23 @@ fn initialize_durable_report_schema(connection: &Connection) -> Result<(), Strin
             unrelated_disposition TEXT,
             finding_json TEXT NOT NULL,
             security_escalation_json TEXT,
+            payload_sanitized INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (report_binding_id, lens, finding_id)
         );
     ";
     connection
         .execute_batch(&format!("PRAGMA journal_mode = WAL; {SNAPSHOT_TABLE}"))
         .map_err(|error| format!("durable_report_schema_failed source={error}"))?;
-    let has_report_binding = connection
+    let has_sanitized_schema = connection
         .query_row(
-            "SELECT 1 FROM pragma_table_info('final_review_lens_snapshot') WHERE name = 'report_binding_id'",
+            "SELECT 1 FROM pragma_table_info('final_review_lens_snapshot') WHERE name = 'payload_sanitized'",
             [],
             |_| Ok(()),
         )
         .optional()
         .map_err(|error| format!("durable_report_schema_inspect_failed source={error}"))?
         .is_some();
-    if !has_report_binding {
+    if !has_sanitized_schema {
         connection
             .execute_batch(&format!(
                 "DROP TABLE final_review_lens_snapshot; {SNAPSHOT_TABLE}"
@@ -7066,7 +7087,7 @@ pre_filter = "project-pre"
             )
             .expect("snapshot finding");
 
-        assert_eq!(finding_id, "current");
+        assert_eq!(finding_id, fingerprint("current"));
     }
 
     #[test]
@@ -7247,6 +7268,62 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn durable_report_scrubs_unclassified_nonsecurity_pii() {
+        let root = test_project_root("durable-report-nonsecurity-pii");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "report-nonsecurity-pii",
+            "project_root": root
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{
+                "id": "pii-finding", "lens": "tests-verification", "severity": "warning",
+                "message": "alice@example.test", "scenario": "private account data",
+                "relevance": { "category": "diff_changed_file", "explanation": "nearby context" }
+            }] }),
+            None,
+        )
+        .expect("durable report");
+        let connection = Connection::open(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
+        let finding_json: String = connection
+            .query_row(
+                "SELECT finding_json FROM final_review_lens_snapshot WHERE lens = 'tests-verification'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("stored finding");
+
+        assert!(!finding_json.contains("alice@example.test"));
+    }
+
+    #[test]
+    fn ticket_report_uses_one_database_across_worktrees() {
+        let first_root = test_project_root("durable-report-ticket-first");
+        let second_root = test_project_root("durable-report-ticket-second");
+
+        assert_eq!(
+            durable_report_database_path(
+                first_root.to_str().expect("first root"),
+                Some("ticket-123")
+            )
+            .expect("first report path"),
+            durable_report_database_path(
+                second_root.to_str().expect("second root"),
+                Some("ticket-123")
+            )
+            .expect("second report path")
+        );
+    }
+
+    #[test]
     fn out_of_scope_report_database_is_not_stored_inside_the_reviewed_worktree() {
         let root = test_project_root("durable-report-user-state");
         let planned: Value = serde_json::from_str(&plan(&json!({
@@ -7284,9 +7361,11 @@ pre_filter = "project-pre"
         })))
         .expect("plan json");
         let mut state = planned["state"].clone();
-        let database =
-            durable_report_database_path(state["scope"]["project_root"].as_str().expect("root"))
-                .expect("database path");
+        let database = durable_report_database_path(
+            state["scope"]["project_root"].as_str().expect("root"),
+            state.get("work_item_id").and_then(Value::as_str),
+        )
+        .expect("database path");
         fs::create_dir_all(database.parent().expect("database parent")).expect("report directory");
         symlink(root.join("outside.sqlite"), &database).expect("database symlink");
 
