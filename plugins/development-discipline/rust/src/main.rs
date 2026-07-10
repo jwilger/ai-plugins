@@ -1,10 +1,14 @@
-use std::collections::{hash_map::DefaultHasher, HashMap, HashSet, VecDeque};
+use std::collections::{
+    hash_map::{DefaultHasher, RandomState},
+    HashMap, HashSet, VecDeque,
+};
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde_json::{json, Value};
 
@@ -36,6 +40,7 @@ const MAX_CALLER_DECISION_DEFENSE_BYTES: usize = 1024;
 const MAX_CALLER_DECISION_DEFENSE_CHARS: usize = MAX_CALLER_DECISION_DEFENSE_BYTES / 4;
 const MAX_CALLER_DECISIONS_PER_ADVANCE: usize = MAX_FINDINGS_PER_ITERATION;
 const MAX_MODEL_ROLE_CHARS: usize = 128;
+static OPAQUE_FINGERPRINT_HASHER: OnceLock<RandomState> = OnceLock::new();
 // This inventory is repeated once per lens assignment, while the full list is
 // retained in session state. Keep it small enough that a maximum-size scope can
 // still return every next-iteration assignment in one MCP response.
@@ -1212,9 +1217,12 @@ fn redact_security_escalation(finding: &Value) -> Value {
 }
 
 fn fingerprint(value: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    format!(
+        "{:016x}",
+        OPAQUE_FINGERPRINT_HASHER
+            .get_or_init(RandomState::new)
+            .hash_one(value)
+    )
 }
 
 fn sanitize_malformed_security_finding(finding: Value) -> Value {
