@@ -7,13 +7,31 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace tiber-rust tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
+ci: validate-marketplace tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
 
 # Rust gates for the tiber plugin workspace.
 tiber-rust:
     cargo fmt --manifest-path plugins/tiber/rust/Cargo.toml --all --check
     cargo clippy --manifest-path plugins/tiber/rust/Cargo.toml --all-targets -- -D warnings
     cargo test --manifest-path plugins/tiber/rust/Cargo.toml
+
+# Rust gates for the development-discipline MCP coordinator.
+development-discipline-rust:
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo fmt --manifest-path plugins/development-discipline/rust/Cargo.toml --all --check
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo clippy --manifest-path plugins/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-discipline/rust/Cargo.toml
+
+development-discipline-release-complete:
+    cd plugins/development-discipline && sha256sum --check release-binaries.sha256
+    bash scripts/check-development-discipline-release-complete.sh
+    version="$(jq -r '.version' plugins/development-discipline/.codex-plugin/plugin.json)" && rg "development-discipline/${version}/bin/development-discipline-mcp" plugins/development-discipline/.mcp.json
+
+development-discipline-release-from-source:
+    bash scripts/check-development-discipline-release-from-source.sh
+
+# Build every bundled development-discipline MCP release target.
+development-discipline-release-all:
+    scripts/build-development-discipline-release-all.sh
 
 # Browser smoke coverage for the read-only tiber dashboard.
 tiber-dashboard-smoke:
