@@ -1997,14 +1997,7 @@ fn append_out_of_scope_report(
                 "security_escalation": disposition.cloned()
             });
             durable_entries.push(entry.clone());
-            report.push(json!({
-                "iteration": iteration,
-                "finding_id": entry.pointer("/finding/id").cloned().unwrap_or(Value::Null),
-                "lens": entry.pointer("/finding/lens").cloned().unwrap_or(Value::Null),
-                "severity": entry.pointer("/finding/severity").cloned().unwrap_or(Value::Null),
-                "unrelated_disposition": entry.pointer("/finding/unrelated_disposition").cloned().unwrap_or(Value::Null),
-                "durable_report": true
-            }));
+            report.push(entry);
         }
         if report.len() > MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES {
             let omitted = report.len() - MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES;
@@ -7375,6 +7368,10 @@ pre_filter = "project-pre"
             None,
         )
         .expect("durable report");
+        assert_eq!(
+            state["out_of_scope_report"][0]["finding"]["message"],
+            "alice@example.test"
+        );
         let report: Value =
             serde_json::from_str(&out_of_scope_report(&json!({ "state": state })).expect("report"))
                 .expect("report json");
