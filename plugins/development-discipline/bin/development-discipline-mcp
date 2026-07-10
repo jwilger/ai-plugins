@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="${BASH_SOURCE[0]%/*}"
+plugin_root="$(cd -- "$script_dir/.." && pwd -P)"
+source "$plugin_root/scripts/detect-target.sh"
+uname_path="$(development_discipline_resolve_uname)" || {
+  echo "development-discipline.mcp.missing_uname" >&2
+  exit 1
+}
+target="$(detect_development_discipline_target "$uname_path")" || {
+  echo "development-discipline.mcp.unsupported_platform os=$("$uname_path" -s) arch=$("$uname_path" -m)" >&2
+  exit 1
+}
+
+binary="$plugin_root/dist/$target/development-discipline-mcp"
+if [ "${DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK:-}" != "1" ] && [ -x "$binary" ]; then
+  exec "$binary" "$@"
+fi
+
+if [ "${DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK:-}" != "1" ]; then
+  echo "development-discipline.mcp.binary_missing binary=$binary" >&2
+  exit 1
+fi
+
+cargo_path="${CARGO:-}"
+if [ -z "$cargo_path" ]; then
+  cargo_path="$(command -v cargo 2>/dev/null || true)"
+fi
+
+case "$cargo_path" in
+  /nix/store/*/bin/cargo | /run/current-system/sw/bin/cargo | /usr/bin/cargo | /bin/cargo) ;;
+  "")
+    echo "development-discipline.mcp.missing_cargo binary=${binary:-none}" >&2
+    exit 1
+    ;;
+  *)
+    if [ -n "${HOME:-}" ] && [ "$cargo_path" = "$HOME/.cargo/bin/cargo" ]; then
+      :
+    else
+      echo "development-discipline.mcp.untrusted_cargo path=$cargo_path binary=${binary:-none}" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+if [ ! -x "$cargo_path" ]; then
+  echo "development-discipline.mcp.missing_cargo path=$cargo_path binary=${binary:-none}" >&2
+  exit 1
+fi
+
+marketplace_root="$(cd -- "$plugin_root/../.." && pwd -P)"
+export CARGO_TARGET_DIR="$marketplace_root/.dependencies/cargo-target/development-discipline"
+
+cd -- "$plugin_root/rust"
+exec "$cargo_path" run --quiet --manifest-path "$plugin_root/rust/Cargo.toml" -- "$@"

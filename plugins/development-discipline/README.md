@@ -28,3 +28,15 @@ conflict with or duplicate existing local practice.
 
 Harness-agnostic. Claude Code and Codex both consume the same `skills/`
 contents, with separate marketplace manifests only for harness metadata.
+
+The final-review coordinator ships static stdio MCP binaries for x86_64 and
+aarch64 Linux plus both macOS architectures. Its launcher selects the local
+target without a runtime package installation; an explicitly enabled Cargo
+fallback remains available for source-tree development. Release checks validate
+each artifact's target format, checksum, and embedded source/toolchain
+fingerprint.
+
+The caller carries final-review state between requests, while one persistent MCP
+process keeps the authoritative session copy. Mutated or stale state and
+post-completion transitions fail closed; active sessions and retained review
+history are bounded.

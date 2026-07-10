@@ -275,6 +275,215 @@ run_tiber_manifest_server_from_fixture_repo() {
       "$command" "${args[@]}"
 }
 
+run_development_discipline_manifest_server_with_claude_plugin_root() {
+  local command
+  local args
+
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    env -i \
+      PATH="$PATH" \
+      HOME="$HOME" \
+      CARGO_HOME="$ROOT/.dependencies/cargo" \
+      BASH_ENV="${BASH_ENV:-}" \
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
+      "$command" "${args[@]}"
+}
+
+run_development_discipline_manifest_server_with_codex_cache() {
+  local command
+  local args
+  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
+
+  mkdir -p "$cache_parent"
+  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.0"
+
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    env -i \
+      PATH="$PATH" \
+      HOME="$HOME" \
+      CARGO_HOME="$ROOT/.dependencies/cargo" \
+      CODEX_HOME="$TMPROOT/codex-home" \
+      "$command" "${args[@]}"
+}
+
+run_development_discipline_codex_cache_final_review_flow() {
+  local command
+  local args
+  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
+  local project_root="$TMPROOT/final-review-project"
+
+  mkdir -p "$cache_parent" "$project_root/.development-discipline"
+  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.0"
+  cat >"$project_root/.development-discipline/final-review.toml" <<'TOML'
+[final_review.models]
+pre_filter = "config-pre"
+lens_review = "config-review"
+post_filter = "config-post"
+verifier = "config-verify"
+TOML
+
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+
+  env -i \
+    PATH="$PATH" \
+    HOME="$HOME" \
+    CARGO_HOME="$ROOT/.dependencies/cargo" \
+    CODEX_HOME="$TMPROOT/codex-home" \
+    FINAL_REVIEW_TEST_PROJECT_ROOT="$project_root" \
+    FINAL_REVIEW_ROUTING_PROJECT_ROOT="$ROOT" \
+    node "$ROOT/scripts/tests/development-discipline-mcp-flow.mjs" \
+    "$command" "${args[@]}"
+}
+
+run_development_discipline_manifest_server_with_both_harness_markers() {
+  local command
+  local args
+  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
+  local claude_root="$TMPROOT/claude-plugin-root"
+
+  mkdir -p "$cache_parent" "$claude_root/bin"
+  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.0"
+  printf '%s\n' '#!/bin/sh' 'echo claude-plugin-root-used' >"$claude_root/bin/development-discipline-mcp"
+  chmod +x "$claude_root/bin/development-discipline-mcp"
+
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    env -i \
+      PATH="$PATH" \
+      HOME="$HOME" \
+      CARGO_HOME="$ROOT/.dependencies/cargo" \
+      CODEX_HOME="$TMPROOT/codex-home" \
+      CLAUDE_PLUGIN_ROOT="$claude_root" \
+      "$command" "${args[@]}"
+}
+
+run_development_discipline_manifest_server_with_missing_codex_cache_and_claude_plugin_root() {
+  local command
+  local args
+
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    env -i \
+      PATH="$PATH" \
+      HOME="$HOME" \
+      CARGO_HOME="$ROOT/.dependencies/cargo" \
+      CODEX_HOME="$TMPROOT/missing-codex-home" \
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
+      "$command" "${args[@]}"
+}
+
+run_development_discipline_manifest_server_with_untrusted_cargo_first() {
+  local untrusted_path="$TMPROOT/untrusted-cargo-path"
+
+  mkdir -p "$untrusted_path"
+  printf '%s\n' '#!/bin/sh' 'echo untrusted-cargo-executed >&2' 'exit 42' >"$untrusted_path/cargo"
+  chmod +x "$untrusted_path/cargo"
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    env -i \
+      PATH="$untrusted_path:/bin:/usr/bin:/run/current-system/sw/bin" \
+      HOME="$HOME" \
+      CARGO_HOME="$ROOT/.dependencies/cargo" \
+      DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
+      DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
+      "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+}
+
+run_development_discipline_manifest_server_with_untrusted_uname_first() {
+  local untrusted_path="$TMPROOT/untrusted-uname-path"
+
+  mkdir -p "$untrusted_path"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'echo untrusted-uname-executed >&2' \
+    'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 42 ;; esac' \
+    >"$untrusted_path/uname"
+  chmod +x "$untrusted_path/uname"
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    env -i \
+      PATH="$untrusted_path:/bin:/usr/bin:/run/current-system/sw/bin" \
+      HOME="$HOME" \
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
+      "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+}
+
+run_development_discipline_manifest_server_with_untrusted_cargo_env() {
+  local untrusted_path="$TMPROOT/untrusted-cargo-env"
+
+  mkdir -p "$untrusted_path"
+  printf '%s\n' '#!/bin/sh' 'echo untrusted-cargo-env-executed >&2' 'exit 42' >"$untrusted_path/cargo"
+  chmod +x "$untrusted_path/cargo"
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    env -i \
+      PATH="$PATH" \
+      HOME="$HOME" \
+      CARGO="$untrusted_path/cargo" \
+      CARGO_HOME="$ROOT/.dependencies/cargo" \
+      DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
+      DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
+      "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+}
+
+run_development_discipline_cargo_fallback_from_reviewed_checkout() {
+  local reviewed_checkout="$TMPROOT/reviewed-checkout"
+  local fallback_home="$TMPROOT/fallback-home"
+  local fake_cargo="$fallback_home/.cargo/bin/cargo"
+
+  mkdir -p "$reviewed_checkout/.cargo" "$fallback_home/.cargo/bin"
+  printf '%s\n' '#!/bin/sh' 'pwd -P' >"$fake_cargo"
+  chmod +x "$fake_cargo"
+
+  cd "$reviewed_checkout"
+  env -i \
+    PATH="/bin:/usr/bin:/run/current-system/sw/bin" \
+    HOME="$fallback_home" \
+    CARGO="$fake_cargo" \
+    DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
+    DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
+    "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+}
+
+run_development_discipline_cargo_fallback_with_untrusted_target_dir() {
+  local fallback_home="$TMPROOT/target-dir-home"
+  local fake_cargo="$fallback_home/.cargo/bin/cargo"
+
+  mkdir -p "$fallback_home/.cargo/bin"
+  printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$CARGO_TARGET_DIR"' >"$fake_cargo"
+  chmod +x "$fake_cargo"
+
+  env -i \
+    PATH="/bin:/usr/bin:/run/current-system/sw/bin" \
+    HOME="$fallback_home" \
+    CARGO="$fake_cargo" \
+    CARGO_TARGET_DIR="$TMPROOT/poisoned-target" \
+    DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
+    DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
+    "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+}
+
+run_development_discipline_cargo_fallback_without_home() {
+  env -i \
+    PATH="/bin:/usr/bin" \
+    DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
+    DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
+    "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+}
+
 install_tiber_cache_launcher() {
   local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/tiber"
   mkdir -p "$cache_parent"
@@ -379,6 +588,138 @@ install_stale_tiber_cache_launcher() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'"name":"tiber"'* ]]
   [[ "$output" == *'"tools":{}'* ]]
+}
+
+@test "development-discipline MCP manifest command starts from Claude plugin root" {
+  cd "$ROOT"
+
+  run run_development_discipline_manifest_server_with_claude_plugin_root
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
+  [[ "$output" == *'"tools":{}'* ]]
+}
+
+@test "development-discipline MCP manifest clears inherited BASH_ENV before launcher startup" {
+  local bash_env_file="$TMPROOT/malicious-bash-env"
+  local marker="$TMPROOT/bash-env-executed"
+
+  cd "$ROOT"
+  printf 'touch %q\n' "$marker" >"$bash_env_file"
+  export BASH_ENV="$bash_env_file"
+
+  run run_development_discipline_manifest_server_with_claude_plugin_root
+  unset BASH_ENV
+
+  [ "$status" -eq 0 ]
+  [ ! -e "$marker" ]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
+}
+
+@test "development-discipline MCP manifest command starts from Codex plugin cache" {
+  cd "$ROOT"
+
+  run run_development_discipline_manifest_server_with_codex_cache
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
+  [[ "$output" == *'"tools":{}'* ]]
+}
+
+@test "development-discipline packaged MCP exposes final-review tools through Codex cache" {
+  local routing
+
+  cd "$ROOT"
+
+  run run_development_discipline_codex_cache_final_review_flow
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"final_review.plan"'* ]]
+  [[ "$output" == *'"protocolVersion":"2024-11-05"'* ]]
+  [[ "$output" == *"bats-review:1:correctness-behavior"* ]]
+  [[ "$output" == *"explicit-pre"* ]]
+  [[ "$output" == *"config-review"* ]]
+  [[ "$output" == *"project_toml_config"* ]]
+  [[ "$output" == *"review_state_out_of_sync=true"* ]]
+  [[ "$output" == *"review_session_complete=true"* ]]
+  [[ "$output" == *"clean_streak"* ]]
+  [[ "$output" == *"completed_iteration"* ]]
+  routing="$(printf '%s\n' "$output" | jq -r 'select(.id == 12) | .result.content[0].text | fromjson | .model_roles')"
+  [ "$(jq -r '.pre_filter' <<<"$routing")" = "gpt-5.6-luna" ]
+  [ "$(jq -r '.lens_review' <<<"$routing")" = "gpt-5.6-terra" ]
+  [ "$(jq -r '.post_filter' <<<"$routing")" = "gpt-5.6-luna" ]
+  [ "$(jq -r '.verifier' <<<"$routing")" = "gpt-5.6-sol" ]
+}
+
+@test "development-discipline MCP manifest prefers Claude plugin root when both harness markers are present" {
+  cd "$ROOT"
+
+  run run_development_discipline_manifest_server_with_both_harness_markers
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"claude-plugin-root-used"* ]]
+}
+
+@test "development-discipline MCP manifest falls back to Claude plugin root when Codex cache is missing" {
+  cd "$ROOT"
+
+  run run_development_discipline_manifest_server_with_missing_codex_cache_and_claude_plugin_root
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
+  [[ "$output" == *'"tools":{}'* ]]
+}
+
+@test "development-discipline MCP launcher rejects untrusted PATH cargo" {
+  cd "$ROOT"
+
+  run run_development_discipline_manifest_server_with_untrusted_cargo_first
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"development-discipline.mcp.untrusted_cargo"* ]]
+  [[ "$output" != *"untrusted-cargo-executed"* ]]
+}
+
+@test "development-discipline MCP launcher ignores untrusted PATH uname" {
+  cd "$ROOT"
+
+  run run_development_discipline_manifest_server_with_untrusted_uname_first
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
+  [[ "$output" != *"untrusted-uname-executed"* ]]
+}
+
+@test "development-discipline MCP launcher rejects untrusted CARGO env override" {
+  cd "$ROOT"
+
+  run run_development_discipline_manifest_server_with_untrusted_cargo_env
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"development-discipline.mcp.untrusted_cargo"* ]]
+  [[ "$output" != *"untrusted-cargo-env-executed"* ]]
+}
+
+@test "development-discipline MCP Cargo fallback ignores reviewed-checkout Cargo config" {
+  run run_development_discipline_cargo_fallback_from_reviewed_checkout
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$ROOT/plugins/development-discipline/rust" ]
+}
+
+@test "development-discipline MCP Cargo fallback ignores inherited target directory" {
+  run run_development_discipline_cargo_fallback_with_untrusted_target_dir
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$ROOT/.dependencies/cargo-target/development-discipline" ]
+}
+
+@test "development-discipline MCP Cargo fallback handles unset HOME" {
+  run run_development_discipline_cargo_fallback_without_home
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"development-discipline.mcp.missing_cargo"* ]]
+  [[ "$output" != *"unbound variable"* ]]
 }
 
 @test "tiber MCP manifest command prefers Claude plugin root when present" {

@@ -29,6 +29,7 @@
             cargo
             cargo-mutants
             cargo-zigbuild
+            file
             chromium
             clippy
             rustc

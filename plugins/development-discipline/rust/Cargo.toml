@@ -1,0 +1,13 @@
+[package]
+name = "development-discipline-mcp"
+version = "0.4.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+serde_json = "1"
+toml = "0.8"
+
+[[bin]]
+name = "development-discipline-mcp"
+path = "src/main.rs"

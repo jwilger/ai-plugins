@@ -1,0 +1,4 @@
+7f6cdd666c5a85cf4466b7880ec81bf46cc9d49253bc7efd72d3b8e481529038  dist/aarch64-unknown-linux-musl/development-discipline-mcp
+071df7ec760b1de1dcc04ba537a73af65e7f4b5467d879883f6d027dd23faa0f  dist/x86_64-unknown-linux-musl/development-discipline-mcp
+65a5b8ff1d8e88f62dc5a0ee80501380e6608856c72ebcdf1419e3ef0a9b7088  dist/x86_64-apple-darwin/development-discipline-mcp
+65a5b8ff1d8e88f62dc5a0ee80501380e6608856c72ebcdf1419e3ef0a9b7088  dist/aarch64-apple-darwin/development-discipline-mcp
