@@ -686,7 +686,10 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         &all_lenses(&conditional_lenses),
     )?;
     let unrelated_finding_policy_confirmation_required =
-        !user_request.trim().is_empty() && arguments.get("unrelated_finding_policy").is_none();
+        arguments.get("unrelated_finding_policy").is_none()
+            && (!user_request.trim().is_empty()
+                || !acceptance_criteria.is_empty()
+                || !explicit_concerns.is_empty());
     let diff_hash = string(arguments, "diff_hash", "unknown");
     if changed_files.is_empty() {
         return Err("changed_files_required=true".to_string());
@@ -1183,13 +1186,14 @@ fn requires_security_escalation(finding: &Value) -> bool {
 }
 
 fn redact_security_escalation(finding: &Value) -> Value {
+    let opaque_id = finding.get("id").and_then(Value::as_str).map(fingerprint);
     let remediation_path_fingerprint = finding
         .get("path")
         .and_then(Value::as_str)
         .and_then(|path| normalize_review_path(path, None))
         .map(|path| fingerprint(&path));
     json!({
-        "id": finding.get("id").cloned().unwrap_or(Value::Null),
+        "id": opaque_id,
         "lens": finding.get("lens").cloned().unwrap_or(Value::Null),
         "severity": finding.get("severity").cloned().unwrap_or(Value::Null),
         "security_impact": finding.get("security_impact").cloned().unwrap_or(Value::Null),
@@ -6202,7 +6206,7 @@ pre_filter = "project-pre"
         assert_eq!(parsed["out_of_scope"].as_array().unwrap().len(), 1);
         assert_eq!(
             parsed["security_escalations_required"][0]["id"],
-            "unrelated-pii"
+            fingerprint("unrelated-pii")
         );
     }
 
@@ -6283,7 +6287,10 @@ pre_filter = "project-pre"
         .expect("filter");
         let parsed: Value = serde_json::from_str(&output).expect("json");
 
-        assert_eq!(parsed["needs_human_decision"][0]["id"], "address-now-pii");
+        assert_eq!(
+            parsed["needs_human_decision"][0]["id"],
+            fingerprint("address-now-pii")
+        );
         assert!(parsed["security_escalations_required"]
             .as_array()
             .expect("escalations")
@@ -6427,6 +6434,19 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn plan_requires_policy_confirmation_for_ticket_context_without_user_request() {
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/new.rs"], "diff_hash": "same",
+            "acceptance_criteria": ["protect users"]
+        })))
+        .expect("plan json");
+        assert_eq!(
+            planned["state"]["unrelated_finding_policy_confirmation_required"],
+            true
+        );
+    }
+
+    #[test]
     fn filter_redacts_suspected_pii_from_general_reports() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"],
@@ -6567,6 +6587,36 @@ pre_filter = "project-pre"
         assert!(filtered["needs_human_decision"][0]
             .get("scenario")
             .is_none());
+    }
+
+    #[test]
+    fn advance_never_persists_sensitive_human_decision_details() {
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/new.rs"], "diff_hash": "same",
+            "unrelated_finding_policy": { "default": "report" },
+            "context": { "user_request": "check PII", "acceptance_criteria": [], "explicit_concerns": ["protect PII"] }
+        }))).expect("plan json");
+        let state = planned["state"].clone();
+        let mut results = clean_lens_results_for(&state);
+        let security = results
+            .as_array_mut()
+            .expect("results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security");
+        security["status"] = json!("findings");
+        security["findings"] = json!([{
+            "id": "human-sensitive", "severity": "warning", "path": "src/new.rs",
+            "message": "alice@example.test exploit payload", "scenario": "private data",
+            "security_impact": "major", "suspected_pii": true,
+            "relevance": { "category": "explicit_user_concern", "matched_context": "protect PII", "explanation": "requires user decision" }
+        }]);
+        let advanced = advance_synthetic_state(&json!({
+            "state": state, "lens_results": results, "current_diff_hash": "same"
+        }))
+        .expect("advance");
+        assert!(!advanced.contains("alice@example.test"));
+        assert!(!advanced.contains("private data"));
     }
 
     #[test]
