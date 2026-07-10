@@ -7385,6 +7385,38 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn out_of_scope_report_binds_same_lens_escalations_to_their_findings() {
+        let root = test_project_root("durable-report-escalation-bindings");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "report-escalation-bindings",
+            "project_root": root
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [
+                { "id": "security-one", "lens": "security-safety", "severity": "warning", "unrelated_disposition": "report" },
+                { "id": "security-two", "lens": "security-safety", "severity": "warning", "unrelated_disposition": "report" }
+            ] }),
+            Some(&json!([
+                { "finding_id": "security-one", "lens": "security-safety", "disposition": "high-priority-ticket", "reference": "BUG-ONE" },
+                { "finding_id": "security-two", "lens": "security-safety", "disposition": "high-priority-ticket", "reference": "BUG-TWO" }
+            ])),
+        )
+        .expect("durable report");
+        let report: Value =
+            serde_json::from_str(&out_of_scope_report(&json!({ "state": state })).expect("report"))
+                .expect("report json");
+        let findings = report["findings"].as_array().expect("findings");
+        assert_eq!(findings[0]["id"], "security-one");
+        assert_eq!(findings[0]["security_escalation"]["reference"], "BUG-ONE");
+        assert_eq!(findings[1]["id"], "security-two");
+        assert_eq!(findings[1]["security_escalation"]["reference"], "BUG-TWO");
+    }
+
+    #[test]
     fn ticket_reports_are_isolated_across_worktrees() {
         let first_root = test_project_root("durable-report-ticket-first");
         let second_root = test_project_root("durable-report-ticket-second");
