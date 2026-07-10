@@ -1513,7 +1513,7 @@ fn advance_with_contract_validation(
     retain_latest(&mut prior_decisions, MAX_RETAINED_CALLER_DECISIONS);
     state["prior_user_decisions"] = Value::Array(prior_decisions);
     apply_caller_decisions_to_defenses(&mut state, &caller_decisions);
-    append_out_of_scope_report(&mut state, &filtered, arguments.get("security_escalations"));
+    append_out_of_scope_report(&mut state, &filtered, arguments.get("security_escalations"))?;
     append_finding_history(&mut state, &filtered, reset_reason);
     update_verified_clean_iterations(&mut state, &filtered, reset_reason);
     ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
@@ -1958,7 +1958,7 @@ fn append_out_of_scope_report(
     state: &mut Value,
     filtered: &Value,
     security_escalations: Option<&Value>,
-) {
+) -> Result<(), String> {
     if !state
         .get("out_of_scope_report")
         .is_some_and(Value::is_array)
@@ -1979,6 +1979,7 @@ fn append_out_of_scope_report(
         .get("iteration_index")
         .and_then(Value::as_u64)
         .unwrap_or(0);
+    let mut durable_entries = Vec::new();
     if let Some(report) = state["out_of_scope_report"].as_array_mut() {
         for finding in filtered
             .get("out_of_scope")
@@ -1992,11 +1993,13 @@ fn append_out_of_scope_report(
                     && entry.get("lens").and_then(Value::as_str)
                         == finding.get("lens").and_then(Value::as_str)
             });
-            report.push(json!({
+            let entry = json!({
                 "iteration": iteration,
                 "finding": finding,
                 "security_escalation": disposition.map(sanitize_security_escalation_record)
-            }));
+            });
+            durable_entries.push(entry.clone());
+            report.push(entry);
         }
         if report.len() > MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES {
             let omitted = report.len() - MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES;
@@ -2008,6 +2011,54 @@ fn append_out_of_scope_report(
                 .saturating_add(omitted as u64));
         }
     }
+    if !durable_entries.is_empty() {
+        append_durable_out_of_scope_report(state, durable_entries)?;
+    }
+    Ok(())
+}
+
+fn append_durable_out_of_scope_report(
+    state: &mut Value,
+    entries: Vec<Value>,
+) -> Result<(), String> {
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "durable_report_project_root_required=true".to_string())?;
+    let session_id = state
+        .get("session_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "durable_report_session_id_required=true".to_string())?;
+    if !session_id
+        .chars()
+        .all(|value| value.is_ascii_alphanumeric() || matches!(value, '-' | '_' | '.'))
+    {
+        return Err("durable_report_session_id_invalid=true".to_string());
+    }
+    let directory = Path::new(project_root).join(".development-discipline/final-review-reports");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("durable_report_directory_create_failed source={error}"))?;
+    let path = directory.join(format!("{session_id}.json"));
+    let mut report = if path.exists() {
+        let content = fs::read_to_string(&path)
+            .map_err(|error| format!("durable_report_read_failed source={error}"))?;
+        serde_json::from_str::<Value>(&content)
+            .map_err(|error| format!("durable_report_parse_failed source={error}"))?
+    } else {
+        json!({"session_id": session_id, "entries": []})
+    };
+    report["entries"]
+        .as_array_mut()
+        .ok_or_else(|| "durable_report_entries_invalid=true".to_string())?
+        .extend(entries);
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&report)
+            .map_err(|error| format!("durable_report_encode_failed source={error}"))?,
+    )
+    .map_err(|error| format!("durable_report_write_failed source={error}"))?;
+    state["out_of_scope_report_artifact"] = json!(path.to_string_lossy());
+    Ok(())
 }
 
 fn sanitize_retained_decision(decision: &Value) -> Value {
@@ -6773,11 +6824,13 @@ pre_filter = "project-pre"
 
     #[test]
     fn out_of_scope_report_retains_every_session_finding() {
-        let mut state = json!({ "iteration_index": 1, "out_of_scope_report": [] });
+        let root = test_project_root("durable-report-retains");
+        let mut state = json!({ "iteration_index": 1, "session_id": "report-retains", "scope": { "project_root": root }, "out_of_scope_report": [] });
         let findings = (0..65)
             .map(|id| json!({ "id": format!("finding-{id}"), "lens": "release-integration" }))
             .collect::<Vec<_>>();
-        append_out_of_scope_report(&mut state, &json!({ "out_of_scope": findings }), None);
+        append_out_of_scope_report(&mut state, &json!({ "out_of_scope": findings }), None)
+            .expect("durable report");
         assert_eq!(
             state["out_of_scope_report"]
                 .as_array()
@@ -6789,11 +6842,13 @@ pre_filter = "project-pre"
 
     #[test]
     fn out_of_scope_report_accounts_for_bounded_overflow() {
-        let mut state = json!({ "iteration_index": 1, "out_of_scope_report": [] });
+        let root = test_project_root("durable-report-overflow");
+        let mut state = json!({ "iteration_index": 1, "session_id": "report-overflow", "scope": { "project_root": root }, "out_of_scope_report": [] });
         let findings = (0..=MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES)
             .map(|id| json!({ "id": format!("finding-{id}"), "lens": "release-integration" }))
             .collect::<Vec<_>>();
-        append_out_of_scope_report(&mut state, &json!({ "out_of_scope": findings }), None);
+        append_out_of_scope_report(&mut state, &json!({ "out_of_scope": findings }), None)
+            .expect("durable report");
         assert_eq!(
             state["out_of_scope_report"]
                 .as_array()
@@ -6802,6 +6857,19 @@ pre_filter = "project-pre"
             MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES
         );
         assert_eq!(state["out_of_scope_report_omitted_count"], 1);
+        let artifact = std::fs::read_to_string(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("durable report contents");
+        assert_eq!(
+            serde_json::from_str::<Value>(&artifact).expect("report json")["entries"]
+                .as_array()
+                .expect("entries")
+                .len(),
+            MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES + 1
+        );
     }
 
     #[test]
