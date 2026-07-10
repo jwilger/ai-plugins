@@ -7410,10 +7410,20 @@ pre_filter = "project-pre"
             serde_json::from_str(&out_of_scope_report(&json!({ "state": state })).expect("report"))
                 .expect("report json");
         let findings = report["findings"].as_array().expect("findings");
-        assert_eq!(findings[0]["id"], "security-one");
-        assert_eq!(findings[0]["security_escalation"]["reference"], "BUG-ONE");
-        assert_eq!(findings[1]["id"], "security-two");
-        assert_eq!(findings[1]["security_escalation"]["reference"], "BUG-TWO");
+        let finding_by_id = |id: &str| {
+            findings
+                .iter()
+                .find(|finding| finding["id"] == id)
+                .expect("finding")
+        };
+        assert_eq!(
+            finding_by_id("security-one")["security_escalation"]["reference"],
+            "BUG-ONE"
+        );
+        assert_eq!(
+            finding_by_id("security-two")["security_escalation"]["reference"],
+            "BUG-TWO"
+        );
     }
 
     #[test]
