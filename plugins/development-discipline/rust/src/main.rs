@@ -1495,7 +1495,7 @@ fn advance_with_contract_validation(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    prior_decisions.extend(caller_decisions.iter().cloned());
+    prior_decisions.extend(caller_decisions.iter().map(sanitize_retained_decision));
     retain_latest(&mut prior_decisions, MAX_RETAINED_CALLER_DECISIONS);
     state["prior_user_decisions"] = Value::Array(prior_decisions);
     apply_caller_decisions_to_defenses(&mut state, &caller_decisions);
@@ -1975,10 +1975,32 @@ fn append_out_of_scope_report(
             report.push(json!({
                 "iteration": iteration,
                 "finding": finding,
-                "security_escalation": disposition.cloned()
+                "security_escalation": disposition.map(sanitize_security_escalation_record)
             }));
         }
     }
+}
+
+fn sanitize_retained_decision(decision: &Value) -> Value {
+    json!({
+        "finding_id": decision.get("finding_id").cloned().unwrap_or(Value::Null),
+        "lens": decision.get("lens").cloned().unwrap_or(Value::Null),
+        "decision": decision.get("decision").cloned().unwrap_or(Value::Null),
+        "remediation_path_fingerprint": decision
+            .get("remediation_path")
+            .and_then(Value::as_str)
+            .and_then(|path| normalize_review_path(path, None))
+            .map(|path| fingerprint(&path))
+    })
+}
+
+fn sanitize_security_escalation_record(record: &Value) -> Value {
+    json!({
+        "finding_id": record.get("finding_id").cloned().unwrap_or(Value::Null),
+        "lens": record.get("lens").cloned().unwrap_or(Value::Null),
+        "disposition": record.get("disposition").cloned().unwrap_or(Value::Null),
+        "reference_fingerprint": record.get("reference").and_then(Value::as_str).map(fingerprint)
+    })
 }
 
 fn retain_latest(values: &mut Vec<Value>, maximum: usize) {
