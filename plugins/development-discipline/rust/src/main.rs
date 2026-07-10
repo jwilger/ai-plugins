@@ -2063,6 +2063,11 @@ fn replace_durable_out_of_scope_report(
         project_root,
         state.get("work_item_id").and_then(Value::as_str),
     )?;
+    remove_legacy_report_artifacts(
+        &path,
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
     let directory = path
         .parent()
         .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
@@ -2149,19 +2154,57 @@ fn durable_report_database_path(
                 .map(|home| PathBuf::from(home).join(".local/state"))
         })
         .ok_or_else(|| "durable_report_state_home_required=true".to_string())?;
-    let storage_key = match work_item_id {
-        Some(work_item_id) => stable_storage_digest(&[
-            "development-discipline-final-review-ticket-report-v1",
-            work_item_id,
-        ]),
-        None => stable_storage_digest(&[
-            "development-discipline-final-review-report-v1",
-            project_root,
-        ]),
-    };
+    let storage_key = stable_storage_digest(&[
+        "development-discipline-final-review-report-v1",
+        project_root,
+        work_item_id.unwrap_or(""),
+    ]);
     Ok(state_root
         .join("development-discipline/final-review-reports")
         .join(format!("{storage_key}.sqlite")))
+}
+
+fn remove_legacy_report_artifacts(
+    current_path: &Path,
+    project_root: &str,
+    work_item_id: Option<&str>,
+) -> Result<(), String> {
+    let state_root = current_path
+        .parent()
+        .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
+    let mut legacy_keys = vec![stable_storage_digest(&[
+        "development-discipline-final-review-report-v1",
+        project_root,
+    ])];
+    if let Some(work_item_id) = work_item_id {
+        legacy_keys.push(stable_storage_digest(&[
+            "development-discipline-final-review-ticket-report-v1",
+            work_item_id,
+        ]));
+    }
+    for key in legacy_keys {
+        let legacy_path = state_root.join(format!("{key}.sqlite"));
+        if legacy_path != current_path {
+            remove_report_artifact_files(&legacy_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_report_artifact_files(path: &Path) -> Result<(), String> {
+    for suffix in ["", "-wal", "-shm"] {
+        let candidate = PathBuf::from(format!("{}{}", path.to_string_lossy(), suffix));
+        match fs::remove_file(&candidate) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "durable_report_legacy_remove_failed source={error}"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn sanitize_durable_finding(finding: &Value) -> Value {
@@ -7305,11 +7348,11 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn ticket_report_uses_one_database_across_worktrees() {
+    fn ticket_reports_are_isolated_across_worktrees() {
         let first_root = test_project_root("durable-report-ticket-first");
         let second_root = test_project_root("durable-report-ticket-second");
 
-        assert_eq!(
+        assert_ne!(
             durable_report_database_path(
                 first_root.to_str().expect("first root"),
                 Some("ticket-123")
