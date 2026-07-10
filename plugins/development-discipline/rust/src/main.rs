@@ -649,7 +649,7 @@ fn tools() -> Value {
         },
         {
             "name": "final_review.out_of_scope_report",
-            "description": "Read the current sanitized out-of-scope report for an authoritative review state.",
+            "description": "Read the current out-of-scope review report for an authoritative review state.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "state": { "type": "object" } },
@@ -1132,9 +1132,8 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                     let mut value = classified.value;
                     value["unrelated_disposition"] = json!(disposition);
                     if requires_security_escalation(&value) {
-                        value = redact_security_escalation(&value);
                         if disposition != "address-now" {
-                            security_escalations_required.push(value.clone());
+                            security_escalations_required.push(redact_security_escalation(&value));
                         }
                     }
                     if disposition == "address-now" {
@@ -2021,15 +2020,24 @@ fn append_out_of_scope_report(
             .unwrap_or_default()
         {
             let disposition = documented.iter().find(|entry| {
-                entry.get("finding_id").and_then(Value::as_str)
-                    == finding.get("id").and_then(Value::as_str)
+                entry
+                    .get("finding_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|entry_id| {
+                        finding
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .is_some_and(|finding_id| {
+                                entry_id == finding_id || entry_id == fingerprint(finding_id)
+                            })
+                    })
                     && entry.get("lens").and_then(Value::as_str)
                         == finding.get("lens").and_then(Value::as_str)
             });
             let entry = json!({
                 "iteration": iteration,
                 "finding": finding,
-                "security_escalation": disposition.map(sanitize_security_escalation_record)
+                "security_escalation": disposition.cloned()
             });
             durable_entries.push(entry.clone());
             report.push(json!({
@@ -2138,7 +2146,7 @@ fn replace_durable_out_of_scope_report(
                     iteration,
                     finding.get("severity").and_then(Value::as_str),
                     finding.get("unrelated_disposition").and_then(Value::as_str),
-                    serde_json::to_string(&sanitize_durable_finding(finding)).map_err(|error| format!("durable_report_finding_encode_failed source={error}"))?,
+                    serde_json::to_string(finding).map_err(|error| format!("durable_report_finding_encode_failed source={error}"))?,
                     entry.get("security_escalation").map(serde_json::to_string).transpose().map_err(|error| format!("durable_report_escalation_encode_failed source={error}"))?,
                 ],
             )
@@ -2228,16 +2236,6 @@ fn remove_report_artifact_files(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn sanitize_durable_finding(finding: &Value) -> Value {
-    json!({
-        "id_fingerprint": finding.get("id").and_then(Value::as_str).map(fingerprint),
-        "lens": finding.get("lens").cloned().unwrap_or(Value::Null),
-        "severity": finding.get("severity").cloned().unwrap_or(Value::Null),
-        "unrelated_disposition": finding.get("unrelated_disposition").cloned().unwrap_or(Value::Null),
-        "path_fingerprint": finding.get("path").and_then(Value::as_str).map(fingerprint)
-    })
-}
-
 fn initialize_durable_report_schema(connection: &Connection) -> Result<(), String> {
     const SNAPSHOT_TABLE: &str = "
         CREATE TABLE IF NOT EXISTS final_review_lens_snapshot (
@@ -2249,23 +2247,23 @@ fn initialize_durable_report_schema(connection: &Connection) -> Result<(), Strin
             unrelated_disposition TEXT,
             finding_json TEXT NOT NULL,
             security_escalation_json TEXT,
-            payload_sanitized INTEGER NOT NULL DEFAULT 1,
+            payload_complete INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (report_binding_id, lens, finding_id)
         );
     ";
     connection
         .execute_batch(&format!("PRAGMA journal_mode = WAL; {SNAPSHOT_TABLE}"))
         .map_err(|error| format!("durable_report_schema_failed source={error}"))?;
-    let has_sanitized_schema = connection
+    let has_complete_schema = connection
         .query_row(
-            "SELECT 1 FROM pragma_table_info('final_review_lens_snapshot') WHERE name = 'payload_sanitized'",
+            "SELECT 1 FROM pragma_table_info('final_review_lens_snapshot') WHERE name = 'payload_complete'",
             [],
             |_| Ok(()),
         )
         .optional()
         .map_err(|error| format!("durable_report_schema_inspect_failed source={error}"))?
         .is_some();
-    if !has_sanitized_schema {
+    if !has_complete_schema {
         connection
             .execute_batch(&format!(
                 "DROP TABLE final_review_lens_snapshot; {SNAPSHOT_TABLE}"
@@ -2285,15 +2283,6 @@ fn sanitize_retained_decision(decision: &Value) -> Value {
             .and_then(Value::as_str)
             .and_then(|path| normalize_review_path(path, None))
             .map(|path| fingerprint(&path))
-    })
-}
-
-fn sanitize_security_escalation_record(record: &Value) -> Value {
-    json!({
-        "finding_id": record.get("finding_id").cloned().unwrap_or(Value::Null),
-        "lens": record.get("lens").cloned().unwrap_or(Value::Null),
-        "disposition": record.get("disposition").cloned().unwrap_or(Value::Null),
-        "reference_fingerprint": record.get("reference").and_then(Value::as_str).map(fingerprint)
     })
 }
 
@@ -6753,16 +6742,19 @@ pre_filter = "project-pre"
         .expect("filter");
         let parsed: Value = serde_json::from_str(&output).expect("json");
 
-        assert_eq!(
-            parsed["needs_human_decision"][0]["id"],
-            fingerprint("address-now-pii")
-        );
+        assert_eq!(parsed["needs_human_decision"][0]["id"], "address-now-pii");
         assert!(parsed["security_escalations_required"]
             .as_array()
             .expect("escalations")
             .is_empty());
-        assert!(parsed["needs_human_decision"][0].get("message").is_none());
-        assert!(parsed["out_of_scope"][0].get("message").is_none());
+        assert_eq!(
+            parsed["needs_human_decision"][0]["message"],
+            "suspected PII exposure"
+        );
+        assert_eq!(
+            parsed["out_of_scope"][0]["message"],
+            "suspected PII exposure"
+        );
     }
 
     #[test]
@@ -6929,7 +6921,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn filter_redacts_suspected_pii_from_general_reports() {
+    fn filter_retains_suspected_pii_in_local_reports() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"],
             "diff_hash": "same"
@@ -6963,7 +6955,10 @@ pre_filter = "project-pre"
             .expect("filter"),
         )
         .expect("json");
-        assert!(filtered["out_of_scope"][0].get("message").is_none());
+        assert_eq!(
+            filtered["out_of_scope"][0]["message"],
+            "email alice@example.test and exploit payload"
+        );
         assert!(filtered["security_escalations_required"][0]
             .get("scenario")
             .is_none());
@@ -7126,7 +7121,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn advance_sanitizes_persisted_security_escalation_reference() {
+    fn advance_retains_persisted_security_escalation_reference() {
         let root = test_project_root("durable-report-security-escalation");
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"], "diff_hash": "same",
@@ -7156,7 +7151,6 @@ pre_filter = "project-pre"
             }]
         }))
         .expect("advance");
-        assert!(!advanced.contains("alice@example.test"));
         let advanced: Value = serde_json::from_str(&advanced).expect("json");
         let connection = Connection::open(
             advanced["state"]["out_of_scope_report_artifact"]
@@ -7172,9 +7166,8 @@ pre_filter = "project-pre"
             )
             .expect("security escalation");
         assert_eq!(
-            serde_json::from_str::<Value>(&escalation_json).expect("escalation json")
-                ["reference_fingerprint"],
-            fingerprint("alice@example.test")
+            serde_json::from_str::<Value>(&escalation_json).expect("escalation json")["reference"],
+            "alice@example.test"
         );
     }
 
@@ -7409,7 +7402,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn durable_report_scrubs_unclassified_nonsecurity_pii() {
+    fn durable_report_retains_complete_local_review_finding() {
         let root = test_project_root("durable-report-nonsecurity-pii");
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
@@ -7442,11 +7435,12 @@ pre_filter = "project-pre"
             )
             .expect("stored finding");
 
-        assert!(!finding_json.contains("alice@example.test"));
+        assert!(finding_json.contains("alice@example.test"));
+        assert!(finding_json.contains("private account data"));
     }
 
     #[test]
-    fn out_of_scope_report_reads_the_current_sanitized_snapshot() {
+    fn out_of_scope_report_reads_the_current_complete_snapshot() {
         let root = test_project_root("durable-report-read");
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
@@ -7470,6 +7464,7 @@ pre_filter = "project-pre"
                 .expect("report json");
 
         assert_eq!(report["findings"][0]["lens"], "release-integration");
+        assert_eq!(report["findings"][0]["message"], "alice@example.test");
     }
 
     #[test]

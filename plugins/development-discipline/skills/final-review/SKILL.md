@@ -143,7 +143,7 @@ current ticket remains actionable regardless of this preference.
 
 When the review is for a tracked ticket, pass its stable tracker ID as
 `work_item_id` to `final_review.plan` (for example, the active Tiber task ID).
-The coordinator stores one current, sanitized SQLite snapshot per worktree and
+The coordinator stores one current SQLite snapshot per worktree and
 work item in user state (`$XDG_STATE_HOME`, or `~/.local/state` as fallback),
 not in the reviewed repository or in per-session files. Each completed review
 transition replaces that binding's old lens rows, including stale conditional
@@ -151,8 +151,8 @@ lenses; the returned `out_of_scope_report_artifact` path is the single report
 location. Without a tracker ID, the coordinator uses a stable worktree/scope/
 base binding so restarted non-ticketed reviews also replace stale rows.
 Use `final_review.out_of_scope_report` with the authoritative review `state` to
-read that current sanitized snapshot; it returns the metadata rows without
-requiring a separate SQLite client or exposing reviewer prose.
+read that current snapshot; it returns the complete retained findings without
+requiring a separate SQLite client.
 
 Use a security-impact assessment separate from review severity: `none`,
 `minor`, `moderate`, `major`, or `critical`. Do not infer this threshold from a
