@@ -6651,6 +6651,57 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn advance_sanitizes_persisted_security_escalation_reference() {
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/new.rs"], "diff_hash": "same",
+            "unrelated_finding_policy": { "default": "report" }
+        })))
+        .expect("plan json");
+        let state = planned["state"].clone();
+        let mut results = clean_lens_results_for(&state);
+        let security = results
+            .as_array_mut()
+            .expect("results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security");
+        security["status"] = json!("findings");
+        security["findings"] = json!([{
+            "id": "out-of-scope-sensitive", "severity": "warning", "path": "src/unchanged.rs",
+            "message": "safe summary", "security_impact": "major", "suspected_pii": false,
+            "relevance": { "category": "diff_changed_file", "explanation": "stale context" }
+        }]);
+        let advanced = advance_synthetic_state(&json!({
+            "state": state, "lens_results": results, "current_diff_hash": "same",
+            "security_escalations": [{
+                "finding_id": fingerprint("out-of-scope-sensitive"), "lens": "security-safety",
+                "disposition": "high-priority-ticket", "reference": "alice@example.test"
+            }]
+        }))
+        .expect("advance");
+        assert!(!advanced.contains("alice@example.test"));
+        let advanced: Value = serde_json::from_str(&advanced).expect("json");
+        assert_eq!(
+            advanced["state"]["out_of_scope_report"][0]["security_escalation"]
+                ["reference_fingerprint"],
+            fingerprint("alice@example.test")
+        );
+    }
+
+    #[test]
+    fn retained_decision_omits_defense_text() {
+        let retained = sanitize_retained_decision(&json!({
+            "finding_id": "opaque", "lens": "security-safety", "decision": "fixed",
+            "remediation_path": "src/new.rs", "defense": "alice@example.test"
+        }));
+        assert!(retained.get("defense").is_none());
+        assert_eq!(
+            retained["remediation_path_fingerprint"],
+            fingerprint("src/new.rs")
+        );
+    }
+
+    #[test]
     fn out_of_scope_report_retains_every_session_finding() {
         let mut state = json!({ "iteration_index": 1, "out_of_scope_report": [] });
         let findings = (0..65)
