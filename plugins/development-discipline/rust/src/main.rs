@@ -1120,11 +1120,7 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
             );
             match classified.bucket.as_str() {
                 "actionable" => {
-                    if requires_security_escalation(&classified.value) {
-                        actionable.push(redact_security_escalation(&classified.value));
-                    } else {
-                        actionable.push(classified.value);
-                    }
+                    actionable.push(classified.value);
                 }
                 "defended_or_accepted" => defended_or_accepted.push(classified.value),
                 "out_of_scope" => {
@@ -1133,7 +1129,7 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                     value["unrelated_disposition"] = json!(disposition);
                     if requires_security_escalation(&value) {
                         if disposition != "address-now" {
-                            security_escalations_required.push(redact_security_escalation(&value));
+                            security_escalations_required.push(value.clone());
                         }
                     }
                     if disposition == "address-now" {
@@ -1147,11 +1143,7 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                     out_of_scope.push(value)
                 }
                 "needs_human_decision" => {
-                    if requires_security_escalation(&classified.value) {
-                        needs_human_decision.push(redact_security_escalation(&classified.value));
-                    } else {
-                        needs_human_decision.push(classified.value);
-                    }
+                    needs_human_decision.push(classified.value);
                 }
                 _ => malformed.push(classified.value),
             }
@@ -1235,24 +1227,6 @@ fn requires_security_escalation(finding: &Value) -> bool {
             finding.get("security_impact").and_then(Value::as_str),
             Some("major" | "critical")
         )
-}
-
-fn redact_security_escalation(finding: &Value) -> Value {
-    let opaque_id = finding.get("id").and_then(Value::as_str).map(fingerprint);
-    let remediation_path_fingerprint = finding
-        .get("path")
-        .and_then(Value::as_str)
-        .and_then(|path| normalize_review_path(path, None))
-        .map(|path| fingerprint(&path));
-    json!({
-        "id": opaque_id,
-        "lens": finding.get("lens").cloned().unwrap_or(Value::Null),
-        "severity": finding.get("severity").cloned().unwrap_or(Value::Null),
-        "security_impact": finding.get("security_impact").cloned().unwrap_or(Value::Null),
-        "suspected_pii": finding.get("suspected_pii").cloned().unwrap_or(Value::Null),
-        "unrelated_disposition": finding.get("unrelated_disposition").cloned().unwrap_or(Value::Null),
-        "remediation_path_fingerprint": remediation_path_fingerprint
-    })
 }
 
 fn fingerprint(value: &str) -> String {
@@ -6661,7 +6635,7 @@ pre_filter = "project-pre"
         assert_eq!(parsed["out_of_scope"].as_array().unwrap().len(), 1);
         assert_eq!(
             parsed["security_escalations_required"][0]["id"],
-            fingerprint("unrelated-pii")
+            "unrelated-pii"
         );
     }
 
@@ -6959,13 +6933,14 @@ pre_filter = "project-pre"
             filtered["out_of_scope"][0]["message"],
             "email alice@example.test and exploit payload"
         );
-        assert!(filtered["security_escalations_required"][0]
-            .get("scenario")
-            .is_none());
+        assert_eq!(
+            filtered["security_escalations_required"][0]["scenario"],
+            "raw personal data"
+        );
     }
 
     #[test]
-    fn filter_redacts_actionable_suspected_pii_from_general_state() {
+    fn filter_retains_actionable_suspected_pii_in_local_state() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"],
             "diff_hash": "same"
@@ -6995,8 +6970,11 @@ pre_filter = "project-pre"
             &filter_findings(&json!({ "state": state, "lens_results": results })).expect("filter"),
         )
         .expect("json");
-        assert!(filtered["actionable"][0].get("message").is_none());
-        assert!(filtered["actionable"][0].get("scenario").is_none());
+        assert_eq!(
+            filtered["actionable"][0]["message"],
+            "email alice@example.test and exploit payload"
+        );
+        assert_eq!(filtered["actionable"][0]["scenario"], "raw personal data");
     }
 
     #[test]
@@ -7057,7 +7035,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn filter_redacts_sensitive_human_decision() {
+    fn filter_retains_sensitive_human_decision_in_local_state() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"], "diff_hash": "same",
             "context": { "user_request": "check PII", "acceptance_criteria": [], "explicit_concerns": ["protect PII"] }
@@ -7084,14 +7062,18 @@ pre_filter = "project-pre"
             .expect("filter"),
         )
         .expect("json");
-        assert!(filtered["needs_human_decision"][0].get("message").is_none());
-        assert!(filtered["needs_human_decision"][0]
-            .get("scenario")
-            .is_none());
+        assert_eq!(
+            filtered["needs_human_decision"][0]["message"],
+            "alice@example.test exploit payload"
+        );
+        assert_eq!(
+            filtered["needs_human_decision"][0]["scenario"],
+            "private data"
+        );
     }
 
     #[test]
-    fn advance_never_persists_sensitive_human_decision_details() {
+    fn advance_retains_local_human_decision_details() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"], "diff_hash": "same",
             "unrelated_finding_policy": { "default": "report" },
@@ -7116,8 +7098,8 @@ pre_filter = "project-pre"
             "state": state, "lens_results": results, "current_diff_hash": "same"
         }))
         .expect("advance");
-        assert!(!advanced.contains("alice@example.test"));
-        assert!(!advanced.contains("private data"));
+        assert!(advanced.contains("alice@example.test"));
+        assert!(advanced.contains("private data"));
     }
 
     #[test]
@@ -7146,7 +7128,7 @@ pre_filter = "project-pre"
         let advanced = advance_synthetic_state(&json!({
             "state": state, "lens_results": results, "current_diff_hash": "same",
             "security_escalations": [{
-                "finding_id": fingerprint("out-of-scope-sensitive"), "lens": "security-safety",
+                "finding_id": "out-of-scope-sensitive", "lens": "security-safety",
                 "disposition": "high-priority-ticket", "reference": "alice@example.test"
             }]
         }))

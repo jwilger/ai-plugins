@@ -295,7 +295,7 @@ const sensitiveFilterResponse = await request(
 const sensitiveFilter = JSON.parse(
   sensitiveFilterResponse.result.content[0].text,
 );
-const opaqueFindingId = sensitiveFilter.security_escalations_required[0].id;
+const securityFindingId = sensitiveFilter.security_escalations_required[0].id;
 const sensitiveAdvanceResponse = await request(
   {
     jsonrpc: "2.0",
@@ -309,7 +309,7 @@ const sensitiveAdvanceResponse = await request(
         current_diff_hash: "sensitive",
         security_escalations: [
           {
-            finding_id: opaqueFindingId,
+            finding_id: securityFindingId,
             lens: "security-safety",
             disposition: "high-priority-ticket",
             reference: "alice@example.test",
