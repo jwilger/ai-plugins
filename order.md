@@ -21,3 +21,4 @@
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260710-rhk3-mechanically-enforce-three-clean-final-review-runs-before-pr-or-main-merge
 20260710-dhse-require-explicit-user-approval-before-amending-commits
+20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
