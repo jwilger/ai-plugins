@@ -6923,7 +6923,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn filter_scrubs_malformed_security_output() {
+    fn filter_retains_malformed_security_output() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"], "diff_hash": "same"
         })))
