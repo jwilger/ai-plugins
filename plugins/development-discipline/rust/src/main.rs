@@ -2145,15 +2145,14 @@ fn durable_report_database_path(
     project_root: &str,
     work_item_id: Option<&str>,
 ) -> Result<PathBuf, String> {
-    let state_root = env::var_os("XDG_STATE_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("HOME")
-                .filter(|value| !value.is_empty())
-                .map(|home| PathBuf::from(home).join(".local/state"))
-        })
-        .ok_or_else(|| "durable_report_state_home_required=true".to_string())?;
+    let state_root = durable_report_state_root(
+        env::var_os("XDG_STATE_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
+        env::var_os("HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
+    )?;
     let storage_key = stable_storage_digest(&[
         "development-discipline-final-review-report-v1",
         project_root,
@@ -2162,6 +2161,18 @@ fn durable_report_database_path(
     Ok(state_root
         .join("development-discipline/final-review-reports")
         .join(format!("{storage_key}.sqlite")))
+}
+
+fn durable_report_state_root(
+    xdg_state_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = xdg_state_home.filter(|path| path.is_absolute()) {
+        return Ok(path);
+    }
+    home.filter(|path| path.is_absolute())
+        .map(|home| home.join(".local/state"))
+        .ok_or_else(|| "durable_report_state_home_required=true".to_string())
 }
 
 fn remove_legacy_report_artifacts(
@@ -4630,6 +4641,18 @@ mod tests {
         assert_eq!(
             stable_storage_digest(&["final-review", "/tmp/worktree", "origin/main"]),
             "a8f8b7b7751e283a"
+        );
+    }
+
+    #[test]
+    fn durable_report_state_root_ignores_relative_xdg_state_home() {
+        assert_eq!(
+            durable_report_state_root(
+                Some(PathBuf::from(".state")),
+                Some(PathBuf::from("/home/tester")),
+            )
+            .expect("state root"),
+            PathBuf::from("/home/tester/.local/state")
         );
     }
 
