@@ -1948,18 +1948,12 @@ fn append_out_of_scope_report(
     filtered: &Value,
     security_escalations: Option<&Value>,
 ) -> Result<(), String> {
-    if !state
-        .get("out_of_scope_report")
-        .is_some_and(Value::is_array)
-    {
-        state["out_of_scope_report"] = json!([]);
-    }
-    if !state
-        .get("out_of_scope_report_omitted_count")
-        .is_some_and(Value::is_u64)
-    {
-        state["out_of_scope_report_omitted_count"] = json!(0);
-    }
+    // The in-memory report is a current snapshot, matching the durable
+    // worktree/ticket snapshot. Do not accumulate full findings across review
+    // iterations: that would retain stale observations and can exceed the
+    // bounded review-state transport budget.
+    state["out_of_scope_report"] = json!([]);
+    state["out_of_scope_report_omitted_count"] = json!(0);
     let documented = security_escalations
         .and_then(Value::as_array)
         .cloned()
@@ -7116,6 +7110,11 @@ pre_filter = "project-pre"
             None,
         )
         .expect("second durable report");
+        assert_eq!(
+            state["out_of_scope_report"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(state["out_of_scope_report"][0]["finding"]["id"], "current");
         let connection = Connection::open(
             state["out_of_scope_report_artifact"]
                 .as_str()
