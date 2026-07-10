@@ -1970,21 +1970,30 @@ fn append_out_of_scope_report(
             .cloned()
             .unwrap_or_default()
         {
-            let disposition = documented.iter().find(|entry| {
-                entry
-                    .get("finding_id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|entry_id| {
-                        finding
-                            .get("id")
-                            .and_then(Value::as_str)
-                            .is_some_and(|finding_id| {
-                                entry_id == finding_id || entry_id == fingerprint(finding_id)
-                            })
-                    })
-                    && entry.get("lens").and_then(Value::as_str)
+            let lens_documents = documented
+                .iter()
+                .filter(|entry| {
+                    entry.get("lens").and_then(Value::as_str)
                         == finding.get("lens").and_then(Value::as_str)
-            });
+                })
+                .collect::<Vec<_>>();
+            let disposition = lens_documents
+                .iter()
+                .copied()
+                .find(|entry| {
+                    entry
+                        .get("finding_id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|entry_id| {
+                            finding
+                                .get("id")
+                                .and_then(Value::as_str)
+                                .is_some_and(|finding_id| {
+                                    entry_id == finding_id || entry_id == fingerprint(finding_id)
+                                })
+                        })
+                })
+                .or_else(|| (lens_documents.len() == 1).then(|| lens_documents[0]));
             let entry = json!({
                 "iteration": iteration,
                 "finding": finding,
@@ -2391,23 +2400,28 @@ fn out_of_scope_report(arguments: &Value) -> Result<String, String> {
     .map_err(|error| format!("durable_report_open_failed source={error}"))?;
     let mut statement = connection
         .prepare(
-            "SELECT finding_json FROM final_review_lens_snapshot WHERE report_binding_id = ?1 ORDER BY lens, severity, finding_id LIMIT ?2",
+            "SELECT finding_json, security_escalation_json FROM final_review_lens_snapshot WHERE report_binding_id = ?1 ORDER BY lens, severity, finding_id LIMIT ?2",
         )
         .map_err(|error| format!("durable_report_query_prepare_failed source={error}"))?;
     let rows = statement
         .query_map(
             params![report_binding_id, MAX_FINDINGS_PER_ITERATION],
-            |row| row.get::<_, String>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .map_err(|error| format!("durable_report_query_failed source={error}"))?;
     let mut findings = Vec::new();
     for row in rows {
-        let finding_json =
+        let (finding_json, security_escalation_json) =
             row.map_err(|error| format!("durable_report_row_failed source={error}"))?;
-        findings.push(
-            serde_json::from_str::<Value>(&finding_json)
-                .map_err(|error| format!("durable_report_row_parse_failed source={error}"))?,
-        );
+        let mut finding = serde_json::from_str::<Value>(&finding_json)
+            .map_err(|error| format!("durable_report_row_parse_failed source={error}"))?;
+        if let Some(security_escalation_json) = security_escalation_json {
+            finding["security_escalation"] = serde_json::from_str(&security_escalation_json)
+                .map_err(|error| {
+                    format!("durable_report_escalation_parse_failed source={error}")
+                })?;
+        }
+        findings.push(finding);
     }
     Ok(json!({
         "artifact": path,

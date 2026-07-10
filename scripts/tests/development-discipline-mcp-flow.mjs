@@ -341,7 +341,8 @@ const retainedFinding = sensitiveReport.findings[0];
 if (
   retainedFinding.message !== "alice@example.test exploit payload" ||
   retainedFinding.scenario !== "private data" ||
-  retainedFinding.unrelated_disposition !== "report"
+  retainedFinding.unrelated_disposition !== "report" ||
+  retainedFinding.security_escalation?.reference !== "alice@example.test"
 ) {
   throw new Error(
     "complete local final-review report details were not returned",
