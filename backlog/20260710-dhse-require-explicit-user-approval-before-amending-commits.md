@@ -19,6 +19,7 @@ A prior session amended a published commit while repairing a PR, creating avoida
 
 - [ ] Relevant commit/PR guidance states that amending any commit requires explicit user authorization.
 - [ ] Relevant commit and PR guidance states that amending any commit requires explicit user authorization.
+- [ ] Default repair and follow-up workflow uses additive commits and does not force-push solely to replace an amended commit.
 
 ## Subtasks
 
