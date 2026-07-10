@@ -1978,9 +1978,7 @@ fn append_out_of_scope_report(
                         finding
                             .get("id")
                             .and_then(Value::as_str)
-                            .is_some_and(|finding_id| {
-                                entry_id == finding_id || entry_id == fingerprint(finding_id)
-                            })
+                            .is_some_and(|finding_id| entry_id == finding_id)
                     })
                     && entry.get("lens").and_then(Value::as_str)
                         == finding.get("lens").and_then(Value::as_str)
