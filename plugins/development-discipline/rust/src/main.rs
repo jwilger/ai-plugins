@@ -331,6 +331,14 @@ impl ReviewCoordinator {
             .and_then(Value::as_str)
             .ok_or_else(|| "internal tool result session missing".to_string())?
             .to_string();
+        if tool_name == "final_review.plan"
+            && state
+                .get("unrelated_finding_policy_confirmation_required")
+                .and_then(Value::as_bool)
+                == Some(true)
+        {
+            return Ok(());
+        }
         if tool_name == "final_review.advance"
             && payload.get("transition_status").and_then(Value::as_str) == Some("verifier_required")
         {
@@ -1214,7 +1222,7 @@ fn sanitize_malformed_security_finding(finding: Value) -> Value {
         return finding;
     }
     json!({
-        "id": finding.get("id").cloned().unwrap_or(Value::Null),
+        "id": finding.get("id").and_then(Value::as_str).map(fingerprint),
         "lens": "security-safety",
         "filter_reason": finding.get("filter_reason").cloned().unwrap_or(Value::Null),
         "security_output_malformed": true
@@ -6538,7 +6546,7 @@ pre_filter = "project-pre"
             .expect("security");
         security["status"] = json!("findings");
         security["findings"] = json!([{
-            "id": "malformed-sensitive", "severity": "warning", "path": "src/new.rs",
+            "id": "alice@example.test", "severity": "warning", "path": "src/new.rs",
             "message": "alice@example.test exploit payload", "scenario": "private data",
             "suspected_pii": true,
             "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
@@ -6552,6 +6560,7 @@ pre_filter = "project-pre"
         .expect("json");
         assert!(filtered["malformed"][0].get("message").is_none());
         assert!(filtered["malformed"][0].get("scenario").is_none());
+        assert_ne!(filtered["malformed"][0]["id"], "alice@example.test");
         assert_eq!(filtered["malformed"][0]["security_output_malformed"], true);
     }
 
