@@ -7,6 +7,7 @@
 
 # Rust build artifacts (workspace target dir at repo root).
 /target/
+/**/target/
 
 # Local Tiber task-board symlink. Canonical task state lives on the `tasks`
 # branch and in Git's common directory, not on source branches.
