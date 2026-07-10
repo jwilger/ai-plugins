@@ -927,26 +927,28 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
             .get("lens")
             .and_then(Value::as_str)
             .unwrap_or("unknown");
-        seen_lenses.push(lens.to_string());
         let expected_subagent_key = subagent_key(state, lens);
-        if result.get("subagent_key").and_then(Value::as_str)
-            != Some(expected_subagent_key.as_str())
-        {
+        let known_lens = expected_lenses.iter().any(|expected| expected == lens);
+        let assigned_key = result.get("subagent_key").and_then(Value::as_str)
+            == Some(expected_subagent_key.as_str());
+        if !assigned_key {
             malformed.push(json!({
-                "lens": lens,
+                "lens": if known_lens { lens } else { "untrusted" },
                 "expected_subagent_key": expected_subagent_key,
-                "actual_subagent_key": result.get("subagent_key").cloned().unwrap_or(Value::Null),
                 "filter_reason": "lens result must include the assigned subagent_key for this review session and lens"
             }));
-        } else {
-            seen_subagent_keys.push(expected_subagent_key);
         }
-        if !expected_lenses.iter().any(|expected| expected == lens) {
+        if !known_lens {
             malformed.push(json!({
-                "lens": lens,
+                "lens": "untrusted",
                 "filter_reason": "unexpected lens for current review state"
             }));
         }
+        if !known_lens || !assigned_key {
+            continue;
+        }
+        seen_lenses.push(lens.to_string());
+        seen_subagent_keys.push(expected_subagent_key);
         if result
             .get("findings")
             .and_then(Value::as_array)
@@ -7018,7 +7020,7 @@ pre_filter = "project-pre"
         .expect("filter");
         let parsed: Value = serde_json::from_str(&output).expect("json");
 
-        assert_eq!(parsed["malformed"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["malformed"].as_array().unwrap().len(), 2);
         assert_eq!(
             parsed["malformed"][0]["filter_reason"],
             "lens result must include the assigned subagent_key for this review session and lens"

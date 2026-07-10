@@ -39,9 +39,9 @@ function send(request) {
   });
 }
 
-async function request(payload) {
+async function request(payload, emit = true) {
   const line = await send(payload);
-  process.stdout.write(`${line}\n`);
+  if (emit) process.stdout.write(`${line}\n`);
   return JSON.parse(line);
 }
 
@@ -253,7 +253,7 @@ const sensitivePlanResponse = await request({
       unrelated_finding_policy: { default: "report" },
     },
   },
-});
+}, false);
 const sensitiveState = JSON.parse(
   sensitivePlanResponse.result.content[0].text,
 ).state;
@@ -285,7 +285,7 @@ const sensitiveFilterResponse = await request({
     name: "final_review.filter_findings",
     arguments: { state: sensitiveState, lens_results: sensitiveResults },
   },
-});
+}, false);
 const sensitiveFilter = JSON.parse(
   sensitiveFilterResponse.result.content[0].text,
 );
@@ -310,7 +310,7 @@ const sensitiveAdvanceResponse = await request({
       ],
     },
   },
-});
+}, false);
 const sensitiveAdvanceText = sensitiveAdvanceResponse.result.content[0].text;
 if (
   sensitiveAdvanceText.includes("alice@example.test") ||
