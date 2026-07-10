@@ -17,6 +17,7 @@ Add a skill that mines session history for durable guardrails and recommends the
 
 - [ ] Skill identifies candidate guardrails from session history without treating transient chatter as durable policy.
 - [ ] Skill recommends whether each guardrail belongs in a reusable ai-plugins plugin or is project-specific.
+- [ ] When destination is ambiguous, skill presents the recommendation and obtains user confirmation before writing.
 
 ## Subtasks
 
