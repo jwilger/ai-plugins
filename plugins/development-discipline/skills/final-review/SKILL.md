@@ -141,6 +141,16 @@ the clean streak and are not current-ticket blockers unless the user explicitly
 chooses to include them. A finding introduced by, caused by, or blocking the
 current ticket remains actionable regardless of this preference.
 
+When the review is for a tracked ticket, pass its stable tracker ID as
+`work_item_id` to `final_review.plan` (for example, the active Tiber task ID).
+The coordinator stores one current, sanitized SQLite snapshot per worktree and
+work item in user state (`$XDG_STATE_HOME`, or `~/.local/state` as fallback),
+not in the reviewed repository or in per-session files. Each completed review
+transition replaces that binding's old lens rows, including stale conditional
+lenses; the returned `out_of_scope_report_artifact` path is the single report
+location. Without a tracker ID, the coordinator uses a stable worktree/scope/
+base binding so restarted non-ticketed reviews also replace stale rows.
+
 Use a security-impact assessment separate from review severity: `none`,
 `minor`, `moderate`, `major`, or `critical`. Do not infer this threshold from a
 finding's `error`, `warning`, or `note` review severity. A major-or-higher

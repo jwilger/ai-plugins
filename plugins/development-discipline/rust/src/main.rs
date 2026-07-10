@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::collections::{
     hash_map::{DefaultHasher, RandomState},
     HashMap, HashSet, VecDeque,
@@ -10,6 +12,7 @@ use std::io::{self, BufRead, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
 
 const DEFAULT_BASE: &str = "origin/main";
@@ -31,6 +34,7 @@ const MAX_REVIEW_LENSES: usize = LENSES.len() + MAX_CONDITIONAL_LENSES;
 const MAX_LENS_IDENTIFIER_CHARS: usize = 64;
 const MAX_LENS_DESCRIPTION_CHARS: usize = 512;
 const MAX_SESSION_ID_CHARS: usize = 128;
+const MAX_WORK_ITEM_ID_CHARS: usize = 256;
 const MAX_ACTIVE_REVIEW_SESSIONS: usize = 32;
 const MAX_RETAINED_HISTORY_ENTRIES: usize = 64;
 const MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES: usize = 128;
@@ -507,6 +511,11 @@ fn tools() -> Value {
                         }
                     },
                     "session_id": { "type": "string", "maxLength": MAX_SESSION_ID_CHARS },
+                    "work_item_id": {
+                        "type": "string",
+                        "maxLength": MAX_WORK_ITEM_ID_CHARS,
+                        "pattern": "^[A-Za-z0-9._:-]+$"
+                    },
                     "project_root": { "type": "string" },
                     "config_path": { "type": "string" },
                     "harness": { "type": "string" },
@@ -741,6 +750,16 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
     let lenses = all_lenses(&conditional_lenses);
     let lens_objectives = lens_objectives(&conditional_lenses);
     let prior_defenses_by_lens = parse_prior_defenses(arguments.get("prior_defenses"), &lenses)?;
+    let work_item_id =
+        string_opt(arguments, "work_item_id").filter(|value| !value.trim().is_empty());
+    if work_item_id.as_ref().is_some_and(|value| {
+        value.chars().count() > MAX_WORK_ITEM_ID_CHARS
+            || !value.chars().all(|value| {
+                value.is_ascii_alphanumeric() || matches!(value, '-' | '_' | '.' | ':')
+            })
+    }) {
+        return Err("work_item_id_invalid=true".to_string());
+    }
     let session_id =
         match string_opt(arguments, "session_id").filter(|value| !value.trim().is_empty()) {
             Some(value) => {
@@ -757,6 +776,8 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
 
     let mut state = json!({
         "session_id": session_id,
+        "work_item_id": work_item_id,
+        "report_binding_id": null,
         "review_contract_id": null,
         "scope": {
             "kind": scope,
@@ -795,6 +816,8 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         "prior_user_decisions": [],
         "history_summary": ""
     });
+    state["report_binding_id"] = json!(computed_report_binding_id(&state)
+        .ok_or_else(|| "report_binding_build_failed=true".to_string())?);
     state["review_contract_id"] = json!(computed_review_contract_id(&state)
         .ok_or_else(|| "review_contract_build_failed=true".to_string())?);
     ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
@@ -1999,7 +2022,14 @@ fn append_out_of_scope_report(
                 "security_escalation": disposition.map(sanitize_security_escalation_record)
             });
             durable_entries.push(entry.clone());
-            report.push(entry);
+            report.push(json!({
+                "iteration": iteration,
+                "finding_id": entry.pointer("/finding/id").cloned().unwrap_or(Value::Null),
+                "lens": entry.pointer("/finding/lens").cloned().unwrap_or(Value::Null),
+                "severity": entry.pointer("/finding/severity").cloned().unwrap_or(Value::Null),
+                "unrelated_disposition": entry.pointer("/finding/unrelated_disposition").cloned().unwrap_or(Value::Null),
+                "durable_report": true
+            }));
         }
         if report.len() > MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES {
             let omitted = report.len() - MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES;
@@ -2011,13 +2041,13 @@ fn append_out_of_scope_report(
                 .saturating_add(omitted as u64));
         }
     }
-    if !durable_entries.is_empty() {
-        append_durable_out_of_scope_report(state, durable_entries)?;
+    if review_contract_is_valid(state) {
+        replace_durable_out_of_scope_report(state, durable_entries)?;
     }
     Ok(())
 }
 
-fn append_durable_out_of_scope_report(
+fn replace_durable_out_of_scope_report(
     state: &mut Value,
     entries: Vec<Value>,
 ) -> Result<(), String> {
@@ -2025,39 +2055,135 @@ fn append_durable_out_of_scope_report(
         .pointer("/scope/project_root")
         .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_project_root_required=true".to_string())?;
-    let session_id = state
-        .get("session_id")
+    let report_binding_id = state
+        .get("report_binding_id")
         .and_then(Value::as_str)
-        .ok_or_else(|| "durable_report_session_id_required=true".to_string())?;
-    if !session_id
-        .chars()
-        .all(|value| value.is_ascii_alphanumeric() || matches!(value, '-' | '_' | '.'))
-    {
-        return Err("durable_report_session_id_invalid=true".to_string());
-    }
-    let directory = Path::new(project_root).join(".development-discipline/final-review-reports");
-    fs::create_dir_all(&directory)
+        .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
+    let path = durable_report_database_path(project_root)?;
+    let directory = path
+        .parent()
+        .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
+    fs::create_dir_all(directory)
         .map_err(|error| format!("durable_report_directory_create_failed source={error}"))?;
-    let path = directory.join(format!("{session_id}.json"));
-    let mut report = if path.exists() {
-        let content = fs::read_to_string(&path)
-            .map_err(|error| format!("durable_report_read_failed source={error}"))?;
-        serde_json::from_str::<Value>(&content)
-            .map_err(|error| format!("durable_report_parse_failed source={error}"))?
-    } else {
-        json!({"session_id": session_id, "entries": []})
-    };
-    report["entries"]
-        .as_array_mut()
-        .ok_or_else(|| "durable_report_entries_invalid=true".to_string())?
-        .extend(entries);
-    fs::write(
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err("durable_report_file_symlink_forbidden=true".to_string());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "durable_report_file_metadata_failed source={error}"
+            ));
+        }
+    }
+    let mut connection = Connection::open_with_flags(
         &path,
-        serde_json::to_vec_pretty(&report)
-            .map_err(|error| format!("durable_report_encode_failed source={error}"))?,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
-    .map_err(|error| format!("durable_report_write_failed source={error}"))?;
+    .map_err(|error| format!("durable_report_open_failed source={error}"))?;
+    initialize_durable_report_schema(&connection)?;
+    let iteration = state
+        .get("iteration_index")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("durable_report_transaction_failed source={error}"))?;
+    transaction
+        .execute(
+            "DELETE FROM final_review_lens_snapshot WHERE report_binding_id = ?1",
+            params![report_binding_id],
+        )
+        .map_err(|error| format!("durable_report_delete_failed source={error}"))?;
+    for entry in entries {
+        let finding = entry
+            .get("finding")
+            .ok_or_else(|| "durable_report_finding_required=true".to_string())?;
+        let finding_id = finding
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "durable_report_finding_id_required=true".to_string())?;
+        let lens = finding
+            .get("lens")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "durable_report_finding_lens_required=true".to_string())?;
+        transaction
+            .execute(
+                "INSERT INTO final_review_lens_snapshot (report_binding_id, lens, finding_id, iteration, severity, unrelated_disposition, finding_json, security_escalation_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    report_binding_id,
+                    lens,
+                    finding_id,
+                    iteration,
+                    finding.get("severity").and_then(Value::as_str),
+                    finding.get("unrelated_disposition").and_then(Value::as_str),
+                    serde_json::to_string(finding).map_err(|error| format!("durable_report_finding_encode_failed source={error}"))?,
+                    entry.get("security_escalation").map(serde_json::to_string).transpose().map_err(|error| format!("durable_report_escalation_encode_failed source={error}"))?,
+                ],
+            )
+            .map_err(|error| format!("durable_report_insert_failed source={error}"))?;
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("durable_report_commit_failed source={error}"))?;
     state["out_of_scope_report_artifact"] = json!(path.to_string_lossy());
+    Ok(())
+}
+
+fn durable_report_database_path(project_root: &str) -> Result<PathBuf, String> {
+    let state_root = env::var_os("XDG_STATE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".local/state"))
+        })
+        .ok_or_else(|| "durable_report_state_home_required=true".to_string())?;
+    let mut hasher = DefaultHasher::new();
+    "development-discipline-final-review-report-v1".hash(&mut hasher);
+    project_root.hash(&mut hasher);
+    Ok(state_root
+        .join("development-discipline/final-review-reports")
+        .join(format!("{:016x}.sqlite", hasher.finish())))
+}
+
+fn initialize_durable_report_schema(connection: &Connection) -> Result<(), String> {
+    const SNAPSHOT_TABLE: &str = "
+        CREATE TABLE IF NOT EXISTS final_review_lens_snapshot (
+            report_binding_id TEXT NOT NULL,
+            lens TEXT NOT NULL,
+            finding_id TEXT NOT NULL,
+            iteration INTEGER NOT NULL,
+            severity TEXT,
+            unrelated_disposition TEXT,
+            finding_json TEXT NOT NULL,
+            security_escalation_json TEXT,
+            PRIMARY KEY (report_binding_id, lens, finding_id)
+        );
+    ";
+    connection
+        .execute_batch(&format!("PRAGMA journal_mode = WAL; {SNAPSHOT_TABLE}"))
+        .map_err(|error| format!("durable_report_schema_failed source={error}"))?;
+    let has_report_binding = connection
+        .query_row(
+            "SELECT 1 FROM pragma_table_info('final_review_lens_snapshot') WHERE name = 'report_binding_id'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| format!("durable_report_schema_inspect_failed source={error}"))?
+        .is_some();
+    if !has_report_binding {
+        connection
+            .execute_batch(&format!(
+                "DROP TABLE final_review_lens_snapshot; {SNAPSHOT_TABLE}"
+            ))
+            .map_err(|error| format!("durable_report_schema_migrate_failed source={error}"))?;
+    }
     Ok(())
 }
 
@@ -2958,6 +3084,8 @@ fn has_default_lens_set(lenses: &[String]) -> bool {
 
 fn computed_review_contract_id(state: &Value) -> Option<String> {
     let session_id = state.get("session_id").and_then(Value::as_str)?;
+    let work_item_id = state.get("work_item_id")?;
+    let report_binding_id = state.get("report_binding_id")?;
     let scope = state.pointer("/scope/kind").and_then(Value::as_str)?;
     let base = state.pointer("/scope/base").and_then(Value::as_str)?;
     let project_root = state
@@ -2981,6 +3109,8 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
     let mut hasher = DefaultHasher::new();
     "final-review-contract-v2".hash(&mut hasher);
     session_id.hash(&mut hasher);
+    work_item_id.to_string().hash(&mut hasher);
+    report_binding_id.to_string().hash(&mut hasher);
     scope.hash(&mut hasher);
     base.hash(&mut hasher);
     project_root.hash(&mut hasher);
@@ -2998,6 +3128,23 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
         .hash(&mut hasher);
     initial_prior_defenses.to_string().hash(&mut hasher);
     Some(format!("{:016x}", hasher.finish()))
+}
+
+fn computed_report_binding_id(state: &Value) -> Option<String> {
+    if let Some(work_item_id) = state.get("work_item_id").and_then(Value::as_str) {
+        return Some(format!("work-item:{work_item_id}"));
+    }
+    let scope = state.pointer("/scope/kind").and_then(Value::as_str)?;
+    let base = state.pointer("/scope/base").and_then(Value::as_str)?;
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)?;
+    let mut hasher = DefaultHasher::new();
+    "final-review-report-v1".hash(&mut hasher);
+    scope.hash(&mut hasher);
+    base.hash(&mut hasher);
+    project_root.hash(&mut hasher);
+    Some(format!("review:{:016x}", hasher.finish()))
 }
 
 fn review_contract_is_valid(state: &Value) -> bool {
@@ -4374,6 +4521,27 @@ mod tests {
         assert_eq!(
             parsed["state"]["caller_attestation_policy"]["required"],
             true
+        );
+    }
+
+    #[test]
+    fn plan_binds_an_optional_work_item_to_the_review_contract() {
+        let first: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "abc",
+            "work_item_id": "20260709-s6vr-final-review"
+        })))
+        .expect("first plan json");
+        let second: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "abc",
+            "work_item_id": "20260710-other-ticket"
+        })))
+        .expect("second plan json");
+
+        assert_ne!(
+            first["state"]["review_contract_id"],
+            second["state"]["review_contract_id"]
         );
     }
 
@@ -6773,8 +6941,10 @@ pre_filter = "project-pre"
 
     #[test]
     fn advance_sanitizes_persisted_security_escalation_reference() {
+        let root = test_project_root("durable-report-security-escalation");
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/new.rs"], "diff_hash": "same",
+            "project_root": root,
             "unrelated_finding_policy": { "default": "report" }
         })))
         .expect("plan json");
@@ -6802,8 +6972,21 @@ pre_filter = "project-pre"
         .expect("advance");
         assert!(!advanced.contains("alice@example.test"));
         let advanced: Value = serde_json::from_str(&advanced).expect("json");
+        let connection = Connection::open(
+            advanced["state"]["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
+        let escalation_json: String = connection
+            .query_row(
+                "SELECT security_escalation_json FROM final_review_lens_snapshot WHERE lens = 'security-safety'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("security escalation");
         assert_eq!(
-            advanced["state"]["out_of_scope_report"][0]["security_escalation"]
+            serde_json::from_str::<Value>(&escalation_json).expect("escalation json")
                 ["reference_fingerprint"],
             fingerprint("alice@example.test")
         );
@@ -6823,53 +7006,272 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn out_of_scope_report_retains_every_session_finding() {
-        let root = test_project_root("durable-report-retains");
-        let mut state = json!({ "iteration_index": 1, "session_id": "report-retains", "scope": { "project_root": root }, "out_of_scope_report": [] });
-        let findings = (0..65)
-            .map(|id| json!({ "id": format!("finding-{id}"), "lens": "release-integration" }))
-            .collect::<Vec<_>>();
-        append_out_of_scope_report(&mut state, &json!({ "out_of_scope": findings }), None)
-            .expect("durable report");
-        assert_eq!(
-            state["out_of_scope_report"]
-                .as_array()
-                .expect("report")
-                .len(),
-            65
-        );
-    }
-
-    #[test]
-    fn out_of_scope_report_accounts_for_bounded_overflow() {
-        let root = test_project_root("durable-report-overflow");
-        let mut state = json!({ "iteration_index": 1, "session_id": "report-overflow", "scope": { "project_root": root }, "out_of_scope_report": [] });
-        let findings = (0..=MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES)
-            .map(|id| json!({ "id": format!("finding-{id}"), "lens": "release-integration" }))
-            .collect::<Vec<_>>();
-        append_out_of_scope_report(&mut state, &json!({ "out_of_scope": findings }), None)
-            .expect("durable report");
-        assert_eq!(
-            state["out_of_scope_report"]
-                .as_array()
-                .expect("report")
-                .len(),
-            MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES
-        );
-        assert_eq!(state["out_of_scope_report_omitted_count"], 1);
-        let artifact = std::fs::read_to_string(
+    fn out_of_scope_report_replaces_stale_findings_for_a_lens() {
+        let root = test_project_root("durable-report-snapshot");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "report-snapshot",
+            "project_root": root
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{ "id": "stale", "lens": "release-integration" }] }),
+            None,
+        )
+        .expect("first durable report");
+        state["iteration_index"] = json!(2);
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{ "id": "current", "lens": "release-integration" }] }),
+            None,
+        )
+        .expect("second durable report");
+        let connection = Connection::open(
             state["out_of_scope_report_artifact"]
                 .as_str()
                 .expect("artifact"),
         )
-        .expect("durable report contents");
+        .expect("database");
+        let finding_id: String = connection
+            .query_row(
+                "SELECT finding_id FROM final_review_lens_snapshot WHERE lens = 'release-integration'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("snapshot finding");
+
+        assert_eq!(finding_id, "current");
+    }
+
+    #[test]
+    fn out_of_scope_report_removes_a_lens_snapshot_after_a_clean_result() {
+        let root = test_project_root("durable-report-clean-lens");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "report-clean-lens",
+            "project_root": root
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{ "id": "stale", "lens": "release-integration" }] }),
+            None,
+        )
+        .expect("first durable report");
+        state["iteration_index"] = json!(2);
+        append_out_of_scope_report(&mut state, &json!({ "out_of_scope": [] }), None)
+            .expect("clean durable report");
+        let connection = Connection::open(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
+        let count: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM final_review_lens_snapshot WHERE lens = 'release-integration'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("snapshot count");
+
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn out_of_scope_report_replaces_a_snapshot_after_the_review_diff_changes() {
+        let root = test_project_root("durable-report-diff-change");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "before",
+            "project_root": root,
+            "work_item_id": "ticket-123"
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{ "id": "stale", "lens": "release-integration" }] }),
+            None,
+        )
+        .expect("first durable report");
+        state["scope"]["diff_hash"] = json!("after");
+        state["review_contract_id"] = json!(computed_review_contract_id(&state).expect("contract"));
+        state["iteration_index"] = json!(2);
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{ "id": "current", "lens": "release-integration" }] }),
+            None,
+        )
+        .expect("second durable report");
+        let connection = Connection::open(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
+        let count: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM final_review_lens_snapshot WHERE lens = 'release-integration'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("snapshot count");
+
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn out_of_scope_report_uses_the_same_binding_after_a_non_ticketed_restart() {
+        let root = test_project_root("durable-report-restart");
+        let first: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "same",
+            "project_root": root,
+            "session_id": "first-session"
+        })))
+        .expect("first plan json");
+        let second: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "same",
+            "project_root": root,
+            "session_id": "second-session"
+        })))
+        .expect("second plan json");
+
         assert_eq!(
-            serde_json::from_str::<Value>(&artifact).expect("report json")["entries"]
-                .as_array()
-                .expect("entries")
-                .len(),
-            MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES + 1
+            first["state"]["report_binding_id"],
+            second["state"]["report_binding_id"]
         );
+    }
+
+    #[test]
+    fn out_of_scope_report_removes_a_conditional_lens_omitted_after_a_ticket_restart() {
+        let root = test_project_root("durable-report-conditional-restart");
+        let first: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "before",
+            "project_root": root,
+            "work_item_id": "ticket-conditional",
+            "conditional_lenses": [{ "id": "migration-risk", "description": "Review migrations." }]
+        })))
+        .expect("first plan json");
+        let mut first_state = first["state"].clone();
+        append_out_of_scope_report(
+            &mut first_state,
+            &json!({ "out_of_scope": [{ "id": "stale", "lens": "migration-risk" }] }),
+            None,
+        )
+        .expect("first durable report");
+        let second: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "after",
+            "project_root": root,
+            "work_item_id": "ticket-conditional"
+        })))
+        .expect("second plan json");
+        let mut second_state = second["state"].clone();
+        append_out_of_scope_report(&mut second_state, &json!({ "out_of_scope": [] }), None)
+            .expect("second durable report");
+        let connection = Connection::open(
+            second_state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
+        let count: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM final_review_lens_snapshot WHERE lens = 'migration-risk'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("snapshot count");
+
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn out_of_scope_report_uses_one_project_sqlite_artifact() {
+        let root = test_project_root("durable-report-sqlite-path");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "report-sqlite",
+            "project_root": root
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{ "id": "finding-1", "lens": "release-integration" }] }),
+            None,
+        )
+        .expect("durable report");
+
+        assert_eq!(
+            Path::new(
+                state["out_of_scope_report_artifact"]
+                    .as_str()
+                    .expect("artifact"),
+            )
+            .extension()
+            .and_then(OsStr::to_str),
+            Some("sqlite")
+        );
+    }
+
+    #[test]
+    fn out_of_scope_report_database_is_not_stored_inside_the_reviewed_worktree() {
+        let root = test_project_root("durable-report-user-state");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "report-user-state",
+            "project_root": root
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{ "id": "finding-1", "lens": "release-integration" }] }),
+            None,
+        )
+        .expect("durable report");
+
+        assert!(!Path::new(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .starts_with(root));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn out_of_scope_report_rejects_a_dangling_database_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_project_root("durable-report-dangling-symlink");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "report-symlink",
+            "project_root": root
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        let database =
+            durable_report_database_path(state["scope"]["project_root"].as_str().expect("root"))
+                .expect("database path");
+        fs::create_dir_all(database.parent().expect("database parent")).expect("report directory");
+        symlink(root.join("outside.sqlite"), &database).expect("database symlink");
+
+        assert!(append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{ "id": "finding-1", "lens": "release-integration" }] }),
+            None,
+        )
+        .is_err());
     }
 
     #[test]
