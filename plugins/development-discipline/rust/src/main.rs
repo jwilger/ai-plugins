@@ -1982,6 +1982,12 @@ fn append_out_of_scope_report(
                     })
                     && entry.get("lens").and_then(Value::as_str)
                         == finding.get("lens").and_then(Value::as_str)
+                    && entry.get("disposition").and_then(Value::as_str)
+                        == Some("high-priority-ticket")
+                    && entry
+                        .get("reference")
+                        .and_then(Value::as_str)
+                        .is_some_and(|reference| !reference.trim().is_empty())
             });
             let entry = json!({
                 "iteration": iteration,
@@ -7400,6 +7406,8 @@ pre_filter = "project-pre"
             ] }),
             Some(&json!([
                 { "finding_id": "security-one", "lens": "security-safety", "disposition": "high-priority-ticket", "reference": "BUG-ONE" },
+                { "finding_id": fingerprint("security-two"), "lens": "security-safety", "disposition": "high-priority-ticket", "reference": "BUG-BOGUS" },
+                { "finding_id": "security-two", "lens": "security-safety", "disposition": "not-a-ticket", "reference": "" },
                 { "finding_id": "security-two", "lens": "security-safety", "disposition": "high-priority-ticket", "reference": "BUG-TWO" }
             ])),
         )
