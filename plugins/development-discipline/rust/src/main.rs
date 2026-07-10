@@ -1127,10 +1127,8 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                     let disposition = unrelated_finding_disposition(&classified.value, state);
                     let mut value = classified.value;
                     value["unrelated_disposition"] = json!(disposition);
-                    if requires_security_escalation(&value) {
-                        if disposition != "address-now" {
-                            security_escalations_required.push(value.clone());
-                        }
+                    if requires_security_escalation(&value) && disposition != "address-now" {
+                        security_escalations_required.push(value.clone());
                     }
                     if disposition == "address-now" {
                         out_of_scope.push(value.clone());
@@ -1174,10 +1172,6 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                 .iter()
                 .any(|key| key == &subagent_key(state, expected))
     });
-    let malformed = malformed
-        .into_iter()
-        .map(sanitize_malformed_security_finding)
-        .collect::<Vec<_>>();
     let clean = actionable.is_empty() && malformed.is_empty() && needs_human_decision.is_empty();
     Ok(json!({
         "actionable": actionable,
@@ -1236,17 +1230,6 @@ fn fingerprint(value: &str) -> String {
             .get_or_init(RandomState::new)
             .hash_one(value)
     )
-}
-
-fn sanitize_malformed_security_finding(finding: Value) -> Value {
-    json!({
-        "id": finding.get("id").and_then(Value::as_str).map(fingerprint),
-        "lens": finding.get("lens").and_then(Value::as_str).filter(|lens| {
-            all_lenses(&[]).iter().any(|expected| expected == lens)
-        }).unwrap_or("untrusted"),
-        "filter_reason": finding.get("filter_reason").cloned().unwrap_or(Value::Null),
-        "reviewer_output_malformed": true
-    })
 }
 
 fn validate_security_escalations(required: &Value, supplied: Option<&Value>) -> Result<(), String> {
@@ -1515,7 +1498,7 @@ fn advance_with_contract_validation(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    prior_decisions.extend(caller_decisions.iter().map(sanitize_retained_decision));
+    prior_decisions.extend(caller_decisions.iter().cloned());
     retain_latest(&mut prior_decisions, MAX_RETAINED_CALLER_DECISIONS);
     state["prior_user_decisions"] = Value::Array(prior_decisions);
     apply_caller_decisions_to_defenses(&mut state, &caller_decisions);
@@ -2245,19 +2228,6 @@ fn initialize_durable_report_schema(connection: &Connection) -> Result<(), Strin
             .map_err(|error| format!("durable_report_schema_migrate_failed source={error}"))?;
     }
     Ok(())
-}
-
-fn sanitize_retained_decision(decision: &Value) -> Value {
-    json!({
-        "finding_id": decision.get("finding_id").cloned().unwrap_or(Value::Null),
-        "lens": decision.get("lens").cloned().unwrap_or(Value::Null),
-        "decision": decision.get("decision").cloned().unwrap_or(Value::Null),
-        "remediation_path_fingerprint": decision
-            .get("remediation_path")
-            .and_then(Value::as_str)
-            .and_then(|path| normalize_review_path(path, None))
-            .map(|path| fingerprint(&path))
-    })
 }
 
 fn retain_latest(values: &mut Vec<Value>, maximum: usize) {
@@ -6839,31 +6809,6 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn malformed_security_finding_is_scrubbed() {
-        let value = sanitize_malformed_security_finding(json!({
-            "lens": "security-safety",
-            "message": "alice@example.test exploit payload",
-            "scenario": "private data",
-            "filter_reason": "finding id is required"
-        }));
-        assert!(value.get("message").is_none());
-        assert!(value.get("scenario").is_none());
-        assert_eq!(value["reviewer_output_malformed"], true);
-    }
-
-    #[test]
-    fn malformed_nonsecurity_pii_finding_is_scrubbed() {
-        let value = sanitize_malformed_security_finding(json!({
-            "lens": "tests-verification",
-            "message": "alice@example.test exploit payload",
-            "suspected_pii": true,
-            "filter_reason": "finding severity is invalid"
-        }));
-        assert!(value.get("message").is_none());
-        assert_eq!(value["reviewer_output_malformed"], true);
-    }
-
-    #[test]
     fn caller_rejects_defense_for_sensitive_security_finding() {
         let state = json!({ "unresolved_findings": [{
             "id": "security-1", "lens": "security-safety", "security_impact": "major", "suspected_pii": false
@@ -7005,14 +6950,16 @@ pre_filter = "project-pre"
             .expect("filter"),
         )
         .expect("json");
-        assert!(filtered["malformed"][0].get("message").is_none());
-        assert!(filtered["malformed"][0].get("scenario").is_none());
-        assert_ne!(filtered["malformed"][0]["id"], "alice@example.test");
-        assert_eq!(filtered["malformed"][0]["reviewer_output_malformed"], true);
+        assert_eq!(
+            filtered["malformed"][0]["message"],
+            "alice@example.test exploit payload"
+        );
+        assert_eq!(filtered["malformed"][0]["scenario"], "private data");
+        assert_eq!(filtered["malformed"][0]["id"], "alice@example.test");
     }
 
     #[test]
-    fn filter_scrubs_unclassified_pii_from_nonsecurity_malformed_output() {
+    fn filter_retains_unclassified_pii_from_nonsecurity_malformed_output() {
         let state = json!({
             "scope": { "changed_files": ["src/new.rs"], "diff_hash": "same" },
             "session_id": "review-1", "iteration_index": 1,
@@ -7029,9 +6976,9 @@ pre_filter = "project-pre"
                 }]
             }]
         })).expect("filter")).expect("json");
-        assert!(filtered["malformed"][0].get("message").is_none());
-        assert!(filtered["malformed"][0].get("scenario").is_none());
-        assert_ne!(filtered["malformed"][0]["id"], "alice@example.test");
+        assert_eq!(filtered["malformed"][0]["message"], "alice@example.test");
+        assert_eq!(filtered["malformed"][0]["scenario"], "private data");
+        assert_eq!(filtered["malformed"][0]["id"], "alice@example.test");
     }
 
     #[test]
@@ -7150,19 +7097,6 @@ pre_filter = "project-pre"
         assert_eq!(
             serde_json::from_str::<Value>(&escalation_json).expect("escalation json")["reference"],
             "alice@example.test"
-        );
-    }
-
-    #[test]
-    fn retained_decision_omits_defense_text() {
-        let retained = sanitize_retained_decision(&json!({
-            "finding_id": "opaque", "lens": "security-safety", "decision": "fixed",
-            "remediation_path": "src/new.rs", "defense": "alice@example.test"
-        }));
-        assert!(retained.get("defense").is_none());
-        assert_eq!(
-            retained["remediation_path_fingerprint"],
-            fingerprint("src/new.rs")
         );
     }
 
