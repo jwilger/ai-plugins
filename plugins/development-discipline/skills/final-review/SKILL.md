@@ -150,6 +150,9 @@ transition replaces that binding's old lens rows, including stale conditional
 lenses; the returned `out_of_scope_report_artifact` path is the single report
 location. Without a tracker ID, the coordinator uses a stable worktree/scope/
 base binding so restarted non-ticketed reviews also replace stale rows.
+Use `final_review.out_of_scope_report` with the authoritative review `state` to
+read that current sanitized snapshot; it returns the metadata rows without
+requiring a separate SQLite client or exposing reviewer prose.
 
 Use a security-impact assessment separate from review severity: `none`,
 `minor`, `moderate`, `major`, or `critical`. Do not infer this threshold from a

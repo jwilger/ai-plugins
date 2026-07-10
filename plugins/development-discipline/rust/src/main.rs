@@ -646,6 +646,15 @@ fn tools() -> Value {
                 "properties": { "state": { "type": "object" } },
                 "required": ["state"]
             }
+        },
+        {
+            "name": "final_review.out_of_scope_report",
+            "description": "Read the current sanitized out-of-scope report for an authoritative review state.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "state": { "type": "object" } },
+                "required": ["state"]
+            }
         }
     ])
 }
@@ -656,6 +665,7 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, String> {
         "final_review.filter_findings" => Ok(text_content(filter_findings(arguments)?)),
         "final_review.advance" => Ok(text_content(advance(arguments)?)),
         "final_review.clean_status" => Ok(text_content(clean_status(arguments))),
+        "final_review.out_of_scope_report" => Ok(text_content(out_of_scope_report(arguments)?)),
         other => Err(format!("unsupported tool: {other}")),
     }
 }
@@ -2420,6 +2430,71 @@ fn clean_status(arguments: &Value) -> String {
         "complete": review_state_complete(state)
     })
     .to_string()
+}
+
+fn out_of_scope_report(arguments: &Value) -> Result<String, String> {
+    let state = arguments
+        .get("state")
+        .ok_or_else(|| "state is required".to_string())?;
+    validate_present_review_contract(state)?;
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "durable_report_project_root_required=true".to_string())?;
+    let report_binding_id = state
+        .get("report_binding_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
+    let path = durable_report_database_path(
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
+    if !path.exists() {
+        return Ok(json!({
+            "artifact": path,
+            "report_binding_id": report_binding_id,
+            "findings": []
+        })
+        .to_string());
+    }
+    if fs::symlink_metadata(&path)
+        .map_err(|error| format!("durable_report_file_metadata_failed source={error}"))?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("durable_report_file_symlink_forbidden=true".to_string());
+    }
+    let connection = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|error| format!("durable_report_open_failed source={error}"))?;
+    let mut statement = connection
+        .prepare(
+            "SELECT finding_json FROM final_review_lens_snapshot WHERE report_binding_id = ?1 ORDER BY lens, severity, finding_id LIMIT ?2",
+        )
+        .map_err(|error| format!("durable_report_query_prepare_failed source={error}"))?;
+    let rows = statement
+        .query_map(
+            params![report_binding_id, MAX_FINDINGS_PER_ITERATION],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| format!("durable_report_query_failed source={error}"))?;
+    let mut findings = Vec::new();
+    for row in rows {
+        let finding_json =
+            row.map_err(|error| format!("durable_report_row_failed source={error}"))?;
+        findings.push(
+            serde_json::from_str::<Value>(&finding_json)
+                .map_err(|error| format!("durable_report_row_parse_failed source={error}"))?,
+        );
+    }
+    Ok(json!({
+        "artifact": path,
+        "report_binding_id": report_binding_id,
+        "findings": findings
+    })
+    .to_string())
 }
 
 fn review_state_complete(state: &Value) -> bool {
@@ -7371,6 +7446,33 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn out_of_scope_report_reads_the_current_sanitized_snapshot() {
+        let root = test_project_root("durable-report-read");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "report-read",
+            "project_root": root
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{
+                "id": "finding-1", "lens": "release-integration", "severity": "warning",
+                "message": "alice@example.test",
+                "unrelated_disposition": "report"
+            }] }),
+            None,
+        )
+        .expect("durable report");
+        let report: Value =
+            serde_json::from_str(&out_of_scope_report(&json!({ "state": state })).expect("report"))
+                .expect("report json");
+
+        assert_eq!(report["findings"][0]["lens"], "release-integration");
+    }
+
+    #[test]
     fn ticket_reports_are_isolated_across_worktrees() {
         let first_root = test_project_root("durable-report-ticket-first");
         let second_root = test_project_root("durable-report-ticket-second");
@@ -10321,7 +10423,8 @@ pre_filter = "project-pre"
         .expect("response");
 
         let tools = response["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 5);
+        assert_eq!(tools[4]["name"], "final_review.out_of_scope_report");
         assert_eq!(
             tools[0]["inputSchema"]["properties"]["required_clean_iterations"]["minimum"],
             DEFAULT_CLEAN_ITERATIONS
