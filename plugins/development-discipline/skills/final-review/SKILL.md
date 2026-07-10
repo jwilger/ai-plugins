@@ -161,8 +161,9 @@ security issue, or any suspected PII exposure at any security-impact level, is
 an exception: unless it must be fixed in the current ticket, document it as a
 high-priority bug ticket even when the selected disposition is report-only.
 Never silently drop, defer without documentation, or let a user opt out of
-recording such a finding. Do not include sensitive PII or exploit details in a
-general report; use the repository's approved security-reporting path.
+recording such a finding. The local final-review report and state retain the
+complete finding; only externally published or tracker artifacts follow the
+repository's applicable reporting policy.
 
 ## Loop
 
