@@ -17,6 +17,8 @@ Final review classified this documentation mismatch as MINOR and non-blocking. A
 
 ## Acceptance criteria
 
+- [ ] Recovery guidance distinguishes leader exit from the last lock-inheriting descendant exiting and tells the user to wait for or terminate the surviving process group before retrying.
+
 ## Subtasks
 
 ## Notes / Log
