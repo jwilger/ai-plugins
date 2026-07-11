@@ -30,3 +30,4 @@
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260711-42si-block-pushes-until-final-review-completes-three-clean-passes
+20260711-tcs3-migrate-ci-off-nix-devshell-tooling
