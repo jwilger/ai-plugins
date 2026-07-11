@@ -19,6 +19,7 @@ The current CI jobs run through `nix develop`, which realizes the project devshe
 
 - [ ] GitHub Actions CI does not invoke Nix or realize flake devshell outputs.
 - [ ] CI installs and runs the Rust, Node, formatting, and Bats tooling with standard GitHub-hosted setup.
+- [ ] EMC and flake integration checks remain available as explicit local-only commands and are excluded from CI.
 
 ## Subtasks
 
