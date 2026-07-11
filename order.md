@@ -1,4 +1,5 @@
 20260709-s6vr-tighten-final-review-relevance-using-auto-review-patterns
+20260711-xdvv-make-final-review-dispositions-configurable-by-severity-and-lens
 20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
 20260707-sf8b-allow-drag-and-drop-reprioritization-in-the-tiber-dashboard-backlog
 20260707-s7q4-deselect-tiber-dashboard-task-when-clicking-outside-selected-task-actions
@@ -23,4 +24,3 @@
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
-20260711-xdvv-make-final-review-dispositions-configurable-by-severity-and-lens
