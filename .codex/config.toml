@@ -1,0 +1,21 @@
+# Project-scoped MCP servers. Both commands are supplied by this project's
+# development environment, rather than installed through Codex globally.
+
+[mcp_servers.emc]
+command = "emc"
+args = ["mcp", "stdio"]
+cwd = "/home/jwilger/projects/ai-plugins"
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+enabled = true
+required = true
+
+[mcp_servers.tiber]
+command = "tiber"
+args = ["mcp", "stdio"]
+cwd = "/home/jwilger/projects/ai-plugins"
+env_vars = ["SSH_AUTH_SOCK"]
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+enabled = true
+required = true
