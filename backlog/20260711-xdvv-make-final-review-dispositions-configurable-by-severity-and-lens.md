@@ -17,6 +17,7 @@ Audit the current final-review severity and disposition behavior, then support r
 
 - [ ] Document which parts of reviewer severity, verifier challenge, and disposition routing already exist before changing behavior.
 - [ ] Reviewers assign exactly one of CRITICAL, MAJOR, MINOR, or TRIVIAL to each finding.
+- [ ] The verifier can confirm or challenge a finding's assigned severity with an auditable rationale.
 
 ## Subtasks
 
