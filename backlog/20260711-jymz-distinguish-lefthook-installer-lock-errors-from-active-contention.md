@@ -17,6 +17,8 @@ Final review classified this operability observation as MINOR and non-blocking. 
 
 ## Acceptance criteria
 
+- [ ] Actual nonblocking lock contention retains the existing locked diagnostic and retry guidance.
+
 ## Subtasks
 
 ## Notes / Log
