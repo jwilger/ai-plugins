@@ -4,10 +4,15 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    emc = {
+      url = "git+https://git.johnwilger.com/slipstream/emc";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
+    };
   };
 
   outputs =
-    { nixpkgs, flake-utils, ... }:
+    { nixpkgs, flake-utils, emc, ... }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
@@ -44,6 +49,7 @@
             bats
             actionlint
             yq-go
+            emc.packages.${system}.default
           ];
 
           shellHook = ''

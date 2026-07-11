@@ -24,6 +24,13 @@ setup() {
   chmod +x "$PROMPTFOO_FAKE_BIN"
 }
 
+@test "development shell starts the EMC MCP server" {
+  run bash -c 'printf "%s\\n" '\''{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}'\'' | timeout 30s nix develop --ignore-environment "$1" -c emc mcp stdio' _ "$ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"emc"'* ]]
+}
+
 run_manifest_server_with_restricted_path() {
   local manifest="$1"
   local server="$2"
