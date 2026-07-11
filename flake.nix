@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     emc = {
-      url = "git+https://git.johnwilger.com/slipstream/emc";
+      url = "github:jwilger/emc";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
     };
@@ -32,6 +32,7 @@
             ripgrep
             fd
             nodejs_22
+            nix
             cargo
             cargo-mutants
             cargo-zigbuild
