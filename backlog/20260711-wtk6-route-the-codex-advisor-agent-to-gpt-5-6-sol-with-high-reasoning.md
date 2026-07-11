@@ -16,6 +16,7 @@ Configure the advisor plugin's Codex-facing agent routing so advisor work uses g
 ## Acceptance criteria
 
 - [ ] Codex advisor-agent invocations select gpt-5.6-sol.
+- [ ] Codex advisor-agent invocations use high reasoning effort, with focused tests or eval evidence.
 
 ## Subtasks
 
