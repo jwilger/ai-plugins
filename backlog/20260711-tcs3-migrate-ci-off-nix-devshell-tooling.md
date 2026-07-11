@@ -17,6 +17,8 @@ The current CI jobs run through `nix develop`, which realizes the project devshe
 
 ## Acceptance criteria
 
+- [ ] GitHub Actions CI does not invoke Nix or realize flake devshell outputs.
+
 ## Subtasks
 
 ## Notes / Log
