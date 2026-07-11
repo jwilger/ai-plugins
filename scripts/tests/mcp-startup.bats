@@ -507,7 +507,7 @@ install_stale_tiber_cache_launcher() {
   cd "$ROOT/plugins/agentic-systems-engineering"
 
   run env PROMPTFOO_MCP_STATE_DIR="$TMPROOT/promptfoo-state" \
-    timeout 5s ./bin/promptfoo-mcp
+    timeout 5s ./bin/promptfoo-mcp </dev/null
 
   [ "$status" -eq 0 ]
   [[ "$output" != *"EROFS"* ]]
