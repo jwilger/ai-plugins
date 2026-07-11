@@ -18,6 +18,7 @@ Audit existing engineering-standards and development-discipline skills first. Th
 ## Acceptance criteria
 
 - [ ] Existing CI-related plugin and skill guidance is audited, and the new responsibility boundaries avoid duplication.
+- [ ] Generic guidance expresses CI as dependency stages, runs independent same-stage checks in parallel, and gates slow or expensive stages on successful fast checks.
 
 ## Subtasks
 
