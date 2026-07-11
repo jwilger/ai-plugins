@@ -18,6 +18,7 @@ Final review classified this architecture/operability/production-risk observatio
 ## Acceptance criteria
 
 - [ ] After a successful reinstall, only the active installer-owned Lefthook GC root remains.
+- [ ] Interrupted or failed reinstalls retain every GC root still needed by an active old-or-new launcher state.
 
 ## Subtasks
 
