@@ -30,7 +30,7 @@ client data, proprietary excerpts, auth material, or private transcripts.
 Use the Nix devshell — do not install global toolchains by hand.
 
 ```shell
-nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats
+nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats, lefthook
 ```
 
 **Critical convention:** anything npm would normally install "globally" must
@@ -75,18 +75,61 @@ it blocks feature work, points to the linked-worktree command above, and
 distinguishes ordinary local changes from the common case where the dirty
 worktree already matches the upstream branch after a fetch.
 
-Install the shared hooks once from the main checkout:
+Install the committed Lefthook configuration from the main checkout:
 
 ```shell
 just worktree-hooks
 ```
 
-The installed hooks do two things:
+Existing clones that installed the former direct shell hooks must rerun this
+command after updating to the Lefthook migration. Rerun it after any
+behavior-affecting change to `lefthook.yml` or
+`scripts/install-worktree-hooks.sh`, and whenever `flake.nix` or `flake.lock`
+changes the exported Lefthook runtime—even when its displayed version is
+unchanged. Normal installation is deliberately refused from a linked worktree
+because the installed runtime and configuration are shared by every worktree.
+
+The Lefthook-managed hooks do two things:
 
 - `pre-commit` and `pre-push` run `scripts/worktree-guard.sh`, which blocks
   commits and pushes from the main checkout while allowing linked worktrees.
 - `post-checkout` runs `scripts/worktree-bootstrap.sh`, which is inert in the
   main checkout and bootstraps linked worktrees once.
+
+The installer serializes concurrent runs with `flock`, registers the
+flake-selected Lefthook store path as a repository-local Nix garbage-collection
+root, validates and snapshots `lefthook.yml`, and replaces each launcher with an
+atomic rename. Before replacing a foreign regular-file or symlink hook, it
+copies that hook to the next unique `*.worktrees-backup` path. It does not
+execute or chain those archival backups: inspect each reported backup and
+migrate behavior that must remain active into `lefthook.yml` before deleting it.
+If installation stops partway through, every hook path is still either the
+complete old hook or the complete new launcher; fix the reported failure and
+rerun `just worktree-hooks` to converge. `flock` releases automatically after
+normal exit or a crash, and the next run removes abandoned staging directories.
+
+`LEFTHOOK_CONFIG` pins the main snapshot, but Lefthook still merges a
+checkout-local `lefthook-local.yml` into delegated jobs. Treat that file as an
+intentional local override, not as part of the installed snapshot. The mandatory
+worktree safety pass runs before Lefthook. Every launcher also passes
+`--no-auto-install`, so an ordinary local `no_auto_install: false` override
+cannot replace the repository-owned launcher.
+
+Launchers derive Git's common directory at runtime and contain no checkout-path
+literals. If a clone is moved, rerun `just worktree-hooks` from its new location
+to repair the indirect Nix GC-root registration before the old auto-root is
+garbage-collected.
+
+The mandatory safety scripts themselves remain checkout-relative: a hook invokes
+`scripts/worktree-guard.sh` or `scripts/worktree-bootstrap.sh` from the worktree
+where Git ran it. A revision that predates or removes those scripts is not
+hook-compatible and fails closed; do not treat runtime pinning as a promise that
+arbitrary historical revisions can commit or push without the safety scripts.
+
+Each launcher runs its mandatory worktree safety check once before delegating
+to Lefthook, and the matching Lefthook job suppresses only that duplicate pass.
+This keeps normal main-checkout enforcement and linked-worktree bootstrap
+independent of Lefthook job selection while avoiding duplicate work.
 
 For each linked worktree, the bootstrap:
 
@@ -271,10 +314,13 @@ live in [`docs/rules/`](docs/rules/) and every architectural decision is recorde
 in [`docs/adr/`](docs/adr/). In brief: functional-core/imperative-shell design,
 parse-don't-validate semantic types where the stack supports them,
 railway-oriented errors, strict linting, behavior-focused tests, eval-driven
-effectiveness and minimum-necessary context for skills/MCP, trunk push CI plus
-PR/merge-queue CI with required approval in PR mode, Conventional Commits with
-**no `Co-Authored-By` trailers**, and no quality shortcuts. These rules apply to
-**both Claude Code and Codex**;
+effectiveness and minimum-necessary context for skills/MCP, proportional threat
+models derived from actual intended use, trunk push CI plus PR/merge-queue CI
+with required approval in PR mode, Conventional Commits with **no
+`Co-Authored-By` trailers**, and no quality shortcuts. If an hour passes without
+a pushed commit, pause and challenge whether the current increment is
+over-engineered; this is a scope heuristic, not permission to skip a gate. These
+rules apply to **both Claude Code and Codex**;
 `CLAUDE.md` is a thin pointer to this file.
 
 ## CI/CD and release

@@ -13,6 +13,7 @@ Every architectural decision is additionally recorded in [`../adr/`](../adr/).
 - [lints.md](lints.md)
 - [testing.md](testing.md)
 - [evals-and-context.md](evals-and-context.md)
+- [proportional-threat-modeling.md](proportional-threat-modeling.md)
 - [workflow-and-commits.md](workflow-and-commits.md)
 
 Overarching rule: **never take quality shortcuts to save time.** This is a
