@@ -17,6 +17,8 @@ Audit existing engineering-standards and development-discipline skills first. Th
 
 ## Acceptance criteria
 
+- [ ] Existing CI-related plugin and skill guidance is audited, and the new responsibility boundaries avoid duplication.
+
 ## Subtasks
 
 ## Notes / Log
