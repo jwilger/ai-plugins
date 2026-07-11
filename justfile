@@ -110,6 +110,10 @@ improve-evals:
 bats:
     bats $(find plugins scripts -name '*.bats' | sort)
 
+# Local-only EMC devshell coverage. This intentionally does not run in CI.
+emc-check:
+    bats tests/emc-devshell.bats
+
 # Install Lefthook-managed hooks for worktree bootstrap and main-checkout enforcement.
 worktree-hooks:
     scripts/install-worktree-hooks.sh

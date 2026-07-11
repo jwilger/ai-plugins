@@ -4,15 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    emc = {
-      url = "github:jwilger/emc";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
-    };
   };
 
   outputs =
-    { nixpkgs, flake-utils, emc, ... }:
+    { nixpkgs, flake-utils, ... }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
@@ -50,7 +45,6 @@
             bats
             actionlint
             yq-go
-            emc.packages.${system}.default
           ];
 
           shellHook = ''
@@ -67,15 +61,38 @@
             export DEPENDENCIES_DIR="$PWD/.dependencies"
             mkdir -p \
               "$DEPENDENCIES_DIR/npm/bin" \
-              "$DEPENDENCIES_DIR/npm-cache"
+              "$DEPENDENCIES_DIR/npm-cache" \
+              "$DEPENDENCIES_DIR/cargo"
 
             # npm / node — `npm install -g <pkg>` installs here, bins on PATH.
             export NPM_CONFIG_PREFIX="$DEPENDENCIES_DIR/npm"
             export NPM_CONFIG_CACHE="$DEPENDENCIES_DIR/npm-cache"
             export NPM_CONFIG_USERCONFIG="$DEPENDENCIES_DIR/npmrc"
 
-            # Put the project-local bin dir first so locally installed tools win.
-            export PATH="$DEPENDENCIES_DIR/npm/bin:$PATH"
+            # Cargo — project-local installs and registry state stay out of $HOME.
+            export CARGO_HOME="$DEPENDENCIES_DIR/cargo"
+            export CARGO_INSTALL_ROOT="$CARGO_HOME"
+
+            # Put project-local installs first so locally installed tools win.
+            export PATH="$CARGO_INSTALL_ROOT/bin:$DEPENDENCIES_DIR/npm/bin:$PATH"
+
+            # EMC is local development tooling. GitHub Actions deliberately skips
+            # this installation; CI must not realize or exercise EMC.
+            if [ -z "''${CI:-}" ]; then
+              emc_version="0.1.13"
+              emc_bin="$CARGO_INSTALL_ROOT/bin/emc"
+
+              if [ -x "$emc_bin" ] && cargo install --list | grep -Fqx "emc v$emc_version:"; then
+                echo "EMC $emc_version is already installed."
+              else
+                echo "Installing EMC $emc_version."
+                if ! cargo install --locked --force --version "$emc_version" emc; then
+                  printf 'emc.install_failed version=%s: check network access and retry with cargo install --locked --force --version %s emc.\n' \
+                    "$emc_version" "$emc_version" >&2
+                  exit 1
+                fi
+              fi
+            fi
 
             echo "ai-plugins devshell ready."
             echo "  just:  $(just --version) · node $(node --version) · npm $(npm --version)"
