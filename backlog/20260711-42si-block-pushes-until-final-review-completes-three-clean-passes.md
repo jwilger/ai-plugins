@@ -17,6 +17,8 @@ The development-discipline final-review workflow correctly states that publicati
 
 ## Acceptance criteria
 
+- [ ] A push or merge of an in-scope change is blocked unless the authoritative final-review state records three consecutive clean iterations for the exact current diff hash.
+
 ## Subtasks
 
 ## Notes / Log
