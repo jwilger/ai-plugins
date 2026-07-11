@@ -17,6 +17,8 @@ A completed feature branch was fast-forwarded into the main coordination checkou
 
 ## Acceptance criteria
 
+- [ ] Feature-edit and integration workflows have a mechanical guard that detects use of the main coordination checkout before repository state is changed.
+
 ## Subtasks
 
 ## Notes / Log
