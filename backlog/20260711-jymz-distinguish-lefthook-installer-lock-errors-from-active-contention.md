@@ -18,6 +18,7 @@ Final review classified this operability observation as MINOR and non-blocking. 
 ## Acceptance criteria
 
 - [ ] Actual nonblocking lock contention retains the existing locked diagnostic and retry guidance.
+- [ ] Lock-file open or creation failures emit a distinct diagnostic that preserves the underlying filesystem error and recovery direction.
 
 ## Subtasks
 
