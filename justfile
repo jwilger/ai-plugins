@@ -110,7 +110,7 @@ improve-evals:
 bats:
     bats $(find plugins scripts -name '*.bats' | sort)
 
-# Install shared git hooks for worktree bootstrap and main-checkout enforcement.
+# Install Lefthook-managed hooks for worktree bootstrap and main-checkout enforcement.
 worktree-hooks:
     scripts/install-worktree-hooks.sh
 

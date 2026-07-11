@@ -9,6 +9,10 @@
   formatting, tests, marketplace validation, and Codex cross-harness manifest
   verification.
 - **Conventional Commits.** Commit between BDD steps once `just ci` is green.
+- **One-hour scope check.** As a rough heuristic, if no commit has been pushed
+  in the past hour, pause and ask whether the current increment is being
+  over-engineered. Prefer a smaller semantic increment when possible; the
+  heuristic never permits skipping tests, review, or another required gate.
 - **No `Co-Authored-By` trailers** (and no other AI-attribution trailers).
 - **Forge-agnostic, no preference:** GitHub, Forgejo, and GitLab are first-class
   peers. Use the forge tooling that matches the repository remote.

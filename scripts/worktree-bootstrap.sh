@@ -2,6 +2,8 @@
 # Bootstrap a linked worktree for this repository.
 set -euo pipefail
 
+[ "${AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN:-}" != worktree-bootstrap ] || exit 0
+
 git_dir="$(cd "$(git rev-parse --git-dir)" && pwd -P)"
 common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
 

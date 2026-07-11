@@ -1,0 +1,17 @@
+assert_lefthook_installed: true
+no_auto_install: true
+
+pre-commit:
+  jobs:
+    - name: worktree-guard
+      run: scripts/worktree-guard.sh
+
+pre-push:
+  jobs:
+    - name: worktree-guard
+      run: scripts/worktree-guard.sh
+
+post-checkout:
+  jobs:
+    - name: worktree-bootstrap
+      run: scripts/worktree-bootstrap.sh

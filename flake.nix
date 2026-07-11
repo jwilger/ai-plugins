@@ -21,6 +21,7 @@
           # (npm -g, etc.) is redirected into ./.dependencies/ by the shellHook
           # below so it never leaks into your home directory.
           packages = with pkgs; [
+            bash
             git
             jq
             ripgrep
@@ -37,6 +38,8 @@
             rustup
             zig
             just
+            lefthook
+            util-linux
             prettier
             bats
             actionlint
@@ -44,6 +47,12 @@
           ];
 
           shellHook = ''
+            # Give hook installation an unambiguous, lockfile-selected Lefthook
+            # source and expected version.
+            export AI_PLUGINS_LEFTHOOK_BIN="${pkgs.lefthook}/bin/lefthook"
+            export AI_PLUGINS_LEFTHOOK_STORE_PATH="${pkgs.lefthook}"
+            export AI_PLUGINS_LEFTHOOK_VERSION="${pkgs.lefthook.version}"
+
             # --- Project-local "global" dependency sandbox ---------------------
             # Everything a package manager would normally drop into $HOME instead
             # lands in ./.dependencies/ (git-ignored). Blow it away any time with

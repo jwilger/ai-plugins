@@ -2,6 +2,8 @@
 # Block commits and pushes from the main checkout. Linked worktrees are allowed.
 set -euo pipefail
 
+[ "${AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN:-}" != worktree-guard ] || exit 0
+
 git_dir="$(cd "$(git rev-parse --git-dir)" && pwd -P)"
 common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
 
