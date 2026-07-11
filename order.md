@@ -1,4 +1,3 @@
-20260709-s6vr-tighten-final-review-relevance-using-auto-review-patterns
 20260711-xdvv-make-final-review-dispositions-configurable-by-severity-and-lens
 20260707-sf8b-allow-drag-and-drop-reprioritization-in-the-tiber-dashboard-backlog
 20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
