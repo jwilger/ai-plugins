@@ -27,3 +27,4 @@
 20260711-95gy-retire-superseded-lefthook-nix-gc-roots-after-successful-reinstall
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
+20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
