@@ -1,10 +1,12 @@
 name: CI
 
 # Public repo: pull_request is reachable from forks, so every job below stays
-# on GitHub-hosted ubuntu-latest. merge_group is included alongside pull_request
-# so the "CI gate" required check runs before a PR can merge.
+# on GitHub-hosted ubuntu-latest. Direct pushes to trunk run the same gate, and
+# merge_group preserves coverage for repositories that opt into PR mode.
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   merge_group:
@@ -74,8 +76,7 @@ jobs:
           nix develop -c scripts/evals/run.sh --dry-run
           nix develop -c scripts/evals/run.sh --suite canary --dry-run
 
-  # Single required status check for branch protection: succeeds only when
-  # every required job did.
+  # Single aggregate status: succeeds only when every required job did.
   gate:
     name: CI gate
     runs-on: ubuntu-latest

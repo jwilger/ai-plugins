@@ -39,6 +39,8 @@
             just
             prettier
             bats
+            actionlint
+            yq-go
           ];
 
           shellHook = ''

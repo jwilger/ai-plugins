@@ -7,7 +7,11 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
+ci: validate-marketplace github-actions tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
+
+# Validate GitHub Actions syntax and semantics used by repository tests.
+github-actions:
+    actionlint
 
 # Rust gates for the tiber plugin workspace.
 tiber-rust:

@@ -8,6 +8,7 @@ setup() {
   git init -q "$REPO"
   git -C "$REPO" config user.email test@example.com
   git -C "$REPO" config user.name Test
+  git -C "$REPO" config commit.gpgsign false
   printf '%s\n' base >"$REPO/tracked.txt"
   git -C "$REPO" add tracked.txt
   git -C "$REPO" commit -qm base
@@ -90,6 +91,7 @@ scope_hash() {
   git init -q "$submodule"
   git -C "$submodule" config user.email test@example.com
   git -C "$submodule" config user.name Test
+  git -C "$submodule" config commit.gpgsign false
   printf '%s\n' first >"$submodule/content.txt"
   git -C "$submodule" add content.txt
   git -C "$submodule" commit -qm first

@@ -271,16 +271,17 @@ live in [`docs/rules/`](docs/rules/) and every architectural decision is recorde
 in [`docs/adr/`](docs/adr/). In brief: functional-core/imperative-shell design,
 parse-don't-validate semantic types where the stack supports them,
 railway-oriented errors, strict linting, behavior-focused tests, eval-driven
-effectiveness and minimum-necessary context for skills/MCP, PR-based CI with
-required approval, Conventional Commits with **no `Co-Authored-By` trailers**,
-and no quality shortcuts. These rules apply to **both Claude Code and Codex**;
+effectiveness and minimum-necessary context for skills/MCP, trunk push CI plus
+PR/merge-queue CI with required approval in PR mode, Conventional Commits with
+**no `Co-Authored-By` trailers**, and no quality shortcuts. These rules apply to
+**both Claude Code and Codex**;
 `CLAUDE.md` is a thin pointer to this file.
 
 ## CI/CD and release
 
 CI runs on GitHub Actions (`.github/workflows/ci.yml`):
 
-- **`ci.yml`** (PR + merge queue): `just ci`, marketplace
+- **`ci.yml`** (pushes to `main` + PR + merge queue): `just ci`, marketplace
   validation (including the cross-harness manifest sync-validator), Codex
   manifest checks, promptfoo eval dry-run wiring, and a final `CI gate`
   aggregator job so branch protection has a single required check.
