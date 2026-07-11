@@ -27,17 +27,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1781188300,
-        "narHash": "sha256-Vxs7/PkRmNp4nCgdzbUg0XiOEePv1oeMP1zjiEMRUA4=",
-        "ref": "refs/heads/main",
-        "rev": "2227a6c55f4b6dc733add84ae9ffe70483bf0f53",
-        "revCount": 584,
-        "type": "git",
-        "url": "https://git.johnwilger.com/slipstream/emc"
+        "lastModified": 1783795945,
+        "narHash": "sha256-WQo97jrivjY5dsfDnFyMEe45AClXG/YpXtrn5QULn5s=",
+        "owner": "jwilger",
+        "repo": "emc",
+        "rev": "05740258295313d776f75009b9af823f2c97b6c9",
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "https://git.johnwilger.com/slipstream/emc"
+        "owner": "jwilger",
+        "repo": "emc",
+        "type": "github"
       }
     },
     "fenix": {
