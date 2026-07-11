@@ -3,9 +3,6 @@ title: Use a real CLI argument parser for Tiber commands and help
 blocked_by: []
 blocks: []
 tags: []
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
