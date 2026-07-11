@@ -22,3 +22,4 @@
 20260710-rhk3-mechanically-enforce-three-clean-final-review-runs-before-pr-or-main-merge
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
+20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
