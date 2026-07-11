@@ -15,6 +15,8 @@ Audit the current final-review severity and disposition behavior, then support r
 
 ## Acceptance criteria
 
+- [ ] Document which parts of reviewer severity, verifier challenge, and disposition routing already exist before changing behavior.
+
 ## Subtasks
 
 ## Notes / Log
