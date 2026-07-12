@@ -1,19 +1,19 @@
 ---
-title: Add CI setup skills with staged fast-fail gating
+title: Add staged fast-fail CI gating to engineering-standards scaffold
 blocked_by: []
 blocks: []
-tags: [ci, skills, engineering-standards, workflow-design]
+tags: [ci, engineering-standards, scaffold, workflow-design]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Create reusable skill guidance for designing and scaffolding efficient CI pipelines, with generic principles separated from tool-specific implementation details.
+Extend the existing engineering-standards scaffold guidance so generated CI uses dependency stages: cheap validation first, parallel independent checks within a stage, and expensive checks only after fast gates pass.
 
 ## Context / Why
 
-Audit existing engineering-standards and development-discipline skills first. The generic guidance should model CI as dependency stages: independent checks within a stage run in parallel, but expensive or slow checks depend on a fast validation stage so they do not consume time or compute when cheap checks already fail. Add tool-specific skills or references only where systems such as GitHub Actions, GitLab CI, or Forgejo require materially different syntax or capabilities.
+engineering-standards:scaffold already owns generic CI generation and its playbook, so do not create a competing general CI skill unless trigger evidence proves a distinct user-facing responsibility. Add the reusable staged fast-fail model there, including always-run aggregation/reporting and deliberate cancellation behavior. Add platform-specific references only where GitHub Actions, GitLab CI, Forgejo, or another system has irreducible syntax or capability differences.
 
 ## Acceptance criteria
 
