@@ -16,6 +16,7 @@ The current rule already says primitives, built-ins, and structural types belong
 ## Acceptance criteria
 
 - [ ] Canonical rules explicitly state that raw strings, numbers, booleans, UUIDs, built-ins, structural records, and type aliases over them are not semantic domain types.
+- [ ] Guidance demonstrates named wrappers and sum types with invariant-safe construction, immediate boundary parsing, and no downstream revalidation.
 
 ## Subtasks
 
