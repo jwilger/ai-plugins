@@ -19,6 +19,7 @@ A completed feature branch was fast-forwarded into the main coordination checkou
 
 - [ ] Feature-edit and integration workflows have a mechanical guard that detects use of the main coordination checkout before repository state is changed.
 - [ ] The guard preserves documented coordination operations and provides a clear worktree remediation path when it blocks an action.
+- [ ] Supported agent workflows run a checkout guard before edit tools mutate project files, and Git integration guards cover the normal local merge, fast-forward, pull, commit, and push paths.
 
 ## Subtasks
 
