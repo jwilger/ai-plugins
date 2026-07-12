@@ -1,5 +1,4 @@
 20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help
-20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
 20260708-puyh-add-development-workflow-router-skill
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
@@ -12,6 +11,7 @@
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
+20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
