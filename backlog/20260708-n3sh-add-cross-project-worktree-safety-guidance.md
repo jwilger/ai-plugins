@@ -2,16 +2,18 @@
 title: Add cross-project worktree safety guidance
 blocked_by: []
 blocks: []
-tags: []
+tags: [worktrees, guidance, developer-experience, evals]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Teach agents to detect coordination checkouts versus feature worktrees, respect repository worktree policies before editing, and avoid leaving dirty main checkouts when changes merely mirror upstream.
+Extend portable worktree guidance with upstream-equivalent dirty-main diagnosis and no-op edit avoidance, complementing the separate mechanical guard task.
 
 ## Context / Why
+
+The repo-local agent checkout guard already detects coordination checkouts and upstream-equivalent dirty state, while the reusable worktrees plugin mainly guards commit/push. Teach the portable workflow to apply only when a repository advertises a coordination-checkout policy, inspect Git dir versus common dir before edits, preserve genuine user changes, distinguish clean/local-dirty/upstream-equivalent states, and route feature work to a linked worktree. Mechanical integration enforcement remains in 20260711-qhgu.
 
 ## Acceptance criteria
 
