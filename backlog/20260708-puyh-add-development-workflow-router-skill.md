@@ -1,6 +1,6 @@
 ---
 title: Add development workflow router skill
-blocked_by: []
+blocked_by: [20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline]
 blocks: []
 tags: []
 pr_mr_url: 

@@ -1,7 +1,7 @@
 ---
 title: Add cross-project change preflight skill to development-discipline
 blocked_by: []
-blocks: []
+blocks: [20260708-puyh-add-development-workflow-router-skill]
 tags: []
 pr_mr_url: 
 pr_mr_status: 
