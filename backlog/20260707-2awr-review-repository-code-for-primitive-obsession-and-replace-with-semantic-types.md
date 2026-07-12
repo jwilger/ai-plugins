@@ -25,6 +25,7 @@ This is a repository-wide implementation task, not only a report, but it must pr
 - [ ] (s1) Inventory domain boundaries and primitive-obession violations across all code-bearing components
 - [ ] (s2) Remediate Tiber Rust domain types and verify public behavior
 - [ ] (s3) Remediate development-discipline Rust domain types and verify coordinator behavior
+- [ ] (s4) Remediate remaining plugin, script, and tool domain slices from the inventory
 
 ## Notes / Log
 
