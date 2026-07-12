@@ -20,7 +20,7 @@ The current CLI returns the hand-written usage error for standard help and dupli
 
 - [x] Root -h/--help and help for every command and nested command group exit successfully and are generated from the parser definition.
 - [x] Missing or invalid arguments produce parser-generated usage on the appropriate stream with a stable nonzero exit status, covered by focused CLI tests.
-- [ ] Every existing valid CLI invocation and scriptable output remains backward-compatible unless an intentional breaking change is separately documented and approved.
+- [x] Every existing valid CLI invocation and scriptable output remains backward-compatible unless an intentional breaking change is separately documented and approved.
 - [ ] The hand-written command dispatcher and usage string are no longer independent sources of truth, and the full tiber-cli test suite passes.
 
 ## Subtasks
