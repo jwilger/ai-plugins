@@ -130,7 +130,7 @@ observations unless the user asks.
 At the start of work on one ticket, ask the user once for an unrelated-finding
 disposition matrix. It may set `address-now`, `follow-up-ticket`, or `report`
 by lens and/or severity class, plus a default for anything unmatched.
-For example, architecture notes can be report-only while release warnings
+For example, architecture observations can be report-only while release findings
 become follow-up tickets. For a multi-ticket automation, ask once before the
 automation begins and retain that policy for its duration. Do not ask again for
 every review iteration or finding.
@@ -156,7 +156,7 @@ requiring a separate SQLite client.
 
 Use a security-impact assessment separate from review severity: `none`,
 `minor`, `moderate`, `major`, or `critical`. Do not infer this threshold from a
-finding's `error`, `warning`, or `note` review severity. A major-or-higher
+finding's `CRITICAL`, `MAJOR`, `MINOR`, or `TRIVIAL` review severity. A major-or-higher
 security issue, or any suspected PII exposure at any security-impact level, is
 an exception: unless it must be fixed in the current ticket, document it as a
 high-priority bug ticket even when the selected disposition is report-only.
