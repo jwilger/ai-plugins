@@ -20,6 +20,7 @@ engineering-standards:scaffold already owns generic CI generation and its playbo
 - [ ] Existing CI-related plugin and skill guidance is audited, and the new responsibility boundaries avoid duplication.
 - [ ] Generic guidance expresses CI as dependency stages, runs independent same-stage checks in parallel, and gates slow or expensive stages on successful fast checks.
 - [ ] Tool-specific skills or references are added only where a CI platform’s syntax or capabilities cannot be expressed clearly by the generic skill.
+- [ ] The existing scaffold skill and playbook are extended rather than duplicating their trigger and responsibility, unless a separate skill is justified by explicit trigger evidence.
 
 ## Subtasks
 
