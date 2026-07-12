@@ -18,6 +18,7 @@ Discovered while validating the unrelated Clap parser release slice. The field p
 ## Acceptance criteria
 
 - [ ] The intended Claude Code and Codex semantics of new-task model invocation metadata are documented from authoritative harness behavior.
+- [ ] Tiber validates for Codex without breaking the intentional Claude Code new-task behavior or duplicating harness-specific skill content unnecessarily.
 
 ## Subtasks
 
