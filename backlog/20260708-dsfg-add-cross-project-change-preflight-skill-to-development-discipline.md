@@ -20,6 +20,7 @@ Obvious documentation, test, schema, configuration, packaging, release, migratio
 - [ ] development-discipline provides a preflight skill or equivalent guidance that classifies change type and lists affected surfaces before implementation begins.
 - [ ] Guidance covers at least behavior, tests, docs, config, packaging, release artifacts, migrations, operational startup, evals, and user workflows as possible affected surfaces.
 - [ ] The change includes behavior eval cases or equivalent acceptance fixtures proving agents perform the preflight before editing in representative repositories.
+- [ ] Before edits, the workflow emits a concise change classification, applicable affected surfaces, supporting repository evidence, and reasoned not-applicable entries.
 
 ## Subtasks
 
