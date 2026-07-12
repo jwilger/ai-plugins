@@ -19,6 +19,7 @@ A MINOR lightweight-review finding during the Clap parser ticket observed that c
 
 - [ ] Focused public CLI tests cover an unknown root command or option and an invalid nested command.
 - [ ] Every covered invalid invocation asserts exit code 2, empty stdout, and parser-generated usage on stderr.
+- [ ] The tests remain behavior-focused and the full tiber-cli suite passes without reintroducing a manual usage source.
 
 ## Subtasks
 
