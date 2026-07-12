@@ -17,6 +17,8 @@ A MINOR lightweight-review finding during the Clap parser ticket observed that c
 
 ## Acceptance criteria
 
+- [ ] Focused public CLI tests cover an unknown root command or option and an invalid nested command.
+
 ## Subtasks
 
 ## Notes / Log
