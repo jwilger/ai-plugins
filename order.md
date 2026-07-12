@@ -29,4 +29,3 @@
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260711-42si-block-pushes-until-final-review-completes-three-clean-passes
 20260712-i76j-add-ci-wait-and-hang-diagnosis-guidance-to-shared-workflow-rules
-20260707-sf8b-allow-drag-and-drop-reprioritization-in-the-tiber-dashboard-backlog
