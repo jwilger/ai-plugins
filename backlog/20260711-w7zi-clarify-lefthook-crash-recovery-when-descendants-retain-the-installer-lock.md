@@ -19,6 +19,7 @@ AGENTS currently says flock releases after a crash, but the intentional no-fork 
 
 - [ ] Recovery guidance distinguishes leader exit from the last lock-inheriting descendant exiting and tells the user to wait for or terminate the surviving process group before retrying.
 - [ ] AGENTS and any installer recovery documentation use the same corrected descendant-held-lock explanation and remediation.
+- [ ] The existing regression coverage proving that a surviving child retains the lock remains passing and is referenced by the documentation change.
 
 ## Subtasks
 
