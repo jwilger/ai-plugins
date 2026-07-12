@@ -2,16 +2,18 @@
 title: Strengthen cross-project Tiber task workflow guidance
 blocked_by: []
 blocks: []
-tags: []
+tags: [tiber, workflow, worktrees, evals]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Strengthen the Tiber plugin guidance so agents in any repository handle task state deliberately: capture backlog tasks without starting them, move active work to in-progress, isolate concurrent work by branch/worktree, and keep PR/MR status current.
+Complete the remaining cross-project Tiber workflow guidance for concurrent active-task isolation and PR/MR lifecycle tracking while preserving already-delivered backlog capture and transition behavior.
 
 ## Context / Why
+
+Backlog-only capture, explicit transition before active work, and PR/MR status fields already exist through completed Tiber work. The remaining delta is to make concurrent in-progress isolation unambiguous, ensure claims/branches/worktrees stay one-per-active-task, and add missing behavior coverage for PR URL and status changes through review and merge. Do not reimplement the existing new-task or transition guidance.
 
 ## Acceptance criteria
 
