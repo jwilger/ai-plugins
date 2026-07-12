@@ -4,13 +4,13 @@
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-55yg-add-final-review-readiness-gate-to-development-discipline
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
-20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260709-spx8-update-all-evals-to-use-gpt-5-6-model-family-when-running-against-codex
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
+20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
