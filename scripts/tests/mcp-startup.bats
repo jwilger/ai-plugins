@@ -205,9 +205,11 @@ run_tiber_manifest_server_with_default_home_codex_cache() {
   local command
   local args
   local home_cache="$TMPROOT/home/.codex/plugins/cache/ai-plugins/tiber"
+  local version
 
   mkdir -p "$home_cache"
-  ln -sfn "$ROOT/plugins/tiber" "$home_cache/0.6.1"
+  version="$(jq -r '.version' "$ROOT/plugins/tiber/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/tiber" "$home_cache/$version"
 
   command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
   mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
@@ -492,8 +494,11 @@ run_development_discipline_cargo_fallback_without_home() {
 
 install_tiber_cache_launcher() {
   local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/tiber"
+  local version
+
   mkdir -p "$cache_parent"
-  ln -sfn "$ROOT/plugins/tiber" "$cache_parent/0.6.1"
+  version="$(jq -r '.version' "$ROOT/plugins/tiber/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/tiber" "$cache_parent/$version"
 }
 
 install_promptfoo_cache_launcher() {
