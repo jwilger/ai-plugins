@@ -18,6 +18,7 @@ Final review of the Clap migration confirmed this behavior already existed in th
 ## Acceptance criteria
 
 - [ ] When a value-taking option is immediately followed by a recognized option token, Tiber emits parser usage on stderr, exits with the stable parser error status, and performs no task or filesystem write.
+- [ ] Legitimate hyphen-leading option values remain expressible through a documented unambiguous syntax such as `--option=--value`.
 
 ## Subtasks
 
