@@ -26,6 +26,7 @@ This is a repository-wide implementation task, not only a report, but it must pr
 - [ ] (s2) Remediate Tiber Rust domain types and verify public behavior
 - [ ] (s3) Remediate development-discipline Rust domain types and verify coordinator behavior
 - [ ] (s4) Remediate remaining plugin, script, and tool domain slices from the inventory
+- [ ] (s5) Run repository-wide validation and document every justified boundary primitive
 
 ## Notes / Log
 
