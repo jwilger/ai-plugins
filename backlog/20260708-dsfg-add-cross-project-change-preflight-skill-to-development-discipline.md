@@ -1,7 +1,7 @@
 ---
 title: Add cross-project change preflight skill to development-discipline
 blocked_by: []
-blocks: [20260708-puyh-add-development-workflow-router-skill]
+blocks: [20260708-puyh-add-development-workflow-router-skill, 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails]
 tags: [development-discipline, preflight, workflow, evals]
 pr_mr_url: 
 pr_mr_status: 

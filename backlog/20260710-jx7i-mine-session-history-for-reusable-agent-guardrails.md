@@ -1,6 +1,6 @@
 ---
 title: Mine session history for reusable agent guardrails
-blocked_by: []
+blocked_by: [20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline]
 blocks: []
 tags: [development-discipline, skills, hindsight, guardrails, privacy, workflow]
 pr_mr_url: 
