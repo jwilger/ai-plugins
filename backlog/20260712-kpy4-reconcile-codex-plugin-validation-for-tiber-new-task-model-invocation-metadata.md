@@ -17,6 +17,8 @@ Discovered while validating the unrelated Clap parser release slice. The field p
 
 ## Acceptance criteria
 
+- [ ] The intended Claude Code and Codex semantics of new-task model invocation metadata are documented from authoritative harness behavior.
+
 ## Subtasks
 
 ## Notes / Log
