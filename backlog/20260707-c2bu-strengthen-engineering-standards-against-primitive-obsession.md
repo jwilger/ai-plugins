@@ -1,7 +1,7 @@
 ---
 title: Strengthen engineering standards against primitive obsession
 blocked_by: []
-blocks: []
+blocks: [20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types]
 tags: []
 ---
 

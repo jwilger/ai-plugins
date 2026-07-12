@@ -1,6 +1,6 @@
 ---
 title: Review repository code for primitive obsession and replace with semantic types
-blocked_by: []
+blocked_by: [20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession]
 blocks: []
 tags: []
 ---
