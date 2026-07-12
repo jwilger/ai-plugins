@@ -17,6 +17,8 @@ Ensure provider-backed eval homes refresh their seeded Codex credentials after t
 
 ## Acceptance criteria
 
+- [ ] Preparing full-marketplace, targeted-plugins, and no-plugins Codex eval homes replaces stale seeded credentials with the current auth source while preserving mode 0600 and never logging credential contents.
+
 ## Subtasks
 
 ## Notes / Log
