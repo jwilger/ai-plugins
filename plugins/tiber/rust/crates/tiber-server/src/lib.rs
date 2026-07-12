@@ -1,7 +1,7 @@
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use futures_util::stream;
 use std::collections::BTreeMap;
@@ -19,6 +19,10 @@ pub fn router_at(root: PathBuf) -> Router {
     Router::new()
         .route("/", get(board))
         .route("/tasks/{task_ref}", get(task))
+        .route(
+            "/tasks/{task_ref}/prioritize-before/{before_ref}",
+            post(prioritize_before),
+        )
         .route("/events", get(events))
         .route("/docs", get(docs))
         .route("/docs/{*path}", get(doc))
@@ -67,6 +71,32 @@ async fn task(State(state): State<AppState>, Path(task_ref): Path<String>) -> Re
         Err(error) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!("dashboard_task_join source={error}"),
+        )
+            .into_response(),
+    }
+}
+
+async fn prioritize_before(
+    State(state): State<AppState>,
+    Path((task_ref, before_ref)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if headers
+        .get("x-tiber-dashboard-action")
+        .and_then(|value| value.to_str().ok())
+        != Some("prioritize-before")
+    {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let root = state.root.clone();
+    match task::spawn_blocking(move || prioritize_backlog_before(&root, &task_ref, &before_ref))
+        .await
+    {
+        Ok(Ok(())) => axum::http::StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(error)) => (axum::http::StatusCode::BAD_REQUEST, format!("{error}")).into_response(),
+        Err(error) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("dashboard_prioritize_join source={error}"),
         )
             .into_response(),
     }
@@ -240,7 +270,7 @@ fn dashboard_html(root: &FsPath) -> Result<String, tiber_git::Error> {
         ));
     }
     Ok(format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-copy-status aria-live=\"polite\"></p><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Tiber board</title>{}</head><body><header class=\"topbar\"><h1>Tiber</h1><div class=\"topbar-right\"><nav class=\"view-toggle\" aria-label=\"Dashboard views\"><a class=\"view-toggle-btn is-active\" href=\"/\">Board</a><a class=\"view-toggle-btn\" href=\"/docs\">Docs</a></nav><span class=\"topbar-meta\" id=\"generated-at\">updated just now</span><a class=\"external-smoke-link\" data-external-link href=\"https://example.invalid/tiber\">External</a></div></header><main class=\"board\" data-dashboard-board>{}</main><p class=\"sr-only\" data-copy-status aria-live=\"polite\"></p><p class=\"sr-only\" data-link-intercept-status aria-live=\"polite\"></p><p class=\"sr-only\" data-reorder-status aria-live=\"polite\"></p><div hidden data-modal-templates>{}</div><dialog class=\"modal\" data-task-modal><article><button class=\"modal-close\" type=\"button\" data-modal-close aria-label=\"Close\">×</button><div data-modal-content></div></article></dialog>{}</body></html>",
         dashboard_style(),
         column_html,
         tasks.iter().map(|task| modal_html(task, &tasks, root)).collect::<String>(),
@@ -324,12 +354,48 @@ fn dashboard_event_data(root: &FsPath) -> Result<String, tiber_git::Error> {
     ))
 }
 
+fn prioritize_backlog_before(
+    root: &FsPath,
+    task_ref: &str,
+    before_ref: &str,
+) -> Result<(), tiber_git::Error> {
+    let tasks = dashboard_tasks(root)?;
+    let task = resolve_dashboard_task(task_ref, &tasks)
+        .ok_or_else(|| tiber_git::Error::Parse(format!("task_ref_missing ref={task_ref}")))?;
+    let before = resolve_dashboard_task(before_ref, &tasks)
+        .ok_or_else(|| tiber_git::Error::Parse(format!("task_ref_missing ref={before_ref}")))?;
+    if task.status != "backlog" || before.status != "backlog" {
+        return Err(tiber_git::Error::Parse(
+            "dashboard_prioritize_scope status=backlog".to_string(),
+        ));
+    }
+    if task.stem == before.stem {
+        return Ok(());
+    }
+    tiber_git::prioritize_before_at(root, &task.stem, &before.stem)
+}
+
 fn status_sort_key(status: &str) -> usize {
     match status {
         "backlog" => 0,
         "in-progress" => 1,
         "done" => 2,
         _ => 3,
+    }
+}
+
+fn resolve_dashboard_task<'a>(
+    task_ref: &str,
+    tasks: &'a [DashboardTask],
+) -> Option<&'a DashboardTask> {
+    let matches = tasks
+        .iter()
+        .filter(|task| task.stem == task_ref || nickname(&task.stem) == task_ref)
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        matches.into_iter().next()
+    } else {
+        None
     }
 }
 
@@ -348,9 +414,16 @@ fn card_html(task: &DashboardTask, tasks: &[DashboardTask], root: &FsPath) -> St
     let pr_mr = pr_mr_badge_html(task);
     let dependency_attrs = dependency_attrs(task, tasks);
     let task_id = ticket_id(&task.stem);
+    let drag_attrs = if task.status == "backlog" {
+        " draggable=\"true\" data-backlog-draggable=\"true\""
+    } else {
+        ""
+    };
     format!(
-        "<article class=\"card\" data-task-link data-stem=\"{}\" {}><a href=\"/tasks/{}\"><div class=\"card-top\">{}{}{}</div><h3 class=\"card-title\">{}</h3></a><div class=\"card-meta\"><button type=\"button\" class=\"copy-id mono\" data-copy-task-id=\"{}\" aria-label=\"Copy ticket ID {}\" title=\"Copy ticket ID\">{}</button><span class=\"mono nickname\">{}</span><span class=\"link-counts\">{}{}</span></div><div class=\"card-tags\">{}</div><section class=\"card-summary\">{}</section></article>",
+        "<article class=\"card\" data-task-link data-stem=\"{}\" data-status=\"{}\"{} {}><a href=\"/tasks/{}\"><div class=\"card-top\">{}{}{}</div><h3 class=\"card-title\">{}</h3></a><div class=\"card-meta\"><button type=\"button\" class=\"copy-id mono\" data-copy-task-id=\"{}\" aria-label=\"Copy ticket ID {}\" title=\"Copy ticket ID\">{}</button><span class=\"mono nickname\">{}</span><span class=\"link-counts\">{}{}</span></div><div class=\"card-tags\">{}</div><section class=\"card-summary\">{}</section></article>",
         escape_html(&task.stem),
+        escape_html(&task.status),
+        drag_attrs,
         dependency_attrs,
         escape_html(&task.stem),
         rank,
@@ -978,6 +1051,10 @@ a { color: inherit; text-decoration: none; }
 .card.is-dependency { box-shadow: 0 0 0 2px var(--dependency), var(--shadow); }
 .card.is-dependent { box-shadow: 0 0 0 2px var(--dependent), var(--shadow); }
 .card.is-dim { opacity: 0.35; }
+.card.is-dragging { opacity: 0.55; }
+.card.is-drop-target { box-shadow: 0 0 0 2px var(--accent), var(--shadow); transform: translateY(-1px); }
+.card[draggable="true"] { cursor: grab; }
+.card[draggable="true"]:active { cursor: grabbing; }
 .card-top { display: flex; gap: 6px; min-height: 18px; }
 .badge, .pill {
   background: var(--surface-2);
@@ -1123,8 +1200,10 @@ const modalContent = document.querySelector('[data-modal-content]');
 const closeButton = document.querySelector('[data-modal-close]');
 const copyStatus = document.querySelector('[data-copy-status]');
 const interceptStatus = document.querySelector('[data-link-intercept-status]');
+const reorderStatus = document.querySelector('[data-reorder-status]');
 const board = document.querySelector('[data-dashboard-board]');
 let selectedStem = null;
+let draggedStem = null;
 
 function splitRefs(value) {
   return (value || '').split(',').map((item) => item.trim()).filter(Boolean);
@@ -1187,6 +1266,26 @@ function resetCopyButton(copyButton) {
   copyButton.classList.remove('is-copied', 'is-copy-failed');
 }
 
+function clearDropTargets() {
+  document.querySelectorAll('.is-drop-target').forEach((card) => {
+    card.classList.remove('is-drop-target');
+  });
+}
+
+async function prioritizeBefore(taskStem, beforeStem) {
+  const response = await fetch(
+    `/tasks/${encodeURIComponent(taskStem)}/prioritize-before/${encodeURIComponent(beforeStem)}`,
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'x-tiber-dashboard-action': 'prioritize-before' },
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+}
+
 async function copyText(text) {
   if (navigator.clipboard?.writeText) {
     try {
@@ -1243,6 +1342,53 @@ document.addEventListener('click', async (event) => {
     event.preventDefault();
     interceptStatus.textContent = `intercepted ${externalLink.href}`;
   }
+});
+
+board.addEventListener('dragstart', (event) => {
+  const card = event.target.closest('[data-backlog-draggable]');
+  if (!card) return;
+  draggedStem = card.dataset.stem;
+  card.classList.add('is-dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', draggedStem);
+});
+
+board.addEventListener('dragover', (event) => {
+  const target = event.target.closest('[data-backlog-draggable]');
+  if (!draggedStem || !target || target.dataset.stem === draggedStem) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  clearDropTargets();
+  target.classList.add('is-drop-target');
+});
+
+board.addEventListener('dragleave', (event) => {
+  const target = event.target.closest('[data-backlog-draggable]');
+  if (!target || target.contains(event.relatedTarget)) return;
+  target.classList.remove('is-drop-target');
+});
+
+board.addEventListener('drop', async (event) => {
+  const target = event.target.closest('[data-backlog-draggable]');
+  const taskStem = draggedStem || event.dataTransfer.getData('text/plain');
+  if (!target || !taskStem || target.dataset.stem === taskStem) return;
+  event.preventDefault();
+  clearDropTargets();
+  try {
+    await prioritizeBefore(taskStem, target.dataset.stem);
+    reorderStatus.textContent = `Moved ${taskStem} before ${target.dataset.stem}`;
+    location.reload();
+  } catch (_error) {
+    reorderStatus.textContent = `Could not move ${taskStem}`;
+  }
+});
+
+board.addEventListener('dragend', () => {
+  document.querySelectorAll('.is-dragging').forEach((card) => {
+    card.classList.remove('is-dragging');
+  });
+  clearDropTargets();
+  draggedStem = null;
 });
 
 board.addEventListener('dblclick', (event) => {
