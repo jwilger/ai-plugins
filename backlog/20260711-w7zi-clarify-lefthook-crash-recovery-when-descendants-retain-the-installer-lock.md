@@ -2,18 +2,18 @@
 title: Clarify Lefthook crash recovery when descendants retain the installer lock
 blocked_by: []
 blocks: []
-tags: [worktrees, lefthook, documentation, review-follow-up]
+tags: [bug, worktrees, lefthook, documentation, review-follow-up]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Make installer recovery guidance explicit that an inherited flock remains held until the last surviving process in the original installer group exits.
+Correct Lefthook installer recovery guidance to explain that an inherited flock remains held until the last surviving lock-inheriting descendant exits.
 
 ## Context / Why
 
-Final review classified this documentation mismatch as MINOR and non-blocking. AGENTS currently says flock releases after a crash, but the intentional --no-fork behavior means a surviving descendant can retain the descriptor and keep retries locked until that process group exits.
+AGENTS currently says flock releases after a crash, but the intentional no-fork behavior means leader death is insufficient when a descendant retains the descriptor. Update every canonical recovery surface to distinguish those cases and direct the operator to wait for or terminate the surviving process group before retrying. This is documentation of real contention, distinct from the false-contention diagnostic bug in 20260711-jymz.
 
 ## Acceptance criteria
 
