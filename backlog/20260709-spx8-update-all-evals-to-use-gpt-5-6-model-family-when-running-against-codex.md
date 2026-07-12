@@ -17,7 +17,6 @@ The canonical Codex eval matrix, runner help, README, and semantic grader curren
 
 ## Acceptance criteria
 
-- [ ] A documented benchmark compares supported GPT-5.6 candidates on representative normal and advisor cases using pass rate, latency, token usage, and cost, after verifying exact current model identifiers.
 - [ ] The selected execution, grader, and advisor model/reasoning split is justified from the benchmark, including the decision about grader independence.
 - [ ] The eval matrix, Codex provider configuration, semantic grader, runner help, README, generated-config tests, and dashboard/site labels are updated with no stale default gpt-5.5 references.
 - [ ] Existing environment overrides remain supported and Claude provider configuration is unchanged.
