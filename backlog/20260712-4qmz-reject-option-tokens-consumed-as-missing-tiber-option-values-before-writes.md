@@ -24,3 +24,5 @@ Final review of the Clap migration confirmed this behavior already existed in th
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-12: Ticket rpmy's review-driven remediation now rejects `--dry-run`/`--apply` when supplied as separate `install-bin --target-dir` values (including reordered modes), while preserving explicit literal paths through `--target-dir=--dry-run` or `--target-dir=--apply`. Keep this backlog item focused on the remaining pre-existing update-field/recognized-option consumption cases and any generalized parser policy.
