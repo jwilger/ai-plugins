@@ -2,16 +2,18 @@
 title: Route the Codex advisor agent to gpt-5.6-sol with high reasoning
 blocked_by: []
 blocks: []
-tags: [advisor, codex, model-routing]
+tags: [advisor, codex, model-routing, developer-experience]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Configure the advisor plugin's Codex-facing agent routing so advisor work uses gpt-5.6-sol with high reasoning, and add focused evidence that the intended model and reasoning level are selected.
+Configure the intentionally Codex-only advisor agent to use gpt-5.6-sol with high reasoning and add focused evidence that both routing values are selected.
 
 ## Context / Why
+
+plugins/advisor/agents/advisor.toml currently selects gpt-5.5 with high reasoning. The user explicitly chose gpt-5.6-sol with high reasoning for high-value advisor work. The advisor plugin is Codex-only, so do not add Claude routing or revive the superseded older ticket's Claude-support requirement. Keep source configuration, README claims, marketplace metadata, and the required plugin version bump consistent.
 
 ## Acceptance criteria
 
