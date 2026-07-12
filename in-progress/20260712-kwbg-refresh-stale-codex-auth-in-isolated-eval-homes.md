@@ -27,3 +27,5 @@ Ensure provider-backed eval homes refresh their seeded Codex credentials after t
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-12: Lightweight TDD review identified two MINOR hardening/coverage follow-ups: atomic and symlink-safe destination replacement, plus explicit coverage for both credential filenames and mode 0600. Per the project disposition policy these are deferred without changing the current diff or resetting review progress. Tracked as 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically, prioritized behind the existing MAJOR eval/Tiber defects.
