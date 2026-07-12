@@ -24,6 +24,7 @@ Use targeted Hindsight recall/reflect first when available, otherwise the curren
 - [ ] History retrieval uses targeted Hindsight when available and otherwise only the current session or user-supplied history; it never performs broad home-directory transcript scraping.
 - [ ] Every candidate is evidence-linked, scrubbed/anonymized, and classified as project rule, reusable plugin guidance, eval case, or no action with a reason.
 - [ ] The skill composes with eval-case-reporter, writing-skills, preflight, and worktree safety rather than duplicating their write or reporting workflows.
+- [ ] A sanitized exact preview and explicit user approval are required before any project, issue-tracker, or cross-repository write.
 
 ## Subtasks
 
