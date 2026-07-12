@@ -2,16 +2,18 @@
 title: Add production-risk and footgun lenses to engineering-standards
 blocked_by: []
 blocks: []
-tags: []
+tags: [engineering-standards, production-risk, reliability, evals]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Strengthen engineering-standards so agents routinely look for sneaky footguns and dev/test-safe patterns that fail under expected production load, burst traffic, DOS-like pressure, or partial failure.
+Add proportional production-risk and hidden-footgun guidance to engineering-standards, cross-referencing rather than duplicating the existing development-discipline review lens.
 
 ## Context / Why
+
+development-discipline final review and lightweight TDD review already include a production-risk-footguns lens. The remaining responsibility is the reusable engineering standard that shapes design before review. Cover partial failure, retry/loop bounds, contention, cache and cleanup hazards, N+1/fanout/resource growth, and thundering herds, but derive findings from the actual deployment and trust boundary. For a local single-owner tool, focus on mistakes, crashes, interruption, stale state, filesystem failure, and remote data loss rather than malicious local processes or intentional bypass.
 
 ## Acceptance criteria
 
