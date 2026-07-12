@@ -21,6 +21,7 @@ Use targeted Hindsight recall/reflect first when available, otherwise the curren
 - [ ] Skill recommends whether each guardrail belongs in a reusable ai-plugins plugin or is project-specific.
 - [ ] When destination is ambiguous, skill presents the recommendation and obtains user confirmation before writing.
 - [ ] Skill includes a safe workflow for locating and changing ai-plugins when invoked from another project.
+- [ ] History retrieval uses targeted Hindsight when available and otherwise only the current session or user-supplied history; it never performs broad home-directory transcript scraping.
 
 ## Subtasks
 
