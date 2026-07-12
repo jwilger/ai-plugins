@@ -19,6 +19,7 @@ flake.nix does not currently provide plugin-eval, and AGENTS documents a fallbac
 
 - [ ] plugin-eval comes from a declared, reproducibly pinned repository source and does not depend on ~/.codex, a global package installation, or mutable user cache state.
 - [ ] nix develop -c plugin-eval --help succeeds from a clean checkout.
+- [ ] Representative plugin-eval analyze and init-benchmark commands run through the devshell against a repository skill.
 
 ## Subtasks
 
