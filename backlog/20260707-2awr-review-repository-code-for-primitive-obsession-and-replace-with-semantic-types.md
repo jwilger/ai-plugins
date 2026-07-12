@@ -22,6 +22,8 @@ This is a repository-wide implementation task, not only a report, but it must pr
 
 ## Subtasks
 
+- [ ] (s1) Inventory domain boundaries and primitive-obession violations across all code-bearing components
+
 ## Notes / Log
 
 - 2026-07-07: Requirement detail: perform a thorough repository-wide code review looking for primitive obsession, then fix it by introducing and using named semantic types for all domain data per engineering-standards. This is an implementation task, not just a report; primitives should be confined to I/O boundaries and parsed into semantic types before entering domain logic.
