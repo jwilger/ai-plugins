@@ -22,10 +22,10 @@
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260711-95gy-retire-superseded-lefthook-nix-gc-roots-after-successful-reinstall
+20260711-tcs3-migrate-ci-off-nix-devshell-tooling
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260711-42si-block-pushes-until-final-review-completes-three-clean-passes
-20260711-tcs3-migrate-ci-off-nix-devshell-tooling
 20260712-i76j-add-ci-wait-and-hang-diagnosis-guidance-to-shared-workflow-rules
