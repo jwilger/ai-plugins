@@ -1,4 +1,3 @@
-20260707-s7q4-deselect-tiber-dashboard-task-when-clicking-outside-selected-task-actions
 20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
 20260707-b98q-preserve-selected-tiber-dashboard-task-across-dashboard-updates
 20260707-qsuz-mark-agent-unresolvable-blocked-tasks-on-the-tiber-board
