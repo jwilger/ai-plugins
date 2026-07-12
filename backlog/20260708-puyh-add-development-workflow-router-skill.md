@@ -23,6 +23,7 @@ The router is a lifecycle dispatcher, not a replacement for test-driven-developm
 - [ ] Behavior fixtures cover normal implementation routing, CI failure routing, and PR-to-merge routing through the full-marketplace eval surface.
 - [ ] The change does not duplicate the full 17-step workflow across every plugin and does not embed project-specific implementation rules that belong in a consuming repo's AGENTS.md.
 - [ ] An explicit routing table covers answer/review, diagnosis, implementation, verification, PR creation, CI/review response, and merge-readiness phases with named specialist skills and precedence.
+- [ ] The router inspects repository state and local instructions before routing, invokes only available harness capabilities, and gives a safe documented fallback for unavailable specialists.
 
 ## Subtasks
 
