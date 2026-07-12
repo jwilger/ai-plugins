@@ -2,16 +2,18 @@
 title: Add development workflow router skill
 blocked_by: [20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline]
 blocks: []
-tags: []
+tags: [development-discipline, workflow-router, skills, evals]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Add a compact development-workflow router skill to the development-discipline plugin so installed marketplace sessions classify development tasks, inspect repo state, and invoke the existing TDD, debugging, verification, final-review, review-feedback, PR babysitting, docs, security, OpenAI, and browser-verification skills at the right lifecycle points without duplicating their full instructions.
+Add a compact development-workflow router that inspects task and repository state, classifies the current lifecycle phase, and routes to existing specialist skills without copying their instructions.
 
 ## Context / Why
+
+The router is a lifecycle dispatcher, not a replacement for test-driven-development, systematic-debugging, verification-before-completion, final-review, receiving-code-review, PR/CI monitoring, documentation, security, OpenAI, or browser skills. Define phase precedence and stop/skip rules, respect repository-local instructions, invoke only skills available in the current harness, and explain a safe fallback when a named specialist is unavailable. The cross-project preflight task 20260708-dsfg is a prerequisite so the router does not immediately need a second structural rewrite.
 
 ## Acceptance criteria
 
