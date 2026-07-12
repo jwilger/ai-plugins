@@ -2,18 +2,18 @@
 title: Mine session history for reusable agent guardrails
 blocked_by: []
 blocks: []
-tags: [skills, hindsight, guardrails, privacy, workflow]
+tags: [development-discipline, skills, hindsight, guardrails, privacy, workflow]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Add a privacy-safe skill that mines available session history for recurring mistakes or user corrections, proposes durable guardrails, and routes each proposal to the correct project or reusable marketplace surface.
+Add a Claude Code and Codex development-discipline skill that mines available session history for recurring mistakes or corrections, proposes durable guardrails, and routes each proposal to the correct project or marketplace surface.
 
 ## Context / Why
 
-Use targeted Hindsight recall/reflect first when available, otherwise the current session or history explicitly supplied by the user. Never crawl arbitrary home-directory transcripts. Candidate guardrails must be evidence-linked, scrubbed of secrets and private data, and classified as project rule, reusable plugin guidance, eval case, or no action. Compose with eval-case-reporter, development-discipline writing-skills, cross-project preflight, and worktree safety instead of reimplementing them. Show a sanitized preview and require explicit approval before any write, issue, or cross-repository mutation.
+Implement this as plugins/development-discipline/skills/mine-session-guardrails for both supported marketplace harnesses. Use targeted Hindsight recall/reflect first when available, otherwise the current session or history explicitly supplied by the user, so Hindsight remains optional. Never crawl arbitrary home-directory transcripts. Candidate guardrails must be evidence-linked, scrubbed of secrets and private data, and classified as project rule, reusable plugin guidance, eval case, or no action. Compose with eval-case-reporter, development-discipline writing-skills, cross-project preflight, and worktree safety instead of reimplementing them. Show a sanitized preview and require explicit approval before any write, issue, or cross-repository mutation.
 
 ## Acceptance criteria
 
