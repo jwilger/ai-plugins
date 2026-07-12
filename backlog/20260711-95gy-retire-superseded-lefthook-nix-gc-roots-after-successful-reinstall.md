@@ -2,18 +2,18 @@
 title: Retire superseded Lefthook Nix GC roots after successful reinstall
 blocked_by: []
 blocks: []
-tags: [worktrees, lefthook, nix, review-follow-up]
+tags: [bug, worktrees, lefthook, nix, review-follow-up]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Avoid unbounded repository-local Nix store retention when the pinned Lefthook derivation changes.
+Retire obsolete installer-owned Lefthook Nix GC roots after a fully successful reinstall without deleting any root still referenced by a surviving old-or-new launcher state.
 
 ## Context / Why
 
-Final review classified this architecture/operability/production-risk observation as MINOR and non-blocking. The installer names indirect GC roots by full store-path basename and currently leaves older installer-owned roots after a later successful reinstall. Cleanup must happen only after the new config and all launchers are installed so interrupted mixed states remain runnable.
+The installer names indirect roots by Lefthook store-path basename and currently retains every older root. Cleanup must run only after the new config and all launchers are atomically installed. Ownership is limited to symlinks in the repository-managed roots directory that match the installer naming contract; foreign files, non-symlinks, and roots referenced by any viable interrupted state must be preserved.
 
 ## Acceptance criteria
 
