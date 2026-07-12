@@ -21,6 +21,7 @@ Current final-review behavior already carries defended findings through the MCP 
 - [ ] The change includes eval cases that exercise final-review readiness and defended-finding carry-forward behavior.
 - [ ] Before final_review.plan, the workflow produces a readiness result bound to the exact current scope and task and stops with actionable remediation when required work is missing.
 - [ ] Readiness checks ticket acceptance criteria, changed and generated artifacts, schemas, versions/manifests, documentation, required tests/evals, release artifacts, and external blockers.
+- [ ] Accepted defenses and tracked blockers reuse the existing prior_defenses/state contract; no duplicate carry-forward mechanism is introduced.
 
 ## Subtasks
 
