@@ -22,3 +22,5 @@ Update the advisor skill's Codex model routing for the GPT-5.6 Sol, Terra, and L
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-12: Backlog grooming: superseded by 20260711-wtk6 after the user explicitly selected gpt-5.6-sol with high reasoning for the intentionally Codex-only advisor plugin. Do not carry the older unresolved model-selection or Claude-support scope forward.
