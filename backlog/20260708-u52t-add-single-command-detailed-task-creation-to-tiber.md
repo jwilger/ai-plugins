@@ -1,6 +1,6 @@
 ---
 title: Add single-command detailed task creation to Tiber
-blocked_by: []
+blocked_by: [20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help]
 blocks: []
 tags: []
 pr_mr_url: 
