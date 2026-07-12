@@ -296,9 +296,11 @@ run_development_discipline_manifest_server_with_codex_cache() {
   local command
   local args
   local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
+  local version
 
   mkdir -p "$cache_parent"
-  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.1"
+  version="$(jq -r '.version' "$ROOT/plugins/development-discipline/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/$version"
 
   command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
   mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
@@ -317,9 +319,11 @@ run_development_discipline_codex_cache_final_review_flow() {
   local args
   local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
   local project_root="$TMPROOT/final-review-project"
+  local version
 
   mkdir -p "$cache_parent" "$project_root/.development-discipline"
-  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.1"
+  version="$(jq -r '.version' "$ROOT/plugins/development-discipline/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/$version"
   cat >"$project_root/.development-discipline/final-review.toml" <<'TOML'
 [final_review.models]
 pre_filter = "config-pre"
@@ -347,9 +351,11 @@ run_development_discipline_manifest_server_with_both_harness_markers() {
   local args
   local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
   local claude_root="$TMPROOT/claude-plugin-root"
+  local version
 
   mkdir -p "$cache_parent" "$claude_root/bin"
-  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/0.4.1"
+  version="$(jq -r '.version' "$ROOT/plugins/development-discipline/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/$version"
   printf '%s\n' '#!/bin/sh' 'echo claude-plugin-root-used' >"$claude_root/bin/development-discipline-mcp"
   chmod +x "$claude_root/bin/development-discipline-mcp"
 
