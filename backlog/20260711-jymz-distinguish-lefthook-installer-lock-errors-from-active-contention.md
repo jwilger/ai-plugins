@@ -2,18 +2,18 @@
 title: Distinguish Lefthook installer lock errors from active contention
 blocked_by: []
 blocks: []
-tags: [worktrees, lefthook, diagnostics, review-follow-up]
+tags: [bug, worktrees, lefthook, diagnostics, review-follow-up]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Give actionable diagnostics when opening the installer lock fails for reasons other than another active installer.
+Give distinct, actionable diagnostics for active Lefthook installer contention versus failure to open or create the lock file.
 
 ## Context / Why
 
-Final review classified this operability observation as MINOR and non-blocking. The current preliminary flock call maps every nonzero result to worktrees.hook_install_locked, including routine filesystem failures such as a read-only state directory, exhausted space, or stale permissions.
+The preliminary nonblocking flock currently maps every nonzero result to worktrees.hook_install_locked. That hides ordinary filesystem failures such as a read-only or missing state directory, exhausted space, and stale permissions. Preserve the contention diagnostic only when the lock was opened successfully and is actually held; lock-path/open failures need a separate stable diagnostic that retains the underlying filesystem cause and remediation.
 
 ## Acceptance criteria
 
