@@ -13,7 +13,6 @@
 20260709-77j3-route-advisor-skill-to-the-appropriate-gpt-5-6-model
 20260709-spx8-update-all-evals-to-use-gpt-5-6-model-family-when-running-against-codex
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
-20260710-rhk3-mechanically-enforce-three-clean-final-review-runs-before-pr-or-main-merge
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
