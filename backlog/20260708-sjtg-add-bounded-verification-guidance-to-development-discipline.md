@@ -24,3 +24,5 @@ Promptfoo now has repository-specific timeouts, but development-discipline still
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-12: Backlog grooming: canonical task now includes the CI wait/hang policy from abandoned duplicate 20260712-i76j.
