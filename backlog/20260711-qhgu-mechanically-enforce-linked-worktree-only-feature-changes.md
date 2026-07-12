@@ -2,18 +2,18 @@
 title: Mechanically enforce linked-worktree-only feature changes
 blocked_by: []
 blocks: []
-tags: [worktrees, engineering-standards, development-discipline, guardrails]
+tags: [bug, worktrees, engineering-standards, development-discipline, guardrails]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Strengthen the worktrees plugin and the applicable development/engineering workflow so feature changes cannot be made or integrated from the main checkout without an explicit, mechanically enforced exception.
+Mechanically guard normal agent pre-edit entrypoints and Git integration operations against accidental feature work in the main coordination checkout while preserving legitimate coordination operations.
 
 ## Context / Why
 
-A completed feature branch was fast-forwarded into the main coordination checkout during normal implementation. Current commit/push hooks block main-checkout commits and pushes, but they do not prevent direct working-tree edits or a local fast-forward merge. Add proportionate guardrails that preserve legitimate coordination operations while making the linked-worktree rule hard to bypass accidentally.
+A completed feature branch was fast-forwarded into the main coordination checkout. Existing pre-commit/pre-push hooks act too late to prevent direct edits or local integration. Use the repository's local single-owner threat model: prevent ordinary agent/operator mistakes at supported workflow and Git entrypoints, but do not attempt OS-level prevention of an intentional local-owner bypass or arbitrary external editor. Preserve existing user changes, allow documented coordination operations, and provide a narrow explicit exception rather than a broad disable switch.
 
 ## Acceptance criteria
 
