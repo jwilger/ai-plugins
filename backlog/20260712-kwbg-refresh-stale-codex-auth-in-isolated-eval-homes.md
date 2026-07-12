@@ -2,14 +2,18 @@
 title: Refresh stale Codex auth in isolated eval homes
 blocked_by: []
 blocks: []
-tags: []
+tags: [evals, codex, authentication, bug, major]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
+Ensure provider-backed eval homes refresh their seeded Codex credentials after the user signs in again, instead of retaining revoked refresh tokens indefinitely.
+
 ## Context / Why
+
+`scripts/evals/prepare-codex-home.mjs::seedAuth` copies `auth.json` and `.credentials.json` only when the isolated target does not exist. In the Tiber Clap ticket, the normal `~/.codex/auth.json` (July 9, working) differed from all three isolated eval copies (July 4), and the provider run failed repeatedly with `refresh token was revoked`. The isolated homes must remain separate from the real Codex home, but credential seeding must safely converge to the current source without printing secret material. This is a pre-existing MAJOR release/eval-operability defect discovered incidentally.
 
 ## Acceptance criteria
 
