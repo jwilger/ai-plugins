@@ -20,6 +20,7 @@ All substantive GitHub CI jobs currently install Nix and run through nix develop
 - [ ] GitHub Actions CI does not invoke Nix or realize flake devshell outputs.
 - [ ] CI installs and runs the Rust, Node, formatting, and Bats tooling with standard GitHub-hosted setup.
 - [ ] EMC and flake integration checks remain available as explicit local-only commands and are excluded from CI.
+- [ ] The workflow explicitly installs every prerequisite exercised by just ci using pinned or repository-controlled versions, including Node and the repository Rust toolchain.
 
 ## Subtasks
 
