@@ -16,3 +16,5 @@ pr_mr_status:
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-12: Backlog grooming: duplicate of 20260711-42si. The newer canonical task records the concrete publication-gate incident, exact-diff requirement, and actionable acceptance criteria.
