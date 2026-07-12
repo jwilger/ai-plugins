@@ -16,10 +16,10 @@
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
+20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
-20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
