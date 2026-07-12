@@ -17,6 +17,8 @@ On a narrow screen the dashboard currently renders Backlog first, forcing users 
 
 ## Acceptance criteria
 
+- [ ] At the single-column responsive breakpoint, the In Progress column is rendered before Backlog.
+
 ## Subtasks
 
 ## Notes / Log
