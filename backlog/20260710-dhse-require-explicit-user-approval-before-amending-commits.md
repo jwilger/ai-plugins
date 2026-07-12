@@ -20,6 +20,7 @@ A prior PR repair amended a published commit and created avoidable recovery work
 - [ ] Relevant commit/PR guidance states that amending any commit requires explicit user authorization.
 - [ ] Default repair and follow-up workflow uses additive commits and does not force-push solely to replace an amended commit.
 - [ ] Shared or default-branch history is never amended as routine repair; any permitted amend elsewhere requires explicit case-by-case user authorization.
+- [ ] Behavior fixtures cover an agent repairing review feedback by adding a commit and refusing to amend or force-push without the required authorization.
 
 ## Subtasks
 
