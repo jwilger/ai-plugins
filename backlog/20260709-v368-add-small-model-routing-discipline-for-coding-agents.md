@@ -9,11 +9,11 @@ pr_mr_status:
 
 ## Summary
 
-Add marketplace guidance and helper-agent behavior so Codex and Claude Code can route bounded, low-risk coding-agent work to small fast models while escalating before quality risk matters.
+Add conservative model-routing guidance for sending bounded, low-risk helper work to small fast models while escalating before ambiguity or quality risk matters.
 
 ## Context / Why
 
-Put the behavior in development-discipline, not agentic-systems-engineering. The ticket should not pin the implementation to specific plugin version bump numbers; the implementation should bump versions according to marketplace conventions. Codex routing should use the exact small Codex model name rather than the shorthand mentioned in planning, and Claude Code routing should use the Haiku alias. Do not treat Claude /fast as a cost-saving mechanism. Do not change global/default models, and do not downgrade advisor work, final review, security review, ambiguous debugging, architecture, destructive changes, or completion claims.
+Use gpt-5.3-codex-spark for eligible Codex helper work and the haiku alias for eligible Claude Code helper work, after verifying current harness availability at implementation time. These are task-local helper routes, not global/default model changes. Eligible work is bounded, read-only or easily reversible, and independently verifiable. Advisor work, final review, security review, architecture, ambiguous debugging, destructive changes, and completion claims must not be downgraded; Claude /fast is not a cost-routing substitute.
 
 ## Acceptance criteria
 
