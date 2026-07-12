@@ -18,7 +18,6 @@ Current final-review behavior already carries defended findings through the MCP 
 ## Acceptance criteria
 
 - [ ] Final-review guidance requires a local readiness checklist before the multi-lens review loop begins.
-- [ ] Guidance tells agents how to carry forward defended findings or externally tracked blockers so later review iterations do not rediscover the same accepted exception as new work.
 - [ ] The change includes eval cases that exercise final-review readiness and defended-finding carry-forward behavior.
 
 ## Subtasks
