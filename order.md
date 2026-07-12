@@ -7,6 +7,7 @@
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
+20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
@@ -18,7 +19,6 @@
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260711-95gy-retire-superseded-lefthook-nix-gc-roots-after-successful-reinstall
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
-20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260711-42si-block-pushes-until-final-review-completes-three-clean-passes
