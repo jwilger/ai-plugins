@@ -13,7 +13,7 @@ Add a Claude Code and Codex development-discipline skill that mines available se
 
 ## Context / Why
 
-Implement this as plugins/development-discipline/skills/mine-session-guardrails for both supported marketplace harnesses. Use targeted Hindsight recall/reflect first when available, otherwise the current session or history explicitly supplied by the user, so Hindsight remains optional. Never crawl arbitrary home-directory transcripts. Candidate guardrails must be evidence-linked, scrubbed of secrets and private data, and classified as project rule, reusable plugin guidance, eval case, or no action. Compose with eval-case-reporter, development-discipline writing-skills, cross-project preflight, and worktree safety instead of reimplementing them. Show a sanitized preview and require explicit approval before any write, issue, or cross-repository mutation.
+Implement this as plugins/development-discipline/skills/mine-session-guardrails for both supported marketplace harnesses after prerequisite 20260708-dsfg delivers the cross-project preflight it must compose with. Use targeted Hindsight recall/reflect first when available, otherwise the current session or history explicitly supplied by the user, so Hindsight remains optional. Never crawl arbitrary home-directory transcripts. Candidate guardrails must be evidence-linked, scrubbed of secrets and private data, and classified as project rule, reusable plugin guidance, eval case, or no action. Compose with eval-case-reporter, development-discipline writing-skills, the prerequisite preflight, and worktree safety instead of reimplementing them. Show a sanitized preview and require explicit approval before any write, issue, or cross-repository mutation.
 
 ## Acceptance criteria
 
