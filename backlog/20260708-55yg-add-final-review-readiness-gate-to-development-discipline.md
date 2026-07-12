@@ -2,16 +2,18 @@
 title: Add final-review readiness gate to development-discipline
 blocked_by: []
 blocks: []
-tags: []
+tags: [development-discipline, final-review, readiness, evals]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Add a readiness gate before the intensive final-review loop so agents self-check schema, versions, docs, generated artifacts, eval coverage, release artifacts, and known defended blockers before spawning review subagents.
+Add a pre-final-review readiness result that catches unmet ticket criteria and missing schema, version, documentation, generated-artifact, eval, release, or blocker work before the expensive review loop begins.
 
 ## Context / Why
+
+Current final-review behavior already carries defended findings through the MCP prior_defenses contract, so this task must not invent a parallel exception system. The remaining gap is an explicit readiness check before final_review.plan that is bound to the current scope and task, stops on actionable omissions, and passes known defended findings or externally tracked blockers through the existing contract.
 
 ## Acceptance criteria
 
