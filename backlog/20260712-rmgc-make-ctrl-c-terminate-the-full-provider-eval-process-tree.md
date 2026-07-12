@@ -17,6 +17,8 @@ Live diagnosis showed scripts/evals/run.sh in the terminal foreground PGID while
 
 ## Acceptance criteria
 
+- [ ] A single terminal SIGINT terminates the eval runner and the complete timeout, Promptfoo, Claude/Codex SDK, and descendant process tree within a bounded grace period.
+
 ## Subtasks
 
 ## Notes / Log
