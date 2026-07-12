@@ -20,6 +20,7 @@ The final-review MCP already tracks three-clean-iteration state, prior defenses,
 - [ ] A push or merge of an in-scope change is blocked unless the authoritative final-review state records three consecutive clean iterations for the exact current diff hash.
 - [ ] The block message identifies the missing, stale, or mismatched review state and gives the developer a clear command or workflow to complete it.
 - [ ] A stable read/check interface exposes authoritative final-review completion and binds it to the repository/worktree, base, updated ref, and exact reviewed hash.
+- [ ] Pre-push enforcement evaluates every updated in-scope ref and blocks missing, stale, mismatched, amended, incomplete, or unavailable review state.
 
 ## Subtasks
 
