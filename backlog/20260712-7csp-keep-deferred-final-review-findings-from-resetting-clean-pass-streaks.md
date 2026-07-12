@@ -18,6 +18,7 @@ The current final-review skill tells callers that findings caused by the active 
 ## Acceptance criteria
 
 - [ ] Final-review guidance explicitly states that a finding deferred under the user-selected policy is routed non-blocking and does not reset a clean streak when the reviewed diff hash is unchanged.
+- [ ] The caller can map a user’s in-scope severity/lens policy into ticket, document, ignore, or block dispositions without editing the reviewed project merely to configure one review.
 
 ## Subtasks
 
