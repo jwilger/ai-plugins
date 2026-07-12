@@ -22,6 +22,7 @@ The current CLI/MCP create surface accepts only a title, and the new-task skill 
 - [ ] The detailed create interface is scriptable and documented, with clear handling for repeated acceptance criteria and multi-line summary/note input.
 - [ ] Existing simple task creation remains backward-compatible for current CLI and MCP callers.
 - [ ] The detailed payload explicitly supports title, summary, context, repeated acceptance criteria, repeated notes, tags, and optional PR/MR URL and status fields.
+- [ ] Payload validation is atomic: invalid input leaves no task or partial task commit, while sync failure reports the one created ref and safe recovery guidance.
 
 ## Subtasks
 
