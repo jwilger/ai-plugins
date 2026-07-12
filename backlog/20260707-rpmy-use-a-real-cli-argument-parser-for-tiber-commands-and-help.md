@@ -15,6 +15,8 @@ The current CLI returns the hand-written usage error for standard help and dupli
 
 ## Acceptance criteria
 
+- [ ] Root -h/--help and help for every command and nested command group exit successfully and are generated from the parser definition.
+
 ## Subtasks
 
 ## Notes / Log
