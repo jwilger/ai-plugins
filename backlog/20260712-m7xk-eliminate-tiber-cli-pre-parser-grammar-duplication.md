@@ -17,6 +17,8 @@ A final-review architecture lens on 20260707-rpmy found that parse_cli_arguments
 
 ## Acceptance criteria
 
+- [ ] Clap owns command validation and generated error construction without a command-specific pre-parser grammar for subtask add or install-bin.
+
 ## Subtasks
 
 ## Notes / Log
