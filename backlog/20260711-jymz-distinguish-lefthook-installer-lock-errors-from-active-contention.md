@@ -19,6 +19,7 @@ The preliminary nonblocking flock currently maps every nonzero result to worktre
 
 - [ ] Actual nonblocking lock contention retains the existing locked diagnostic and retry guidance.
 - [ ] Lock-file open or creation failures emit a distinct diagnostic that preserves the underlying filesystem error and recovery direction.
+- [ ] Automated tests distinguish a successfully opened but held lock from unwritable, missing-parent, permission, and other lock-file open or creation failures.
 
 ## Subtasks
 
