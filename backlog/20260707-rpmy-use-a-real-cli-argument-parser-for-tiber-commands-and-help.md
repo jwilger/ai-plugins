@@ -2,12 +2,16 @@
 title: Use a real CLI argument parser for Tiber commands and help
 blocked_by: []
 blocks: []
-tags: []
+tags: [bug, tiber, cli, developer-experience]
 ---
 
 ## Summary
 
+Replace Tiber's hand-written positional dispatch and usage string with a real Rust CLI parser so standard help works, invalid invocations fail consistently, and the command grammar has one maintainable source of truth.
+
 ## Context / Why
+
+The current CLI returns the hand-written usage error for standard help and duplicates parsing rules across positional branches. A linked worktree at .worktrees/tiber-clap-cli-parser already contains uncommitted Clap-based work and a focused cli_help test. Preserve that work, keep existing valid scriptable invocations compatible, and treat generated parser help as the authoritative command contract.
 
 ## Acceptance criteria
 
