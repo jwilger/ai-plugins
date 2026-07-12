@@ -110,7 +110,7 @@ out-of-scope finding with this precedence: `by_lens`, then `by_severity`, then
 entry on `final_review.advance` with its finding ID, lens, and nonblank ticket
 reference. `report` stays non-blocking and is retained in bounded review state.
 
-Review severity (`error`, `warning`, `note`) is separate from
+Review severity is exactly one of `CRITICAL`, `MAJOR`, `MINOR`, or `TRIVIAL` and is separate from
 `security_impact` (`none`, `minor`, `moderate`, `major`, `critical`). Any
 suspected PII exposure or major/critical security observation requires a
 matching `security_escalations` entry with a nonblank high-priority ticket
@@ -161,6 +161,12 @@ tables override them one phase at a time for that harness. This lets a shared
 repository use concrete Codex model IDs without routing Claude reviewers to
 unsupported models.
 
+Projects can also add `[final_review.dispositions.<SEVERITY>]` tables for
+`CRITICAL`, `MAJOR`, `MINOR`, and `TRIVIAL`. Each table must map every active
+review lens to exactly one of `block`, `ticket`, `document`, or `ignore`.
+Incomplete, unknown, or invalid matrix entries fail closed; without a matrix,
+all severity-and-lens combinations default to `block`.
+
 Resolved roles, their sources, required clean count, lens objectives, and the
 caller-attestation policy are bound into `review_contract_id`. Mutating them or
 any progression field in caller-carried state makes the server-authoritative
@@ -195,7 +201,9 @@ When `final_review.advance` returns `transition_status: verifier_required`, run
 the returned assignment with its exact `subagent_key` and `model_role`, close
 the subagent after collecting its result, then resubmit the same lens results
 with `verifier_result`. Verified results require exactly one `confirmed`,
-`rejected`, or `uncertain` verdict per candidate. Rejected candidates do not
+`rejected`, or `uncertain` verdict per candidate, a final review severity, and
+a non-empty rationale. The server records reviewer and verifier severities and
+routes with the verifier's final severity. Rejected candidates do not
 become unresolved blockers, but the iteration remains non-clean because a lens
 raised a finding. Uncertain candidates stay open for human decision.
 

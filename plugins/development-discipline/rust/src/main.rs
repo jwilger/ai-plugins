@@ -19,6 +19,7 @@ const DEFAULT_BASE: &str = "origin/main";
 const DEFAULT_CLEAN_ITERATIONS: u64 = 3;
 const MAX_CLEAN_ITERATIONS: u64 = 10;
 const DEFAULT_CONFIG_PATH: &str = ".development-discipline/final-review.toml";
+const REVIEW_SEVERITIES: [&str; 4] = ["CRITICAL", "MAJOR", "MINOR", "TRIVIAL"];
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 const MAX_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 const MAX_STATE_BYTES: usize = 1024 * 1024;
@@ -741,7 +742,8 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         Some(Path::new(&project_root)),
         "scope_changed_files",
     )?;
-    let model_roles = resolve_model_roles(arguments)?;
+    let lenses = all_lenses(&conditional_lenses);
+    let (model_roles, finding_disposition_policy) = resolve_model_roles(arguments, &lenses)?;
     let fast_model_role = model_roles.pre_filter.clone();
     let review_model_role = model_roles.lens_review.clone();
     let resolved_model_roles = json!({
@@ -757,7 +759,6 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         "verifier": model_roles.sources.verifier
     });
     let caller_attestation_policy = caller_attestation_policy();
-    let lenses = all_lenses(&conditional_lenses);
     let lens_objectives = lens_objectives(&conditional_lenses);
     let prior_defenses_by_lens = parse_prior_defenses(arguments.get("prior_defenses"), &lenses)?;
     let work_item_id =
@@ -802,6 +803,7 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
             "explicit_concerns": explicit_concerns
         },
         "unrelated_finding_policy": unrelated_finding_policy,
+        "finding_disposition_policy": finding_disposition_policy,
         "unrelated_finding_policy_confirmation_required": unrelated_finding_policy_confirmation_required,
         "out_of_scope_report": [],
         "unresolved_security_escalations": [],
@@ -950,6 +952,7 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
     }
 
     let mut actionable = Vec::new();
+    let mut routed = Vec::new();
     let mut defended_or_accepted = Vec::new();
     let mut out_of_scope = Vec::new();
     let mut security_escalations_required = Vec::new();
@@ -1085,12 +1088,13 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
             if finding
                 .get("severity")
                 .and_then(Value::as_str)
-                .is_none_or(|severity| !matches!(severity, "error" | "warning" | "note"))
+                .is_none_or(|severity| !REVIEW_SEVERITIES.contains(&severity))
             {
                 let mut value = finding.clone();
                 value["lens"] = json!(lens);
-                value["filter_reason"] =
-                    json!("finding severity is required and must be error, warning, or note");
+                value["filter_reason"] = json!(
+                    "finding severity is required and must be CRITICAL, MAJOR, MINOR, or TRIVIAL"
+                );
                 malformed.push(value);
                 continue;
             }
@@ -1118,9 +1122,18 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                 project_root.as_deref(),
                 state,
             );
+            let mut classified = classified;
+            classified.value["disposition"] = json!(finding_disposition(&classified.value, state));
             match classified.bucket.as_str() {
                 "actionable" => {
-                    actionable.push(classified.value);
+                    if classified.value["disposition"] == "block" {
+                        actionable.push(classified.value);
+                    } else {
+                        if classified.value["disposition"] == "ticket" {
+                            follow_up_tickets_required.push(classified.value.clone());
+                        }
+                        routed.push(classified.value);
+                    }
                 }
                 "defended_or_accepted" => defended_or_accepted.push(classified.value),
                 "out_of_scope" => {
@@ -1141,7 +1154,14 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
                     out_of_scope.push(value)
                 }
                 "needs_human_decision" => {
-                    needs_human_decision.push(classified.value);
+                    if classified.value["disposition"] == "block" {
+                        needs_human_decision.push(classified.value);
+                    } else {
+                        if classified.value["disposition"] == "ticket" {
+                            follow_up_tickets_required.push(classified.value.clone());
+                        }
+                        routed.push(classified.value);
+                    }
                 }
                 _ => malformed.push(classified.value),
             }
@@ -1175,6 +1195,7 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
     let clean = actionable.is_empty() && malformed.is_empty() && needs_human_decision.is_empty();
     Ok(json!({
         "actionable": actionable,
+        "routed": routed,
         "defended_or_accepted": defended_or_accepted,
         "out_of_scope": out_of_scope,
         "security_escalations_required": security_escalations_required,
@@ -1193,6 +1214,25 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
         }
     })
     .to_string())
+}
+
+fn finding_disposition(finding: &Value, state: &Value) -> &'static str {
+    let severity = finding.get("severity").and_then(Value::as_str);
+    let lens = finding.get("lens").and_then(Value::as_str);
+    let configured = severity.and_then(|severity| {
+        lens.and_then(|lens| {
+            state
+                .get("finding_disposition_policy")
+                .and_then(|policy| policy.pointer(&format!("/{severity}/{lens}")))
+                .and_then(Value::as_str)
+        })
+    });
+    match configured {
+        Some("ticket") => "ticket",
+        Some("document") => "document",
+        Some("ignore") => "ignore",
+        _ => "block",
+    }
 }
 
 fn unrelated_finding_disposition(finding: &Value, state: &Value) -> &'static str {
@@ -1439,7 +1479,12 @@ fn advance_with_contract_validation(
             &verifier_candidates,
             verifier_result,
         )?;
-        verification = apply_verifier_result(&mut filtered, &verifier_candidates, verifier_result)?;
+        verification = apply_verifier_result(
+            &mut filtered,
+            &verifier_candidates,
+            verifier_result,
+            &effective_scope_state,
+        )?;
         verifier_shutdown.push(json!({
             "subagent_key": verifier_result["subagent_key"],
             "action": "close"
@@ -3115,11 +3160,10 @@ fn parse_unrelated_finding_policy(
         }
         Ok(Value::Object(output))
     };
-    let severities = vec![
-        "error".to_string(),
-        "warning".to_string(),
-        "note".to_string(),
-    ];
+    let severities = REVIEW_SEVERITIES
+        .iter()
+        .map(|severity| (*severity).to_string())
+        .collect::<Vec<_>>();
     Ok(json!({
         "default": default,
         "by_lens": parse_mapping("by_lens", lenses)?,
@@ -3436,7 +3480,7 @@ fn caller_attestation_schema() -> Value {
 }
 
 fn verification_candidates(filtered: &Value) -> Vec<Value> {
-    ["actionable", "needs_human_decision"]
+    ["actionable", "needs_human_decision", "routed"]
         .iter()
         .flat_map(|bucket| {
             filtered
@@ -3540,11 +3584,12 @@ fn verifier_result_schema() -> Value {
                 "maxItems": MAX_FINDINGS_PER_ITERATION,
                 "items": {
                     "type": "object",
-                    "required": ["finding_id", "lens", "verdict", "rationale"],
+                    "required": ["finding_id", "lens", "verdict", "severity", "rationale"],
                     "properties": {
                         "finding_id": { "type": "string" },
                         "lens": { "type": "string" },
                         "verdict": { "type": "string", "enum": ["confirmed", "rejected", "uncertain"] },
+                        "severity": { "type": "string", "enum": REVIEW_SEVERITIES },
                         "rationale": { "type": "string" }
                     }
                 }
@@ -3641,6 +3686,7 @@ fn apply_verifier_result(
     filtered: &mut Value,
     candidates: &[Value],
     result: &Value,
+    state: &Value,
 ) -> Result<Value, String> {
     if result.get("status").and_then(Value::as_str) == Some("failed") {
         let verification = json!({
@@ -3672,7 +3718,7 @@ fn apply_verifier_result(
 
     let mut rejected = Vec::new();
     let mut uncertain = Vec::new();
-    for bucket in ["actionable", "needs_human_decision"] {
+    for bucket in ["actionable", "needs_human_decision", "routed"] {
         let mut retained = Vec::new();
         for mut finding in filtered
             .get(bucket)
@@ -3688,9 +3734,15 @@ fn apply_verifier_result(
                 .get(&finding_key)
                 .copied()
                 .ok_or_else(|| "verifier_verdict_missing=true".to_string())?;
+            let reviewer_severity = finding["severity"].clone();
+            let verifier_severity = verdict["severity"].clone();
+            finding["severity"] = verifier_severity.clone();
+            finding["disposition"] = json!(finding_disposition(&finding, state));
             finding["verification"] = json!({
                 "verdict": verdict["verdict"],
-                "rationale": verdict["rationale"]
+                "rationale": verdict["rationale"],
+                "reviewer_severity": reviewer_severity,
+                "verifier_severity": verifier_severity
             });
             match verdict.get("verdict").and_then(Value::as_str) {
                 Some("rejected") => rejected.push(finding),
@@ -3701,6 +3753,7 @@ fn apply_verifier_result(
         }
         filtered[bucket] = Value::Array(retained);
     }
+    reroute_findings_by_disposition(filtered);
     if let Some(needs_human) = filtered["needs_human_decision"].as_array_mut() {
         needs_human.extend(uncertain);
     }
@@ -3714,6 +3767,51 @@ fn apply_verifier_result(
     });
     filtered["verification"] = verification.clone();
     Ok(verification)
+}
+
+fn reroute_findings_by_disposition(filtered: &mut Value) {
+    let mut actionable = Vec::new();
+    let mut needs_human_decision = Vec::new();
+    let mut routed = filtered
+        .get("routed")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut follow_up_tickets_required = filtered
+        .get("follow_up_tickets_required")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for bucket in ["actionable", "needs_human_decision"] {
+        for finding in filtered
+            .get(bucket)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            if finding.get("disposition").and_then(Value::as_str) == Some("block") {
+                if bucket == "actionable" {
+                    actionable.push(finding);
+                } else {
+                    needs_human_decision.push(finding);
+                }
+            } else {
+                if finding.get("disposition").and_then(Value::as_str) == Some("ticket")
+                    && !follow_up_tickets_required.iter().any(|existing| {
+                        existing.get("id") == finding.get("id")
+                            && existing.get("lens") == finding.get("lens")
+                    })
+                {
+                    follow_up_tickets_required.push(finding.clone());
+                }
+                routed.push(finding);
+            }
+        }
+    }
+    filtered["actionable"] = Value::Array(actionable);
+    filtered["needs_human_decision"] = Value::Array(needs_human_decision);
+    filtered["routed"] = Value::Array(routed);
+    filtered["follow_up_tickets_required"] = Value::Array(follow_up_tickets_required);
 }
 
 fn validate_verdict_coverage(candidates: &[Value], verdicts: &[Value]) -> Result<(), String> {
@@ -3750,6 +3848,13 @@ fn validate_verdict_coverage(candidates: &[Value], verdicts: &[Value]) -> Result
             Some("confirmed" | "rejected" | "uncertain")
         ) {
             return Err("verifier_verdict_invalid=true".to_string());
+        }
+        if verdict
+            .get("severity")
+            .and_then(Value::as_str)
+            .is_none_or(|severity| !REVIEW_SEVERITIES.contains(&severity))
+        {
+            return Err("verifier_verdict_severity_invalid=true".to_string());
         }
         let key = (lens, finding_id);
         if !candidate_keys.contains(&key) {
@@ -3796,7 +3901,7 @@ fn reviewer_output_schema() -> Value {
                             "maxLength": MAX_FINDING_ID_BYTES,
                             "pattern": "^[A-Za-z0-9._:-]+$"
                         },
-                        "severity": { "type": "string", "enum": ["error", "warning", "note"] },
+                        "severity": { "type": "string", "enum": ["CRITICAL", "MAJOR", "MINOR", "TRIVIAL"] },
                         "security_impact": { "type": "string", "enum": ["none", "minor", "moderate", "major", "critical"] },
                         "suspected_pii": { "type": "boolean" },
                         "path": { "type": "string" },
@@ -3900,7 +4005,10 @@ struct ModelRoleSources {
     verifier: String,
 }
 
-fn resolve_model_roles(arguments: &Value) -> Result<ModelRoles, String> {
+fn resolve_model_roles(
+    arguments: &Value,
+    lenses: &[String],
+) -> Result<(ModelRoles, Value), String> {
     let harness = detect_harness(arguments);
     let config = load_model_config(arguments, &harness)?;
     let harness_defaults = harness_model_defaults(&harness);
@@ -3954,20 +4062,25 @@ fn resolve_model_roles(arguments: &Value) -> Result<ModelRoles, String> {
         .iter()
         .any(|(_, source)| source.starts_with("project_toml_config"));
 
-    Ok(ModelRoles {
-        pre_filter: pre_filter.0,
-        lens_review: lens_review.0,
-        post_filter: post_filter.0,
-        verifier: verifier.0,
-        sources: ModelRoleSources {
-            pre_filter: pre_filter.1,
-            lens_review: lens_review.1,
-            post_filter: post_filter.1,
-            verifier: verifier.1,
+    let dispositions =
+        parse_finding_disposition_policy(config.finding_disposition_config.as_ref(), lenses)?;
+    Ok((
+        ModelRoles {
+            pre_filter: pre_filter.0,
+            lens_review: lens_review.0,
+            post_filter: post_filter.0,
+            verifier: verifier.0,
+            sources: ModelRoleSources {
+                pre_filter: pre_filter.1,
+                lens_review: lens_review.1,
+                post_filter: post_filter.1,
+                verifier: verifier.1,
+            },
+            confirmation_required,
+            harness,
         },
-        confirmation_required,
-        harness,
-    })
+        dispositions,
+    ))
 }
 
 fn resolve_model_role(
@@ -4065,6 +4178,7 @@ fn parse_explicit_model_role(
 struct ProjectModelConfig {
     generic: toml::value::Table,
     harness_specific: toml::value::Table,
+    finding_disposition_config: Option<toml::Value>,
     harness: String,
 }
 
@@ -4146,18 +4260,40 @@ fn load_model_config(arguments: &Value, harness: &str) -> Result<ProjectModelCon
             canonical_path.display()
         )
     })?;
-    let config = parsed
+    let final_review = parsed
         .get("final_review")
-        .and_then(|value| value.get("models"))
         .and_then(toml::Value::as_table)
         .cloned()
         .ok_or_else(|| {
             format!(
-                "model_config_missing_models_table path={}",
+                "model_config_missing_final_review_table path={}",
                 canonical_path.display()
             )
         })?;
-    project_model_config(config, harness, &canonical_path)
+    if final_review
+        .keys()
+        .any(|key| !matches!(key.as_str(), "models" | "dispositions"))
+    {
+        return Err(format!(
+            "model_config_unknown_final_review_key path={}",
+            canonical_path.display()
+        ));
+    }
+    let models = final_review
+        .get("models")
+        .map(|value| {
+            value.as_table().cloned().ok_or_else(|| {
+                format!(
+                    "model_config_models_must_be_table path={}",
+                    canonical_path.display()
+                )
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let mut config = project_model_config(models, harness, &canonical_path)?;
+    config.finding_disposition_config = final_review.get("dispositions").cloned();
+    Ok(config)
 }
 
 fn read_model_config_file(path: &Path, explicit: bool) -> Result<Option<String>, String> {
@@ -4233,8 +4369,77 @@ fn project_model_config(
     Ok(ProjectModelConfig {
         generic,
         harness_specific,
+        finding_disposition_config: None,
         harness: harness.to_string(),
     })
+}
+
+fn parse_finding_disposition_policy(
+    config: Option<&toml::Value>,
+    lenses: &[String],
+) -> Result<Value, String> {
+    let Some(config) = config else {
+        return Ok(Value::Object(
+            REVIEW_SEVERITIES
+                .iter()
+                .map(|severity| {
+                    (
+                        (*severity).to_string(),
+                        Value::Object(
+                            lenses
+                                .iter()
+                                .map(|lens| (lens.clone(), json!("block")))
+                                .collect(),
+                        ),
+                    )
+                })
+                .collect(),
+        ));
+    };
+    let config = config
+        .as_table()
+        .ok_or_else(|| "finding_disposition_policy_must_be_table=true".to_string())?;
+    if config
+        .keys()
+        .any(|key| !REVIEW_SEVERITIES.contains(&key.as_str()))
+    {
+        return Err("finding_disposition_policy_unknown_severity=true".to_string());
+    }
+    let mut policy = serde_json::Map::new();
+    for severity in REVIEW_SEVERITIES {
+        let entries = config
+            .get(severity)
+            .ok_or_else(|| format!("finding_disposition_policy_missing_severity={severity}"))?
+            .as_table()
+            .ok_or_else(|| {
+                format!("finding_disposition_policy_severity_must_be_table={severity}")
+            })?;
+        if entries
+            .keys()
+            .any(|lens| !lenses.iter().any(|allowed| allowed == lens))
+        {
+            return Err(format!(
+                "finding_disposition_policy_unknown_lens={severity}"
+            ));
+        }
+        let mut row = serde_json::Map::new();
+        for lens in lenses {
+            let value = entries
+                .get(lens)
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| {
+                    format!("finding_disposition_policy_missing_lens={severity}:{lens}")
+                })?;
+            if !matches!(value, "block" | "ticket" | "document" | "ignore") {
+                return Err(format!(
+                    "finding_disposition_policy_invalid_disposition={severity}:{lens}"
+                ));
+            }
+            row.insert(lens.clone(), json!(value));
+        }
+        policy.insert(severity.to_string(), Value::Object(row));
+    }
+    Ok(Value::Object(policy))
 }
 
 fn validate_model_config_table(
@@ -4668,7 +4873,7 @@ mod tests {
             "unrelated_finding_policy": {
                 "default": "report",
                 "by_lens": { "release-integration": "follow-up-ticket" },
-                "by_severity": { "warning": "follow-up-ticket" }
+                "by_severity": { "MAJOR": "follow-up-ticket" }
             }
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
@@ -5932,6 +6137,61 @@ verifier = "default-verify"
     }
 
     #[test]
+    fn plan_loads_a_complete_project_severity_by_lens_disposition_matrix() {
+        let project_root = test_project_root("disposition-matrix");
+        let config_dir = project_root.join(".development-discipline");
+        fs::create_dir_all(&config_dir).expect("config dir");
+        let lenses = LENSES
+            .iter()
+            .map(|lens| format!("{lens} = \"block\""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(
+            config_dir.join("final-review.toml"),
+            format!(
+                "[final_review.dispositions.CRITICAL]\n{lenses}\n\n[final_review.dispositions.MAJOR]\n{}\n\n[final_review.dispositions.MINOR]\n{}\n\n[final_review.dispositions.TRIVIAL]\n{}\n",
+                lenses.replace("\"block\"", "\"ticket\""),
+                lenses.replace("\"block\"", "\"document\""),
+                lenses.replace("\"block\"", "\"ignore\"")
+            ),
+        )
+        .expect("write config");
+
+        let parsed: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "abc",
+            "project_root": project_root
+        })))
+        .expect("plan json");
+
+        assert_eq!(
+            parsed["state"]["finding_disposition_policy"]["CRITICAL"]["correctness-behavior"],
+            "block"
+        );
+        assert_eq!(
+            parsed["state"]["finding_disposition_policy"]["MAJOR"]["correctness-behavior"],
+            "ticket"
+        );
+
+        fs::write(
+            config_dir.join("final-review.toml"),
+            format!("[final_review.dispositions.CRITICAL]\n{lenses}\n"),
+        )
+        .expect("write incomplete config");
+        assert_eq!(
+            plan_result(&json!({
+                "changed_files": ["src/lib.rs"],
+                "diff_hash": "abc",
+                "project_root": project_root
+            }))
+            .expect_err("incomplete matrix must fail"),
+            "finding_disposition_policy_missing_severity=MAJOR"
+        );
+
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
     fn plan_rejects_non_regular_model_config_before_reading() {
         let project_root = test_project_root("non-regular-config");
         let config_path = project_root.join(".development-discipline/final-review.toml");
@@ -6289,7 +6549,7 @@ pre_filter = "outside-pre"
         first["status"] = json!("findings");
         first["findings"] = json!([{
             "id": "finding-1",
-            "severity": "warning",
+            "severity": "MAJOR",
             "path": "src/lib.rs",
             "message": "candidate",
             "relevance": {"category": "diff_changed_file", "explanation": "changed file"}
@@ -6516,10 +6776,10 @@ pre_filter = "project-pre"
                 "subagent_key": "review-1:1:correctness-behavior",
                 "status": "findings",
                 "findings": [
-                    { "id": "real", "severity": "error", "path": "src/new.rs", "message": "real", "relevance": { "category": "diff_changed_file", "explanation": "changed line" } },
-                    { "id": "stale", "severity": "warning", "path": "src/old.rs", "message": "stale", "relevance": { "category": "diff_changed_file", "explanation": "nearby" } },
-                    { "id": "release-risk", "severity": "warning", "path": "src/old.rs", "message": "release risk", "changed_diff_evidence": { "path": "src/new.rs", "causal_path": "changed package metadata affects the shared release" }, "relevance": { "category": "cross_cutting_risk", "explanation": "shared packaging" } },
-                    { "id": "already-answered", "severity": "warning", "path": "src/new.rs", "message": "already answered", "prior_defense_id": "defense-1", "changed_diff_evidence": { "path": "src/new.rs", "causal_path": "the changed behavior contradicts the accepted defense" }, "relevance": { "category": "prior_defense", "explanation": "user declined this" } },
+                    { "id": "real", "severity": "CRITICAL", "path": "src/new.rs", "message": "real", "relevance": { "category": "diff_changed_file", "explanation": "changed line" } },
+                    { "id": "stale", "severity": "MAJOR", "path": "src/old.rs", "message": "stale", "relevance": { "category": "diff_changed_file", "explanation": "nearby" } },
+                    { "id": "release-risk", "severity": "MAJOR", "path": "src/old.rs", "message": "release risk", "changed_diff_evidence": { "path": "src/new.rs", "causal_path": "changed package metadata affects the shared release" }, "relevance": { "category": "cross_cutting_risk", "explanation": "shared packaging" } },
+                    { "id": "already-answered", "severity": "MAJOR", "path": "src/new.rs", "message": "already answered", "prior_defense_id": "defense-1", "changed_diff_evidence": { "path": "src/new.rs", "causal_path": "the changed behavior contradicts the accepted defense" }, "relevance": { "category": "prior_defense", "explanation": "user declined this" } },
                     { "id": "vague", "path": "src/new.rs", "message": "vague" }
                 ]
             }]
@@ -6553,7 +6813,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "stale-context",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/old.rs",
                     "message": "stale nearby context",
                     "relevance": { "category": "diff_changed_file", "explanation": "nearby but unchanged" }
@@ -6568,6 +6828,87 @@ pre_filter = "project-pre"
         assert_eq!(parsed["malformed"].as_array().unwrap().len(), 0);
         assert_eq!(parsed["needs_human_decision"].as_array().unwrap().len(), 0);
         assert_eq!(parsed["clean"], true);
+    }
+
+    #[test]
+    fn filter_accepts_critical_reviewer_severity_and_records_its_disposition() {
+        let state = json!({
+            "scope": { "changed_files": ["src/new.rs"], "diff_hash": "same" },
+            "context": { "user_request": "requested behavior" },
+            "session_id": "review-1",
+            "iteration_index": 1,
+            "lenses": ["correctness-behavior"],
+            "prior_defenses_by_lens": {},
+            "finding_disposition_policy": {
+                "CRITICAL": { "correctness-behavior": "block" },
+                "MAJOR": { "correctness-behavior": "ticket" },
+                "MINOR": { "correctness-behavior": "document" },
+                "TRIVIAL": { "correctness-behavior": "ignore" }
+            }
+        });
+        let output = filter_findings(&json!({
+            "state": state,
+            "lens_results": [{
+                "lens": "correctness-behavior",
+                "subagent_key": "review-1:1:correctness-behavior",
+                "status": "findings",
+                "findings": [{
+                    "id": "critical-regression",
+                    "severity": "CRITICAL",
+                    "path": "src/new.rs",
+                    "message": "regression",
+                    "relevance": { "category": "diff_changed_file", "explanation": "changed line" }
+                }]
+            }]
+        }))
+        .expect("filter");
+        let parsed: Value = serde_json::from_str(&output).expect("json");
+
+        assert!(parsed["malformed"].as_array().unwrap().is_empty());
+        assert_eq!(parsed["actionable"][0]["severity"], "CRITICAL");
+        assert_eq!(parsed["actionable"][0]["disposition"], "block");
+    }
+
+    #[test]
+    fn filter_routes_nonblocking_dispositions_out_of_the_actionable_bucket() {
+        let state = json!({
+            "scope": { "changed_files": ["src/new.rs"], "diff_hash": "same" },
+            "context": { "user_request": "requested behavior" },
+            "session_id": "review-1",
+            "iteration_index": 1,
+            "lenses": ["correctness-behavior"],
+            "prior_defenses_by_lens": {},
+            "finding_disposition_policy": {
+                "CRITICAL": { "correctness-behavior": "block" },
+                "MAJOR": { "correctness-behavior": "ticket" },
+                "MINOR": { "correctness-behavior": "document" },
+                "TRIVIAL": { "correctness-behavior": "ignore" }
+            }
+        });
+        let filtered = filter_findings(&json!({
+            "state": state,
+            "lens_results": [{
+                "lens": "correctness-behavior",
+                "subagent_key": "review-1:1:correctness-behavior",
+                "status": "findings",
+                "findings": [{
+                    "id": "ticketed-regression",
+                    "severity": "MAJOR",
+                    "path": "src/new.rs",
+                    "message": "regression",
+                    "relevance": { "category": "diff_changed_file", "explanation": "changed line" }
+                }]
+            }]
+        }))
+        .expect("filter");
+        let parsed: Value = serde_json::from_str(&filtered).expect("json");
+
+        assert!(parsed["actionable"].as_array().unwrap().is_empty());
+        assert_eq!(parsed["routed"][0]["disposition"], "ticket");
+        assert_eq!(
+            parsed["follow_up_tickets_required"][0]["id"],
+            "ticketed-regression"
+        );
     }
 
     #[test]
@@ -6586,7 +6927,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "unrelated-pii",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/unchanged.rs",
                     "message": "suspected PII exposure outside this diff",
                     "suspected_pii": true,
@@ -6613,7 +6954,7 @@ pre_filter = "project-pre"
             "unrelated_finding_policy": {
                 "default": "report",
                 "by_lens": { "release-integration": "follow-up-ticket" },
-                "by_severity": { "warning": "address-now" }
+                "by_severity": { "MAJOR": "address-now" }
             }
         })))
         .expect("plan json");
@@ -6626,7 +6967,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "release-followup",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/unchanged.rs",
                     "message": "unrelated release observation",
                     "relevance": { "category": "diff_changed_file", "explanation": "stale context" }
@@ -6670,7 +7011,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "address-now-pii",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/unchanged.rs",
                     "message": "suspected PII exposure",
                     "suspected_pii": true,
@@ -6738,7 +7079,7 @@ pre_filter = "project-pre"
         security["status"] = json!("findings");
         security["findings"] = json!([{
             "id": "unrelated-major-security",
-            "severity": "warning",
+            "severity": "MAJOR",
             "path": "src/unchanged.rs",
             "message": "major issue outside this diff",
             "security_impact": "major",
@@ -6853,7 +7194,7 @@ pre_filter = "project-pre"
         security["status"] = json!("findings");
         security["findings"] = json!([{
             "id": "sensitive-finding",
-            "severity": "warning",
+            "severity": "MAJOR",
             "path": "src/unchanged.rs",
             "message": "email alice@example.test and exploit payload",
             "scenario": "raw personal data",
@@ -6898,7 +7239,7 @@ pre_filter = "project-pre"
         security["status"] = json!("findings");
         security["findings"] = json!([{
             "id": "sensitive-actionable",
-            "severity": "warning",
+            "severity": "MAJOR",
             "path": "src/new.rs",
             "message": "email alice@example.test and exploit payload",
             "scenario": "raw personal data",
@@ -6934,7 +7275,7 @@ pre_filter = "project-pre"
             .expect("security");
         security["status"] = json!("findings");
         security["findings"] = json!([{
-            "id": "alice@example.test", "severity": "warning", "path": "src/new.rs",
+            "id": "alice@example.test", "severity": "MAJOR", "path": "src/new.rs",
             "message": "alice@example.test exploit payload", "scenario": "private data",
             "suspected_pii": true,
             "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
@@ -6993,7 +7334,7 @@ pre_filter = "project-pre"
             .expect("security");
         security["status"] = json!("findings");
         security["findings"] = json!([{
-            "id": "human-sensitive", "severity": "warning", "path": "src/new.rs",
+            "id": "human-sensitive", "severity": "MAJOR", "path": "src/new.rs",
             "message": "alice@example.test exploit payload", "scenario": "private data",
             "security_impact": "major", "suspected_pii": true,
             "relevance": { "category": "explicit_user_concern", "matched_context": "protect PII", "explanation": "requires user decision" }
@@ -7032,7 +7373,7 @@ pre_filter = "project-pre"
             .expect("security");
         security["status"] = json!("findings");
         security["findings"] = json!([{
-            "id": "human-sensitive", "severity": "warning", "path": "src/new.rs",
+            "id": "human-sensitive", "severity": "MAJOR", "path": "src/new.rs",
             "message": "alice@example.test exploit payload", "scenario": "private data",
             "security_impact": "major", "suspected_pii": true,
             "relevance": { "category": "explicit_user_concern", "matched_context": "protect PII", "explanation": "requires user decision" }
@@ -7064,7 +7405,7 @@ pre_filter = "project-pre"
             .expect("security");
         security["status"] = json!("findings");
         security["findings"] = json!([{
-            "id": "out-of-scope-sensitive", "severity": "warning", "path": "src/unchanged.rs",
+            "id": "out-of-scope-sensitive", "severity": "MAJOR", "path": "src/unchanged.rs",
             "message": "safe summary", "security_impact": "major", "suspected_pii": false,
             "relevance": { "category": "diff_changed_file", "explanation": "stale context" }
         }]);
@@ -7331,7 +7672,7 @@ pre_filter = "project-pre"
         append_out_of_scope_report(
             &mut state,
             &json!({ "out_of_scope": [{
-                "id": "pii-finding", "lens": "tests-verification", "severity": "warning",
+                "id": "pii-finding", "lens": "tests-verification", "severity": "MAJOR",
                 "message": "alice@example.test", "scenario": "private account data",
                 "relevance": { "category": "diff_changed_file", "explanation": "nearby context" }
             }] }),
@@ -7369,7 +7710,7 @@ pre_filter = "project-pre"
         append_out_of_scope_report(
             &mut state,
             &json!({ "out_of_scope": [{
-                "id": "finding-1", "lens": "release-integration", "severity": "warning",
+                "id": "finding-1", "lens": "release-integration", "severity": "MAJOR",
                 "message": "alice@example.test",
                 "unrelated_disposition": "report"
             }] }),
@@ -7401,8 +7742,8 @@ pre_filter = "project-pre"
         append_out_of_scope_report(
             &mut state,
             &json!({ "out_of_scope": [
-                { "id": "security-one", "lens": "security-safety", "severity": "warning", "unrelated_disposition": "report" },
-                { "id": "security-two", "lens": "security-safety", "severity": "warning", "unrelated_disposition": "report" }
+                { "id": "security-one", "lens": "security-safety", "severity": "MAJOR", "unrelated_disposition": "report" },
+                { "id": "security-two", "lens": "security-safety", "severity": "MAJOR", "unrelated_disposition": "report" }
             ] }),
             Some(&json!([
                 { "finding_id": "security-one", "lens": "security-safety", "disposition": "high-priority-ticket", "reference": "BUG-ONE" },
@@ -7527,7 +7868,7 @@ pre_filter = "project-pre"
         release["status"] = json!("findings");
         release["findings"] = json!([{
             "id": "unrelated-release",
-            "severity": "note",
+            "severity": "TRIVIAL",
             "path": "src/unchanged.rs",
             "message": "follow-up required",
             "relevance": { "category": "diff_changed_file", "explanation": "stale context" }
@@ -7559,7 +7900,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "generic-hardening",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/new.rs",
                     "message": "Add unrelated infrastructure hardening",
                     "relevance": {
@@ -7594,7 +7935,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "generic-evidence",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/new.rs",
                     "message": "Add unrelated release hardening",
                     "changed_diff_evidence": "This change may affect releases",
@@ -7630,7 +7971,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "nice-to-have",
-                    "severity": "note",
+                    "severity": "TRIVIAL",
                     "path": "src/new.rs",
                     "message": "nice to have",
                     "relevance": { "category": "nice_to_have", "explanation": "wishlist" }
@@ -7664,7 +8005,7 @@ pre_filter = "project-pre"
                 "subagent_key": "review-1:1:correctness-behavior",
                 "status": "findings",
                 "findings": [
-                    { "id": "self-suppressed", "severity": "warning", "path": "src/new.rs", "message": "self suppressed", "prior_defense_id": "missing", "relevance": { "category": "prior_defense", "explanation": "claimed defense" } }
+                    { "id": "self-suppressed", "severity": "MAJOR", "path": "src/new.rs", "message": "self suppressed", "prior_defense_id": "missing", "relevance": { "category": "prior_defense", "explanation": "claimed defense" } }
                 ]
             }]
         }))
@@ -7698,7 +8039,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "invented-defense",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/new.rs",
                     "message": "Challenge a defense that does not exist",
                     "prior_defense_id": "missing",
@@ -7736,7 +8077,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "repeated-defense",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/new.rs",
                     "message": "Repeat the already defended concern",
                     "prior_defense_id": "defense-1",
@@ -8268,7 +8609,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "finding-1",
-                    "severity": "error",
+                    "severity": "CRITICAL",
                     "path": "src/replacement.rs",
                     "message": "different finding payload under diff b",
                     "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
@@ -8285,6 +8626,7 @@ pre_filter = "project-pre"
                     "finding_id": "finding-1",
                     "lens": "correctness-behavior",
                     "verdict": "rejected",
+                    "severity": "MAJOR",
                     "rationale": "stale verdict from diff a"
                 }]
             }
@@ -8436,7 +8778,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "contradictory",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/new.rs",
                     "message": "already defended",
                     "prior_defense_id": "finding-1",
@@ -8920,14 +9262,14 @@ pre_filter = "project-pre"
                 "findings": [
                     {
                         "id": "finding-1",
-                        "severity": "error",
+                        "severity": "CRITICAL",
                         "path": "src/new.rs",
                         "message": "real issue",
                         "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
                     },
                     {
                         "id": "decision-1",
-                        "severity": "warning",
+                        "severity": "MAJOR",
                         "path": "src/new.rs",
                         "message": "explicit concern needs a decision",
                         "relevance": { "category": "explicit_user_concern", "explanation": "caller decision required" }
@@ -8997,7 +9339,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "oversized",
-                    "severity": "error",
+                    "severity": "CRITICAL",
                     "path": "src/new.rs",
                     "message": "x".repeat(600 * 1024),
                     "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
@@ -9122,6 +9464,7 @@ pre_filter = "project-pre"
                     "finding_id": "finding-1",
                     "lens": "correctness-behavior",
                     "verdict": "confirmed",
+                    "severity": "MAJOR",
                     "rationale": "duplicate compact verdict"
                 })
             })
@@ -9227,9 +9570,9 @@ pre_filter = "project-pre"
             {"id": "b", "lens": "correctness-behavior"}
         ]);
         let verdicts = json!([
-            {"finding_id": "a", "lens": "correctness-behavior", "verdict": "confirmed", "rationale": "first"},
-            {"finding_id": "a", "lens": "correctness-behavior", "verdict": "confirmed", "rationale": "duplicate"},
-            {"finding_id": "unknown", "lens": "correctness-behavior", "verdict": "confirmed", "rationale": "unknown"}
+            {"finding_id": "a", "lens": "correctness-behavior", "verdict": "confirmed", "severity": "MAJOR", "rationale": "first"},
+            {"finding_id": "a", "lens": "correctness-behavior", "verdict": "confirmed", "severity": "MAJOR", "rationale": "duplicate"},
+            {"finding_id": "unknown", "lens": "correctness-behavior", "verdict": "confirmed", "severity": "MAJOR", "rationale": "unknown"}
         ]);
 
         let error = validate_verdict_coverage(
@@ -9248,8 +9591,8 @@ pre_filter = "project-pre"
             {"id": "b", "lens": "correctness-behavior"}
         ]);
         let verdicts = json!([
-            {"finding_id": "b", "lens": "correctness-behavior", "verdict": "confirmed", "rationale": "first"},
-            {"finding_id": "b", "lens": "correctness-behavior", "verdict": "confirmed", "rationale": "duplicate"}
+            {"finding_id": "b", "lens": "correctness-behavior", "verdict": "confirmed", "severity": "MAJOR", "rationale": "first"},
+            {"finding_id": "b", "lens": "correctness-behavior", "verdict": "confirmed", "severity": "MAJOR", "rationale": "duplicate"}
         ]);
 
         let error = validate_verdict_coverage(
@@ -9294,6 +9637,7 @@ pre_filter = "project-pre"
                     "finding_id": "finding-1",
                     "lens": "correctness-behavior",
                     "verdict": "rejected",
+                    "severity": "MAJOR",
                     "rationale": "The reported scenario is not reachable from the changed behavior."
                 }]
             }
@@ -9314,6 +9658,58 @@ pre_filter = "project-pre"
         assert_eq!(
             parsed["subagent_shutdown"][0]["subagent_key"],
             "review-1:1:verifier"
+        );
+    }
+
+    #[test]
+    fn verifier_records_auditable_severity_reclassification_and_final_disposition() {
+        let state = json!({
+            "finding_disposition_policy": {
+                "CRITICAL": { "correctness-behavior": "block" },
+                "MAJOR": { "correctness-behavior": "ticket" },
+                "MINOR": { "correctness-behavior": "document" },
+                "TRIVIAL": { "correctness-behavior": "ignore" }
+            }
+        });
+        let finding = json!({
+            "id": "severity-change",
+            "lens": "correctness-behavior",
+            "severity": "CRITICAL",
+            "disposition": "block"
+        });
+        let mut filtered = json!({
+            "actionable": [finding.clone()],
+            "needs_human_decision": []
+        });
+        let result = json!({
+            "status": "verified",
+            "verdicts": [{
+                "finding_id": "severity-change",
+                "lens": "correctness-behavior",
+                "verdict": "confirmed",
+                "severity": "MINOR",
+                "rationale": "The failure is recoverable and documented."
+            }]
+        });
+
+        apply_verifier_result(
+            &mut filtered,
+            std::slice::from_ref(&finding),
+            &result,
+            &state,
+        )
+        .expect("verified result");
+
+        assert!(filtered["actionable"].as_array().unwrap().is_empty());
+        assert_eq!(filtered["routed"][0]["severity"], "MINOR");
+        assert_eq!(filtered["routed"][0]["disposition"], "document");
+        assert_eq!(
+            filtered["routed"][0]["verification"]["reviewer_severity"],
+            "CRITICAL"
+        );
+        assert_eq!(
+            filtered["routed"][0]["verification"]["verifier_severity"],
+            "MINOR"
         );
     }
 
@@ -9364,6 +9760,7 @@ pre_filter = "project-pre"
                     "finding_id": "finding-1",
                     "lens": "correctness-behavior",
                     "verdict": "rejected",
+                    "severity": "MAJOR",
                     "rationale": "The reported scenario is not reachable from the changed behavior."
                 }]
             }
@@ -9763,7 +10160,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "x".repeat(129),
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/new.rs",
                     "message": "oversized id",
                     "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
@@ -9797,14 +10194,14 @@ pre_filter = "project-pre"
                 "findings": [
                     {
                         "id": "duplicate",
-                        "severity": "error",
+                        "severity": "CRITICAL",
                         "path": "src/new.rs",
                         "message": "first scenario",
                         "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
                     },
                     {
                         "id": "duplicate",
-                        "severity": "warning",
+                        "severity": "MAJOR",
                         "path": "src/new.rs",
                         "message": "distinct second scenario",
                         "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
@@ -9837,7 +10234,7 @@ pre_filter = "project-pre"
             .map(|index| {
                 json!({
                     "id": format!("finding-{index}"),
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "src/new.rs",
                     "message": "compact finding",
                     "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
@@ -9937,7 +10334,7 @@ pre_filter = "project-pre"
                     .map(|index| {
                         json!({
                             "id": format!("{lens}-{index}"),
-                            "severity": "warning",
+                            "severity": "MAJOR",
                             "path": "src/new.rs",
                             "message": "compact finding",
                             "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
@@ -10080,7 +10477,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "pathless-claim",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "message": "pathless claim",
                     "relevance": { "category": "user_request", "explanation": "claims request match" }
                 }]
@@ -10098,7 +10495,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "pathless-evidenced",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "message": "pathless but evidenced",
                     "matched_context": { "type": "user_request", "value": "requested behavior" },
                     "relevance": { "category": "user_request", "explanation": "quotes request" }
@@ -10128,7 +10525,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "missing-docs",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "docs/config.md",
                     "message": "missing documented config path",
                     "matched_context": { "type": "acceptance_criteria", "value": "project-local TOML model-role precedence" },
@@ -10162,7 +10559,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "fabricated-context",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "docs/config.md",
                     "message": "fabricated context",
                     "matched_context": { "type": "acceptance_criteria", "value": "unrelated wishlist" },
@@ -10195,7 +10592,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "padded-context",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "message": "claims an inexact criterion match",
                     "matched_context": {
                         "type": "acceptance_criteria",
@@ -10235,7 +10632,7 @@ pre_filter = "project-pre"
                 "status": "findings",
                 "findings": [{
                     "id": "mismatched-context-category",
-                    "severity": "warning",
+                    "severity": "MAJOR",
                     "path": "docs/config.md",
                     "message": "context type does not support claimed relevance category",
                     "matched_context": { "type": "acceptance_criteria", "value": "project-local TOML model-role precedence" },
@@ -10278,7 +10675,7 @@ pre_filter = "project-pre"
                 "findings": [
                     {
                         "id": "absolute-path",
-                        "severity": "warning",
+                        "severity": "MAJOR",
                         "security_impact": "none",
                         "suspected_pii": false,
                         "path": absolute,
@@ -10287,7 +10684,7 @@ pre_filter = "project-pre"
                     },
                     {
                         "id": "dot-relative-path",
-                        "severity": "warning",
+                        "severity": "MAJOR",
                         "security_impact": "none",
                         "suspected_pii": false,
                         "path": "./plugins/development-discipline/bin/development-discipline-mcp",
@@ -10335,7 +10732,7 @@ pre_filter = "project-pre"
             "status": "findings",
             "findings": [{
                 "id": "finding-1",
-                "severity": "error",
+                "severity": "CRITICAL",
                 "path": "src/new.rs",
                 "message": "real issue",
                 "relevance": { "category": "diff_changed_file", "explanation": "changed file" }
@@ -10602,7 +10999,7 @@ pre_filter = "project-pre"
         finding_results[0]["status"] = json!("findings");
         finding_results[0]["findings"] = json!([{
             "id": "finding-1",
-            "severity": "error",
+            "severity": "CRITICAL",
             "path": "src/new.rs",
             "message": "real issue",
             "relevance": {
@@ -10743,7 +11140,7 @@ pre_filter = "project-pre"
         finding_results[0]["status"] = json!("findings");
         finding_results[0]["findings"] = json!([{
             "id": "finding-1",
-            "severity": "error",
+            "severity": "CRITICAL",
             "path": "src/new.rs",
             "message": "candidate issue",
             "relevance": {
@@ -10791,6 +11188,7 @@ pre_filter = "project-pre"
                 "finding_id": "finding-1",
                 "lens": "correctness-behavior",
                 "verdict": "rejected",
+                "severity": "MAJOR",
                 "rationale": "The reported scenario is not reachable."
             }],
             "caller_attestation": {
