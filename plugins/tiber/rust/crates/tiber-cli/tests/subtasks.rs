@@ -40,6 +40,41 @@ fn subtask_add_check_and_uncheck_update_task_checklist() {
 }
 
 #[test]
+fn subtask_predecessor_list_trims_whitespace_and_ignores_empty_entries() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Normalize predecessors"]));
+    assert_success(repo.tiber([
+        "subtask",
+        "add",
+        "normalize-predecessors",
+        "First dependency",
+    ]));
+    assert_success(repo.tiber([
+        "subtask",
+        "add",
+        "normalize-predecessors",
+        "Second dependency",
+    ]));
+
+    let add = repo.tiber([
+        "subtask",
+        "add",
+        "normalize-predecessors",
+        "Dependent task",
+        "--after",
+        "s1, s2, ,",
+    ]);
+
+    assert_success(add);
+    let task = repo.tiber(["show", "normalize-predecessors"]);
+    assert_success_ref(&task);
+    assert!(String::from_utf8(task.stdout)
+        .expect("task should be utf8")
+        .contains("- [ ] (s3) Dependent task — after: s1, s2\n"));
+}
+
+#[test]
 fn subtask_check_only_updates_subtasks_section() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
