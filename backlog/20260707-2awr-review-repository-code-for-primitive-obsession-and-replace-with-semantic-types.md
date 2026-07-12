@@ -17,6 +17,7 @@ This is a repository-wide implementation task, not only a report, but it must pr
 
 - [ ] A checked repository inventory identifies each domain boundary and primitive-obession violation by component, with reasoned exclusions for I/O adapters, DTOs, configuration, shell glue, and presentation-only data.
 - [ ] Every inventoried domain violation is assigned to and completed in a bounded component slice; no raw domain primitive remains untracked.
+- [ ] Each slice introduces named types with private or invariant-safe construction, parses at the boundary, keeps primitives in adapters, and preserves public behavior with black-box tests.
 
 ## Subtasks
 
