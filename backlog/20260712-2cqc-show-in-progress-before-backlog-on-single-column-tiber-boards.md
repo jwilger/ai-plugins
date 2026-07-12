@@ -19,6 +19,7 @@ On a narrow screen the dashboard currently renders Backlog first, forcing users 
 
 - [ ] At the single-column responsive breakpoint, the In Progress column is rendered before Backlog.
 - [ ] At wider multi-column breakpoints, the intended board layout and column ordering remain unchanged.
+- [ ] Responsive UI coverage verifies the narrow-screen column order and guards against regression.
 
 ## Subtasks
 
