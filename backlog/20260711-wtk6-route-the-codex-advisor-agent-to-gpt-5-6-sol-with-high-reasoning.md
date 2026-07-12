@@ -13,7 +13,7 @@ Configure the intentionally Codex-only advisor agent to use gpt-5.6-sol with hig
 
 ## Context / Why
 
-plugins/advisor/agents/advisor.toml currently selects gpt-5.5 with high reasoning. The user explicitly chose gpt-5.6-sol with high reasoning for high-value advisor work. The advisor plugin is Codex-only, so do not add Claude routing or revive the superseded older ticket's Claude-support requirement. Keep source configuration, README claims, marketplace metadata, and the required plugin version bump consistent.
+plugins/advisor/agents/advisor.toml currently selects gpt-5.5 with high reasoning. The user explicitly chose gpt-5.6-sol with high reasoning for high-value advisor work. The advisor plugin is Codex-only, so do not add Claude routing. The superseded ticket's generic runtime-configurability and fallback requirements are intentionally not carried forward: this task pins the exact source configuration, adds no custom override layer, and must fail visibly rather than silently downgrade if the requested model is unavailable. Keep source configuration, README claims, marketplace metadata, and the required plugin version bump consistent.
 
 ## Acceptance criteria
 
