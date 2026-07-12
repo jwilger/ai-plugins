@@ -1,6 +1,7 @@
 20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help
 20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
+20260712-7csp-keep-deferred-final-review-findings-from-resetting-clean-pass-streaks
 20260711-42si-block-pushes-until-final-review-completes-three-clean-passes
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260710-dhse-require-explicit-user-approval-before-amending-commits
@@ -26,4 +27,3 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
-20260712-7csp-keep-deferred-final-review-findings-from-resetting-clean-pass-streaks
