@@ -25,6 +25,7 @@ Implement this as plugins/development-discipline/skills/mine-session-guardrails 
 - [ ] Every candidate is evidence-linked, scrubbed/anonymized, and classified as project rule, reusable plugin guidance, eval case, or no action with a reason.
 - [ ] The skill composes with eval-case-reporter, writing-skills, preflight, and worktree safety rather than duplicating their write or reporting workflows.
 - [ ] A sanitized exact preview and explicit user approval are required before any project, issue-tracker, or cross-repository write.
+- [ ] The skill is named mine-session-guardrails under development-discipline, supports both Claude Code and Codex with optional Hindsight, and updates both manifests, plugin/root documentation, semver, and relevant full-marketplace eval coverage.
 
 ## Subtasks
 
