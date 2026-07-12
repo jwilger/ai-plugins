@@ -111,7 +111,7 @@ findingLensResults[0] = {
   findings: [
     {
       id: "launcher-real",
-      severity: "error",
+      severity: "CRITICAL",
       path: "src/new.rs",
       message: "changed-file issue",
       relevance: {
@@ -121,7 +121,7 @@ findingLensResults[0] = {
     },
     {
       id: "launcher-stale",
-      severity: "warning",
+      severity: "MAJOR",
       path: "src/old.rs",
       message: "unchanged-file issue",
       relevance: {
@@ -181,6 +181,7 @@ const verifiedResponse = await request({
             finding_id: "launcher-real",
             lens: "correctness-behavior",
             verdict: "rejected",
+            severity: "CRITICAL",
             rationale:
               "The launcher fixture intentionally exercises rejection.",
           },
@@ -268,7 +269,7 @@ sensitiveSecurity.status = "findings";
 sensitiveSecurity.findings = [
   {
     id: "sensitive-flow-id",
-    severity: "warning",
+    severity: "MAJOR",
     path: "src/old.rs",
     message: "alice@example.test exploit payload",
     scenario: "private data",
