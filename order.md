@@ -1,4 +1,3 @@
-20260707-qsuz-mark-agent-unresolvable-blocked-tasks-on-the-tiber-board
 20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help
 20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
