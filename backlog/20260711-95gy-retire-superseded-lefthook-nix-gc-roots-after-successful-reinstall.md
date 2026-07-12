@@ -19,6 +19,7 @@ The installer names indirect roots by Lefthook store-path basename and currently
 
 - [ ] After a successful reinstall, only the active installer-owned Lefthook GC root remains.
 - [ ] Interrupted or failed reinstalls retain every GC root still needed by an active old-or-new launcher state.
+- [ ] Cleanup removes only obsolete installer-owned root symlinks and preserves foreign entries, non-symlinks, the active root, and every root referenced by a surviving launcher.
 
 ## Subtasks
 
