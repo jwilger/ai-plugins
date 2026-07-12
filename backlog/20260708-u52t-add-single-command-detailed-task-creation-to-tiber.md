@@ -2,16 +2,18 @@
 title: Add single-command detailed task creation to Tiber
 blocked_by: [20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help]
 blocks: []
-tags: []
+tags: [tiber, cli, mcp, developer-experience]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Add a Tiber CLI/MCP workflow for creating a backlog task with title, summary, acceptance criteria, notes, and optional metadata in one command or one tool call, so agents do not need to issue several sequential create/update/acceptance commands for a single well-specified ticket.
+Add an atomic one-invocation CLI and one-call MCP workflow for creating a fully specified Tiber backlog task without sequential follow-up mutations.
 
 ## Context / Why
+
+The current CLI/MCP create surface accepts only a title, and the new-task skill must then issue update, acceptance, and note calls. Define one detailed payload containing title, summary, context, repeated acceptance criteria, repeated notes, tags, and optional PR/MR fields. Invalid input must create no partial task, and a sync failure must identify the single created ref and a safe recovery path. Implement after the parser migration 20260707-rpmy so new flags are not parsed twice.
 
 ## Acceptance criteria
 
