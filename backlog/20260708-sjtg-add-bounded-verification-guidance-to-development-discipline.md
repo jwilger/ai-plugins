@@ -17,7 +17,6 @@ Promptfoo now has repository-specific timeouts, but development-discipline still
 
 ## Acceptance criteria
 
-- [ ] development-discipline verification guidance requires bounded timeouts or explicit monitoring plans for long-running tests, evals, CI checks, and external tools.
 - [ ] Guidance tells agents to track broken verification infrastructure separately instead of treating an unbounded hang as permanent completion evidence or rediscovering it every review cycle.
 - [ ] The change includes eval cases covering a hanging verifier and the expected bounded-timeout or tracked-blocker response.
 - [ ] Every long-running check has an explicit timeout or monitoring/cancellation plan; an unbounded hang or timeout never counts as passing evidence.
