@@ -21,6 +21,7 @@ A completed feature branch was fast-forwarded into the main coordination checkou
 - [ ] The guard preserves documented coordination operations and provides a clear worktree remediation path when it blocks an action.
 - [ ] Supported agent workflows run a checkout guard before edit tools mutate project files, and Git integration guards cover the normal local merge, fast-forward, pull, commit, and push paths.
 - [ ] A documented allowlist preserves coordination operations such as fetch, worktree management, task-branch maintenance, and hook installation without permitting ordinary feature integration in main.
+- [ ] Any exception is narrow, case-by-case, visible in diagnostics, and does not become a persistent global bypass.
 
 ## Subtasks
 
