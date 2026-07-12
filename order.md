@@ -1,5 +1,6 @@
 20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help
 20260710-dhse-require-explicit-user-approval-before-amending-commits
+20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260709-spx8-update-all-evals-to-use-gpt-5-6-model-family-when-running-against-codex
@@ -19,6 +20,5 @@
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260711-95gy-retire-superseded-lefthook-nix-gc-roots-after-successful-reinstall
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
-20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260711-42si-block-pushes-until-final-review-completes-three-clean-passes
