@@ -33,6 +33,57 @@ fn update_edits_title_summary_context_and_tags_without_raw_markdown_paths() {
 }
 
 #[test]
+fn update_tag_list_trims_whitespace_and_ignores_empty_entries() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Normalize tags"]));
+
+    let update = repo.tiber(["update", "normalize-tags", "--tags", "alpha, beta, ,"]);
+
+    assert_success(update);
+    let show = repo.tiber(["show", "normalize-tags"]);
+    assert_success_ref(&show);
+    let task = String::from_utf8(show.stdout).expect("show output should be utf8");
+    assert!(
+        task.contains("tags: [alpha, beta]\n"),
+        "unexpected tags: {task}"
+    );
+}
+
+#[test]
+fn repeated_update_fields_keep_the_last_value() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Repeated fields"]));
+
+    let update = repo.tiber([
+        "update",
+        "repeated-fields",
+        "--title",
+        "First title",
+        "--title",
+        "Final title",
+        "--tags",
+        "old",
+        "--tags",
+        "new, final",
+    ]);
+
+    assert_success(update);
+    let show = repo.tiber(["show", "repeated-fields"]);
+    assert_success_ref(&show);
+    let task = String::from_utf8(show.stdout).expect("show output should be utf8");
+    assert!(
+        task.contains("title: Final title\n"),
+        "unexpected title: {task}"
+    );
+    assert!(
+        task.contains("tags: [new, final]\n"),
+        "unexpected tags: {task}"
+    );
+}
+
+#[test]
 fn update_edits_pr_mr_tracking_frontmatter() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

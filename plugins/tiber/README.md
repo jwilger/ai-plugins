@@ -93,6 +93,10 @@ shell commands.
 
 ## CLI Commands
 
+Run `tiber --help` for the complete command list and
+`tiber <command> --help` for parser-generated command usage. Generated help is
+the authoritative CLI grammar.
+
 Common reads:
 
 ```shell
