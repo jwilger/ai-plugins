@@ -17,6 +17,8 @@ The canonical Codex eval matrix, runner help, README, and semantic grader curren
 
 ## Acceptance criteria
 
+- [ ] A documented benchmark compares supported GPT-5.6 candidates on representative normal and advisor cases using pass rate, latency, token usage, and cost, after verifying exact current model identifiers.
+
 ## Subtasks
 
 ## Notes / Log
