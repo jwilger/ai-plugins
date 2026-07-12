@@ -2,16 +2,18 @@
 title: Add cross-project change preflight skill to development-discipline
 blocked_by: []
 blocks: [20260708-puyh-add-development-workflow-router-skill]
-tags: []
+tags: [development-discipline, preflight, workflow, evals]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Add a cross-project development-discipline preflight that classifies a requested change before editing and enumerates the secondary obligations it implies, so agents do not rely on final review to discover obvious docs, tests, eval, packaging, schema, or release work.
+Add a cross-project development preflight that classifies the requested change and identifies its secondary obligations before any implementation edit.
 
 ## Context / Why
+
+Obvious documentation, test, schema, configuration, packaging, release, migration, startup, eval, and workflow obligations are currently discovered late during final review. The preflight should produce a concise evidence-backed classification, not a speculative implementation plan, and must honor repository-local instructions over reusable defaults. It applies proportionally: substantive changes get the full surface check, while genuinely narrow documentation or metadata work may mark irrelevant surfaces not applicable with a reason.
 
 ## Acceptance criteria
 
