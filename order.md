@@ -3,6 +3,7 @@
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
+20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
@@ -16,7 +17,6 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
-20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260711-95gy-retire-superseded-lefthook-nix-gc-roots-after-successful-reinstall
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
