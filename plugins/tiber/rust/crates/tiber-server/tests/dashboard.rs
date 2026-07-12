@@ -70,12 +70,78 @@ async fn dashboard_board_page_exposes_browser_smoke_controls() {
     assert!(board.contains("data-task-link"));
     assert!(board.contains("data-copy-task-id"));
     assert!(board.contains("data-copy-status"));
+    assert!(board.contains("data-reorder-status"));
     assert!(board.contains("data-task-modal"));
     assert!(board.contains("data-modal-content"));
     assert!(board.contains("href=\"/docs\""));
     assert!(board.contains("data-external-link"));
     assert!(board.contains("data-link-intercept-status"));
+    assert!(board.contains("data-backlog-draggable=\"true\""));
+    assert!(board.contains("draggable=\"true\""));
+    assert!(board.contains("x-tiber-dashboard-action"));
     assert!(board.contains("new EventSource(\"/events\")"));
+}
+
+#[tokio::test]
+async fn dashboard_reprioritizes_backlog_cards_with_post_guard() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    repo.tiber(["create", "First card"]);
+    repo.tiber(["create", "Second card"]);
+    let first = repo.task_stem("backlog", "first-card");
+    let second = repo.task_stem("backlog", "second-card");
+    assert_eq!(repo.order_entries(), vec![first.clone(), second.clone()]);
+
+    let app = tiber_server::router_at(repo.path.clone());
+    let forbidden = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/tasks/{second}/prioritize-before/{first}"))
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("forbidden response");
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .oneshot(
+            Request::post(format!("/tasks/{second}/prioritize-before/{first}"))
+                .header("x-tiber-dashboard-action", "prioritize-before")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("prioritize response");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(repo.order_entries(), vec![second, first]);
+}
+
+#[tokio::test]
+async fn dashboard_reprioritize_rejects_non_backlog_tasks() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    repo.tiber(["create", "Backlog card"]);
+    repo.tiber(["create", "Started card"]);
+    let backlog = repo.task_stem("backlog", "backlog-card");
+    let started = repo.task_stem("backlog", "started-card");
+    repo.move_task("backlog", "in-progress", &started);
+
+    let response = tiber_server::router_at(repo.path.clone())
+        .oneshot(
+            Request::post(format!("/tasks/{started}/prioritize-before/{backlog}"))
+                .header("x-tiber-dashboard-action", "prioritize-before")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("prioritize response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(body_text(response)
+        .await
+        .contains("dashboard_prioritize_scope status=backlog"));
 }
 
 #[tokio::test]
@@ -408,6 +474,20 @@ impl TempRepo {
             .expect("read task");
         assert_success(output.clone());
         String::from_utf8(output.stdout).expect("task should be utf8")
+    }
+
+    fn order_entries(&self) -> Vec<String> {
+        let output = Command::new("git")
+            .args(["show", "tasks:order.md"])
+            .current_dir(&self.path)
+            .output()
+            .expect("read order");
+        assert_success(output.clone());
+        String::from_utf8(output.stdout)
+            .expect("order should be utf8")
+            .lines()
+            .map(str::to_string)
+            .collect()
     }
 
     fn task_document(

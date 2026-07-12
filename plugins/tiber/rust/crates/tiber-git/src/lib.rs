@@ -50,6 +50,15 @@ pub fn task_metadata_at(root: impl Into<PathBuf>, task_ref: &str) -> Result<Task
     repo.with_task_workspace(|repo| repo.task_metadata(task_ref))
 }
 
+pub fn prioritize_before_at(
+    root: impl Into<PathBuf>,
+    task_ref: &str,
+    before_ref: &str,
+) -> Result<(), Error> {
+    let repo = GitRepository::at(root);
+    repo.with_task_workspace(|repo| repo.prioritize_before(task_ref, before_ref))
+}
+
 pub fn task_documents_at(root: impl Into<PathBuf>) -> Result<Vec<TaskDocument>, Error> {
     let repo = GitRepository::at(root);
     repo.with_task_snapshot_workspace(|repo| repo.task_documents_snapshot())
