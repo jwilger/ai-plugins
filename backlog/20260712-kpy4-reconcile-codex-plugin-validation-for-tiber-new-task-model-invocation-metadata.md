@@ -2,14 +2,18 @@
 title: Reconcile Codex plugin validation for Tiber new-task model invocation metadata
 blocked_by: []
 blocks: []
-tags: []
+tags: [tiber, codex, validation, developer-experience, minor-review-finding]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
+Resolve the pre-existing mismatch between Tiber's new-task skill metadata and the generic Codex plugin validator, which currently rejects disable-model-invocation.
+
 ## Context / Why
+
+Discovered while validating the unrelated Clap parser release slice. The field predates that change and may be intentional for Claude Code, so remediation must preserve multi-harness behavior instead of changing the active parser ticket.
 
 ## Acceptance criteria
 
