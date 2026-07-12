@@ -19,6 +19,7 @@ A final-review architecture lens on 20260707-rpmy found that parse_cli_arguments
 
 - [ ] Clap owns command validation and generated error construction without a command-specific pre-parser grammar for subtask add or install-bin.
 - [ ] Help actions on the affected command paths remain parser-generated and succeed consistently even when later tokens would otherwise be malformed.
+- [ ] Focused regressions preserve the intentional legacy edge cases for literal --after titles, empty predecessor rejection, and mode-looking install target paths without filesystem writes on malformed invocations.
 
 ## Subtasks
 
