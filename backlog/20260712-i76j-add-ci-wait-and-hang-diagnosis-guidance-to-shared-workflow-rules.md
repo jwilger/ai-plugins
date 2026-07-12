@@ -18,3 +18,5 @@ Document project-agnostic guidance for waiting on CI: use recent successful run 
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-12: Backlog grooming: merged into the broader bounded-verification task 20260708-sjtg. The comparable-run baseline, baseline-plus-five-minute diagnosis threshold, and deliberate inspect/cancel/retry policy were added to that canonical task.
