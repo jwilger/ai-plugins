@@ -18,7 +18,6 @@ A prior PR repair amended a published commit and created avoidable recovery work
 ## Acceptance criteria
 
 - [ ] Relevant commit/PR guidance states that amending any commit requires explicit user authorization.
-- [ ] Relevant commit and PR guidance states that amending any commit requires explicit user authorization.
 - [ ] Default repair and follow-up workflow uses additive commits and does not force-push solely to replace an amended commit.
 
 ## Subtasks
