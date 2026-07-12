@@ -22,6 +22,7 @@ The final-review MCP already tracks three-clean-iteration state, prior defenses,
 - [ ] A stable read/check interface exposes authoritative final-review completion and binds it to the repository/worktree, base, updated ref, and exact reviewed hash.
 - [ ] Pre-push enforcement evaluates every updated in-scope ref and blocks missing, stale, mismatched, amended, incomplete, or unavailable review state.
 - [ ] Supported PR and main-merge paths have equivalent remote CI/status enforcement, or the implementation explicitly documents and tests any platform boundary that cannot be enforced locally.
+- [ ] Automated coverage includes missing, stale, mismatched, complete, amended, and multi-ref cases plus a narrow documented exemption for the Tiber tasks branch without exempting ordinary feature refs.
 
 ## Subtasks
 
