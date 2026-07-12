@@ -2,18 +2,18 @@
 title: Require explicit user approval before amending commits
 blocked_by: []
 blocks: []
-tags: []
+tags: [bug, development-discipline, git, safety]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Ensure agent workflows never amend an existing commit unless the user explicitly asks for an amend.
+Treat additive commits as the default repair workflow and require explicit case-by-case user authorization before amending any existing commit.
 
 ## Context / Why
 
-A prior session amended a published commit while repairing a PR, creating avoidable recovery work. This must become explicit guidance in the relevant discipline workflow.
+A prior PR repair amended a published commit and created avoidable recovery work. Shared/default-branch history must never be rewritten as routine repair. On other branches, an amend is allowed only when the user explicitly authorizes that specific amend; PR feedback and follow-up fixes default to new commits and must not trigger a force-push merely to replace history.
 
 ## Acceptance criteria
 
