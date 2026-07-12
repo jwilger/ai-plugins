@@ -2,18 +2,18 @@
 title: Block pushes until final-review completes three clean passes
 blocked_by: []
 blocks: []
-tags: [development-discipline, final-review, worktrees, release-enforcement, bug]
+tags: [bug, development-discipline, final-review, release-enforcement, git]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Fix the release/push enforcement gap that allowed a branch to be pushed after only one started final-review pass rather than the required three completed clean iterations.
+Add a stable final-review state checker and mechanically gate publication so pushes and supported merge paths proceed only after three consecutive clean iterations for the exact current change.
 
 ## Context / Why
 
-The development-discipline final-review workflow correctly states that publication requires three consecutive clean iterations, but it does not currently provide a mechanical push gate that checks the authoritative review state. An agent started the review, received only partial first-iteration results, then pushed anyway. Add a proportionate enforcement mechanism linking the reviewed diff hash and branch state to pre-push/merge behavior so incomplete, stale, or mismatched review state blocks publication with clear remediation.
+The final-review MCP already tracks three-clean-iteration state, prior defenses, and a scope hash, but current hooks do not consume that state. A partial first iteration was followed by a push. Provide a hook/CI-consumable check bound to the repository, worktree, base, updated ref, and exact current diff or commit hash. Local pre-push and remote PR/merge enforcement are distinct surfaces and both must be covered or their limits made explicit. Fail closed when required state is missing, stale, mismatched, or unavailable. Exempt only infrastructure that must publish without final review, especially the Git-backed Tiber tasks branch, using a narrow documented rule.
 
 ## Acceptance criteria
 
