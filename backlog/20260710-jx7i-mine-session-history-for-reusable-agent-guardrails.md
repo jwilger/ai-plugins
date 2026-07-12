@@ -2,18 +2,18 @@
 title: Mine session history for reusable agent guardrails
 blocked_by: []
 blocks: []
-tags: []
+tags: [skills, hindsight, guardrails, privacy, workflow]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Add a skill that mines session history for durable guardrails and recommends their proper home.
+Add a privacy-safe skill that mines available session history for recurring mistakes or user corrections, proposes durable guardrails, and routes each proposal to the correct project or reusable marketplace surface.
 
 ## Context / Why
 
-The skill must inspect session history for recurring mistakes or user corrections, propose reusable guardrails, distinguish project-specific rules from marketplace/plugin-level guidance, and ask the user to choose the destination when the recommendation is not unambiguous. It must know how to make ai-plugins changes even when invoked from another project.
+Use targeted Hindsight recall/reflect first when available, otherwise the current session or history explicitly supplied by the user. Never crawl arbitrary home-directory transcripts. Candidate guardrails must be evidence-linked, scrubbed of secrets and private data, and classified as project rule, reusable plugin guidance, eval case, or no action. Compose with eval-case-reporter, development-discipline writing-skills, cross-project preflight, and worktree safety instead of reimplementing them. Show a sanitized preview and require explicit approval before any write, issue, or cross-repository mutation.
 
 ## Acceptance criteria
 
