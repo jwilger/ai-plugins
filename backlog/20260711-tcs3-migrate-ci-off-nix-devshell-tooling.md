@@ -22,6 +22,7 @@ All substantive GitHub CI jobs currently install Nix and run through nix develop
 - [ ] EMC and flake integration checks remain available as explicit local-only commands and are excluded from CI.
 - [ ] The workflow explicitly installs every prerequisite exercised by just ci using pinned or repository-controlled versions, including Node and the repository Rust toolchain.
 - [ ] All existing logical gates, dry-run eval checks, and the aggregate CI gate remain present and pass on a clean GitHub-hosted runner.
+- [ ] Tests or workflow assertions prove CI contains no Nix installation action, nix develop invocation, or accidental EMC/flake gate.
 
 ## Subtasks
 
