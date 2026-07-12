@@ -21,6 +21,7 @@ The final-review MCP already tracks three-clean-iteration state, prior defenses,
 - [ ] The block message identifies the missing, stale, or mismatched review state and gives the developer a clear command or workflow to complete it.
 - [ ] A stable read/check interface exposes authoritative final-review completion and binds it to the repository/worktree, base, updated ref, and exact reviewed hash.
 - [ ] Pre-push enforcement evaluates every updated in-scope ref and blocks missing, stale, mismatched, amended, incomplete, or unavailable review state.
+- [ ] Supported PR and main-merge paths have equivalent remote CI/status enforcement, or the implementation explicitly documents and tests any platform boundary that cannot be enforced locally.
 
 ## Subtasks
 
