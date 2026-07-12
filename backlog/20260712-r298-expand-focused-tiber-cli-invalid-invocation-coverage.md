@@ -18,6 +18,7 @@ A MINOR lightweight-review finding during the Clap parser ticket observed that c
 ## Acceptance criteria
 
 - [ ] Focused public CLI tests cover an unknown root command or option and an invalid nested command.
+- [ ] Every covered invalid invocation asserts exit code 2, empty stdout, and parser-generated usage on stderr.
 
 ## Subtasks
 
