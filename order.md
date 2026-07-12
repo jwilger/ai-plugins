@@ -1,9 +1,9 @@
 20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help
-20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260709-spx8-update-all-evals-to-use-gpt-5-6-model-family-when-running-against-codex
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
+20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
 20260708-55yg-add-final-review-readiness-gate-to-development-discipline
