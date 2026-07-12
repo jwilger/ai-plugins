@@ -18,6 +18,7 @@ Deferred MINOR findings from lightweight review of 20260712-kwbg. The current re
 ## Acceptance criteria
 
 - [ ] Credential refresh writes a temporary file in the target directory, sets mode 0600, and atomically renames it over a regular destination without following destination symlinks outside the eval home.
+- [ ] Focused tests cover auth.json and .credentials.json contents and mode 0600 for both initial seeding and stale-credential refresh.
 
 ## Subtasks
 
