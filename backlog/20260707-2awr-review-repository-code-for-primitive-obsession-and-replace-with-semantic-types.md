@@ -16,6 +16,7 @@ This is a repository-wide implementation task, not only a report, but it must pr
 ## Acceptance criteria
 
 - [ ] A checked repository inventory identifies each domain boundary and primitive-obession violation by component, with reasoned exclusions for I/O adapters, DTOs, configuration, shell glue, and presentation-only data.
+- [ ] Every inventoried domain violation is assigned to and completed in a bounded component slice; no raw domain primitive remains untracked.
 
 ## Subtasks
 
