@@ -1,4 +1,3 @@
-20260707-4rbv-make-tiber-opaque-to-host-repositories-and-agents
 20260707-b98q-preserve-selected-tiber-dashboard-task-across-dashboard-updates
 20260707-qsuz-mark-agent-unresolvable-blocked-tasks-on-the-tiber-board
 20260707-rpmy-use-a-real-cli-argument-parser-for-tiber-commands-and-help
