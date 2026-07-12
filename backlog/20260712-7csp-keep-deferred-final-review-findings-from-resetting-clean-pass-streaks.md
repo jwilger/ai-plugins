@@ -17,6 +17,8 @@ The current final-review skill tells callers that findings caused by the active 
 
 ## Acceptance criteria
 
+- [ ] Final-review guidance explicitly states that a finding deferred under the user-selected policy is routed non-blocking and does not reset a clean streak when the reviewed diff hash is unchanged.
+
 ## Subtasks
 
 ## Notes / Log
