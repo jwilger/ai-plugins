@@ -19,6 +19,7 @@ Deferred MINOR findings from formal review of 20260712-rmgc. EVAL_INTERRUPT_GRAC
 
 - [ ] EVAL_INTERRUPT_GRACE is parsed once as a finite supported duration and invalid values fail fast with a clear configuration error before launching Promptfoo.
 - [ ] Focused tests cover invalid grace values and prove they cannot leave an interrupting runner blocked.
+- [ ] Delayed TERM/KILL escalation remains bound to the original eval process group or is canceled on original-group completion, without signaling a later unrelated PGID.
 
 ## Subtasks
 
