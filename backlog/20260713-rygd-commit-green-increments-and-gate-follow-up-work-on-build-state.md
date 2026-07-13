@@ -19,6 +19,7 @@ The current workflow held a large green change uncommitted through repeated full
 
 - [ ] Guidance defines tests plus lightweight review as the commit-and-push gate for each implementation increment.
 - [ ] Guidance defines full review as the ticket-completion gate, not a prerequisite for preserving a green increment.
+- [ ] When full review finds issues, guidance requires a new green tests/light-review commit and push before restarting full review.
 
 ## Subtasks
 
