@@ -19,6 +19,7 @@ A final-review MINOR found that the current BASH_ENV DEBUG-hook fixture pauses i
 
 - [ ] The regression holds PID publication until it has observed an explicit marker proving the runner's INT handler executed while eval_pid was still empty and the launch phase was active.
 - [ ] The test fails when deferred launch-phase signal handling is removed or bypassed, and passes with the intended eval_launching behavior.
+- [ ] The fixture remains deterministic and bounded without adding production-only test hooks to scripts/evals/run.sh.
 
 ## Subtasks
 
