@@ -2,7 +2,7 @@
 title: Preserve dangling workspace symlinks during GPT-5.6 benchmark preparation
 blocked_by: []
 blocks: []
-tags: []
+tags: [evals, gpt-5.6, filesystem, safety, minor]
 pr_mr_url: 
 pr_mr_status: 
 ---
