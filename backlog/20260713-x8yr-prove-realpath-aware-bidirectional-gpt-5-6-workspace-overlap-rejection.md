@@ -17,6 +17,8 @@ The current overlap matrix checks exact lexical equality only. The implementatio
 
 ## Acceptance criteria
 
+- [ ] Tests fail if overlap protection loses ancestor, descendant, symlink-alias, or default ~/.codex coverage.
+
 ## Subtasks
 
 ## Notes / Log
