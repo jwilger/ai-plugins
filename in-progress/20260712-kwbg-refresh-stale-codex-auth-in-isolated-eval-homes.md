@@ -22,7 +22,7 @@ Ensure provider-backed eval homes refresh their seeded Codex credentials after t
 
 - [x] Preparing full-marketplace, targeted-plugins, and no-plugins Codex eval homes replaces stale seeded credentials with the current auth source while preserving mode 0600 and never logging credential contents.
 - [x] Focused tests reproduce a pre-existing stale isolated auth file and prove a subsequent preparation refreshes it from a newer/different source without mutating the source home.
-- [ ] API-key-backed runs continue to avoid copying ChatGPT credentials, and credential-source/target isolation guards remain enforced.
+- [x] API-key-backed runs continue to avoid copying ChatGPT credentials, and credential-source/target isolation guards remain enforced.
 
 ## Subtasks
 
