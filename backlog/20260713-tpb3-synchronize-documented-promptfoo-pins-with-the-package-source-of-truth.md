@@ -19,6 +19,7 @@ Deferred MINOR from final review of 20260709-spx8. package.json now pins Promptf
 
 - [ ] Root README dependency and consuming-project setup guidance match the Promptfoo version pinned in package.json.
 - [ ] Agentic-systems-engineering guidance and any scaffold or launcher diagnostics either match the package pin or avoid duplicating a literal version.
+- [ ] A focused consistency check fails when operational Promptfoo version guidance drifts from the package source of truth.
 
 ## Subtasks
 
