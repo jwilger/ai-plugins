@@ -17,6 +17,8 @@ MINOR caused finding from the 20260709-spx8 review. README currently advertises 
 
 ## Acceptance criteria
 
+- [ ] Version-specific plugin troubleshooting documentation, including Tiber Codex cache paths, remains synchronized with the released manifest version or uses manifest-versioned wording that cannot drift.
+
 ## Subtasks
 
 ## Notes / Log
