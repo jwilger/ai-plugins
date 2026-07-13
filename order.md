@@ -2,6 +2,7 @@
 20260709-spx8-update-all-evals-to-use-gpt-5-6-model-family-when-running-against-codex
 20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
+20260713-jsad-document-retained-subagent-slot-recovery-in-final-review-guidance
 20260713-qa3n-make-the-eval-launch-race-regression-prove-pre-publication-signal-handling
 20260713-g56q-distinguish-eval-setup-interruption-diagnostics-from-promptfoo-interruption
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
@@ -32,4 +33,3 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
-20260713-jsad-document-retained-subagent-slot-recovery-in-final-review-guidance
