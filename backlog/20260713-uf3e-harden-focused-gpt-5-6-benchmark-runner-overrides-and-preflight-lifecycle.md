@@ -20,6 +20,7 @@ Deferred MINOR findings from final review of 20260709-spx8. An inherited PROMPTF
 - [ ] The focused wrapper rejects or caps concurrency overrides outside a documented safe range, and tests cover inherited values.
 - [ ] Execution and grader-calibration always resolve to distinct artifact directories, including when supported output-root overrides are present.
 - [ ] Preflight preparation is covered by the signal-aware lifecycle or clears and marks stale phase artifacts before work begins.
+- [ ] Focused regressions distinguish preparation failure or interruption from a completed provider comparison and prevent stale results from being treated as fresh evidence.
 
 ## Subtasks
 
