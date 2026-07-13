@@ -17,6 +17,8 @@ Deferred MINOR from the fresh review of 20260709-spx8. The implementation alread
 
 ## Acceptance criteria
 
+- [ ] A focused provider test supplies an upstream response with an existing error and no raw trace, then asserts the exact error response is returned unchanged.
+
 ## Subtasks
 
 ## Notes / Log
