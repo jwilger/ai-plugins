@@ -47,3 +47,4 @@
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
+20260713-xg6h-prove-exact-gpt-5-6-benchmark-workspace-ownership-marker-contents
