@@ -17,6 +17,8 @@ Discovered while migrating canonical Codex eval defaults to GPT-5.6. Provider la
 
 ## Acceptance criteria
 
+- [ ] Every persisted result records the resolved execution model and reasoning effort, and provider/dashboard labels remain accurate when environment overrides are used.
+
 ## Subtasks
 
 ## Notes / Log
