@@ -18,6 +18,7 @@ Deferred caused MINOR from the lightweight review of 20260709-spx8. The focused 
 ## Acceptance criteria
 
 - [ ] skills-only-marketplace with an explicitly supplied empty --plugins value fails with a clear validation error.
+- [ ] Unknown skills-only plugin names fail before replacing or writing the eval home.
 
 ## Subtasks
 
