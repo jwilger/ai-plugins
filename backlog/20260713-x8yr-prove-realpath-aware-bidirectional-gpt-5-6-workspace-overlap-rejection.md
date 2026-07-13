@@ -9,6 +9,8 @@ pr_mr_status:
 
 ## Summary
 
+Extend workspace-isolation tests across ancestor, descendant, symlink-alias, explicit-auth, and default ~/.codex overlap cases.
+
 ## Context / Why
 
 ## Acceptance criteria
