@@ -8,6 +8,7 @@
 20260713-uf3e-harden-focused-gpt-5-6-benchmark-runner-overrides-and-preflight-lifecycle
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
 20260713-hkrf-cover-gpt-5-6-benchmark-sample-overrides-and-exact-provider-label-contracts
+20260713-tpb3-synchronize-documented-promptfoo-pins-with-the-package-source-of-truth
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
 20260712-7csp-keep-deferred-final-review-findings-from-resetting-clean-pass-streaks
@@ -35,4 +36,3 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
-20260713-tpb3-synchronize-documented-promptfoo-pins-with-the-package-source-of-truth
