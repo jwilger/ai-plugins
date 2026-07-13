@@ -18,6 +18,7 @@ Final review found a MINOR operability issue in the new pre-Promptfoo signal pat
 ## Acceptance criteria
 
 - [ ] SIGINT before Promptfoo launch writes a setup-specific terminal diagnostic and status.json reason without claiming a Promptfoo eval had started.
+- [ ] SIGINT after provider launch retains the existing Promptfoo/provider-eval interruption wording and signal-derived exit status.
 
 ## Subtasks
 
