@@ -17,6 +17,8 @@ Deferred MINOR from the pinned-source isolation review of 20260709-spx8. The con
 
 ## Acceptance criteria
 
+- [ ] A focused lifecycle test calls cleanup before callApi and proves the inner provider loader and app-server startup are never invoked.
+
 ## Subtasks
 
 ## Notes / Log
