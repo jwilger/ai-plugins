@@ -31,3 +31,4 @@ Deferred MINOR findings from final review of 20260709-spx8. An inherited PROMPTF
 ## Notes / Log
 
 - 2026-07-13: 2026-07-13 review update: 20260709-spx8 now rejects concurrency values outside canonical 1-2, but ${PROMPTFOO_MAX_CONCURRENCY:-2} still treats an explicitly empty inherited value as default 2. Preserve this MINOR unset-vs-empty case in the follow-up.
+- 2026-07-13: 2026-07-13 lightweight review of 20260709-spx8 deferred this caused MINOR test-depth finding: current contention coverage proves fail-fast behavior, but does not probe lock retention through the checker, release after completion, or an initially absent lock remaining absent during dry-run.
