@@ -19,6 +19,7 @@ Observed during the Ctrl-C eval-runner final review: the collaboration runtime s
 
 - [ ] Final-review guidance documents the administrative follow-up plus immediate interrupt sequence for releasing a retained completed-agent slot.
 - [ ] The guidance requires the replacement reviewer to be a brand-new fork_turns=none subagent and explicitly forbids treating the interrupted administrative agent as fresh review context.
+- [ ] Recovery instructions include bounded retry/reporting behavior when the runtime still refuses a fresh spawn, with tests or fixtures covering the guidance where applicable.
 
 ## Subtasks
 
