@@ -21,6 +21,7 @@ Deferred MINOR findings from final review of 20260709-spx8. An inherited PROMPTF
 - [ ] Execution and grader-calibration always resolve to distinct artifact directories, including when supported output-root overrides are present.
 - [ ] Preflight preparation is covered by the signal-aware lifecycle or clears and marks stale phase artifacts before work begins.
 - [ ] Focused regressions distinguish preparation failure or interruption from a completed provider comparison and prevent stale results from being treated as fresh evidence.
+- [ ] An explicitly empty PROMPTFOO_MAX_CONCURRENCY is either documented as equivalent to unset or rejected distinctly; regression coverage locks the chosen contract.
 
 ## Subtasks
 
