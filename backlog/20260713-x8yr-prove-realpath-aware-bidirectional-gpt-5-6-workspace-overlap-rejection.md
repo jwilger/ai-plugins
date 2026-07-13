@@ -2,7 +2,7 @@
 title: Prove realpath-aware bidirectional GPT-5.6 workspace overlap rejection
 blocked_by: []
 blocks: []
-tags: []
+tags: [evals, gpt-5.6, tests, filesystem, minor]
 pr_mr_url: 
 pr_mr_status: 
 ---
