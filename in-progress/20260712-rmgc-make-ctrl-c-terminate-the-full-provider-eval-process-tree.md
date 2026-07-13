@@ -27,3 +27,5 @@ Live diagnosis showed scripts/evals/run.sh in the terminal foreground PGID while
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-13: Completed in signed commit bf13dae41c7612a93b077039a5de351e81a0f020 and pushed to main. Verification: focused launch-race regression passed; relevant eval-runner suites passed 34/34; full local `just ci` passed with 44 mutants (38 caught, 6 unviable) and 201 Bats tests; final review reached clean_streak 3 on unchanged scope hash 86c4d98e837218119bfb239b687f2ea289baceab with no unresolved findings; GitHub CI run https://github.com/jwilger/ai-plugins/actions/runs/29259885955 completed successfully. Provider-backed evals were intentionally not run per user direction until ticket 20260709-spx8 migrates defaults to GPT-5.6 Sol/Terra/Luna.
