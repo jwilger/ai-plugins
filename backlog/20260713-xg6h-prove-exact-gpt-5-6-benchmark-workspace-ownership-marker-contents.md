@@ -13,6 +13,8 @@ Add a negative regression proving that only the exact benchmark workspace marker
 
 ## Context / Why
 
+Current tests cover an absent marker and the exact valid marker, but not a near-match or malformed marker. A regression accepting any marker file would pass. This MINOR review finding was deferred from 20260709-spx8.
+
 ## Acceptance criteria
 
 ## Subtasks
