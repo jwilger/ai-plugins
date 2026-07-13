@@ -17,6 +17,8 @@ A final-review MINOR found that the current BASH_ENV DEBUG-hook fixture pauses i
 
 ## Acceptance criteria
 
+- [ ] The regression holds PID publication until it has observed an explicit marker proving the runner's INT handler executed while eval_pid was still empty and the launch phase was active.
+
 ## Subtasks
 
 ## Notes / Log
