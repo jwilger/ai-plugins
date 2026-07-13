@@ -17,6 +17,8 @@ Deferred MINOR from the fresh-context review of 20260709-spx8. The current regre
 
 ## Acceptance criteria
 
+- [ ] A focused test proves GPT56_BENCHMARK_SAMPLES=2 produces exactly two uniquely indexed samples for every benchmark case while the unset default remains one.
+
 ## Subtasks
 
 ## Notes / Log
