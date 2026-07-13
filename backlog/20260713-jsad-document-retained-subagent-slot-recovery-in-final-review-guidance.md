@@ -17,6 +17,8 @@ Observed during the Ctrl-C eval-runner final review: the collaboration runtime s
 
 ## Acceptance criteria
 
+- [ ] Final-review guidance documents the administrative follow-up plus immediate interrupt sequence for releasing a retained completed-agent slot.
+
 ## Subtasks
 
 ## Notes / Log
