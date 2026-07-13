@@ -25,3 +25,5 @@ Deferred MINOR findings from final review of 20260709-spx8. An inherited PROMPTF
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-13: 2026-07-13 review update: 20260709-spx8 now rejects concurrency values outside canonical 1-2, but ${PROMPTFOO_MAX_CONCURRENCY:-2} still treats an explicitly empty inherited value as default 2. Preserve this MINOR unset-vs-empty case in the follow-up.
