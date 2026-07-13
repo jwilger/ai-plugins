@@ -19,6 +19,7 @@ Deferred MINOR from the fresh-context review of 20260709-spx8. The current regre
 
 - [ ] A focused test proves GPT56_BENCHMARK_SAMPLES=2 produces exactly two uniquely indexed samples for every benchmark case while the unset default remains one.
 - [ ] A focused test enumerates exactly six unique Sol/Terra/Luna provider labels across standard and advisor-like modes and verifies each case uses the correct three-label subset.
+- [ ] A focused measurement-gate test proves an entirely absent configured case reports every missing provider/sample tuple, including the zero-result artifact edge case.
 
 ## Subtasks
 
