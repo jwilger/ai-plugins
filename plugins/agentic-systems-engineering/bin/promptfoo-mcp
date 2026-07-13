@@ -13,7 +13,7 @@ elif [ -x "$plugin_root/../../node_modules/.bin/promptfoo" ]; then
 elif command -v promptfoo >/dev/null 2>&1; then
   promptfoo_bin="$(command -v promptfoo)"
 else
-  echo "promptfoo.missing_binary expected=promptfoo@0.121.17 hint='install promptfoo or set PROMPTFOO_BIN'" >&2
+  echo "promptfoo.missing_binary expected=promptfoo@0.121.18 hint='install promptfoo or set PROMPTFOO_BIN'" >&2
   exit 127
 fi
 

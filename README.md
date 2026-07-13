@@ -135,9 +135,13 @@ to the marketplace surface they exercise.
 The canonical promptfoo behavior evals run through Promptfoo's native coding
 agent providers: `anthropic:claude-agent-sdk` for Claude Code and
 `openai:codex-sdk` for Codex. The runner generates the promptfoo config from
-the current marketplace manifests, so each provider loads the full `ai-plugins`
-marketplace, not a single plugin in isolation. Routing and plugin composition
-are therefore part of the measured behavior. Promptfoo is pinned at `0.121.17`;
+the current marketplace manifests and labels no-plugin, targeted-plugin, and
+full-marketplace behavior modes. Codex uses a separate generated home for each
+mode, but the targeted home defaults to every Codex marketplace plugin unless
+`EVAL_TARGETED_PLUGINS` narrows it. Claude loads the full Claude marketplace in
+both plugin-enabled modes. Therefore the default run measures an empty baseline
+and full marketplace composition; the targeted label represents a distinct
+composition only when its override is set. Promptfoo is pinned at `0.121.18`;
 the Promptfoo, Codex SDK, and Claude Agent SDK packages are pinned in
 `package.json` and `package-lock.json`. The runner disables prompt response
 caching and hosted sharing so a behavior run is a fresh local record.
@@ -150,11 +154,23 @@ Default eval harness posture:
   remains Sonnet high effort with Opus 4.8 advisor where that harness exposes
   those controls; Promptfoo's current Claude Agent SDK provider does not expose
   those knobs in this repo's generated config.
-- Codex: `openai:codex-sdk`, `gpt-5.5` with
+- Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with
   `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
-  deep tracing, and a generated `CODEX_EVAL_HOME` containing every repo plugin.
-  Model-graded assertions also use `openai:codex-sdk` by default so OpenAI
-  model access goes through local Codex auth rather than `OPENAI_API_KEY`.
+  deep tracing disabled, and isolated generated homes containing no plugins, an
+  explicitly overridden targeted set, or every repo plugin according to the
+  behavior mode. Without that override, targeted and full homes contain the
+  same plugins.
+  Model-graded assertions independently default to
+  `gpt-5.6-sol` with high reasoning through the same SDK, so OpenAI model access
+  goes through local Codex auth rather than `OPENAI_API_KEY`. Override the two
+  roles separately with `CODEX_EVAL_MODEL` / `CODEX_EVAL_REASONING_EFFORT` and
+  `CODEX_GRADER_MODEL` / `CODEX_GRADER_REASONING_EFFORT`.
+
+The focused [GPT-5.6 model-family benchmark](evals/benchmarks/gpt-5.6-model-family/README.md)
+compares Sol, Terra, and Luna without running the full marketplace eval suite.
+Its trace-enforced Codex app-server wrapper and skills-only/no-plugin homes are
+benchmark controls; the canonical behavior runner above continues to use the
+native Codex SDK provider and the configured behavior-mode matrix.
 
 The canary suite is separate from behavior evals. Canaries may explicitly ask
 the harness to prove plugin and skill loading. Behavior prompts stay natural and
@@ -198,7 +214,7 @@ partial artifacts under
 
 Codex users who install `agentic-systems-engineering` also get an optional
 Promptfoo MCP server (`promptfoo mcp --transport stdio`). Consuming projects
-must provide `promptfoo@0.121.17` on `PATH`; when the project uses `flake.nix`,
+must provide `promptfoo@0.121.18` on `PATH`; when the project uses `flake.nix`,
 prefer `pkgs.promptfoo` when nixpkgs provides the required version so updates
 flow through the flake lockfile, otherwise use the project's local
 package-manager sandbox. Use it for agent-assisted config validation, focused

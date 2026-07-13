@@ -179,9 +179,9 @@ JSON
   [[ "$output" == *"label: claude-code-sonnet-full-marketplace"* ]]
   [[ "$output" == *"label: claude-code-sonnet-targeted-plugins"* ]]
   [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
-  [[ "$output" == *"label: codex-gpt-5.5-full-marketplace"* ]]
-  [[ "$output" == *"label: codex-gpt-5.5-targeted-plugins"* ]]
-  [[ "$output" == *"label: codex-gpt-5.5-no-plugins"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]
   [[ "$output" == *"pluginMode: no-plugins"* ]]
   [[ "$output" == *"pluginMode: targeted-plugins"* ]]
   [[ "$output" == *"pluginMode: full-marketplace"* ]]
@@ -266,13 +266,13 @@ JSON
 {
   "results": [
     {
-      "provider": {"label": "codex-gpt-5.5-full-marketplace"},
-      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-5.5", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
+      "provider": {"label": "codex-gpt-5.6-terra-full-marketplace"},
+      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
       "gradingResult": {"pass": true, "score": 1}
     },
     {
-      "provider": {"label": "codex-gpt-5.5-no-plugins"},
-      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-5.5", "plugin_mode": "no-plugins", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
+      "provider": {"label": "codex-gpt-5.6-terra-no-plugins"},
+      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "no-plugins", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
       "gradingResult": {"pass": false, "score": 0}
     }
   ]
@@ -285,10 +285,10 @@ JSON
   run node - <<NODE
 const fs = require('fs');
 const summary = JSON.parse(fs.readFileSync('$ROOT/site/evals/summary.json', 'utf8'));
-if (!summary.aggregates.some((group) => group.providerVariant === 'codex-gpt-5.5' && group.pluginMode === 'full-marketplace')) {
+if (!summary.aggregates.some((group) => group.providerVariant === 'codex-gpt-5.6-terra' && group.pluginMode === 'full-marketplace')) {
   throw new Error('missing provider variant/plugin mode aggregate');
 }
-if (!summary.valueGateSummaries.some((gate) => gate.caseId === 'alpha' && gate.providerVariant === 'codex-gpt-5.5' && gate.status === 'pass')) {
+if (!summary.valueGateSummaries.some((gate) => gate.caseId === 'alpha' && gate.providerVariant === 'codex-gpt-5.6-terra' && gate.status === 'pass')) {
   throw new Error(`missing passing value gate: ${JSON.stringify(summary.valueGateSummaries)}`);
 }
 NODE
@@ -304,13 +304,13 @@ NODE
 {
   "results": [
     {
-      "provider": {"label": "codex-gpt-5.5-full-marketplace"},
-      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-5.5", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
+      "provider": {"label": "codex-gpt-5.6-terra-full-marketplace"},
+      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
       "gradingResult": {"pass": true, "score": 1}
     },
     {
-      "provider": {"label": "codex-gpt-5.5-no-plugins"},
-      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-5.5", "plugin_mode": "no-plugins", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
+      "provider": {"label": "codex-gpt-5.6-terra-no-plugins"},
+      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "no-plugins", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
       "gradingResult": {"pass": false, "score": 0, "reason": "provider unavailable: not logged in"}
     }
   ]

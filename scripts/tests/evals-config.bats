@@ -31,10 +31,10 @@ make_codex_only_eval_fixture() {
       "defaultModel": "sonnet"
     },
     {
-      "id": "codex-gpt-5.5",
+      "id": "codex-gpt-5.6-terra",
       "provider": "openai:codex-sdk",
       "modelEnv": "CODEX_EVAL_MODEL",
-      "defaultModel": "gpt-5.5",
+      "defaultModel": "gpt-5.6-terra",
       "reasoningEffortEnv": "CODEX_EVAL_REASONING_EFFORT",
       "defaultReasoningEffort": "medium"
     }
@@ -115,6 +115,82 @@ MD
   [[ "$output" == *"provider:"*$'\n'"      text:"*$'\n'"        id: openai:codex-sdk"* ]]
   [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME)"* ]]
   [[ "$output" != *"openai:gpt-5-mini"* ]]
+}
+
+@test "generated Codex config defaults execution to Terra and grading to independent Sol" {
+  run node "$GENERATOR" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"model: \"{{ env.CODEX_EVAL_MODEL | default('gpt-5.6-terra') }}\""* ]]
+  [[ "$output" == *"model_reasoning_effort: \"{{ env.CODEX_EVAL_REASONING_EFFORT | default('medium') }}\""* ]]
+  [[ "$output" == *"model: \"{{ env.CODEX_GRADER_MODEL | default('gpt-5.6-sol') }}\""* ]]
+  [[ "$output" == *"model_reasoning_effort: \"{{ env.CODEX_GRADER_REASONING_EFFORT | default('high') }}\""* ]]
+}
+
+@test "advisor plugin-eval benchmark defaults to Terra with explicit medium reasoning" {
+  benchmark="$ROOT/plugins/advisor/skills/advisor/.plugin-eval/benchmark.json"
+
+  [ "$(jq -r '.runner.model' "$benchmark")" = "gpt-5.6-terra" ]
+  jq -e '.runner.extraArgs == ["-c", "model_reasoning_effort=\"medium\""]' "$benchmark"
+}
+
+@test "every Codex plugin-eval benchmark defaults to Terra with explicit medium reasoning" {
+  run node - "$ROOT" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.argv[2];
+const benchmarkFiles = [];
+
+function visit(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      visit(file);
+    } else if (entry.name === 'benchmark.json' && path.basename(path.dirname(file)) === '.plugin-eval') {
+      benchmarkFiles.push(file);
+    }
+  }
+}
+
+visit(path.join(root, 'plugins'));
+const codexBenchmarks = benchmarkFiles
+  .map((file) => ({ file, config: JSON.parse(fs.readFileSync(file, 'utf8')) }))
+  .filter(({ config }) => config.runner?.type === 'codex-cli');
+
+if (codexBenchmarks.length === 0) {
+  throw new Error('no Codex plugin-eval benchmarks found');
+}
+
+const failures = codexBenchmarks.flatMap(({ file, config }) => {
+  const errors = [];
+  if (config.runner.model !== 'gpt-5.6-terra') {
+    errors.push(`model=${JSON.stringify(config.runner.model)}`);
+  }
+  if (JSON.stringify(config.runner.extraArgs) !== JSON.stringify(['-c', 'model_reasoning_effort="medium"'])) {
+    errors.push(`extraArgs=${JSON.stringify(config.runner.extraArgs)}`);
+  }
+  return errors.length === 0 ? [] : [`${path.relative(root, file)}: ${errors.join(', ')}`];
+});
+
+if (failures.length > 0) {
+  console.error(failures.join('\n'));
+  process.exit(1);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
+@test "operator-facing Promptfoo pins match the package source of truth" {
+  promptfoo_version="$(jq -r '.devDependencies.promptfoo' "$ROOT/package.json")"
+
+  for guidance in \
+    "$ROOT/plugins/agentic-systems-engineering/skills/scaffold-agentic-evals/SKILL.md" \
+    "$ROOT/plugins/agentic-systems-engineering/skills/scaffold-agentic-evals/references/scaffold.md" \
+    "$ROOT/plugins/agentic-systems-engineering/bin/promptfoo-mcp"; do
+    grep -Fq "promptfoo@$promptfoo_version" "$guidance"
+  done
 }
 
 @test "generated configs expose every marketplace plugin through the relevant harness surface" {
@@ -344,6 +420,7 @@ NODE
   eval_home="$FIXTURE_TMP/eval-home"
   mkdir -p "$auth_home" "$eval_home"
   printf '%s\n' '{"token":"current"}' >"$auth_home/auth.json"
+  printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
   printf '%s\n' '{"token":"revoked"}' >"$eval_home/auth.json"
 
   run env CODEX_EVAL_AUTH_HOME="$auth_home" node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$eval_home" --plugin-mode no-plugins

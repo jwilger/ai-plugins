@@ -503,8 +503,11 @@ install_tiber_cache_launcher() {
 
 install_promptfoo_cache_launcher() {
   local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/agentic-systems-engineering"
+  local version
+
   mkdir -p "$cache_parent"
-  ln -sfn "$ROOT/plugins/agentic-systems-engineering" "$cache_parent/0.1.4"
+  version="$(jq -r '.version' "$ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/agentic-systems-engineering" "$cache_parent/$version"
 }
 
 install_stale_tiber_cache_launcher() {

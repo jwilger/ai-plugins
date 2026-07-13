@@ -1,0 +1,120 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Focused GPT-5.6 execution-model benchmark for ai-plugins
+
+prompts:
+  - |
+    Answer the scenario as an advisory behavior question. Treat it as stateless and do not use, mention, or rely on earlier conversations or eval runs. Use installed marketplace plugin and skill guidance when it is relevant. Answer directly without delegating or using collaboration or subagent tools. Do not run shell commands, start evals, mutate files, or inspect repository state.
+
+    {{scenario_prompt}}
+
+providers:
+  - id: file://trace-enforced-codex-provider.mjs
+    label: codex-gpt-5.6-sol-standard
+    config:
+      model: gpt-5.6-sol
+      model_reasoning_effort: medium
+      working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+      deep_tracing: false
+      skip_git_repo_check: true
+      cli_config:
+        features:
+          plugins: true
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE }}"
+  - id: file://trace-enforced-codex-provider.mjs
+    label: codex-gpt-5.6-terra-standard
+    config:
+      model: gpt-5.6-terra
+      model_reasoning_effort: medium
+      working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+      deep_tracing: false
+      skip_git_repo_check: true
+      cli_config:
+        features:
+          plugins: true
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE }}"
+  - id: file://trace-enforced-codex-provider.mjs
+    label: codex-gpt-5.6-luna-standard
+    config:
+      model: gpt-5.6-luna
+      model_reasoning_effort: medium
+      working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+      deep_tracing: false
+      skip_git_repo_check: true
+      cli_config:
+        features:
+          plugins: true
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE }}"
+  - id: file://trace-enforced-codex-provider.mjs
+    label: codex-gpt-5.6-sol-advisor-like
+    config:
+      model: gpt-5.6-sol
+      model_reasoning_effort: medium
+      working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+      deep_tracing: false
+      skip_git_repo_check: true
+      cli_config:
+        features:
+          plugins: false
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+  - id: file://trace-enforced-codex-provider.mjs
+    label: codex-gpt-5.6-terra-advisor-like
+    config:
+      model: gpt-5.6-terra
+      model_reasoning_effort: medium
+      working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+      deep_tracing: false
+      skip_git_repo_check: true
+      cli_config:
+        features:
+          plugins: false
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+  - id: file://trace-enforced-codex-provider.mjs
+    label: codex-gpt-5.6-luna-advisor-like
+    config:
+      model: gpt-5.6-luna
+      model_reasoning_effort: medium
+      working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+      deep_tracing: false
+      skip_git_repo_check: true
+      cli_config:
+        features:
+          plugins: false
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+
+tests: file://cases.cjs
+
+defaultTest:
+  options:
+    provider:
+      text:
+        id: file://trace-enforced-codex-provider.mjs
+        label: grader-gpt-5.6-sol-high
+        config:
+          model: gpt-5.6-sol
+          model_reasoning_effort: high
+          working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+          deep_tracing: false
+          skip_git_repo_check: true
+          cli_config:
+            features:
+              plugins: false
+          cli_env:
+            CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+
+commandLineOptions:
+  maxConcurrency: 2
+  share: false
+  cache: false
+  write: true
+
+metadata:
+  benchmark: gpt-5.6-model-family
+  executionEffort: medium
+  graderModel: gpt-5.6-sol
+  graderEffort: high
