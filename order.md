@@ -1,4 +1,5 @@
 20260712-rmgc-make-ctrl-c-terminate-the-full-provider-eval-process-tree
+20260709-spx8-update-all-evals-to-use-gpt-5-6-model-family-when-running-against-codex
 20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
@@ -12,7 +13,6 @@
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
-20260709-spx8-update-all-evals-to-use-gpt-5-6-model-family-when-running-against-codex
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
