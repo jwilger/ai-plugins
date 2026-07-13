@@ -13,6 +13,8 @@ Extend workspace-isolation tests across ancestor, descendant, symlink-alias, exp
 
 ## Context / Why
 
+The current overlap matrix checks exact lexical equality only. The implementation uses realpath-aware bidirectional containment, but regressions to equality-only checks or loss of default-home protection would pass. This MINOR review finding was deferred from 20260709-spx8.
+
 ## Acceptance criteria
 
 ## Subtasks
