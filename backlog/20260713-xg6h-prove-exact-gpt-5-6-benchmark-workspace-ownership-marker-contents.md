@@ -9,6 +9,8 @@ pr_mr_status:
 
 ## Summary
 
+Add a negative regression proving that only the exact benchmark workspace marker contents authorize recursive recreation.
+
 ## Context / Why
 
 ## Acceptance criteria
