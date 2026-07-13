@@ -17,6 +17,8 @@ Deferred MINOR findings from final review of 20260709-spx8. An inherited PROMPTF
 
 ## Acceptance criteria
 
+- [ ] The focused wrapper rejects or caps concurrency overrides outside a documented safe range, and tests cover inherited values.
+
 ## Subtasks
 
 ## Notes / Log
