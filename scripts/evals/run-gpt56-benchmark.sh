@@ -3,6 +3,16 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 benchmark_dir="$root/evals/benchmarks/gpt-5.6-model-family"
+provider_eval_lock_file="$root/.dependencies/evals/provider-eval.lock"
+if git_common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  git_common_dir="$(cd "$git_common_dir" && pwd -P)"
+  if [ "$(basename "$git_common_dir")" != ".git" ]; then
+    echo "provider eval locking requires a non-bare coordination checkout" >&2
+    exit 2
+  fi
+  coordination_checkout="$(cd "$git_common_dir/.." && pwd -P)"
+  provider_eval_lock_file="$coordination_checkout/.dependencies/evals/provider-eval.lock"
+fi
 phase="execution"
 dry_run=0
 
@@ -124,11 +134,18 @@ print_command() {
   printf '\n'
 }
 
+standard_plugins_csv() {
+  node -e \
+    'const loadCases = require(process.argv[1]); process.stdout.write(loadCases.standardPluginNames().join(","));' \
+    "$benchmark_dir/cases.cjs"
+}
+
 if [ "$dry_run" -eq 1 ]; then
   "${workspace_prepare[@]}" --check >/dev/null
   print_command "${workspace_prepare[@]}"
   if [ "$phase" = "execution" ]; then
-    print_command node "$root/scripts/evals/prepare-codex-home.mjs" "$skills_home" --plugin-mode skills-only-marketplace
+    standard_plugins="$(standard_plugins_csv)"
+    print_command node "$root/scripts/evals/prepare-codex-home.mjs" "$skills_home" --plugin-mode skills-only-marketplace --plugins "$standard_plugins"
   fi
   print_command node "$root/scripts/evals/prepare-codex-home.mjs" "$no_plugins_home" --plugin-mode no-plugins
   "$root/scripts/evals/run.sh" --dry-run "$config"
@@ -140,7 +157,7 @@ if [ "$dry_run" -eq 1 ]; then
   exit 0
 fi
 
-lock_file="$root/.dependencies/evals/provider-eval.lock"
+lock_file="$provider_eval_lock_file"
 mkdir -p "$(dirname "$lock_file")"
 exec 9>>"$lock_file"
 if ! flock --nonblock 9; then
@@ -153,7 +170,8 @@ export AI_PLUGINS_EVAL_LOCK_FD=9
 
 "${workspace_prepare[@]}" >/dev/null
 if [ "$phase" = "execution" ]; then
-  node "$root/scripts/evals/prepare-codex-home.mjs" "$skills_home" --plugin-mode skills-only-marketplace >/dev/null
+  standard_plugins="$(standard_plugins_csv)"
+  node "$root/scripts/evals/prepare-codex-home.mjs" "$skills_home" --plugin-mode skills-only-marketplace --plugins "$standard_plugins" >/dev/null
 fi
 node "$root/scripts/evals/prepare-codex-home.mjs" "$no_plugins_home" --plugin-mode no-plugins >/dev/null
 

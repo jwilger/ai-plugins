@@ -2,6 +2,8 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  git_common_dir="$(cd "$ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd -P)"
+  MAIN_CHECKOUT="$(cd "$git_common_dir/.." && pwd -P)"
   BENCHMARK_RUNNER="$ROOT/scripts/evals/run-gpt56-benchmark.sh"
   CALIBRATION_CHECKER="$ROOT/scripts/evals/check-gpt56-grader-calibration.mjs"
 }
@@ -369,7 +371,8 @@ NODE
   run env OPENAI_API_KEY=fixture node \
     "$ROOT/scripts/evals/prepare-codex-home.mjs" \
     "$eval_home" \
-    --plugin-mode skills-only-marketplace
+    --plugin-mode skills-only-marketplace \
+    --plugins agentic-systems-engineering,development-discipline
 
   [ "$status" -eq 0 ]
   version="$(jq -r '.version' "$ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
@@ -380,6 +383,10 @@ NODE
   [ ! -e "$cached_plugin/bin" ]
   [ ! -e "$cached_plugin/.claude-plugin" ]
   [ ! -e "$cached_plugin/README.md" ]
+  [ "$(grep -c '^\[plugins\.' "$eval_home/config.toml")" -eq 2 ]
+  [ -d "$eval_home/plugins/cache/ai-plugins/development-discipline" ]
+  [ ! -e "$eval_home/plugins/cache/ai-plugins/advisor" ]
+  ! grep -q 'advisor@ai-plugins' "$eval_home/config.toml"
   grep -q '\[plugins\."agentic-systems-engineering@ai-plugins"\]' "$eval_home/config.toml"
 
   rm -rf "$temp_root"
@@ -480,6 +487,7 @@ NODE
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 2 ]
   [[ "$output" == *"$skills_home --plugin-mode skills-only-marketplace"* ]]
+  [[ "$output" == *"--plugins agentic-systems-engineering\\,development-discipline"* ]]
   [[ "$output" == *"$no_plugins_home --plugin-mode no-plugins"* ]]
   [[ "$output" == *"$out_root/execution/results.json"* ]]
   [[ "$output" == *"--max-concurrency 2"* ]]
@@ -505,7 +513,7 @@ NODE
 
 @test "GPT-5.6 benchmark runner rejects a concurrent live run before preparation while dry-run bypasses the lock" {
   temp_root="$(mktemp -d)"
-  lock_path="$ROOT/.dependencies/evals/provider-eval.lock"
+  lock_path="$MAIN_CHECKOUT/.dependencies/evals/provider-eval.lock"
   preparation_marker="$temp_root/preparation-invoked"
   provider_marker="$temp_root/provider-invoked"
   fake_bin="$temp_root/bin"
@@ -563,6 +571,57 @@ NODE
 
   [ "$status" -eq 0 ]
   [ "$lock_contents_after" = "$lock_contents_before" ]
+}
+
+@test "GPT-5.6 benchmark runner shares its provider lock across linked worktrees" {
+  temp_root="$(mktemp -d)"
+  fixture_main="$temp_root/main"
+  fixture_worktree="$temp_root/linked"
+  fake_bin="$temp_root/bin"
+  preparation_marker="$temp_root/preparation-invoked"
+  mkdir -p "$fixture_main/scripts/evals" "$fake_bin"
+  cp "$BENCHMARK_RUNNER" "$fixture_main/scripts/evals/run-gpt56-benchmark.sh"
+
+  git -C "$fixture_main" init -q
+  git -C "$fixture_main" config user.name fixture
+  git -C "$fixture_main" config user.email fixture@example.invalid
+  git -C "$fixture_main" config commit.gpgSign false
+  git -C "$fixture_main" add scripts/evals/run-gpt56-benchmark.sh
+  git -C "$fixture_main" commit -qm fixture
+  git -C "$fixture_main" worktree add -q --detach "$fixture_worktree"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'touch "$PREPARATION_MARKER"' \
+    'exit 91' \
+    >"$fake_bin/node"
+  chmod +x "$fake_bin/node"
+
+  lock_path="$fixture_main/.dependencies/evals/provider-eval.lock"
+  mkdir -p "$(dirname "$lock_path")"
+  exec 8>>"$lock_path"
+  flock --nonblock 8
+
+  run env \
+    PATH="$fake_bin:$PATH" \
+    PREPARATION_MARKER="$preparation_marker" \
+    CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="$temp_root/skills-home" \
+    CODEX_EVAL_HOME_NO_PLUGINS="$temp_root/no-plugins-home" \
+    GPT56_BENCHMARK_WORKSPACE="$temp_root/workspace" \
+    GPT56_BENCHMARK_OUT_ROOT="$temp_root/out" \
+    "$fixture_worktree/scripts/evals/run-gpt56-benchmark.sh" --phase execution
+  run_status="$status"
+  run_output="$output"
+  preparation_invoked=0
+  [ ! -e "$preparation_marker" ] || preparation_invoked=1
+
+  flock --unlock 8
+  exec 8>&-
+  rm -rf "$temp_root"
+
+  [ "$run_status" -eq 75 ]
+  [[ "$run_output" == *"provider-backed eval already active; lock is held: $lock_path"* ]]
+  [ "$preparation_invoked" -eq 0 ]
 }
 
 @test "GPT-5.6 benchmark runner rejects concurrency outside the canonical one-to-two range" {
@@ -869,14 +928,19 @@ NODE
   out_root="$temp_root/out"
   fake_promptfoo="$temp_root/promptfoo"
   marker="$temp_root/promptfoo-invoked"
-  expected_plugin="$(jq -r '.plugins[0].name' "$ROOT/.agents/plugins/marketplace.json")"
+  expected_plugin="agentic-systems-engineering"
   agentic_version="$(jq -r '.version' "$ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
 
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
     'grep -q "\\[plugins\\.\\\"${EXPECTED_PLUGIN}@ai-plugins\\\"\\]" "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml"' \
+    'grep -q "\\[plugins\\.\\\"development-discipline@ai-plugins\\\"\\]" "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml"' \
+    '[ "$(grep -c "^\\[plugins\\." "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml")" -eq 2 ]' \
     '[ -d "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/$EXPECTED_PLUGIN" ]' \
+    '[ -d "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/development-discipline" ]' \
+    '[ ! -e "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/advisor" ]' \
+    '! grep -q "advisor@ai-plugins" "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml"' \
     '[ ! -e "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/agentic-systems-engineering/$AGENTIC_VERSION/.mcp.json" ]' \
     '! grep -q "^\\[plugins\\." "$CODEX_EVAL_HOME_NO_PLUGINS/config.toml"' \
     '[ -d "$GPT56_BENCHMARK_WORKSPACE" ]' \
@@ -915,6 +979,18 @@ const path = require('node:path');
 const root = process.argv[2];
 const loadCases = require(path.join(root, 'evals/benchmarks/gpt-5.6-model-family/cases.cjs'));
 const cases = loadCases();
+
+const standardPluginNames = loadCases.standardPluginNames?.();
+const expectedStandardPluginNames = [
+  'agentic-systems-engineering',
+  'development-discipline',
+];
+if (JSON.stringify(standardPluginNames) !== JSON.stringify(expectedStandardPluginNames)) {
+  throw new Error(`unexpected standard plugin scope: ${JSON.stringify(standardPluginNames)}`);
+}
+if (standardPluginNames.includes('advisor')) {
+  throw new Error('standard plugin scope includes delegation-only Advisor guidance');
+}
 
 if (cases.length !== 4) {
   throw new Error(`expected four benchmark cases, got ${cases.length}`);
@@ -1502,11 +1578,14 @@ NODE
   [ "$status" -eq 0 ]
 }
 
-@test "trace-enforced Codex provider accepts normal user-message lifecycle traces" {
-  run node --input-type=module - "$ROOT" <<'NODE'
+@test "trace-enforced Codex provider and isolation checker share the normal user-message lifecycle contract" {
+  artifact="$(mktemp)"
+  run node --input-type=module - "$ROOT" "$artifact" <<'NODE'
+import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const root = process.argv[2];
+const artifact = process.argv[3];
 const { default: TraceEnforcedCodexProvider } = await import(
   pathToFileURL(
     `${root}/evals/benchmarks/gpt-5.6-model-family/trace-enforced-codex-provider.mjs`,
@@ -1565,9 +1644,25 @@ const response = await provider.callApi('Answer directly.');
 if (response.error) {
   throw new Error(`normal user-message lifecycle was rejected: ${response.error}`);
 }
+
+fs.writeFileSync(artifact, JSON.stringify({
+  results: {
+    results: [{
+      provider: { label: 'codex-gpt-5.6-terra-standard' },
+      testCase: { vars: { case_id: 'normal-user-message-lifecycle', sample_index: 1 } },
+      response,
+    }],
+  },
+}));
 NODE
 
   [ "$status" -eq 0 ]
+
+  run node "$ROOT/scripts/evals/check-gpt56-execution-isolation.mjs" "$artifact"
+
+  rm -f "$artifact"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified 1 direct GPT-5.6 execution result"* ]]
 }
 
 @test "trace-enforced Codex provider forces defense-in-depth app-server config" {

@@ -1,6 +1,11 @@
 import { loadApiProvider } from "promptfoo";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  allowedNormalizedItemTypes,
+  allowedRawResponseItemTypes,
+  toolNotificationDescription,
+} from "./trace-policy.mjs";
 
 // package-lock pins @openai/codex-sdk -> @openai/codex 0.144.3, whose npm
 // binary is linked here. Promptfoo otherwise resolves a bare `codex` on PATH.
@@ -8,37 +13,6 @@ const pinnedCodexPath = fileURLToPath(
   new URL("../../../node_modules/.bin/codex", import.meta.url),
 );
 
-const allowedItemTypes = new Set([
-  "user_message",
-  "agent_message",
-  "reasoning",
-]);
-const allowedRawResponseItemTypes = new Set(["message", "reasoning"]);
-const allowedNotificationItemTypes = new Set([
-  "userMessage",
-  "agentMessage",
-  "reasoning",
-]);
-const benignNotificationMethods = new Set([
-  "error",
-  "thread/started",
-  "thread/status/changed",
-  "thread/tokenUsage/updated",
-  "turn/started",
-  "turn/completed",
-  "item/started",
-  "item/completed",
-  "rawResponseItem/completed",
-  "item/agentMessage/delta",
-  "item/reasoning/summaryTextDelta",
-  "item/reasoning/summaryPartAdded",
-  "item/reasoning/textDelta",
-  "turn/moderationMetadata",
-  "model/safetyBuffering/updated",
-  "warning",
-  "deprecationNotice",
-  "configWarning",
-]);
 const disabledFeatures = [
   "shell_tool",
   "unified_exec",
@@ -127,26 +101,6 @@ function withoutPromptConfig(context) {
 
   const { config: _ignoredConfig, ...prompt } = context.prompt;
   return { ...context, prompt };
-}
-
-function toolNotificationDescription(notifications) {
-  for (const notification of notifications) {
-    const method = notification?.method;
-    if (typeof method !== "string" || !method) {
-      return "unknown notification";
-    }
-    if (!benignNotificationMethods.has(method)) {
-      return method;
-    }
-    if (method === "item/started" || method === "item/completed") {
-      const itemType = notification?.params?.item?.type;
-      if (!allowedNotificationItemTypes.has(itemType)) {
-        return `${method}:${itemType ?? "unknown"}`;
-      }
-    }
-  }
-
-  return undefined;
 }
 
 /**
@@ -254,7 +208,7 @@ export default class TraceEnforcedCodexProvider {
     }
 
     const rejectedItem = raw?.items?.find(
-      (item) => !allowedItemTypes.has(item?.type),
+      (item) => !allowedNormalizedItemTypes.has(item?.type),
     );
 
     if (rejectedItem) {

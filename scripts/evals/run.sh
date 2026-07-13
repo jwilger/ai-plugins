@@ -31,6 +31,15 @@ eval_launching=0
 interrupted_status=0
 interrupted_signal=""
 provider_eval_lock_file="$root/.dependencies/evals/provider-eval.lock"
+if git_common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  git_common_dir="$(cd "$git_common_dir" && pwd -P)"
+  if [ "$(basename "$git_common_dir")" != ".git" ]; then
+    echo "provider eval locking requires a non-bare coordination checkout" >&2
+    exit 2
+  fi
+  coordination_checkout="$(cd "$git_common_dir/.." && pwd -P)"
+  provider_eval_lock_file="$coordination_checkout/.dependencies/evals/provider-eval.lock"
+fi
 
 usage() {
   cat <<'USAGE'

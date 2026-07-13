@@ -2,6 +2,8 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  git_common_dir="$(cd "$ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd -P)"
+  MAIN_CHECKOUT="$(cd "$git_common_dir/.." && pwd -P)"
   RUNNER="$ROOT/scripts/evals/run.sh"
   SIGNAL_FIXTURE_ROOT=""
   SIGNAL_RUNNER_PID=""
@@ -189,7 +191,7 @@ teardown() {
 
 @test "eval runner serializes live provider runs and accepts only its exact inherited lock" {
   temp_root="$(mktemp -d)"
-  lock_path="$ROOT/.dependencies/evals/provider-eval.lock"
+  lock_path="$MAIN_CHECKOUT/.dependencies/evals/provider-eval.lock"
   config="$temp_root/promptfooconfig.yaml"
   fake_promptfoo="$temp_root/promptfoo"
   provider_marker="$temp_root/provider-invoked"
@@ -253,6 +255,56 @@ SH
   [ "$status" -eq 0 ]
   [ -e "$provider_marker" ]
   rm -rf "$temp_root"
+}
+
+@test "eval runner shares its provider lock across linked worktrees" {
+  temp_root="$(mktemp -d)"
+  fixture_main="$temp_root/main"
+  fixture_worktree="$temp_root/linked"
+  fake_bin="$temp_root/bin"
+  config="$temp_root/promptfooconfig.yaml"
+  preparation_marker="$temp_root/preparation-invoked"
+  mkdir -p "$fixture_main/scripts/evals" "$fake_bin"
+  cp "$RUNNER" "$fixture_main/scripts/evals/run.sh"
+  printf 'prompts: []\nproviders: []\ntests: []\n' >"$config"
+
+  git -C "$fixture_main" init -q
+  git -C "$fixture_main" config user.name fixture
+  git -C "$fixture_main" config user.email fixture@example.invalid
+  git -C "$fixture_main" config commit.gpgSign false
+  git -C "$fixture_main" add scripts/evals/run.sh
+  git -C "$fixture_main" commit -qm fixture
+  git -C "$fixture_main" worktree add -q --detach "$fixture_worktree"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'touch "$PREPARATION_MARKER"' \
+    'exit 91' \
+    >"$fake_bin/node"
+  chmod +x "$fake_bin/node"
+
+  lock_path="$fixture_main/.dependencies/evals/provider-eval.lock"
+  mkdir -p "$(dirname "$lock_path")"
+  exec 8>>"$lock_path"
+  flock --nonblock 8
+
+  run env \
+    PATH="$fake_bin:$PATH" \
+    PREPARATION_MARKER="$preparation_marker" \
+    EVAL_OUT_DIR="$temp_root/output" \
+    "$fixture_worktree/scripts/evals/run.sh" "$config"
+  run_status="$status"
+  run_output="$output"
+  preparation_invoked=0
+  [ ! -e "$preparation_marker" ] || preparation_invoked=1
+
+  flock --unlock 8
+  exec 8>&-
+  rm -rf "$temp_root"
+
+  [ "$run_status" -eq 75 ]
+  [[ "$run_output" == *"provider-backed eval already active; lock is held: $lock_path"* ]]
+  [ "$preparation_invoked" -eq 0 ]
 }
 
 @test "eval runner dry-run prepares targeted Codex home from Codex marketplace plugins" {
