@@ -18,6 +18,7 @@ Deferred MINOR from the correctness review of 20260709-spx8. scripts/evals/check
 ## Acceptance criteria
 
 - [ ] Measurement-mode min_pass_rate is accepted only when it is a finite numeric value exactly equal to zero; strings, booleans, null, and non-finite numbers are rejected with an actionable diagnostic.
+- [ ] Focused regression tests cover valid numeric zero and representative coercible malformed values without changing ordinary threshold-mode behavior.
 
 ## Subtasks
 
