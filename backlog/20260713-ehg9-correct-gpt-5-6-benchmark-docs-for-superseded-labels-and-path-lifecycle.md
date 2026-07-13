@@ -20,3 +20,5 @@ Caused MINOR deferred from 20260709-spx8. The decision/limits prose still says c
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-13: Final-review iteration 1 reconfirmed the deferred MINOR: the README says phase output directories are freshly recreated, but stable directories retain auxiliary files and a preparation failure can occur before standard result files are cleared. Preserve the distinction between directory freshness and checker-verified current artifacts.
