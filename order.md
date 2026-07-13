@@ -49,3 +49,4 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
+20260713-rygd-commit-green-increments-and-gate-follow-up-work-on-build-state
