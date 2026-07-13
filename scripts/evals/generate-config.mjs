@@ -110,7 +110,8 @@ function fileUrl(file) {
 function behaviorTestLoader() {
   if (process.env.EVAL_CASE_FILTER || process.env.EVAL_SAMPLES) {
     return fileUrl(
-      path.join(root, "evals/out/generated/load-harness-cases.runtime.cjs"),
+      process.env.EVAL_RUNTIME_LOADER_FILE ||
+        path.join(root, "evals/out/generated/load-harness-cases.runtime.cjs"),
     );
   }
   return fileUrl(path.join(root, "evals/promptfoo/load-harness-cases.cjs"));
@@ -287,8 +288,8 @@ defaultTest:
       text:
         id: openai:codex-sdk
         config:
-          model: "{{ env.CODEX_GRADER_MODEL | default('gpt-5.5') }}"
-          model_reasoning_effort: "{{ env.CODEX_GRADER_REASONING_EFFORT | default('medium') }}"
+          model: "{{ env.CODEX_GRADER_MODEL | default('gpt-5.6-sol') }}"
+          model_reasoning_effort: "{{ env.CODEX_GRADER_REASONING_EFFORT | default('high') }}"
           working_dir: ${quote(evalWorkspace)}
           sandbox_mode: read-only
           approval_policy: never

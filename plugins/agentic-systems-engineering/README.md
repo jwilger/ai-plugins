@@ -30,13 +30,17 @@ client data, and avoids private implementation details or private tool names.
 
 The repo includes a promptfoo-based OSS eval lane that runs behavior scenarios
 through Promptfoo's native Claude Code and Codex coding-agent providers. The
-runner generates config from the marketplace manifests so both providers load
-the full `ai-plugins` marketplace before each scenario. Plugin routing and
-composition are part of the eval surface. The lane writes JSON, HTML, and JUnit
-artifacts under `evals/out/`, then builds a static dashboard under
-`site/evals/`. Hosted promptfoo sharing is not used as the durable record.
-Promptfoo is pinned at `0.121.17`; prompt response caching and hosted sharing
-are disabled for behavior evidence.
+runner generates config from the marketplace manifests and labels no-plugin,
+targeted-plugin, and full-marketplace behavior modes. Codex uses a separate
+generated home for each mode, but the targeted home defaults to every Codex
+marketplace plugin unless `EVAL_TARGETED_PLUGINS` narrows it. Claude loads the
+full Claude marketplace in both plugin-enabled modes. Therefore the default run
+measures an empty baseline and full marketplace composition; the targeted label
+represents a distinct composition only when its override is set. The lane writes
+JSON, HTML, and JUnit artifacts under `evals/out/`, then builds a static
+dashboard under `site/evals/`. Hosted promptfoo sharing is not used as the
+durable record. Promptfoo is pinned at `0.121.18`; prompt response caching and
+hosted sharing are disabled for behavior evidence.
 
 The dashboard reports provider/case/sample pass rates, threshold status, and
 plugin/skill summaries so regressions can be traced to the marketplace surface
@@ -49,9 +53,13 @@ Default eval posture matches intended use:
   Code posture remains Sonnet high effort with Opus 4.8 advisor where that harness
   exposes those controls; Promptfoo's current Claude Agent SDK provider does
   not expose those knobs in this repo's generated config.
-- Codex: `openai:codex-sdk`, `gpt-5.5` with medium reasoning effort, a
-  read-only sandbox, no approvals, streaming, deep tracing, and a generated
-  `CODEX_EVAL_HOME` containing every repo plugin.
+- Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with medium reasoning
+  effort, a read-only sandbox, no approvals, streaming, deep tracing disabled,
+  and isolated generated homes containing no plugins, an explicitly overridden
+  targeted set, or every repo plugin according to the behavior mode. Without
+  that override, targeted and full homes contain the same plugins. Independent
+  model grading defaults to `gpt-5.6-sol` with high reasoning. Both execution
+  and grader roles retain separate environment overrides.
 
 Canaries are separate from behavior evals. Canaries explicitly prove plugin and
 skill loading; behavior prompts remain natural and do not name `ai-plugins`.
@@ -75,7 +83,7 @@ generated repo-owned artifacts.
 
 The Codex MCP manifest starts through an absolute `/bin/sh` launcher so Codex
 does not need `bash` on its MCP startup `PATH`. Reinstall or upgrade the plugin
-from marketplace version `0.1.4` or newer if Codex reports `No such file or
+from marketplace version `0.2.0` or newer if Codex reports `No such file or
 directory` while starting the `promptfoo` MCP server.
 
 Promptfoo's `mcp` provider is a different feature: it treats an MCP server as

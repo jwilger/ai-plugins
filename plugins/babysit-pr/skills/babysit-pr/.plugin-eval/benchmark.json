@@ -6,10 +6,10 @@
   "targetName": "babysit-pr",
   "runner": {
     "type": "codex-cli",
-    "model": "gpt-5.4-mini",
+    "model": "gpt-5.6-terra",
     "sandbox": "workspace-write",
     "approvalPolicy": "never",
-    "extraArgs": []
+    "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
   },
   "workspace": {
     "sourcePath": ".",

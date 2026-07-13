@@ -28,7 +28,9 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: scripts/evals/run.sh"* ]]
   [[ "$output" == *"Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all"* ]]
-  [[ "$output" == *"Codex:       provider=openai:codex-sdk, model=gpt-5.5, model_reasoning_effort=medium"* ]]
+  [[ "$output" == *"Codex:       provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium"* ]]
+  [[ "$output" == *"CODEX_GRADER_MODEL            (default: gpt-5.6-sol)"* ]]
+  [[ "$output" == *"CODEX_GRADER_REASONING_EFFORT (default: high)"* ]]
   [[ "$output" == *"Each provider loads the relevant marketplace surface for its harness"* ]]
   [[ "$output" == *"Pinned eval packages are managed by package.json and package-lock.json"* ]]
   [[ "$output" == *"@openai/codex-sdk"* ]]
@@ -43,6 +45,7 @@ teardown() {
   [[ "$output" == *"set to 0 to disable)"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)"* ]]
   [[ "$output" == *"EVAL_INTERRUPT_GRACE         (default: 2s between INT, TERM, and KILL)"* ]]
+  [[ "$output" == *"EVAL_OUT_DIR                 (default: evals/out; isolates generated config and artifacts)"* ]]
   [[ "$output" == *"results.junit.xml"* ]]
 }
 
@@ -74,6 +77,184 @@ teardown() {
   [[ "$output" != *"$other_cwd/evals/out/generated"* ]]
 }
 
+@test "eval runner resolves a relative output directory from the caller directory" {
+  other_cwd="$(mktemp -d)"
+  relative_out="relative-output-$BATS_TEST_NUMBER-$$"
+
+  run bash -c '
+    cd "$1"
+    EVAL_OUT_DIR="$2" "$3" --dry-run
+  ' _ "$other_cwd" "$relative_out" "$RUNNER"
+
+  rm -rf "$ROOT/$relative_out"
+  rm -rf "$other_cwd"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$other_cwd/$relative_out/results.json"* ]]
+  [[ "$output" != *"$ROOT/$relative_out/results.json"* ]]
+}
+
+@test "eval runner dry-run supports an isolated output directory" {
+  isolated_out="$(mktemp -d)/benchmark-output"
+
+  run env EVAL_OUT_DIR="$isolated_out" "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$isolated_out/results.json"* ]]
+  [[ "$output" == *"$isolated_out/report.html"* ]]
+  [[ "$output" == *"$isolated_out/results.junit.xml"* ]]
+  [[ "$output" == *"$isolated_out/generated/agentic-systems-engineering.behavior.yaml"* ]]
+  [ ! -e "$isolated_out" ]
+
+  rm -rf "${isolated_out%/*}"
+}
+
+@test "eval runner dry-run leaves an empty custom output directory unclaimed" {
+  temp_root="$(mktemp -d)"
+  isolated_out="$temp_root/benchmark-output"
+  mkdir "$isolated_out"
+  chmod 0711 "$isolated_out"
+  original_inode="$(stat -c %i "$isolated_out")"
+
+  run env EVAL_OUT_DIR="$isolated_out" "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %i "$isolated_out")" = "$original_inode" ]
+  [ "$(stat -c %a "$isolated_out")" = "711" ]
+  [ ! -e "$isolated_out/.ai-plugins-eval-output" ]
+
+  rm -rf "$temp_root"
+}
+
+@test "eval runner refuses a nonempty unowned custom output before generated writes" {
+  temp_root="$(mktemp -d)"
+  isolated_out="$temp_root/benchmark-output"
+  mkdir "$isolated_out"
+  printf 'keep me\n' >"$isolated_out/user-file"
+
+  run env EVAL_OUT_DIR="$isolated_out" "$RUNNER" --dry-run
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"refusing unowned eval output directory"* ]]
+  grep -q 'keep me' "$isolated_out/user-file"
+  [ ! -e "$isolated_out/generated" ]
+
+  rm -rf "$temp_root"
+}
+
+@test "eval runner accepts a legacy nested directory under the repo eval output root" {
+  nested_out="$ROOT/evals/out/owned-nested-$BATS_TEST_NUMBER-$$"
+  mkdir -p "$nested_out"
+  printf 'legacy focused result\n' >"$nested_out/results.json"
+
+  run env EVAL_OUT_DIR="$nested_out" "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  grep -q 'legacy focused result' "$nested_out/results.json"
+  [ ! -e "$nested_out/.ai-plugins-eval-output" ]
+  rm -rf "$nested_out"
+}
+
+@test "eval runner identifies the repository root as a protected output path" {
+  run env EVAL_OUT_DIR="$ROOT" "$RUNNER" --dry-run
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"eval output path contains protected root: $ROOT"* ]]
+}
+
+@test "eval runner dry-run preserves artifacts in a marker-owned custom output" {
+  temp_root="$(mktemp -d)"
+  isolated_out="$temp_root/benchmark-output"
+  mkdir "$isolated_out"
+  printf 'ai-plugins eval output\n' >"$isolated_out/.ai-plugins-eval-output"
+  printf 'results sentinel\n' >"$isolated_out/results.json"
+  printf 'report sentinel\n' >"$isolated_out/report.html"
+  printf 'junit sentinel\n' >"$isolated_out/results.junit.xml"
+  printf 'status sentinel\n' >"$isolated_out/status.json"
+  mkdir "$isolated_out/generated"
+  printf 'config sentinel\n' >"$isolated_out/generated/agentic-systems-engineering.behavior.yaml"
+  printf 'metadata sentinel\n' >"$isolated_out/generated/agentic-systems-engineering.behavior.metadata.json"
+
+  run env EVAL_OUT_DIR="$isolated_out" "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  grep -q 'results sentinel' "$isolated_out/results.json"
+  grep -q 'report sentinel' "$isolated_out/report.html"
+  grep -q 'junit sentinel' "$isolated_out/results.junit.xml"
+  grep -q 'status sentinel' "$isolated_out/status.json"
+  grep -q 'config sentinel' "$isolated_out/generated/agentic-systems-engineering.behavior.yaml"
+  grep -q 'metadata sentinel' "$isolated_out/generated/agentic-systems-engineering.behavior.metadata.json"
+
+  rm -rf "$temp_root"
+}
+
+@test "eval runner serializes live provider runs and accepts only its exact inherited lock" {
+  temp_root="$(mktemp -d)"
+  lock_path="$ROOT/.dependencies/evals/provider-eval.lock"
+  config="$temp_root/promptfooconfig.yaml"
+  fake_promptfoo="$temp_root/promptfoo"
+  provider_marker="$temp_root/provider-invoked"
+  mkdir -p "$(dirname "$lock_path")"
+  printf 'prompts: []\nproviders: []\ntests: []\n' >"$config"
+  cat >"$fake_promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+touch "$PROVIDER_MARKER"
+SH
+  chmod +x "$fake_promptfoo"
+
+  exec 8>>"$lock_path"
+  flock --nonblock 8
+
+  run env \
+    PROMPTFOO_BIN="$fake_promptfoo" \
+    PROVIDER_MARKER="$provider_marker" \
+    EVAL_OUT_DIR="$temp_root/blocked-output" \
+    "$RUNNER" "$config"
+
+  [ "$status" -eq 75 ]
+  [[ "$output" == *"provider-backed eval already active; lock is held: $lock_path"* ]]
+  [ ! -e "$temp_root/blocked-output" ]
+  [ ! -e "$provider_marker" ]
+
+  run env \
+    AI_PLUGINS_EVAL_LOCK_HELD=1 \
+    AI_PLUGINS_EVAL_LOCK_PATH="$temp_root/not-the-provider-lock" \
+    AI_PLUGINS_EVAL_LOCK_FD=8 \
+    PROMPTFOO_BIN="$fake_promptfoo" \
+    PROVIDER_MARKER="$provider_marker" \
+    EVAL_OUT_DIR="$temp_root/wrong-inherited-output" \
+    "$RUNNER" "$config"
+
+  [ "$status" -eq 75 ]
+  [ ! -e "$temp_root/wrong-inherited-output" ]
+  [ ! -e "$provider_marker" ]
+
+  run env \
+    PROMPTFOO_BIN="$fake_promptfoo" \
+    PROVIDER_MARKER="$provider_marker" \
+    EVAL_OUT_DIR="$temp_root/dry-output" \
+    "$RUNNER" --dry-run "$config"
+
+  [ "$status" -eq 0 ]
+  [ ! -e "$provider_marker" ]
+
+  run env \
+    AI_PLUGINS_EVAL_LOCK_HELD=1 \
+    AI_PLUGINS_EVAL_LOCK_PATH="$lock_path" \
+    AI_PLUGINS_EVAL_LOCK_FD=8 \
+    PROMPTFOO_BIN="$fake_promptfoo" \
+    PROVIDER_MARKER="$provider_marker" \
+    EVAL_OUT_DIR="$temp_root/inherited-output" \
+    "$RUNNER" "$config"
+
+  flock --unlock 8
+  exec 8>&-
+
+  [ "$status" -eq 0 ]
+  [ -e "$provider_marker" ]
+  rm -rf "$temp_root"
+}
+
 @test "eval runner dry-run prepares targeted Codex home from Codex marketplace plugins" {
   run "$RUNNER" --dry-run
 
@@ -97,7 +278,7 @@ teardown() {
 }
 
 @test "eval runner dry-run prepares only selected Codex plugin mode" {
-  run env EVAL_PROVIDER_FILTER=codex-gpt-5.5 "$RUNNER" --dry-run
+  run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
@@ -139,29 +320,29 @@ teardown() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"label: claude-code-sonnet-full-marketplace"* ]]
-  [[ "$output" != *"label: codex-gpt-5.5-full-marketplace"* ]]
+  [[ "$output" != *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
 }
 
 @test "generated eval config exact provider variant filter selects one full-marketplace provider" {
-  run env EVAL_PROVIDER_FILTER=codex-gpt-5.5 node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
+  run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: codex-gpt-5.5-full-marketplace"* ]]
-  [[ "$output" != *"label: codex-gpt-5.5-targeted-plugins"* ]]
-  [[ "$output" != *"label: codex-gpt-5.5-no-plugins"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
+  [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
+  [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
   [[ "$output" != *"label: claude-code-sonnet"* ]]
   [[ "$output" == *"pluginModes:"*$'\n'"      - id: full-marketplace"* ]]
 }
 
 @test "generated eval config combines case and provider filters without expanding provider modes" {
-  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture EVAL_PROVIDER_FILTER=codex-gpt-5.5 node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
+  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^  - id: openai:codex-sdk$')" -eq 1 ]
-  [[ "$output" == *"label: codex-gpt-5.5-full-marketplace"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
   [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
-  [[ "$output" != *"label: codex-gpt-5.5-targeted-plugins"* ]]
-  [[ "$output" != *"label: codex-gpt-5.5-no-plugins"* ]]
+  [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
+  [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
   [[ "$output" != *"label: claude-code-sonnet"* ]]
 }
 
@@ -240,17 +421,17 @@ JSON
   "results": {
     "results": [
       {
-        "provider": { "label": "codex-gpt-5.5-no-plugins" },
+        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
         "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "no-plugins", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
         "gradingResult": { "pass": false, "score": 0, "reason": "No plugin-specific command known" }
       },
       {
-        "provider": { "label": "codex-gpt-5.5-targeted-plugins" },
+        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
         "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "targeted-plugins", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
         "gradingResult": { "pass": true, "score": 1 }
       },
       {
-        "provider": { "label": "codex-gpt-5.5-full-marketplace" },
+        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
         "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "full-marketplace", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
         "gradingResult": { "pass": true, "score": 1 }
       }
@@ -274,12 +455,12 @@ JSON
   "results": {
     "results": [
       {
-        "provider": { "label": "codex-gpt-5.5-full-marketplace" },
+        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
         "testCase": { "vars": { "case_id": "composition", "min_pass_rate": 1, "value_gate_mode": "none" } },
         "gradingResult": { "pass": true, "score": 1 }
       },
       {
-        "provider": { "label": "codex-gpt-5.5-no-plugins" },
+        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
         "testCase": { "vars": { "case_id": "composition", "min_pass_rate": 1, "value_gate_mode": "none" } },
         "gradingResult": { "pass": true, "score": 1 }
       }
@@ -430,6 +611,42 @@ SH
   rm -f "$ROOT/evals/out/generated/runtime-options.json"
   [ "$status" -eq 0 ]
   [[ "$output" == *'"caseFilter":"tiber"'* ]]
+}
+
+@test "eval runner filtered samples use the runtime loader in an isolated output directory" {
+  fixture_root="$(mktemp -d)"
+  isolated_out="$fixture_root/isolated-output"
+  mkdir -p "$fixture_root/bin"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+config=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-c" ]; then
+    config="$2"
+    break
+  fi
+  shift
+done
+runtime_loader="$EVAL_OUT_DIR/generated/load-harness-cases.runtime.cjs"
+test -f "$runtime_loader"
+grep -F "tests: file://$runtime_loader" "$config"
+cat "$EVAL_OUT_DIR/generated/runtime-options.json"
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+
+  run env \
+    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    EVAL_OUT_DIR="$isolated_out" \
+    EVAL_CASE_FILTER=tiber \
+    EVAL_SAMPLES=2 \
+    "$RUNNER"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tests: file://$isolated_out/generated/load-harness-cases.runtime.cjs"* ]]
+  [[ "$output" == *'"caseFilter":"tiber"'* ]]
+  [[ "$output" == *'"samples":"2"'* ]]
 }
 
 @test "eval runner times out a hanging promptfoo invocation" {
@@ -856,7 +1073,7 @@ const metadataOutput = process.argv[process.argv.indexOf('--metadata-output') + 
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, `providers:
   - id: openai:codex-sdk
-    label: codex-gpt-5.5-targeted-plugins
+    label: codex-gpt-5.6-terra-targeted-plugins
     pluginMode: targeted-plugins
 `);
 fs.mkdirSync(path.dirname(metadataOutput), { recursive: true });
@@ -878,14 +1095,15 @@ JSON
 }
 
 @test "package manifest pins promptfoo and coding harness provider SDKs" {
-  run node - "$ROOT/package.json" <<'NODE'
+  run node - "$ROOT/package.json" "$ROOT/package-lock.json" <<'NODE'
 const fs = require('fs');
 
 const pkg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const lock = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const deps = pkg.devDependencies || {};
 const expected = {
-  promptfoo: '0.121.17',
-  '@openai/codex-sdk': '0.142.5',
+  promptfoo: '0.121.18',
+  '@openai/codex-sdk': '0.144.3',
   '@anthropic-ai/claude-agent-sdk': '0.3.201',
 };
 
@@ -893,6 +1111,19 @@ for (const [name, version] of Object.entries(expected)) {
   if (deps[name] !== version) {
     throw new Error(`${name} should be pinned to ${version}, got ${deps[name] || 'missing'}`);
   }
+}
+
+if (pkg.overrides?.['@openai/codex-sdk'] !== expected['@openai/codex-sdk']) {
+  throw new Error('Promptfoo must be forced onto the GPT-5.6-capable Codex SDK');
+}
+
+const resolvedSdkVersions = [...new Set(
+  Object.entries(lock.packages || {})
+    .filter(([entry]) => entry.endsWith('node_modules/@openai/codex-sdk'))
+    .map(([, metadata]) => metadata.version),
+)];
+if (JSON.stringify(resolvedSdkVersions) !== JSON.stringify(['0.144.3'])) {
+  throw new Error(`stale Codex SDK copies remain in package-lock: ${resolvedSdkVersions.join(', ')}`);
 }
 NODE
 

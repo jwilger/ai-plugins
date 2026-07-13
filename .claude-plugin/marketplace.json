@@ -27,7 +27,7 @@
       "name": "agentic-systems-engineering",
       "source": "./plugins/agentic-systems-engineering",
       "description": "Portable guardrails for building, evaluating, and delivering LLM and agentic systems.",
-      "version": "0.1.4",
+      "version": "0.2.0",
       "category": "Developer Tools",
       "keywords": ["agents", "llm", "evals", "rag", "delivery"]
     },
@@ -43,7 +43,7 @@
       "name": "babysit-pr",
       "source": "./plugins/babysit-pr",
       "description": "Babysit a pull/merge request to completion across GitHub, Forgejo, and GitLab.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "Developer Tools",
       "keywords": ["pr", "ci", "review"]
     },
@@ -59,7 +59,7 @@
       "name": "tiber",
       "source": "./plugins/tiber",
       "description": "Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow.",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "category": "Developer Tools",
       "keywords": ["tasks", "git", "mcp", "dashboard", "planning"]
     }

@@ -20,7 +20,7 @@ setup() {
           "min_pass_rate": 0.67
         },
         "provider": {
-          "label": "codex-gpt-5.5"
+          "label": "codex-gpt-5.6-terra"
         },
         "gradingResult": {
           "pass": true,
@@ -39,7 +39,7 @@ setup() {
           "min_pass_rate": 0.67
         },
         "provider": {
-          "label": "codex-gpt-5.5"
+          "label": "codex-gpt-5.6-terra"
         },
         "gradingResult": {
           "pass": false,
@@ -58,7 +58,7 @@ setup() {
           "min_pass_rate": 0.67
         },
         "provider": {
-          "label": "codex-gpt-5.5"
+          "label": "codex-gpt-5.6-terra"
         },
         "gradingResult": {
           "pass": true,
@@ -77,7 +77,7 @@ setup() {
           "min_pass_rate": 0
         },
         "provider": {
-          "label": "codex-gpt-5.5"
+          "label": "codex-gpt-5.6-terra"
         },
         "gradingResult": {
           "pass": false,
@@ -143,7 +143,7 @@ teardown() {
   [ "$(jq '.blocked' "$TMPROOT/site/evals/summary.json")" = "1" ]
   [ "$(jq '.failed' "$TMPROOT/site/evals/summary.json")" = "3" ]
   [ "$(jq -r '.status.state' "$TMPROOT/site/evals/summary.json")" = "completed" ]
-  [ "$(jq -r '.aggregates[] | select(.id == "fixture-pass") | .provider' "$TMPROOT/site/evals/summary.json")" = "codex-gpt-5.5" ]
+  [ "$(jq -r '.aggregates[] | select(.id == "fixture-pass") | .provider' "$TMPROOT/site/evals/summary.json")" = "codex-gpt-5.6-terra" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-pass") | .passRate' "$TMPROOT/site/evals/summary.json")" = "0.6666666666666666" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .samples[0].sampleIndex' "$TMPROOT/site/evals/summary.json")" = "0" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .minPassRate' "$TMPROOT/site/evals/summary.json")" = "0" ]
@@ -157,7 +157,7 @@ teardown() {
   grep -q '"skillSummaries"' "$TMPROOT/site/evals/summary.json"
   grep -q '"skill": "evaluate-stochastic-systems"' "$TMPROOT/site/evals/summary.json"
   grep -q "fixture-pass" "$TMPROOT/site/evals/index.html"
-  grep -q "codex-gpt-5.5" "$TMPROOT/site/evals/index.html"
+  grep -q "codex-gpt-5.6-terra" "$TMPROOT/site/evals/index.html"
   grep -q "66.7%" "$TMPROOT/site/evals/index.html"
   grep -q "fixture-provider-limit" "$TMPROOT/site/evals/index.html"
   grep -q "blocked" "$TMPROOT/site/evals/index.html"

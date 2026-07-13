@@ -1,6 +1,6 @@
 {
   "name": "babysit-pr",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Babysit a pull/merge request to completion — watch CI, respond to review feedback, and merge — across GitHub, Forgejo, and GitLab.",
   "author": {
     "name": "John Wilger",

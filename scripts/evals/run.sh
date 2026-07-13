@@ -2,11 +2,19 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+caller_cwd="$(pwd -P)"
 config="evals/promptfoo/agentic-systems-engineering.yaml"
-out_dir="$root/evals/out"
+default_out_dir="$root/evals/out"
+requested_out_dir="${EVAL_OUT_DIR:-$default_out_dir}"
+case "$requested_out_dir" in
+  /*) out_dir="$(realpath -m -- "$requested_out_dir")" ;;
+  *) out_dir="$(realpath -m -- "$caller_cwd/$requested_out_dir")" ;;
+esac
+export EVAL_OUT_DIR="$out_dir"
 generated_dir="$out_dir/generated"
 runtime_options_file="$generated_dir/runtime-options.json"
 runtime_loader_file="$generated_dir/load-harness-cases.runtime.cjs"
+export EVAL_RUNTIME_LOADER_FILE="$runtime_loader_file"
 max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-1}"
 eval_timeout="${EVAL_TIMEOUT:-}"
 eval_timeout_full_default="${EVAL_TIMEOUT_FULL_DEFAULT:-90m}"
@@ -22,6 +30,7 @@ eval_watchdog_pid=""
 eval_launching=0
 interrupted_status=0
 interrupted_signal=""
+provider_eval_lock_file="$root/.dependencies/evals/provider-eval.lock"
 
 usage() {
   cat <<'USAGE'
@@ -32,14 +41,14 @@ Each provider loads the relevant marketplace surface for its harness.
 
 Default harness posture:
   Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all
-  Codex:       provider=openai:codex-sdk, model=gpt-5.5, model_reasoning_effort=medium
+  Codex:       provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium
 
 Environment overrides:
   CLAUDE_EVAL_MODEL
   CODEX_EVAL_MODEL
   CODEX_EVAL_REASONING_EFFORT
-  CODEX_GRADER_MODEL            (default: gpt-5.5)
-  CODEX_GRADER_REASONING_EFFORT (default: medium)
+  CODEX_GRADER_MODEL            (default: gpt-5.6-sol)
+  CODEX_GRADER_REASONING_EFFORT (default: high)
   EVAL_SAMPLES
   EVAL_CASE_FILTER
   EVAL_PROVIDER_FILTER         (filters tested providers by final label, variant id,
@@ -53,6 +62,7 @@ Environment overrides:
   EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)
   EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)
   EVAL_INTERRUPT_GRACE         (default: 2s between INT, TERM, and KILL)
+  EVAL_OUT_DIR                 (default: evals/out; isolates generated config and artifacts)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
 Pinned eval packages are managed by package.json and package-lock.json:
@@ -261,6 +271,106 @@ print_prepare_codex_home_for_mode() {
   esac
 }
 
+acquire_provider_eval_lock() {
+  local inherited_fd="${AI_PLUGINS_EVAL_LOCK_FD:-}"
+  local inherited_path="${AI_PLUGINS_EVAL_LOCK_PATH:-}"
+  local canonical_inherited_path=""
+
+  if [ -n "$inherited_path" ]; then
+    canonical_inherited_path="$(realpath -m -- "$inherited_path")"
+  fi
+  if [ "${AI_PLUGINS_EVAL_LOCK_HELD:-}" = "1" ] &&
+    [ "$canonical_inherited_path" = "$provider_eval_lock_file" ] &&
+    [[ "$inherited_fd" =~ ^[0-9]+$ ]] &&
+    [ "$provider_eval_lock_file" -ef "/dev/fd/$inherited_fd" ] &&
+    flock --nonblock "$inherited_fd"; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$provider_eval_lock_file")"
+  exec 9>>"$provider_eval_lock_file"
+  if ! flock --nonblock 9; then
+    echo "provider-backed eval already active; lock is held: $provider_eval_lock_file" >&2
+    exit 75
+  fi
+  export AI_PLUGINS_EVAL_LOCK_HELD=1
+  export AI_PLUGINS_EVAL_LOCK_PATH="$provider_eval_lock_file"
+  export AI_PLUGINS_EVAL_LOCK_FD=9
+}
+
+prepare_eval_output_dir() {
+  local mode="${1:-prepare}"
+  node - "$out_dir" "$default_out_dir" "$root" "$mode" <<'NODE'
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const outputDir = process.argv[2];
+const defaultOutputDir = process.argv[3];
+const repoRoot = process.argv[4];
+const checkOnly = process.argv[5] === 'check';
+const markerName = '.ai-plugins-eval-output';
+const markerContents = 'ai-plugins eval output\n';
+
+function realPathIfExists(entry) {
+  try {
+    return fs.realpathSync(entry);
+  } catch {
+    return path.resolve(entry);
+  }
+}
+
+function isSameOrAncestor(ancestor, descendant) {
+  const relative = path.relative(ancestor, descendant);
+  return (
+    relative === '' ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== '..' &&
+      !path.isAbsolute(relative))
+  );
+}
+
+try {
+  const realOutputDir = realPathIfExists(outputDir);
+  for (const protectedRoot of [repoRoot, os.homedir()]) {
+    if (isSameOrAncestor(realOutputDir, realPathIfExists(protectedRoot))) {
+      throw new Error(
+        `eval output path contains protected root: ${protectedRoot}`,
+      );
+    }
+  }
+
+  if (!fs.existsSync(outputDir)) {
+    if (checkOnly) process.exit(0);
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+  if (!fs.statSync(outputDir).isDirectory()) {
+    throw new Error(`eval output path is not a directory: ${outputDir}`);
+  }
+
+  const entries = fs.readdirSync(outputDir);
+  const marker = path.join(outputDir, markerName);
+  const isRepoEvalOutput = isSameOrAncestor(
+    realPathIfExists(defaultOutputDir),
+    realPathIfExists(outputDir),
+  );
+  const isOwned =
+    fs.existsSync(marker) &&
+    fs.readFileSync(marker, 'utf8') === markerContents;
+
+  if (entries.length > 0 && !isRepoEvalOutput && !isOwned) {
+    throw new Error(`refusing unowned eval output directory: ${outputDir}`);
+  }
+  if (entries.length === 0 && !checkOnly) {
+    fs.writeFileSync(marker, markerContents, { mode: 0o600 });
+  }
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}
+NODE
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --help)
@@ -341,17 +451,27 @@ fi
 
 run_cmd=(timeout --kill-after "$eval_timeout_kill_after" "$eval_timeout" "${cmd[@]}")
 
+if [ "$dry_run" -eq 0 ]; then
+  acquire_provider_eval_lock
+fi
+
 cd "$root"
 
 if [ "$dry_run" -eq 1 ]; then
+  prepare_eval_output_dir check
   dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-full-marketplace}}"
   dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
   dry_targeted_home="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.dependencies/evals/codex-home-targeted-plugins}"
   printf '%q ' "$root/scripts/evals/ensure-node-deps.sh"
   printf '\n'
   if [ "$generated_config" -eq 1 ]; then
-    node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file" >/dev/null
-    printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file"
+    generated_metadata_output_file="$generated_metadata_file"
+    dry_inspection_dir="$(mktemp -d "${TMPDIR:-/tmp}/ai-plugins-eval-dry-run.XXXXXX")"
+    trap 'rm -rf -- "$dry_inspection_dir"' EXIT
+    dry_inspection_config="$dry_inspection_dir/config.yaml"
+    generated_metadata_file="$dry_inspection_dir/metadata.json"
+    node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$dry_inspection_config" --metadata-output "$generated_metadata_file" >/dev/null
+    printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_output_file"
     printf '\n'
     if uses_codex_grader; then
       print_prepare_codex_home_for_mode full-marketplace
@@ -366,6 +486,7 @@ if [ "$dry_run" -eq 1 ]; then
   exit 0
 fi
 
+prepare_eval_output_dir
 mkdir -p "$out_dir" "$root/.dependencies/evals/agent-workspace"
 rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml" "$out_dir/status.json"
 trap 'forward_eval_signal INT 130' INT

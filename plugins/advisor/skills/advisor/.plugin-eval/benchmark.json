@@ -6,10 +6,10 @@
   "targetName": "advisor",
   "runner": {
     "type": "codex-cli",
-    "model": "gpt-5.5",
+    "model": "gpt-5.6-terra",
     "sandbox": "read-only",
     "approvalPolicy": "never",
-    "extraArgs": []
+    "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
   },
   "workspace": {
     "sourcePath": ".",

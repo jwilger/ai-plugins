@@ -20,7 +20,7 @@ without depending on a hosted dashboard.
 ## Runner Rules
 
 - Install tools through the project's package-manager sandbox.
-- Ensure `promptfoo@0.121.17` is available on `PATH` before relying on
+- Ensure `promptfoo@0.121.18` is available on `PATH` before relying on
   Promptfoo commands or the optional MCP server. If the project uses
   `flake.nix` and nixpkgs provides a compatible `pkgs.promptfoo`, prefer adding
   that package there so updates flow through the flake lockfile; otherwise use

@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: GPT-5.6 grader calibration against frozen human labels
+
+prompts:
+  - "{{candidate_output}}"
+
+providers:
+  - id: echo
+    label: frozen-human-answer
+
+  - id: file://trace-enforced-codex-provider.mjs
+    label: grader-gpt-5.6-sol-high
+    config:
+      model: gpt-5.6-sol
+      model_reasoning_effort: high
+      working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+      deep_tracing: false
+      skip_git_repo_check: true
+      cli_config:
+        features:
+          plugins: false
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+
+  - id: file://trace-enforced-codex-provider.mjs
+    label: grader-gpt-5.6-terra-high
+    config:
+      model: gpt-5.6-terra
+      model_reasoning_effort: high
+      working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+      deep_tracing: false
+      skip_git_repo_check: true
+      cli_config:
+        features:
+          plugins: false
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+
+  - id: file://trace-enforced-codex-provider.mjs
+    label: grader-gpt-5.6-luna-high
+    config:
+      model: gpt-5.6-luna
+      model_reasoning_effort: high
+      working_dir: "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}"
+      deep_tracing: false
+      skip_git_repo_check: true
+      cli_config:
+        features:
+          plugins: false
+      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+
+tests: file://grader-cases.cjs
+
+tracing:
+  enabled: false
+
+commandLineOptions:
+  maxConcurrency: 2
+  share: false
+  cache: false
+  write: true
+
+metadata:
+  benchmark: gpt-5.6-grader-calibration
+  measurement: grader-human-agreement
+  sampleCount: 1
+  graderEffort: high
