@@ -3,6 +3,23 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   RUNNER="$ROOT/scripts/evals/run.sh"
+  SIGNAL_FIXTURE_ROOT=""
+  SIGNAL_RUNNER_PID=""
+  SIGNAL_EVAL_PGID=""
+  SIGNAL_CHILD_PID=""
+  SIGNAL_GRANDCHILD_PID=""
+}
+
+teardown() {
+  [ -z "$SIGNAL_EVAL_PGID" ] || kill -KILL -- "-$SIGNAL_EVAL_PGID" 2>/dev/null || true
+  if [ -n "$SIGNAL_RUNNER_PID" ]; then
+    kill -KILL -- "-$SIGNAL_RUNNER_PID" 2>/dev/null || true
+    kill -KILL "$SIGNAL_RUNNER_PID" 2>/dev/null || true
+    wait "$SIGNAL_RUNNER_PID" 2>/dev/null || true
+  fi
+  [ -z "$SIGNAL_CHILD_PID" ] || kill -KILL "$SIGNAL_CHILD_PID" 2>/dev/null || true
+  [ -z "$SIGNAL_GRANDCHILD_PID" ] || kill -KILL "$SIGNAL_GRANDCHILD_PID" 2>/dev/null || true
+  [ -z "$SIGNAL_FIXTURE_ROOT" ] || rm -rf "$SIGNAL_FIXTURE_ROOT"
 }
 
 @test "eval runner prints help" {
@@ -25,6 +42,7 @@ setup() {
   [[ "$output" == *"EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)"* ]]
   [[ "$output" == *"set to 0 to disable)"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)"* ]]
+  [[ "$output" == *"EVAL_INTERRUPT_GRACE         (default: 2s between INT, TERM, and KILL)"* ]]
   [[ "$output" == *"results.junit.xml"* ]]
 }
 
@@ -100,7 +118,7 @@ setup() {
   run env EVAL_TIMEOUT=0 "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" != *"timeout --kill-after"* ]]
+  [[ "$output" == *"timeout --kill-after 30s 0"* ]]
   [[ "$output" == *"node_modules/.bin/promptfoo eval"* ]]
 }
 
@@ -533,6 +551,267 @@ SH
   [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval was interrupted before completion with status 130" ]
   [[ "$output" != *"Eval thresholds passed"* ]]
   rm -rf "$fixture_root"
+}
+
+@test "eval runner records SIGINT during pre-promptfoo setup" {
+  SIGNAL_FIXTURE_ROOT="$(mktemp -d)"
+  fixture_root="$SIGNAL_FIXTURE_ROOT"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+on_interrupt() {
+  printf 'interrupted\n' >"$PROCESS_FIXTURE_DIR/setup.interrupted"
+  exit 130
+}
+trap on_interrupt INT
+mkdir -p evals/out
+printf '{"results":{"results":[]}}\n' >evals/out/results.json
+printf '%s\n' "$$" >"$PROCESS_FIXTURE_DIR/setup.pid"
+printf 'ready\n' >"$PROCESS_FIXTURE_DIR/setup.ready"
+while true; do sleep 1; done
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'started\n' >"$PROCESS_FIXTURE_DIR/promptfoo.started"
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  setsid env --default-signal=INT \
+    PROCESS_FIXTURE_DIR="$fixture_root" \
+    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    EVAL_TIMEOUT=0 \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml" \
+    >"$fixture_root/runner.log" 2>&1 &
+  SIGNAL_RUNNER_PID="$!"
+
+  for _ in $(seq 1 100); do
+    [ ! -s "$fixture_root/setup.ready" ] || break
+    sleep 0.05
+  done
+  [ -s "$fixture_root/setup.ready" ]
+  [ -s "$fixture_root/setup.pid" ]
+  SIGNAL_CHILD_PID="$(cat "$fixture_root/setup.pid")"
+
+  kill -INT -- "-$SIGNAL_RUNNER_PID"
+  runner_exited=0
+  for _ in $(seq 1 100); do
+    if ! kill -0 "$SIGNAL_RUNNER_PID" 2>/dev/null; then
+      runner_exited=1
+      break
+    fi
+    sleep 0.05
+  done
+  [ "$runner_exited" -eq 1 ]
+
+  runner_status=0
+  wait "$SIGNAL_RUNNER_PID" || runner_status="$?"
+  SIGNAL_RUNNER_PID=""
+
+  [ "$runner_status" -eq 130 ]
+  [ -f "$fixture_root/setup.interrupted" ]
+  ! kill -0 "$SIGNAL_CHILD_PID" 2>/dev/null
+  [ ! -e "$fixture_root/promptfoo.started" ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "interrupted" ]
+  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval was interrupted before completion with status 130" ]
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ -f "$fixture_root/evals/out/timeout-artifacts/"*/results.json ]
+}
+
+@test "eval runner forwards SIGINT received before publishing the eval pid" {
+  SIGNAL_FIXTURE_ROOT="$(mktemp -d)"
+  fixture_root="$SIGNAL_FIXTURE_ROOT"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/launch-hook.sh" <<'SH'
+if [ -z "${EVAL_RUNNER_BASHPID:-}" ]; then
+  export EVAL_RUNNER_BASHPID="$BASHPID"
+fi
+eval_launch_hook() {
+  local command="$1"
+  if [ "$BASHPID" = "$EVAL_RUNNER_BASHPID" ] && [ "$command" = 'eval_pid="$!"' ]; then
+    trap - DEBUG
+    for _ in {1..200}; do
+      [ ! -s "$PROCESS_FIXTURE_DIR/child.ready" ] || break
+      sleep 0.01
+    done
+    [ -s "$PROCESS_FIXTURE_DIR/child.ready" ] || exit 99
+    printf 'ready\n' >"$PROCESS_FIXTURE_DIR/capture.ready"
+    while [ ! -e "$PROCESS_FIXTURE_DIR/capture.release" ]; do sleep 0.01; done
+  fi
+}
+trap 'eval_launch_hook "$BASH_COMMAND"' DEBUG
+SH
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+on_interrupt() {
+  printf 'interrupted\n' >"$PROCESS_FIXTURE_DIR/child.interrupted"
+  exit 130
+}
+trap on_interrupt INT
+printf '%s\n' "$$" >"$PROCESS_FIXTURE_DIR/child.pid"
+printf 'ready\n' >"$PROCESS_FIXTURE_DIR/child.ready"
+while true; do sleep 1; done
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  setsid env --default-signal=INT \
+    BASH_ENV="$fixture_root/launch-hook.sh" \
+    PROCESS_FIXTURE_DIR="$fixture_root" \
+    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    EVAL_TIMEOUT=0 \
+    EVAL_INTERRUPT_GRACE=0.1s \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml" \
+    >"$fixture_root/runner.log" 2>&1 &
+  SIGNAL_RUNNER_PID="$!"
+
+  for _ in $(seq 1 100); do
+    [ ! -s "$fixture_root/capture.ready" ] || break
+    sleep 0.05
+  done
+  [ -s "$fixture_root/capture.ready" ]
+  [ -s "$fixture_root/child.pid" ]
+  SIGNAL_CHILD_PID="$(cat "$fixture_root/child.pid")"
+  SIGNAL_EVAL_PGID="$(ps -o pgid= -p "$SIGNAL_CHILD_PID" | tr -d ' ')"
+  runner_pgid="$(ps -o pgid= -p "$SIGNAL_RUNNER_PID" | tr -d ' ')"
+  [ "$SIGNAL_EVAL_PGID" != "$runner_pgid" ]
+
+  kill -INT -- "-$SIGNAL_RUNNER_PID"
+  touch "$fixture_root/capture.release"
+  runner_exited=0
+  for _ in $(seq 1 100); do
+    if ! kill -0 "$SIGNAL_RUNNER_PID" 2>/dev/null; then
+      runner_exited=1
+      break
+    fi
+    sleep 0.05
+  done
+  [ "$runner_exited" -eq 1 ]
+
+  runner_status=0
+  wait "$SIGNAL_RUNNER_PID" || runner_status="$?"
+  SIGNAL_RUNNER_PID=""
+
+  [ "$runner_status" -eq 130 ]
+  [ -f "$fixture_root/child.interrupted" ]
+  ! kill -0 "$SIGNAL_CHILD_PID" 2>/dev/null
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "interrupted" ]
+  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval was interrupted before completion with status 130" ]
+}
+
+@test "eval runner SIGINT terminates the complete promptfoo process group" {
+  SIGNAL_FIXTURE_ROOT="$(mktemp -d)"
+  fixture_root="$SIGNAL_FIXTURE_ROOT"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+printf '{"results":{"results":[]}}\n' >evals/out/results.json
+grandchild_pid=""
+on_interrupt() {
+  printf 'interrupted\n' >"$PROCESS_FIXTURE_DIR/child.interrupted"
+  [ -z "$grandchild_pid" ] || wait "$grandchild_pid" 2>/dev/null || true
+  exit 130
+}
+trap on_interrupt INT
+printf '%s\n' "$$" >"$PROCESS_FIXTURE_DIR/child.pid"
+env --default-signal=INT bash -c '
+  on_interrupt() {
+    printf "interrupted\n" >"$PROCESS_FIXTURE_DIR/grandchild.interrupted"
+  }
+  trap on_interrupt INT
+  trap "" TERM
+  printf "%s\n" "$$" >"$PROCESS_FIXTURE_DIR/grandchild.pid"
+  while true; do sleep 1; done
+' &
+grandchild_pid="$!"
+printf 'ready\n' >"$PROCESS_FIXTURE_DIR/child.ready"
+set +e
+wait "$grandchild_pid"
+exit "$?"
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  setsid env --default-signal=INT \
+    PROCESS_FIXTURE_DIR="$fixture_root" \
+    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    EVAL_TIMEOUT=0 \
+    EVAL_TIMEOUT_KILL_AFTER=0.1s \
+    EVAL_INTERRUPT_GRACE=0.1s \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml" \
+    >"$fixture_root/runner.log" 2>&1 &
+  SIGNAL_RUNNER_PID="$!"
+
+  for _ in $(seq 1 100); do
+    [ ! -s "$fixture_root/child.ready" ] || [ ! -s "$fixture_root/grandchild.pid" ] || break
+    sleep 0.05
+  done
+  [ -s "$fixture_root/child.ready" ]
+  [ -s "$fixture_root/child.pid" ]
+  [ -s "$fixture_root/grandchild.pid" ]
+  SIGNAL_CHILD_PID="$(cat "$fixture_root/child.pid")"
+  SIGNAL_GRANDCHILD_PID="$(cat "$fixture_root/grandchild.pid")"
+  SIGNAL_EVAL_PGID="$(ps -o pgid= -p "$SIGNAL_CHILD_PID" | tr -d ' ')"
+  runner_pgid="$(ps -o pgid= -p "$SIGNAL_RUNNER_PID" | tr -d ' ')"
+  [ "$SIGNAL_EVAL_PGID" != "$runner_pgid" ]
+
+  kill -INT -- "-$SIGNAL_RUNNER_PID"
+  runner_exited=0
+  for _ in $(seq 1 100); do
+    if ! kill -0 "$SIGNAL_RUNNER_PID" 2>/dev/null; then
+      runner_exited=1
+      break
+    fi
+    sleep 0.05
+  done
+  [ "$runner_exited" -eq 1 ]
+
+  runner_status=0
+  wait "$SIGNAL_RUNNER_PID" || runner_status="$?"
+  SIGNAL_RUNNER_PID=""
+
+  for _ in $(seq 1 100); do
+    if ! kill -0 "$SIGNAL_CHILD_PID" 2>/dev/null &&
+      ! kill -0 "$SIGNAL_GRANDCHILD_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+
+  [ "$runner_status" -eq 130 ]
+  [ -f "$fixture_root/child.interrupted" ]
+  [ -f "$fixture_root/grandchild.interrupted" ]
+  ! kill -0 "$SIGNAL_CHILD_PID" 2>/dev/null
+  ! kill -0 "$SIGNAL_GRANDCHILD_PID" 2>/dev/null
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "interrupted" ]
+  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval was interrupted before completion with status 130" ]
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ -f "$fixture_root/evals/out/timeout-artifacts/"*/results.json ]
 }
 
 @test "eval runner force-kills a promptfoo process that ignores timeout termination" {
