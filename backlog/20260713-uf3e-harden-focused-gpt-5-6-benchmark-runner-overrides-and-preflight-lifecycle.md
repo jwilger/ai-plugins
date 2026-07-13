@@ -24,6 +24,7 @@ Deferred MINOR findings from final review of 20260709-spx8. An inherited PROMPTF
 - [ ] An explicitly empty PROMPTFOO_MAX_CONCURRENCY is either documented as equivalent to unset or rejected distinctly; regression coverage locks the chosen contract.
 - [ ] Relative GPT56_BENCHMARK_OUT_ROOT and EVAL_OUT_DIR overrides resolve once against the caller's original working directory, and preparation, the canonical runner, and post-run checkers use the same absolute paths.
 - [ ] A successful focused live-run regression proves the shared provider lock and its inherited identity are held during both provider execution and post-run artifact checking, then released after the complete lifecycle.
+- [ ] Dry-run regression coverage proves the focused wrapper neither acquires nor creates the provider lock.
 
 ## Subtasks
 
