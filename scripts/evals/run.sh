@@ -12,10 +12,16 @@ eval_timeout="${EVAL_TIMEOUT:-}"
 eval_timeout_full_default="${EVAL_TIMEOUT_FULL_DEFAULT:-90m}"
 eval_timeout_focused_default="${EVAL_TIMEOUT_FOCUSED_DEFAULT:-20m}"
 eval_timeout_kill_after="${EVAL_TIMEOUT_KILL_AFTER:-30s}"
+eval_interrupt_grace="${EVAL_INTERRUPT_GRACE:-2s}"
 suite="behavior"
 dry_run=0
 generated_config=0
 promptfoo_bin="${PROMPTFOO_BIN:-$root/node_modules/.bin/promptfoo}"
+eval_pid=""
+eval_watchdog_pid=""
+eval_launching=0
+interrupted_status=0
+interrupted_signal=""
 
 usage() {
   cat <<'USAGE'
@@ -46,6 +52,7 @@ Environment overrides:
   EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)
   EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)
   EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)
+  EVAL_INTERRUPT_GRACE         (default: 2s between INT, TERM, and KILL)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
 Pinned eval packages are managed by package.json and package-lock.json:
@@ -139,6 +146,58 @@ write_eval_status() {
     --state "$state" \
     --reason "$reason" \
     --provider-credentials "${EVAL_PROVIDER_CREDENTIALS_STATUS:-unknown}" >/dev/null
+}
+
+finish_eval_interruption() {
+  local status="$1"
+  local message
+
+  if [ "$status" -eq 143 ]; then
+    message="promptfoo eval was terminated before completion"
+  else
+    message="promptfoo eval was interrupted before completion with status $status"
+  fi
+  echo "$message" >&2
+  write_eval_status interrupted "$message"
+  retain_partial_outputs "exit-$status"
+  exit "$status"
+}
+
+forward_eval_signal() {
+  local signal="$1"
+  local status="$2"
+
+  interrupted_status="$status"
+  interrupted_signal="$signal"
+  if [ -n "$eval_pid" ]; then
+    kill -s "$signal" -- "-$eval_pid" 2>/dev/null ||
+      kill -s "$signal" "$eval_pid" 2>/dev/null || true
+    arm_eval_interrupt_watchdog
+  elif [ "$eval_launching" -eq 1 ]; then
+    return 0
+  else
+    trap - INT TERM
+    finish_eval_interruption "$status"
+  fi
+}
+
+arm_eval_interrupt_watchdog() {
+  local group_id="$eval_pid"
+
+  [ -z "$eval_watchdog_pid" ] || return 0
+  (
+    sleep "$eval_interrupt_grace"
+    if kill -0 -- "-$group_id" 2>/dev/null || kill -0 "$group_id" 2>/dev/null; then
+      kill -TERM -- "-$group_id" 2>/dev/null || kill -TERM "$group_id" 2>/dev/null || true
+    else
+      exit 0
+    fi
+    sleep "$eval_interrupt_grace"
+    if kill -0 -- "-$group_id" 2>/dev/null || kill -0 "$group_id" 2>/dev/null; then
+      kill -KILL -- "-$group_id" 2>/dev/null || kill -KILL "$group_id" 2>/dev/null || true
+    fi
+  ) &
+  eval_watchdog_pid="$!"
 }
 
 selected_codex_provider_plugin_modes() {
@@ -280,10 +339,7 @@ if [ -n "${EVAL_CASE_FILTER:-}" ]; then
   cmd+=(--filter-pattern "$EVAL_CASE_FILTER")
 fi
 
-run_cmd=("${cmd[@]}")
-if [ -n "$eval_timeout" ] && [ "$eval_timeout" != "0" ]; then
-  run_cmd=(timeout --kill-after "$eval_timeout_kill_after" "$eval_timeout" "${cmd[@]}")
-fi
+run_cmd=(timeout --kill-after "$eval_timeout_kill_after" "$eval_timeout" "${cmd[@]}")
 
 cd "$root"
 
@@ -312,6 +368,8 @@ fi
 
 mkdir -p "$out_dir" "$root/.dependencies/evals/agent-workspace"
 rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml" "$out_dir/status.json"
+trap 'forward_eval_signal INT 130' INT
+trap 'forward_eval_signal TERM 143' TERM
 "$root/scripts/evals/ensure-node-deps.sh"
 if [ "$generated_config" -eq 1 ]; then
   node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file" >/dev/null
@@ -340,8 +398,36 @@ if [ "$generated_config" -eq 1 ]; then
 fi
 
 set +e
-"${run_cmd[@]}"
-promptfoo_status="$?"
+eval_launching=1
+(
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  exec "${run_cmd[@]}"
+) &
+eval_pid="$!"
+eval_launching=0
+if [ -n "$interrupted_signal" ]; then
+  kill -s "$interrupted_signal" -- "-$eval_pid" 2>/dev/null ||
+    kill -s "$interrupted_signal" "$eval_pid" 2>/dev/null || true
+  arm_eval_interrupt_watchdog
+fi
+promptfoo_status=0
+while true; do
+  wait "$eval_pid"
+  promptfoo_status="$?"
+  if ! kill -0 "$eval_pid" 2>/dev/null; then
+    break
+  fi
+done
+if [ -n "$eval_watchdog_pid" ]; then
+  wait "$eval_watchdog_pid" 2>/dev/null || true
+  eval_watchdog_pid=""
+fi
+trap - INT TERM
+eval_pid=""
+if [ "$interrupted_status" -ne 0 ]; then
+  promptfoo_status="$interrupted_status"
+fi
 set -e
 
 if [ "$promptfoo_status" -ne 0 ]; then
@@ -352,16 +438,10 @@ if [ "$promptfoo_status" -ne 0 ]; then
     exit "$promptfoo_status"
   fi
   if [ "$promptfoo_status" -eq 143 ]; then
-    echo "promptfoo eval was terminated before completion" >&2
-    write_eval_status interrupted "promptfoo eval was terminated before completion"
-    retain_partial_outputs "exit-$promptfoo_status"
-    exit "$promptfoo_status"
+    finish_eval_interruption "$promptfoo_status"
   fi
   if [ "$promptfoo_status" -ge 128 ]; then
-    echo "promptfoo eval was interrupted before completion with status $promptfoo_status" >&2
-    write_eval_status interrupted "promptfoo eval was interrupted before completion with status $promptfoo_status"
-    retain_partial_outputs "exit-$promptfoo_status"
-    exit "$promptfoo_status"
+    finish_eval_interruption "$promptfoo_status"
   fi
   if [ ! -s "$out_dir/results.json" ]; then
     exit "$promptfoo_status"
