@@ -11,6 +11,7 @@
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
 20260713-j3x4-render-effective-codex-eval-model-overrides-in-dashboard-labels
 20260713-hkrf-cover-gpt-5-6-benchmark-sample-overrides-and-exact-provider-label-contracts
+20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
 20260713-hiks-require-strict-types-for-gpt-5-6-measurement-gate-metadata
 20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
 20260713-shcm-cover-upstream-provider-error-passthrough-in-the-gpt-5-6-trace-enforced-provider
@@ -46,5 +47,4 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
-20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
 20260713-xg6h-prove-exact-gpt-5-6-benchmark-workspace-ownership-marker-contents
