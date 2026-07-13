@@ -17,6 +17,8 @@ Deferred MINOR from final review of 20260709-spx8. package.json now pins Promptf
 
 ## Acceptance criteria
 
+- [ ] Root README dependency and consuming-project setup guidance match the Promptfoo version pinned in package.json.
+
 ## Subtasks
 
 ## Notes / Log
