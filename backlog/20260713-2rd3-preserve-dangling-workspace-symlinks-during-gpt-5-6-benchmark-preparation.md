@@ -17,6 +17,8 @@ The GPT-5.6 workspace helper uses existsSync before recursive recreation. A dang
 
 ## Acceptance criteria
 
+- [ ] A dangling workspace symlink is refused without removing or replacing the symlink or its target.
+
 ## Subtasks
 
 ## Notes / Log
