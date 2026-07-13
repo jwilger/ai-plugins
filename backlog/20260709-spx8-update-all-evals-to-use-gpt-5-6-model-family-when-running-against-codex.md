@@ -2,7 +2,7 @@
 title: Update all evals to use gpt-5.6 model family when running against Codex
 blocked_by: []
 blocks: []
-tags: [evals, codex, model-routing, benchmarking]
+tags: [evals, codex, model-routing, benchmarking, major]
 pr_mr_url: 
 pr_mr_status: 
 ---
