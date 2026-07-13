@@ -22,7 +22,7 @@ Live diagnosis showed scripts/evals/run.sh in the terminal foreground PGID while
 
 - [x] A single terminal SIGINT terminates the eval runner and the complete timeout, Promptfoo, Claude/Codex SDK, and descendant process tree within a bounded grace period.
 - [x] Interrupted runs return a signal-derived nonzero status, write interrupted status metadata, retain partial artifacts as designed, and never invoke Promptfoo sharing.
-- [ ] A regression test sends a real SIGINT to the production-like foreground/process-group topology and proves no child or grandchild survives.
+- [x] A regression test sends a real SIGINT to the production-like foreground/process-group topology and proves no child or grandchild survives.
 
 ## Subtasks
 
