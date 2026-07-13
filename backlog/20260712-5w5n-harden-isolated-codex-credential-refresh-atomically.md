@@ -25,3 +25,5 @@ Deferred MINOR findings from lightweight review of 20260712-kwbg. The current re
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-13: Formal review of 20260712-kwbg confirmed the existing source-immutability coverage gap and additionally found that the refresh regression inherits ambient OPENAI_API_KEY while no focused case proves the API-key no-copy branch. Added explicit API-key isolation/no-copy coverage to this existing MINOR hardening ticket rather than creating a duplicate.
