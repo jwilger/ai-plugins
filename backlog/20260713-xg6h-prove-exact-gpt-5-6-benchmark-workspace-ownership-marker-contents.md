@@ -2,7 +2,7 @@
 title: Prove exact GPT-5.6 benchmark workspace ownership marker contents
 blocked_by: []
 blocks: []
-tags: []
+tags: [evals, gpt-5.6, tests, filesystem, minor]
 pr_mr_url: 
 pr_mr_status: 
 ---
