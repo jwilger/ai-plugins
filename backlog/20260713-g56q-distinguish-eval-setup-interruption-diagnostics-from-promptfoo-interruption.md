@@ -17,6 +17,8 @@ Final review found a MINOR operability issue in the new pre-Promptfoo signal pat
 
 ## Acceptance criteria
 
+- [ ] SIGINT before Promptfoo launch writes a setup-specific terminal diagnostic and status.json reason without claiming a Promptfoo eval had started.
+
 ## Subtasks
 
 ## Notes / Log
