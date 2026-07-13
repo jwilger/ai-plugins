@@ -338,6 +338,20 @@ NODE
   rm -rf "$tmp_home"
 }
 
+@test "codex eval home preparation refreshes stale seeded auth" {
+  FIXTURE_TMP="$(mktemp -d)"
+  auth_home="$FIXTURE_TMP/auth-source"
+  eval_home="$FIXTURE_TMP/eval-home"
+  mkdir -p "$auth_home" "$eval_home"
+  printf '%s\n' '{"token":"current"}' >"$auth_home/auth.json"
+  printf '%s\n' '{"token":"revoked"}' >"$eval_home/auth.json"
+
+  run env CODEX_EVAL_AUTH_HOME="$auth_home" node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$eval_home" --plugin-mode no-plugins
+
+  [ "$status" -eq 0 ]
+  cmp "$auth_home/auth.json" "$eval_home/auth.json"
+}
+
 @test "codex eval home preparation refuses the real codex home by default" {
   tmp_home="$(mktemp -d)"
 

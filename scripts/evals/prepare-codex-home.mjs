@@ -115,7 +115,7 @@ function seedAuth(codexHome) {
     const source = path.join(authHome, filename);
     const target = path.join(codexHome, filename);
 
-    if (fs.existsSync(source) && !fs.existsSync(target)) {
+    if (fs.existsSync(source)) {
       fs.copyFileSync(source, target);
       fs.chmodSync(target, 0o600);
     }
