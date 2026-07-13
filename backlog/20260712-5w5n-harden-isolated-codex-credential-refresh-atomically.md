@@ -20,6 +20,7 @@ Deferred MINOR findings from lightweight review of 20260712-kwbg. The current re
 - [ ] Credential refresh writes a temporary file in the target directory, sets mode 0600, and atomically renames it over a regular destination without following destination symlinks outside the eval home.
 - [ ] Focused tests cover auth.json and .credentials.json contents and mode 0600 for both initial seeding and stale-credential refresh.
 - [ ] An interrupted or failed refresh leaves either the complete old target or the complete new target, never mutates the source credentials, and never logs credential contents.
+- [ ] Focused tests explicitly clear ambient OPENAI_API_KEY for credential-refresh cases and prove that API-key runs neither seed nor replace auth.json or .credentials.json.
 
 ## Subtasks
 
