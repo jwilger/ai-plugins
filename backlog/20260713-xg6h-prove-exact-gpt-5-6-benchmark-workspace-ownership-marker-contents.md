@@ -17,6 +17,8 @@ Current tests cover an absent marker and the exact valid marker, but not a near-
 
 ## Acceptance criteria
 
+- [ ] A nonempty workspace with a near-match marker is refused and all existing content is preserved.
+
 ## Subtasks
 
 ## Notes / Log
