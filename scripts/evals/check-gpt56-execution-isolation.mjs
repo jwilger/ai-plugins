@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import {
+  allowedNormalizedItemTypes,
+  allowedRawResponseItemTypes,
+  toolNotificationDescription,
+} from "../../evals/benchmarks/gpt-5.6-model-family/trace-policy.mjs";
 
 const resultsPath = process.argv[2];
 
@@ -25,29 +30,6 @@ const prohibitedToolNames = new Set([
   "send_message",
   "spawn_agent",
   "wait_agent",
-]);
-const allowedNormalizedItemTypes = new Set(["agent_message", "reasoning"]);
-const allowedRawResponseItemTypes = new Set(["message", "reasoning"]);
-const allowedNotificationItemTypes = new Set(["agentMessage", "reasoning"]);
-const benignNotificationMethods = new Set([
-  "error",
-  "thread/started",
-  "thread/status/changed",
-  "thread/tokenUsage/updated",
-  "turn/started",
-  "turn/completed",
-  "item/started",
-  "item/completed",
-  "rawResponseItem/completed",
-  "item/agentMessage/delta",
-  "item/reasoning/summaryTextDelta",
-  "item/reasoning/summaryPartAdded",
-  "item/reasoning/textDelta",
-  "turn/moderationMetadata",
-  "model/safetyBuffering/updated",
-  "warning",
-  "deprecationNotice",
-  "configWarning",
 ]);
 
 function providerLabel(result) {
@@ -124,26 +106,6 @@ function containsCollaborationActivity(items) {
   }
 
   return false;
-}
-
-function toolNotificationDescription(notifications) {
-  for (const notification of notifications) {
-    const method = notification?.method;
-    if (typeof method !== "string" || !method) {
-      return "unknown notification";
-    }
-    if (!benignNotificationMethods.has(method)) {
-      return method;
-    }
-    if (method === "item/started" || method === "item/completed") {
-      const itemType = notification?.params?.item?.type;
-      if (!allowedNotificationItemTypes.has(itemType)) {
-        return `${method}:${itemType ?? "unknown"}`;
-      }
-    }
-  }
-
-  return undefined;
 }
 
 const failures = [];

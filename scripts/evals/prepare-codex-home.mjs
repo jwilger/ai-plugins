@@ -54,6 +54,14 @@ function parseArgs(argv) {
   ) {
     throw new Error("targeted-plugins mode requires --plugins");
   }
+  if (
+    args.plugins &&
+    !["targeted-plugins", "skills-only-marketplace"].includes(args.pluginMode)
+  ) {
+    throw new Error(
+      `--plugins is not supported with plugin mode ${args.pluginMode}`,
+    );
+  }
 
   return args;
 }
@@ -276,11 +284,7 @@ function main() {
   assertEvalHomeCanBeRecreated(resolvedHome);
 
   const plugins =
-    args.pluginMode === "no-plugins"
-      ? []
-      : marketplacePlugins(
-          args.pluginMode === "targeted-plugins" ? args.plugins : null,
-        );
+    args.pluginMode === "no-plugins" ? [] : marketplacePlugins(args.plugins);
 
   if (!initializeInPlace) {
     fs.rmSync(resolvedHome, { recursive: true, force: true });

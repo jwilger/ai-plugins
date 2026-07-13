@@ -23,7 +23,10 @@ cost estimates below use the current
 The execution comparison uses one sample from each model for four distinct
 cases: two standard marketplace scenarios and two Advisor-like scenarios. The
 standard cases load only the marketplace's plugin manifests and skill guidance;
-MCP servers, hooks, binaries, agents, and other plugin components are excluded.
+their home is limited to the `agentic-systems-engineering` and
+`development-discipline` plugins selected by those fixtures, so unrelated
+delegation-only Advisor guidance is absent. MCP servers, hooks, binaries,
+agents, and other plugin components are excluded.
 The Advisor-like cases and all graders run with no plugins and ask for a direct
 answer, preventing the installed Advisor agent from handling the task instead
 of the model being compared. Every execution output is judged by the same

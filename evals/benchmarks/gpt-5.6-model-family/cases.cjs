@@ -9,27 +9,49 @@ const standardProviderLabels = models.map(
 const advisorProviderLabels = models.map(
   (model) => `codex-gpt-5.6-${model}-advisor-like`,
 );
+const standardCaseIds = new Set([
+  "agentic-tool-contracts-and-loops",
+  "development-discipline-review-feedback-skepticism",
+]);
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
 }
 
-function standardCases() {
-  const selected = new Set([
-    "agentic-tool-contracts-and-loops",
-    "development-discipline-review-feedback-skepticism",
-  ]);
+function selectedStandardFixtures() {
+  return readJson("evals/fixtures/behavior/full-marketplace/cases.json").filter(
+    (testCase) => standardCaseIds.has(testCase.case_id),
+  );
+}
 
-  return readJson("evals/fixtures/behavior/full-marketplace/cases.json")
-    .filter((testCase) => selected.has(testCase.case_id))
-    .map((testCase) => ({
-      id: testCase.case_id,
-      behavior: testCase.behavior,
-      prompt: testCase.prompt,
-      rubric: testCase.semanticRubric,
-      category: "standard",
-      providers: standardProviderLabels,
-    }));
+function standardPluginNames() {
+  const plugins = [
+    ...new Set(
+      selectedStandardFixtures().flatMap((testCase) => testCase.plugins || []),
+    ),
+  ].sort();
+
+  if (plugins.length === 0) {
+    throw new Error("standard benchmark cases select no marketplace plugins");
+  }
+  if (plugins.includes("advisor")) {
+    throw new Error(
+      "standard benchmark cases cannot load delegation-only Advisor guidance",
+    );
+  }
+
+  return plugins;
+}
+
+function standardCases() {
+  return selectedStandardFixtures().map((testCase) => ({
+    id: testCase.case_id,
+    behavior: testCase.behavior,
+    prompt: testCase.prompt,
+    rubric: testCase.semanticRubric,
+    category: "standard",
+    providers: standardProviderLabels,
+  }));
 }
 
 function advisorLikeCases() {
@@ -55,7 +77,7 @@ function advisorLikeCases() {
     }));
 }
 
-module.exports = function loadBenchmarkCases() {
+function loadBenchmarkCases() {
   const rawSamples = process.env.GPT56_BENCHMARK_SAMPLES ?? "1";
   if (!/^(?:[1-9]|10)$/.test(rawSamples)) {
     throw new RangeError(
@@ -89,4 +111,8 @@ module.exports = function loadBenchmarkCases() {
       ],
     })),
   );
-};
+}
+
+loadBenchmarkCases.standardPluginNames = standardPluginNames;
+
+module.exports = loadBenchmarkCases;
