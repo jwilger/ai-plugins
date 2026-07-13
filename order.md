@@ -15,6 +15,7 @@
 20260713-shcm-cover-upstream-provider-error-passthrough-in-the-gpt-5-6-trace-enforced-provider
 20260713-ffpt-avoid-initializing-the-gpt-5-6-trace-provider-during-unused-cleanup
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
+20260713-u2md-remove-stale-live-evals-workflow-documentation
 20260713-tpb3-synchronize-documented-promptfoo-pins-with-the-package-source-of-truth
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
@@ -43,4 +44,3 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
-20260713-u2md-remove-stale-live-evals-workflow-documentation
