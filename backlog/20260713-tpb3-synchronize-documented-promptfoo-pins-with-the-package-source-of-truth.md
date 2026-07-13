@@ -24,3 +24,5 @@ Deferred MINOR from final review of 20260709-spx8. package.json now pins Promptf
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-13: Final-review iteration 1 found the remaining scaffold skill, scaffold reference, and promptfoo-mcp diagnostic pin drift blocks the current GPT-5.6 migration. 20260709-spx8 will address these caused release-integration paths now; retain this item until that work is verified and landed.
