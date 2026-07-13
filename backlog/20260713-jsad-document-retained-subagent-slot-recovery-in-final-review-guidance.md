@@ -24,3 +24,5 @@ Observed during the Ctrl-C eval-runner final review: the collaboration runtime s
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-13: Confirmed recovery technique on 2026-07-13: when a completed retained subagent still consumes a concurrency slot, send it an administrative follow-up explicitly requesting no work and an immediate return, then call interrupt_agent after that return. This released the slot and allowed a fresh reviewer to spawn. Final-review guidance should document the sequence and require preserving the completed result before recycling.
