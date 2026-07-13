@@ -35,3 +35,4 @@
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260713-tpb3-synchronize-documented-promptfoo-pins-with-the-package-source-of-truth
+20260713-uf3e-harden-focused-gpt-5-6-benchmark-runner-overrides-and-preflight-lifecycle
