@@ -21,6 +21,7 @@ The current workflow held a large green change uncommitted through repeated full
 - [ ] When full review finds issues, guidance requires a new green tests/light-review commit and push before restarting full review.
 - [ ] Before addressing review findings or starting another ticket, guidance requires checking the latest pushed build; running or green permits work, while failed blocks follow-up work until resolved.
 - [ ] Full-review instructions pin the baseline commit so pushes during review do not move or erase the reviewed diff.
+- [ ] Guidance defines fast unit tests plus lightweight review as the local commit-and-push gate for each implementation increment.
 
 ## Subtasks
 
