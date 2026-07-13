@@ -17,6 +17,8 @@ The current workflow held a large green change uncommitted through repeated full
 
 ## Acceptance criteria
 
+- [ ] Guidance defines tests plus lightweight review as the commit-and-push gate for each implementation increment.
+
 ## Subtasks
 
 ## Notes / Log
