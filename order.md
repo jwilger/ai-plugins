@@ -5,6 +5,7 @@
 20260713-qa3n-make-the-eval-launch-race-regression-prove-pre-publication-signal-handling
 20260713-g56q-distinguish-eval-setup-interruption-diagnostics-from-promptfoo-interruption
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
+20260713-uf3e-harden-focused-gpt-5-6-benchmark-runner-overrides-and-preflight-lifecycle
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
 20260713-hkrf-cover-gpt-5-6-benchmark-sample-overrides-and-exact-provider-label-contracts
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
@@ -35,4 +36,3 @@
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260713-tpb3-synchronize-documented-promptfoo-pins-with-the-package-source-of-truth
-20260713-uf3e-harden-focused-gpt-5-6-benchmark-runner-overrides-and-preflight-lifecycle
