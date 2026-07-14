@@ -22,3 +22,5 @@ The GPT-5.6 workspace helper uses existsSync before recursive recreation. A dang
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Reconfirmed independently in the final lightweight review for 20260709-spx8: a dangling symlink is treated as missing and replaced. No current-ticket diff change was made because this remains a deferred MINOR.
