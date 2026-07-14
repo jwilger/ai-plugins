@@ -18,6 +18,7 @@ Backlog-only capture, explicit transition before active work, and basic PR/MR UR
 ## Acceptance criteria
 
 - [ ] Guidance requires each concurrently active in-progress task to use its own claim, branch, and linked worktree and forbids treating a backlog claim as an informal reservation.
+- [ ] PR/MR lifecycle coverage records the URL and stable status changes through draft or open, checks, review, approval, merge, close, or blocked outcomes.
 
 ## Subtasks
 
