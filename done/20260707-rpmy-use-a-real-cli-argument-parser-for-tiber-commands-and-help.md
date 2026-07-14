@@ -1,7 +1,7 @@
 ---
 title: Use a real CLI argument parser for Tiber commands and help
 blocked_by: []
-blocks: [20260708-u52t-add-single-command-detailed-task-creation-to-tiber]
+blocks: []
 tags: [bug, tiber, cli, developer-experience]
 ---
 
