@@ -34,6 +34,31 @@ then, implementation proceeds one step or scenario at a time.
 7. Refactor only with the tests green and the lightweight review clean.
 8. Repeat for the next behavior.
 
+## Green Increment Delivery
+
+Treat each completed behavior as a preservable implementation increment. Before
+starting the next RED test:
+
+1. Run the fast unit tests and directly relevant quick checks.
+2. Run the lightweight review below. If it causes an edit, repeat the fast tests
+   and lightweight review until both are green.
+3. Commit and push the green increment.
+4. Check the latest pushed build. Continue when CI is running or green. A failed
+   build blocks follow-up implementation, review-finding remediation, and a new
+   ticket until the failure is understood and repaired.
+
+Long-running integration, mutation, exhaustive, full-suite, and similarly
+expensive checks belong in CI unless a local run is directly required to
+diagnose a failure. Do not make every local increment wait for them.
+
+Full review is the ticket-completion gate after the actual acceptance criteria
+are implemented; it is not a prerequisite for preserving each green increment.
+When full review requires a code or guidance edit, first confirm the latest
+pushed build is running or green, make the edit test-first, then repeat fast
+unit tests, lightweight review, commit and push, and the CI check. Resume full
+review through one diff-bound delta risk assessment rather than restarting
+unaffected lenses.
+
 ## Lightweight Review
 
 After each implementation step, run one fresh-context review subagent before
@@ -68,4 +93,5 @@ cannot be completed to this standard instead of silently skipping it.
 Before moving on, be able to point to the RED output, the GREEN output, and the
 small implementation step that connects them. Before starting the next cycle,
 also point to the clean lightweight review or the defended finding accepted by a
-follow-up review.
+follow-up review, the pushed commit, and a latest pushed build that is running
+or green.
