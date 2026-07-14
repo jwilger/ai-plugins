@@ -19,6 +19,7 @@ Final review of 20260709-spx8 found that a dangling workspace symlink is treated
 
 - [ ] A dangling workspace symlink is refused without removing or replacing the symlink or its target.
 - [ ] A nonempty workspace with an absent, malformed, or near-match ownership marker is refused, and every existing link and file remains unchanged.
+- [ ] Only the exact documented ownership-marker contents authorize recursive recreation of an existing runner-owned workspace.
 
 ## Subtasks
 
