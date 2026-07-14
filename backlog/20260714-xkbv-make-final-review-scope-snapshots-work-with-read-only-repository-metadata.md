@@ -21,6 +21,7 @@ A caused MINOR operability finding from 20260713-rygd showed that mandatory scop
 - [ ] The replacement mechanism preserves the exact baseline, changed-file inventory, tracked, staged, unstaged, and untracked content coverage, immutable scope reference, and diff-hash binding.
 - [ ] Focused Rust and public JSON-RPC regressions exercise a writable worktree with read-only repository metadata for both initial assessment and delta reassessment.
 - [ ] Permission or snapshot-construction failure emits an actionable diagnostic and supported recovery path without silently bypassing or weakening final-review enforcement.
+- [ ] Temporary snapshot state is isolated, bounded, and cleaned safely without deleting user or repository data.
 
 ## Subtasks
 
