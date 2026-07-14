@@ -9,13 +9,13 @@
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
-20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
 20260708-55yg-add-final-review-readiness-gate-to-development-discipline
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
