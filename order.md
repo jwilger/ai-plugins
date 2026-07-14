@@ -29,7 +29,6 @@
 20260713-tpb3-synchronize-documented-promptfoo-pins-with-the-package-source-of-truth
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
-20260712-7csp-keep-deferred-final-review-findings-from-resetting-clean-pass-streaks
 20260711-42si-block-pushes-until-final-review-completes-three-clean-passes
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260710-dhse-require-explicit-user-approval-before-amending-commits
