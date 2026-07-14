@@ -19,6 +19,7 @@ Consolidates two MINOR observations from the risk-proportionate final-review tic
 
 - [ ] Reject or explicitly model split candidates whose scope ownership is fully overlapping, while preserving collective coverage of the changed-file inventory.
 - [ ] Make final_review.advance's review_budget_decision JSON Schema accept exactly the payload shapes and bounds accepted by runtime validation.
+- [ ] Add focused tests for overlapping split scopes and schema/runtime boundary parity.
 
 ## Subtasks
 
