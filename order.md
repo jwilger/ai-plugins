@@ -17,7 +17,6 @@
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
-20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
@@ -28,6 +27,7 @@
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
