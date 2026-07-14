@@ -19,7 +19,6 @@ The risk-proportionate policy already requires the ticket's actual acceptance cr
 
 - [ ] Final-review guidance requires a local readiness checklist before the multi-lens review loop begins.
 - [ ] The change includes eval cases that exercise final-review readiness and defended-finding carry-forward behavior.
-- [ ] Before final_review.plan, the workflow produces a readiness result bound to the exact current scope and task and stops with actionable remediation when required work is missing.
 
 ## Subtasks
 
