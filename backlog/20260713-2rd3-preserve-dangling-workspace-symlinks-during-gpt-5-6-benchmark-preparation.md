@@ -28,3 +28,4 @@ Final review of 20260709-spx8 found that a dangling workspace symlink is treated
 
 - 2026-07-14: Reconfirmed independently in the final lightweight review for 20260709-spx8: a dangling symlink is treated as missing and replaced. No current-ticket diff change was made because this remains a deferred MINOR.
 - 2026-07-14: 2026-07-14 formal final-review pass 1 for 20260709-spx8 independently reconfirmed the dangling-symlink ownership gap. Deferred as MINOR; the frozen source diff is unchanged.
+- 2026-07-14: Backlog grooming 2026-07-14: Consolidated 20260713-xg6h and 20260713-x8yr into this workspace ownership/isolation ticket. The merged scope remains one filesystem decision boundary: whether a path may be recreated and whether it overlaps protected state.
