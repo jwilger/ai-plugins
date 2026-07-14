@@ -58,3 +58,4 @@
 20260714-iv3g-retire-content-addressed-final-review-delta-artifacts
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
 20260714-24xa-tighten-final-review-split-and-budget-decision-contracts
+20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
