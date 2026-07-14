@@ -13,7 +13,7 @@ Make the GPT-5.6 provider wrapper and post-run isolation checker call one shared
 
 ## Context / Why
 
-Verified MINOR architecture finding from 20260709-spx8: both enforcement boundaries independently repeat item, notification, raw-response-item, and server-request validation while trace-policy.mjs shares only allowlists/helpers, leaving lifecycle rules vulnerable to drift.
+Verified MINOR architecture finding from 20260709-spx8: both enforcement boundaries independently repeat item, notification, raw-response-item, and server-request validation while trace-policy.mjs shares only allowlists/helpers, leaving lifecycle rules vulnerable to drift. A later lightweight review of the successful-turn fix found additional caused MINOR gaps that belong in the same complete-validator work: lifecycle start/completion currently accept the error-notification turnId fallback instead of requiring params.turn.id; completion is not proven terminal relative to later allowed notifications; turn-scoped notifications are not uniformly checked for matching active thread/turn identifiers; and the shared helper's negative-path parity matrix does not cover all schema, ordering, duplication, and retryable-error branches.
 
 ## Acceptance criteria
 
