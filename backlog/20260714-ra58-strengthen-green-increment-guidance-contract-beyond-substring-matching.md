@@ -17,6 +17,8 @@ MINOR test-verification finding from the risk-proportionate review-policy ticket
 
 ## Acceptance criteria
 
+- [ ] Reject negated or contradictory green-increment, CI-failure, and full-review guidance rather than accepting disconnected phrase presence.
+
 ## Subtasks
 
 ## Notes / Log
