@@ -27,6 +27,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [ ] Low-risk work uses lightweight review with at most one optional targeted final lens; medium-risk work uses one targeted full-review pass; high-risk work uses one broad pass.
 - [ ] Multiple independent clean passes are available only for exceptional risk such as destructive or irreversible operations, authentication/authorization boundaries, sensitive-data migrations, cryptographic behavior, or safety-critical behavior.
 - [ ] A review iteration is clean when no unresolved blocking finding remains after disposition; caused CRITICAL/MAJOR findings block, incidental or pre-existing CRITICAL/MAJOR and all MINOR findings require appropriately prioritized backlog work, and TRIVIAL findings are report-only.
+- [ ] Deferred and already-known findings are not re-verified or re-reported without materially severity-changing evidence, and they do not block completion or reset clean state when the reviewed diff hash is unchanged and required ticket/report evidence exists.
 
 ## Subtasks
 
