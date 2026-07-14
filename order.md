@@ -4,7 +4,6 @@
 20260713-hgyz-make-targeted-plugin-eval-mode-install-the-actual-case-plugin-set
 20260713-jsad-document-retained-subagent-slot-recovery-in-final-review-guidance
 20260713-qa3n-make-the-eval-launch-race-regression-prove-pre-publication-signal-handling
-20260713-g56q-distinguish-eval-setup-interruption-diagnostics-from-promptfoo-interruption
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
 20260713-h9bn-prove-canonical-status-precedence-in-the-gpt-5-6-calibration-runner
 20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
@@ -38,6 +37,7 @@
 20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260713-g56q-distinguish-eval-setup-interruption-diagnostics-from-promptfoo-interruption
 20260714-7kxi-exercise-promptfoo-cli-provider-shape-in-gpt-5-6-measurement-fixtures
 20260713-hkrf-cover-gpt-5-6-benchmark-sample-overrides-and-exact-provider-label-contracts
 20260713-shcm-cover-upstream-provider-error-passthrough-in-the-gpt-5-6-trace-enforced-provider
