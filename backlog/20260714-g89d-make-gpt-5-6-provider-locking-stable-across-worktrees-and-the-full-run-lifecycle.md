@@ -21,6 +21,7 @@ Split from 20260713-uf3e. The focused and canonical runners can disagree on logi
 - [ ] Dry-run neither acquires nor creates the provider lock.
 - [ ] Focused and canonical runners derive the same canonical lock identity when invoked through a symlinked checkout or runner path.
 - [ ] The cross-worktree lock lives outside disposable .dependencies caches, and inability to resolve the Git-common location fails closed before provider launch.
+- [ ] Regression coverage proves unlinking or recreating disposable paths cannot produce a second concurrently acquirable lock.
 
 ## Subtasks
 
