@@ -43,6 +43,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [ ] Initial final-review planning returns exactly one fresh, diff-bound broad-but-shallow risk-scout assignment before any deep-review lens assignments; it covers every review dimension, consumes shared evidence, records canonical semantic failure paths for discovery sample one, and cannot run tests, invoke verifiers, or recurse into more planning.
 - [ ] After this policy ships with green CI, the entire existing backlog is deduplicated, consolidated, and reprioritized at the ticket boundary using value, risk/impact, likelihood or observed frequency, and opportunity cost; repeated sightings update likelihood evidence on the existing ticket rather than creating duplicates.
 - [ ] Failed CI and unmet ticket acceptance criteria remain independent completion gates; among review findings, only caused or worsened CRITICAL/MAJOR security findings (unauthorized access or protected-system/data compromise) and safety findings (plausible harm to people or the physical world) block, while every other finding is consolidated into backlog work and TRIVIAL remains report-only unless an explicit release stop applies.
+- [ ] The broad scout always evaluates security risk and safety risk as separate dimensions; deeper safety review is selected only when the intended deployment has a plausible human or physical-harm path, and safety-critical work receives exceptional-risk independence.
 
 ## Subtasks
 
