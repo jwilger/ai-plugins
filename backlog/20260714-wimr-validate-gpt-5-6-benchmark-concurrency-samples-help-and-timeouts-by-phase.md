@@ -21,6 +21,7 @@ Split from 20260713-uf3e. Inherited concurrency can exceed the supported maximum
 - [ ] Canonical runner help remains available despite an invalid ambient concurrency override, while live and dry-run execution validate before preparation or launch.
 - [ ] GPT56_BENCHMARK_SAMPLES validation applies only to execution; grader calibration remains runnable when an irrelevant stale or malformed sample override is present.
 - [ ] Supported sample counts receive an effective timeout that scales with the documented turn count, or require an explicit EVAL_TIMEOUT with an actionable preflight diagnostic; dry-run prints the effective deadline.
+- [ ] Focused tests cover supported, out-of-range, malformed, and explicitly empty concurrency; phase-specific sample validation; help; and the complete supported sample/deadline range.
 
 ## Subtasks
 
