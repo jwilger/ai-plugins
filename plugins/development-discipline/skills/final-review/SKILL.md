@@ -248,9 +248,11 @@ policy.
    disposition evidence that the verifier's final classification newly
    requires. The server freezes the core lens, scope, and caller-decision
    arguments, so a defense or accepted-risk decision first added on
-   resubmission fails closed. Failed/uncertain verification keeps blocking
-   candidates open. A rejected finding is removed; the iteration may count as
-   clean when no other blocking, malformed, or needs-human finding remains.
+   resubmission fails closed. Failed verification retains every candidate; an
+   uncertain result keeps blocking and materially uncertain security or
+   human-safety candidates open. A rejected finding is removed; the iteration
+   may count as clean when no other blocking, malformed, or needs-human finding
+   remains.
 
    For a medium-risk session, the coordinator records a server-timed 75-minute
    checkpoint. When `advance_kind` is `review_budget_checkpoint`, the submitted

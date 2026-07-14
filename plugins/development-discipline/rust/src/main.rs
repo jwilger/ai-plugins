@@ -2491,6 +2491,20 @@ fn caused_blocking_security_or_safety_finding(finding: &Value) -> bool {
     ))
 }
 
+fn materially_uncertain_security_or_safety_finding(finding: &Value) -> bool {
+    matches!(
+        finding.get("severity").and_then(Value::as_str),
+        Some("CRITICAL" | "MAJOR")
+    ) && finding.get("causality").and_then(Value::as_str) == Some("uncertain")
+        && (matches!(
+            finding.get("security_impact").and_then(Value::as_str),
+            Some("major" | "critical")
+        ) || matches!(
+            finding.get("safety_impact").and_then(Value::as_str),
+            Some("major" | "critical")
+        ))
+}
+
 fn caused_blocking_safety_finding(finding: &Value) -> bool {
     matches!(
         finding.get("safety_impact").and_then(Value::as_str),
@@ -7605,16 +7619,20 @@ fn verification_candidates_for_state(state: &Value, filtered: &Value) -> Vec<Val
             else {
                 continue;
             };
-            if unresolved_keys.contains(&key)
-                && !scout_blocker_keys.contains(&key)
+            let material_uncertainty = materially_uncertain_security_or_safety_finding(finding);
+            if (material_uncertainty
+                || (unresolved_keys.contains(&key) && !scout_blocker_keys.contains(&key)))
                 && !candidates.iter().any(|candidate| {
                     candidate.get("lens") == finding.get("lens")
                         && candidate.get("id") == finding.get("id")
                 })
             {
                 let mut disputed = finding.clone();
-                disputed["verification_reason"] =
-                    json!("disputes the final disposition of a prior unresolved blocker");
+                disputed["verification_reason"] = if material_uncertainty {
+                    json!("material causality remains uncertain")
+                } else {
+                    json!("disputes the final disposition of a prior unresolved blocker")
+                };
                 candidates.push(disputed);
             }
         }
@@ -7863,6 +7881,7 @@ fn apply_verifier_result(
     state: &Value,
 ) -> Result<Value, String> {
     if result.get("status").and_then(Value::as_str) == Some("failed") {
+        retain_failed_material_uncertainty_open(filtered, candidates, result);
         let verification = json!({
             "status": "failed_retained",
             "rationale": result.get("rationale").cloned().unwrap_or(Value::Null),
@@ -7957,11 +7976,15 @@ fn apply_verifier_result(
             match verdict.get("verdict").and_then(Value::as_str) {
                 Some("rejected") => rejected.push(finding),
                 Some("uncertain")
-                    if finding.get("disposition").and_then(Value::as_str) == Some("block") =>
+                    if finding.get("disposition").and_then(Value::as_str) == Some("block")
+                        || materially_uncertain_security_or_safety_finding(&finding) =>
                 {
                     uncertain.push(finding);
                 }
                 Some("uncertain") => retained.push(finding),
+                Some("confirmed") if materially_uncertain_security_or_safety_finding(&finding) => {
+                    uncertain.push(finding);
+                }
                 Some("confirmed")
                     if bucket == "out_of_scope"
                         && finding.get("disposition").and_then(Value::as_str) == Some("block") =>
@@ -8004,6 +8027,86 @@ fn apply_verifier_result(
     });
     filtered["verification"] = verification.clone();
     Ok(verification)
+}
+
+fn retain_failed_material_uncertainty_open(
+    filtered: &mut Value,
+    candidates: &[Value],
+    result: &Value,
+) {
+    let candidate_keys = candidates
+        .iter()
+        .filter(|finding| materially_uncertain_security_or_safety_finding(finding))
+        .filter_map(|finding| {
+            Some((
+                finding.get("lens")?.as_str()?.to_string(),
+                finding.get("id")?.as_str()?.to_string(),
+            ))
+        })
+        .collect::<HashSet<_>>();
+    if candidate_keys.is_empty() {
+        return;
+    }
+
+    let mut open = Vec::new();
+    for bucket in ["routed", "out_of_scope"] {
+        let mut retained = Vec::new();
+        for mut finding in filtered
+            .get(bucket)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let key = finding
+                .get("lens")
+                .and_then(Value::as_str)
+                .and_then(|lens| {
+                    finding
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(|id| (lens.to_string(), id.to_string()))
+                });
+            if key.as_ref().is_some_and(|key| candidate_keys.contains(key)) {
+                finding["verification"] = json!({
+                    "status": "failed",
+                    "rationale": result.get("rationale").cloned().unwrap_or(Value::Null)
+                });
+                open.push(finding);
+            } else {
+                retained.push(finding);
+            }
+        }
+        filtered[bucket] = Value::Array(retained);
+    }
+    if open.is_empty() {
+        return;
+    }
+
+    let mut needs_human_decision = filtered
+        .get("needs_human_decision")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    needs_human_decision.extend(open);
+    filtered["needs_human_decision"] = Value::Array(needs_human_decision);
+    if let Some(follow_ups) = filtered
+        .get_mut("follow_up_tickets_required")
+        .and_then(Value::as_array_mut)
+    {
+        follow_ups.retain(|finding| {
+            let key = finding
+                .get("lens")
+                .and_then(Value::as_str)
+                .and_then(|lens| {
+                    finding
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(|id| (lens.to_string(), id.to_string()))
+                });
+            key.is_none_or(|key| !candidate_keys.contains(&key))
+        });
+    }
+    filtered["clean"] = json!(false);
 }
 
 fn reroute_findings_by_disposition(filtered: &mut Value) {
@@ -14805,6 +14908,161 @@ pre_filter = "project-pre"
         assert_eq!(verification["status"], "verified");
         assert_eq!(filtered["routed"][0]["id"], "minor-diagnostic-gap");
         assert_eq!(filtered["actionable"][0]["id"], "caused-auth-bypass");
+    }
+
+    #[test]
+    fn verifier_includes_new_materially_uncertain_routed_findings() {
+        let state = json!({ "risk_plan": { "overall_risk": "high" } });
+        let filtered = json!({
+            "actionable": [],
+            "needs_human_decision": [],
+            "routed": [{
+                "id": "possible-auth-bypass",
+                "lens": "security-safety",
+                "severity": "MAJOR",
+                "causality": "uncertain",
+                "causality_evidence": "The changed authorization path is plausible but attribution is unresolved.",
+                "security_impact": "major",
+                "safety_impact": "none",
+                "disposition": "ticket"
+            }, {
+                "id": "minor-diagnostic-gap",
+                "lens": "operability-user-impact",
+                "severity": "MINOR",
+                "causality": "uncertain",
+                "causality_evidence": "The diagnostic provenance is unclear.",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "disposition": "ticket"
+            }],
+            "out_of_scope": []
+        });
+
+        let candidates = verification_candidates_for_state(&state, &filtered);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0]["id"], "possible-auth-bypass");
+        assert_eq!(
+            candidates[0]["verification_reason"],
+            "material causality remains uncertain"
+        );
+    }
+
+    #[test]
+    fn materially_uncertain_verifier_result_remains_open() {
+        let state = json!({ "risk_plan": { "overall_risk": "high" } });
+        let finding = json!({
+            "id": "possible-auth-bypass",
+            "lens": "security-safety",
+            "severity": "MAJOR",
+            "causality": "uncertain",
+            "causality_evidence": "The changed authorization path is plausible but attribution is unresolved.",
+            "security_impact": "major",
+            "safety_impact": "none",
+            "disposition": "ticket"
+        });
+        let mut filtered = json!({
+            "actionable": [],
+            "needs_human_decision": [],
+            "routed": [finding.clone()],
+            "out_of_scope": [],
+            "malformed": [],
+            "follow_up_tickets_required": [finding.clone()]
+        });
+
+        apply_verifier_result(
+            &mut filtered,
+            std::slice::from_ref(&finding),
+            &json!({
+                "status": "verified",
+                "verdicts": [{
+                    "finding_id": "possible-auth-bypass",
+                    "lens": "security-safety",
+                    "verdict": "uncertain",
+                    "severity": "MAJOR",
+                    "causality": "uncertain",
+                    "causality_evidence": "The verifier could not resolve whether the diff introduced the path.",
+                    "security_impact": "major",
+                    "safety_impact": "none",
+                    "rationale": "The material authorization path remains plausible and unresolved."
+                }]
+            }),
+            &state,
+        )
+        .expect("material uncertainty remains open");
+
+        assert!(filtered["routed"].as_array().unwrap().is_empty());
+        assert_eq!(
+            filtered["needs_human_decision"][0]["id"],
+            "possible-auth-bypass"
+        );
+        assert_eq!(filtered["clean"], false);
+    }
+
+    #[test]
+    fn failed_or_still_uncertain_material_verification_remains_open() {
+        let state = json!({ "risk_plan": { "overall_risk": "high" } });
+        let finding = json!({
+            "id": "possible-auth-bypass",
+            "lens": "security-safety",
+            "severity": "MAJOR",
+            "causality": "uncertain",
+            "causality_evidence": "The changed authorization path is plausible but attribution is unresolved.",
+            "security_impact": "major",
+            "safety_impact": "none",
+            "disposition": "ticket"
+        });
+        let verifier_results = [
+            json!({
+                "status": "failed",
+                "rationale": "The verifier could not inspect the authorization path."
+            }),
+            json!({
+                "status": "verified",
+                "verdicts": [{
+                    "finding_id": "possible-auth-bypass",
+                    "lens": "security-safety",
+                    "verdict": "confirmed",
+                    "severity": "MAJOR",
+                    "causality": "uncertain",
+                    "causality_evidence": "The failure is real but attribution remains unresolved.",
+                    "security_impact": "major",
+                    "safety_impact": "none",
+                    "rationale": "The material authorization failure is confirmed, but not its origin."
+                }]
+            }),
+        ];
+
+        for verifier_result in verifier_results {
+            let mut filtered = json!({
+                "actionable": [],
+                "needs_human_decision": [],
+                "routed": [finding.clone()],
+                "out_of_scope": [],
+                "malformed": [],
+                "follow_up_tickets_required": [finding.clone()],
+                "clean": true
+            });
+
+            apply_verifier_result(
+                &mut filtered,
+                std::slice::from_ref(&finding),
+                &verifier_result,
+                &state,
+            )
+            .expect("material uncertainty remains open");
+
+            assert!(filtered["routed"].as_array().unwrap().is_empty());
+            assert_eq!(
+                filtered["needs_human_decision"][0]["id"],
+                "possible-auth-bypass"
+            );
+            assert!(filtered["follow_up_tickets_required"]
+                .as_array()
+                .unwrap()
+                .is_empty());
+            assert_eq!(filtered["clean"], false);
+        }
     }
 
     #[test]

@@ -292,8 +292,10 @@ Model roles do not imply one model call per phase:
 - `post_filter` is the deterministic `final_review.filter_findings` path by
   default, so its model label is normally not invoked.
 - `verifier` is one conditional batched caller subagent when post-filtering
-  leaves actionable or needs-human-decision candidates. A missing verifier
-  result blocks the transition. A failed verifier retains every candidate.
+  leaves actionable or needs-human-decision candidates, or when a new
+  `MAJOR`/`CRITICAL` security or human-safety finding has material impact but
+  uncertain causality. A missing verifier result blocks the transition. A
+  failed verifier retains every candidate.
 
 When `final_review.advance` returns `transition_status: verifier_required`, run
 the returned assignment with its exact `subagent_key` and `model_role`, close
@@ -304,8 +306,9 @@ a non-empty rationale. The server records reviewer and verifier severities and
 routes with the verifier's final severity and causality/impact classification.
 Rejected candidates do not become unresolved blockers; the iteration may count
 as clean when no other blocking, malformed, or needs-human finding remains.
-Uncertain blocking candidates stay open for human decision, while a verified
-nonblocking downgrade requires the applicable backlog/report disposition.
+Uncertain blocking candidates and materially uncertain security or human-safety
+candidates stay open for human decision, while a verified nonblocking downgrade
+requires the applicable backlog/report disposition.
 
 The coordinator accepts at most 23 lens results, 64 findings per lens, 256
 findings per iteration, and 256 verifier verdicts. Runtime checks mirror the
