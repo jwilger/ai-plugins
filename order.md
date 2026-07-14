@@ -9,7 +9,6 @@
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
 20260714-ucd7-clean-up-auto-created-gpt-5-6-benchmark-workspaces
-20260713-hiks-require-strict-types-for-gpt-5-6-measurement-gate-metadata
 20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
@@ -35,6 +34,7 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260713-hiks-require-strict-types-for-gpt-5-6-measurement-gate-metadata
 20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
 20260713-qa3n-make-the-eval-launch-race-regression-prove-pre-publication-signal-handling
 20260713-g56q-distinguish-eval-setup-interruption-diagnostics-from-promptfoo-interruption
