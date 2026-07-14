@@ -17,6 +17,8 @@ Lightweight behavior review of the GPT-5.6 measurement-contract extraction found
 
 ## Acceptance criteria
 
+- [ ] scripts/evals/check-thresholds.mjs exits with status 2 when arguments follow the required results JSON path.
+
 ## Subtasks
 
 ## Notes / Log
