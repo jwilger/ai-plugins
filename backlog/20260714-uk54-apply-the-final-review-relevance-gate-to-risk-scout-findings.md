@@ -26,3 +26,5 @@ Final-review correctness finding from 20260713-rygd. This is not covered by 2026
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Consolidation check found no duplicate. Priority evidence: high recurring workflow value, medium impact, medium-high likelihood for shallow LLM observations, and moderate localized implementation cost.
