@@ -19,7 +19,12 @@ arguments, model routing, verifier details, or packaging fallback.
 ## Scope
 
 Resolve the reviewed diff from the user's requested scope. Always check current
-branch and worktree status first.
+branch and worktree status first. Use the full immutable `baseline_commit`
+captured before the ticket's first commit or push. Do not resolve a movable base
+again when final review starts: incremental pushes may already have advanced it
+past part or all of the ticket. If the ticket-start baseline was not recorded
+and the named base may have moved, stop rather than claiming a complete final
+review.
 
 | User asks for                  | Review scope                                            |
 | ------------------------------ | ------------------------------------------------------- |
@@ -28,17 +33,18 @@ branch and worktree status first.
 | Since a branch, tag, or commit | that ref to the complete tracked worktree               |
 | Existing PR/MR                 | PR/MR base to the checked-out complete tracked worktree |
 
-For base scope, run this argv vector from the project root to inspect content,
-replacing `<base>` with the resolved ref; for uncommitted scope, use `HEAD`:
+Run this argv vector from the project root to inspect content, replacing
+`<baseline-commit>` with that full ticket-start OID for both base and
+uncommitted scope:
 
 ```text
-["git","diff","--find-renames","--find-copies","--end-of-options","<base>","--"]
+["git","diff","--find-renames","--find-copies","--end-of-options","<baseline-commit>","--"]
 ```
 
 Discover exact tracked paths from the same one-revision surface with:
 
 ```text
-["git","diff","--name-only","-z","--find-renames","--find-copies","--end-of-options","<base>","--"]
+["git","diff","--name-only","-z","--find-renames","--find-copies","--end-of-options","<baseline-commit>","--"]
 ```
 
 Parse its NUL-delimited records as exact paths; never derive names from the
@@ -57,17 +63,20 @@ as the development-discipline plugin directory containing this skill, then
 derive `diff_hash` only with the bundled helper:
 
 ```text
-["bash","<plugin-root>/scripts/final-review-scope-hash.sh","--project-root","<project-root>","--scope","base","--base","<base>","--changed-files-from","<nul-inventory-file>"]
+["bash","<plugin-root>/scripts/final-review-scope-hash.sh","--project-root","<project-root>","--scope","base","--base","<base>","--baseline-commit","<baseline-commit>","--changed-files-from","<nul-inventory-file>"]
 ```
 
 Write every exact changed path to a temporary NUL-delimited inventory file, in
 any order, and pass only that file path through `--changed-files-from`; never
 expand the inventory into helper argv. Delete the temporary file after the hash
-call. For uncommitted scope, use `--scope uncommitted` and omit `--base`. The
-helper deterministically sorts and chunks the inventory, then binds the resolved
-base, base-to-index diff, index-to-worktree diff, and current content of the
-declared paths, including untracked files. Use its exact stdout as `diff_hash`;
-stop if it fails. Re-resolve the inventory, rewrite the NUL-delimited file, and
+call. For uncommitted scope, use `--scope uncommitted`, omit `--base`, and keep
+the same ticket-start `--baseline-commit`. The helper rejects symbolic or
+abbreviated baselines, then deterministically sorts and chunks the inventory and
+binds the exact baseline, base-to-index diff, index-to-worktree diff, and current
+content of the declared paths, including untracked files. Pass that same
+`baseline_commit` to `final_review.assess_risk` and the risk-planned
+`final_review.plan`. Use the helper's exact stdout as `diff_hash`; stop if it
+fails. Re-resolve the inventory, rewrite the NUL-delimited file, and
 rerun the helper immediately before every `final_review.advance` call. Do not
 substitute a triple-dot, index-only, bare worktree, caller-invented hash, or
 path-per-argument invocation; those can omit scope or fail at valid large-scope
@@ -167,9 +176,13 @@ repository's applicable reporting policy.
 
 ## Loop
 
-1. Resolve the baseline/diff and call `final_review.plan`. Keep that stdio MCP
-   process alive for the entire cycle; later calls carry state that the server
-   checks against its authoritative session copy.
+1. Resolve the pinned baseline/diff, run the shared fast-test evidence once,
+   and call `final_review.assess_risk` with the full `baseline_commit`. Launch
+   and close its one scout, append the required caller attestation, then submit
+   that assessment to `final_review.plan` with the identical baseline, scope,
+   inventory, hash, and evidence. Keep that stdio MCP process alive for the
+   entire cycle; later calls carry state that the server checks against its
+   authoritative session copy.
 2. For every assignment, start a fresh subagent with the complete MCP-generated
    assignment prompt, including its baseline, diff, relevant files, user
    request, acceptance criteria, explicit concerns, and prior defenses. Exclude
