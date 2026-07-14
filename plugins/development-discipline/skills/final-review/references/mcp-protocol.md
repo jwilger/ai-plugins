@@ -5,13 +5,17 @@ final-review path.
 
 ## Required Scope
 
-`final_review.plan` requires a complete reviewed `changed_files` inventory and a
-non-placeholder `diff_hash`. Before the ticket's first commit or push, resolve
-and retain the full `baseline_commit` OID. Incremental pushes can move the named
-base past the ticket, so final review must not re-resolve that ref. Supply the
-same full OID to the scope-hash helper, `final_review.assess_risk`, and the
-risk-planned `final_review.plan`; missing, symbolic, abbreviated, or changed
-baseline values fail closed. Compute both `diff_hash` and every
+Run `final_review.assess_risk` before `final_review.plan`; the plan boundary
+requires that scout's bound `risk_assessment`, the complete reviewed
+`changed_files` inventory, a non-placeholder `diff_hash`, the full
+`baseline_commit`, and the same diff-bound `shared_test_evidence`. A caller
+cannot fall back to an all-lens legacy plan by omitting the scout. Before the
+ticket's first commit or push, resolve and retain the full baseline OID.
+Incremental pushes can move the named base past the ticket, so final review must
+not re-resolve that ref. Supply the same full OID to the scope-hash helper,
+`final_review.assess_risk`, and the risk-planned `final_review.plan`; missing,
+symbolic, abbreviated, or changed baseline values fail closed. Compute both
+`diff_hash` and every
 `current_diff_hash` with the plugin's
 `scripts/final-review-scope-hash.sh` helper. Write the complete current
 changed-file inventory to a temporary NUL-delimited file and pass its path with
@@ -49,15 +53,20 @@ evicted, stale, or mutated session state fails closed; advancing a completed
 session also fails. The coordinator retains at most 32 active sessions with LRU
 eviction.
 When an advance returns `verifier_required`, the server retains the pending
-assignment ID and exact pre-verifier arguments. Until the caller resubmits those
-same arguments plus the matching `verifier_result`, missing verification or
-changed lens/scope/decision arguments fail closed. Pending verifier state is
-cleared only by an accepted advanced transition or session eviction.
+assignment ID and exact core pre-verifier arguments. Until the caller resubmits
+the same lens, scope, and caller-decision arguments plus the matching
+`verifier_result`, missing verification or changed core arguments fail closed.
+The resubmission may also add `unrelated_follow_ups` or
+`security_escalations` newly required by the verifier's final classification;
+those disposition records are deliberately outside the frozen core. Pending
+verifier state is cleared only by an accepted advanced transition or session
+eviction.
 Call `final_review.filter_findings` before the initial advance, prepare any
 applicable `caller_decisions` from its retained findings, and include them on
-that first advance. Once `verifier_required` is returned, resubmission may add
-only `verifier_result`; introducing a defense or accepted-risk decision at that
-point changes the frozen arguments and fails closed.
+that first advance. Once `verifier_required` is returned, introducing a defense
+or accepted-risk decision changes the frozen core arguments and fails closed;
+only the verifier result and conditionally required disposition documentation
+may be new.
 Reviewer prompts include a bounded changed-file navigation hint plus an
 authoritative `scope_reference` containing project root, scope, base, and diff
 hash. Its argv-based scope resolution uses a one-revision base-to-worktree diff
@@ -106,24 +115,83 @@ duplicate, unknown-lens, or rationales without a non-whitespace character fail
 closed. Imported defenses are bound into the initial review contract and
 included in the first assignment for their matching lens.
 
-## Unrelated Findings And Security Escalation
+## Scope-Growth And Review-Budget Gates
 
-Pass a one-time `unrelated_finding_policy` to `final_review.plan` when the
-user chooses routing by lens or review severity. The MCP resolves each
-out-of-scope finding with this precedence: `by_lens`, then `by_severity`, then
-`default`. Valid dispositions are `address-now`, `follow-up-ticket`, and
-`report`. An `address-now` observation becomes a human decision; a
-`follow-up-ticket` observation requires a matching `unrelated_follow_ups`
-entry on `final_review.advance` with its finding ID, lens, and nonblank ticket
-reference. `report` stays non-blocking and is retained in bounded review state.
+The broad risk scout evaluates whether the current ticket has grown into either
+of these scope triggers:
 
-Review severity is exactly one of `CRITICAL`, `MAJOR`, `MINOR`, or `TRIVIAL` and is separate from
-`security_impact` (`none`, `minor`, `moderate`, `major`, `critical`). Any
-suspected PII exposure or major/critical security observation requires a
-matching `security_escalations` entry with a nonblank high-priority ticket
-reference before advance. An out-of-scope observation cannot claim an
-unverified current-ticket fix; if it truly blocks the ticket, classify it as
-relevant and address it in the ticket instead.
+- `new-subsystem`
+- `unusually-broad-diff`
+
+When either applies, the assessment sets `split_required: true`, supplies a
+nonblank `split_rationale`, and returns 2-16 `split_candidates`. Candidate IDs
+must be unique bounded identifiers. Every candidate includes a nonblank title,
+one or more normalized `scope_paths`, one or more acceptance criteria, and a
+nonblank `independently_shippable_reason`; their combined scope paths must cover
+the current `changed_files` inventory. The coordinator validates this structure
+before compiling review lenses and persists a contract-bound
+`scope_split_hold`. Initial planning returns `ticket_split_required`; a delta
+transition returns `advance_kind: scope_split_hold` after preserving the new
+scope, evidence, and findings. Both return no assignments, remain incomplete,
+and reject every later advance. Because the server retains the held session, a
+caller cannot retry the same session with `split_required: false`. The scope
+split hold takes precedence over a review-budget checkpoint that becomes due on
+the same delta transition.
+
+Every risk-planned session carries a contract-bound, server-timed review budget.
+For a medium-risk session, the checkpoint is exactly 75 minutes after planning
+(inside the policy's 60-90 minute range). It also activates if a delta scout
+raises a lower-risk session to medium; the original planning time remains the
+clock origin. Sessions that start high or exceptional use their own bounded
+review plan rather than this medium-risk checkpoint. Elapsed time saturates at zero if the wall clock
+moves backward, and callers cannot supply or mutate the start time.
+
+When a lens or delta transition reaches the checkpoint, the coordinator first
+applies its findings and replacement-diff evidence, then returns authoritative
+state with `advance_kind: review_budget_checkpoint`,
+`checkpoint_pending: true`, no next assignments, and the allowed decisions.
+This ordering prevents a later decision from dropping already-submitted
+findings. The next `final_review.advance` call must keep the current diff hash,
+send empty `lens_results`, and add one `review_budget_decision`:
+
+```json
+{
+  "decision": "ship",
+  "rationale": "Acceptance criteria and review gates are satisfied."
+}
+```
+
+`decision` is exactly `ship`, `split`, or `escalate`. `split` additionally
+requires 2-16 distinct nonblank `ticket_references`; `escalate` requires a
+nonblank `escalation_reference`. The coordinator rejects premature, duplicate,
+malformed, or diff-changing decision calls. `ship` is rejected while any known
+blocking finding remains and never substitutes for acceptance criteria or CI.
+A valid `ship` decision is terminal for final review: it clears remaining
+nonblocking lens work, returns `complete: true`, and schedules no reviewers.
+The calling workflow must still satisfy the ticket's acceptance criteria and
+confirm the latest pushed CI build is running or green before release or new
+work. `split` and `escalate` persist a contract-bound terminal hold, preserve
+every completion blocker, schedule no reviewers, and reject any later advance
+for that session.
+
+## Finding Disposition And Escalation
+
+Risk-planned review blocks only caused or worsened `CRITICAL`/`MAJOR` findings
+with a concrete plausible major/critical security or human-safety impact in the
+intended deployment and an in-scope changed remediation path. Incidental or
+pre-existing findings at those severities, caused non-security/non-safety
+findings, and every `MINOR` finding require a matching
+`unrelated_follow_ups` backlog reference before advance. `TRIVIAL` findings are
+report-only. Acceptance criteria remain an independent completion gate.
+
+Review severity is exactly one of `CRITICAL`, `MAJOR`, `MINOR`, or `TRIVIAL`
+and is separate from both `security_impact` and `safety_impact` (`none`,
+`minor`, `moderate`, `major`, `critical`). Prioritize deferred work against the
+whole backlog using value, risk, likelihood, and opportunity cost. Already
+tracked findings on an unchanged diff are neither re-verified nor re-ticketed
+unless new evidence materially raises severity. Any suspected PII exposure or
+pre-existing/incidental major/critical security or safety observation requires
+an appropriately high-priority documented ticket; never silently discard it.
 
 ## Model Routing
 
@@ -168,11 +236,14 @@ tables override them one phase at a time for that harness. This lets a shared
 repository use concrete Codex model IDs without routing Claude reviewers to
 unsupported models.
 
-Projects can also add `[final_review.dispositions.<SEVERITY>]` tables for
-`CRITICAL`, `MAJOR`, `MINOR`, and `TRIVIAL`. Each table must map every active
-review lens to exactly one of `block`, `ticket`, `document`, or `ignore`.
-Incomplete, unknown, or invalid matrix entries fail closed; without a matrix,
-all severity-and-lens combinations default to `block`.
+Legacy non-risk-planned sessions can add
+`[final_review.dispositions.<SEVERITY>]` tables for `CRITICAL`, `MAJOR`,
+`MINOR`, and `TRIVIAL`. Each table must map every configured review lens to
+exactly one of `block`, `ticket`, `document`, or `ignore`; incomplete, unknown,
+or invalid entries fail closed. Risk-planned sessions retain that configuration
+for contract compatibility but use the mandatory deterministic disposition
+rule: only caused/worsened material security or human-safety findings block,
+other nontrivial findings require backlog evidence, and TRIVIAL is report-only.
 
 Resolved roles, their sources, required clean count, lens objectives, and the
 caller-attestation policy are bound into `review_contract_id`. Mutating them or
@@ -210,9 +281,11 @@ the subagent after collecting its result, then resubmit the same lens results
 with `verifier_result`. Verified results require exactly one `confirmed`,
 `rejected`, or `uncertain` verdict per candidate, a final review severity, and
 a non-empty rationale. The server records reviewer and verifier severities and
-routes with the verifier's final severity. Rejected candidates do not
-become unresolved blockers, but the iteration remains non-clean because a lens
-raised a finding. Uncertain candidates stay open for human decision.
+routes with the verifier's final severity and causality/impact classification.
+Rejected candidates do not become unresolved blockers; the iteration may count
+as clean when no other blocking, malformed, or needs-human finding remains.
+Uncertain blocking candidates stay open for human decision, while a verified
+nonblocking downgrade requires the applicable backlog/report disposition.
 
 The coordinator accepts at most 23 lens results, 64 findings per lens, 256
 findings per iteration, and 256 verifier verdicts. Runtime checks mirror the

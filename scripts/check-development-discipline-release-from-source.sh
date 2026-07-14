@@ -71,6 +71,9 @@ fi
 
 jq -s -e '
   def response($id): map(select(.id == $id)) | first;
+  def final_targeted_response:
+    map(select((.id | type) == "string" and (.id | startswith("main-targeted-"))))
+    | last;
   (response(3).result.content[0].text | fromjson
     | .model_roles.pre_filter == "explicit-pre"
       and .model_roles.lens_review == "config-review"
@@ -88,9 +91,9 @@ jq -s -e '
     | .transition_status == "advanced"
       and (.filtered.verifier_rejected | map(.id)) == ["launcher-real"]
       and .state.clean_streak == 1)
-  and (response(9).result.content[0].text | fromjson
+  and (final_targeted_response.result.content[0].text | fromjson
     | .complete == true
-      and .state.clean_streak == 3
+      and (.completion_blockers | length) == 0
       and (.next_assignments | length) == 0)
   and (response(11).error.code == -32602
     and response(11).error.message == "review_session_complete=true")
