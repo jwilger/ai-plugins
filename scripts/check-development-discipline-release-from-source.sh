@@ -81,8 +81,8 @@ jq -s -e '
   and (response(7).result.content[0].text | fromjson
     | .transition_status == "advanced"
       and (.filtered.verifier_rejected | map(.id)) == ["launcher-real"]
-      and .state.clean_streak == 0)
-  and (response(10).result.content[0].text | fromjson
+      and .state.clean_streak == 1)
+  and (response(9).result.content[0].text | fromjson
     | .complete == true
       and .state.clean_streak == 3
       and (.next_assignments | length) == 0)
