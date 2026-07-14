@@ -53,3 +53,4 @@
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
+20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
