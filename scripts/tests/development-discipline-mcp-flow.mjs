@@ -20,6 +20,11 @@ const ticketBaselineCommit = execFileSync(
   ["-C", projectRoot, "rev-parse", "--verify", "HEAD^{commit}"],
   { encoding: "utf8" },
 ).trim();
+const routingBaselineCommit = execFileSync(
+  "git",
+  ["-C", routingRoot, "rev-parse", "--verify", "HEAD^{commit}"],
+  { encoding: "utf8" },
+).trim();
 
 const child = spawn(command, args, {
   env: {
@@ -53,6 +58,75 @@ async function request(payload, emit = true) {
   return JSON.parse(line);
 }
 
+function sharedTestEvidence(id, diffHash, summary) {
+  return {
+    id,
+    diff_hash: diffHash,
+    status: "passed",
+    summary,
+    commands: ["fixture:packaged-mcp-flow"],
+    artifact_reference: `fixture://packaged-mcp-flow/${diffHash}`,
+  };
+}
+
+async function scoutAssessment(
+  requestId,
+  riskArguments,
+  selectedLens,
+  { evidence, plausibleFailure, materialImpact },
+) {
+  const response = await request(
+    {
+      jsonrpc: "2.0",
+      id: requestId,
+      method: "tools/call",
+      params: {
+        name: "final_review.assess_risk",
+        arguments: riskArguments,
+      },
+    },
+    false,
+  );
+  if (!response.result) {
+    throw new Error(
+      `risk scout setup failed: ${JSON.stringify(response.error ?? response)}`,
+    );
+  }
+  const scout = JSON.parse(response.result.content[0].text).assignments[0];
+  if (!scout.review_dimensions.includes(selectedLens)) {
+    throw new Error(`risk scout did not expose requested lens ${selectedLens}`);
+  }
+
+  return {
+    assignment_id: scout.assignment_id,
+    subagent_key: scout.subagent_key,
+    shared_test_evidence_id: scout.shared_test_evidence.id,
+    overall_risk: "medium",
+    dimensions: scout.review_dimensions.map((lens) => {
+      const selected = lens === selectedLens;
+      return {
+        lens,
+        risk: selected ? "medium" : "none",
+        evidence: selected
+          ? evidence
+          : "No concrete failure path for this dimension in the fixture change.",
+        plausible_failure: selected ? plausibleFailure : "none",
+        material_impact: selected ? materialImpact : "none",
+        uncertain: false,
+      };
+    }),
+    exceptional_triggers: [],
+    split_required: false,
+    plan_assumptions: [],
+    findings: [],
+    caller_attestation: {
+      model_role: scout.model_role,
+      fresh_context: true,
+      closed_after_result: true,
+    },
+  };
+}
+
 await request({
   jsonrpc: "2.0",
   id: 1,
@@ -64,6 +138,34 @@ await request({
   },
 });
 await request({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+const mainRiskArguments = {
+  session_id: "bats-review",
+  base: "HEAD",
+  baseline_commit: ticketBaselineCommit,
+  scope: "uncommitted",
+  project_root: projectRoot,
+  changed_files: ["src/new.rs"],
+  diff_hash: "same",
+  shared_test_evidence: sharedTestEvidence(
+    "tests-bats-review",
+    "same",
+    "The packaged fixture's fast state-machine checks passed for this diff.",
+  ),
+  pre_filter_model_role: "explicit-pre",
+};
+const mainRiskAssessment = await scoutAssessment(
+  "3-scout",
+  mainRiskArguments,
+  "correctness-behavior",
+  {
+    evidence:
+      "The changed coordinator transition directly controls verifier and completion state.",
+    plausibleFailure:
+      "A rejected verifier finding could leave the review unable to advance or complete.",
+    materialImpact:
+      "The final-review workflow would deadlock and block delivery.",
+  },
+);
 const planResponse = await request({
   jsonrpc: "2.0",
   id: 3,
@@ -71,18 +173,16 @@ const planResponse = await request({
   params: {
     name: "final_review.plan",
     arguments: {
-      session_id: "bats-review",
-      base: "HEAD",
-      scope: "uncommitted",
-      project_root: projectRoot,
-      changed_files: ["src/new.rs"],
-      diff_hash: "same",
-      pre_filter_model_role: "explicit-pre",
+      ...mainRiskArguments,
+      risk_assessment: mainRiskAssessment,
     },
   },
 });
 const plan = JSON.parse(planResponse.result.content[0].text);
 const state = plan.state;
+if (state.lenses.length !== 1 || state.lenses[0] !== "correctness-behavior") {
+  throw new Error("main fixture did not produce a targeted correctness plan");
+}
 const forgedState = structuredClone(state);
 forgedState.iteration_index = 3;
 forgedState.clean_streak = 2;
@@ -130,7 +230,7 @@ findingLensResults[0] = {
       causality: "caused",
       causality_evidence: "The fixture attributes the candidate to src/new.rs.",
       likelihood: "possible",
-      security_impact: "none",
+      security_impact: "major",
       safety_impact: "none",
       path: "src/new.rs",
       message: "changed-file issue",
@@ -191,6 +291,13 @@ const verifiedResponse = await request({
       state,
       lens_results: findingLensResults,
       current_diff_hash: "same",
+      unrelated_follow_ups: [
+        {
+          finding_id: "launcher-stale",
+          lens: "correctness-behavior",
+          ticket_reference: "BACKLOG-LAUNCHER-STALE",
+        },
+      ],
       verifier_result: {
         subagent_key: verifierAssignment.subagent_key,
         assignment_id: verifierAssignment.assignment_id,
@@ -220,11 +327,17 @@ const verifiedResponse = await request({
     },
   },
 });
-let currentState = JSON.parse(verifiedResponse.result.content[0].text).state;
-for (let index = 0; index < 2; index += 1) {
+let currentTransition = JSON.parse(verifiedResponse.result.content[0].text);
+let currentState = currentTransition.state;
+let targetedPass = 0;
+while (!currentTransition.complete) {
+  targetedPass += 1;
+  if (targetedPass > 16) {
+    throw new Error("targeted review did not converge after assigned passes");
+  }
   const advancedResponse = await request({
     jsonrpc: "2.0",
-    id: 8 + index,
+    id: `main-targeted-${targetedPass}`,
     method: "tools/call",
     params: {
       name: "final_review.advance",
@@ -235,7 +348,8 @@ for (let index = 0; index < 2; index += 1) {
       },
     },
   });
-  currentState = JSON.parse(advancedResponse.result.content[0].text).state;
+  currentTransition = JSON.parse(advancedResponse.result.content[0].text);
+  currentState = currentTransition.state;
 }
 await request({
   jsonrpc: "2.0",
@@ -250,24 +364,83 @@ await request({
     },
   },
 });
-await request({
+const routingRiskArguments = {
+  session_id: "bats-codex-routing",
+  base: routingBaselineCommit,
+  baseline_commit: routingBaselineCommit,
+  scope: "base",
+  project_root: routingRoot,
+  harness: "codex",
+  changed_files: ["plugins/development-discipline/rust/src/main.rs"],
+  diff_hash: "routing",
+  shared_test_evidence: sharedTestEvidence(
+    "tests-bats-codex-routing",
+    "routing",
+    "The packaged fixture's fast model-routing checks passed for this diff.",
+  ),
+};
+const routingRiskAssessment = await scoutAssessment(
+  "12-scout",
+  routingRiskArguments,
+  "correctness-behavior",
+  {
+    evidence:
+      "Harness-aware role resolution determines which model performs each review phase.",
+    plausibleFailure:
+      "The Codex harness could resolve an incorrect model role for a review phase.",
+    materialImpact:
+      "Review work would run with the wrong configured capability profile.",
+  },
+);
+const routingPlanResponse = await request({
   jsonrpc: "2.0",
   id: 12,
   method: "tools/call",
   params: {
     name: "final_review.plan",
     arguments: {
-      session_id: "bats-codex-routing",
-      base: "origin/main",
-      scope: "base",
-      project_root: routingRoot,
-      harness: "codex",
-      changed_files: ["plugins/development-discipline/rust/src/main.rs"],
-      diff_hash: "routing",
+      ...routingRiskArguments,
+      risk_assessment: routingRiskAssessment,
     },
   },
 });
+const routingPlan = JSON.parse(routingPlanResponse.result.content[0].text);
+if (
+  routingPlan.state.lenses.length !== 1 ||
+  routingPlan.state.lenses[0] !== "correctness-behavior"
+) {
+  throw new Error(
+    "routing fixture did not produce a targeted correctness plan",
+  );
+}
 
+const sensitiveRiskArguments = {
+  session_id: "bats-sensitive-persistence",
+  base: "HEAD",
+  baseline_commit: ticketBaselineCommit,
+  scope: "uncommitted",
+  project_root: projectRoot,
+  changed_files: ["src/new.rs"],
+  diff_hash: "sensitive",
+  shared_test_evidence: sharedTestEvidence(
+    "tests-bats-sensitive-persistence",
+    "sensitive",
+    "The packaged fixture's fast sensitive-report checks passed for this diff.",
+  ),
+};
+const sensitiveRiskAssessment = await scoutAssessment(
+  "13-scout",
+  sensitiveRiskArguments,
+  "security-safety",
+  {
+    evidence:
+      "The policy path persists and reports findings that can contain protected data.",
+    plausibleFailure:
+      "Disposition could drop required details or route sensitive content incorrectly.",
+    materialImpact:
+      "The local report would become incomplete or apply the wrong security disposition.",
+  },
+);
 const sensitivePlanResponse = await request(
   {
     jsonrpc: "2.0",
@@ -276,12 +449,8 @@ const sensitivePlanResponse = await request(
     params: {
       name: "final_review.plan",
       arguments: {
-        session_id: "bats-sensitive-persistence",
-        base: "HEAD",
-        scope: "uncommitted",
-        project_root: projectRoot,
-        changed_files: ["src/new.rs"],
-        diff_hash: "sensitive",
+        ...sensitiveRiskArguments,
+        risk_assessment: sensitiveRiskAssessment,
         unrelated_finding_policy: { default: "report" },
       },
     },
@@ -291,6 +460,12 @@ const sensitivePlanResponse = await request(
 const sensitiveState = JSON.parse(
   sensitivePlanResponse.result.content[0].text,
 ).state;
+if (
+  sensitiveState.lenses.length !== 1 ||
+  sensitiveState.lenses[0] !== "security-safety"
+) {
+  throw new Error("policy fixture did not produce a targeted security plan");
+}
 const sensitiveResults = cleanLensResults(sensitiveState);
 const sensitiveSecurity = sensitiveResults.find(
   (result) => result.lens === "security-safety",
@@ -330,7 +505,7 @@ const sensitiveFilterResponse = await request(
 const sensitiveFilter = JSON.parse(
   sensitiveFilterResponse.result.content[0].text,
 );
-const securityFindingId = sensitiveFilter.security_escalations_required[0].id;
+const securityFindingId = sensitiveFilter.follow_up_tickets_required[0].id;
 const sensitiveAdvanceResponse = await request(
   {
     jsonrpc: "2.0",
@@ -342,12 +517,11 @@ const sensitiveAdvanceResponse = await request(
         state: sensitiveState,
         lens_results: sensitiveResults,
         current_diff_hash: "sensitive",
-        security_escalations: [
+        unrelated_follow_ups: [
           {
             finding_id: securityFindingId,
             lens: "security-safety",
-            disposition: "high-priority-ticket",
-            reference: "alice@example.test",
+            ticket_reference: "BACKLOG-SENSITIVE-FLOW",
           },
         ],
       },
@@ -376,8 +550,9 @@ const retainedFinding = sensitiveReport.findings[0];
 if (
   retainedFinding.message !== "alice@example.test exploit payload" ||
   retainedFinding.scenario !== "private data" ||
-  retainedFinding.unrelated_disposition !== "report" ||
-  retainedFinding.security_escalation?.reference !== "alice@example.test"
+  retainedFinding.unrelated_disposition !== "follow-up-ticket" ||
+  sensitiveAdvanced.state.deferred_findings[0]?.ticket_reference !==
+    "BACKLOG-SENSITIVE-FLOW"
 ) {
   throw new Error(
     "complete local final-review report details were not returned",

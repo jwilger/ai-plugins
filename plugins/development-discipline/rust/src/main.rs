@@ -13,6 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
@@ -57,6 +58,14 @@ const MAX_SHARED_TEST_ARTIFACT_BYTES: usize = 2 * 1024;
 const MAX_BROAD_TEST_RERUN_REASON_BYTES: usize = 2 * 1024;
 const MAX_DELTA_EVIDENCE_BYTES: usize = 128 * 1024;
 const MAX_DELTA_INLINE_PATCH_BYTES: usize = 96 * 1024;
+const MEDIUM_RISK_REVIEW_BUDGET_MINUTES: u64 = 75;
+const MAX_REVIEW_BUDGET_RATIONALE_BYTES: usize = 2 * 1024;
+const MAX_REVIEW_BUDGET_REFERENCES: usize = 16;
+const MAX_SPLIT_CANDIDATES: usize = 16;
+const MAX_SPLIT_CANDIDATE_TITLE_BYTES: usize = 256;
+const MAX_SPLIT_CANDIDATE_REASON_BYTES: usize = 2 * 1024;
+const MAX_SPLIT_CANDIDATE_CRITERIA: usize = 32;
+const MAX_SPLIT_CANDIDATE_PATHS: usize = 256;
 static OPAQUE_FINGERPRINT_HASHER: OnceLock<RandomState> = OnceLock::new();
 static SNAPSHOT_INDEX_COUNTER: AtomicU64 = AtomicU64::new(0);
 // This inventory is repeated once per lens assignment, while the full list is
@@ -156,12 +165,24 @@ fn write_json_rpc_response(output: &mut impl Write, response: Value) -> io::Resu
     output.flush()
 }
 
-#[derive(Default)]
 struct ReviewCoordinator {
     sessions: HashMap<String, Value>,
     pending_verifiers: HashMap<String, PendingVerifier>,
     pending_delta_risks: HashMap<String, PendingVerifier>,
     session_lru: VecDeque<String>,
+    now_epoch_seconds: Box<dyn Fn() -> u64 + Send + Sync>,
+}
+
+impl Default for ReviewCoordinator {
+    fn default() -> Self {
+        Self {
+            sessions: HashMap::new(),
+            pending_verifiers: HashMap::new(),
+            pending_delta_risks: HashMap::new(),
+            session_lru: VecDeque::new(),
+            now_epoch_seconds: Box::new(current_epoch_seconds),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -221,6 +242,14 @@ fn handle_json_rpc(request: &Value) -> Result<Value, String> {
 }
 
 impl ReviewCoordinator {
+    #[cfg(test)]
+    fn with_clock(clock: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
+        Self {
+            now_epoch_seconds: Box::new(clock),
+            ..Self::default()
+        }
+    }
+
     fn handle_json_rpc(&mut self, request: &Value) -> Result<Value, String> {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let Some(method) = request.get("method").and_then(Value::as_str) else {
@@ -245,7 +274,8 @@ impl ReviewCoordinator {
                         return Ok(error_response(id, -32602, &error));
                     }
                 }
-                match call_tool(name, &arguments) {
+                let now_epoch_seconds = (self.now_epoch_seconds)();
+                match call_tool_at(name, &arguments, now_epoch_seconds) {
                     Ok(result) => {
                         let response =
                             json!({ "jsonrpc": "2.0", "id": id.clone(), "result": result });
@@ -306,8 +336,18 @@ impl ReviewCoordinator {
         if !matches_authoritative {
             return Err("review_state_out_of_sync=true".to_string());
         }
+        if tool_name == "final_review.advance" && scope_split_hold_active(state) {
+            return Err("review_scope_split_hold_active=true".to_string());
+        }
         if tool_name == "final_review.advance" && review_state_complete(state) {
             return Err("review_session_complete=true".to_string());
+        }
+        if tool_name == "final_review.advance" && review_budget_hold_active(state) {
+            let decision = state
+                .pointer("/risk_plan/review_budget/decision/decision")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            return Err(format!("review_budget_hold_active decision={decision}"));
         }
         if tool_name == "final_review.advance" {
             if let Some(pending) = self.pending_verifiers.get(session_id) {
@@ -367,11 +407,15 @@ impl ReviewCoordinator {
             .and_then(Value::as_str)
             .ok_or_else(|| "internal tool result session missing".to_string())?
             .to_string();
+        if tool_name == "final_review.plan" && self.sessions.contains_key(&session_id) {
+            return Err("review_session_exists=true".to_string());
+        }
         if tool_name == "final_review.plan"
             && state
                 .get("unrelated_finding_policy_confirmation_required")
                 .and_then(Value::as_bool)
                 == Some(true)
+            && !scope_split_hold_active(&state)
         {
             return Ok(());
         }
@@ -420,9 +464,6 @@ impl ReviewCoordinator {
             && payload.get("transition_status").and_then(Value::as_str) != Some("advanced")
         {
             return Ok(());
-        }
-        if tool_name == "final_review.plan" && self.sessions.contains_key(&session_id) {
-            return Err("review_session_exists=true".to_string());
         }
         self.sessions.insert(session_id.clone(), state);
         self.pending_verifiers.remove(&session_id);
@@ -609,11 +650,13 @@ fn tools() -> Value {
                         }
                     }
                 },
-                "allOf": [{
-                    "if": { "required": ["risk_assessment"] },
-                    "then": { "required": ["baseline_commit"] }
-                }],
-                "required": ["changed_files", "diff_hash"]
+                "required": [
+                    "baseline_commit",
+                    "changed_files",
+                    "diff_hash",
+                    "risk_assessment",
+                    "shared_test_evidence"
+                ]
             }
         },
         {
@@ -712,6 +755,7 @@ fn tools() -> Value {
                             "additionalProperties": false
                         }
                     },
+                    "review_budget_decision": review_budget_decision_schema(),
                     "verifier_result": verifier_result_schema()
                 },
                 "required": ["state", "lens_results", "current_diff_hash"]
@@ -790,6 +834,42 @@ fn baseline_commit_schema() -> Value {
     })
 }
 
+fn review_budget_decision_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "decision": { "type": "string", "enum": ["ship", "split", "escalate"] },
+            "rationale": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": MAX_REVIEW_BUDGET_RATIONALE_BYTES / 4,
+                "pattern": "\\S"
+            },
+            "ticket_references": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": MAX_REVIEW_BUDGET_REFERENCES,
+                "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" }
+            },
+            "escalation_reference": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "pattern": "\\S"
+            }
+        },
+        "required": ["decision", "rationale"],
+        "allOf": [{
+            "if": { "properties": { "decision": { "const": "split" } }, "required": ["decision"] },
+            "then": { "required": ["ticket_references"] }
+        }, {
+            "if": { "properties": { "decision": { "const": "escalate" } }, "required": ["decision"] },
+            "then": { "required": ["escalation_reference"] }
+        }],
+        "additionalProperties": false
+    })
+}
+
 fn shared_test_evidence_schema() -> Value {
     json!({
         "type": "object",
@@ -815,11 +895,15 @@ fn shared_test_evidence_schema() -> Value {
     })
 }
 
-fn call_tool(name: &str, arguments: &Value) -> Result<Value, String> {
+fn call_tool_at(name: &str, arguments: &Value, now_epoch_seconds: u64) -> Result<Value, String> {
     match name {
-        "final_review.plan" => Ok(text_content(plan_result(arguments)?)),
+        "final_review.plan" => Ok(text_content(plan_result_at(arguments, now_epoch_seconds)?)),
         "final_review.filter_findings" => Ok(text_content(filter_findings(arguments)?)),
-        "final_review.advance" => Ok(text_content(advance(arguments)?)),
+        "final_review.advance" => Ok(text_content(advance_with_contract_validation_at(
+            arguments,
+            true,
+            now_epoch_seconds,
+        )?)),
         "final_review.clean_status" => Ok(text_content(clean_status(arguments))),
         "final_review.out_of_scope_report" => Ok(text_content(out_of_scope_report(arguments)?)),
         "final_review.assess_risk" => Ok(text_content(risk_assessment_result(arguments)?)),
@@ -1409,7 +1493,8 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
             "Name a concrete plausible failure path and material impact for every elevated risk.",
             "Inspect the change through scope.scope_resolution pinned to scope.baseline_commit; never re-resolve the movable base name.",
             "Mark uncertainty explicitly; uncertainty selects coverage instead of omitting it.",
-            "Identify exceptional-risk triggers and whether the ticket should be split before review.",
+            "Identify exceptional-risk triggers. Set split_required=true when the diff has grown into a new subsystem or an unusually broad diff.",
+            "When split_required=true, name the applicable scope_growth_triggers and propose at least two split_candidates whose normalized scope_paths collectively cover the changed-file inventory, each with independent acceptance criteria and an independently shippable reason.",
             "Classify security_impact and safety_impact independently for every finding, regardless of which review lens discovered it.",
             "Every caused or worsened CRITICAL/MAJOR security or human-safety finding must name the in-scope changed path that would be remediated.",
             "Record canonical semantic failure paths, but do not run tests, invoke a verifier, or request another planner.",
@@ -1563,6 +1648,7 @@ fn delta_risk_assignment(
         "instructions": [
             "Return the full current risk matrix and mark affected=true only for dimensions whose concrete failure paths or required confirmation changed.",
             "Mark every newly selected dimension and every dimension containing a new finding as affected.",
+            "If the replacement diff has grown into a new subsystem or an unusually broad diff, set split_required=true and return at least two independently shippable split_candidates covering the replacement changed-file inventory.",
             "Do not remove unresolved blockers or request less coverage; the coordinator enforces a monotonic coverage floor.",
             "Consume the supplied shared test evidence. Do not run tests, invoke a verifier, or request another planner."
         ]
@@ -1597,6 +1683,17 @@ fn risk_assessment_output_schema() -> Value {
             "exceptional_triggers": { "type": "array", "items": { "type": "string" } },
             "split_required": { "type": "boolean" },
             "split_rationale": { "type": "string" },
+            "scope_growth_triggers": {
+                "type": "array",
+                "maxItems": 2,
+                "items": { "type": "string", "enum": ["new-subsystem", "unusually-broad-diff"] }
+            },
+            "split_candidates": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": MAX_SPLIT_CANDIDATES,
+                "items": split_candidate_schema()
+            },
             "plan_assumptions": { "type": "array", "items": { "type": "string" } },
             "findings": {
                 "type": "array",
@@ -1665,6 +1762,61 @@ fn risk_assessment_output_schema() -> Value {
             "split_required",
             "plan_assumptions",
             "findings"
+        ],
+        "allOf": [{
+            "if": {
+                "properties": { "split_required": { "const": true } },
+                "required": ["split_required"]
+            },
+            "then": {
+                "required": ["split_rationale", "scope_growth_triggers", "split_candidates"]
+            }
+        }],
+        "additionalProperties": false
+    })
+}
+
+fn split_candidate_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": MAX_FINDING_ID_BYTES,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": MAX_SPLIT_CANDIDATE_TITLE_BYTES / 4,
+                "pattern": "\\S"
+            },
+            "scope_paths": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": MAX_SPLIT_CANDIDATE_PATHS,
+                "items": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "\\S" }
+            },
+            "acceptance_criteria": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": MAX_SPLIT_CANDIDATE_CRITERIA,
+                "items": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "\\S" }
+            },
+            "independently_shippable_reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": MAX_SPLIT_CANDIDATE_REASON_BYTES / 4,
+                "pattern": "\\S"
+            }
+        },
+        "required": [
+            "id",
+            "title",
+            "scope_paths",
+            "acceptance_criteria",
+            "independently_shippable_reason"
         ],
         "additionalProperties": false
     })
@@ -1765,9 +1917,7 @@ fn compile_risk_plan(
         .and_then(Value::as_str)
         .filter(|risk| matches!(*risk, "low" | "medium" | "high" | "exceptional"))
         .ok_or_else(|| "risk_assessment_overall_risk_invalid=true".to_string())?;
-    if assessment.get("split_required").and_then(Value::as_bool) != Some(false) {
-        return Err("review_split_required=true".to_string());
-    }
+    let scope_split = validated_scope_split_plan(assessment, changed_files)?;
     let expected_dimensions = expected_assignment
         .get("review_dimensions")
         .and_then(Value::as_array)
@@ -1872,13 +2022,26 @@ fn compile_risk_plan(
         };
         lens_passes.insert(lens.clone(), json!(passes));
     }
-    let required_clean_iterations = lens_passes
-        .values()
-        .filter_map(Value::as_u64)
-        .max()
-        .unwrap_or(1);
-    let active_lenses = selected_lenses.clone();
-    let active_lens_passes = lens_passes.clone();
+    let split_hold = scope_split.is_some();
+    let required_clean_iterations = if split_hold {
+        1
+    } else {
+        lens_passes
+            .values()
+            .filter_map(Value::as_u64)
+            .max()
+            .unwrap_or(1)
+    };
+    let active_lenses = if split_hold {
+        Vec::new()
+    } else {
+        selected_lenses.clone()
+    };
+    let active_lens_passes = if split_hold {
+        serde_json::Map::new()
+    } else {
+        lens_passes.clone()
+    };
     let (findings, blocking_findings) = validated_scout_findings(
         assessment.get("findings"),
         &expected_dimensions,
@@ -1916,6 +2079,7 @@ fn compile_risk_plan(
         "lens_passes": lens_passes,
         "active_lenses": active_lenses,
         "active_lens_passes": active_lens_passes,
+        "scope_split": scope_split.unwrap_or(Value::Null),
         "delta_history": [],
         "discovery_saturation": discovery_saturation,
         "discovery_sample_count": 1,
@@ -1927,6 +2091,192 @@ fn compile_risk_plan(
         required_clean_iterations,
         blocking_findings,
     }))
+}
+
+fn validated_scope_split_plan(
+    assessment: &serde_json::Map<String, Value>,
+    changed_files: &[String],
+) -> Result<Option<Value>, String> {
+    let split_required = assessment
+        .get("split_required")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "risk_assessment_split_required_invalid=true".to_string())?;
+    let triggers = strict_string_array(
+        assessment.get("scope_growth_triggers"),
+        "scope_growth_triggers",
+    )?
+    .unwrap_or_default();
+    let candidates = assessment
+        .get("split_candidates")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let rationale = assessment
+        .get("split_rationale")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    if !split_required {
+        if !triggers.is_empty() || !candidates.is_empty() || !rationale.trim().is_empty() {
+            return Err("risk_assessment_split_plan_without_split_required=true".to_string());
+        }
+        return Ok(None);
+    }
+    if rationale.trim().is_empty() {
+        return Err("review_split_rationale_required=true".to_string());
+    }
+    if rationale.len() > MAX_SPLIT_CANDIDATE_REASON_BYTES {
+        return Err(format!(
+            "review_split_rationale_too_large max_bytes={MAX_SPLIT_CANDIDATE_REASON_BYTES}"
+        ));
+    }
+    if triggers.is_empty() {
+        return Err("review_split_scope_growth_trigger_required=true".to_string());
+    }
+    if triggers.len() > 2 {
+        return Err("review_split_scope_growth_triggers_too_many max=2".to_string());
+    }
+    let mut unique_triggers = HashSet::with_capacity(triggers.len());
+    for trigger in &triggers {
+        if !matches!(trigger.as_str(), "new-subsystem" | "unusually-broad-diff") {
+            return Err(format!(
+                "review_split_scope_growth_trigger_invalid={trigger}"
+            ));
+        }
+        if !unique_triggers.insert(trigger.clone()) {
+            return Err(format!(
+                "review_split_scope_growth_trigger_duplicate={trigger}"
+            ));
+        }
+    }
+    if candidates.len() < 2 {
+        return Err("review_split_candidates_required min=2".to_string());
+    }
+    if candidates.len() > MAX_SPLIT_CANDIDATES {
+        return Err(format!(
+            "review_split_candidates_too_many max={MAX_SPLIT_CANDIDATES}"
+        ));
+    }
+
+    let normalized_changed_files = changed_files
+        .iter()
+        .filter_map(|path| normalize_review_path(path, None))
+        .collect::<Vec<_>>();
+    let mut covered_changed_files = HashSet::new();
+    let mut candidate_ids = HashSet::with_capacity(candidates.len());
+    let mut normalized_candidates = Vec::with_capacity(candidates.len());
+    for (index, candidate) in candidates.iter().enumerate() {
+        let candidate = candidate
+            .as_object()
+            .ok_or_else(|| format!("review_split_candidate_object_required index={index}"))?;
+        let id = candidate
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| {
+                !id.is_empty()
+                    && id.len() <= MAX_FINDING_ID_BYTES
+                    && id.chars().all(|value| {
+                        value.is_ascii_alphanumeric() || matches!(value, '-' | '_' | '.' | ':')
+                    })
+            })
+            .ok_or_else(|| format!("review_split_candidate_id_invalid index={index}"))?;
+        if !candidate_ids.insert(id.to_string()) {
+            return Err(format!("review_split_candidate_id_duplicate={id}"));
+        }
+        let mut candidate_text = HashMap::new();
+        for (field, max_bytes) in [
+            ("title", MAX_SPLIT_CANDIDATE_TITLE_BYTES),
+            (
+                "independently_shippable_reason",
+                MAX_SPLIT_CANDIDATE_REASON_BYTES,
+            ),
+        ] {
+            let value = candidate
+                .get(field)
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| format!("review_split_candidate_{field}_required id={id}"))?;
+            if value.len() > max_bytes {
+                return Err(format!(
+                    "review_split_candidate_{field}_too_large id={id} max_bytes={max_bytes}"
+                ));
+            }
+            candidate_text.insert(field, value.to_string());
+        }
+        let criteria = strict_string_array(
+            candidate.get("acceptance_criteria"),
+            "split_candidate_acceptance_criteria",
+        )?
+        .unwrap_or_default();
+        if criteria.is_empty()
+            || criteria.len() > MAX_SPLIT_CANDIDATE_CRITERIA
+            || criteria.iter().any(|criterion| criterion.trim().is_empty())
+        {
+            return Err(format!(
+                "review_split_candidate_acceptance_criteria_invalid id={id}"
+            ));
+        }
+        let scope_paths =
+            strict_string_array(candidate.get("scope_paths"), "split_candidate_scope_paths")?
+                .unwrap_or_default();
+        if scope_paths.is_empty() || scope_paths.len() > MAX_SPLIT_CANDIDATE_PATHS {
+            return Err(format!(
+                "review_split_candidate_scope_paths_invalid id={id}"
+            ));
+        }
+        let mut normalized_scope_paths = Vec::with_capacity(scope_paths.len());
+        for scope_path in scope_paths {
+            let normalized = normalize_review_path(&scope_path, None)
+                .ok_or_else(|| format!("review_split_candidate_scope_path_invalid id={id}"))?;
+            let mut path_in_scope = false;
+            for changed_file in &normalized_changed_files {
+                if changed_file == &normalized
+                    || changed_file.starts_with(&format!("{normalized}/"))
+                {
+                    covered_changed_files.insert(changed_file.clone());
+                    path_in_scope = true;
+                }
+            }
+            if !path_in_scope {
+                return Err(format!(
+                    "review_split_candidate_scope_path_out_of_scope id={id} path={normalized}"
+                ));
+            }
+            normalized_scope_paths.push(normalized);
+        }
+        normalized_scope_paths.sort();
+        normalized_scope_paths.dedup();
+        normalized_candidates.push(json!({
+            "id": id,
+            "title": candidate_text["title"],
+            "scope_paths": normalized_scope_paths,
+            "acceptance_criteria": criteria,
+            "independently_shippable_reason": candidate_text["independently_shippable_reason"]
+        }));
+    }
+    if let Some(uncovered) = normalized_changed_files
+        .iter()
+        .find(|path| !covered_changed_files.contains(*path))
+    {
+        return Err(format!(
+            "review_split_candidate_scope_incomplete path={uncovered}"
+        ));
+    }
+
+    let mut ordered_triggers = triggers;
+    ordered_triggers.sort();
+    normalized_candidates.sort_by(|left, right| {
+        left.get("id")
+            .and_then(Value::as_str)
+            .cmp(&right.get("id").and_then(Value::as_str))
+    });
+    Ok(Some(json!({
+        "required": true,
+        "hold": true,
+        "rationale": rationale,
+        "triggers": ordered_triggers,
+        "candidates": normalized_candidates
+    })))
 }
 
 fn validated_scout_findings(
@@ -2286,7 +2636,33 @@ fn update_discovery_saturation(state: &mut Value, filtered: &mut Value) -> Resul
     Ok(())
 }
 
+fn current_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
 fn plan_result(arguments: &Value) -> Result<String, String> {
+    plan_result_internal(arguments, current_epoch_seconds(), false)
+}
+
+fn plan_result_at(
+    arguments: &Value,
+    review_started_at_epoch_seconds: u64,
+) -> Result<String, String> {
+    plan_result_internal(arguments, review_started_at_epoch_seconds, true)
+}
+
+fn plan_result_internal(
+    arguments: &Value,
+    review_started_at_epoch_seconds: u64,
+    require_risk_assessment: bool,
+) -> Result<String, String> {
+    if require_risk_assessment && arguments.get("risk_assessment").is_none() {
+        return Err("risk_assessment_required_before_final_review_plan=true".to_string());
+    }
     let scope = match arguments.get("scope") {
         None => "base".to_string(),
         Some(Value::String(scope)) => scope.clone(),
@@ -2344,18 +2720,32 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         "scope_changed_files",
     )?;
     let compiled_risk_plan = compile_risk_plan(arguments, &changed_files)?;
-    let lenses = compiled_risk_plan
+    let configured_lenses = compiled_risk_plan
         .as_ref()
         .map(|plan| plan.selected_lenses.clone())
         .unwrap_or_else(|| all_lenses(&conditional_lenses));
+    let lenses = compiled_risk_plan
+        .as_ref()
+        .and_then(|plan| string_array(plan.state.get("active_lenses")))
+        .unwrap_or_else(|| configured_lenses.clone());
     let required_clean_iterations = compiled_risk_plan
         .as_ref()
         .map(|plan| plan.required_clean_iterations)
         .unwrap_or(legacy_required_clean_iterations);
-    let risk_plan_state = compiled_risk_plan
+    let mut risk_plan_state = compiled_risk_plan
         .as_ref()
         .map(|plan| plan.state.clone())
         .unwrap_or(Value::Null);
+    if risk_plan_state.is_object() {
+        risk_plan_state["review_budget"] = json!({
+            "applies": risk_plan_state.get("overall_risk").and_then(Value::as_str) == Some("medium"),
+            "checkpoint_minutes": MEDIUM_RISK_REVIEW_BUDGET_MINUTES,
+            "started_at_epoch_seconds": review_started_at_epoch_seconds,
+            "checkpoint_pending": false,
+            "decision": null,
+            "hold": false
+        });
+    }
     let baseline_commit = compiled_risk_plan
         .as_ref()
         .and_then(|plan| plan.state.get("baseline_commit"))
@@ -2379,14 +2769,17 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         .as_ref()
         .map(|plan| Value::Array(plan.blocking_findings.clone()))
         .unwrap_or(Value::Null);
-    let unrelated_finding_policy =
-        parse_unrelated_finding_policy(arguments.get("unrelated_finding_policy"), &lenses)?;
+    let unrelated_finding_policy = parse_unrelated_finding_policy(
+        arguments.get("unrelated_finding_policy"),
+        &configured_lenses,
+    )?;
     let unrelated_finding_policy_confirmation_required =
         arguments.get("unrelated_finding_policy").is_none()
             && (!user_request.trim().is_empty()
                 || !acceptance_criteria.is_empty()
                 || !explicit_concerns.is_empty());
-    let (model_roles, finding_disposition_policy) = resolve_model_roles(arguments, &lenses)?;
+    let (model_roles, finding_disposition_policy) =
+        resolve_model_roles(arguments, &configured_lenses)?;
     let fast_model_role = model_roles.pre_filter.clone();
     let review_model_role = model_roles.lens_review.clone();
     let resolved_model_roles = json!({
@@ -2403,7 +2796,8 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
     });
     let caller_attestation_policy = caller_attestation_policy();
     let lens_objectives = lens_objectives(&conditional_lenses);
-    let prior_defenses_by_lens = parse_prior_defenses(arguments.get("prior_defenses"), &lenses)?;
+    let prior_defenses_by_lens =
+        parse_prior_defenses(arguments.get("prior_defenses"), &configured_lenses)?;
     let work_item_id =
         string_opt(arguments, "work_item_id").filter(|value| !value.trim().is_empty());
     if work_item_id.as_ref().is_some_and(|value| {
@@ -2513,7 +2907,12 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         )?
     };
 
-    let response = json!({
+    let scope_split = state
+        .pointer("/risk_plan/scope_split")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let split_hold = scope_split_hold_active(&state);
+    let mut response = json!({
         "state": state,
         "default_lenses": LENSES,
         "conditional_lenses": conditional_lenses.iter().map(ConditionalLens::as_json).collect::<Vec<_>>(),
@@ -2553,8 +2952,16 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         "post_filter_tool": "final_review.filter_findings",
         "advance_tool": "final_review.advance",
         "calling_agent_responsibility": "Launch each assignment as a real fresh-context subagent in the current harness. Use the assigned subagent_key, close the subagent after collecting its result, then append caller_attestation with the assigned model role, fresh_context=true, and closed_after_result=true before final_review.advance. Do not ask this MCP server to impersonate subagents."
-    })
-    .to_string();
+    });
+    if split_hold {
+        response["transition_status"] = json!("ticket_split_required");
+        response["advance_kind"] = json!("scope_split_hold");
+        response["scope_split"] = scope_split;
+        response["complete"] = json!(false);
+        response["completion_blockers"] = Value::Array(unresolved_findings(&response["state"]));
+        response["assignments"] = json!([]);
+    }
+    let response = response.to_string();
     if response.len() > MAX_REQUEST_BYTES {
         return Err(format!(
             "plan_response_too_large max_bytes={MAX_REQUEST_BYTES}"
@@ -3231,13 +3638,233 @@ fn validate_follow_up_tickets(required: &Value, supplied: Option<&Value>) -> Res
     Ok(())
 }
 
-fn advance(arguments: &Value) -> Result<String, String> {
-    advance_with_contract_validation(arguments, true)
+fn review_budget_checkpoint_pending(state: &Value) -> bool {
+    state
+        .pointer("/risk_plan/review_budget/checkpoint_pending")
+        .and_then(Value::as_bool)
+        == Some(true)
 }
 
+fn review_budget_hold_active(state: &Value) -> bool {
+    state
+        .pointer("/risk_plan/review_budget/hold")
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn review_budget_ship_selected(state: &Value) -> bool {
+    state
+        .pointer("/risk_plan/review_budget/decision/decision")
+        .and_then(Value::as_str)
+        == Some("ship")
+}
+
+fn scope_split_hold_active(state: &Value) -> bool {
+    state
+        .pointer("/risk_plan/scope_split/hold")
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn review_budget_checkpoint_summary(state: &Value, now_epoch_seconds: u64) -> Value {
+    let started_at = state
+        .pointer("/risk_plan/review_budget/started_at_epoch_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(now_epoch_seconds);
+    json!({
+        "checkpoint_minutes": MEDIUM_RISK_REVIEW_BUDGET_MINUTES,
+        "elapsed_minutes": now_epoch_seconds.saturating_sub(started_at) / 60,
+        "allowed_decisions": ["ship", "split", "escalate"],
+        "instruction": "Choose ship, split, or escalate explicitly. Ship still requires all acceptance criteria and rejects every unresolved blocking security or human-safety finding."
+    })
+}
+
+fn mark_review_budget_checkpoint_if_due(
+    state: &mut Value,
+    now_epoch_seconds: u64,
+) -> Result<bool, String> {
+    let Some(budget) = state
+        .pointer_mut("/risk_plan/review_budget")
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(false);
+    };
+    let applies = budget.get("applies").and_then(Value::as_bool) == Some(true);
+    let pending = budget.get("checkpoint_pending").and_then(Value::as_bool) == Some(true);
+    let decided = budget.get("decision").is_some_and(|value| !value.is_null());
+    let hold = budget.get("hold").and_then(Value::as_bool) == Some(true);
+    if !applies || pending || decided || hold {
+        return Ok(false);
+    }
+    let started_at = budget
+        .get("started_at_epoch_seconds")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "review_budget_started_at_required=true".to_string())?;
+    let checkpoint_seconds = MEDIUM_RISK_REVIEW_BUDGET_MINUTES.saturating_mul(60);
+    if now_epoch_seconds.saturating_sub(started_at) < checkpoint_seconds {
+        return Ok(false);
+    }
+    budget.insert("checkpoint_pending".to_string(), json!(true));
+    state["review_contract_id"] = json!(computed_review_contract_id(state)
+        .ok_or_else(|| "review_contract_rebind_failed=true".to_string())?);
+    Ok(true)
+}
+
+fn validated_review_budget_decision(value: Option<&Value>) -> Result<Value, String> {
+    let value = value.ok_or_else(|| "review_budget_decision_required=true".to_string())?;
+    let decision = value
+        .as_object()
+        .ok_or_else(|| "review_budget_decision_object_required=true".to_string())?;
+    let kind = decision
+        .get("decision")
+        .and_then(Value::as_str)
+        .filter(|kind| matches!(*kind, "ship" | "split" | "escalate"))
+        .ok_or_else(|| "review_budget_decision_invalid=true".to_string())?;
+    let rationale = decision
+        .get("rationale")
+        .and_then(Value::as_str)
+        .filter(|rationale| !rationale.trim().is_empty())
+        .ok_or_else(|| "review_budget_rationale_required=true".to_string())?;
+    if rationale.len() > MAX_REVIEW_BUDGET_RATIONALE_BYTES {
+        return Err(format!(
+            "review_budget_rationale_too_large max_bytes={MAX_REVIEW_BUDGET_RATIONALE_BYTES}"
+        ));
+    }
+    match kind {
+        "ship" => {
+            if decision.len() != 2 {
+                return Err("review_budget_ship_fields_invalid=true".to_string());
+            }
+            Ok(json!({ "decision": kind, "rationale": rationale }))
+        }
+        "split" => {
+            if decision.len() != 3 {
+                return Err("review_budget_split_fields_invalid=true".to_string());
+            }
+            let references = strict_string_array(
+                decision.get("ticket_references"),
+                "review_budget_ticket_references",
+            )?
+            .unwrap_or_default();
+            if !(2..=MAX_REVIEW_BUDGET_REFERENCES).contains(&references.len())
+                || references
+                    .iter()
+                    .any(|reference| reference.trim().is_empty())
+            {
+                return Err(format!(
+                    "review_budget_split_ticket_references_invalid min=2 max={MAX_REVIEW_BUDGET_REFERENCES}"
+                ));
+            }
+            let unique = references.iter().collect::<HashSet<_>>();
+            if unique.len() != references.len() {
+                return Err("review_budget_split_ticket_references_duplicate=true".to_string());
+            }
+            Ok(json!({
+                "decision": kind,
+                "rationale": rationale,
+                "ticket_references": references
+            }))
+        }
+        "escalate" => {
+            if decision.len() != 3 {
+                return Err("review_budget_escalate_fields_invalid=true".to_string());
+            }
+            let reference = decision
+                .get("escalation_reference")
+                .and_then(Value::as_str)
+                .filter(|reference| !reference.trim().is_empty())
+                .ok_or_else(|| "review_budget_escalation_reference_required=true".to_string())?;
+            if reference.len() > 1024 {
+                return Err(
+                    "review_budget_escalation_reference_too_large max_bytes=1024".to_string(),
+                );
+            }
+            Ok(json!({
+                "decision": kind,
+                "rationale": rationale,
+                "escalation_reference": reference
+            }))
+        }
+        _ => unreachable!("validated review budget decision kind"),
+    }
+}
+
+fn review_budget_decision_transition(
+    mut state: Value,
+    lens_results: &Value,
+    decision: Option<&Value>,
+    now_epoch_seconds: u64,
+) -> Result<String, String> {
+    if lens_results
+        .as_array()
+        .is_none_or(|results| !results.is_empty())
+    {
+        return Err("review_budget_decision_requires_empty_lens_results=true".to_string());
+    }
+    let Some(decision) = decision else {
+        return Ok(json!({
+            "state": state,
+            "transition_status": "review_budget_decision_required",
+            "review_budget": review_budget_checkpoint_summary(&state, now_epoch_seconds),
+            "complete": false,
+            "completion_blockers": unresolved_findings(&state),
+            "next_assignments": [],
+            "subagent_shutdown": []
+        })
+        .to_string());
+    };
+    let decision = validated_review_budget_decision(Some(decision))?;
+    let kind = decision
+        .get("decision")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    if kind == "ship" && !unresolved_findings(&state).is_empty() {
+        return Err("review_budget_ship_blocked_by_unresolved_findings=true".to_string());
+    }
+    state["risk_plan"]["review_budget"]["checkpoint_pending"] = json!(false);
+    state["risk_plan"]["review_budget"]["decision"] = decision.clone();
+    state["risk_plan"]["review_budget"]["hold"] = json!(kind != "ship");
+    if kind == "ship" {
+        state["risk_plan"]["active_lenses"] = json!([]);
+        state["risk_plan"]["active_lens_passes"] = json!({});
+        state["lenses"] = json!([]);
+        state["required_clean_iterations"] = json!(1);
+    }
+    state["review_contract_id"] = json!(computed_review_contract_id(&state)
+        .ok_or_else(|| "review_contract_rebind_failed=true".to_string())?);
+    ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
+    let complete = kind == "ship" && review_state_complete(&state);
+    let next_assignments: Vec<Value> = Vec::new();
+    Ok(json!({
+        "state": state,
+        "transition_status": "advanced",
+        "advance_kind": "review_budget_decision",
+        "review_budget_outcome": decision,
+        "complete": complete,
+        "completion_blockers": unresolved_findings(&state),
+        "next_assignments": next_assignments,
+        "subagent_shutdown": []
+    })
+    .to_string())
+}
+
+#[cfg(test)]
+fn advance(arguments: &Value) -> Result<String, String> {
+    advance_with_contract_validation_at(arguments, true, current_epoch_seconds())
+}
+
+#[cfg(test)]
 fn advance_with_contract_validation(
     arguments: &Value,
     require_review_contract: bool,
+) -> Result<String, String> {
+    advance_with_contract_validation_at(arguments, require_review_contract, current_epoch_seconds())
+}
+
+fn advance_with_contract_validation_at(
+    arguments: &Value,
+    require_review_contract: bool,
+    now_epoch_seconds: u64,
 ) -> Result<String, String> {
     let mut state = arguments
         .get("state")
@@ -3286,6 +3913,33 @@ fn advance_with_contract_validation(
     validate_required_clean_iterations(&state)?;
     if require_review_contract {
         validate_present_review_contract(&state)?;
+    }
+    if scope_split_hold_active(&state) {
+        return Err("review_scope_split_hold_active=true".to_string());
+    }
+    if review_budget_ship_selected(&state) {
+        return Err("review_session_complete=true".to_string());
+    }
+    if review_budget_hold_active(&state) {
+        let decision = state
+            .pointer("/risk_plan/review_budget/decision/decision")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        return Err(format!("review_budget_hold_active decision={decision}"));
+    }
+    if review_budget_checkpoint_pending(&state) {
+        if diff_changed {
+            return Err("review_budget_decision_required_before_diff_change=true".to_string());
+        }
+        return review_budget_decision_transition(
+            state,
+            &lens_results,
+            arguments.get("review_budget_decision"),
+            now_epoch_seconds,
+        );
+    }
+    if arguments.get("review_budget_decision").is_some() {
+        return Err("review_budget_decision_not_requested=true".to_string());
     }
     if state.get("risk_plan").is_some_and(Value::is_object) {
         if diff_changed {
@@ -3353,7 +4007,10 @@ fn advance_with_contract_validation(
                 current_shared_test_evidence,
                 current_delta_evidence,
                 delta_risk_assessment,
-                &caller_decisions,
+                DeltaTransitionContext {
+                    caller_decisions: &caller_decisions,
+                    now_epoch_seconds,
+                },
             );
         } else if arguments.get("current_shared_test_evidence").is_some() {
             let supplied = validated_shared_test_evidence(
@@ -3549,6 +4206,25 @@ fn advance_with_contract_validation(
 
     let required = effective_required_clean_iterations(&state);
     state["required_clean_iterations"] = json!(required);
+    let budget_checkpoint = mark_review_budget_checkpoint_if_due(&mut state, now_epoch_seconds)?;
+    ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
+    if budget_checkpoint {
+        let completion_blockers = unresolved_findings(&state);
+        return Ok(json!({
+            "state": state,
+            "filtered": filtered,
+            "verification": verification,
+            "transition_status": "advanced",
+            "advance_kind": "review_budget_checkpoint",
+            "review_budget": review_budget_checkpoint_summary(&state, now_epoch_seconds),
+            "complete": false,
+            "completion_blockers": completion_blockers,
+            "reset_reason": reset_reason,
+            "next_assignments": [],
+            "subagent_shutdown": verifier_shutdown
+        })
+        .to_string());
+    }
     let complete = review_state_complete(&state);
 
     let next_assignments = if complete {
@@ -3634,6 +4310,11 @@ fn advance_with_contract_validation(
     .to_string())
 }
 
+struct DeltaTransitionContext<'a> {
+    caller_decisions: &'a [Value],
+    now_epoch_seconds: u64,
+}
+
 fn apply_delta_risk_reassessment(
     mut state: Value,
     current_diff_hash: &str,
@@ -3641,7 +4322,7 @@ fn apply_delta_risk_reassessment(
     current_shared_test_evidence: Value,
     current_delta_evidence: Value,
     delta_risk_assessment: &Value,
-    caller_decisions: &[Value],
+    transition: DeltaTransitionContext<'_>,
 ) -> Result<String, String> {
     let prior_diff_hash = state
         .pointer("/scope/diff_hash")
@@ -3696,6 +4377,12 @@ fn apply_delta_risk_reassessment(
     delta_arguments["risk_assessment"] = delta_risk_assessment.clone();
     let compiled = compile_risk_plan(&delta_arguments, current_changed_files)?
         .ok_or_else(|| "delta_risk_assessment_compile_failed=true".to_string())?;
+    let scope_split = compiled
+        .state
+        .get("scope_split")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let scope_split_hold = scope_split.get("hold").and_then(Value::as_bool) == Some(true);
     if compiled
         .state
         .get("baseline_commit")
@@ -3889,7 +4576,8 @@ fn apply_delta_risk_reassessment(
             ))
         })
         .collect::<HashSet<_>>();
-    let effective_caller_decisions = caller_decisions
+    let effective_caller_decisions = transition
+        .caller_decisions
         .iter()
         .filter(|decision| {
             let key = (
@@ -3963,12 +4651,16 @@ fn apply_delta_risk_reassessment(
     );
     known_major_critical_ids.sort();
     known_major_critical_ids.dedup();
-    let (active_lenses, active_lens_passes) = derived_pending_review(
+    let (mut active_lenses, mut active_lens_passes) = derived_pending_review(
         &selected_lenses,
         &lens_passes,
         &confirmation_samples,
         &last_sample_added_new,
     );
+    if scope_split_hold {
+        active_lenses.clear();
+        active_lens_passes.clear();
+    }
     let discovery_saturation = json!({
         "known_major_critical_ids": known_major_critical_ids,
         "confirmation_samples_by_lens": confirmation_samples,
@@ -4055,12 +4747,16 @@ fn apply_delta_risk_reassessment(
     state["risk_plan"]["shared_test_evidence_id"] =
         compiled.state["shared_test_evidence_id"].clone();
     state["risk_plan"]["overall_risk"] = json!(overall_risk);
+    if state["risk_plan"]["overall_risk"] == "medium" {
+        state["risk_plan"]["review_budget"]["applies"] = json!(true);
+    }
     state["risk_plan"]["dimensions"] = Value::Array(merged_dimensions);
     state["risk_plan"]["findings"] = Value::Array(merged_findings);
     state["risk_plan"]["selected_lenses"] = json!(selected_lenses);
     state["risk_plan"]["lens_passes"] = Value::Object(lens_passes);
     state["risk_plan"]["active_lenses"] = json!(active_lenses);
     state["risk_plan"]["active_lens_passes"] = Value::Object(active_lens_passes);
+    state["risk_plan"]["scope_split"] = scope_split.clone();
     state["risk_plan"]["discovery_saturation"] = discovery_saturation;
     state["risk_plan"]["delta_history"] = Value::Array(delta_history);
     state["risk_plan"]["discovery_sample_count"] = json!(
@@ -4121,7 +4817,40 @@ fn apply_delta_risk_reassessment(
     state["required_clean_iterations"] = json!(required);
     state["review_contract_id"] = json!(computed_review_contract_id(&state)
         .ok_or_else(|| "review_contract_rebind_failed=true".to_string())?);
+    if scope_split_hold {
+        ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
+        let completion_blockers = unresolved_findings(&state);
+        return Ok(json!({
+            "state": state,
+            "transition_status": "advanced",
+            "advance_kind": "scope_split_hold",
+            "scope_split": scope_split,
+            "complete": false,
+            "completion_blockers": completion_blockers,
+            "next_assignments": [],
+            "subagent_shutdown": []
+        })
+        .to_string());
+    }
+    let budget_checkpoint =
+        mark_review_budget_checkpoint_if_due(&mut state, transition.now_epoch_seconds)?;
     ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
+    if budget_checkpoint {
+        let completion_blockers = unresolved_findings(&state);
+        let review_budget = review_budget_checkpoint_summary(&state, transition.now_epoch_seconds);
+        return Ok(json!({
+            "state": state,
+            "transition_status": "advanced",
+            "advance_kind": "review_budget_checkpoint",
+            "prior_advance_kind": "delta_reassessment",
+            "review_budget": review_budget,
+            "complete": false,
+            "completion_blockers": completion_blockers,
+            "next_assignments": [],
+            "subagent_shutdown": []
+        })
+        .to_string());
+    }
     let next_assignments = review_assignments_for_state(&state, next_iteration)?;
     let completion_blockers = unresolved_findings(&state);
 
@@ -5144,15 +5873,22 @@ fn clean_status(arguments: &Value) -> String {
         .and_then(Value::as_u64)
         .unwrap_or(0);
 
-    json!({
+    let mut status = json!({
         "required_clean_iterations": required,
         "consecutive_clean_iterations": consecutive,
         "unresolved_findings": unresolved_findings(state),
         "verified_clean_iterations": verified_clean_count(state),
         "review_contract_valid": review_contract_is_valid(state),
+        "review_budget": state.pointer("/risk_plan/review_budget").cloned().unwrap_or(Value::Null),
         "complete": review_state_complete(state)
-    })
-    .to_string()
+    });
+    if state.get("risk_plan").is_some_and(Value::is_object) {
+        status["scope_split"] = state
+            .pointer("/risk_plan/scope_split")
+            .cloned()
+            .unwrap_or(Value::Null);
+    }
+    status.to_string()
 }
 
 fn out_of_scope_report(arguments: &Value) -> Result<String, String> {
@@ -5227,6 +5963,15 @@ fn out_of_scope_report(arguments: &Value) -> Result<String, String> {
 
 fn review_state_complete(state: &Value) -> bool {
     if state.get("risk_plan").is_some_and(Value::is_object) {
+        if scope_split_hold_active(state)
+            || review_budget_checkpoint_pending(state)
+            || review_budget_hold_active(state)
+        {
+            return false;
+        }
+        if review_budget_ship_selected(state) {
+            return unresolved_findings(state).is_empty() && review_contract_is_valid(state);
+        }
         return string_array(state.pointer("/risk_plan/active_lenses"))
             .is_some_and(|lenses| lenses.is_empty())
             && unresolved_findings(state).is_empty()
@@ -6149,6 +6894,27 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
     {
         return false;
     }
+    if !review_budget_contract_is_valid(risk_plan) {
+        return false;
+    }
+    if !scope_split_contract_is_valid(state, risk_plan) {
+        return false;
+    }
+    let scope_split_hold = scope_split_hold_active(state);
+    let budget_ship = review_budget_ship_selected(state);
+    if scope_split_hold
+        && (review_budget_checkpoint_pending(state)
+            || review_budget_hold_active(state)
+            || risk_plan
+                .get("review_budget")
+                .and_then(|budget| budget.get("decision"))
+                .is_some_and(|decision| !decision.is_null()))
+    {
+        return false;
+    }
+    if scope_split_hold && budget_ship {
+        return false;
+    }
     let Some(scope_snapshot_commit) = state
         .pointer("/scope/snapshot_commit")
         .and_then(Value::as_str)
@@ -6214,6 +6980,9 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
         return false;
     };
     let unresolved = unresolved_findings(state);
+    if budget_ship && !unresolved.is_empty() {
+        return false;
+    }
     let Some(resolved_blockers) = risk_plan
         .get("resolved_blocking_findings")
         .and_then(Value::as_array)
@@ -6334,6 +7103,22 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
     {
         return false;
     }
+    let Some(active_lens_passes) = risk_plan
+        .get("active_lens_passes")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    let terminal_without_lenses = scope_split_hold || budget_ship;
+    if terminal_without_lenses {
+        return active.is_empty()
+            && lenses.is_empty()
+            && active_lens_passes.is_empty()
+            && state
+                .get("required_clean_iterations")
+                .and_then(Value::as_u64)
+                == Some(1);
+    }
     let (expected_active, expected_active_passes) = derived_pending_review(
         &selected,
         lens_passes,
@@ -6346,12 +7131,6 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
     {
         return false;
     }
-    let Some(active_lens_passes) = risk_plan
-        .get("active_lens_passes")
-        .and_then(Value::as_object)
-    else {
-        return false;
-    };
     if active_lens_passes.len() != active.len()
         || active.iter().any(|lens| {
             let active_passes = active_lens_passes.get(lens).and_then(Value::as_u64);
@@ -6372,6 +7151,120 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
         .get("required_clean_iterations")
         .and_then(Value::as_u64)
         == Some(required)
+}
+
+fn scope_split_contract_is_valid(
+    state: &Value,
+    risk_plan: &serde_json::Map<String, Value>,
+) -> bool {
+    let Some(scope_split) = risk_plan.get("scope_split") else {
+        return false;
+    };
+    if scope_split.is_null() {
+        return true;
+    }
+    let Some(fields) = scope_split.as_object() else {
+        return false;
+    };
+    if fields.len() != 5
+        || fields.get("required").and_then(Value::as_bool) != Some(true)
+        || fields.get("hold").and_then(Value::as_bool) != Some(true)
+    {
+        return false;
+    }
+    let Some(changed_files) = string_array(state.pointer("/scope/changed_files")) else {
+        return false;
+    };
+    let assessment = json!({
+        "split_required": true,
+        "split_rationale": fields.get("rationale").cloned().unwrap_or(Value::Null),
+        "scope_growth_triggers": fields.get("triggers").cloned().unwrap_or(Value::Null),
+        "split_candidates": fields.get("candidates").cloned().unwrap_or(Value::Null)
+    });
+    let Some(assessment) = assessment.as_object() else {
+        return false;
+    };
+    validated_scope_split_plan(assessment, &changed_files)
+        .ok()
+        .flatten()
+        .is_some_and(|normalized| &normalized == scope_split)
+}
+
+fn review_budget_contract_is_valid(risk_plan: &serde_json::Map<String, Value>) -> bool {
+    let Some(budget) = risk_plan.get("review_budget").and_then(Value::as_object) else {
+        return false;
+    };
+    if budget.len() != 6
+        || budget.get("checkpoint_minutes").and_then(Value::as_u64)
+            != Some(MEDIUM_RISK_REVIEW_BUDGET_MINUTES)
+        || budget
+            .get("started_at_epoch_seconds")
+            .and_then(Value::as_u64)
+            .is_none()
+    {
+        return false;
+    }
+    let Some(applies) = budget.get("applies").and_then(Value::as_bool) else {
+        return false;
+    };
+    match risk_plan.get("overall_risk").and_then(Value::as_str) {
+        Some("medium") if !applies => return false,
+        Some("low") if applies => return false,
+        Some("low" | "medium" | "high" | "exceptional") => {}
+        _ => return false,
+    }
+    let Some(checkpoint_pending) = budget.get("checkpoint_pending").and_then(Value::as_bool) else {
+        return false;
+    };
+    let Some(hold) = budget.get("hold").and_then(Value::as_bool) else {
+        return false;
+    };
+    let decision = budget.get("decision").unwrap_or(&Value::Null);
+    if !applies {
+        return !checkpoint_pending && !hold && decision.is_null();
+    }
+    if checkpoint_pending {
+        return !hold && decision.is_null();
+    }
+    if decision.is_null() {
+        return !hold;
+    }
+    let Some(decision) = decision.as_object() else {
+        return false;
+    };
+    let kind = decision.get("decision").and_then(Value::as_str);
+    let rationale_valid = decision
+        .get("rationale")
+        .and_then(Value::as_str)
+        .is_some_and(|rationale| {
+            !rationale.trim().is_empty() && rationale.len() <= MAX_REVIEW_BUDGET_RATIONALE_BYTES
+        });
+    rationale_valid
+        && match kind {
+            Some("ship") => !hold && decision.len() == 2,
+            Some("split") => {
+                hold && decision.len() == 3
+                    && decision
+                        .get("ticket_references")
+                        .and_then(Value::as_array)
+                        .is_some_and(|references| {
+                            (2..=MAX_REVIEW_BUDGET_REFERENCES).contains(&references.len())
+                                && references.iter().all(|reference| {
+                                    reference
+                                        .as_str()
+                                        .is_some_and(|reference| !reference.trim().is_empty())
+                                })
+                        })
+            }
+            Some("escalate") => {
+                hold && decision.len() == 3
+                    && decision
+                        .get("escalation_reference")
+                        .and_then(Value::as_str)
+                        .is_some_and(|reference| !reference.trim().is_empty())
+            }
+            _ => false,
+        }
 }
 
 fn validate_present_review_contract(state: &Value) -> Result<(), String> {
@@ -8250,6 +9143,76 @@ mod tests {
         arguments
     }
 
+    fn add_test_risk_assessment(
+        mut arguments: Value,
+        overall_risk: &str,
+        selected: &[(&str, &str)],
+        findings: Value,
+    ) -> Value {
+        let diff_hash = arguments
+            .get("diff_hash")
+            .and_then(Value::as_str)
+            .expect("test diff hash")
+            .to_string();
+        if arguments.get("shared_test_evidence").is_none() {
+            arguments["shared_test_evidence"] = shared_test_evidence_for(&diff_hash);
+        }
+        if arguments.get("baseline_commit").is_none() {
+            let resolved_root =
+                resolved_project_root_string(&arguments).expect("test project root");
+            arguments["baseline_commit"] = json!(git_text(
+                Path::new(&resolved_root),
+                &["rev-parse".to_string(), "origin/main^{commit}".to_string()],
+                None,
+                None,
+                "test_risk_baseline",
+            )
+            .expect("resolve test risk baseline"));
+        }
+        let scout: Value =
+            serde_json::from_str(&risk_assessment_result(&arguments).expect("risk scout"))
+                .expect("risk scout json");
+        let assignment = &scout["assignments"][0];
+        let dimensions = assignment["review_dimensions"]
+            .as_array()
+            .expect("review dimensions")
+            .iter()
+            .map(|lens| {
+                let lens = lens.as_str().expect("lens");
+                let risk = selected
+                    .iter()
+                    .find_map(|(selected_lens, risk)| (*selected_lens == lens).then_some(*risk))
+                    .unwrap_or("none");
+                let selected = risk != "none";
+                json!({
+                    "lens": lens,
+                    "risk": risk,
+                    "evidence": if selected { "The test exercises a concrete coordinator invariant." } else { "No concrete failure path for this dimension." },
+                    "plausible_failure": if selected { "The coordinator can accept or emit the wrong state transition." } else { "none" },
+                    "material_impact": if selected { "The tested final-review contract becomes unreliable." } else { "none" },
+                    "uncertain": false
+                })
+            })
+            .collect::<Vec<_>>();
+        arguments["risk_assessment"] = json!({
+            "assignment_id": assignment["assignment_id"],
+            "subagent_key": assignment["subagent_key"],
+            "overall_risk": overall_risk,
+            "dimensions": dimensions,
+            "exceptional_triggers": [],
+            "split_required": false,
+            "plan_assumptions": [],
+            "findings": findings,
+            "shared_test_evidence_id": assignment["shared_test_evidence"]["id"],
+            "caller_attestation": {
+                "model_role": assignment["model_role"],
+                "fresh_context": true,
+                "closed_after_result": true
+            }
+        });
+        arguments
+    }
+
     #[test]
     fn plan_returns_state_first_iteration_assignments_and_model_roles() {
         let output = plan(&json!({
@@ -8813,6 +9776,17 @@ mod tests {
     #[test]
     fn stdio_preserves_internal_error_for_model_config_io_failure() {
         let project_root = test_project_root("stdio-dangling-config");
+        let arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "stdio-dangling-config",
+                "changed_files": ["src/lib.rs"],
+                "diff_hash": "abc",
+                "project_root": project_root.clone()
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
         fs::create_dir_all(project_root.join(".development-discipline")).expect("config dir");
         std::os::unix::fs::symlink(
             project_root.join("missing-final-review.toml"),
@@ -8825,11 +9799,7 @@ mod tests {
             "method": "tools/call",
             "params": {
                 "name": "final_review.plan",
-                "arguments": {
-                    "changed_files": ["src/lib.rs"],
-                    "diff_hash": "abc",
-                    "project_root": project_root
-                }
+                "arguments": arguments
             }
         });
         let input = Cursor::new(format!("{request}\n"));
@@ -8928,7 +9898,21 @@ mod tests {
 
     #[test]
     fn json_rpc_rejects_an_escaped_plan_response_before_capturing_state() {
-        let arguments = amplified_plan_arguments(1_800);
+        let selected_lenses = LENSES
+            .iter()
+            .map(|lens| lens.to_string())
+            .chain((0..MAX_CONDITIONAL_LENSES).map(|index| format!("conditional-{index}")))
+            .collect::<Vec<_>>();
+        let selected = selected_lenses
+            .iter()
+            .map(|lens| (lens.as_str(), "high"))
+            .collect::<Vec<_>>();
+        let arguments = add_test_risk_assessment(
+            amplified_plan_arguments(1_616),
+            "high",
+            &selected,
+            json!([]),
+        );
         let plan_text = plan_result(&arguments).expect("inner plan text remains within budget");
         let plan_size = plan_text.len();
         assert!(plan_size <= MAX_REQUEST_BYTES);
@@ -8984,6 +9968,17 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "expanded-scope-response",
+                "changed_files": ["src/initial.rs"],
+                "diff_hash": "initial",
+                "conditional_lenses": conditional_lenses
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
         let plan_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
@@ -8991,12 +9986,7 @@ mod tests {
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.plan",
-                    "arguments": {
-                        "session_id": "expanded-scope-response",
-                        "changed_files": ["src/initial.rs"],
-                        "diff_hash": "initial",
-                        "conditional_lenses": conditional_lenses
-                    }
+                    "arguments": plan_arguments
                 }
             }))
             .expect("plan response");
@@ -9015,17 +10005,47 @@ mod tests {
                 "name": "final_review.advance",
                 "arguments": {
                     "state": state,
-                    "lens_results": clean_lens_results_for(&state),
+                    "lens_results": [],
                     "current_diff_hash": "expanded",
-                    "current_changed_files": changed_files
+                    "current_changed_files": changed_files,
+                    "current_shared_test_evidence": shared_test_evidence_for("expanded")
                 }
             }
         });
         assert!(serde_json::to_vec(&request).expect("request").len() <= MAX_REQUEST_BYTES);
 
-        let response = coordinator
+        let required_response = coordinator
             .handle_json_rpc(&request)
             .expect("bounded advance response");
+        assert!(
+            serde_json::to_vec(&required_response)
+                .expect("response")
+                .len()
+                <= MAX_REQUEST_BYTES
+        );
+        let required: Value = serde_json::from_str(
+            required_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("delta scout text"),
+        )
+        .expect("delta scout json");
+        assert_eq!(
+            required["transition_status"],
+            "delta_risk_assessment_required"
+        );
+        let assessment = delta_risk_assessment_for(
+            &required["delta_risk_assignments"][0],
+            "high",
+            &[("correctness-behavior", "high")],
+            &["correctness-behavior"],
+            json!([]),
+        );
+        let mut resubmission = request;
+        resubmission["id"] = json!(3);
+        resubmission["params"]["arguments"]["delta_risk_assessment"] = assessment;
+        let response = coordinator
+            .handle_json_rpc(&resubmission)
+            .expect("bounded delta plan response");
         assert!(serde_json::to_vec(&response).expect("response").len() <= MAX_REQUEST_BYTES);
         let advanced: Value = serde_json::from_str(
             response["result"]["content"][0]["text"]
@@ -9046,7 +10066,7 @@ mod tests {
                 .as_array()
                 .expect("assignments")
                 .len(),
-            LENSES.len() + MAX_CONDITIONAL_LENSES
+            1
         );
     }
 
@@ -14374,6 +15394,7 @@ pre_filter = "project-pre"
                 "unresolved_findings": [advanced["state"]["unresolved_findings"][0].clone()],
                 "verified_clean_iterations": 0,
                 "review_contract_valid": false,
+                "review_budget": null,
                 "complete": false
             })
             .to_string()
@@ -15366,8 +16387,14 @@ pre_filter = "project-pre"
             DEFAULT_CLEAN_ITERATIONS
         );
         assert_eq!(
-            tools[0]["inputSchema"]["allOf"][0]["then"]["required"],
-            json!(["baseline_commit"])
+            tools[0]["inputSchema"]["required"],
+            json!([
+                "baseline_commit",
+                "changed_files",
+                "diff_hash",
+                "risk_assessment",
+                "shared_test_evidence"
+            ])
         );
         assert!(tools[5]["inputSchema"]["required"]
             .as_array()
@@ -15399,6 +16426,30 @@ pre_filter = "project-pre"
             tools[2]["inputSchema"]["properties"]["verifier_result"]["properties"]["verdicts"]
                 ["maxItems"],
             MAX_FINDINGS_PER_ITERATION
+        );
+        assert_eq!(
+            tools[2]["inputSchema"]["properties"]["review_budget_decision"]["properties"]
+                ["decision"]["enum"],
+            json!(["ship", "split", "escalate"])
+        );
+        let scout_schema = risk_assessment_output_schema();
+        assert_eq!(
+            scout_schema["allOf"][0]["then"]["required"],
+            json!([
+                "split_rationale",
+                "scope_growth_triggers",
+                "split_candidates"
+            ])
+        );
+        assert_eq!(
+            scout_schema["properties"]["split_candidates"]["items"]["required"],
+            json!([
+                "id",
+                "title",
+                "scope_paths",
+                "acceptance_criteria",
+                "independently_shippable_reason"
+            ])
         );
     }
 
@@ -15549,6 +16600,33 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn json_rpc_plan_rejects_bypassing_the_mandatory_risk_scout() {
+        let response = handle_json_rpc(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "final_review.plan",
+                "arguments": {
+                    "session_id": "mandatory-risk-scout",
+                    "base": "origin/main",
+                    "baseline_commit": current_test_baseline_commit(),
+                    "changed_files": ["src/lib.rs"],
+                    "diff_hash": "mandatory-risk-scout-diff",
+                    "shared_test_evidence": shared_test_evidence_for("mandatory-risk-scout-diff"),
+                    "unrelated_finding_policy": { "default": "report" }
+                }
+            }
+        }))
+        .expect("tool response");
+
+        assert_eq!(
+            response["error"]["message"],
+            "risk_assessment_required_before_final_review_plan=true"
+        );
+    }
+
+    #[test]
     fn json_rpc_plan_compiles_a_medium_risk_assessment_into_one_targeted_pass() {
         let arguments = json!({
             "session_id": "medium-risk-review",
@@ -15651,6 +16729,700 @@ pre_filter = "project-pre"
         assert_eq!(advanced["complete"], true);
         assert_eq!(advanced["state"]["clean_streak"], 1);
         assert_eq!(advanced["next_assignments"], json!([]));
+    }
+
+    #[test]
+    fn medium_risk_review_budget_requires_an_explicit_decision_at_75_minutes() {
+        let arguments = assessed_plan_arguments(
+            "medium-risk-budget",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let planned: Value =
+            serde_json::from_str(&plan_result_at(&arguments, 1_000).expect("medium-risk plan"))
+                .expect("plan json");
+        let state = planned["state"].clone();
+
+        assert_eq!(state["risk_plan"]["review_budget"]["applies"], true);
+        assert_eq!(
+            state["risk_plan"]["review_budget"]["checkpoint_minutes"],
+            75
+        );
+        assert_eq!(
+            state["risk_plan"]["review_budget"]["started_at_epoch_seconds"],
+            1_000
+        );
+        assert_eq!(state["risk_plan"]["review_budget"]["decision"], Value::Null);
+        let mut tampered = state.clone();
+        tampered["risk_plan"]["review_budget"]["started_at_epoch_seconds"] = json!(999);
+        assert!(!review_contract_is_valid(&tampered));
+
+        let before_checkpoint: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(
+                &json!({
+                    "state": state,
+                    "lens_results": clean_lens_results_for(&state),
+                    "current_diff_hash": "medium-risk-budget-diff"
+                }),
+                false,
+                5_499,
+            )
+            .expect("one second before the checkpoint advances normally"),
+        )
+        .expect("pre-checkpoint json");
+        assert_eq!(before_checkpoint["complete"], true);
+
+        let checkpoint: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(
+                &json!({
+                    "state": state,
+                    "lens_results": clean_lens_results_for(&state),
+                    "current_diff_hash": "medium-risk-budget-diff"
+                }),
+                false,
+                5_500,
+            )
+            .expect("budget checkpoint response"),
+        )
+        .expect("checkpoint json");
+        assert_eq!(checkpoint["transition_status"], "advanced");
+        assert_eq!(checkpoint["advance_kind"], "review_budget_checkpoint");
+        assert_eq!(
+            checkpoint["state"]["risk_plan"]["review_budget"]["checkpoint_pending"],
+            true
+        );
+        assert_eq!(checkpoint["next_assignments"], json!([]));
+        assert_eq!(
+            checkpoint["review_budget"]["allowed_decisions"],
+            json!(["ship", "split", "escalate"])
+        );
+
+        let advanced: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(
+                &json!({
+                    "state": checkpoint["state"],
+                    "lens_results": [],
+                    "current_diff_hash": "medium-risk-budget-diff",
+                    "review_budget_decision": {
+                        "decision": "ship",
+                        "rationale": "The acceptance criteria and review gates are satisfied."
+                    }
+                }),
+                false,
+                5_500,
+            )
+            .expect("explicit ship decision advances"),
+        )
+        .expect("advanced json");
+        assert_eq!(advanced["complete"], true);
+        assert_eq!(
+            advanced["state"]["risk_plan"]["review_budget"]["decision"]["decision"],
+            "ship"
+        );
+        assert!(review_contract_is_valid(&advanced["state"]));
+    }
+
+    #[test]
+    fn json_rpc_budget_checkpoint_persists_results_before_a_decision_only_advance() {
+        use std::sync::Arc;
+
+        let clock = Arc::new(AtomicU64::new(1_000));
+        let coordinator_clock = Arc::clone(&clock);
+        let mut coordinator =
+            ReviewCoordinator::with_clock(move || coordinator_clock.load(Ordering::SeqCst));
+        let plan_arguments = assessed_plan_arguments(
+            "json-rpc-budget-checkpoint",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let plan_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.plan",
+                    "arguments": plan_arguments
+                }
+            }))
+            .expect("plan response");
+        let plan: Value = serde_json::from_str(
+            plan_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+        let state = plan["state"].clone();
+        clock.store(5_500, Ordering::SeqCst);
+
+        let checkpoint_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state": state,
+                        "lens_results": clean_lens_results_for(&state),
+                        "current_diff_hash": "json-rpc-budget-checkpoint-diff"
+                    }
+                }
+            }))
+            .expect("checkpoint response");
+        let checkpoint: Value = serde_json::from_str(
+            checkpoint_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("checkpoint text"),
+        )
+        .expect("checkpoint json");
+        assert_eq!(checkpoint["advance_kind"], "review_budget_checkpoint");
+        assert_eq!(
+            coordinator.sessions.get("json-rpc-budget-checkpoint"),
+            Some(&checkpoint["state"])
+        );
+
+        let ship_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state": checkpoint["state"],
+                        "lens_results": [],
+                        "current_diff_hash": "json-rpc-budget-checkpoint-diff",
+                        "review_budget_decision": {
+                            "decision": "ship",
+                            "rationale": "The persisted clean review satisfies the completion gate."
+                        }
+                    }
+                }
+            }))
+            .expect("ship response");
+        let shipped: Value = serde_json::from_str(
+            ship_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("ship text"),
+        )
+        .expect("ship json");
+        assert_eq!(shipped["advance_kind"], "review_budget_decision");
+        assert_eq!(shipped["complete"], true);
+    }
+
+    #[test]
+    fn review_budget_ship_cannot_omit_a_known_blocker_and_split_stops_review() {
+        let arguments = assessed_plan_arguments(
+            "medium-risk-budget-blocker",
+            "medium",
+            &[("security-safety", "medium")],
+            json!([{
+                "semantic_key": "protected-data-bypass",
+                "lens": "security-safety",
+                "severity": "MAJOR",
+                "security_impact": "major",
+                "safety_impact": "none",
+                "likelihood": "possible",
+                "causality": "caused",
+                "path": "src/lib.rs",
+                "message": "The changed authorization path can expose protected data.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The authorization path is changed by this diff."
+                }
+            }]),
+        );
+        let planned: Value = serde_json::from_str(
+            &plan_result_at(&arguments, 2_000).expect("medium-risk blocker plan"),
+        )
+        .expect("plan json");
+        let state = planned["state"].clone();
+
+        let checkpoint: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(
+                &json!({
+                    "state": state,
+                    "lens_results": clean_lens_results_for(&state),
+                    "current_diff_hash": "medium-risk-budget-blocker-diff"
+                }),
+                false,
+                6_500,
+            )
+            .expect("known blocker still reaches the explicit budget checkpoint"),
+        )
+        .expect("checkpoint json");
+        let checkpoint_state = checkpoint["state"].clone();
+
+        assert_eq!(
+            advance_with_contract_validation_at(
+                &json!({
+                    "state": checkpoint_state,
+                    "lens_results": [],
+                    "current_diff_hash": "medium-risk-budget-blocker-diff",
+                    "review_budget_decision": {
+                        "decision": "ship",
+                        "rationale": "Ship now."
+                    }
+                }),
+                false,
+                6_500,
+            )
+            .expect_err("a known blocker forbids the ship decision"),
+            "review_budget_ship_blocked_by_unresolved_findings=true"
+        );
+
+        let split: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(
+                &json!({
+                    "state": checkpoint_state,
+                    "lens_results": [],
+                    "current_diff_hash": "medium-risk-budget-blocker-diff",
+                    "review_budget_decision": {
+                        "decision": "split",
+                        "rationale": "Separate the authorization fix from the review-policy work.",
+                        "ticket_references": ["TICKET-A", "TICKET-B"]
+                    }
+                }),
+                false,
+                6_500,
+            )
+            .expect("split decision stops review"),
+        )
+        .expect("split json");
+        assert_eq!(split["transition_status"], "advanced");
+        assert_eq!(split["advance_kind"], "review_budget_decision");
+        assert_eq!(split["complete"], false);
+        assert_eq!(split["state"]["risk_plan"]["review_budget"]["hold"], true);
+        assert_eq!(
+            split["state"]["risk_plan"]["review_budget"]["decision"]["decision"],
+            "split"
+        );
+        assert_eq!(split["next_assignments"], json!([]));
+        assert!(review_contract_is_valid(&split["state"]));
+        assert_eq!(
+            advance_with_contract_validation_at(
+                &json!({
+                    "state": split["state"],
+                    "lens_results": [],
+                    "current_diff_hash": "medium-risk-budget-blocker-diff"
+                }),
+                false,
+                6_501,
+            )
+            .expect_err("a split hold is terminal for the review session"),
+            "review_budget_hold_active decision=split"
+        );
+    }
+
+    #[test]
+    fn review_budget_ship_terminates_remaining_nonblocking_review_work() {
+        let arguments = assessed_plan_arguments(
+            "medium-risk-budget-terminal-ship",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let planned: Value =
+            serde_json::from_str(&plan_result_at(&arguments, 1_000).expect("medium-risk plan"))
+                .expect("plan json");
+        let state = planned["state"].clone();
+        let finding_result = risk_finding_lens_result(
+            &state,
+            "correctness-behavior",
+            "nonblocking-review-depth",
+            "MAJOR",
+        );
+
+        let checkpoint: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(
+                &json!({
+                    "state": state,
+                    "lens_results": [finding_result],
+                    "current_diff_hash": "medium-risk-budget-terminal-ship-diff",
+                    "unrelated_follow_ups": [{
+                        "finding_id": "nonblocking-review-depth",
+                        "lens": "correctness-behavior",
+                        "ticket_reference": "TICKET-NONBLOCKING"
+                    }]
+                }),
+                false,
+                5_500,
+            )
+            .expect("nonblocking finding reaches the budget checkpoint"),
+        )
+        .expect("checkpoint json");
+        assert_eq!(checkpoint["advance_kind"], "review_budget_checkpoint");
+        assert_eq!(
+            checkpoint["state"]["risk_plan"]["active_lenses"],
+            json!(["correctness-behavior"])
+        );
+
+        let shipped: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(
+                &json!({
+                    "state": checkpoint["state"],
+                    "lens_results": [],
+                    "current_diff_hash": "medium-risk-budget-terminal-ship-diff",
+                    "review_budget_decision": {
+                        "decision": "ship",
+                        "rationale": "The remaining observation is tracked and does not block shipment."
+                    }
+                }),
+                false,
+                5_500,
+            )
+            .expect("ship ends final review"),
+        )
+        .expect("ship json");
+
+        assert_eq!(shipped["complete"], true);
+        assert_eq!(shipped["state"]["risk_plan"]["active_lenses"], json!([]));
+        assert_eq!(shipped["state"]["lenses"], json!([]));
+        assert_eq!(shipped["next_assignments"], json!([]));
+        assert!(review_contract_is_valid(&shipped["state"]));
+    }
+
+    fn initial_scope_split_arguments(session_id: &str) -> Value {
+        let mut arguments = assessed_plan_arguments(
+            session_id,
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+        );
+        arguments["risk_assessment"]["split_required"] = json!(true);
+        arguments["risk_assessment"]["split_rationale"] =
+            json!("The diff introduces independently shippable policy and integration work.");
+        arguments["risk_assessment"]["scope_growth_triggers"] = json!(["new-subsystem"]);
+        arguments["risk_assessment"]["split_candidates"] = json!([{
+            "id": "coordinator-policy",
+            "title": "Ship the coordinator policy",
+            "scope_paths": ["src/lib.rs"],
+            "acceptance_criteria": ["Coordinator policy is independently usable."],
+            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact."
+        }, {
+            "id": "integration-tests",
+            "title": "Ship the integration tests",
+            "scope_paths": ["tests/lib_test.rs"],
+            "acceptance_criteria": ["Integration tests consume the released policy."],
+            "independently_shippable_reason": "The integration coverage can follow after the coordinator release."
+        }]);
+        arguments
+    }
+
+    #[test]
+    fn initial_scope_split_preserves_selected_lens_policy_without_assigning_the_lens() {
+        let mut arguments = initial_scope_split_arguments("scope-split-selected-policy");
+        arguments["unrelated_finding_policy"] = json!({
+            "default": "report",
+            "by_lens": {
+                "architecture-maintainability": "follow-up-ticket"
+            },
+            "by_severity": {}
+        });
+
+        let split: Value = serde_json::from_str(
+            &plan_result_at(&arguments, 3_000)
+                .expect("selected-lens policy must survive an authoritative split hold"),
+        )
+        .expect("scope split json");
+
+        assert_eq!(split["transition_status"], "ticket_split_required");
+        assert_eq!(split["state"]["lenses"], json!([]));
+        assert_eq!(split["assignments"], json!([]));
+        assert_eq!(
+            split["state"]["unrelated_finding_policy"]["by_lens"]["architecture-maintainability"],
+            "follow-up-ticket"
+        );
+        assert!(split["state"]["finding_disposition_policy"]["MAJOR"]
+            ["architecture-maintainability"]
+            .is_string());
+        assert!(review_contract_is_valid(&split["state"]));
+    }
+
+    #[test]
+    fn initial_scope_split_preserves_selected_lens_prior_defenses() {
+        let mut arguments = initial_scope_split_arguments("scope-split-prior-defense");
+        arguments["prior_defenses"] = json!([{
+            "id": "accepted-boundary",
+            "lens": "architecture-maintainability",
+            "decision": "defended",
+            "defense": "The original policy boundary was already accepted."
+        }]);
+
+        let split: Value = serde_json::from_str(
+            &plan_result_at(&arguments, 3_000)
+                .expect("selected-lens defenses must survive an authoritative split hold"),
+        )
+        .expect("scope split json");
+
+        assert_eq!(split["transition_status"], "ticket_split_required");
+        assert_eq!(split["state"]["lenses"], json!([]));
+        assert_eq!(split["assignments"], json!([]));
+        assert_eq!(
+            split["state"]["initial_prior_defenses_by_lens"]["architecture-maintainability"][0]
+                ["id"],
+            "accepted-boundary"
+        );
+        assert!(review_contract_is_valid(&split["state"]));
+    }
+
+    #[test]
+    fn scope_growth_requires_independently_shippable_split_candidates() {
+        let mut arguments = assessed_plan_arguments(
+            "scope-growth-split",
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+        );
+        arguments["risk_assessment"]["split_required"] = json!(true);
+        arguments["risk_assessment"]["split_rationale"] =
+            json!("The diff now introduces a new subsystem with separate release value.");
+        arguments["risk_assessment"]["scope_growth_triggers"] = json!(["new-subsystem"]);
+
+        assert_eq!(
+            plan_result_at(&arguments, 3_000)
+                .expect_err("a split needs concrete independently shippable candidates"),
+            "review_split_candidates_required min=2"
+        );
+
+        arguments["risk_assessment"]["split_candidates"] = json!([{
+            "id": "coordinator-policy",
+            "title": "Ship the coordinator policy",
+            "scope_paths": ["src/lib.rs"],
+            "acceptance_criteria": ["Coordinator policy is independently usable."],
+            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact."
+        }, {
+            "id": "integration-tests",
+            "title": "Ship the dashboard integration",
+            "scope_paths": ["tests/lib_test.rs"],
+            "acceptance_criteria": ["Dashboard integration consumes the released policy."],
+            "independently_shippable_reason": "The dashboard can follow after the coordinator release."
+        }]);
+        arguments
+            .as_object_mut()
+            .expect("plan arguments")
+            .remove("unrelated_finding_policy");
+        let mut coordinator = ReviewCoordinator::with_clock(|| 3_000);
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.plan",
+                    "arguments": arguments.clone()
+                }
+            }))
+            .expect("scope split response");
+        let split: Value = serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("scope split text"),
+        )
+        .expect("scope split json");
+
+        assert_eq!(split["transition_status"], "ticket_split_required");
+        assert_eq!(split["advance_kind"], "scope_split_hold");
+        assert_eq!(split["complete"], false);
+        assert_eq!(split["assignments"], json!([]));
+        assert_eq!(split["state"]["lenses"], json!([]));
+        assert_eq!(
+            split["state"]["risk_plan"]["scope_split"]["triggers"],
+            json!(["new-subsystem"])
+        );
+        assert_eq!(
+            coordinator.sessions.get("scope-growth-split"),
+            Some(&split["state"])
+        );
+        assert!(review_contract_is_valid(&split["state"]));
+        let mut tampered = split["state"].clone();
+        tampered["risk_plan"]["scope_split"]["candidates"][1]["scope_paths"] =
+            json!(["src/lib.rs"]);
+        tampered["review_contract_id"] =
+            json!(computed_review_contract_id(&tampered).expect("rehashed contract"));
+        assert!(!review_contract_is_valid(&tampered));
+
+        let held = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state": split["state"],
+                        "lens_results": [],
+                        "current_diff_hash": "scope-growth-split-diff"
+                    }
+                }
+            }))
+            .expect("held advance response");
+        assert_eq!(
+            held["error"]["message"],
+            "review_scope_split_hold_active=true"
+        );
+
+        let mut weakened = arguments;
+        weakened["risk_assessment"]["split_required"] = json!(false);
+        weakened["risk_assessment"]
+            .as_object_mut()
+            .expect("risk assessment")
+            .retain(|field, _| {
+                !matches!(
+                    field.as_str(),
+                    "split_rationale" | "scope_growth_triggers" | "split_candidates"
+                )
+            });
+        let retry = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.plan",
+                    "arguments": weakened
+                }
+            }))
+            .expect("retry response");
+        assert_eq!(retry["error"]["message"], "review_session_exists=true");
+    }
+
+    #[test]
+    fn delta_scope_growth_stops_before_rebinding_review_state() {
+        let arguments = assessed_plan_arguments(
+            "delta-scope-growth",
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+        );
+        let planned: Value =
+            serde_json::from_str(&plan_result_at(&arguments, 1_000).expect("medium-risk plan"))
+                .expect("plan json");
+        let state = &planned["state"];
+        let replacement_diff_hash = "delta-scope-growth-v2";
+        let mut resubmission = json!({
+            "state": state,
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(&resubmission, false, 5_500)
+                .expect("delta scout required"),
+        )
+        .expect("delta response json");
+        let mut assessment = delta_risk_assessment_for(
+            &required["delta_risk_assignments"][0],
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            &["architecture-maintainability"],
+            json!([]),
+        );
+        assessment["split_required"] = json!(true);
+        assessment["split_rationale"] =
+            json!("The response added a new independently deployable subsystem.");
+        assessment["scope_growth_triggers"] = json!(["new-subsystem"]);
+        assessment["split_candidates"] = json!([{
+            "id": "original-policy",
+            "title": "Keep the original policy edit",
+            "scope_paths": ["src/lib.rs"],
+            "acceptance_criteria": ["The original policy behavior remains independently releasable."],
+            "independently_shippable_reason": "It preserves the original ticket boundary."
+        }, {
+            "id": "new-subsystem",
+            "title": "Build the new subsystem separately",
+            "scope_paths": ["tests/lib_test.rs"],
+            "acceptance_criteria": ["The subsystem has an independent integration contract."],
+            "independently_shippable_reason": "It can be released after the policy behavior."
+        }]);
+        resubmission["delta_risk_assessment"] = assessment;
+
+        let split: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(&resubmission, false, 5_500)
+                .expect("delta scope growth persists a terminal split hold"),
+        )
+        .expect("delta split json");
+        assert_eq!(split["transition_status"], "advanced");
+        assert_eq!(split["advance_kind"], "scope_split_hold");
+        assert_eq!(split["state"]["scope"]["diff_hash"], replacement_diff_hash);
+        assert_eq!(split["state"]["risk_plan"]["scope_split"]["hold"], true);
+        assert_eq!(split["state"]["lenses"], json!([]));
+        assert_eq!(split["next_assignments"], json!([]));
+        assert!(review_contract_is_valid(&split["state"]));
+        assert_eq!(
+            advance_with_contract_validation_at(
+                &json!({
+                    "state": split["state"],
+                    "lens_results": [],
+                    "current_diff_hash": replacement_diff_hash
+                }),
+                false,
+                5_501,
+            )
+            .expect_err("a delta split hold is terminal"),
+            "review_scope_split_hold_active=true"
+        );
+        assert_eq!(state["scope"]["diff_hash"], "delta-scope-growth-diff");
+    }
+
+    #[test]
+    fn long_running_delta_reassessment_cannot_bypass_the_budget_checkpoint() {
+        let arguments = assessed_plan_arguments(
+            "delta-budget-checkpoint",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let planned: Value =
+            serde_json::from_str(&plan_result_at(&arguments, 1_000).expect("medium-risk plan"))
+                .expect("plan json");
+        let state = &planned["state"];
+        let replacement_diff_hash = "delta-budget-checkpoint-v2";
+        let mut resubmission = json!({
+            "state": state,
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(&resubmission, false, 5_500)
+                .expect("delta scout is still required before a ship decision"),
+        )
+        .expect("delta-required json");
+        assert_eq!(
+            required["transition_status"],
+            "delta_risk_assessment_required"
+        );
+        resubmission["delta_risk_assessment"] = delta_risk_assessment_for(
+            &required["delta_risk_assignments"][0],
+            "medium",
+            &[("correctness-behavior", "medium")],
+            &["correctness-behavior"],
+            json!([]),
+        );
+
+        let checkpoint: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(&resubmission, false, 5_500)
+                .expect("delta evidence is persisted before the checkpoint"),
+        )
+        .expect("checkpoint json");
+        assert_eq!(checkpoint["advance_kind"], "review_budget_checkpoint");
+        assert_eq!(checkpoint["prior_advance_kind"], "delta_reassessment");
+        assert_eq!(
+            checkpoint["state"]["scope"]["diff_hash"],
+            replacement_diff_hash
+        );
+        assert_eq!(
+            checkpoint["state"]["risk_plan"]["review_budget"]["checkpoint_pending"],
+            true
+        );
+        assert_eq!(checkpoint["next_assignments"], json!([]));
+        assert!(review_contract_is_valid(&checkpoint["state"]));
     }
 
     #[test]
@@ -17614,10 +19386,16 @@ pre_filter = "project-pre"
         ];
 
         for (index, (field, malformed, expected_error)) in cases.into_iter().enumerate() {
-            let mut arguments = json!({
-                "changed_files": ["src/new.rs"],
-                "diff_hash": "same"
-            });
+            let mut arguments = add_test_risk_assessment(
+                json!({
+                    "session_id": format!("malformed-context-{index}"),
+                    "changed_files": ["src/new.rs"],
+                    "diff_hash": "same"
+                }),
+                "high",
+                &[("correctness-behavior", "high")],
+                json!([]),
+            );
             arguments[field] = malformed;
             let response = coordinator
                 .handle_json_rpc(&json!({
@@ -17639,6 +19417,19 @@ pre_filter = "project-pre"
     #[test]
     fn json_rpc_tools_call_drives_final_review_state_machine() {
         let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "rpc-review",
+                "base": "HEAD",
+                "scope": "uncommitted",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same",
+                "pre_filter_model_role": "explicit-pre"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
         let plan_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
@@ -17646,15 +19437,7 @@ pre_filter = "project-pre"
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.plan",
-                    "arguments": {
-                        "session_id": "rpc-review",
-                        "base": "HEAD",
-                        "scope": "uncommitted",
-                        "required_clean_iterations": 3,
-                        "changed_files": ["src/new.rs"],
-                        "diff_hash": "same",
-                        "pre_filter_model_role": "explicit-pre"
-                    }
+                    "arguments": plan_arguments
                 }
             }))
             .expect("plan response");
@@ -17670,7 +19453,10 @@ pre_filter = "project-pre"
         );
 
         let mut state = plan["state"].clone();
-        for expected_clean_streak in 1..=3 {
+        let required = state["required_clean_iterations"]
+            .as_u64()
+            .expect("required passes");
+        for expected_clean_streak in 1..=required {
             let lens_results = clean_lens_results_for(&state);
             let advance_response = coordinator
                 .handle_json_rpc(&json!({
@@ -17698,11 +19484,22 @@ pre_filter = "project-pre"
             );
             state = advanced["state"].clone();
         }
+        assert!(review_state_complete(&state));
     }
 
     #[test]
     fn json_rpc_requires_the_exact_resubmission_while_a_verifier_is_pending() {
         let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "pending-verifier-review",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
         let plan_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
@@ -17710,11 +19507,7 @@ pre_filter = "project-pre"
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.plan",
-                    "arguments": {
-                        "session_id": "pending-verifier-review",
-                        "changed_files": ["src/new.rs"],
-                        "diff_hash": "same"
-                    }
+                    "arguments": plan_arguments
                 }
             }))
             .expect("plan response");
@@ -17730,6 +19523,11 @@ pre_filter = "project-pre"
         finding_results[0]["findings"] = json!([{
             "id": "finding-1",
             "severity": "CRITICAL",
+            "causality": "caused",
+            "causality_evidence": "The changed branch introduces the authorization failure.",
+            "likelihood": "possible",
+            "security_impact": "critical",
+            "safety_impact": "none",
             "path": "src/new.rs",
             "message": "real issue",
             "relevance": {
@@ -17842,8 +19640,18 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn json_rpc_exact_resubmission_accepts_a_frozen_decision_for_a_rejected_finding() {
+    fn json_rpc_exact_resubmission_accepts_a_rejected_finding() {
         let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "rejected-frozen-decision",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
         let plan_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
@@ -17851,11 +19659,7 @@ pre_filter = "project-pre"
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.plan",
-                    "arguments": {
-                        "session_id": "rejected-frozen-decision",
-                        "changed_files": ["src/new.rs"],
-                        "diff_hash": "same"
-                    }
+                    "arguments": plan_arguments
                 }
             }))
             .expect("plan response");
@@ -17871,6 +19675,11 @@ pre_filter = "project-pre"
         finding_results[0]["findings"] = json!([{
             "id": "finding-1",
             "severity": "CRITICAL",
+            "causality": "caused",
+            "causality_evidence": "The changed branch appears to introduce the authorization failure.",
+            "likelihood": "possible",
+            "security_impact": "critical",
+            "safety_impact": "none",
             "path": "src/new.rs",
             "message": "candidate issue",
             "relevance": {
@@ -17881,13 +19690,7 @@ pre_filter = "project-pre"
         let advance_arguments = json!({
             "state": state,
             "lens_results": finding_results,
-            "current_diff_hash": "same",
-            "caller_decisions": [{
-                "finding_id": "finding-1",
-                "lens": "correctness-behavior",
-                "decision": "defended",
-                "defense": "The reported scenario does not apply."
-            }]
+            "current_diff_hash": "same"
         });
         let pending_response = coordinator
             .handle_json_rpc(&json!({
@@ -17919,6 +19722,10 @@ pre_filter = "project-pre"
                 "lens": "correctness-behavior",
                 "verdict": "rejected",
                 "severity": "MAJOR",
+                "causality": "incidental",
+                "causality_evidence": "The reported path is not introduced or worsened by the diff.",
+                "security_impact": "none",
+                "safety_impact": "none",
                 "rationale": "The reported scenario is not reachable."
             }],
             "caller_attestation": {
@@ -17939,6 +19746,7 @@ pre_filter = "project-pre"
                 }
             }))
             .expect("exact resubmission response");
+        assert!(response.get("result").is_some(), "response={response}");
         let advanced: Value = serde_json::from_str(
             response["result"]["content"][0]["text"]
                 .as_str()
@@ -18094,6 +19902,16 @@ pre_filter = "project-pre"
     #[test]
     fn json_rpc_rejects_forged_progress_against_server_owned_session_state() {
         let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "forged-review",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
         let plan_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
@@ -18101,11 +19919,7 @@ pre_filter = "project-pre"
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.plan",
-                    "arguments": {
-                        "session_id": "forged-review",
-                        "changed_files": ["src/new.rs"],
-                        "diff_hash": "same"
-                    }
+                    "arguments": plan_arguments
                 }
             }))
             .expect("plan response");
@@ -18149,17 +19963,23 @@ pre_filter = "project-pre"
     #[test]
     fn json_rpc_rejects_duplicate_plan_session_id() {
         let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "existing-review",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
         let request = json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
             "params": {
                 "name": "final_review.plan",
-                "arguments": {
-                    "session_id": "existing-review",
-                    "changed_files": ["src/new.rs"],
-                    "diff_hash": "same"
-                }
+                "arguments": plan_arguments
             }
         });
         let first = coordinator
@@ -18180,6 +20000,16 @@ pre_filter = "project-pre"
         let mut coordinator = ReviewCoordinator::default();
         let mut states = Vec::new();
         for index in 0..=MAX_ACTIVE_REVIEW_SESSIONS {
+            let plan_arguments = add_test_risk_assessment(
+                json!({
+                    "session_id": format!("bounded-review-{index}"),
+                    "changed_files": ["src/new.rs"],
+                    "diff_hash": format!("diff-{index}")
+                }),
+                "high",
+                &[("correctness-behavior", "high")],
+                json!([]),
+            );
             let response = coordinator
                 .handle_json_rpc(&json!({
                     "jsonrpc": "2.0",
@@ -18187,11 +20017,7 @@ pre_filter = "project-pre"
                     "method": "tools/call",
                     "params": {
                         "name": "final_review.plan",
-                        "arguments": {
-                            "session_id": format!("bounded-review-{index}"),
-                            "changed_files": ["src/new.rs"],
-                            "diff_hash": format!("diff-{index}")
-                        }
+                        "arguments": plan_arguments
                     }
                 }))
                 .expect("plan response");
@@ -18230,6 +20056,16 @@ pre_filter = "project-pre"
     #[test]
     fn json_rpc_rejects_advance_after_review_session_completion() {
         let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "completed-review",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
         let response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
@@ -18237,11 +20073,7 @@ pre_filter = "project-pre"
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.plan",
-                    "arguments": {
-                        "session_id": "completed-review",
-                        "changed_files": ["src/new.rs"],
-                        "diff_hash": "same"
-                    }
+                    "arguments": plan_arguments
                 }
             }))
             .expect("plan response");
@@ -18252,7 +20084,10 @@ pre_filter = "project-pre"
         )
         .expect("plan json");
         let mut state = payload["state"].clone();
-        for id in 2..=4 {
+        let required = state["required_clean_iterations"]
+            .as_u64()
+            .expect("required passes");
+        for id in 2..=(required + 1) {
             let response = coordinator
                 .handle_json_rpc(&json!({
                     "jsonrpc": "2.0",
@@ -18280,7 +20115,7 @@ pre_filter = "project-pre"
         let response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
-                "id": 5,
+                "id": required + 2,
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.advance",

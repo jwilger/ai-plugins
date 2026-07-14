@@ -29,7 +29,7 @@ review.
 | User asks for                  | Review scope                                            |
 | ------------------------------ | ------------------------------------------------------- |
 | No explicit base               | `origin/main` to the complete tracked worktree          |
-| Uncommitted changes            | `HEAD` to the complete tracked worktree                 |
+| Uncommitted changes            | ticket-start baseline to the complete tracked worktree  |
 | Since a branch, tag, or commit | that ref to the complete tracked worktree               |
 | Existing PR/MR                 | PR/MR base to the checked-out complete tracked worktree |
 
@@ -92,6 +92,18 @@ at least one non-whitespace character.
 The MCP binds imported defenses into the initial contract and gives each one to
 the matching first-iteration lens. Do not rely on conversation context alone.
 
+The risk scout must set `split_required: true` when the ticket has grown into a
+new subsystem or an unusually broad diff. It must name the corresponding
+`scope_growth_triggers` and propose at least two `split_candidates`; every
+candidate needs a stable ID, title, normalized scope paths, independent
+acceptance criteria, and an explanation of why it is independently shippable.
+Together their scope paths must cover the current changed-file inventory.
+`final_review.plan` and delta reassessment persist that assessment as a
+contract-bound `scope_split_hold`, return no deep-review assignments, and reject
+later advances. The same session cannot be replanned with a weakened assessment
+to get past the gate. Split the work into independently shippable tickets and
+start a new review for each resulting diff.
+
 ## Default Lenses
 
 Use repository-agnostic lenses by default:
@@ -99,6 +111,7 @@ Use repository-agnostic lenses by default:
 - `correctness-behavior`: requirements, edge cases, regressions, and observable behavior.
 - `tests-verification`: test quality, missing coverage, stale evidence, and whether verification proves the claim.
 - `security-safety`: secrets, injection, permissions, unsafe subprocess/file/network behavior, and trust boundaries.
+- `safety-human-harm`: plausible failures that could harm people or the physical world in the intended deployment.
 - `architecture-maintainability`: fit with local patterns, coupling, complexity, naming, and future change cost.
 - `operability-user-impact`: failure messages, ergonomics, configuration, migration, observability, and recovery.
 - `release-integration`: versioning, compatibility, packaging, docs, CI, rollout, and downstream integration.
@@ -132,23 +145,34 @@ the clean streak. A real challenge to a prior defense is non-clean until
 resolved and accepted by a later relevant-lens review. Generic best practice or
 a hypothetical improvement is not a cross-cutting risk without a concrete
 failure path caused by the current change. Do not fix or backlog out-of-scope
-observations unless the user asks.
+wishlist items or generic hardening suggestions. A concrete pre-existing defect
+is still backlog evidence even though it is not a current-ticket blocker.
 
-## Unrelated-Finding Disposition
+## Finding Disposition
 
-At the start of work on one ticket, ask the user once for an unrelated-finding
-disposition matrix. It may set `address-now`, `follow-up-ticket`, or `report`
-by lens and/or severity class, plus a default for anything unmatched.
-For example, architecture observations can be report-only while release findings
-become follow-up tickets. For a multi-ticket automation, ask once before the
-automation begins and retain that policy for its duration. Do not ask again for
-every review iteration or finding.
+Disposition is deterministic and separate from acceptance criteria:
+
+- A caused or worsened `CRITICAL`/`MAJOR` finding blocks final review only when
+  it identifies a concrete, plausible security failure (unauthorized access to
+  the system or its data) or human/physical-safety failure in the intended
+  deployment, with material impact and an in-scope remediation path.
+- Incidental or pre-existing `CRITICAL`/`MAJOR` findings, and caused findings of
+  those severities outside security and human safety, become backlog tickets.
+- Every `MINOR` finding becomes appropriately prioritized backlog work.
+- Every `TRIVIAL` finding is logged in the retained report only.
+
+Prioritize backlog work against the complete backlog using value, risk,
+likelihood, and opportunity cost. A concrete finding does not jump ahead of
+known common work merely because review found it most recently. Do not
+re-report or re-verify an already-tracked finding on an unchanged diff unless
+new evidence materially increases its severity. Deferred and already-known
+findings do not reset review progress.
 
 Always retain the MCP `out_of_scope` findings in the final review report with
-their lens, severity, evidence, and the selected disposition. They do not reset
-the clean streak and are not current-ticket blockers unless the user explicitly
-chooses to include them. A finding introduced by, caused by, or blocking the
-current ticket remains actionable regardless of this preference.
+their lens, severity, evidence, and disposition. Backlogged and report-only
+findings do not block final review. Completing the ticket still requires every
+actual acceptance criterion; disposition is not permission to omit required
+behavior.
 
 When the review is for a tracked ticket, pass its stable tracker ID as
 `work_item_id` to `final_review.plan` (for example, the active Tiber task ID).
@@ -165,14 +189,14 @@ requiring a separate SQLite client.
 
 Use a security-impact assessment separate from review severity: `none`,
 `minor`, `moderate`, `major`, or `critical`. Do not infer this threshold from a
-finding's `CRITICAL`, `MAJOR`, `MINOR`, or `TRIVIAL` review severity. A major-or-higher
-security issue, or any suspected PII exposure at any security-impact level, is
-an exception: unless it must be fixed in the current ticket, document it as a
-high-priority bug ticket even when the selected disposition is report-only.
-Never silently drop, defer without documentation, or let a user opt out of
-recording such a finding. The local final-review report and state retain the
-complete finding; only externally published or tracker artifacts follow the
-repository's applicable reporting policy.
+finding's `CRITICAL`, `MAJOR`, `MINOR`, or `TRIVIAL` review severity. Assess
+`safety_impact` independently on the same scale. A caused/worsened material
+security or safety failure is blocking; the same concrete issue when
+pre-existing or incidental becomes appropriately high-priority backlog work.
+Never silently drop known security, PII, or human-safety evidence. The local
+final-review report and state retain the complete finding; only externally
+published or tracker artifacts follow the repository's applicable reporting
+policy.
 
 ## Loop
 
@@ -182,7 +206,8 @@ repository's applicable reporting policy.
    that assessment to `final_review.plan` with the identical baseline, scope,
    inventory, hash, and evidence. Keep that stdio MCP process alive for the
    entire cycle; later calls carry state that the server checks against its
-   authoritative session copy.
+   authoritative session copy. `final_review.plan` rejects any call that omits
+   the bound scout assessment, baseline, or shared evidence.
 2. For every assignment, start a fresh subagent with the complete MCP-generated
    assignment prompt, including its baseline, diff, relevant files, user
    request, acceptance criteria, explicit concerns, and prior defenses. Exclude
@@ -203,11 +228,26 @@ repository's applicable reporting policy.
    `verifier_required`, run and immediately close that one batched assignment
    and append the same caller attestation. Resubmit the exact same `state`,
    `lens_results`, `current_diff_hash`, any required `current_changed_files`,
-   and `caller_decisions`, adding only `verifier_result`. The server freezes
-   pre-verifier arguments, so a defense or accepted-risk decision first added
-   on resubmission fails closed. Failed/uncertain verification keeps candidates
-   open; a rejected finding is not a blocker but its iteration is still
-   non-clean.
+   and `caller_decisions`, adding `verifier_result` plus any ticket or security
+   disposition evidence that the verifier's final classification newly
+   requires. The server freezes the core lens, scope, and caller-decision
+   arguments, so a defense or accepted-risk decision first added on
+   resubmission fails closed. Failed/uncertain verification keeps blocking
+   candidates open. A rejected finding is removed; the iteration may count as
+   clean when no other blocking, malformed, or needs-human finding remains.
+
+   For a medium-risk session, the coordinator records a server-timed 75-minute
+   checkpoint. When `advance_kind` is `review_budget_checkpoint`, the submitted
+   review or delta results have already been applied to authoritative state and
+   no further reviewer is assigned. Make the next call with that returned
+   state, the unchanged `current_diff_hash`, empty `lens_results`, and exactly
+   one `review_budget_decision`: `ship`, `split`, or `escalate`, with a nonblank
+   rationale. `split` also requires at least two distinct ticket references;
+   `escalate` requires a nonblank escalation reference. `ship` terminates final
+   review and schedules no more reviewers, but never overrides unmet acceptance
+   criteria, a failed/not-started CI gate, or an unresolved blocking finding.
+   Split and escalate create a terminal hold for that review session.
+
 4. Fix valid findings when remediation was requested; for review-only requests,
    report without editing. On the initial advancing call that records each
    disposition, send `caller_decisions` in this shape:
@@ -229,11 +269,17 @@ repository's applicable reporting policy.
    character. Do not rely on conversation prose to carry a decision into later
    assignments.
 
-5. Repeat with fresh assignments. Stop only when `final_review.advance` reports
-   completion after three consecutive full iterations with no actionable,
-   needs-human, malformed, or unresolved finding. A filtered out-of-scope
-   observation does not break an otherwise clean iteration. A defense counts as
-   clean only after the next relevant lens accepts it.
+5. Repeat only the assignments returned by the coordinator. Low risk normally
+   needs the lightweight review and at most one targeted lens; medium risk gets
+   one targeted full pass; high risk gets one broad pass; exceptional risk may
+   assign two independent passes only to exceptional dimensions. After a
+   blocking fix, rerun affected lenses plus the correctness/integration guard,
+   not every unaffected lens. Stop when `final_review.advance` reports
+   completion: all planned passes and discovery-saturation checks are satisfied,
+   every finding has been dispositioned, and no unresolved blocking caused or
+   worsened CRITICAL/MAJOR security or human-safety finding remains. Backlogged,
+   already-known, and report-only observations do not reset progress when the
+   reviewed diff is unchanged.
 
 This skill requires a harness that can launch fresh-context subagents and keep
 one MCP process alive through the review. If either capability is unavailable,
@@ -247,5 +293,5 @@ review contract.
 
 Before PR creation, merge, or readiness claims, report the scope/baseline,
 lenses, fixes/defenses/remaining risk, the selected unrelated-finding
-disposition and its out-of-scope report, three clean iterations, and
-verification commands/outcomes.
+disposition and its out-of-scope report, risk-selected pass evidence, the final
+blocking-finding status, and verification commands/outcomes.
