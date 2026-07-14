@@ -10,6 +10,8 @@ use std::fs;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
@@ -53,7 +55,10 @@ const MAX_SHARED_TEST_COMMAND_BYTES: usize = 1024;
 const MAX_SHARED_TEST_SUMMARY_BYTES: usize = 4 * 1024;
 const MAX_SHARED_TEST_ARTIFACT_BYTES: usize = 2 * 1024;
 const MAX_BROAD_TEST_RERUN_REASON_BYTES: usize = 2 * 1024;
+const MAX_DELTA_EVIDENCE_BYTES: usize = 128 * 1024;
+const MAX_DELTA_INLINE_PATCH_BYTES: usize = 96 * 1024;
 static OPAQUE_FINGERPRINT_HASHER: OnceLock<RandomState> = OnceLock::new();
+static SNAPSHOT_INDEX_COUNTER: AtomicU64 = AtomicU64::new(0);
 // This inventory is repeated once per lens assignment, while the full list is
 // retained in session state. Keep it small enough that a maximum-size scope can
 // still return every next-iteration assignment in one MCP response.
@@ -155,6 +160,7 @@ fn write_json_rpc_response(output: &mut impl Write, response: Value) -> io::Resu
 struct ReviewCoordinator {
     sessions: HashMap<String, Value>,
     pending_verifiers: HashMap<String, PendingVerifier>,
+    pending_delta_risks: HashMap<String, PendingVerifier>,
     session_lru: VecDeque<String>,
 }
 
@@ -318,6 +324,20 @@ impl ReviewCoordinator {
                     return Err("pending_verifier_resubmission_mismatch=true".to_string());
                 }
             }
+            if let Some(pending) = self.pending_delta_risks.get(session_id) {
+                let assessment = arguments
+                    .get("delta_risk_assessment")
+                    .ok_or_else(|| "pending_delta_risk_assessment_required=true".to_string())?;
+                if assessment.get("assignment_id").and_then(Value::as_str)
+                    != Some(pending.assignment_id.as_str())
+                {
+                    return Err("pending_delta_risk_assignment_mismatch=true".to_string());
+                }
+                let resubmission = pending_delta_risk_core_arguments(arguments)?;
+                if resubmission != pending.arguments {
+                    return Err("pending_delta_risk_resubmission_mismatch=true".to_string());
+                }
+            }
         }
         self.touch_session(session_id);
         Ok(())
@@ -376,6 +396,27 @@ impl ReviewCoordinator {
             return Ok(());
         }
         if tool_name == "final_review.advance"
+            && payload.get("transition_status").and_then(Value::as_str)
+                == Some("delta_risk_assessment_required")
+        {
+            let assignment_id = payload
+                .pointer("/delta_risk_assignments/0/assignment_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "internal delta risk assignment id missing".to_string())?
+                .to_string();
+            let expected_arguments = pending_delta_risk_core_arguments(arguments)
+                .map_err(|_| "internal delta risk arguments object missing".to_string())?;
+            self.pending_delta_risks.insert(
+                session_id.clone(),
+                PendingVerifier {
+                    assignment_id,
+                    arguments: expected_arguments,
+                },
+            );
+            self.touch_session(&session_id);
+            return Ok(());
+        }
+        if tool_name == "final_review.advance"
             && payload.get("transition_status").and_then(Value::as_str) != Some("advanced")
         {
             return Ok(());
@@ -385,6 +426,7 @@ impl ReviewCoordinator {
         }
         self.sessions.insert(session_id.clone(), state);
         self.pending_verifiers.remove(&session_id);
+        self.pending_delta_risks.remove(&session_id);
         self.touch_session(&session_id);
         while self.sessions.len() > MAX_ACTIVE_REVIEW_SESSIONS {
             let Some(evicted) = self.session_lru.pop_front() else {
@@ -392,6 +434,7 @@ impl ReviewCoordinator {
             };
             self.sessions.remove(&evicted);
             self.pending_verifiers.remove(&evicted);
+            self.pending_delta_risks.remove(&evicted);
         }
         Ok(())
     }
@@ -414,6 +457,15 @@ fn pending_verifier_core_arguments(arguments: &Value) -> Result<Value, String> {
     ] {
         fields.remove(field);
     }
+    Ok(core)
+}
+
+fn pending_delta_risk_core_arguments(arguments: &Value) -> Result<Value, String> {
+    let mut core = arguments.clone();
+    let fields = core
+        .as_object_mut()
+        .ok_or_else(|| "pending_delta_risk_arguments_object_required=true".to_string())?;
+    fields.remove("delta_risk_assessment");
     Ok(core)
 }
 
@@ -627,6 +679,7 @@ fn tools() -> Value {
                     "current_diff_hash": { "type": "string" },
                     "current_changed_files": { "type": "array", "items": { "type": "string" } },
                     "current_shared_test_evidence": shared_test_evidence_schema(),
+                    "delta_risk_assessment": delta_risk_assessment_output_schema(),
                     "security_escalations": {
                         "type": "array",
                         "items": {
@@ -859,6 +912,347 @@ fn validated_shared_test_evidence(
     Ok(normalized)
 }
 
+fn git_command(project_root: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
+        .arg("-c")
+        .arg("core.fsmonitor=false")
+        .arg("-c")
+        .arg("core.quotePath=true")
+        .arg("-C")
+        .arg(project_root)
+        .env("GIT_AUTHOR_NAME", "Development Discipline")
+        .env("GIT_AUTHOR_EMAIL", "development-discipline@localhost")
+        .env("GIT_AUTHOR_DATE", "@0 +0000")
+        .env("GIT_COMMITTER_NAME", "Development Discipline")
+        .env("GIT_COMMITTER_EMAIL", "development-discipline@localhost")
+        .env("GIT_COMMITTER_DATE", "@0 +0000");
+    command
+}
+
+fn run_git(
+    project_root: &Path,
+    args: &[String],
+    index_file: Option<&Path>,
+    stdin: Option<&[u8]>,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let mut command = git_command(project_root);
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(index_file) = index_file {
+        command.env("GIT_INDEX_FILE", index_file);
+    }
+    if stdin.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("{label}_spawn_failed source={error}"))?;
+    if let Some(input) = stdin {
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| format!("{label}_stdin_missing=true"))?
+            .write_all(input)
+            .map_err(|error| format!("{label}_stdin_failed source={error}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("{label}_wait_failed source={error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.chars().take(2048).collect::<String>();
+        return Err(format!("{label}_failed detail={}", stderr.trim()));
+    }
+    Ok(output.stdout)
+}
+
+fn git_text(
+    project_root: &Path,
+    args: &[String],
+    index_file: Option<&Path>,
+    stdin: Option<&[u8]>,
+    label: &str,
+) -> Result<String, String> {
+    let output = run_git(project_root, args, index_file, stdin, label)?;
+    String::from_utf8(output)
+        .map(|value| value.trim().to_string())
+        .map_err(|error| format!("{label}_utf8_failed source={error}"))
+}
+
+fn path_chunks(paths: &[String]) -> Vec<Vec<String>> {
+    let mut chunks = Vec::new();
+    let mut current = Vec::new();
+    let mut current_bytes = 0_usize;
+    for path in paths {
+        let bytes = path.len().saturating_add(16);
+        if !current.is_empty() && current_bytes.saturating_add(bytes) > 64 * 1024 {
+            chunks.push(current);
+            current = Vec::new();
+            current_bytes = 0;
+        }
+        current.push(path.clone());
+        current_bytes = current_bytes.saturating_add(bytes);
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+fn valid_git_object_id(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.chars().all(|character| character.is_ascii_hexdigit())
+}
+
+fn create_scope_snapshot_commit(
+    project_root: &Path,
+    changed_files: &[String],
+) -> Result<String, String> {
+    let parent = git_text(
+        project_root,
+        &["rev-parse".to_string(), "HEAD^{commit}".to_string()],
+        None,
+        None,
+        "scope_snapshot_head",
+    )?;
+    let prefix = git_text(
+        project_root,
+        &["rev-parse".to_string(), "--show-prefix".to_string()],
+        None,
+        None,
+        "scope_snapshot_prefix",
+    )?;
+    let counter = SNAPSHOT_INDEX_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let index_file = env::temp_dir().join(format!(
+        "development-discipline-snapshot-{}-{counter}.index",
+        std::process::id()
+    ));
+    let lock_file = PathBuf::from(format!("{}.lock", index_file.to_string_lossy()));
+    let result = (|| {
+        run_git(
+            project_root,
+            &["read-tree".to_string(), parent.clone()],
+            Some(&index_file),
+            None,
+            "scope_snapshot_read_tree",
+        )?;
+        let mut tracked = HashSet::new();
+        for chunk in path_chunks(changed_files) {
+            let mut args = vec![
+                "ls-files".to_string(),
+                "--full-name".to_string(),
+                "-z".to_string(),
+                "--".to_string(),
+            ];
+            args.extend(chunk.iter().map(|path| format!(":(literal){path}")));
+            let output = run_git(
+                project_root,
+                &args,
+                Some(&index_file),
+                None,
+                "scope_snapshot_list_tracked",
+            )?;
+            for path in output
+                .split(|byte| *byte == 0)
+                .filter(|path| !path.is_empty())
+            {
+                let path = std::str::from_utf8(path).map_err(|error| {
+                    format!("scope_snapshot_tracked_path_utf8_failed source={error}")
+                })?;
+                tracked.insert(path.to_string());
+            }
+        }
+        let included = changed_files
+            .iter()
+            .filter(|path| {
+                fs::symlink_metadata(project_root.join(path)).is_ok()
+                    || tracked.contains(&format!("{prefix}{path}"))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for chunk in path_chunks(&included) {
+            let mut args = vec!["add".to_string(), "-A".to_string(), "--".to_string()];
+            args.extend(chunk.iter().map(|path| format!(":(literal){path}")));
+            run_git(
+                project_root,
+                &args,
+                Some(&index_file),
+                None,
+                "scope_snapshot_add",
+            )?;
+        }
+        let tree = git_text(
+            project_root,
+            &["write-tree".to_string()],
+            Some(&index_file),
+            None,
+            "scope_snapshot_write_tree",
+        )?;
+        git_text(
+            project_root,
+            &["commit-tree".to_string(), tree, "-p".to_string(), parent],
+            None,
+            Some(b"development-discipline scope snapshot\n"),
+            "scope_snapshot_commit_tree",
+        )
+    })();
+    let _ = fs::remove_file(&index_file);
+    let _ = fs::remove_file(&lock_file);
+    let commit = result?;
+    if !valid_git_object_id(&commit) {
+        return Err("scope_snapshot_commit_invalid=true".to_string());
+    }
+    Ok(commit)
+}
+
+fn generated_delta_evidence(
+    state: &Value,
+    prior_diff_hash: &str,
+    current_diff_hash: &str,
+    current_changed_files: &[String],
+) -> Result<Value, String> {
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .map(Path::new)
+        .ok_or_else(|| "scope_project_root_required=true".to_string())?;
+    let prior_snapshot_commit = state
+        .pointer("/scope/snapshot_commit")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "scope_snapshot_commit_required=true".to_string())?;
+    let mut snapshot_paths =
+        string_array(state.pointer("/scope/changed_files")).unwrap_or_default();
+    snapshot_paths.extend(current_changed_files.iter().cloned());
+    snapshot_paths.sort();
+    snapshot_paths.dedup();
+    let current_snapshot_commit = create_scope_snapshot_commit(project_root, &snapshot_paths)?;
+    let mut range_args = vec![
+        "diff".to_string(),
+        "--binary".to_string(),
+        "--full-index".to_string(),
+        "--no-color".to_string(),
+        "--no-ext-diff".to_string(),
+        "--no-textconv".to_string(),
+        "--no-renames".to_string(),
+        "--relative".to_string(),
+        prior_snapshot_commit.to_string(),
+        current_snapshot_commit.clone(),
+        "--".to_string(),
+    ];
+    range_args.extend(
+        snapshot_paths
+            .iter()
+            .map(|path| format!(":(literal){path}")),
+    );
+    let counter = SNAPSHOT_INDEX_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let evidence_dir = env::temp_dir().join("development-discipline-delta-evidence");
+    fs::create_dir_all(&evidence_dir)
+        .map_err(|error| format!("delta_evidence_directory_failed source={error}"))?;
+    let patch_path = evidence_dir.join(format!("{}-{counter}.patch", std::process::id()));
+    let patch_file = fs::File::create(&patch_path)
+        .map_err(|error| format!("delta_evidence_create_failed source={error}"))?;
+    let mut command = git_command(project_root);
+    let output = command
+        .args(&range_args)
+        .stdout(Stdio::from(patch_file))
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| format!("delta_evidence_diff_failed source={error}"))?;
+    if !output.status.success() {
+        let _ = fs::remove_file(&patch_path);
+        return Err(format!(
+            "delta_evidence_diff_failed detail={}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let mut changed_path_args = vec![
+        "diff".to_string(),
+        "--name-only".to_string(),
+        "-z".to_string(),
+        "--no-renames".to_string(),
+        "--relative".to_string(),
+        prior_snapshot_commit.to_string(),
+        current_snapshot_commit.clone(),
+        "--".to_string(),
+    ];
+    changed_path_args.extend(
+        snapshot_paths
+            .iter()
+            .map(|path| format!(":(literal){path}")),
+    );
+    let changed_paths_output = run_git(
+        project_root,
+        &changed_path_args,
+        None,
+        None,
+        "delta_evidence_changed_paths",
+    )?;
+    let mut changed_paths = changed_paths_output
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            std::str::from_utf8(path)
+                .map(str::to_string)
+                .map_err(|error| format!("delta_evidence_path_utf8_failed source={error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    changed_paths.sort();
+    changed_paths.dedup();
+    let patch_size = fs::metadata(&patch_path)
+        .map_err(|error| format!("delta_evidence_metadata_failed source={error}"))?
+        .len() as usize;
+    let summary = format!(
+        "Server-generated Git snapshot delta changes {} path(s).",
+        changed_paths.len()
+    );
+    let mut normalized = json!({
+        "prior_diff_hash": prior_diff_hash,
+        "current_diff_hash": current_diff_hash,
+        "changed_paths": changed_paths,
+        "summary": summary,
+        "prior_snapshot_commit": prior_snapshot_commit,
+        "current_snapshot_commit": current_snapshot_commit
+    });
+    if patch_size <= MAX_DELTA_INLINE_PATCH_BYTES {
+        let patch = fs::read_to_string(&patch_path)
+            .map_err(|error| format!("delta_evidence_read_failed source={error}"))?;
+        normalized["inline_patch"] = json!(patch);
+        let _ = fs::remove_file(&patch_path);
+    } else {
+        let digest = git_text(
+            project_root,
+            &[
+                "hash-object".to_string(),
+                patch_path.to_string_lossy().to_string(),
+            ],
+            None,
+            None,
+            "delta_evidence_digest",
+        )?;
+        if !valid_git_object_id(&digest) {
+            let _ = fs::remove_file(&patch_path);
+            return Err("delta_evidence_digest_invalid=true".to_string());
+        }
+        let content_addressed_path = evidence_dir.join(format!("{digest}.patch"));
+        match fs::hard_link(&patch_path, &content_addressed_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                let _ = fs::remove_file(&patch_path);
+                return Err(format!("delta_evidence_persist_failed source={error}"));
+            }
+        }
+        let _ = fs::remove_file(&patch_path);
+        normalized["artifact_reference"] = json!(content_addressed_path);
+        normalized["artifact_digest"] = json!(digest);
+    }
+    ensure_json_size(&normalized, "delta_evidence", MAX_DELTA_EVIDENCE_BYTES)?;
+    Ok(normalized)
+}
+
 fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
     let scope = match arguments.get("scope") {
         None => "base".to_string(),
@@ -909,6 +1303,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         Some(Path::new(&project_root)),
         "scope_changed_files",
     )?;
+    let snapshot_commit = create_scope_snapshot_commit(Path::new(&project_root), &changed_files)?;
     let conditional_lenses = parse_conditional_lenses(arguments.get("conditional_lenses"))?;
     let review_dimensions = risk_dimensions(&conditional_lenses);
     let (model_roles, _) = resolve_model_roles(arguments, &review_dimensions)?;
@@ -924,7 +1319,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
             }
             None => stable_session_id(&project_root, &scope, &base, &diff_hash),
         };
-    let binding = json!({
+    let mut binding = json!({
         "session_id": session_id,
         "scope": scope,
         "base": base,
@@ -935,8 +1330,15 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         "acceptance_criteria": acceptance_criteria,
         "explicit_concerns": explicit_concerns,
         "review_dimensions": review_dimensions,
-        "shared_test_evidence": shared_test_evidence
+        "shared_test_evidence": shared_test_evidence,
+        "snapshot_commit": snapshot_commit
     });
+    if let Some(delta_evidence) = arguments.get("delta_evidence") {
+        if !delta_evidence.is_object() {
+            return Err("delta_evidence_must_be_object=true".to_string());
+        }
+        binding["delta_evidence"] = delta_evidence.clone();
+    }
     let binding_text = binding.to_string();
     let assignment_id = format!(
         "risk-{}",
@@ -977,7 +1379,8 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
             "base": base,
             "project_root": project_root,
             "changed_files": changed_files,
-            "diff_hash": diff_hash
+            "diff_hash": diff_hash,
+            "snapshot_commit": snapshot_commit
         },
         "review_dimensions": review_dimensions,
         "shared_test_evidence": shared_test_evidence,
@@ -1000,6 +1403,118 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         ));
     }
     Ok(response)
+}
+
+fn delta_risk_arguments(
+    state: &Value,
+    current_diff_hash: &str,
+    current_changed_files: &[String],
+    current_shared_test_evidence: &Value,
+    current_delta_evidence: &Value,
+) -> Result<Value, String> {
+    let review_contract_id = state
+        .get("review_contract_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_contract_id_required=true".to_string())?;
+    let session_id = format!(
+        "delta-{}",
+        stable_storage_digest(&[
+            review_contract_id,
+            state
+                .pointer("/scope/diff_hash")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown"),
+            current_diff_hash,
+            &current_delta_evidence.to_string(),
+        ])
+    );
+    let built_in_dimensions = risk_dimensions(&[]).into_iter().collect::<HashSet<_>>();
+    let conditional_lenses = state
+        .pointer("/risk_plan/dimensions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|dimension| dimension.get("lens").and_then(Value::as_str))
+        .filter(|lens| !built_in_dimensions.contains(*lens))
+        .map(|lens| {
+            json!({
+                "id": lens,
+                "description": state
+                    .get("lens_objectives")
+                    .and_then(|objectives| objectives.get(lens))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Assess the concrete risk introduced by this conditional dimension.")
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "session_id": session_id,
+        "base": state.pointer("/scope/base").and_then(Value::as_str).unwrap_or(DEFAULT_BASE),
+        "scope": state.pointer("/scope/kind").and_then(Value::as_str).unwrap_or("base"),
+        "project_root": state.pointer("/scope/project_root").and_then(Value::as_str).unwrap_or("."),
+        "changed_files": current_changed_files,
+        "diff_hash": current_diff_hash,
+        "shared_test_evidence": current_shared_test_evidence,
+        "delta_evidence": current_delta_evidence,
+        "user_request": state.pointer("/context/user_request").and_then(Value::as_str).unwrap_or(""),
+        "acceptance_criteria": state.pointer("/context/acceptance_criteria").cloned().unwrap_or_else(|| json!([])),
+        "explicit_concerns": state.pointer("/context/explicit_concerns").cloned().unwrap_or_else(|| json!([])),
+        "conditional_lenses": conditional_lenses,
+        "pre_filter_model_role": state.pointer("/model_roles/pre_filter").and_then(Value::as_str).unwrap_or("fast-filter")
+    }))
+}
+
+fn delta_risk_assignment(
+    state: &Value,
+    current_diff_hash: &str,
+    current_changed_files: &[String],
+    current_shared_test_evidence: &Value,
+    current_delta_evidence: &Value,
+) -> Result<(Value, Value), String> {
+    let arguments = delta_risk_arguments(
+        state,
+        current_diff_hash,
+        current_changed_files,
+        current_shared_test_evidence,
+        current_delta_evidence,
+    )?;
+    let payload: Value = serde_json::from_str(&risk_assessment_result(&arguments)?)
+        .map_err(|error| format!("delta_risk_assignment_parse_failed source={error}"))?;
+    let mut assignment = payload
+        .pointer("/assignments/0")
+        .cloned()
+        .ok_or_else(|| "delta_risk_assignment_missing=true".to_string())?;
+    let prior_diff_hash = state
+        .pointer("/scope/diff_hash")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    assignment["role"] = json!("delta-risk-scout");
+    assignment["prior_diff_hash"] = json!(prior_diff_hash);
+    assignment["current_diff_hash"] = json!(current_diff_hash);
+    assignment["delta_evidence"] = current_delta_evidence.clone();
+    assignment["expected_output_schema"] = delta_risk_assessment_output_schema();
+    assignment["prompt"] = json!(json!({
+        "role": "delta-risk-scout",
+        "objective": "Compare the prior reviewed diff with the replacement diff, identify only risk dimensions materially affected by the response changes, and preserve or add required coverage without removing prior obligations.",
+        "prior_review": {
+            "review_contract_id": state.get("review_contract_id").cloned().unwrap_or(Value::Null),
+            "scope": state.get("scope").cloned().unwrap_or(Value::Null),
+            "risk_plan": state.get("risk_plan").cloned().unwrap_or(Value::Null),
+            "unresolved_findings": state.get("unresolved_findings").cloned().unwrap_or_else(|| json!([]))
+        },
+        "current_review": {
+            "scope": assignment.get("scope").cloned().unwrap_or(Value::Null),
+            "shared_test_evidence": current_shared_test_evidence,
+            "delta_evidence": current_delta_evidence
+        },
+        "instructions": [
+            "Return the full current risk matrix and mark affected=true only for dimensions whose concrete failure paths or required confirmation changed.",
+            "Mark every newly selected dimension and every dimension containing a new finding as affected.",
+            "Do not remove unresolved blockers or request less coverage; the coordinator enforces a monotonic coverage floor.",
+            "Consume the supplied shared test evidence. Do not run tests, invoke a verifier, or request another planner."
+        ]
+    }).to_string());
+    Ok((arguments, assignment))
 }
 
 fn risk_assessment_output_schema() -> Value {
@@ -1100,6 +1615,35 @@ fn risk_assessment_output_schema() -> Value {
         ],
         "additionalProperties": false
     })
+}
+
+fn delta_risk_assessment_output_schema() -> Value {
+    let mut schema = risk_assessment_output_schema();
+    let properties = schema["properties"]
+        .as_object_mut()
+        .expect("risk assessment properties are an object");
+    properties.insert("prior_diff_hash".to_string(), json!({ "type": "string" }));
+    properties.insert("current_diff_hash".to_string(), json!({ "type": "string" }));
+    properties.insert(
+        "caller_attestation".to_string(),
+        caller_attestation_schema(),
+    );
+    let dimensions = properties
+        .get_mut("dimensions")
+        .and_then(|dimensions| dimensions.get_mut("items"))
+        .expect("risk assessment dimensions have an item schema");
+    dimensions["properties"]["affected"] = json!({ "type": "boolean" });
+    dimensions["required"]
+        .as_array_mut()
+        .expect("risk dimension required fields are an array")
+        .push(json!("affected"));
+    let required = schema["required"]
+        .as_array_mut()
+        .expect("risk assessment required fields are an array");
+    required.push(json!("prior_diff_hash"));
+    required.push(json!("current_diff_hash"));
+    required.push(json!("caller_attestation"));
+    schema
 }
 
 #[derive(Clone)]
@@ -1280,14 +1824,35 @@ fn compile_risk_plan(
         .filter_map(Value::as_u64)
         .max()
         .unwrap_or(1);
+    let active_lenses = selected_lenses.clone();
+    let active_lens_passes = lens_passes.clone();
     let (findings, blocking_findings) = validated_scout_findings(
         assessment.get("findings"),
         &expected_dimensions,
         changed_files,
     )?;
+    if let Some(finding) = findings.iter().find(|finding| {
+        matches!(
+            finding.get("severity").and_then(Value::as_str),
+            Some("MAJOR" | "CRITICAL")
+        ) && finding
+            .get("lens")
+            .and_then(Value::as_str)
+            .is_none_or(|lens| !selected_lenses.iter().any(|selected| selected == lens))
+    }) {
+        return Err(format!(
+            "risk_assessment_material_finding_lens_must_be_selected lens={}",
+            finding
+                .get("lens")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        ));
+    }
+    let discovery_saturation = initial_discovery_saturation(&selected_lenses, &findings);
     let state = json!({
         "assessment_id": expected_assignment["assignment_id"],
         "shared_test_evidence_id": expected_assignment["shared_test_evidence"]["id"],
+        "scope_snapshot_commit": expected_assignment["scope"]["snapshot_commit"],
         "overall_risk": overall_risk,
         "dimensions": dimensions,
         "findings": findings,
@@ -1295,6 +1860,10 @@ fn compile_risk_plan(
         "plan_assumptions": assessment.get("plan_assumptions").cloned().unwrap_or_else(|| json!([])),
         "selected_lenses": selected_lenses,
         "lens_passes": lens_passes,
+        "active_lenses": active_lenses,
+        "active_lens_passes": active_lens_passes,
+        "delta_history": [],
+        "discovery_saturation": discovery_saturation,
         "discovery_sample_count": 1,
         "resolved_blocking_findings": []
     });
@@ -1458,6 +2027,211 @@ fn caused_blocking_safety_finding(finding: &Value) -> bool {
     ) && caused_blocking_security_or_safety_finding(finding)
 }
 
+fn material_finding_id(finding: &Value) -> Option<String> {
+    matches!(
+        finding.get("severity").and_then(Value::as_str),
+        Some("MAJOR" | "CRITICAL")
+    )
+    .then(|| {
+        finding
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    })
+    .flatten()
+}
+
+fn initial_discovery_saturation(selected_lenses: &[String], findings: &[Value]) -> Value {
+    let mut known_major_critical_ids = findings
+        .iter()
+        .filter_map(material_finding_id)
+        .collect::<Vec<_>>();
+    known_major_critical_ids.sort();
+    known_major_critical_ids.dedup();
+    let confirmation_samples_by_lens = selected_lenses
+        .iter()
+        .map(|lens| (lens.clone(), json!(0)))
+        .collect::<serde_json::Map<_, _>>();
+    let last_sample_added_new_by_lens = selected_lenses
+        .iter()
+        .map(|lens| (lens.clone(), json!(false)))
+        .collect::<serde_json::Map<_, _>>();
+    json!({
+        "known_major_critical_ids": known_major_critical_ids,
+        "confirmation_samples_by_lens": confirmation_samples_by_lens,
+        "last_sample_added_new_by_lens": last_sample_added_new_by_lens
+    })
+}
+
+fn derived_pending_review(
+    selected_lenses: &[String],
+    lens_passes: &serde_json::Map<String, Value>,
+    confirmation_samples: &serde_json::Map<String, Value>,
+    last_sample_added_new: &serde_json::Map<String, Value>,
+) -> (Vec<String>, serde_json::Map<String, Value>) {
+    let mut pending = Vec::new();
+    let mut remaining_passes = serde_json::Map::new();
+    for lens in selected_lenses {
+        let required = lens_passes.get(lens).and_then(Value::as_u64).unwrap_or(1);
+        let completed = confirmation_samples
+            .get(lens)
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let added_new = last_sample_added_new
+            .get(lens)
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if completed < required || added_new {
+            pending.push(lens.clone());
+            let remaining = if completed < required {
+                required - completed
+            } else {
+                1
+            };
+            remaining_passes.insert(lens.clone(), json!(remaining.max(1)));
+        }
+    }
+    (pending, remaining_passes)
+}
+
+fn refresh_active_review_state(state: &mut Value) -> Result<Vec<String>, String> {
+    let selected_lenses = string_array(state.pointer("/risk_plan/selected_lenses"))
+        .ok_or_else(|| "risk_plan_selected_lenses_required=true".to_string())?;
+    let lens_passes = state
+        .pointer("/risk_plan/lens_passes")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| "risk_plan_lens_passes_required=true".to_string())?;
+    let confirmation_samples = state
+        .pointer("/risk_plan/discovery_saturation/confirmation_samples_by_lens")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| "risk_plan_confirmation_samples_required=true".to_string())?;
+    let last_sample_added_new = state
+        .pointer("/risk_plan/discovery_saturation/last_sample_added_new_by_lens")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| "risk_plan_last_sample_added_new_required=true".to_string())?;
+    let (active_lenses, active_lens_passes) = derived_pending_review(
+        &selected_lenses,
+        &lens_passes,
+        &confirmation_samples,
+        &last_sample_added_new,
+    );
+    state["risk_plan"]["active_lenses"] = json!(active_lenses);
+    state["risk_plan"]["active_lens_passes"] = Value::Object(active_lens_passes.clone());
+    state["lenses"] = json!(active_lenses);
+    state["required_clean_iterations"] = json!(active_lens_passes
+        .values()
+        .filter_map(Value::as_u64)
+        .max()
+        .unwrap_or(1));
+    Ok(active_lenses)
+}
+
+fn update_discovery_saturation(state: &mut Value, filtered: &mut Value) -> Result<(), String> {
+    if !state.get("risk_plan").is_some_and(Value::is_object) {
+        return Ok(());
+    }
+    let reviewed_lenses = string_array(filtered.pointer("/transition/expected_lenses"))
+        .ok_or_else(|| "filtered_transition_expected_lenses_required=true".to_string())?;
+    let malformed_lenses = filtered
+        .get("malformed")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|finding| finding.get("lens").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    let mut known_ids =
+        string_array(state.pointer("/risk_plan/discovery_saturation/known_major_critical_ids"))
+            .ok_or_else(|| "risk_plan_known_major_critical_ids_required=true".to_string())?
+            .into_iter()
+            .collect::<HashSet<_>>();
+    let pre_sample_known = known_ids.clone();
+    let mut new_ids_by_lens = reviewed_lenses
+        .iter()
+        .map(|lens| (lens.clone(), HashSet::new()))
+        .collect::<HashMap<_, _>>();
+    for finding in [
+        "actionable",
+        "needs_human_decision",
+        "routed",
+        "out_of_scope",
+        "defended_or_accepted",
+        "already_tracked",
+    ]
+    .into_iter()
+    .flat_map(|bucket| {
+        filtered
+            .get(bucket)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+    }) {
+        let Some(id) = material_finding_id(finding) else {
+            continue;
+        };
+        let Some(lens) = finding.get("lens").and_then(Value::as_str) else {
+            continue;
+        };
+        if let Some(ids) = new_ids_by_lens.get_mut(lens) {
+            ids.insert(id);
+        }
+    }
+    let mut confirmation_samples = state
+        .pointer("/risk_plan/discovery_saturation/confirmation_samples_by_lens")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| "risk_plan_confirmation_samples_required=true".to_string())?;
+    let mut last_sample_added_new = state
+        .pointer("/risk_plan/discovery_saturation/last_sample_added_new_by_lens")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| "risk_plan_last_sample_added_new_required=true".to_string())?;
+    let mut newly_discovered = Vec::new();
+    for lens in &reviewed_lenses {
+        if malformed_lenses.contains(lens) {
+            continue;
+        }
+        let count = confirmation_samples
+            .get(lens)
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .saturating_add(1);
+        confirmation_samples.insert(lens.clone(), json!(count));
+        let added = new_ids_by_lens
+            .get(lens)
+            .into_iter()
+            .flatten()
+            .filter(|id| !pre_sample_known.contains(*id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let added_new = !added.is_empty();
+        if let Some(ids) = new_ids_by_lens.get(lens) {
+            known_ids.extend(ids.iter().cloned());
+        }
+        newly_discovered.extend(added);
+        last_sample_added_new.insert(lens.clone(), json!(added_new));
+    }
+    let mut known_ids = known_ids.into_iter().collect::<Vec<_>>();
+    known_ids.sort();
+    newly_discovered.sort();
+    newly_discovered.dedup();
+    state["risk_plan"]["discovery_saturation"]["known_major_critical_ids"] = json!(known_ids);
+    state["risk_plan"]["discovery_saturation"]["confirmation_samples_by_lens"] =
+        Value::Object(confirmation_samples);
+    state["risk_plan"]["discovery_saturation"]["last_sample_added_new_by_lens"] =
+        Value::Object(last_sample_added_new);
+    let next_lenses = refresh_active_review_state(state)?;
+    filtered["discovery_saturation"] = json!({
+        "reviewed_lenses": reviewed_lenses,
+        "new_major_critical_ids": newly_discovered,
+        "next_lenses": next_lenses
+    });
+    Ok(())
+}
+
 fn plan_result(arguments: &Value) -> Result<String, String> {
     let scope = match arguments.get("scope") {
         None => "base".to_string(),
@@ -1527,6 +2301,11 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
     let risk_plan_state = compiled_risk_plan
         .as_ref()
         .map(|plan| plan.state.clone())
+        .unwrap_or(Value::Null);
+    let scope_snapshot_commit = compiled_risk_plan
+        .as_ref()
+        .and_then(|plan| plan.state.get("scope_snapshot_commit"))
+        .cloned()
         .unwrap_or(Value::Null);
     let shared_test_evidence = if compiled_risk_plan.is_some() {
         validated_shared_test_evidence(
@@ -1600,7 +2379,8 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
             "base": base,
             "changed_files": changed_files,
             "diff_hash": diff_hash,
-            "project_root": project_root
+            "project_root": project_root,
+            "snapshot_commit": scope_snapshot_commit
         },
         "context": {
             "user_request": user_request,
@@ -2439,16 +3219,77 @@ fn advance_with_contract_validation(
     } else {
         None
     };
+    validate_required_clean_iterations(&state)?;
+    if require_review_contract {
+        validate_present_review_contract(&state)?;
+    }
     if state.get("risk_plan").is_some_and(Value::is_object) {
         if diff_changed {
-            validated_shared_test_evidence(
+            let current_shared_test_evidence = validated_shared_test_evidence(
                 arguments.get("current_shared_test_evidence"),
                 current_diff_hash,
                 "current_shared_test_evidence_required_when_diff_changes=true",
             )?;
-            return Err(
-                "risk_reassessment_required_when_diff_changes=true new_session_id_required=true"
-                    .to_string(),
+            let current_changed_files = current_changed_files.as_ref().ok_or_else(|| {
+                "current_changed_files_required_when_diff_changes=true".to_string()
+            })?;
+            let current_delta_evidence = generated_delta_evidence(
+                &state,
+                prior_diff_hash,
+                current_diff_hash,
+                current_changed_files,
+            )?;
+            if lens_results
+                .as_array()
+                .is_none_or(|results| !results.is_empty())
+            {
+                return Err("delta_risk_reassessment_requires_empty_lens_results=true".to_string());
+            }
+            if state
+                .get("unrelated_finding_policy_confirmation_required")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                return Err("unrelated_finding_policy_confirmation_required=true".to_string());
+            }
+            let caller_decisions = arguments
+                .get("caller_decisions")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let empty_filtered = json!({
+                "actionable": [],
+                "needs_human_decision": [],
+                "verifier_rejected": []
+            });
+            validate_caller_decisions(&state, &empty_filtered, &caller_decisions)?;
+            let (_, assignment) = delta_risk_assignment(
+                &state,
+                current_diff_hash,
+                current_changed_files,
+                &current_shared_test_evidence,
+                &current_delta_evidence,
+            )?;
+            let Some(delta_risk_assessment) = arguments.get("delta_risk_assessment") else {
+                return Ok(json!({
+                    "state": state,
+                    "transition_status": "delta_risk_assessment_required",
+                    "delta_risk_assignments": [assignment],
+                    "complete": false,
+                    "completion_blockers": unresolved_findings(&state),
+                    "next_assignments": [],
+                    "subagent_shutdown": []
+                })
+                .to_string());
+            };
+            return apply_delta_risk_reassessment(
+                state,
+                current_diff_hash,
+                current_changed_files,
+                current_shared_test_evidence,
+                current_delta_evidence,
+                delta_risk_assessment,
+                &caller_decisions,
             );
         } else if arguments.get("current_shared_test_evidence").is_some() {
             let supplied = validated_shared_test_evidence(
@@ -2464,9 +3305,8 @@ fn advance_with_contract_validation(
             }
         }
     }
-    validate_required_clean_iterations(&state)?;
-    if require_review_contract {
-        validate_present_review_contract(&state)?;
+    if arguments.get("delta_risk_assessment").is_some() {
+        return Err("delta_risk_assessment_requires_diff_change=true".to_string());
     }
     validate_lens_caller_attestations(&state, &lens_results)?;
     let mut effective_scope_state = state.clone();
@@ -2583,7 +3423,13 @@ fn advance_with_contract_validation(
     state["scope"]["diff_hash"] = json!(current_diff_hash);
     let (decision_reset, scout_resolution_changed) =
         update_unresolved_findings(&mut state, &filtered, &caller_decisions, diff_changed);
-    if prior_contract_valid && (diff_changed || scout_resolution_changed) {
+    let discovery_saturation_changed = state.get("risk_plan").is_some_and(Value::is_object);
+    if discovery_saturation_changed {
+        update_discovery_saturation(&mut state, &mut filtered)?;
+    }
+    if prior_contract_valid
+        && (diff_changed || scout_resolution_changed || discovery_saturation_changed)
+    {
         let rebound_contract = computed_review_contract_id(&state)
             .ok_or_else(|| "review_contract_rebind_failed=true".to_string())?;
         state["review_contract_id"] = json!(rebound_contract);
@@ -2639,14 +3485,7 @@ fn advance_with_contract_validation(
 
     let required = effective_required_clean_iterations(&state);
     state["required_clean_iterations"] = json!(required);
-    let complete = state
-        .get("clean_streak")
-        .and_then(Value::as_u64)
-        .unwrap_or(0)
-        >= required
-        && unresolved_findings(&state).is_empty()
-        && review_contract_is_valid(&state)
-        && verified_clean_count(&state) >= required as usize;
+    let complete = review_state_complete(&state);
 
     let next_assignments = if complete {
         Vec::new()
@@ -2728,6 +3567,548 @@ fn advance_with_contract_validation(
         "subagent_shutdown": subagent_shutdown
     })
     .to_string())
+}
+
+fn apply_delta_risk_reassessment(
+    mut state: Value,
+    current_diff_hash: &str,
+    current_changed_files: &[String],
+    current_shared_test_evidence: Value,
+    current_delta_evidence: Value,
+    delta_risk_assessment: &Value,
+    caller_decisions: &[Value],
+) -> Result<String, String> {
+    let prior_diff_hash = state
+        .pointer("/scope/diff_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "prior_diff_hash_required=true".to_string())?
+        .to_string();
+    if delta_risk_assessment
+        .get("prior_diff_hash")
+        .and_then(Value::as_str)
+        != Some(prior_diff_hash.as_str())
+    {
+        return Err("delta_risk_assessment_prior_diff_hash_mismatch=true".to_string());
+    }
+    if delta_risk_assessment
+        .get("current_diff_hash")
+        .and_then(Value::as_str)
+        != Some(current_diff_hash)
+    {
+        return Err("delta_risk_assessment_current_diff_hash_mismatch=true".to_string());
+    }
+
+    let dimensions = delta_risk_assessment
+        .get("dimensions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "delta_risk_assessment_dimensions_required=true".to_string())?;
+    let mut affected_lenses = HashSet::with_capacity(dimensions.len());
+    for dimension in dimensions {
+        let lens = dimension
+            .get("lens")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "delta_risk_assessment_dimension_lens_required=true".to_string())?;
+        match dimension.get("affected").and_then(Value::as_bool) {
+            Some(true) => {
+                affected_lenses.insert(lens.to_string());
+            }
+            Some(false) => {}
+            None => {
+                return Err(format!(
+                    "delta_risk_assessment_dimension_affected_required lens={lens}"
+                ))
+            }
+        }
+    }
+
+    let (mut delta_arguments, _) = delta_risk_assignment(
+        &state,
+        current_diff_hash,
+        current_changed_files,
+        &current_shared_test_evidence,
+        &current_delta_evidence,
+    )?;
+    delta_arguments["risk_assessment"] = delta_risk_assessment.clone();
+    let compiled = compile_risk_plan(&delta_arguments, current_changed_files)?
+        .ok_or_else(|| "delta_risk_assessment_compile_failed=true".to_string())?;
+    if compiled
+        .state
+        .get("scope_snapshot_commit")
+        .and_then(Value::as_str)
+        != current_delta_evidence
+            .get("current_snapshot_commit")
+            .and_then(Value::as_str)
+    {
+        return Err("delta_risk_scope_snapshot_changed_during_assessment=true".to_string());
+    }
+
+    let old_selected = string_array(state.pointer("/risk_plan/selected_lenses"))
+        .ok_or_else(|| "risk_plan_selected_lenses_required=true".to_string())?;
+    for lens in &compiled.selected_lenses {
+        if lens != "correctness-behavior"
+            && !old_selected.contains(lens)
+            && !affected_lenses.contains(lens)
+        {
+            return Err(format!(
+                "delta_risk_assessment_new_lens_must_be_affected lens={lens}"
+            ));
+        }
+    }
+    for finding in compiled
+        .state
+        .get("findings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let lens = finding
+            .get("lens")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "delta_risk_assessment_finding_lens_required=true".to_string())?;
+        if !compiled
+            .selected_lenses
+            .iter()
+            .any(|selected| selected == lens)
+        {
+            return Err(format!(
+                "delta_risk_assessment_finding_lens_must_be_selected lens={lens}"
+            ));
+        }
+        if !affected_lenses.contains(lens) {
+            return Err(format!(
+                "delta_risk_assessment_finding_lens_must_be_affected lens={lens}"
+            ));
+        }
+    }
+
+    let old_dimensions = state
+        .pointer("/risk_plan/dimensions")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| "risk_plan_dimensions_required=true".to_string())?;
+    let new_dimensions = compiled
+        .state
+        .get("dimensions")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| "delta_risk_plan_dimensions_required=true".to_string())?;
+    let mut dimension_order = Vec::new();
+    let mut old_dimensions_by_lens = HashMap::new();
+    for dimension in old_dimensions {
+        if let Some(lens) = dimension.get("lens").and_then(Value::as_str) {
+            dimension_order.push(lens.to_string());
+            old_dimensions_by_lens.insert(lens.to_string(), dimension);
+        }
+    }
+    let mut new_dimensions_by_lens = HashMap::new();
+    for mut dimension in new_dimensions {
+        let Some(lens) = dimension
+            .get("lens")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        if let Some(object) = dimension.as_object_mut() {
+            object.remove("affected");
+        }
+        if !dimension_order.contains(&lens) {
+            dimension_order.push(lens.clone());
+        }
+        new_dimensions_by_lens.insert(lens, dimension);
+    }
+
+    let mut merged_dimensions = Vec::with_capacity(dimension_order.len());
+    for lens in &dimension_order {
+        let old = old_dimensions_by_lens.get(lens);
+        let new = new_dimensions_by_lens.get(lens);
+        let mut merged = match (old, new) {
+            (Some(old), Some(new)) => {
+                let old_rank = old
+                    .get("risk")
+                    .and_then(Value::as_str)
+                    .map(risk_rank)
+                    .unwrap_or(0);
+                let new_rank = new
+                    .get("risk")
+                    .and_then(Value::as_str)
+                    .map(risk_rank)
+                    .unwrap_or(0);
+                if new_rank >= old_rank {
+                    new.clone()
+                } else {
+                    old.clone()
+                }
+            }
+            (Some(old), None) => old.clone(),
+            (None, Some(new)) => new.clone(),
+            (None, None) => continue,
+        };
+        let uncertain = old
+            .and_then(|dimension| dimension.get("uncertain"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || new
+                .and_then(|dimension| dimension.get("uncertain"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        merged["uncertain"] = json!(uncertain);
+        if lens == "correctness-behavior"
+            && merged
+                .get("risk")
+                .and_then(Value::as_str)
+                .is_none_or(|risk| risk_rank(risk) < risk_rank("low"))
+        {
+            merged["risk"] = json!("low");
+            merged["evidence"] = json!(
+                "Every replacement diff receives one integration and correctness confirmation."
+            );
+            merged["plausible_failure"] =
+                json!("A response edit can alter behavior outside its directly affected lens.");
+            merged["material_impact"] =
+                json!("The review could otherwise miss an integration regression.");
+        }
+        merged_dimensions.push(merged);
+    }
+
+    let mut selected_set = old_selected.iter().cloned().collect::<HashSet<_>>();
+    selected_set.extend(compiled.selected_lenses.iter().cloned());
+    selected_set.insert("correctness-behavior".to_string());
+    let selected_lenses = dimension_order
+        .iter()
+        .filter(|lens| selected_set.contains(*lens))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let old_lens_passes = state
+        .pointer("/risk_plan/lens_passes")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let new_lens_passes = compiled
+        .state
+        .get("lens_passes")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut lens_passes = serde_json::Map::new();
+    for lens in &selected_lenses {
+        let old = old_lens_passes
+            .get(lens)
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let new = new_lens_passes
+            .get(lens)
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        lens_passes.insert(lens.clone(), json!(old.max(new).max(1)));
+    }
+
+    let new_blocker_keys = compiled
+        .blocking_findings
+        .iter()
+        .filter_map(|finding| {
+            Some((
+                finding.get("lens")?.as_str()?.to_string(),
+                finding.get("id")?.as_str()?.to_string(),
+            ))
+        })
+        .collect::<HashSet<_>>();
+    let effective_caller_decisions = caller_decisions
+        .iter()
+        .filter(|decision| {
+            let key = (
+                decision.get("lens").and_then(Value::as_str),
+                decision.get("finding_id").and_then(Value::as_str),
+            );
+            !matches!(key, (Some(lens), Some(id)) if new_blocker_keys.contains(&(lens.to_string(), id.to_string())))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let new_blocker_lenses = new_blocker_keys
+        .iter()
+        .map(|(lens, _)| lens.clone())
+        .collect::<HashSet<_>>();
+    let fixed_lenses = effective_caller_decisions
+        .iter()
+        .filter(|decision| decision.get("decision").and_then(Value::as_str) == Some("fixed"))
+        .filter_map(|decision| decision.get("lens").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    let newly_selected = compiled
+        .selected_lenses
+        .iter()
+        .filter(|lens| !old_selected.contains(lens))
+        .cloned()
+        .collect::<HashSet<_>>();
+    let mut confirmation_samples = state
+        .pointer("/risk_plan/discovery_saturation/confirmation_samples_by_lens")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut last_sample_added_new = state
+        .pointer("/risk_plan/discovery_saturation/last_sample_added_new_by_lens")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    for lens in &selected_lenses {
+        confirmation_samples
+            .entry(lens.clone())
+            .or_insert_with(|| json!(0));
+        last_sample_added_new
+            .entry(lens.clone())
+            .or_insert_with(|| json!(false));
+    }
+    let reset_lenses = selected_lenses
+        .iter()
+        .filter(|lens| {
+            lens.as_str() == "correctness-behavior"
+                || affected_lenses.contains(*lens)
+                || fixed_lenses.contains(*lens)
+                || newly_selected.contains(*lens)
+                || new_blocker_lenses.contains(*lens)
+        })
+        .cloned()
+        .collect::<HashSet<_>>();
+    for lens in &reset_lenses {
+        confirmation_samples.insert(lens.clone(), json!(0));
+        last_sample_added_new.insert(lens.clone(), json!(false));
+    }
+    let mut known_major_critical_ids =
+        string_array(state.pointer("/risk_plan/discovery_saturation/known_major_critical_ids"))
+            .unwrap_or_default();
+    known_major_critical_ids.extend(
+        compiled
+            .state
+            .get("findings")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(material_finding_id),
+    );
+    known_major_critical_ids.sort();
+    known_major_critical_ids.dedup();
+    let (active_lenses, active_lens_passes) = derived_pending_review(
+        &selected_lenses,
+        &lens_passes,
+        &confirmation_samples,
+        &last_sample_added_new,
+    );
+    let discovery_saturation = json!({
+        "known_major_critical_ids": known_major_critical_ids,
+        "confirmation_samples_by_lens": confirmation_samples,
+        "last_sample_added_new_by_lens": last_sample_added_new
+    });
+
+    let mut merged_findings = state
+        .pointer("/risk_plan/findings")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for finding in compiled
+        .state
+        .get("findings")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
+        let key = (
+            finding.get("lens").and_then(Value::as_str),
+            finding.get("id").and_then(Value::as_str),
+        );
+        if let Some(existing) = merged_findings.iter_mut().find(|existing| {
+            existing.get("lens").and_then(Value::as_str) == key.0
+                && existing.get("id").and_then(Value::as_str) == key.1
+        }) {
+            if !caused_blocking_security_or_safety_finding(existing)
+                || caused_blocking_security_or_safety_finding(&finding)
+            {
+                *existing = finding;
+            }
+        } else {
+            merged_findings.push(finding);
+        }
+    }
+
+    let old_overall_risk = state
+        .pointer("/risk_plan/overall_risk")
+        .and_then(Value::as_str)
+        .unwrap_or("low")
+        .to_string();
+    let new_overall_risk = compiled
+        .state
+        .get("overall_risk")
+        .and_then(Value::as_str)
+        .unwrap_or("low")
+        .to_string();
+    let overall_risk = if risk_rank(&new_overall_risk) >= risk_rank(&old_overall_risk) {
+        new_overall_risk
+    } else {
+        old_overall_risk
+    };
+
+    let mut delta_history = state
+        .pointer("/risk_plan/delta_history")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut affected_lenses_for_history = affected_lenses.iter().cloned().collect::<Vec<_>>();
+    affected_lenses_for_history.sort();
+    delta_history.push(json!({
+        "assessment_id": compiled.state["assessment_id"],
+        "prior_diff_hash": prior_diff_hash,
+        "current_diff_hash": current_diff_hash,
+        "affected_lenses": affected_lenses_for_history,
+        "active_lenses": active_lenses,
+        "new_selected_lenses": compiled.selected_lenses,
+        "delta_evidence_summary": current_delta_evidence["summary"],
+        "delta_evidence_source": if current_delta_evidence.get("inline_patch").is_some() {
+            "inline_patch"
+        } else {
+            "artifact_reference"
+        }
+    }));
+    retain_latest(&mut delta_history, MAX_RETAINED_HISTORY_ENTRIES);
+
+    state["scope"]["diff_hash"] = json!(current_diff_hash);
+    state["scope"]["changed_files"] = json!(current_changed_files);
+    state["scope"]["snapshot_commit"] = current_delta_evidence["current_snapshot_commit"].clone();
+    state["shared_test_evidence"] = current_shared_test_evidence.clone();
+    state["risk_plan"]["assessment_id"] = compiled.state["assessment_id"].clone();
+    state["risk_plan"]["scope_snapshot_commit"] =
+        current_delta_evidence["current_snapshot_commit"].clone();
+    state["risk_plan"]["shared_test_evidence_id"] =
+        compiled.state["shared_test_evidence_id"].clone();
+    state["risk_plan"]["overall_risk"] = json!(overall_risk);
+    state["risk_plan"]["dimensions"] = Value::Array(merged_dimensions);
+    state["risk_plan"]["findings"] = Value::Array(merged_findings);
+    state["risk_plan"]["selected_lenses"] = json!(selected_lenses);
+    state["risk_plan"]["lens_passes"] = Value::Object(lens_passes);
+    state["risk_plan"]["active_lenses"] = json!(active_lenses);
+    state["risk_plan"]["active_lens_passes"] = Value::Object(active_lens_passes);
+    state["risk_plan"]["discovery_saturation"] = discovery_saturation;
+    state["risk_plan"]["delta_history"] = Value::Array(delta_history);
+    state["risk_plan"]["discovery_sample_count"] = json!(
+        state
+            .pointer("/risk_plan/discovery_sample_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            + 1
+    );
+    state["lenses"] = state["risk_plan"]["active_lenses"].clone();
+
+    let mut unresolved = unresolved_findings(&state);
+    for finding in compiled.blocking_findings {
+        upsert_unresolved_finding(&mut unresolved, finding);
+    }
+    state["unresolved_findings"] = Value::Array(unresolved);
+    let empty_filtered = json!({
+        "actionable": [],
+        "needs_human_decision": [],
+        "verifier_rejected": [],
+        "routed": [],
+        "out_of_scope": [],
+        "verification": { "status": "not_required" }
+    });
+    update_unresolved_findings(
+        &mut state,
+        &empty_filtered,
+        &effective_caller_decisions,
+        true,
+    );
+
+    let mut prior_decisions = state
+        .get("prior_user_decisions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    prior_decisions.extend(effective_caller_decisions.iter().cloned());
+    retain_latest(&mut prior_decisions, MAX_RETAINED_CALLER_DECISIONS);
+    state["prior_user_decisions"] = Value::Array(prior_decisions);
+    apply_caller_decisions_to_defenses(&mut state, &effective_caller_decisions);
+
+    let next_iteration = state
+        .get("iteration_index")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        + 1;
+    state["iteration_index"] = json!(next_iteration);
+    state["clean_streak"] = json!(0);
+    state["verified_clean_iterations"] = json!([]);
+    let required = state
+        .pointer("/risk_plan/active_lens_passes")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|passes| passes.values())
+        .filter_map(Value::as_u64)
+        .max()
+        .unwrap_or(1);
+    state["required_clean_iterations"] = json!(required);
+    state["review_contract_id"] = json!(computed_review_contract_id(&state)
+        .ok_or_else(|| "review_contract_rebind_failed=true".to_string())?);
+    ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
+    let next_assignments = review_assignments_for_state(&state, next_iteration)?;
+    let completion_blockers = unresolved_findings(&state);
+
+    Ok(json!({
+        "state": state,
+        "transition_status": "advanced",
+        "advance_kind": "delta_reassessment",
+        "complete": false,
+        "completion_blockers": completion_blockers,
+        "next_assignments": next_assignments,
+        "subagent_shutdown": []
+    })
+    .to_string())
+}
+
+fn review_assignments_for_state(state: &Value, iteration: u64) -> Result<Vec<Value>, String> {
+    let lenses = string_array(state.get("lenses")).unwrap_or_else(|| all_lenses(&[]));
+    let acceptance_criteria =
+        string_array(state.pointer("/context/acceptance_criteria")).unwrap_or_default();
+    let explicit_concerns =
+        string_array(state.pointer("/context/explicit_concerns")).unwrap_or_default();
+    let changed_files = string_array(state.pointer("/scope/changed_files")).unwrap_or_default();
+    assignments(
+        iteration,
+        state
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or("final-review-unknown"),
+        &lenses,
+        state.get("lens_objectives").unwrap_or(&Value::Null),
+        state
+            .pointer("/model_roles/lens_review")
+            .and_then(Value::as_str)
+            .unwrap_or("strong-reviewer"),
+        "start_fresh",
+        state
+            .pointer("/scope/kind")
+            .and_then(Value::as_str)
+            .unwrap_or("base"),
+        state
+            .pointer("/scope/base")
+            .and_then(Value::as_str)
+            .unwrap_or(DEFAULT_BASE),
+        state
+            .pointer("/scope/project_root")
+            .and_then(Value::as_str)
+            .unwrap_or("."),
+        state
+            .pointer("/scope/diff_hash")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+        state
+            .pointer("/context/user_request")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+        &acceptance_criteria,
+        &explicit_concerns,
+        &changed_files,
+        state.get("prior_defenses_by_lens").unwrap_or(&Value::Null),
+        state.get("deferred_findings").unwrap_or(&Value::Null),
+        state.get("shared_test_evidence").unwrap_or(&Value::Null),
+    )
 }
 
 fn update_unresolved_findings(
@@ -3639,6 +5020,14 @@ fn validate_scope_metadata(state: &Value) -> Result<(), String> {
     if diff_hash.trim().is_empty() || diff_hash == "unknown" {
         return Err("scope_diff_hash_required=true".to_string());
     }
+    if state.get("risk_plan").is_some_and(Value::is_object)
+        && state
+            .pointer("/scope/snapshot_commit")
+            .and_then(Value::as_str)
+            .is_none_or(|commit| !valid_git_object_id(commit))
+    {
+        return Err("scope_snapshot_commit_required=true".to_string());
+    }
     Ok(())
 }
 
@@ -3757,6 +5146,12 @@ fn out_of_scope_report(arguments: &Value) -> Result<String, String> {
 }
 
 fn review_state_complete(state: &Value) -> bool {
+    if state.get("risk_plan").is_some_and(Value::is_object) {
+        return string_array(state.pointer("/risk_plan/active_lenses"))
+            .is_some_and(|lenses| lenses.is_empty())
+            && unresolved_findings(state).is_empty()
+            && review_contract_is_valid(state);
+    }
     let required = effective_required_clean_iterations(state);
     state
         .get("clean_streak")
@@ -4558,6 +5953,10 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
         .pointer("/scope/project_root")
         .and_then(Value::as_str)?;
     let diff_hash = state.pointer("/scope/diff_hash").and_then(Value::as_str)?;
+    let snapshot_commit = state
+        .pointer("/scope/snapshot_commit")
+        .cloned()
+        .unwrap_or(Value::Null);
     let changed_files = string_array(state.pointer("/scope/changed_files"))?;
     let lenses = string_array(state.get("lenses"))?;
     let lens_objectives = state.get("lens_objectives")?;
@@ -4586,6 +5985,7 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
     base.hash(&mut hasher);
     project_root.hash(&mut hasher);
     diff_hash.hash(&mut hasher);
+    snapshot_commit.to_string().hash(&mut hasher);
     changed_files.hash(&mut hasher);
     lenses.hash(&mut hasher);
     lens_objectives.to_string().hash(&mut hasher);
@@ -4664,6 +6064,20 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
     {
         return false;
     }
+    let Some(scope_snapshot_commit) = state
+        .pointer("/scope/snapshot_commit")
+        .and_then(Value::as_str)
+    else {
+        return false;
+    };
+    if !valid_git_object_id(scope_snapshot_commit)
+        || risk_plan
+            .get("scope_snapshot_commit")
+            .and_then(Value::as_str)
+            != Some(scope_snapshot_commit)
+    {
+        return false;
+    }
     let Some(diff_hash) = state.pointer("/scope/diff_hash").and_then(Value::as_str) else {
         return false;
     };
@@ -4684,7 +6098,20 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
         return false;
     }
     let selected = string_array(risk_plan.get("selected_lenses")).unwrap_or_default();
-    if selected != lenses {
+    let active = string_array(risk_plan.get("active_lenses")).unwrap_or_default();
+    let selected_unique = selected.iter().collect::<HashSet<_>>().len() == selected.len();
+    let active_unique = active.iter().collect::<HashSet<_>>().len() == active.len();
+    if active != lenses
+        || !selected_unique
+        || !active_unique
+        || active
+            .iter()
+            .any(|active_lens| !selected.contains(active_lens))
+        || risk_plan
+            .get("delta_history")
+            .and_then(Value::as_array)
+            .is_none_or(|history| history.len() > MAX_RETAINED_HISTORY_ENTRIES)
+    {
         return false;
     }
     let Some(scout_findings) = risk_plan.get("findings").and_then(Value::as_array) else {
@@ -4729,34 +6156,118 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
             return false;
         }
     }
-    if scout_findings.iter().any(|finding| {
-        if !caused_blocking_security_or_safety_finding(finding) {
-            return false;
-        }
-        let id = finding.get("id").and_then(Value::as_str);
-        let lens = finding.get("lens").and_then(Value::as_str);
-        let still_unresolved = unresolved.iter().any(|candidate| {
-            candidate.get("id").and_then(Value::as_str) == id
-                && candidate.get("lens").and_then(Value::as_str) == lens
-        });
-        let has_bound_resolution = matches!((lens, id), (Some(lens), Some(id)) if {
-            resolved_keys.contains(&(lens.to_string(), id.to_string()))
-        });
-        !still_unresolved && !has_bound_resolution
-    }) {
+    if scout_findings
+        .iter()
+        .filter(|finding| caused_blocking_security_or_safety_finding(finding))
+        .any(|finding| {
+            let id = finding.get("id").and_then(Value::as_str);
+            let lens = finding.get("lens").and_then(Value::as_str);
+            let still_unresolved = unresolved.iter().any(|candidate| {
+                candidate.get("id").and_then(Value::as_str) == id
+                    && candidate.get("lens").and_then(Value::as_str) == lens
+            });
+            let has_bound_resolution = matches!((lens, id), (Some(lens), Some(id)) if {
+                resolved_keys.contains(&(lens.to_string(), id.to_string()))
+            });
+            !still_unresolved && !has_bound_resolution
+        })
+    {
         return false;
     }
     let Some(lens_passes) = risk_plan.get("lens_passes").and_then(Value::as_object) else {
         return false;
     };
-    if lens_passes.len() != lenses.len()
-        || lenses
+    if lens_passes.len() != selected.len()
+        || selected
             .iter()
             .any(|lens| !matches!(lens_passes.get(lens).and_then(Value::as_u64), Some(1 | 2)))
     {
         return false;
     }
-    let required = lens_passes
+    let Some(saturation) = risk_plan
+        .get("discovery_saturation")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    if saturation.len() != 3 {
+        return false;
+    }
+    let Some(known_ids) = string_array(saturation.get("known_major_critical_ids")) else {
+        return false;
+    };
+    let mut sorted_known_ids = known_ids.clone();
+    sorted_known_ids.sort();
+    sorted_known_ids.dedup();
+    if known_ids != sorted_known_ids
+        || known_ids.iter().any(|id| {
+            id.is_empty()
+                || id.len() > MAX_FINDING_ID_BYTES
+                || !id.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
+                })
+        })
+        || scout_findings
+            .iter()
+            .filter_map(material_finding_id)
+            .any(|id| !known_ids.contains(&id))
+    {
+        return false;
+    }
+    let Some(confirmation_samples) = saturation
+        .get("confirmation_samples_by_lens")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    let Some(last_sample_added_new) = saturation
+        .get("last_sample_added_new_by_lens")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    if confirmation_samples.len() != selected.len()
+        || last_sample_added_new.len() != selected.len()
+        || selected.iter().any(|lens| {
+            let samples = confirmation_samples.get(lens).and_then(Value::as_u64);
+            let added_new = last_sample_added_new.get(lens).and_then(Value::as_bool);
+            samples.is_none()
+                || added_new.is_none()
+                || (added_new == Some(true) && samples == Some(0))
+        })
+    {
+        return false;
+    }
+    let (expected_active, expected_active_passes) = derived_pending_review(
+        &selected,
+        lens_passes,
+        confirmation_samples,
+        last_sample_added_new,
+    );
+    if active != expected_active
+        || risk_plan.get("active_lens_passes")
+            != Some(&Value::Object(expected_active_passes.clone()))
+    {
+        return false;
+    }
+    let Some(active_lens_passes) = risk_plan
+        .get("active_lens_passes")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    if active_lens_passes.len() != active.len()
+        || active.iter().any(|lens| {
+            let active_passes = active_lens_passes.get(lens).and_then(Value::as_u64);
+            let total_passes = lens_passes.get(lens).and_then(Value::as_u64);
+            !matches!(active_passes, Some(1 | 2))
+                || active_passes
+                    .is_none_or(|active| total_passes.is_none_or(|total| active > total))
+        })
+    {
+        return false;
+    }
+    let required = active_lens_passes
         .values()
         .filter_map(Value::as_u64)
         .max()
@@ -6466,6 +7977,28 @@ mod tests {
             .join(format!("{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("test project root");
+        run_git(
+            &root,
+            &["init".to_string(), "--quiet".to_string()],
+            None,
+            None,
+            "test_git_init",
+        )
+        .expect("initialize test Git repository");
+        run_git(
+            &root,
+            &[
+                "commit".to_string(),
+                "--allow-empty".to_string(),
+                "--quiet".to_string(),
+                "-m".to_string(),
+                "initial test snapshot".to_string(),
+            ],
+            None,
+            None,
+            "test_git_initial_commit",
+        )
+        .expect("create initial test commit");
         root
     }
 
@@ -6506,6 +8039,24 @@ mod tests {
         selected: &[(&str, &str)],
         findings: Value,
     ) -> Value {
+        assessed_plan_arguments_for_diff_at_root(
+            session_id,
+            diff_hash,
+            overall_risk,
+            selected,
+            findings,
+            None,
+        )
+    }
+
+    fn assessed_plan_arguments_for_diff_at_root(
+        session_id: &str,
+        diff_hash: &str,
+        overall_risk: &str,
+        selected: &[(&str, &str)],
+        findings: Value,
+        project_root: Option<&Path>,
+    ) -> Value {
         let mut arguments = json!({
             "session_id": session_id,
             "base": "origin/main",
@@ -6516,6 +8067,9 @@ mod tests {
             "acceptance_criteria": ["Select review depth from concrete risk"],
             "unrelated_finding_policy": { "default": "report" }
         });
+        if let Some(project_root) = project_root {
+            arguments["project_root"] = json!(project_root);
+        }
         let scout: Value =
             serde_json::from_str(&risk_assessment_result(&arguments).expect("risk scout"))
                 .expect("risk scout json");
@@ -11853,7 +13407,18 @@ pre_filter = "project-pre"
 
         assert_eq!(advanced["state"]["unresolved_findings"], json!([]));
         assert_eq!(advanced["filtered"]["routed"][0]["disposition"], "ticket");
-        assert_eq!(advanced["complete"], true);
+        assert_eq!(advanced["complete"], false);
+        assert_eq!(advanced["state"]["lenses"], json!(["security-safety"]));
+        let confirmed: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": advanced["state"],
+                "lens_results": clean_lens_results_for(&advanced["state"]),
+                "current_diff_hash": "stateful-preexisting-reclassification-diff"
+            }))
+            .expect("a second sample confirms no new material path"),
+        )
+        .expect("confirmed json");
+        assert_eq!(confirmed["complete"], true);
     }
 
     #[test]
@@ -12071,7 +13636,17 @@ pre_filter = "project-pre"
             "existing-auth-bypass"
         );
         assert_eq!(advanced["filtered"]["clean"], true);
-        assert_eq!(advanced["complete"], true);
+        assert_eq!(advanced["complete"], false);
+        let confirmed: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": advanced["state"],
+                "lens_results": clean_lens_results_for(&advanced["state"]),
+                "current_diff_hash": "out-of-scope-preexisting-reclassification-diff"
+            }))
+            .expect("a second sample confirms no new material path"),
+        )
+        .expect("confirmed json");
+        assert_eq!(confirmed["complete"], true);
     }
 
     #[test]
@@ -13223,6 +14798,40 @@ pre_filter = "project-pre"
         )
     }
 
+    fn risk_finding_lens_result(state: &Value, lens: &str, id: &str, severity: &str) -> Value {
+        let mut finding = json!({
+            "id": id,
+            "severity": severity,
+            "causality": "caused",
+            "causality_evidence": "The reviewed branch introduces this failure path.",
+            "likelihood": "possible",
+            "security_impact": "none",
+            "safety_impact": "none",
+            "path": "src/lib.rs",
+            "message": format!("Material review finding {id}."),
+            "relevance": {
+                "category": "diff_changed_file",
+                "explanation": "The finding is in the changed branch."
+            }
+        });
+        if lens == "security-safety" {
+            finding["suspected_pii"] = json!(false);
+        }
+        json!({
+            "lens": lens,
+            "subagent_key": subagent_key(state, lens),
+            "shared_test_evidence_id": state["shared_test_evidence"]["id"],
+            "additional_broad_test_run": false,
+            "status": "findings",
+            "findings": [finding],
+            "caller_attestation": {
+                "model_role": state["model_roles"]["lens_review"],
+                "fresh_context": true,
+                "closed_after_result": true
+            }
+        })
+    }
+
     fn actionable_lens_results_for(state: &Value) -> Value {
         json!([{
             "lens": "correctness-behavior",
@@ -13608,7 +15217,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn risk_review_diff_change_requires_fresh_scout_before_rebinding_evidence() {
+    fn risk_review_diff_change_requires_bound_delta_scout_before_rebinding_evidence() {
         let arguments = assessed_plan_arguments(
             "replacement-shared-evidence",
             "medium",
@@ -13640,31 +15249,546 @@ pre_filter = "project-pre"
                 "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
                 "current_shared_test_evidence": replacement
             }))
-            .expect_err("new evidence cannot inherit the old scout's risk plan"),
-            "risk_reassessment_required_when_diff_changes=true new_session_id_required=true"
+            .expect_err("old lens results cannot be replayed against replacement evidence"),
+            "delta_risk_reassessment_requires_empty_lens_results=true"
         );
 
-        let replacement_arguments = assessed_plan_arguments(
-            "replacement-shared-evidence-v2",
-            "medium",
-            &[("correctness-behavior", "medium")],
-            json!([]),
-        );
-        let replacement_plan: Value =
-            serde_json::from_str(&plan(&replacement_arguments)).expect("replacement plan json");
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": state,
+                "lens_results": [],
+                "current_diff_hash": replacement_diff_hash,
+                "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+                "current_shared_test_evidence": replacement
+            }))
+            .expect("replacement evidence starts a bound delta scout"),
+        )
+        .expect("delta-required json");
         assert_eq!(
-            replacement_plan["state"]["shared_test_evidence"],
+            required["transition_status"],
+            "delta_risk_assessment_required"
+        );
+        assert_eq!(required["state"], *state);
+        assert_eq!(
+            required["delta_risk_assignments"][0]["shared_test_evidence"],
             shared_test_evidence_for(replacement_diff_hash)
         );
-        assert!(replacement_plan["assignments"][0]["prompt"]
-            .as_str()
+        assert_eq!(
+            required["delta_risk_assignments"][0]["delta_evidence"]["prior_snapshot_commit"],
+            state["scope"]["snapshot_commit"]
+        );
+    }
+
+    fn delta_risk_assessment_for(
+        assignment: &Value,
+        overall_risk: &str,
+        selected: &[(&str, &str)],
+        affected_lenses: &[&str],
+        findings: Value,
+    ) -> Value {
+        let dimensions = assignment["review_dimensions"]
+            .as_array()
             .unwrap()
-            .contains("tests-replacement-shared-evidence-v2-diff"));
-        assert!(review_contract_is_valid(&replacement_plan["state"]));
+            .iter()
+            .map(|lens| {
+                let lens = lens.as_str().unwrap();
+                let risk = selected
+                    .iter()
+                    .find_map(|(selected_lens, risk)| (*selected_lens == lens).then_some(*risk))
+                    .unwrap_or("none");
+                let selected = risk != "none";
+                json!({
+                    "lens": lens,
+                    "risk": risk,
+                    "evidence": if selected { "The replacement diff retains a concrete risk path." } else { "No concrete failure path for this dimension." },
+                    "plausible_failure": if selected { "The replacement could preserve or introduce incorrect review behavior." } else { "none" },
+                    "material_impact": if selected { "Review coverage or completion could be wrong." } else { "none" },
+                    "uncertain": false,
+                    "affected": affected_lenses.contains(&lens)
+                })
+            })
+            .collect::<Vec<_>>();
+        json!({
+            "assignment_id": assignment["assignment_id"],
+            "subagent_key": assignment["subagent_key"],
+            "shared_test_evidence_id": assignment["shared_test_evidence"]["id"],
+            "prior_diff_hash": assignment["prior_diff_hash"],
+            "current_diff_hash": assignment["current_diff_hash"],
+            "overall_risk": overall_risk,
+            "dimensions": dimensions,
+            "exceptional_triggers": [],
+            "split_required": false,
+            "plan_assumptions": [],
+            "findings": findings,
+            "caller_attestation": {
+                "model_role": assignment["model_role"],
+                "fresh_context": true,
+                "closed_after_result": true
+            }
+        })
     }
 
     #[test]
-    fn json_rpc_risk_reassessment_requires_and_accepts_a_new_session_identity() {
+    fn changed_risk_diff_requests_one_bound_delta_scout_without_mutating_state() {
+        let arguments = assessed_plan_arguments(
+            "delta-scout-required",
+            "high",
+            &[
+                ("security-safety", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let state = &planned["state"];
+        let replacement_diff_hash = "delta-scout-required-v2";
+        let response: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": state,
+                "lens_results": [],
+                "current_diff_hash": replacement_diff_hash,
+                "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+                "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+            }))
+            .expect("changed risk diff requests a delta scout"),
+        )
+        .expect("delta response json");
+
+        assert_eq!(
+            response["transition_status"],
+            "delta_risk_assessment_required"
+        );
+        assert_eq!(response["state"], *state);
+        assert_eq!(response["next_assignments"], json!([]));
+        assert_eq!(
+            response["delta_risk_assignments"].as_array().unwrap().len(),
+            1
+        );
+        let assignment = &response["delta_risk_assignments"][0];
+        assert_eq!(assignment["role"], "delta-risk-scout");
+        assert_eq!(assignment["prior_diff_hash"], state["scope"]["diff_hash"]);
+        assert_eq!(assignment["current_diff_hash"], replacement_diff_hash);
+        assert_eq!(assignment["constraints"]["run_tests"], false);
+        assert_eq!(assignment["constraints"]["request_more_planners"], false);
+    }
+
+    #[test]
+    fn valid_delta_reassessment_targets_only_affected_lenses_plus_correctness_guard() {
+        let arguments = assessed_plan_arguments(
+            "targeted-delta-reassessment",
+            "high",
+            &[
+                ("security-safety", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let reviewed: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": clean_lens_results_for(&planned["state"]),
+                "current_diff_hash": "targeted-delta-reassessment-diff"
+            }))
+            .expect("the prior planned lenses complete one review sample"),
+        )
+        .expect("reviewed state json");
+        let state = &reviewed["state"];
+        let replacement_diff_hash = "targeted-delta-reassessment-v2";
+        let base_arguments = json!({
+            "state": state,
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&base_arguments).expect("delta scout required"),
+        )
+        .expect("delta-required json");
+        let assignment = &required["delta_risk_assignments"][0];
+        let assessment = delta_risk_assessment_for(
+            assignment,
+            "high",
+            &[
+                ("security-safety", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            &["security-safety"],
+            json!([]),
+        );
+        let mut reassessment_arguments = base_arguments;
+        reassessment_arguments["delta_risk_assessment"] = assessment;
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&reassessment_arguments)
+                .expect("valid delta assessment advances the same session"),
+        )
+        .expect("advanced delta json");
+
+        assert_eq!(advanced["transition_status"], "advanced");
+        assert_eq!(advanced["advance_kind"], "delta_reassessment");
+        assert_eq!(advanced["state"]["session_id"], state["session_id"]);
+        assert_eq!(
+            advanced["state"]["scope"]["diff_hash"],
+            replacement_diff_hash
+        );
+        assert_eq!(
+            advanced["state"]["lenses"],
+            json!(["correctness-behavior", "security-safety"])
+        );
+        assert_eq!(advanced["next_assignments"].as_array().unwrap().len(), 2);
+        assert!(advanced["next_assignments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|assignment| assignment["lens"] != "architecture-maintainability"));
+        assert!(review_contract_is_valid(&advanced["state"]));
+    }
+
+    #[test]
+    fn delta_before_initial_deep_review_preserves_every_unconfirmed_lens() {
+        let arguments = assessed_plan_arguments(
+            "delta-preserves-unconfirmed",
+            "high",
+            &[
+                ("security-safety", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let state = &planned["state"];
+        let replacement_diff_hash = "delta-preserves-unconfirmed-v2";
+        let base_arguments = json!({
+            "state": state,
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&base_arguments).expect("delta scout required"),
+        )
+        .expect("delta-required json");
+        let assessment = delta_risk_assessment_for(
+            &required["delta_risk_assignments"][0],
+            "high",
+            &[
+                ("security-safety", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            &["security-safety"],
+            json!([]),
+        );
+        let mut resubmission = base_arguments;
+        resubmission["delta_risk_assessment"] = assessment;
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&resubmission)
+                .expect("unconfirmed prior lenses remain active"),
+        )
+        .expect("advanced delta json");
+
+        assert_eq!(
+            advanced["state"]["lenses"],
+            json!([
+                "correctness-behavior",
+                "security-safety",
+                "architecture-maintainability"
+            ])
+        );
+    }
+
+    #[test]
+    fn changed_risk_diff_uses_server_generated_old_to_new_delta_evidence() {
+        let project_root = test_project_root("server-generated-delta-evidence");
+        fs::create_dir_all(project_root.join("src")).expect("source directory");
+        fs::write(project_root.join("src/lib.rs"), "old transition\n")
+            .expect("write prior content");
+        let arguments = assessed_plan_arguments_for_diff_at_root(
+            "delta-content-required",
+            "delta-content-required-diff",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            Some(&project_root),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let replacement_diff_hash = "delta-content-required-v2";
+        fs::write(
+            project_root.join("unrelated.txt"),
+            "unrelated head movement\n",
+        )
+        .expect("write unrelated content");
+        run_git(
+            &project_root,
+            &[
+                "add".to_string(),
+                "--".to_string(),
+                "unrelated.txt".to_string(),
+            ],
+            None,
+            None,
+            "test_git_add_unrelated",
+        )
+        .expect("stage unrelated content");
+        run_git(
+            &project_root,
+            &[
+                "commit".to_string(),
+                "--quiet".to_string(),
+                "-m".to_string(),
+                "move head outside review scope".to_string(),
+            ],
+            None,
+            None,
+            "test_git_commit_unrelated",
+        )
+        .expect("commit unrelated content");
+        fs::write(project_root.join("src/lib.rs"), "new transition\n")
+            .expect("write replacement content");
+
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": [],
+                "current_diff_hash": replacement_diff_hash,
+                "current_changed_files": ["src/lib.rs"],
+                "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+            }))
+            .expect("the coordinator generates bound delta evidence"),
+        )
+        .expect("delta-required json");
+        let evidence = &required["delta_risk_assignments"][0]["delta_evidence"];
+
+        assert_eq!(evidence["changed_paths"], json!(["src/lib.rs"]));
+        assert_eq!(
+            evidence["prior_snapshot_commit"],
+            planned["state"]["scope"]["snapshot_commit"]
+        );
+        assert_ne!(
+            evidence["current_snapshot_commit"],
+            evidence["prior_snapshot_commit"]
+        );
+        let patch = evidence["inline_patch"].as_str().expect("inline patch");
+        assert!(patch.contains("-old transition"));
+        assert!(patch.contains("+new transition"));
+        assert!(!patch.contains("unrelated.txt"));
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn large_delta_artifact_keeps_a_stable_identity_across_scout_resubmission() {
+        let project_root = test_project_root("content-addressed-delta-evidence");
+        fs::create_dir_all(project_root.join("src")).expect("source directory");
+        fs::write(project_root.join("src/lib.rs"), "old line\n".repeat(20_000))
+            .expect("write large prior content");
+        let arguments = assessed_plan_arguments_for_diff_at_root(
+            "content-addressed-delta",
+            "content-addressed-delta-v1",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            Some(&project_root),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        fs::write(project_root.join("src/lib.rs"), "new line\n".repeat(20_000))
+            .expect("write large replacement content");
+        let replacement_diff_hash = "content-addressed-delta-v2";
+        let base_arguments = json!({
+            "state": planned["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&base_arguments).expect("large delta requests a scout"),
+        )
+        .expect("delta-required json");
+        let assignment = &required["delta_risk_assignments"][0];
+        let artifact_reference = assignment["delta_evidence"]["artifact_reference"]
+            .as_str()
+            .expect("large deltas use an artifact")
+            .to_string();
+        assert!(assignment["delta_evidence"].get("inline_patch").is_none());
+        assert!(Path::new(&artifact_reference).is_file());
+
+        let assessment = delta_risk_assessment_for(
+            assignment,
+            "medium",
+            &[("correctness-behavior", "medium")],
+            &["correctness-behavior"],
+            json!([]),
+        );
+        let mut resubmission = base_arguments;
+        resubmission["delta_risk_assessment"] = assessment;
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&resubmission)
+                .expect("content-addressed evidence keeps the assignment stable"),
+        )
+        .expect("advanced delta json");
+
+        assert_eq!(advanced["transition_status"], "advanced");
+        assert_eq!(advanced["advance_kind"], "delta_reassessment");
+        assert!(review_contract_is_valid(&advanced["state"]));
+        let _ = fs::remove_file(artifact_reference);
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn delta_reassessment_cannot_reduce_coverage_or_erase_an_unresolved_blocker() {
+        let arguments = assessed_plan_arguments(
+            "monotonic-delta-reassessment",
+            "high",
+            &[
+                (SAFETY_LENS, "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            json!([{
+                "semantic_key": "unsafe-output",
+                "lens": SAFETY_LENS,
+                "severity": "MAJOR",
+                "security_impact": "none",
+                "safety_impact": "major",
+                "likelihood": "possible",
+                "causality": "caused",
+                "path": "src/lib.rs",
+                "message": "The changed output can plausibly injure a person.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The changed output path creates the unsafe command."
+                }
+            }]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let state = &planned["state"];
+        let replacement_diff_hash = "monotonic-delta-reassessment-v2";
+        let base_arguments = json!({
+            "state": state,
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&base_arguments).expect("delta scout required"),
+        )
+        .expect("delta-required json");
+        let assignment = &required["delta_risk_assignments"][0];
+        let assessment = delta_risk_assessment_for(
+            assignment,
+            "low",
+            &[("correctness-behavior", "low")],
+            &[],
+            json!([]),
+        );
+        let mut reassessment_arguments = base_arguments;
+        reassessment_arguments["delta_risk_assessment"] = assessment;
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&reassessment_arguments)
+                .expect("lower delta assessment cannot remove prior obligations"),
+        )
+        .expect("advanced delta json");
+
+        let selected = advanced["state"]["risk_plan"]["selected_lenses"]
+            .as_array()
+            .unwrap();
+        assert!(selected.contains(&json!(SAFETY_LENS)));
+        assert!(selected.contains(&json!("architecture-maintainability")));
+        assert!(selected.contains(&json!("correctness-behavior")));
+        assert_eq!(
+            advanced["state"]["risk_plan"]["lens_passes"][SAFETY_LENS],
+            state["risk_plan"]["lens_passes"][SAFETY_LENS]
+        );
+        assert_eq!(
+            advanced["state"]["unresolved_findings"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            advanced["state"]["unresolved_findings"][0]["id"],
+            "unsafe-output"
+        );
+        assert!(review_contract_is_valid(&advanced["state"]));
+    }
+
+    #[test]
+    fn delta_reconfirmed_blocker_overrides_a_stale_fixed_decision() {
+        let blocker = json!({
+            "semantic_key": "unsafe-output",
+            "lens": SAFETY_LENS,
+            "severity": "MAJOR",
+            "security_impact": "none",
+            "safety_impact": "major",
+            "likelihood": "possible",
+            "causality": "caused",
+            "path": "src/lib.rs",
+            "message": "The changed output can plausibly injure a person.",
+            "relevance": {
+                "category": "diff_changed_file",
+                "explanation": "The changed output path creates the unsafe command."
+            }
+        });
+        let arguments = assessed_plan_arguments(
+            "delta-reconfirms-blocker",
+            "high",
+            &[(SAFETY_LENS, "high")],
+            json!([blocker.clone()]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let replacement_diff_hash = "delta-reconfirms-blocker-v2";
+        let base_arguments = json!({
+            "state": planned["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash),
+            "caller_decisions": [{
+                "finding_id": "unsafe-output",
+                "lens": SAFETY_LENS,
+                "decision": "fixed",
+                "remediation_path": "src/lib.rs"
+            }]
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&base_arguments).expect("delta scout required"),
+        )
+        .expect("delta-required json");
+        let assessment = delta_risk_assessment_for(
+            &required["delta_risk_assignments"][0],
+            "high",
+            &[(SAFETY_LENS, "high")],
+            &[SAFETY_LENS],
+            json!([blocker]),
+        );
+        let mut resubmission = base_arguments;
+        resubmission["delta_risk_assessment"] = assessment;
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&resubmission).expect("the reconfirmed blocker remains open"),
+        )
+        .expect("advanced delta json");
+
+        assert_eq!(
+            advanced["state"]["unresolved_findings"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            advanced["state"]["unresolved_findings"][0]["id"],
+            "unsafe-output"
+        );
+        assert_eq!(
+            advanced["state"]["risk_plan"]["resolved_blocking_findings"],
+            json!([])
+        );
+    }
+
+    #[test]
+    fn json_rpc_delta_reassessment_freezes_resubmission_and_keeps_session_identity() {
         let mut coordinator = ReviewCoordinator::default();
         let first_arguments = assessed_plan_arguments(
             "json-rpc-risk-reassessment-v1",
@@ -13692,6 +15816,13 @@ pre_filter = "project-pre"
         let state = &first_plan["state"];
         let replacement_diff_hash = "json-rpc-risk-reassessment-v2-diff";
 
+        let base_arguments = json!({
+            "state": state,
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
         let reassessment_required = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
@@ -13699,81 +15830,306 @@ pre_filter = "project-pre"
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.advance",
-                    "arguments": {
-                        "state": state,
-                        "lens_results": clean_lens_results_for(state),
-                        "current_diff_hash": replacement_diff_hash,
-                        "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
-                        "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
-                    }
+                    "arguments": base_arguments
                 }
             }))
             .expect("reassessment-required response");
+        let required: Value = serde_json::from_str(
+            reassessment_required["result"]["content"][0]["text"]
+                .as_str()
+                .expect("delta-required text"),
+        )
+        .expect("delta-required json");
         assert_eq!(
-            reassessment_required["error"]["message"],
-            "risk_reassessment_required_when_diff_changes=true new_session_id_required=true"
+            required["transition_status"],
+            "delta_risk_assessment_required"
         );
-
-        let reused_identity = assessed_plan_arguments_for_diff(
-            "json-rpc-risk-reassessment-v1",
-            replacement_diff_hash,
+        let assignment = &required["delta_risk_assignments"][0];
+        let assessment = delta_risk_assessment_for(
+            assignment,
             "medium",
             &[("correctness-behavior", "medium")],
+            &["correctness-behavior"],
             json!([]),
         );
-        let reused_response = coordinator
+
+        let mut changed_resubmission = base_arguments.clone();
+        changed_resubmission["current_changed_files"] = json!(["src/lib.rs"]);
+        changed_resubmission["delta_risk_assessment"] = assessment.clone();
+        let changed_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
                 "id": 3,
                 "method": "tools/call",
                 "params": {
-                    "name": "final_review.plan",
-                    "arguments": reused_identity
+                    "name": "final_review.advance",
+                    "arguments": changed_resubmission
                 }
             }))
-            .expect("reused-identity response");
+            .expect("changed resubmission response");
         assert_eq!(
-            reused_response["error"]["message"],
-            "review_session_exists=true"
+            changed_response["error"]["message"],
+            "pending_delta_risk_resubmission_mismatch=true"
         );
 
-        let replacement_arguments = assessed_plan_arguments_for_diff(
-            "json-rpc-risk-reassessment-v2",
-            replacement_diff_hash,
-            "medium",
-            &[("correctness-behavior", "medium")],
-            json!([]),
-        );
-        let replacement_response = coordinator
+        let mut exact_resubmission = base_arguments;
+        exact_resubmission["delta_risk_assessment"] = assessment;
+        let advanced_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
                 "id": 4,
                 "method": "tools/call",
                 "params": {
-                    "name": "final_review.plan",
-                    "arguments": replacement_arguments
+                    "name": "final_review.advance",
+                    "arguments": exact_resubmission
                 }
             }))
-            .expect("replacement plan response");
-        let replacement_plan: Value = serde_json::from_str(
-            replacement_response["result"]["content"][0]["text"]
+            .expect("advanced reassessment response");
+        let advanced: Value = serde_json::from_str(
+            advanced_response["result"]["content"][0]["text"]
                 .as_str()
-                .expect("replacement plan text"),
+                .expect("advanced reassessment text"),
         )
-        .expect("replacement plan json");
+        .expect("advanced reassessment json");
         assert_eq!(
-            replacement_plan["state"]["session_id"],
-            "json-rpc-risk-reassessment-v2"
+            advanced["state"]["session_id"],
+            "json-rpc-risk-reassessment-v1"
         );
         assert_eq!(
-            replacement_plan["state"]["scope"]["diff_hash"],
+            advanced["state"]["scope"]["diff_hash"],
             replacement_diff_hash
         );
         assert_eq!(
-            replacement_plan["state"]["shared_test_evidence"]["diff_hash"],
+            advanced["state"]["shared_test_evidence"]["diff_hash"],
             replacement_diff_hash
         );
-        assert!(review_contract_is_valid(&replacement_plan["state"]));
+        assert!(review_contract_is_valid(&advanced["state"]));
+    }
+
+    #[test]
+    fn new_material_path_repeats_only_its_lens_until_the_next_sample_finds_nothing_new() {
+        let arguments = assessed_plan_arguments(
+            "material-discovery-saturation",
+            "high",
+            &[
+                ("correctness-behavior", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let state = &planned["state"];
+        let mut results = clean_lens_results_for(state).as_array().unwrap().clone();
+        results[0] =
+            risk_finding_lens_result(state, "correctness-behavior", "new-material-path", "MAJOR");
+        let first: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": state,
+                "lens_results": results,
+                "current_diff_hash": "material-discovery-saturation-diff",
+                "unrelated_follow_ups": [{
+                    "finding_id": "new-material-path",
+                    "lens": "correctness-behavior",
+                    "ticket_reference": "BACKLOG-MATERIAL-PATH"
+                }]
+            }))
+            .expect("first material sample advances"),
+        )
+        .expect("first advanced json");
+
+        assert_eq!(first["complete"], false);
+        assert_eq!(first["state"]["lenses"], json!(["correctness-behavior"]));
+        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            first["filtered"]["discovery_saturation"]["new_major_critical_ids"],
+            json!(["new-material-path"])
+        );
+
+        let second_state = &first["state"];
+        let second: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": second_state,
+                "lens_results": clean_lens_results_for(second_state),
+                "current_diff_hash": "material-discovery-saturation-diff"
+            }))
+            .expect("confirmation sample advances"),
+        )
+        .expect("second advanced json");
+
+        assert_eq!(second["complete"], true);
+        assert_eq!(second["state"]["lenses"], json!([]));
+    }
+
+    #[test]
+    fn exceptional_second_pass_targets_only_the_exceptional_lens() {
+        let arguments = assessed_plan_arguments(
+            "exceptional-targeted-second-pass",
+            "exceptional",
+            &[
+                ("correctness-behavior", "high"),
+                ("architecture-maintainability", "exceptional"),
+            ],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let first: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": clean_lens_results_for(&planned["state"]),
+                "current_diff_hash": "exceptional-targeted-second-pass-diff"
+            }))
+            .expect("first exceptional sample advances"),
+        )
+        .expect("first advanced json");
+
+        assert_eq!(
+            first["state"]["lenses"],
+            json!(["architecture-maintainability"])
+        );
+        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 1);
+
+        let second: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": first["state"],
+                "lens_results": clean_lens_results_for(&first["state"]),
+                "current_diff_hash": "exceptional-targeted-second-pass-diff"
+            }))
+            .expect("second exceptional sample advances"),
+        )
+        .expect("second advanced json");
+        assert_eq!(second["complete"], true);
+    }
+
+    #[test]
+    fn malformed_lens_retries_without_repeating_a_valid_peer() {
+        let arguments = assessed_plan_arguments(
+            "malformed-targeted-retry",
+            "high",
+            &[
+                ("correctness-behavior", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let mut results = clean_lens_results_for(&planned["state"])
+            .as_array()
+            .unwrap()
+            .clone();
+        results[0]["status"] = json!("clean");
+        results[0]["findings"] = json!([{
+            "id": "contradictory-clean-result",
+            "severity": "MINOR"
+        }]);
+        let first: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": results,
+                "current_diff_hash": "malformed-targeted-retry-diff"
+            }))
+            .expect("malformed sample advances to a retry"),
+        )
+        .expect("first advanced json");
+
+        assert_eq!(first["state"]["lenses"], json!(["correctness-behavior"]));
+        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn repeated_scout_material_path_is_known_and_needs_no_extra_sample() {
+        let scout_finding = json!({
+            "semantic_key": "known-major-path",
+            "lens": "correctness-behavior",
+            "severity": "MAJOR",
+            "security_impact": "none",
+            "safety_impact": "none",
+            "likelihood": "possible",
+            "causality": "caused",
+            "path": "src/lib.rs",
+            "message": "A material correctness path is already known.",
+            "relevance": {
+                "category": "diff_changed_file",
+                "explanation": "The changed branch contains the path."
+            }
+        });
+        let arguments = assessed_plan_arguments(
+            "known-scout-material-path",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([scout_finding]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": [risk_finding_lens_result(
+                    &planned["state"],
+                    "correctness-behavior",
+                    "known-major-path",
+                    "MAJOR"
+                )],
+                "current_diff_hash": "known-scout-material-path-diff",
+                "unrelated_follow_ups": [{
+                    "finding_id": "known-major-path",
+                    "lens": "correctness-behavior",
+                    "ticket_reference": "BACKLOG-KNOWN-PATH"
+                }]
+            }))
+            .expect("known scout path advances"),
+        )
+        .expect("advanced json");
+
+        assert_eq!(advanced["complete"], true);
+        assert_eq!(
+            advanced["filtered"]["discovery_saturation"]["new_major_critical_ids"],
+            json!([])
+        );
+    }
+
+    #[test]
+    fn scout_material_finding_cannot_hide_under_an_unselected_lens() {
+        let arguments = assessed_plan_arguments(
+            "unselected-scout-material-path",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([{
+                "semantic_key": "hidden-major-path",
+                "lens": "architecture-maintainability",
+                "severity": "MAJOR",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "likelihood": "possible",
+                "causality": "caused",
+                "path": "src/lib.rs",
+                "message": "A material path was assigned to an omitted lens.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The path is in the changed branch."
+                }
+            }]),
+        );
+
+        assert_eq!(
+            plan_result(&arguments).expect_err("material scout paths require deep coverage"),
+            "risk_assessment_material_finding_lens_must_be_selected lens=architecture-maintainability"
+        );
+    }
+
+    #[test]
+    fn risk_contract_rejects_forged_discovery_progress() {
+        let arguments = assessed_plan_arguments(
+            "forged-discovery-progress",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let mut forged = planned["state"].clone();
+        forged["risk_plan"]["discovery_saturation"]["confirmation_samples_by_lens"]
+            ["correctness-behavior"] = json!(1);
+        forged["review_contract_id"] = json!(computed_review_contract_id(&forged).unwrap());
+
+        assert!(!review_contract_is_valid(&forged));
     }
 
     #[test]
@@ -13881,7 +16237,7 @@ pre_filter = "project-pre"
             .expect("deferred findings complete the targeted review"),
         )
         .expect("advanced json");
-        assert_eq!(advanced["complete"], true);
+        assert_eq!(advanced["complete"], false);
         assert_eq!(advanced["verification"]["status"], "not_required");
         assert_eq!(advanced["state"]["clean_streak"], 1);
         assert_eq!(advanced["state"]["finding_history"][0]["routed_count"], 3);
@@ -13889,6 +16245,16 @@ pre_filter = "project-pre"
             advanced["state"]["finding_history"][0]["already_tracked_count"],
             0
         );
+        let confirmed: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": advanced["state"],
+                "lens_results": clean_lens_results_for(&advanced["state"]),
+                "current_diff_hash": "deferred-nonsecurity-findings-diff"
+            }))
+            .expect("a second sample confirms no new material path"),
+        )
+        .expect("confirmed json");
+        assert_eq!(confirmed["complete"], true);
     }
 
     #[test]
@@ -14559,7 +16925,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn applied_scout_blocker_fix_requires_a_fresh_risk_plan() {
+    fn applied_scout_blocker_fix_requires_a_bound_delta_reassessment() {
         let arguments = assessed_plan_arguments(
             "resolved-safety-blocker",
             "high",
@@ -14583,10 +16949,9 @@ pre_filter = "project-pre"
         let plan: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
         let current_shared_test_evidence =
             shared_test_evidence_for("resolved-safety-blocker-fixed-diff");
-        let lens_results = clean_lens_results_for(&plan["state"]);
-        let error = advance_synthetic_state(&json!({
+        let base_arguments = json!({
             "state": plan["state"],
-            "lens_results": lens_results,
+            "lens_results": [],
             "current_diff_hash": "resolved-safety-blocker-fixed-diff",
             "current_changed_files": ["src/lib.rs"],
             "current_shared_test_evidence": current_shared_test_evidence,
@@ -14596,20 +16961,39 @@ pre_filter = "project-pre"
                 "decision": "fixed",
                 "remediation_path": "src/lib.rs"
             }]
-        }))
-        .expect_err("a fix cannot inherit the stale scout plan");
-
-        assert_eq!(
-            error,
-            "risk_reassessment_required_when_diff_changes=true new_session_id_required=true"
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&base_arguments).expect("a fix requires a delta scout"),
+        )
+        .expect("delta-required json");
+        let assignment = &required["delta_risk_assignments"][0];
+        let assessment = delta_risk_assessment_for(
+            assignment,
+            "high",
+            &[(SAFETY_LENS, "high")],
+            &[SAFETY_LENS],
+            json!([]),
         );
-        assert!(review_contract_is_valid(&plan["state"]));
+        let mut resubmission = base_arguments;
+        resubmission["delta_risk_assessment"] = assessment;
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&resubmission)
+                .expect("the bound delta scout can confirm a blocker fix"),
+        )
+        .expect("advanced delta json");
+
+        assert_eq!(advanced["advance_kind"], "delta_reassessment");
+        assert!(review_contract_is_valid(&advanced["state"]));
         assert_eq!(
-            plan["state"]["unresolved_findings"]
+            advanced["state"]["unresolved_findings"]
                 .as_array()
                 .unwrap()
                 .len(),
-            1
+            0
+        );
+        assert_eq!(
+            advanced["state"]["risk_plan"]["resolved_blocking_findings"][0]["id"],
+            "unsafe-control-output"
         );
     }
 
