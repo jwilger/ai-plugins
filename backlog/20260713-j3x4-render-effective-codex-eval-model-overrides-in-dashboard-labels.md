@@ -20,3 +20,5 @@ Pre-existing MINOR found during 20260709-spx8. scripts/evals/generate-config.mjs
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Superseded by 20260713-nm8h. The target now explicitly preserves this ticket's effective-model override and static-Terra-label regression requirements.
