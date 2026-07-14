@@ -26,3 +26,4 @@ Deferred MINOR from the fresh-context review of 20260709-spx8. The current regre
 ## Notes / Log
 
 - 2026-07-13: Deferred MINOR from the measurement-completeness rereview of 20260709-spx8: current coverage proves config-derived omitted-case rejection and the shared provider/sample completeness loop, but does not assert exhaustive missing-tuple diagnostics for a wholly absent case or the zero-result artifact edge. This is test-depth hardening only; existing behavior already fails closed.
+- 2026-07-14: Scope boundary from 20260713-uf3e split: this ticket owns repeated-sample expansion, exact provider labels, and missing-tuple diagnostics. 20260714-wimr owns production validation and effective-timeout semantics.
