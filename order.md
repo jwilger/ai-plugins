@@ -54,3 +54,4 @@
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
+20260714-gb9s-bound-final-review-git-pathspec-argv-and-delta-evidence-inventories
