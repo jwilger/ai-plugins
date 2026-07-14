@@ -28,7 +28,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [x] Guidance permits longer-running integration, mutation, full-suite, and similarly expensive checks to run in CI instead of blocking each local increment.
 - [x] Final-review planning accepts or derives an explicit risk class from concrete deployment, trust-boundary, reversibility, data, and operational evidence, and enables only lenses justified by that risk.
 - [x] Low-risk work uses lightweight review with at most one optional targeted final lens; medium-risk work uses one targeted full-review pass; high-risk work uses one broad pass.
-- [ ] Multiple independent clean passes are available only for exceptional risk such as destructive or irreversible operations, authentication/authorization boundaries, sensitive-data migrations, cryptographic behavior, or safety-critical behavior.
+- [x] Multiple independent clean passes are available only for exceptional risk such as destructive or irreversible operations, authentication/authorization boundaries, sensitive-data migrations, cryptographic behavior, or safety-critical behavior.
 - [ ] Deferred and already-known findings are not re-verified or re-reported without materially severity-changing evidence, and they do not block completion or reset clean state when the reviewed diff hash is unchanged and required ticket/report evidence exists.
 - [ ] After a blocking fix, high-risk review reruns only affected lenses plus one integration or correctness lens; unaffected lenses are not restarted.
 - [ ] Verifier assignments are created only for blocking, disputed, or materially uncertain findings and never merely because a routine MINOR finding was deferred.
