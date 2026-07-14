@@ -17,6 +17,8 @@ Consolidates two MINOR observations from the risk-proportionate final-review tic
 
 ## Acceptance criteria
 
+- [ ] Reject or explicitly model split candidates whose scope ownership is fully overlapping, while preserving collective coverage of the changed-file inventory.
+
 ## Subtasks
 
 ## Notes / Log
