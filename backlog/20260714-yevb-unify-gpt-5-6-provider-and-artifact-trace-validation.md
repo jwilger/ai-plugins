@@ -25,3 +25,5 @@ Verified MINOR architecture finding from 20260709-spx8: both enforcement boundar
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: 2026-07-14 formal final-review pass 1 for 20260709-spx8 reconfirmed missing provider/checker parity cases for retryable errors before/after the active turn, mismatched thread/turn identifiers, and duplicate turn/started. These are covered by the existing comprehensive lifecycle parity criterion; deferred as MINOR without changing the frozen diff.
