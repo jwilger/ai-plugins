@@ -17,6 +17,8 @@ Split from 20260713-uf3e. Ambient output overrides can collapse execution and gr
 
 ## Acceptance criteria
 
+- [ ] Execution and grader calibration always resolve to distinct artifact directories, including under every supported output-root override.
+
 ## Subtasks
 
 ## Notes / Log
