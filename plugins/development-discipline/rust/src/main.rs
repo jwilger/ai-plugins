@@ -31,7 +31,7 @@ const MAX_FINDING_ID_BYTES: usize = 128;
 const MAX_CHANGED_FILES: usize = 20_000;
 const MAX_ASSIGNMENT_CONTEXT_BYTES: usize = 64 * 1024;
 const MAX_CONDITIONAL_LENSES: usize = 16;
-const MAX_REVIEW_LENSES: usize = LENSES.len() + MAX_CONDITIONAL_LENSES;
+const MAX_REVIEW_LENSES: usize = LENSES.len() + 1 + MAX_CONDITIONAL_LENSES;
 const MAX_LENS_IDENTIFIER_CHARS: usize = 64;
 const MAX_LENS_DESCRIPTION_CHARS: usize = 512;
 const MAX_SESSION_ID_CHARS: usize = 128;
@@ -73,6 +73,7 @@ const LENSES: &[&str] = &[
     "release-integration",
     "production-risk-footguns",
 ];
+const SAFETY_LENS: &str = "safety-human-harm";
 
 fn main() {
     if let Err(error) = run_stdio(io::stdin().lock(), io::stdout().lock()) {
@@ -225,7 +226,7 @@ impl ReviewCoordinator {
                     .pointer("/params/arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                if name != "final_review.plan" {
+                if !matches!(name, "final_review.plan" | "final_review.assess_risk") {
                     if let Err(error) = self.validate_authoritative_state(name, &arguments) {
                         return Ok(error_response(id, -32602, &error));
                     }
@@ -446,7 +447,7 @@ fn initialize_response(request: &Value, id: Value) -> Value {
                 "version": env!("CARGO_PKG_VERSION"),
                 "sourceFingerprint": BUILD_SOURCE_FINGERPRINT
             },
-            "instructions": "Use final_review.plan to get caller-carried, server-authoritative review state and subagent assignments. Keep this MCP process alive for the full review, launch the actual reviewers as subagents in the calling agent, submit structured results to final_review.filter_findings, and use final_review.advance as the canonical state transition before claiming the three-clean-iteration rule is satisfied."
+            "instructions": "Use final_review.assess_risk before final_review.plan. Launch the one bounded scout, append its caller attestation after shutdown, then submit the assessment so the coordinator can select deeper lenses. Keep this MCP process alive for the full review, launch assigned reviewers as subagents, submit structured results to final_review.filter_findings, and use final_review.advance as the canonical state transition."
         }
     })
 }
@@ -511,6 +512,7 @@ fn tools() -> Value {
                             "additionalProperties": false
                         }
                     },
+                    "risk_assessment": { "type": "object" },
                     "session_id": { "type": "string", "maxLength": MAX_SESSION_ID_CHARS },
                     "work_item_id": {
                         "type": "string",
@@ -656,6 +658,48 @@ fn tools() -> Value {
                 "properties": { "state": { "type": "object" } },
                 "required": ["state"]
             }
+        },
+        {
+            "name": "final_review.assess_risk",
+            "description": "Create one bounded broad-spectrum risk-scout assignment before selecting deeper review lenses.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "base": { "type": "string", "minLength": 1, "pattern": "\\S" },
+                    "scope": { "type": "string", "enum": ["base", "uncommitted"] },
+                    "user_request": { "type": "string" },
+                    "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+                    "explicit_concerns": { "type": "array", "items": { "type": "string" } },
+                    "changed_files": { "type": "array", "items": { "type": "string" } },
+                    "diff_hash": { "type": "string" },
+                    "conditional_lenses": {
+                        "type": "array",
+                        "maxItems": MAX_CONDITIONAL_LENSES,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string", "maxLength": MAX_LENS_IDENTIFIER_CHARS },
+                                "description": { "type": "string", "maxLength": MAX_LENS_DESCRIPTION_CHARS }
+                            },
+                            "required": ["id", "description"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "session_id": { "type": "string", "maxLength": MAX_SESSION_ID_CHARS },
+                    "project_root": { "type": "string" },
+                    "config_path": { "type": "string" },
+                    "harness": { "type": "string" },
+                    "fast_model_role": { "type": "string" },
+                    "pre_filter_model_role": { "type": "string" },
+                    "model_roles": {
+                        "type": "object",
+                        "properties": {
+                            "pre_filter": { "type": "string", "maxLength": MAX_MODEL_ROLE_CHARS }
+                        }
+                    }
+                },
+                "required": ["changed_files", "diff_hash"]
+            }
         }
     ])
 }
@@ -667,6 +711,7 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, String> {
         "final_review.advance" => Ok(text_content(advance(arguments)?)),
         "final_review.clean_status" => Ok(text_content(clean_status(arguments))),
         "final_review.out_of_scope_report" => Ok(text_content(out_of_scope_report(arguments)?)),
+        "final_review.assess_risk" => Ok(text_content(risk_assessment_result(arguments)?)),
         other => Err(format!("unsupported tool: {other}")),
     }
 }
@@ -674,6 +719,567 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, String> {
 #[cfg(test)]
 fn plan(arguments: &Value) -> String {
     plan_result(arguments).expect("valid final_review.plan arguments")
+}
+
+fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
+    let scope = match arguments.get("scope") {
+        None => "base".to_string(),
+        Some(Value::String(scope)) if matches!(scope.as_str(), "base" | "uncommitted") => {
+            scope.clone()
+        }
+        Some(_) => return Err("scope_invalid expected=base|uncommitted".to_string()),
+    };
+    let requested_base = match arguments.get("base") {
+        None => None,
+        Some(Value::String(base)) if !base.trim().is_empty() => Some(base.clone()),
+        Some(_) => return Err("base_invalid expected=nonempty-string".to_string()),
+    };
+    let base = if scope == "uncommitted" {
+        "HEAD".to_string()
+    } else {
+        requested_base.unwrap_or_else(|| DEFAULT_BASE.to_string())
+    };
+    let user_request = strict_string_or_default(arguments, "user_request", "")?;
+    let acceptance_criteria =
+        strict_string_array(arguments.get("acceptance_criteria"), "acceptance_criteria")?
+            .unwrap_or_default();
+    let explicit_concerns =
+        strict_string_array(arguments.get("explicit_concerns"), "explicit_concerns")?
+            .unwrap_or_default();
+    let changed_files =
+        strict_string_array(arguments.get("changed_files"), "changed_files")?.unwrap_or_default();
+    if changed_files.is_empty() {
+        return Err("changed_files_required=true".to_string());
+    }
+    if changed_files.len() > MAX_CHANGED_FILES {
+        return Err(format!(
+            "scope_changed_files_too_many max={MAX_CHANGED_FILES}"
+        ));
+    }
+    let diff_hash = string(arguments, "diff_hash", "unknown");
+    if diff_hash.trim().is_empty() || diff_hash == "unknown" {
+        return Err("diff_hash_required=true".to_string());
+    }
+    let project_root = resolved_project_root_string(arguments)?;
+    validate_changed_file_paths(
+        &changed_files,
+        Some(Path::new(&project_root)),
+        "scope_changed_files",
+    )?;
+    let conditional_lenses = parse_conditional_lenses(arguments.get("conditional_lenses"))?;
+    let review_dimensions = risk_dimensions(&conditional_lenses);
+    let (model_roles, _) = resolve_model_roles(arguments, &review_dimensions)?;
+    let session_id =
+        match string_opt(arguments, "session_id").filter(|value| !value.trim().is_empty()) {
+            Some(value) => {
+                if value.chars().count() > MAX_SESSION_ID_CHARS {
+                    return Err(format!(
+                        "session_id_too_long max_chars={MAX_SESSION_ID_CHARS}"
+                    ));
+                }
+                sanitize_identifier(&value)
+            }
+            None => stable_session_id(&project_root, &scope, &base, &diff_hash),
+        };
+    let binding = json!({
+        "session_id": session_id,
+        "scope": scope,
+        "base": base,
+        "project_root": project_root,
+        "diff_hash": diff_hash,
+        "changed_files": changed_files,
+        "user_request": user_request,
+        "acceptance_criteria": acceptance_criteria,
+        "explicit_concerns": explicit_concerns,
+        "review_dimensions": review_dimensions
+    });
+    let binding_text = binding.to_string();
+    let assignment_id = format!(
+        "risk-{}",
+        stable_storage_digest(&["final-review-risk-assessment-v1", &binding_text])
+    );
+    let subagent_key = format!("{session_id}:risk-scout");
+    let constraints = json!({
+        "run_tests": false,
+        "emit_canonical_findings": true,
+        "invoke_verifier": false,
+        "request_more_planners": false
+    });
+    let prompt = json!({
+        "role": "risk-scout",
+        "objective": "Assess every review dimension shallowly from concrete deployment, trust-boundary, reversibility, data, and operational evidence so deterministic policy can select deeper review work.",
+        "scope": binding,
+        "constraints": constraints,
+        "instructions": [
+            "Name a concrete plausible failure path and material impact for every elevated risk.",
+            "Mark uncertainty explicitly; uncertainty selects coverage instead of omitting it.",
+            "Identify exceptional-risk triggers and whether the ticket should be split before review.",
+            "Every caused or worsened CRITICAL/MAJOR security or human-safety finding must name the in-scope changed path that would be remediated.",
+            "Record canonical semantic failure paths, but do not run tests, invoke a verifier, or request another planner."
+        ]
+    })
+    .to_string();
+    let assignment = json!({
+        "assignment_id": assignment_id,
+        "subagent_key": subagent_key,
+        "role": "risk-scout",
+        "model_role": model_roles.pre_filter,
+        "lifecycle_action": "start_fresh",
+        "close_after_result": true,
+        "scope": {
+            "kind": scope,
+            "base": base,
+            "project_root": project_root,
+            "changed_files": changed_files,
+            "diff_hash": diff_hash
+        },
+        "review_dimensions": review_dimensions,
+        "constraints": constraints,
+        "prompt": prompt,
+        "expected_output_schema": risk_assessment_output_schema(),
+        "caller_append_schema": caller_attestation_schema()
+    });
+    let response = json!({
+        "transition_status": "risk_assessment_required",
+        "risk_assessment_id": assignment_id,
+        "assignments": [assignment],
+        "deep_review_assignments": [],
+        "calling_agent_responsibility": "Launch exactly this one fresh-context risk scout, collect its structured assessment, close the scout, append caller_attestation after closing it, and submit that assessment to final_review.plan."
+    })
+    .to_string();
+    if response.len() > MAX_REQUEST_BYTES {
+        return Err(format!(
+            "risk_assessment_response_too_large max_bytes={MAX_REQUEST_BYTES}"
+        ));
+    }
+    Ok(response)
+}
+
+fn risk_assessment_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "assignment_id": { "type": "string" },
+            "subagent_key": { "type": "string" },
+            "overall_risk": { "type": "string", "enum": ["low", "medium", "high", "exceptional"] },
+            "dimensions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "lens": { "type": "string" },
+                        "risk": { "type": "string", "enum": ["none", "low", "medium", "high", "exceptional"] },
+                        "evidence": { "type": "string" },
+                        "plausible_failure": { "type": "string" },
+                        "material_impact": { "type": "string" },
+                        "uncertain": { "type": "boolean" }
+                    },
+                    "required": ["lens", "risk", "evidence", "plausible_failure", "material_impact", "uncertain"],
+                    "additionalProperties": false
+                }
+            },
+            "exceptional_triggers": { "type": "array", "items": { "type": "string" } },
+            "split_required": { "type": "boolean" },
+            "split_rationale": { "type": "string" },
+            "plan_assumptions": { "type": "array", "items": { "type": "string" } },
+            "findings": {
+                "type": "array",
+                "maxItems": MAX_FINDINGS_PER_ITERATION,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "semantic_key": {
+                            "type": "string",
+                            "maxLength": MAX_FINDING_ID_BYTES,
+                            "pattern": "^[A-Za-z0-9._:-]+$"
+                        },
+                        "lens": { "type": "string" },
+                        "severity": { "type": "string", "enum": ["CRITICAL", "MAJOR", "MINOR", "TRIVIAL"] },
+                        "security_impact": { "type": "string", "enum": ["none", "minor", "moderate", "major", "critical"] },
+                        "likelihood": { "type": "string", "enum": ["rare", "unlikely", "possible", "likely", "observed"] },
+                        "causality": { "type": "string", "enum": ["caused", "worsened", "pre-existing", "incidental", "uncertain"] },
+                        "path": { "type": "string", "description": "For a blocking caused/worsened security or human-safety finding, the in-scope changed path that would be remediated." },
+                        "line": { "type": "integer" },
+                        "message": { "type": "string" },
+                        "scenario": { "type": "string" },
+                        "evidence": { "type": "string" },
+                        "material_impact": { "type": "string" },
+                        "relevance": {
+                            "type": "object",
+                            "properties": {
+                                "category": {
+                                    "type": "string",
+                                    "enum": [
+                                        "diff_changed_file",
+                                        "user_request",
+                                        "acceptance_criteria",
+                                        "explicit_user_concern",
+                                        "cross_cutting_risk"
+                                    ]
+                                },
+                                "explanation": { "type": "string" }
+                            },
+                            "required": ["category", "explanation"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "required": [
+                        "semantic_key",
+                        "lens",
+                        "severity",
+                        "security_impact",
+                        "likelihood",
+                        "causality",
+                        "message",
+                        "relevance"
+                    ],
+                    "additionalProperties": false
+                }
+            }
+        },
+        "required": [
+            "assignment_id",
+            "subagent_key",
+            "overall_risk",
+            "dimensions",
+            "exceptional_triggers",
+            "split_required",
+            "plan_assumptions",
+            "findings"
+        ],
+        "additionalProperties": false
+    })
+}
+
+#[derive(Clone)]
+struct CompiledRiskPlan {
+    state: Value,
+    selected_lenses: Vec<String>,
+    required_clean_iterations: u64,
+    blocking_findings: Vec<Value>,
+}
+
+fn risk_rank(risk: &str) -> u8 {
+    match risk {
+        "none" => 0,
+        "low" => 1,
+        "medium" => 2,
+        "high" => 3,
+        "exceptional" => 4,
+        _ => 0,
+    }
+}
+
+fn compile_risk_plan(
+    arguments: &Value,
+    changed_files: &[String],
+) -> Result<Option<CompiledRiskPlan>, String> {
+    let Some(assessment) = arguments.get("risk_assessment") else {
+        return Ok(None);
+    };
+    let assessment = assessment
+        .as_object()
+        .ok_or_else(|| "risk_assessment_must_be_object=true".to_string())?;
+    let expected_payload: Value = serde_json::from_str(&risk_assessment_result(arguments)?)
+        .map_err(|error| format!("risk_assessment_binding_parse_failed source={error}"))?;
+    let expected_assignment = expected_payload
+        .pointer("/assignments/0")
+        .ok_or_else(|| "risk_assessment_binding_assignment_missing=true".to_string())?;
+    for field in ["assignment_id", "subagent_key"] {
+        if assessment.get(field).and_then(Value::as_str)
+            != expected_assignment.get(field).and_then(Value::as_str)
+        {
+            return Err(format!("risk_assessment_{field}_mismatch=true"));
+        }
+    }
+    validate_caller_attestation(
+        assessment.get("caller_attestation"),
+        expected_assignment
+            .get("model_role")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+        expected_assignment
+            .get("subagent_key")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+    )?;
+    let overall_risk = assessment
+        .get("overall_risk")
+        .and_then(Value::as_str)
+        .filter(|risk| matches!(*risk, "low" | "medium" | "high" | "exceptional"))
+        .ok_or_else(|| "risk_assessment_overall_risk_invalid=true".to_string())?;
+    if assessment.get("split_required").and_then(Value::as_bool) != Some(false) {
+        return Err("review_split_required=true".to_string());
+    }
+    let expected_dimensions = expected_assignment
+        .get("review_dimensions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "risk_assessment_binding_dimensions_missing=true".to_string())?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let dimensions = assessment
+        .get("dimensions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "risk_assessment_dimensions_required=true".to_string())?;
+    let mut by_lens = HashMap::with_capacity(dimensions.len());
+    for dimension in dimensions {
+        let lens = dimension
+            .get("lens")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "risk_assessment_dimension_lens_required=true".to_string())?;
+        if !expected_dimensions.iter().any(|expected| expected == lens) {
+            return Err(format!("risk_assessment_dimension_unknown_lens={lens}"));
+        }
+        if by_lens
+            .insert(lens.to_string(), dimension.clone())
+            .is_some()
+        {
+            return Err(format!("risk_assessment_dimension_duplicate_lens={lens}"));
+        }
+        let risk = dimension
+            .get("risk")
+            .and_then(Value::as_str)
+            .filter(|risk| matches!(*risk, "none" | "low" | "medium" | "high" | "exceptional"))
+            .ok_or_else(|| format!("risk_assessment_dimension_risk_invalid lens={lens}"))?;
+        for field in ["evidence", "plausible_failure", "material_impact"] {
+            if dimension
+                .get(field)
+                .and_then(Value::as_str)
+                .is_none_or(|value| value.trim().is_empty())
+            {
+                return Err(format!(
+                    "risk_assessment_dimension_{field}_required lens={lens}"
+                ));
+            }
+        }
+        if dimension
+            .get("uncertain")
+            .and_then(Value::as_bool)
+            .is_none()
+        {
+            return Err(format!(
+                "risk_assessment_dimension_uncertain_required lens={lens}"
+            ));
+        }
+        if overall_risk != "exceptional" && risk == "exceptional" {
+            return Err(
+                "risk_assessment_exceptional_dimension_requires_exceptional_profile=true"
+                    .to_string(),
+            );
+        }
+    }
+    if by_lens.len() != expected_dimensions.len() {
+        return Err("risk_assessment_dimensions_incomplete=true".to_string());
+    }
+    let highest_dimension_risk = expected_dimensions
+        .iter()
+        .filter_map(|lens| by_lens[lens].get("risk").and_then(Value::as_str))
+        .max_by_key(|risk| risk_rank(risk))
+        .unwrap_or("none");
+    if risk_rank(overall_risk) < risk_rank(highest_dimension_risk) {
+        return Err(format!(
+            "risk_assessment_overall_risk_understates_dimensions overall={overall_risk} highest={highest_dimension_risk}"
+        ));
+    }
+
+    let selected_lenses = expected_dimensions
+        .iter()
+        .filter(|lens| {
+            let dimension = &by_lens[*lens];
+            dimension.get("risk").and_then(Value::as_str) != Some("none")
+                || dimension.get("uncertain").and_then(Value::as_bool) == Some(true)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    match overall_risk {
+        "low" if selected_lenses.len() > 1 => {
+            return Err("risk_assessment_low_profile_too_many_lenses max=1".to_string())
+        }
+        "medium" | "high" | "exceptional" if selected_lenses.is_empty() => {
+            return Err(format!(
+                "risk_assessment_{overall_risk}_profile_requires_lens=true"
+            ))
+        }
+        _ => {}
+    }
+    let mut lens_passes = serde_json::Map::new();
+    for lens in &selected_lenses {
+        let passes = if overall_risk == "exceptional"
+            && by_lens[lens].get("risk").and_then(Value::as_str) == Some("exceptional")
+        {
+            2
+        } else {
+            1
+        };
+        lens_passes.insert(lens.clone(), json!(passes));
+    }
+    let required_clean_iterations = lens_passes
+        .values()
+        .filter_map(Value::as_u64)
+        .max()
+        .unwrap_or(1);
+    let (findings, blocking_findings) = validated_scout_findings(
+        assessment.get("findings"),
+        &expected_dimensions,
+        changed_files,
+    )?;
+    let state = json!({
+        "assessment_id": expected_assignment["assignment_id"],
+        "overall_risk": overall_risk,
+        "dimensions": dimensions,
+        "findings": findings,
+        "exceptional_triggers": assessment.get("exceptional_triggers").cloned().unwrap_or_else(|| json!([])),
+        "plan_assumptions": assessment.get("plan_assumptions").cloned().unwrap_or_else(|| json!([])),
+        "selected_lenses": selected_lenses,
+        "lens_passes": lens_passes,
+        "discovery_sample_count": 1,
+        "resolved_blocking_findings": []
+    });
+    Ok(Some(CompiledRiskPlan {
+        state,
+        selected_lenses,
+        required_clean_iterations,
+        blocking_findings,
+    }))
+}
+
+fn validated_scout_findings(
+    value: Option<&Value>,
+    expected_dimensions: &[String],
+    changed_files: &[String],
+) -> Result<(Vec<Value>, Vec<Value>), String> {
+    let findings = value
+        .and_then(Value::as_array)
+        .ok_or_else(|| "risk_assessment_findings_required=true".to_string())?;
+    if findings.len() > MAX_FINDINGS_PER_ITERATION {
+        return Err(format!(
+            "risk_assessment_findings_too_many max={MAX_FINDINGS_PER_ITERATION}"
+        ));
+    }
+    let mut semantic_keys = HashSet::with_capacity(findings.len());
+    let mut validated = Vec::with_capacity(findings.len());
+    let mut blocking = Vec::new();
+    for finding in findings {
+        let semantic_key = finding
+            .get("semantic_key")
+            .and_then(Value::as_str)
+            .filter(|key| {
+                !key.is_empty()
+                    && key.len() <= MAX_FINDING_ID_BYTES
+                    && key.chars().all(|value| {
+                        value.is_ascii_alphanumeric() || matches!(value, '-' | '_' | '.' | ':')
+                    })
+            })
+            .ok_or_else(|| "risk_assessment_finding_semantic_key_invalid=true".to_string())?;
+        if !semantic_keys.insert(semantic_key.to_string()) {
+            return Err(format!(
+                "risk_assessment_finding_semantic_key_duplicate={semantic_key}"
+            ));
+        }
+        finding
+            .get("lens")
+            .and_then(Value::as_str)
+            .filter(|lens| expected_dimensions.iter().any(|expected| expected == lens))
+            .ok_or_else(|| "risk_assessment_finding_lens_invalid=true".to_string())?;
+        finding
+            .get("severity")
+            .and_then(Value::as_str)
+            .filter(|severity| REVIEW_SEVERITIES.contains(severity))
+            .ok_or_else(|| "risk_assessment_finding_severity_invalid=true".to_string())?;
+        finding
+            .get("security_impact")
+            .and_then(Value::as_str)
+            .filter(|impact| {
+                matches!(
+                    *impact,
+                    "none" | "minor" | "moderate" | "major" | "critical"
+                )
+            })
+            .ok_or_else(|| "risk_assessment_finding_security_impact_invalid=true".to_string())?;
+        finding
+            .get("likelihood")
+            .and_then(Value::as_str)
+            .filter(|likelihood| {
+                matches!(
+                    *likelihood,
+                    "rare" | "unlikely" | "possible" | "likely" | "observed"
+                )
+            })
+            .ok_or_else(|| "risk_assessment_finding_likelihood_invalid=true".to_string())?;
+        finding
+            .get("causality")
+            .and_then(Value::as_str)
+            .filter(|causality| {
+                matches!(
+                    *causality,
+                    "caused" | "worsened" | "pre-existing" | "incidental" | "uncertain"
+                )
+            })
+            .ok_or_else(|| "risk_assessment_finding_causality_invalid=true".to_string())?;
+        if finding
+            .get("message")
+            .and_then(Value::as_str)
+            .is_none_or(|message| message.trim().is_empty())
+        {
+            return Err("risk_assessment_finding_message_required=true".to_string());
+        }
+        let relevance = finding
+            .get("relevance")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "risk_assessment_finding_relevance_required=true".to_string())?;
+        if relevance
+            .get("category")
+            .and_then(Value::as_str)
+            .is_none_or(|category| !allowed_relevance_category(category))
+            || relevance
+                .get("explanation")
+                .and_then(Value::as_str)
+                .is_none_or(|explanation| explanation.trim().is_empty())
+        {
+            return Err("risk_assessment_finding_relevance_invalid=true".to_string());
+        }
+        let mut normalized = finding.clone();
+        normalized["id"] = json!(semantic_key);
+        if caused_blocking_security_or_safety_finding(&normalized) {
+            let in_scope_path = normalized
+                .get("path")
+                .and_then(Value::as_str)
+                .and_then(|path| normalize_review_path(path, None))
+                .is_some_and(|path| {
+                    changed_files.iter().any(|changed_file| {
+                        normalize_review_path(changed_file, None).as_deref() == Some(path.as_str())
+                    })
+                });
+            if !in_scope_path {
+                return Err(format!(
+                    "risk_assessment_blocking_finding_path_required_or_out_of_scope={semantic_key}"
+                ));
+            }
+            blocking.push(normalized.clone());
+        }
+        validated.push(normalized);
+    }
+    Ok((validated, blocking))
+}
+
+fn caused_blocking_security_or_safety_finding(finding: &Value) -> bool {
+    matches!(
+        finding.get("severity").and_then(Value::as_str),
+        Some("CRITICAL" | "MAJOR")
+    ) && matches!(
+        finding.get("causality").and_then(Value::as_str),
+        Some("caused" | "worsened")
+    ) && (matches!(
+        finding.get("security_impact").and_then(Value::as_str),
+        Some("major" | "critical")
+    ) || finding.get("lens").and_then(Value::as_str) == Some(SAFETY_LENS))
+}
+
+fn caused_blocking_safety_finding(finding: &Value) -> bool {
+    finding.get("lens").and_then(Value::as_str) == Some(SAFETY_LENS)
+        && caused_blocking_security_or_safety_finding(finding)
 }
 
 fn plan_result(arguments: &Value) -> Result<String, String> {
@@ -704,7 +1310,7 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
             "required_clean_iterations_too_large max={MAX_CLEAN_ITERATIONS}"
         ));
     }
-    let required_clean_iterations = requested_clean_iterations.max(DEFAULT_CLEAN_ITERATIONS);
+    let legacy_required_clean_iterations = requested_clean_iterations.max(DEFAULT_CLEAN_ITERATIONS);
     let user_request = strict_string_or_default(arguments, "user_request", "")?;
     let acceptance_criteria =
         strict_string_array(arguments.get("acceptance_criteria"), "acceptance_criteria")?
@@ -715,15 +1321,6 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
     let changed_files =
         strict_string_array(arguments.get("changed_files"), "changed_files")?.unwrap_or_default();
     let conditional_lenses = parse_conditional_lenses(arguments.get("conditional_lenses"))?;
-    let unrelated_finding_policy = parse_unrelated_finding_policy(
-        arguments.get("unrelated_finding_policy"),
-        &all_lenses(&conditional_lenses),
-    )?;
-    let unrelated_finding_policy_confirmation_required =
-        arguments.get("unrelated_finding_policy").is_none()
-            && (!user_request.trim().is_empty()
-                || !acceptance_criteria.is_empty()
-                || !explicit_concerns.is_empty());
     let diff_hash = string(arguments, "diff_hash", "unknown");
     if changed_files.is_empty() {
         return Err("changed_files_required=true".to_string());
@@ -742,7 +1339,30 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         Some(Path::new(&project_root)),
         "scope_changed_files",
     )?;
-    let lenses = all_lenses(&conditional_lenses);
+    let compiled_risk_plan = compile_risk_plan(arguments, &changed_files)?;
+    let lenses = compiled_risk_plan
+        .as_ref()
+        .map(|plan| plan.selected_lenses.clone())
+        .unwrap_or_else(|| all_lenses(&conditional_lenses));
+    let required_clean_iterations = compiled_risk_plan
+        .as_ref()
+        .map(|plan| plan.required_clean_iterations)
+        .unwrap_or(legacy_required_clean_iterations);
+    let risk_plan_state = compiled_risk_plan
+        .as_ref()
+        .map(|plan| plan.state.clone())
+        .unwrap_or(Value::Null);
+    let initial_unresolved_findings = compiled_risk_plan
+        .as_ref()
+        .map(|plan| Value::Array(plan.blocking_findings.clone()))
+        .unwrap_or(Value::Null);
+    let unrelated_finding_policy =
+        parse_unrelated_finding_policy(arguments.get("unrelated_finding_policy"), &lenses)?;
+    let unrelated_finding_policy_confirmation_required =
+        arguments.get("unrelated_finding_policy").is_none()
+            && (!user_request.trim().is_empty()
+                || !acceptance_criteria.is_empty()
+                || !explicit_concerns.is_empty());
     let (model_roles, finding_disposition_policy) = resolve_model_roles(arguments, &lenses)?;
     let fast_model_role = model_roles.pre_filter.clone();
     let review_model_role = model_roles.lens_review.clone();
@@ -806,11 +1426,13 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         "finding_disposition_policy": finding_disposition_policy,
         "unrelated_finding_policy_confirmation_required": unrelated_finding_policy_confirmation_required,
         "out_of_scope_report": [],
+        "unresolved_findings": initial_unresolved_findings,
         "unresolved_security_escalations": [],
         "model_roles": resolved_model_roles,
         "model_role_sources": resolved_model_role_sources,
         "model_role_confirmation_required": model_roles.confirmation_required,
         "phase_execution": phase_execution,
+        "risk_plan": risk_plan_state,
         "lenses": lenses,
         "lens_objectives": lens_objectives,
         "iteration_index": 1,
@@ -1497,13 +2119,13 @@ fn advance_with_contract_validation(
         state["scope"]["changed_files"] = json!(current_changed_files);
     }
     state["scope"]["diff_hash"] = json!(current_diff_hash);
-    if diff_changed && prior_contract_valid {
+    let (decision_reset, scout_resolution_changed) =
+        update_unresolved_findings(&mut state, &filtered, &caller_decisions, diff_changed);
+    if prior_contract_valid && (diff_changed || scout_resolution_changed) {
         let rebound_contract = computed_review_contract_id(&state)
             .ok_or_else(|| "review_contract_rebind_failed=true".to_string())?;
         state["review_contract_id"] = json!(rebound_contract);
     }
-    let decision_reset =
-        update_unresolved_findings(&mut state, &filtered, &caller_decisions, diff_changed);
 
     let clean_streak = state
         .get("clean_streak")
@@ -1552,11 +2174,7 @@ fn advance_with_contract_validation(
     update_verified_clean_iterations(&mut state, &filtered, reset_reason);
     ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
 
-    let required = state
-        .get("required_clean_iterations")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_CLEAN_ITERATIONS)
-        .max(DEFAULT_CLEAN_ITERATIONS);
+    let required = effective_required_clean_iterations(&state);
     state["required_clean_iterations"] = json!(required);
     let complete = state
         .get("clean_streak")
@@ -1652,8 +2270,22 @@ fn update_unresolved_findings(
     filtered: &Value,
     caller_decisions: &[Value],
     diff_changed: bool,
-) -> bool {
+) -> (bool, bool) {
     let mut unresolved = unresolved_findings(state);
+    let scout_blocker_keys = state
+        .pointer("/risk_plan/findings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|finding| caused_blocking_security_or_safety_finding(finding))
+        .filter_map(|finding| {
+            Some((
+                finding.get("lens")?.as_str()?.to_string(),
+                finding.get("id")?.as_str()?.to_string(),
+            ))
+        })
+        .collect::<HashSet<_>>();
+    let mut resolved_scout_blockers = Vec::new();
 
     let mut decision_reset = false;
     unresolved.retain(|finding| {
@@ -1667,6 +2299,27 @@ fn update_unresolved_findings(
         );
         if resolved && !diff_changed {
             decision_reset = true;
+        }
+        if resolved {
+            let lens = finding.get("lens").and_then(Value::as_str);
+            let id = finding.get("id").and_then(Value::as_str);
+            if matches!((lens, id), (Some(lens), Some(id)) if scout_blocker_keys.contains(&(lens.to_string(), id.to_string())))
+            {
+                if let Some(remediation_path) = caller_decisions.iter().find_map(|decision| {
+                    (decision.get("finding_id").and_then(Value::as_str) == id
+                        && decision.get("lens").and_then(Value::as_str) == lens
+                        && decision.get("decision").and_then(Value::as_str) == Some("fixed"))
+                    .then(|| decision.get("remediation_path").and_then(Value::as_str))
+                    .flatten()
+                }) {
+                    resolved_scout_blockers.push(json!({
+                        "id": id,
+                        "lens": lens,
+                        "remediation_path": remediation_path,
+                        "resolved_diff_hash": state.pointer("/scope/diff_hash").and_then(Value::as_str)
+                    }));
+                }
+            }
         }
         !resolved
     });
@@ -1696,7 +2349,24 @@ fn update_unresolved_findings(
     }
 
     state["unresolved_findings"] = Value::Array(unresolved);
-    decision_reset
+    let mut scout_resolution_changed = false;
+    if let Some(records) = state
+        .pointer_mut("/risk_plan/resolved_blocking_findings")
+        .and_then(Value::as_array_mut)
+    {
+        for record in resolved_scout_blockers {
+            let id = record.get("id").and_then(Value::as_str);
+            let lens = record.get("lens").and_then(Value::as_str);
+            if !records.iter().any(|existing| {
+                existing.get("id").and_then(Value::as_str) == id
+                    && existing.get("lens").and_then(Value::as_str) == lens
+            }) {
+                records.push(record);
+                scout_resolution_changed = true;
+            }
+        }
+    }
+    (decision_reset, scout_resolution_changed)
 }
 
 fn unresolved_findings(state: &Value) -> Vec<Value> {
@@ -1760,6 +2430,28 @@ fn validate_caller_decisions(
                     && finding.get("id").and_then(Value::as_str) == id
                     && requires_security_escalation(&finding)
             });
+        let blocking_safety_finding = unresolved_findings(state)
+            .into_iter()
+            .chain(
+                ["actionable", "needs_human_decision"]
+                    .into_iter()
+                    .flat_map(|bucket| {
+                        filtered
+                            .get(bucket)
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .cloned()
+                    }),
+            )
+            .any(|finding| {
+                finding.get("lens").and_then(Value::as_str) == lens
+                    && finding.get("id").and_then(Value::as_str) == id
+                    && caused_blocking_safety_finding(&finding)
+            });
+        if blocking_safety_finding && !matches!(decision_kind, Some("fixed")) {
+            return Err("blocking_safety_finding_must_be_fixed=true".to_string());
+        }
         if sensitive_security_finding && !matches!(decision_kind, Some("fixed")) {
             return Err("sensitive_security_finding_must_be_fixed=true".to_string());
         }
@@ -1940,11 +2632,7 @@ fn update_verified_clean_iterations(state: &mut Value, filtered: &Value, reset_r
         .unwrap_or(1)
         .saturating_sub(1);
     let transition_id = transition_id(state, filtered);
-    let required = state
-        .get("required_clean_iterations")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_CLEAN_ITERATIONS)
-        .max(DEFAULT_CLEAN_ITERATIONS) as usize;
+    let required = effective_required_clean_iterations(state) as usize;
     if let Some(entries) = state["verified_clean_iterations"].as_array_mut() {
         entries.push(json!({
             "iteration": completed_iteration,
@@ -2380,11 +3068,7 @@ fn allowed_relevance_category(category: &str) -> bool {
 
 fn clean_status(arguments: &Value) -> String {
     let state = arguments.get("state").unwrap_or(arguments);
-    let required = state
-        .get("required_clean_iterations")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_CLEAN_ITERATIONS)
-        .max(DEFAULT_CLEAN_ITERATIONS);
+    let required = effective_required_clean_iterations(state);
     let consecutive = state
         .get("clean_streak")
         .and_then(Value::as_u64)
@@ -2472,11 +3156,7 @@ fn out_of_scope_report(arguments: &Value) -> Result<String, String> {
 }
 
 fn review_state_complete(state: &Value) -> bool {
-    let required = state
-        .get("required_clean_iterations")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_CLEAN_ITERATIONS)
-        .max(DEFAULT_CLEAN_ITERATIONS);
+    let required = effective_required_clean_iterations(state);
     state
         .get("clean_streak")
         .and_then(Value::as_u64)
@@ -2485,6 +3165,19 @@ fn review_state_complete(state: &Value) -> bool {
         && unresolved_findings(state).is_empty()
         && review_contract_is_valid(state)
         && verified_clean_count(state) >= required as usize
+}
+
+fn effective_required_clean_iterations(state: &Value) -> u64 {
+    let minimum = if state.get("risk_plan").is_some_and(Value::is_object) {
+        1
+    } else {
+        DEFAULT_CLEAN_ITERATIONS
+    };
+    state
+        .get("required_clean_iterations")
+        .and_then(Value::as_u64)
+        .unwrap_or(minimum)
+        .max(minimum)
 }
 
 struct ClassifiedFinding {
@@ -3179,11 +3872,26 @@ fn all_lenses(conditional_lenses: &[ConditionalLens]) -> Vec<String> {
     lenses
 }
 
+fn risk_dimensions(conditional_lenses: &[ConditionalLens]) -> Vec<String> {
+    let mut dimensions = Vec::with_capacity(LENSES.len() + 1 + conditional_lenses.len());
+    for lens in LENSES {
+        dimensions.push((*lens).to_string());
+        if *lens == "security-safety" {
+            dimensions.push(SAFETY_LENS.to_string());
+        }
+    }
+    for lens in conditional_lenses {
+        dimensions.push(lens.id.clone());
+    }
+    dimensions
+}
+
 fn default_lens_objectives() -> Value {
     json!({
         "correctness-behavior": "Verify functional correctness, edge cases, state transitions, and behavioral regressions.",
         "tests-verification": "Assess whether tests and verification evidence cover the changed behavior and plausible failure modes.",
-        "security-safety": "Identify security, trust-boundary, data-safety, and abuse-resistance regressions introduced by the change.",
+        "security-safety": "Identify unauthorized-access, protected-data, trust-boundary, integrity, and abuse-resistance regressions introduced by the change.",
+        "safety-human-harm": "Identify plausible failures that could harm people or the physical world in the system's intended deployment.",
         "architecture-maintainability": "Evaluate design coherence, ownership boundaries, maintainability, and unnecessary complexity.",
         "operability-user-impact": "Check runtime failure handling, diagnostics, usability, accessibility when relevant, and operator impact.",
         "release-integration": "Check versioning, compatibility, packaging, documentation, CI, rollout, and downstream integration.",
@@ -3221,6 +3929,7 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
     let changed_files = string_array(state.pointer("/scope/changed_files"))?;
     let lenses = string_array(state.get("lenses"))?;
     let lens_objectives = state.get("lens_objectives")?;
+    let risk_plan = state.get("risk_plan").cloned().unwrap_or(Value::Null);
     let required_clean_iterations = state.get("required_clean_iterations")?.as_u64()?;
     let model_roles = state.get("model_roles")?;
     let model_role_sources = state.get("model_role_sources")?;
@@ -3244,6 +3953,7 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
     changed_files.hash(&mut hasher);
     lenses.hash(&mut hasher);
     lens_objectives.to_string().hash(&mut hasher);
+    risk_plan.to_string().hash(&mut hasher);
     required_clean_iterations.hash(&mut hasher);
     model_roles.to_string().hash(&mut hasher);
     model_role_sources.to_string().hash(&mut hasher);
@@ -3294,7 +4004,111 @@ fn review_contract_is_valid(state: &Value) -> bool {
         return false;
     };
     let lenses = string_array(state.get("lenses")).unwrap_or_default();
-    stored == computed && has_default_lens_set(&lenses)
+    stored == computed
+        && if state.get("risk_plan").is_some_and(Value::is_object) {
+            risk_plan_contract_is_valid(state, &lenses)
+        } else {
+            has_default_lens_set(&lenses)
+        }
+}
+
+fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
+    let Some(risk_plan) = state.get("risk_plan").and_then(Value::as_object) else {
+        return false;
+    };
+    if risk_plan
+        .get("assessment_id")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+        || !matches!(
+            risk_plan.get("overall_risk").and_then(Value::as_str),
+            Some("low" | "medium" | "high" | "exceptional")
+        )
+    {
+        return false;
+    }
+    let selected = string_array(risk_plan.get("selected_lenses")).unwrap_or_default();
+    if selected != lenses {
+        return false;
+    }
+    let Some(scout_findings) = risk_plan.get("findings").and_then(Value::as_array) else {
+        return false;
+    };
+    let unresolved = unresolved_findings(state);
+    let Some(resolved_blockers) = risk_plan
+        .get("resolved_blocking_findings")
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    let scout_blocker_keys = scout_findings
+        .iter()
+        .filter(|finding| caused_blocking_security_or_safety_finding(finding))
+        .filter_map(|finding| {
+            Some((
+                finding.get("lens")?.as_str()?.to_string(),
+                finding.get("id")?.as_str()?.to_string(),
+            ))
+        })
+        .collect::<HashSet<_>>();
+    let mut resolved_keys = HashSet::with_capacity(resolved_blockers.len());
+    for resolution in resolved_blockers {
+        let Some(lens) = resolution.get("lens").and_then(Value::as_str) else {
+            return false;
+        };
+        let Some(id) = resolution.get("id").and_then(Value::as_str) else {
+            return false;
+        };
+        if !scout_blocker_keys.contains(&(lens.to_string(), id.to_string()))
+            || resolution
+                .get("remediation_path")
+                .and_then(Value::as_str)
+                .is_none_or(|path| path.trim().is_empty())
+            || resolution
+                .get("resolved_diff_hash")
+                .and_then(Value::as_str)
+                .is_none_or(|hash| hash.trim().is_empty() || hash == "unknown")
+            || !resolved_keys.insert((lens.to_string(), id.to_string()))
+        {
+            return false;
+        }
+    }
+    if scout_findings.iter().any(|finding| {
+        if !caused_blocking_security_or_safety_finding(finding) {
+            return false;
+        }
+        let id = finding.get("id").and_then(Value::as_str);
+        let lens = finding.get("lens").and_then(Value::as_str);
+        let still_unresolved = unresolved.iter().any(|candidate| {
+            candidate.get("id").and_then(Value::as_str) == id
+                && candidate.get("lens").and_then(Value::as_str) == lens
+        });
+        let has_bound_resolution = matches!((lens, id), (Some(lens), Some(id)) if {
+            resolved_keys.contains(&(lens.to_string(), id.to_string()))
+        });
+        !still_unresolved && !has_bound_resolution
+    }) {
+        return false;
+    }
+    let Some(lens_passes) = risk_plan.get("lens_passes").and_then(Value::as_object) else {
+        return false;
+    };
+    if lens_passes.len() != lenses.len()
+        || lenses
+            .iter()
+            .any(|lens| !matches!(lens_passes.get(lens).and_then(Value::as_u64), Some(1 | 2)))
+    {
+        return false;
+    }
+    let required = lens_passes
+        .values()
+        .filter_map(Value::as_u64)
+        .max()
+        .unwrap_or(1);
+    state
+        .get("required_clean_iterations")
+        .and_then(Value::as_u64)
+        == Some(required)
 }
 
 fn validate_present_review_contract(state: &Value) -> Result<(), String> {
@@ -4062,8 +4876,14 @@ fn resolve_model_roles(
         .iter()
         .any(|(_, source)| source.starts_with("project_toml_config"));
 
-    let dispositions =
-        parse_finding_disposition_policy(config.finding_disposition_config.as_ref(), lenses)?;
+    let disposition_inventory = risk_dimensions(&parse_conditional_lenses(
+        arguments.get("conditional_lenses"),
+    )?);
+    let dispositions = parse_finding_disposition_policy(
+        config.finding_disposition_config.as_ref(),
+        &disposition_inventory,
+        lenses,
+    )?;
     Ok((
         ModelRoles {
             pre_filter: pre_filter.0,
@@ -4376,7 +5196,8 @@ fn project_model_config(
 
 fn parse_finding_disposition_policy(
     config: Option<&toml::Value>,
-    lenses: &[String],
+    allowed_lenses: &[String],
+    selected_lenses: &[String],
 ) -> Result<Value, String> {
     let Some(config) = config else {
         return Ok(Value::Object(
@@ -4386,7 +5207,7 @@ fn parse_finding_disposition_policy(
                     (
                         (*severity).to_string(),
                         Value::Object(
-                            lenses
+                            selected_lenses
                                 .iter()
                                 .map(|lens| (lens.clone(), json!("block")))
                                 .collect(),
@@ -4416,25 +5237,35 @@ fn parse_finding_disposition_policy(
             })?;
         if entries
             .keys()
-            .any(|lens| !lenses.iter().any(|allowed| allowed == lens))
+            .any(|lens| !allowed_lenses.iter().any(|allowed| allowed == lens))
         {
             return Err(format!(
                 "finding_disposition_policy_unknown_lens={severity}"
             ));
         }
-        let mut row = serde_json::Map::new();
-        for lens in lenses {
-            let value = entries
-                .get(lens)
-                .and_then(toml::Value::as_str)
-                .ok_or_else(|| {
-                    format!("finding_disposition_policy_missing_lens={severity}:{lens}")
-                })?;
-            if !matches!(value, "block" | "ticket" | "document" | "ignore") {
+        for (lens, value) in entries {
+            if value
+                .as_str()
+                .is_none_or(|value| !matches!(value, "block" | "ticket" | "document" | "ignore"))
+            {
                 return Err(format!(
                     "finding_disposition_policy_invalid_disposition={severity}:{lens}"
                 ));
             }
+        }
+        for lens in allowed_lenses {
+            if lens != SAFETY_LENS && !entries.contains_key(lens) {
+                return Err(format!(
+                    "finding_disposition_policy_missing_lens={severity}:{lens}"
+                ));
+            }
+        }
+        let mut row = serde_json::Map::new();
+        for lens in selected_lenses {
+            let value = entries
+                .get(lens)
+                .and_then(toml::Value::as_str)
+                .unwrap_or("block");
             row.insert(lens.clone(), json!(value));
         }
         policy.insert(severity.to_string(), Value::Object(row));
@@ -4766,6 +5597,64 @@ mod tests {
 
     fn advance_synthetic_state(arguments: &Value) -> Result<String, String> {
         advance_with_contract_validation(arguments, false)
+    }
+
+    fn assessed_plan_arguments(
+        session_id: &str,
+        overall_risk: &str,
+        selected: &[(&str, &str)],
+        findings: Value,
+    ) -> Value {
+        let mut arguments = json!({
+            "session_id": session_id,
+            "base": "origin/main",
+            "changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "diff_hash": format!("{session_id}-diff"),
+            "user_request": "Change local review planning",
+            "acceptance_criteria": ["Select review depth from concrete risk"],
+            "unrelated_finding_policy": { "default": "report" }
+        });
+        let scout: Value =
+            serde_json::from_str(&risk_assessment_result(&arguments).expect("risk scout"))
+                .expect("risk scout json");
+        let assignment = &scout["assignments"][0];
+        let dimensions = assignment["review_dimensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|lens| {
+                let lens = lens.as_str().unwrap();
+                let risk = selected
+                    .iter()
+                    .find_map(|(selected_lens, risk)| (*selected_lens == lens).then_some(*risk))
+                    .unwrap_or("none");
+                let selected = risk != "none";
+                json!({
+                    "lens": lens,
+                    "risk": risk,
+                    "evidence": if selected { "The changed review state machine has a concrete risk path." } else { "No concrete failure path for this local tooling change." },
+                    "plausible_failure": if selected { "The coordinator could schedule, block, or complete the wrong review work." } else { "none" },
+                    "material_impact": if selected { "Review completion becomes unreliable." } else { "none" },
+                    "uncertain": false
+                })
+            })
+            .collect::<Vec<_>>();
+        arguments["risk_assessment"] = json!({
+            "assignment_id": assignment["assignment_id"],
+            "subagent_key": assignment["subagent_key"],
+            "overall_risk": overall_risk,
+            "dimensions": dimensions,
+            "exceptional_triggers": [],
+            "split_required": false,
+            "plan_assumptions": [],
+            "findings": findings,
+            "caller_attestation": {
+                "model_role": assignment["model_role"],
+                "fresh_context": true,
+                "closed_after_result": true
+            }
+        });
+        arguments
     }
 
     #[test]
@@ -6188,6 +7077,82 @@ verifier = "default-verify"
             "finding_disposition_policy_missing_severity=MAJOR"
         );
 
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn risk_planning_projects_legacy_disposition_matrices_onto_selected_lenses() {
+        let project_root = test_project_root("legacy-risk-disposition-matrix");
+        let config_dir = project_root.join(".development-discipline");
+        fs::create_dir_all(&config_dir).expect("config dir");
+        let lenses = LENSES
+            .iter()
+            .map(|lens| format!("{lens} = \"block\""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(
+            config_dir.join("final-review.toml"),
+            format!(
+                "[final_review.dispositions.CRITICAL]\n{lenses}\n\n[final_review.dispositions.MAJOR]\n{lenses}\n\n[final_review.dispositions.MINOR]\n{lenses}\n\n[final_review.dispositions.TRIVIAL]\n{lenses}\n"
+            ),
+        )
+        .expect("write legacy config");
+        let mut arguments = json!({
+            "session_id": "legacy-risk-dispositions",
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "legacy-risk-dispositions-diff",
+            "project_root": project_root,
+            "unrelated_finding_policy": { "default": "report" }
+        });
+        let scout: Value = serde_json::from_str(
+            &risk_assessment_result(&arguments)
+                .expect("legacy matrix must not prevent risk assessment"),
+        )
+        .expect("scout json");
+        let assignment = &scout["assignments"][0];
+        let dimensions = assignment["review_dimensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|lens| {
+                let lens = lens.as_str().unwrap();
+                let selected = lens == "correctness-behavior";
+                json!({
+                    "lens": lens,
+                    "risk": if selected { "medium" } else { "none" },
+                    "evidence": if selected { "The state transition can fail." } else { "No concrete failure path." },
+                    "plausible_failure": if selected { "The wrong review work is scheduled." } else { "none" },
+                    "material_impact": if selected { "Review completion is unreliable." } else { "none" },
+                    "uncertain": false
+                })
+            })
+            .collect::<Vec<_>>();
+        arguments["risk_assessment"] = json!({
+            "assignment_id": assignment["assignment_id"],
+            "subagent_key": assignment["subagent_key"],
+            "overall_risk": "medium",
+            "dimensions": dimensions,
+            "exceptional_triggers": [],
+            "split_required": false,
+            "plan_assumptions": [],
+            "findings": [],
+            "caller_attestation": {
+                "model_role": assignment["model_role"],
+                "fresh_context": true,
+                "closed_after_result": true
+            }
+        });
+
+        let planned: Value = serde_json::from_str(
+            &plan_result(&arguments).expect("legacy matrix must support targeted risk planning"),
+        )
+        .expect("plan json");
+
+        assert_eq!(planned["state"]["lenses"], json!(["correctness-behavior"]));
+        assert_eq!(
+            planned["state"]["finding_disposition_policy"]["CRITICAL"],
+            json!({ "correctness-behavior": "block" })
+        );
         let _ = fs::remove_dir_all(project_root);
     }
 
@@ -10425,7 +11390,10 @@ pre_filter = "project-pre"
         }))
         .expect_err("caller state cannot expand review fanout past the absolute cap");
 
-        assert_eq!(error, "review_lenses_too_many max=23");
+        assert_eq!(
+            error,
+            format!("review_lenses_too_many max={MAX_REVIEW_LENSES}")
+        );
     }
 
     #[test]
@@ -10780,8 +11748,9 @@ pre_filter = "project-pre"
         .expect("response");
 
         let tools = response["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 6);
         assert_eq!(tools[4]["name"], "final_review.out_of_scope_report");
+        assert_eq!(tools[5]["name"], "final_review.assess_risk");
         assert_eq!(
             tools[0]["inputSchema"]["properties"]["required_clean_iterations"]["minimum"],
             DEFAULT_CLEAN_ITERATIONS
@@ -10812,6 +11781,397 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn json_rpc_assess_risk_requests_one_bounded_scout_before_deep_review() {
+        let response = handle_json_rpc(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "final_review.assess_risk",
+                "arguments": {
+                    "session_id": "risk-first-review",
+                    "base": "origin/main",
+                    "changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+                    "diff_hash": "risk-diff",
+                    "user_request": "Change local review planning",
+                    "acceptance_criteria": ["Select review depth from concrete risk"]
+                }
+            }
+        }))
+        .expect("risk assessment response");
+        let payload: Value = serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("risk assessment text"),
+        )
+        .expect("risk assessment json");
+
+        assert_eq!(payload["transition_status"], "risk_assessment_required");
+        assert_eq!(payload["assignments"].as_array().unwrap().len(), 1);
+        assert_eq!(payload["deep_review_assignments"], json!([]));
+        assert!(payload.get("state").is_none());
+        let review_dimensions = payload["assignments"][0]["review_dimensions"]
+            .as_array()
+            .unwrap();
+        for lens in LENSES {
+            assert!(review_dimensions.contains(&json!(lens)));
+        }
+        assert!(review_dimensions.contains(&json!("safety-human-harm")));
+        assert_eq!(payload["assignments"][0]["scope"]["diff_hash"], "risk-diff");
+        assert_eq!(
+            payload["assignments"][0]["constraints"],
+            json!({
+                "run_tests": false,
+                "emit_canonical_findings": true,
+                "invoke_verifier": false,
+                "request_more_planners": false
+            })
+        );
+        let scout_schema = &payload["assignments"][0]["expected_output_schema"];
+        assert!(scout_schema["properties"]
+            .get("caller_attestation")
+            .is_none());
+        assert_eq!(
+            payload["assignments"][0]["caller_append_schema"],
+            caller_attestation_schema()
+        );
+        assert!(payload["calling_agent_responsibility"]
+            .as_str()
+            .unwrap()
+            .contains("append caller_attestation after closing"));
+        let required = scout_schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("findings")));
+        assert!(scout_schema["properties"]
+            .get("candidate_concerns")
+            .is_none());
+        assert_eq!(
+            scout_schema["properties"]["findings"]["items"]["required"],
+            json!([
+                "semantic_key",
+                "lens",
+                "severity",
+                "security_impact",
+                "likelihood",
+                "causality",
+                "message",
+                "relevance"
+            ])
+        );
+    }
+
+    #[test]
+    fn json_rpc_plan_compiles_a_medium_risk_assessment_into_one_targeted_pass() {
+        let arguments = json!({
+            "session_id": "medium-risk-review",
+            "base": "origin/main",
+            "changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "diff_hash": "medium-risk-diff",
+            "user_request": "Change local review planning",
+            "acceptance_criteria": ["Select review depth from concrete risk"],
+            "unrelated_finding_policy": { "default": "report" }
+        });
+        let scout_response = handle_json_rpc(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "final_review.assess_risk",
+                "arguments": arguments.clone()
+            }
+        }))
+        .expect("risk assessment response");
+        let scout: Value = serde_json::from_str(
+            scout_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("risk assessment text"),
+        )
+        .expect("risk assessment json");
+        let assignment = &scout["assignments"][0];
+        let dimensions = assignment["review_dimensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|lens| {
+                let lens = lens.as_str().unwrap();
+                let selected = matches!(lens, "correctness-behavior" | "tests-verification");
+                json!({
+                    "lens": lens,
+                    "risk": if selected { "medium" } else { "none" },
+                    "evidence": if selected { "The changed review state machine needs behavioral proof." } else { "No concrete failure path for this local tooling change." },
+                    "plausible_failure": if selected { "The coordinator could schedule or complete the wrong review work." } else { "none" },
+                    "material_impact": if selected { "Review completion becomes unreliable." } else { "none" },
+                    "uncertain": false
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut plan_arguments = arguments;
+        plan_arguments["risk_assessment"] = json!({
+            "assignment_id": assignment["assignment_id"],
+            "subagent_key": assignment["subagent_key"],
+            "overall_risk": "medium",
+            "dimensions": dimensions,
+            "exceptional_triggers": [],
+            "split_required": false,
+            "plan_assumptions": [],
+            "findings": [],
+            "caller_attestation": {
+                "model_role": assignment["model_role"],
+                "fresh_context": true,
+                "closed_after_result": true
+            }
+        });
+
+        let response = handle_json_rpc(&json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "final_review.plan",
+                "arguments": plan_arguments
+            }
+        }))
+        .expect("plan response");
+        let plan: Value = serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+
+        assert_eq!(plan["state"]["risk_plan"]["overall_risk"], "medium");
+        assert_eq!(
+            plan["state"]["lenses"],
+            json!(["correctness-behavior", "tests-verification"])
+        );
+        assert_eq!(plan["state"]["required_clean_iterations"], 1);
+        assert_eq!(plan["assignments"].as_array().unwrap().len(), 2);
+        assert!(review_contract_is_valid(&plan["state"]));
+
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": plan["state"],
+                "lens_results": clean_lens_results_for(&plan["state"]),
+                "current_diff_hash": "medium-risk-diff"
+            }))
+            .expect("one-pass medium-risk advance"),
+        )
+        .expect("advanced json");
+        assert_eq!(advanced["complete"], true);
+        assert_eq!(advanced["state"]["clean_streak"], 1);
+        assert_eq!(advanced["next_assignments"], json!([]));
+    }
+
+    #[test]
+    fn risk_scout_safety_blocker_remains_unresolved_after_clean_confirmation() {
+        let arguments = assessed_plan_arguments(
+            "safety-blocker-review",
+            "high",
+            &[(SAFETY_LENS, "high")],
+            json!([{
+                "semantic_key": "unsafe-control-output",
+                "lens": SAFETY_LENS,
+                "severity": "MAJOR",
+                "security_impact": "none",
+                "likelihood": "possible",
+                "causality": "caused",
+                "path": "src/lib.rs",
+                "message": "The changed control output can plausibly injure a person.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The changed output path creates the unsafe command."
+                }
+            }]),
+        );
+        let plan: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        assert_eq!(
+            plan["state"]["unresolved_findings"][0]["id"],
+            "unsafe-control-output"
+        );
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": plan["state"],
+                "lens_results": clean_lens_results_for(&plan["state"]),
+                "current_diff_hash": "safety-blocker-review-diff"
+            }))
+            .expect("advance with unresolved scout blocker"),
+        )
+        .expect("advanced json");
+        assert_eq!(advanced["complete"], false);
+        assert_eq!(
+            advanced["state"]["unresolved_findings"][0]["id"],
+            "unsafe-control-output"
+        );
+    }
+
+    #[test]
+    fn risk_scout_safety_blocker_cannot_be_accepted_without_a_fix() {
+        let arguments = assessed_plan_arguments(
+            "unacceptable-safety-risk",
+            "high",
+            &[(SAFETY_LENS, "high")],
+            json!([{
+                "semantic_key": "unsafe-control-output",
+                "lens": SAFETY_LENS,
+                "severity": "MAJOR",
+                "security_impact": "none",
+                "likelihood": "possible",
+                "causality": "caused",
+                "path": "src/lib.rs",
+                "message": "The changed control output can plausibly injure a person.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The changed output path creates the unsafe command."
+                }
+            }]),
+        );
+        let plan: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        let error = validate_caller_decisions(
+            &plan["state"],
+            &json!({ "actionable": [], "needs_human_decision": [] }),
+            &[json!({
+                "finding_id": "unsafe-control-output",
+                "lens": SAFETY_LENS,
+                "decision": "accepted-risk",
+                "defense": "The operator accepts the chance of injury."
+            })],
+        )
+        .expect_err("caused major safety findings must be fixed");
+
+        assert_eq!(error, "blocking_safety_finding_must_be_fixed=true");
+    }
+
+    #[test]
+    fn risk_contract_rejects_omitting_an_unresolved_scout_blocker() {
+        let arguments = assessed_plan_arguments(
+            "bound-safety-blocker",
+            "high",
+            &[(SAFETY_LENS, "high")],
+            json!([{
+                "semantic_key": "unsafe-control-output",
+                "lens": SAFETY_LENS,
+                "severity": "MAJOR",
+                "security_impact": "none",
+                "likelihood": "possible",
+                "causality": "caused",
+                "path": "src/lib.rs",
+                "message": "The changed control output can plausibly injure a person.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The changed output path creates the unsafe command."
+                }
+            }]),
+        );
+        let plan: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let mut tampered = plan["state"].clone();
+        tampered["unresolved_findings"] = json!([]);
+        tampered["prior_user_decisions"] = json!([{
+            "finding_id": "unsafe-control-output",
+            "lens": SAFETY_LENS,
+            "decision": "fixed",
+            "remediation_path": "src/unrelated.rs"
+        }]);
+
+        assert!(!review_contract_is_valid(&tampered));
+    }
+
+    #[test]
+    fn risk_assessment_rejects_a_pathless_blocking_scout_finding() {
+        let arguments = assessed_plan_arguments(
+            "pathless-safety-blocker",
+            "high",
+            &[(SAFETY_LENS, "high")],
+            json!([{
+                "semantic_key": "unsafe-control-output",
+                "lens": SAFETY_LENS,
+                "severity": "MAJOR",
+                "security_impact": "none",
+                "likelihood": "possible",
+                "causality": "caused",
+                "message": "The changed control output can plausibly injure a person.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The changed output path creates the unsafe command."
+                }
+            }]),
+        );
+
+        let error =
+            plan_result(&arguments).expect_err("blocking scout findings need a changed path");
+
+        assert_eq!(
+            error,
+            "risk_assessment_blocking_finding_path_required_or_out_of_scope=unsafe-control-output"
+        );
+    }
+
+    #[test]
+    fn applied_scout_blocker_fix_creates_contract_bound_resolution_proof() {
+        let arguments = assessed_plan_arguments(
+            "resolved-safety-blocker",
+            "high",
+            &[(SAFETY_LENS, "high")],
+            json!([{
+                "semantic_key": "unsafe-control-output",
+                "lens": SAFETY_LENS,
+                "severity": "MAJOR",
+                "security_impact": "none",
+                "likelihood": "possible",
+                "causality": "caused",
+                "path": "src/lib.rs",
+                "message": "The changed control output can plausibly injure a person.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The changed output path creates the unsafe command."
+                }
+            }]),
+        );
+        let plan: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": plan["state"],
+                "lens_results": clean_lens_results_for(&plan["state"]),
+                "current_diff_hash": "resolved-safety-blocker-fixed-diff",
+                "current_changed_files": ["src/lib.rs"],
+                "caller_decisions": [{
+                    "finding_id": "unsafe-control-output",
+                    "lens": SAFETY_LENS,
+                    "decision": "fixed",
+                    "remediation_path": "src/lib.rs"
+                }]
+            }))
+            .expect("applied fix advances review"),
+        )
+        .expect("advanced json");
+
+        assert_eq!(advanced["state"]["unresolved_findings"], json!([]));
+        assert_eq!(
+            advanced["state"]["risk_plan"]["resolved_blocking_findings"][0]["id"],
+            "unsafe-control-output"
+        );
+        assert!(review_contract_is_valid(&advanced["state"]));
+    }
+
+    #[test]
+    fn risk_assessment_rejects_an_overall_profile_below_its_highest_dimension() {
+        let arguments = assessed_plan_arguments(
+            "understated-safety-risk",
+            "medium",
+            &[(SAFETY_LENS, "high")],
+            json!([]),
+        );
+
+        let error =
+            plan_result(&arguments).expect_err("high safety risk requires high overall risk");
+
+        assert_eq!(
+            error,
+            "risk_assessment_overall_risk_understates_dimensions overall=medium highest=high"
+        );
+    }
+
+    #[test]
     fn json_rpc_initialize_negotiates_supported_protocol_versions() {
         let supported = handle_json_rpc(&json!({
             "jsonrpc": "2.0",
@@ -10825,6 +12185,10 @@ pre_filter = "project-pre"
         }))
         .expect("supported initialize response");
         assert_eq!(supported["result"]["protocolVersion"], "2024-11-05");
+        assert!(supported["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("final_review.assess_risk before final_review.plan"));
 
         let unsupported = handle_json_rpc(&json!({
             "jsonrpc": "2.0",
