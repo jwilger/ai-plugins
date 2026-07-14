@@ -24,3 +24,5 @@ Backlog-only capture, explicit transition before active work, and basic PR/MR UR
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Backlog grooming 2026-07-14: Removed already-delivered implementation scope for backlog capture, transition, and basic PR fields. Those remain regression expectations; this ticket now owns concurrent isolation and lifecycle coverage.
