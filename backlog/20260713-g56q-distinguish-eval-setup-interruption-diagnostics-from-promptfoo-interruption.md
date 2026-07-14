@@ -24,3 +24,5 @@ Final review found a MINOR operability issue in the new pre-Promptfoo signal pat
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Scope boundary from 20260713-uf3e split: this ticket owns setup-versus-provider interruption wording only; 20260714-2xyd owns preparation lifecycle and stale-evidence handling.
