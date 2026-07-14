@@ -17,8 +17,6 @@ A caused MAJOR correctness finding from 20260713-rygd showed that scout findings
 
 ## Acceptance criteria
 
-- [ ] Initial and delta risk-scout findings pass through the same deterministic relevance validation and filtering used for normal lens findings before persistence, disposition, blocker calculation, or follow-up-ticket requirements.
-
 ## Subtasks
 
 ## Notes / Log
