@@ -20,7 +20,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 
 ## Acceptance criteria
 
-- [ ] Guidance defines full review as the ticket-completion gate, not a prerequisite for preserving a green increment.
+- [x] Guidance defines full review as the ticket-completion gate, not a prerequisite for preserving a green increment.
 - [ ] When full review finds issues, guidance requires a new green tests/light-review commit and push before restarting full review.
 - [ ] Before addressing review findings or starting another ticket, guidance requires checking the latest pushed build; running or green permits work, while failed blocks follow-up work until resolved.
 - [ ] Full-review instructions pin the baseline commit so pushes during review do not move or erase the reviewed diff.
