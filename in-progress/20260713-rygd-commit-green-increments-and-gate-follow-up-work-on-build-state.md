@@ -30,7 +30,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [x] Low-risk work uses lightweight review with at most one optional targeted final lens; medium-risk work uses one targeted full-review pass; high-risk work uses one broad pass.
 - [x] Multiple independent clean passes are available only for exceptional risk such as destructive or irreversible operations, authentication/authorization boundaries, sensitive-data migrations, cryptographic behavior, or safety-critical behavior.
 - [x] Deferred and already-known findings are not re-verified or re-reported without materially severity-changing evidence, and they do not block completion or reset clean state when the reviewed diff hash is unchanged and required ticket/report evidence exists.
-- [ ] After a blocking fix, high-risk review reruns only affected lenses plus one integration or correctness lens; unaffected lenses are not restarted.
+- [x] After a blocking fix, high-risk review reruns only affected lenses plus one integration or correctness lens; unaffected lenses are not restarted.
 - [ ] Verifier assignments are created only for blocking, disputed, or materially uncertain findings and never merely because a routine MINOR finding was deferred.
 - [ ] One shared test-evidence run is recorded per reviewed diff for all lenses to consume; a lens reruns a broad suite only with a documented lens-specific reason.
 - [ ] Medium-risk review has a roughly 60–90 minute budget checkpoint that forces an explicit ship, split, or escalate decision while never silently omitting a known blocker.
