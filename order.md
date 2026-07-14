@@ -11,7 +11,6 @@
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
-20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
@@ -22,6 +21,7 @@
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
 20260714-ucd7-clean-up-auto-created-gpt-5-6-benchmark-workspaces
