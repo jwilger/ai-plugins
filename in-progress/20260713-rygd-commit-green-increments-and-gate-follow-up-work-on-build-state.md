@@ -23,7 +23,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [x] Guidance defines full review as the ticket-completion gate, not a prerequisite for preserving a green increment.
 - [x] When full review finds issues, guidance requires a new green tests/light-review commit and push before restarting full review.
 - [x] Before addressing review findings or starting another ticket, guidance requires checking the latest pushed build; running or green permits work, while failed blocks follow-up work until resolved.
-- [ ] Full-review instructions pin the baseline commit so pushes during review do not move or erase the reviewed diff.
+- [x] Full-review instructions pin the baseline commit so pushes during review do not move or erase the reviewed diff.
 - [ ] Guidance defines fast unit tests plus lightweight review as the local commit-and-push gate for each implementation increment.
 - [ ] Guidance permits longer-running integration, mutation, full-suite, and similarly expensive checks to run in CI instead of blocking each local increment.
 - [ ] Final-review planning accepts or derives an explicit risk class from concrete deployment, trust-boundary, reversibility, data, and operational evidence, and enables only lenses justified by that risk.
