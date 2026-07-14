@@ -33,9 +33,9 @@
 20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
-20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
 20260713-qa3n-make-the-eval-launch-race-regression-prove-pre-publication-signal-handling
 20260713-g56q-distinguish-eval-setup-interruption-diagnostics-from-promptfoo-interruption
 20260714-7kxi-exercise-promptfoo-cli-provider-shape-in-gpt-5-6-measurement-fixtures
