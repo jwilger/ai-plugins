@@ -27,6 +27,7 @@ Deferred MINOR findings from final review of 20260709-spx8. An inherited PROMPTF
 - [ ] Dry-run regression coverage proves the focused wrapper neither acquires nor creates the provider lock.
 - [ ] Focused and canonical runners canonicalize the shared provider-lock identity consistently when the checkout or runner is invoked through a symlink, with a regression covering the nested handoff.
 - [ ] PID-named default benchmark workspaces are safely removed on exit after ownership-marker verification, while explicitly supplied workspaces are preserved.
+- [ ] GPT56_BENCHMARK_SAMPLES validation applies only to execution; grader calibration remains runnable when an irrelevant stale or malformed sample override is present.
 
 ## Subtasks
 
