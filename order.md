@@ -1,4 +1,3 @@
-20260713-rygd-commit-green-increments-and-gate-follow-up-work-on-build-state
 20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes
 20260713-hgyz-make-targeted-plugin-eval-mode-install-the-actual-case-plugin-set
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline

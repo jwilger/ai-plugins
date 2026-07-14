@@ -5,9 +5,6 @@ blocks: []
 tags: [development-discipline, final-review, workflow, risk, ci, policy, bug, major, top-priority]
 pr_mr_url: 
 pr_mr_status: 
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
