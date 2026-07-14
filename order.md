@@ -19,8 +19,8 @@
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260708-n3sh-add-cross-project-worktree-safety-guidance
-20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
