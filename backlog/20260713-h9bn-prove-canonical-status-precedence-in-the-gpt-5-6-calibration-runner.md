@@ -17,6 +17,8 @@ Caused MINOR deferred from 20260709-spx8. The current fake Promptfoo exits 7, bu
 
 ## Acceptance criteria
 
+- [ ] For ordinary nonzero execution outcomes with a readable artifact, the focused execution phase still runs the independent isolation checker and preserves the canonical runner status.
+
 ## Subtasks
 
 ## Notes / Log
