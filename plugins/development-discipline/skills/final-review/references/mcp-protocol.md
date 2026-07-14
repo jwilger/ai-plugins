@@ -6,19 +6,26 @@ final-review path.
 ## Required Scope
 
 `final_review.plan` requires a complete reviewed `changed_files` inventory and a
-non-placeholder `diff_hash`. Compute both `diff_hash` and every
+non-placeholder `diff_hash`. Before the ticket's first commit or push, resolve
+and retain the full `baseline_commit` OID. Incremental pushes can move the named
+base past the ticket, so final review must not re-resolve that ref. Supply the
+same full OID to the scope-hash helper, `final_review.assess_risk`, and the
+risk-planned `final_review.plan`; missing, symbolic, abbreviated, or changed
+baseline values fail closed. Compute both `diff_hash` and every
 `current_diff_hash` with the plugin's
 `scripts/final-review-scope-hash.sh` helper. Write the complete current
 changed-file inventory to a temporary NUL-delimited file and pass its path with
-`--changed-files-from`; do not expand paths into helper argv. The helper bounds,
+`--changed-files-from` and the retained OID with `--baseline-commit`; do not
+expand paths into helper argv. The helper bounds,
 validates, normalizes, and deterministically chunks that inventory so its own
-Git subprocesses remain below platform argument limits. It hashes the resolved
-base, base-to-index diff, index-to-worktree diff, and current mode/content
+Git subprocesses remain below platform argument limits. It hashes the exact
+baseline, base-to-index diff, index-to-worktree diff, and current mode/content
 manifest for exactly those paths. This makes staged, unstaged, deletion, and
 untracked-content changes observable while excluding unrelated local dirt.
 Discover tracked paths with the same one-revision content scope using
-`git diff --name-only -z --find-renames --find-copies --end-of-options <base>
---` (or `HEAD` for uncommitted scope). Parse those NUL-delimited records as exact
+`git diff --name-only -z --find-renames --find-copies --end-of-options
+<baseline_commit> --` for both base and uncommitted scope. Parse those
+NUL-delimited records as exact
 paths rather than extracting names from the human-readable diff. Discover
 untracked and other worktree paths with
 `git status --short -z --untracked-files=all`, parse its NUL-delimited records as

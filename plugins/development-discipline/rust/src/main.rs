@@ -529,6 +529,7 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "base": { "type": "string", "minLength": 1, "pattern": "\\S" },
+                    "baseline_commit": baseline_commit_schema(),
                     "scope": { "type": "string", "enum": ["base", "uncommitted"] },
                     "required_clean_iterations": { "type": "integer", "minimum": DEFAULT_CLEAN_ITERATIONS, "maximum": MAX_CLEAN_ITERATIONS },
                     "user_request": { "type": "string" },
@@ -608,6 +609,10 @@ fn tools() -> Value {
                         }
                     }
                 },
+                "allOf": [{
+                    "if": { "required": ["risk_assessment"] },
+                    "then": { "required": ["baseline_commit"] }
+                }],
                 "required": ["changed_files", "diff_hash"]
             }
         },
@@ -737,6 +742,7 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "base": { "type": "string", "minLength": 1, "pattern": "\\S" },
+                    "baseline_commit": baseline_commit_schema(),
                     "scope": { "type": "string", "enum": ["base", "uncommitted"] },
                     "user_request": { "type": "string" },
                     "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
@@ -770,10 +776,18 @@ fn tools() -> Value {
                         }
                     }
                 },
-                "required": ["changed_files", "diff_hash", "shared_test_evidence"]
+                "required": ["baseline_commit", "changed_files", "diff_hash", "shared_test_evidence"]
             }
         }
     ])
+}
+
+fn baseline_commit_schema() -> Value {
+    json!({
+        "type": "string",
+        "pattern": "^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$",
+        "description": "Full commit OID resolved before computing changed_files, diff_hash, and shared_test_evidence."
+    })
 }
 
 fn shared_test_evidence_schema() -> Value {
@@ -1007,17 +1021,37 @@ fn valid_git_object_id(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.chars().all(|character| character.is_ascii_hexdigit())
 }
 
+fn resolve_baseline_commit(project_root: &Path, baseline_commit: &str) -> Result<String, String> {
+    if !valid_git_object_id(baseline_commit) {
+        return Err("review_baseline_commit_invalid=true".to_string());
+    }
+    let commit = git_text(
+        project_root,
+        &[
+            "rev-parse".to_string(),
+            "--verify".to_string(),
+            "--end-of-options".to_string(),
+            format!("{baseline_commit}^{{commit}}"),
+        ],
+        None,
+        None,
+        "review_baseline_resolve",
+    )?;
+    if !valid_git_object_id(&commit) {
+        return Err("review_baseline_commit_invalid=true".to_string());
+    }
+    if commit != baseline_commit {
+        return Err("review_baseline_commit_not_canonical=true".to_string());
+    }
+    Ok(commit)
+}
+
 fn create_scope_snapshot_commit(
     project_root: &Path,
+    baseline_commit: &str,
     changed_files: &[String],
 ) -> Result<String, String> {
-    let parent = git_text(
-        project_root,
-        &["rev-parse".to_string(), "HEAD^{commit}".to_string()],
-        None,
-        None,
-        "scope_snapshot_head",
-    )?;
+    let parent = resolve_baseline_commit(project_root, baseline_commit)?;
     let prefix = git_text(
         project_root,
         &["rev-parse".to_string(), "--show-prefix".to_string()],
@@ -1123,12 +1157,17 @@ fn generated_delta_evidence(
         .pointer("/scope/snapshot_commit")
         .and_then(Value::as_str)
         .ok_or_else(|| "scope_snapshot_commit_required=true".to_string())?;
+    let baseline_commit = state
+        .pointer("/scope/baseline_commit")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "scope_baseline_commit_required=true".to_string())?;
     let mut snapshot_paths =
         string_array(state.pointer("/scope/changed_files")).unwrap_or_default();
     snapshot_paths.extend(current_changed_files.iter().cloned());
     snapshot_paths.sort();
     snapshot_paths.dedup();
-    let current_snapshot_commit = create_scope_snapshot_commit(project_root, &snapshot_paths)?;
+    let current_snapshot_commit =
+        create_scope_snapshot_commit(project_root, baseline_commit, &snapshot_paths)?;
     let mut range_args = vec![
         "diff".to_string(),
         "--binary".to_string(),
@@ -1303,7 +1342,15 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         Some(Path::new(&project_root)),
         "scope_changed_files",
     )?;
-    let snapshot_commit = create_scope_snapshot_commit(Path::new(&project_root), &changed_files)?;
+    let requested_baseline_commit = match arguments.get("baseline_commit") {
+        Some(Value::String(commit)) if valid_git_object_id(commit) => commit,
+        Some(_) => return Err("review_baseline_commit_invalid=true".to_string()),
+        None => return Err("review_baseline_commit_required=true".to_string()),
+    };
+    let baseline_commit =
+        resolve_baseline_commit(Path::new(&project_root), requested_baseline_commit)?;
+    let snapshot_commit =
+        create_scope_snapshot_commit(Path::new(&project_root), &baseline_commit, &changed_files)?;
     let conditional_lenses = parse_conditional_lenses(arguments.get("conditional_lenses"))?;
     let review_dimensions = risk_dimensions(&conditional_lenses);
     let (model_roles, _) = resolve_model_roles(arguments, &review_dimensions)?;
@@ -1317,7 +1364,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
                 }
                 sanitize_identifier(&value)
             }
-            None => stable_session_id(&project_root, &scope, &base, &diff_hash),
+            None => stable_session_id(&project_root, &scope, &baseline_commit, &diff_hash),
         };
     let mut binding = json!({
         "session_id": session_id,
@@ -1331,6 +1378,8 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         "explicit_concerns": explicit_concerns,
         "review_dimensions": review_dimensions,
         "shared_test_evidence": shared_test_evidence,
+        "baseline_commit": baseline_commit,
+        "scope_resolution": scope_resolution(&scope, &baseline_commit),
         "snapshot_commit": snapshot_commit
     });
     if let Some(delta_evidence) = arguments.get("delta_evidence") {
@@ -1358,6 +1407,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         "constraints": constraints,
         "instructions": [
             "Name a concrete plausible failure path and material impact for every elevated risk.",
+            "Inspect the change through scope.scope_resolution pinned to scope.baseline_commit; never re-resolve the movable base name.",
             "Mark uncertainty explicitly; uncertainty selects coverage instead of omitting it.",
             "Identify exceptional-risk triggers and whether the ticket should be split before review.",
             "Classify security_impact and safety_impact independently for every finding, regardless of which review lens discovered it.",
@@ -1380,6 +1430,8 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
             "project_root": project_root,
             "changed_files": changed_files,
             "diff_hash": diff_hash,
+            "baseline_commit": baseline_commit,
+            "scope_resolution": scope_resolution(&scope, &baseline_commit),
             "snapshot_commit": snapshot_commit
         },
         "review_dimensions": review_dimensions,
@@ -1450,6 +1502,7 @@ fn delta_risk_arguments(
     Ok(json!({
         "session_id": session_id,
         "base": state.pointer("/scope/base").and_then(Value::as_str).unwrap_or(DEFAULT_BASE),
+        "baseline_commit": state.pointer("/scope/baseline_commit").cloned().unwrap_or(Value::Null),
         "scope": state.pointer("/scope/kind").and_then(Value::as_str).unwrap_or("base"),
         "project_root": state.pointer("/scope/project_root").and_then(Value::as_str).unwrap_or("."),
         "changed_files": current_changed_files,
@@ -1852,6 +1905,7 @@ fn compile_risk_plan(
     let state = json!({
         "assessment_id": expected_assignment["assignment_id"],
         "shared_test_evidence_id": expected_assignment["shared_test_evidence"]["id"],
+        "baseline_commit": expected_assignment["scope"]["baseline_commit"],
         "scope_snapshot_commit": expected_assignment["scope"]["snapshot_commit"],
         "overall_risk": overall_risk,
         "dimensions": dimensions,
@@ -2302,6 +2356,11 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         .as_ref()
         .map(|plan| plan.state.clone())
         .unwrap_or(Value::Null);
+    let baseline_commit = compiled_risk_plan
+        .as_ref()
+        .and_then(|plan| plan.state.get("baseline_commit"))
+        .cloned()
+        .unwrap_or(Value::Null);
     let scope_snapshot_commit = compiled_risk_plan
         .as_ref()
         .and_then(|plan| plan.state.get("scope_snapshot_commit"))
@@ -2380,6 +2439,7 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
             "changed_files": changed_files,
             "diff_hash": diff_hash,
             "project_root": project_root,
+            "baseline_commit": baseline_commit,
             "snapshot_commit": scope_snapshot_commit
         },
         "context": {
@@ -2423,6 +2483,10 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
         .ok_or_else(|| "review_contract_build_failed=true".to_string())?);
     ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
 
+    let review_base = state
+        .pointer("/scope/baseline_commit")
+        .and_then(Value::as_str)
+        .unwrap_or(&base);
     let initial_assignments = if unrelated_finding_policy_confirmation_required {
         Vec::new()
     } else {
@@ -2436,7 +2500,7 @@ fn plan_result(arguments: &Value) -> Result<String, String> {
             &review_model_role,
             "start_fresh",
             &scope,
-            &base,
+            review_base,
             &project_root,
             &diff_hash,
             &user_request,
@@ -3500,8 +3564,9 @@ fn advance_with_contract_validation(
             .and_then(Value::as_str)
             .unwrap_or("base");
         let base = state
-            .pointer("/scope/base")
+            .pointer("/scope/baseline_commit")
             .and_then(Value::as_str)
+            .or_else(|| state.pointer("/scope/base").and_then(Value::as_str))
             .unwrap_or(DEFAULT_BASE);
         let project_root = state
             .pointer("/scope/project_root")
@@ -3631,6 +3696,16 @@ fn apply_delta_risk_reassessment(
     delta_arguments["risk_assessment"] = delta_risk_assessment.clone();
     let compiled = compile_risk_plan(&delta_arguments, current_changed_files)?
         .ok_or_else(|| "delta_risk_assessment_compile_failed=true".to_string())?;
+    if compiled
+        .state
+        .get("baseline_commit")
+        .and_then(Value::as_str)
+        != state
+            .pointer("/scope/baseline_commit")
+            .and_then(Value::as_str)
+    {
+        return Err("delta_risk_baseline_commit_mismatch=true".to_string());
+    }
     if compiled
         .state
         .get("scope_snapshot_commit")
@@ -4087,8 +4162,9 @@ fn review_assignments_for_state(state: &Value, iteration: u64) -> Result<Vec<Val
             .and_then(Value::as_str)
             .unwrap_or("base"),
         state
-            .pointer("/scope/base")
+            .pointer("/scope/baseline_commit")
             .and_then(Value::as_str)
+            .or_else(|| state.pointer("/scope/base").and_then(Value::as_str))
             .unwrap_or(DEFAULT_BASE),
         state
             .pointer("/scope/project_root")
@@ -5021,12 +5097,16 @@ fn validate_scope_metadata(state: &Value) -> Result<(), String> {
         return Err("scope_diff_hash_required=true".to_string());
     }
     if state.get("risk_plan").is_some_and(Value::is_object)
-        && state
-            .pointer("/scope/snapshot_commit")
-            .and_then(Value::as_str)
-            .is_none_or(|commit| !valid_git_object_id(commit))
+        && ["baseline_commit", "snapshot_commit"]
+            .into_iter()
+            .any(|field| {
+                state
+                    .pointer(&format!("/scope/{field}"))
+                    .and_then(Value::as_str)
+                    .is_none_or(|commit| !valid_git_object_id(commit))
+            })
     {
-        return Err("scope_snapshot_commit_required=true".to_string());
+        return Err("scope_baseline_and_snapshot_commits_required=true".to_string());
     }
     Ok(())
 }
@@ -5566,8 +5646,8 @@ fn deferred_findings_for_lens(deferred_findings: &Value, lens: &str) -> Vec<Valu
     matching
 }
 
-fn scope_resolution(scope: &str, base: &str) -> Value {
-    let revision = if scope == "uncommitted" { "HEAD" } else { base };
+fn scope_resolution(_scope: &str, base: &str) -> Value {
+    let revision = base;
     json!({
         "tracked_diff_argv": [
             "git",
@@ -5953,6 +6033,10 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
         .pointer("/scope/project_root")
         .and_then(Value::as_str)?;
     let diff_hash = state.pointer("/scope/diff_hash").and_then(Value::as_str)?;
+    let baseline_commit = state
+        .pointer("/scope/baseline_commit")
+        .cloned()
+        .unwrap_or(Value::Null);
     let snapshot_commit = state
         .pointer("/scope/snapshot_commit")
         .cloned()
@@ -5985,6 +6069,7 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
     base.hash(&mut hasher);
     project_root.hash(&mut hasher);
     diff_hash.hash(&mut hasher);
+    baseline_commit.to_string().hash(&mut hasher);
     snapshot_commit.to_string().hash(&mut hasher);
     changed_files.hash(&mut hasher);
     lenses.hash(&mut hasher);
@@ -6075,6 +6160,17 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
             .get("scope_snapshot_commit")
             .and_then(Value::as_str)
             != Some(scope_snapshot_commit)
+    {
+        return false;
+    }
+    let Some(baseline_commit) = state
+        .pointer("/scope/baseline_commit")
+        .and_then(Value::as_str)
+    else {
+        return false;
+    };
+    if !valid_git_object_id(baseline_commit)
+        || risk_plan.get("baseline_commit").and_then(Value::as_str) != Some(baseline_commit)
     {
         return false;
     }
@@ -6552,8 +6648,9 @@ fn verifier_assignment(state: &Value, findings: &[Value]) -> Result<Value, Strin
         .and_then(Value::as_str)
         .unwrap_or("base");
     let base = state
-        .pointer("/scope/base")
+        .pointer("/scope/baseline_commit")
         .and_then(Value::as_str)
+        .or_else(|| state.pointer("/scope/base").and_then(Value::as_str))
         .unwrap_or(DEFAULT_BASE);
     let project_root = state
         .pointer("/scope/project_root")
@@ -7999,6 +8096,18 @@ mod tests {
             "test_git_initial_commit",
         )
         .expect("create initial test commit");
+        run_git(
+            &root,
+            &[
+                "update-ref".to_string(),
+                "refs/remotes/origin/main".to_string(),
+                "HEAD".to_string(),
+            ],
+            None,
+            None,
+            "test_git_origin_main",
+        )
+        .expect("create test origin/main ref");
         root
     }
 
@@ -8015,6 +8124,24 @@ mod tests {
             "commands": ["cargo test --lib"],
             "artifact_reference": "ci://fast-unit-tests"
         })
+    }
+
+    fn test_baseline_commit(project_root: &Path, revision: &str) -> String {
+        git_text(
+            project_root,
+            &["rev-parse".to_string(), format!("{revision}^{{commit}}")],
+            None,
+            None,
+            "test_baseline_commit",
+        )
+        .expect("resolve test baseline commit")
+    }
+
+    fn current_test_baseline_commit() -> String {
+        test_baseline_commit(
+            &env::current_dir().expect("current test project root"),
+            "origin/main",
+        )
     }
 
     fn assessed_plan_arguments(
@@ -8070,6 +8197,15 @@ mod tests {
         if let Some(project_root) = project_root {
             arguments["project_root"] = json!(project_root);
         }
+        let resolved_root = resolved_project_root_string(&arguments).expect("test project root");
+        arguments["baseline_commit"] = json!(git_text(
+            Path::new(&resolved_root),
+            &["rev-parse".to_string(), "origin/main^{commit}".to_string()],
+            None,
+            None,
+            "test_risk_baseline",
+        )
+        .expect("resolve test risk baseline"));
         let scout: Value =
             serde_json::from_str(&risk_assessment_result(&arguments).expect("risk scout"))
                 .expect("risk scout json");
@@ -8976,6 +9112,340 @@ mod tests {
     }
 
     #[test]
+    fn risk_plan_pins_the_resolved_baseline_when_the_named_ref_moves() {
+        let project_root = test_project_root("pinned-review-baseline");
+        let baseline_commit = git_text(
+            &project_root,
+            &["rev-parse".to_string(), "HEAD".to_string()],
+            None,
+            None,
+            "test_baseline_commit",
+        )
+        .expect("initial baseline commit");
+        let arguments = assessed_plan_arguments_for_diff_at_root(
+            "pinned-review-baseline",
+            "pinned-review-baseline-diff",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            Some(&project_root),
+        );
+        let scout: Value = serde_json::from_str(
+            &risk_assessment_result(&arguments).expect("risk scout assignment"),
+        )
+        .expect("risk scout json");
+        assert_eq!(
+            scout["assignments"][0]["scope"]["baseline_commit"],
+            baseline_commit
+        );
+        assert_eq!(
+            scout["assignments"][0]["scope"]["scope_resolution"]["tracked_diff_argv"][5],
+            baseline_commit
+        );
+        assert!(scout["assignments"][0]["prompt"]
+            .as_str()
+            .expect("risk scout prompt")
+            .contains("never re-resolve the movable base name"));
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        fs::write(project_root.join("unrelated.txt"), "move the named ref\n")
+            .expect("write unrelated commit");
+        run_git(
+            &project_root,
+            &[
+                "add".to_string(),
+                "--".to_string(),
+                "unrelated.txt".to_string(),
+            ],
+            None,
+            None,
+            "test_baseline_add",
+        )
+        .expect("stage unrelated commit");
+        run_git(
+            &project_root,
+            &[
+                "commit".to_string(),
+                "--quiet".to_string(),
+                "-m".to_string(),
+                "move named review base".to_string(),
+            ],
+            None,
+            None,
+            "test_baseline_move_commit",
+        )
+        .expect("create moved baseline commit");
+        run_git(
+            &project_root,
+            &[
+                "update-ref".to_string(),
+                "refs/remotes/origin/main".to_string(),
+                "HEAD".to_string(),
+            ],
+            None,
+            None,
+            "test_baseline_move_ref",
+        )
+        .expect("move origin/main");
+
+        assert_eq!(
+            planned["state"]["scope"]["baseline_commit"],
+            baseline_commit
+        );
+        assert_eq!(
+            planned["state"]["risk_plan"]["baseline_commit"],
+            baseline_commit
+        );
+        let prompt = planned["assignments"][0]["prompt"]
+            .as_str()
+            .expect("review prompt");
+        assert!(prompt.contains(&baseline_commit));
+        assert!(!prompt.contains("origin/main"));
+
+        fs::create_dir_all(project_root.join("src")).expect("source directory");
+        fs::write(project_root.join("src/lib.rs"), "response edit\n").expect("write response edit");
+        let replacement_diff_hash = "pinned-review-baseline-v2";
+        let base_arguments = json!({
+            "state": planned["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&base_arguments).expect("delta scout required"),
+        )
+        .expect("delta-required json");
+        let delta_assignment = &required["delta_risk_assignments"][0];
+        assert_eq!(
+            delta_assignment["scope"]["baseline_commit"],
+            baseline_commit
+        );
+        let assessment = delta_risk_assessment_for(
+            delta_assignment,
+            "medium",
+            &[("correctness-behavior", "medium")],
+            &["correctness-behavior"],
+            json!([]),
+        );
+        let mut resubmission = base_arguments;
+        resubmission["delta_risk_assessment"] = assessment;
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&resubmission).expect("delta assessment advances"),
+        )
+        .expect("advanced delta json");
+        assert_eq!(
+            advanced["state"]["scope"]["baseline_commit"],
+            baseline_commit
+        );
+        let current_snapshot_commit = advanced["state"]["scope"]["snapshot_commit"]
+            .as_str()
+            .expect("current snapshot commit");
+        assert_eq!(
+            git_text(
+                &project_root,
+                &[
+                    "rev-parse".to_string(),
+                    format!("{current_snapshot_commit}^"),
+                ],
+                None,
+                None,
+                "test_pinned_snapshot_parent",
+            )
+            .expect("current snapshot parent"),
+            baseline_commit
+        );
+        let next_prompt = advanced["next_assignments"][0]["prompt"]
+            .as_str()
+            .expect("next review prompt");
+        assert!(next_prompt.contains(&baseline_commit));
+        assert!(!next_prompt.contains("origin/main"));
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn risk_scout_uses_the_caller_pinned_baseline_when_the_named_ref_moved_before_assessment() {
+        let project_root = test_project_root("pre-assessment-baseline-move");
+        let baseline_commit = git_text(
+            &project_root,
+            &["rev-parse".to_string(), "HEAD".to_string()],
+            None,
+            None,
+            "test_pre_assessment_baseline",
+        )
+        .expect("initial baseline commit");
+        let tree = git_text(
+            &project_root,
+            &["write-tree".to_string()],
+            None,
+            None,
+            "test_pre_assessment_tree",
+        )
+        .expect("baseline tree");
+        let moved_commit = git_text(
+            &project_root,
+            &[
+                "commit-tree".to_string(),
+                tree,
+                "-p".to_string(),
+                baseline_commit.clone(),
+            ],
+            None,
+            Some(b"move the named base before assessment\n"),
+            "test_pre_assessment_moved_commit",
+        )
+        .expect("moved named-base commit");
+        run_git(
+            &project_root,
+            &[
+                "update-ref".to_string(),
+                "refs/remotes/origin/main".to_string(),
+                moved_commit,
+            ],
+            None,
+            None,
+            "test_pre_assessment_move_ref",
+        )
+        .expect("move origin/main before assessment");
+        fs::create_dir_all(project_root.join("src")).expect("source directory");
+        fs::write(project_root.join("src/lib.rs"), "reviewed change\n")
+            .expect("write reviewed change");
+        let arguments = json!({
+            "session_id": "pre-assessment-baseline-move",
+            "base": "origin/main",
+            "baseline_commit": baseline_commit,
+            "project_root": project_root,
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "pre-assessment-baseline-move-diff",
+            "shared_test_evidence": shared_test_evidence_for("pre-assessment-baseline-move-diff")
+        });
+
+        let scout: Value = serde_json::from_str(
+            &risk_assessment_result(&arguments).expect("risk scout assignment"),
+        )
+        .expect("risk scout json");
+        assert_eq!(
+            scout["assignments"][0]["scope"]["baseline_commit"],
+            baseline_commit
+        );
+        assert_eq!(
+            scout["assignments"][0]["scope"]["scope_resolution"]["tracked_diff_argv"][5],
+            baseline_commit
+        );
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn uncommitted_delta_reassessment_keeps_the_baseline_after_head_moves() {
+        let project_root = test_project_root("uncommitted-pinned-review-baseline");
+        let baseline_commit = git_text(
+            &project_root,
+            &["rev-parse".to_string(), "HEAD".to_string()],
+            None,
+            None,
+            "test_uncommitted_baseline",
+        )
+        .expect("initial baseline commit");
+        let mut arguments = assessed_plan_arguments_for_diff_at_root(
+            "uncommitted-pinned-review-baseline",
+            "uncommitted-pinned-review-baseline-diff",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            Some(&project_root),
+        );
+        arguments["scope"] = json!("uncommitted");
+        arguments["base"] = json!("HEAD");
+        arguments["baseline_commit"] = json!(baseline_commit);
+        let scout: Value = serde_json::from_str(
+            &risk_assessment_result(&arguments).expect("uncommitted risk scout"),
+        )
+        .expect("uncommitted risk scout json");
+        let assignment = &scout["assignments"][0];
+        arguments["risk_assessment"]["assignment_id"] = assignment["assignment_id"].clone();
+        arguments["risk_assessment"]["subagent_key"] = assignment["subagent_key"].clone();
+        arguments["risk_assessment"]["shared_test_evidence_id"] =
+            assignment["shared_test_evidence"]["id"].clone();
+        arguments["risk_assessment"]["caller_attestation"]["model_role"] =
+            assignment["model_role"].clone();
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        fs::write(
+            project_root.join("committed-response.txt"),
+            "committed response\n",
+        )
+        .expect("write committed response");
+        run_git(
+            &project_root,
+            &[
+                "add".to_string(),
+                "--".to_string(),
+                "committed-response.txt".to_string(),
+            ],
+            None,
+            None,
+            "test_uncommitted_response_add",
+        )
+        .expect("stage committed response");
+        run_git(
+            &project_root,
+            &[
+                "commit".to_string(),
+                "--quiet".to_string(),
+                "-m".to_string(),
+                "commit review response".to_string(),
+            ],
+            None,
+            None,
+            "test_uncommitted_response_commit",
+        )
+        .expect("commit review response");
+        fs::create_dir_all(project_root.join("src")).expect("source directory");
+        fs::write(project_root.join("src/lib.rs"), "follow-up response\n")
+            .expect("write follow-up response");
+
+        let replacement_diff_hash = "uncommitted-pinned-review-baseline-v2";
+        let base_arguments = json!({
+            "state": planned["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&base_arguments).expect("delta scout required"),
+        )
+        .expect("delta-required json");
+        let delta_assignment = &required["delta_risk_assignments"][0];
+        assert_eq!(
+            delta_assignment["scope"]["baseline_commit"],
+            baseline_commit
+        );
+        let assessment = delta_risk_assessment_for(
+            delta_assignment,
+            "medium",
+            &[("correctness-behavior", "medium")],
+            &["correctness-behavior"],
+            json!([]),
+        );
+        let mut resubmission = base_arguments;
+        resubmission["delta_risk_assessment"] = assessment;
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&resubmission).expect("delta assessment advances"),
+        )
+        .expect("advanced delta json");
+        assert_eq!(
+            advanced["state"]["scope"]["baseline_commit"],
+            baseline_commit
+        );
+        let next_prompt = advanced["next_assignments"][0]["prompt"]
+            .as_str()
+            .expect("next review prompt");
+        assert!(next_prompt.contains(&baseline_commit));
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
     fn plan_forbids_reviewers_from_inventing_ticket_requirements() {
         let parsed: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
@@ -9579,6 +10049,7 @@ verifier = "default-verify"
         .expect("write legacy config");
         let mut arguments = json!({
             "session_id": "legacy-risk-dispositions",
+            "baseline_commit": test_baseline_commit(&project_root, "origin/main"),
             "changed_files": ["src/lib.rs"],
             "diff_hash": "legacy-risk-dispositions-diff",
             "shared_test_evidence": shared_test_evidence_for("legacy-risk-dispositions-diff"),
@@ -14895,6 +15366,18 @@ pre_filter = "project-pre"
             DEFAULT_CLEAN_ITERATIONS
         );
         assert_eq!(
+            tools[0]["inputSchema"]["allOf"][0]["then"]["required"],
+            json!(["baseline_commit"])
+        );
+        assert!(tools[5]["inputSchema"]["required"]
+            .as_array()
+            .expect("risk scout required fields")
+            .contains(&json!("baseline_commit")));
+        assert_eq!(
+            tools[5]["inputSchema"]["properties"]["baseline_commit"]["pattern"],
+            "^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$"
+        );
+        assert_eq!(
             tools[1]["inputSchema"]["properties"]["lens_results"]["maxItems"],
             MAX_REVIEW_LENSES
         );
@@ -14942,6 +15425,43 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn risk_scout_requires_a_caller_pinned_baseline_commit() {
+        let project_root = test_project_root("required-risk-baseline");
+        fs::create_dir_all(project_root.join("src")).expect("source directory");
+        fs::write(project_root.join("src/lib.rs"), "reviewed change\n")
+            .expect("write reviewed change");
+        let arguments = json!({
+            "session_id": "required-risk-baseline",
+            "base": "origin/main",
+            "project_root": project_root,
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "required-risk-baseline-diff",
+            "shared_test_evidence": shared_test_evidence_for("required-risk-baseline-diff")
+        });
+
+        assert_eq!(
+            risk_assessment_result(&arguments)
+                .expect_err("risk evidence must name the baseline used to compute it"),
+            "review_baseline_commit_required=true"
+        );
+        for invalid in ["HEAD", "0123456789abcdef0123456789abcdef0123456"] {
+            let mut invalid_arguments = arguments.clone();
+            invalid_arguments["baseline_commit"] = json!(invalid);
+            assert_eq!(
+                risk_assessment_result(&invalid_arguments)
+                    .expect_err("symbolic and abbreviated baselines are not stable bindings"),
+                "review_baseline_commit_invalid=true"
+            );
+        }
+        let mut missing_commit = arguments.clone();
+        missing_commit["baseline_commit"] = json!("0000000000000000000000000000000000000000");
+        assert!(risk_assessment_result(&missing_commit)
+            .expect_err("the full OID must name an existing commit")
+            .starts_with("review_baseline_resolve_failed"));
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
     fn json_rpc_assess_risk_requests_one_bounded_scout_before_deep_review() {
         let response = handle_json_rpc(&json!({
             "jsonrpc": "2.0",
@@ -14952,6 +15472,7 @@ pre_filter = "project-pre"
                 "arguments": {
                     "session_id": "risk-first-review",
                     "base": "origin/main",
+                    "baseline_commit": current_test_baseline_commit(),
                     "changed_files": ["src/lib.rs", "tests/lib_test.rs"],
                     "diff_hash": "risk-diff",
                     "shared_test_evidence": shared_test_evidence_for("risk-diff"),
@@ -15032,6 +15553,7 @@ pre_filter = "project-pre"
         let arguments = json!({
             "session_id": "medium-risk-review",
             "base": "origin/main",
+            "baseline_commit": current_test_baseline_commit(),
             "changed_files": ["src/lib.rs", "tests/lib_test.rs"],
             "diff_hash": "medium-risk-diff",
             "shared_test_evidence": shared_test_evidence_for("medium-risk-diff"),

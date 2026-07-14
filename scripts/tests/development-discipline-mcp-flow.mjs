@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 const [command, ...args] = process.argv.slice(2);
@@ -15,6 +15,11 @@ const routingRoot = process.env.FINAL_REVIEW_ROUTING_PROJECT_ROOT;
 if (!projectRoot || !routingRoot) {
   throw new Error("final-review test project roots are required");
 }
+const ticketBaselineCommit = execFileSync(
+  "git",
+  ["-C", projectRoot, "rev-parse", "--verify", "HEAD^{commit}"],
+  { encoding: "utf8" },
+).trim();
 
 const child = spawn(command, args, {
   env: {
@@ -382,6 +387,7 @@ if (
 const ticketRiskArguments = {
   session_id: "bats-verifier-ticket-evidence",
   base: "HEAD",
+  baseline_commit: ticketBaselineCommit,
   scope: "uncommitted",
   project_root: projectRoot,
   changed_files: ["src/new.rs"],

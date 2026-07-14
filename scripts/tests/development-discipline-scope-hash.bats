@@ -16,13 +16,72 @@ setup() {
 
 scope_hash() {
   local inventory="$BATS_TEST_TMPDIR/changed-files.inventory"
+  local baseline_commit
 
   printf '%s\0' "$@" >"$inventory"
+  baseline_commit="$(git -C "$REPO" rev-parse HEAD)"
   "$HASH_SCRIPT" \
     --project-root "$REPO" \
     --scope base \
     --base HEAD \
+    --baseline-commit "$baseline_commit" \
     --changed-files-from "$inventory"
+}
+
+@test "final-review scope hash keeps an explicit uncommitted baseline after HEAD moves" {
+  local inventory="$BATS_TEST_TMPDIR/changed-files.inventory"
+  local baseline_commit
+  local before
+  local after_with_baseline
+  local after_with_head
+
+  baseline_commit="$(git -C "$REPO" rev-parse HEAD)"
+  printf '%s\0' tracked.txt >"$inventory"
+  printf '%s\n' reviewed-change >"$REPO/tracked.txt"
+  before="$(
+    "$HASH_SCRIPT" \
+      --project-root "$REPO" \
+      --scope uncommitted \
+      --baseline-commit "$baseline_commit" \
+      --changed-files-from "$inventory"
+  )"
+
+  printf '%s\n' move-head >"$REPO/head-marker.txt"
+  git -C "$REPO" add head-marker.txt
+  git -C "$REPO" commit -qm 'move HEAD'
+  after_with_baseline="$(
+    "$HASH_SCRIPT" \
+      --project-root "$REPO" \
+      --scope uncommitted \
+      --baseline-commit "$baseline_commit" \
+      --changed-files-from "$inventory"
+  )"
+  after_with_head="$(
+    "$HASH_SCRIPT" \
+      --project-root "$REPO" \
+      --scope uncommitted \
+      --baseline-commit "$(git -C "$REPO" rev-parse HEAD)" \
+      --changed-files-from "$inventory"
+  )"
+
+  [ "$after_with_baseline" = "$before" ]
+  [ "$after_with_head" != "$before" ]
+}
+
+@test "final-review scope hash rejects missing symbolic and abbreviated baselines" {
+  local inventory="$BATS_TEST_TMPDIR/changed-files.inventory"
+
+  printf '%s\0' tracked.txt >"$inventory"
+  for baseline_commit in "" HEAD 0123456789abcdef0123456789abcdef0123456; do
+    run "$HASH_SCRIPT" \
+      --project-root "$REPO" \
+      --scope uncommitted \
+      --baseline-commit "$baseline_commit" \
+      --changed-files-from "$inventory"
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"must be a full lowercase commit OID"* ]]
+  done
 }
 
 @test "final-review scope hash covers index worktree and untracked content deterministically" {
@@ -155,6 +214,7 @@ EOF
     --project-root "$REPO" \
     --scope base \
     --base HEAD \
+    --baseline-commit "$(git -C "$REPO" rev-parse HEAD)" \
     --changed-files-from "$inventory"
 
   [ "$status" -eq 2 ]
@@ -176,6 +236,7 @@ EOF
     --project-root "$REPO" \
     --scope base \
     --base HEAD \
+    --baseline-commit "$(git -C "$REPO" rev-parse HEAD)" \
     --changed-files-from "$inventory"
 
   [ "$status" -eq 0 ]

@@ -4,7 +4,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: final-review-scope-hash.sh --project-root PATH --scope base|uncommitted [--base REF] --changed-files-from FILE
+Usage: final-review-scope-hash.sh --project-root PATH --scope base|uncommitted [--base REF] --baseline-commit OID --changed-files-from FILE
 EOF
 }
 
@@ -16,6 +16,7 @@ die() {
 project_root=""
 scope=""
 base="origin/main"
+baseline_commit=""
 changed_files_from=""
 changed_files=()
 max_changed_files=20000
@@ -43,6 +44,11 @@ while (($# > 0)); do
       base="$2"
       shift 2
       ;;
+    --baseline-commit)
+      (($# >= 2)) || die "--baseline-commit requires a value"
+      baseline_commit="$2"
+      shift 2
+      ;;
     --changed-files-from)
       (($# >= 2)) || die "--changed-files-from requires a value"
       changed_files_from="$2"
@@ -67,15 +73,15 @@ git_in_project rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
 case "$scope" in
   base)
     [[ -n "$base" ]] || die "--base must not be empty"
-    effective_base="$base"
     ;;
   uncommitted)
-    effective_base="HEAD"
     ;;
   *)
     die "--scope must be 'base' or 'uncommitted'"
     ;;
 esac
+[[ "$baseline_commit" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] ||
+  die "--baseline-commit must be a full lowercase commit OID"
 
 if [[ -n "$changed_files_from" ]]; then
   [[ -f "$changed_files_from" && ! -L "$changed_files_from" ]] ||
@@ -187,8 +193,10 @@ for ((i = 0; i < ${#sorted_files[@]}; i++)); do
   fi
 done
 
-base_oid="$(git_in_project rev-parse --verify --end-of-options "$effective_base^{commit}")" ||
-  die "base does not resolve to a commit: $effective_base"
+base_oid="$(git_in_project rev-parse --verify --end-of-options "$baseline_commit^{commit}")" ||
+  die "baseline does not resolve to a commit: $baseline_commit"
+[[ "$base_oid" == "$baseline_commit" ]] ||
+  die "--baseline-commit must be the canonical commit OID"
 
 index_chunk_hashes=()
 worktree_chunk_hashes=()
