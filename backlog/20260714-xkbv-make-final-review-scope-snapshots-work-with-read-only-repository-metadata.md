@@ -2,14 +2,18 @@
 title: Make final-review scope snapshots work with read-only repository metadata
 blocked_by: []
 blocks: []
-tags: []
+tags: [development-discipline, final-review, operability, git, minor]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
+Remove the mandatory final-review scout's dependency on writable repository Git metadata by isolating scope-snapshot objects while preserving exact diff binding.
+
 ## Context / Why
+
+Final-review operability finding from 20260713-rygd. This is distinct from 20260714-gb9s pathspec/evidence-size bounds, 20260714-hmwe ambient signing/hooks, and 20260714-iv3g delta-artifact cleanup; none addresses mandatory snapshot writes to a read-only repository object store.
 
 ## Acceptance criteria
 
