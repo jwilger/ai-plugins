@@ -36,7 +36,6 @@
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
-20260712-r298-expand-focused-tiber-cli-invalid-invocation-coverage
 20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
 20260708-n3sh-add-cross-project-worktree-safety-guidance
@@ -45,6 +44,7 @@
 20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260712-r298-expand-focused-tiber-cli-invalid-invocation-coverage
 20260711-95gy-retire-superseded-lefthook-nix-gc-roots-after-successful-reinstall
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
