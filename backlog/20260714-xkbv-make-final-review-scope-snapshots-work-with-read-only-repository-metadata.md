@@ -18,6 +18,7 @@ A caused MINOR operability finding from 20260713-rygd showed that mandatory scop
 ## Acceptance criteria
 
 - [ ] Initial and delta scope snapshot creation does not write objects, refs, indexes, or other metadata into the reviewed repository's Git directory and succeeds when the worktree is writable but .git is read-only.
+- [ ] The replacement mechanism preserves the exact baseline, changed-file inventory, tracked, staged, unstaged, and untracked content coverage, immutable scope reference, and diff-hash binding.
 
 ## Subtasks
 
