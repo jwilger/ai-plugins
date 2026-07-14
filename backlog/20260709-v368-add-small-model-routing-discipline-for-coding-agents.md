@@ -21,6 +21,7 @@ Use gpt-5.6-luna for bounded read-only or easily reversible helper work with ind
 - [ ] Implementation verifies the exact current harness model identifiers and availability; an unavailable requested route fails visibly or escalates rather than silently downgrading.
 - [ ] Claude Code receives an equivalent current-harness helper and escalation policy where supported, or the implementation documents the missing capability; Claude /fast is never presented as a cost-routing substitute.
 - [ ] Existing development workflow skills cross-reference model routing where delegation decisions naturally arise without duplicating the full matrix.
+- [ ] Behavior fixtures cover accepted Luna delegation, Terra default work, required Sol escalation, ambiguous or high-risk work that cannot use Luna, and refusal to silently downgrade.
 
 ## Subtasks
 
