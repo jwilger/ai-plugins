@@ -54,3 +54,4 @@
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260714-n7ku-extract-gpt-5-6-measurement-contracts-from-the-generic-threshold-checker
 20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
+20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
