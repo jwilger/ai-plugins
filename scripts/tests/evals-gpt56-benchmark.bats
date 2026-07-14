@@ -663,7 +663,7 @@ NODE
   [[ "$output" == *"$no_plugins_home --plugin-mode no-plugins"* ]]
   [[ "$output" == *"$out_root/execution/results.json"* ]]
   [[ "$output" == *"--max-concurrency 2"* ]]
-  expected_measurement_check="check-thresholds.mjs $out_root/execution/results.json --expected-measurement-config $ROOT/evals/benchmarks/gpt-5.6-model-family/promptfooconfig.yaml"
+  expected_measurement_check="check-gpt56-measurement.mjs $out_root/execution/results.json --expected-measurement-config $ROOT/evals/benchmarks/gpt-5.6-model-family/promptfooconfig.yaml"
   [[ "$output" == *"$expected_measurement_check"* ]]
   [[ "$output" == *"check-gpt56-execution-isolation.mjs $out_root/execution/results.json"* ]]
   measurement_check_line="$(printf '%s\n' "$output" | grep -nF "$expected_measurement_check" | cut -d: -f1)"

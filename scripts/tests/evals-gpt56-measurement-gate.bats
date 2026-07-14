@@ -11,7 +11,7 @@ teardown() {
 }
 
 run_checker() {
-  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$RESULTS"
+  run node "$ROOT/scripts/evals/check-gpt56-measurement.mjs" "$RESULTS"
 }
 
 run_expected_benchmark_checker() {
@@ -21,7 +21,7 @@ run_expected_benchmark_checker() {
     GPT56_BENCHMARK_WORKSPACE="${RESULTS}.workspace" \
     GPT56_BENCHMARK_SAMPLES="${EXPECTED_BENCHMARK_SAMPLES:-1}" \
     PROMPTFOO_MAX_CONCURRENCY="${EXPECTED_MAX_CONCURRENCY:-2}" \
-    node "$ROOT/scripts/evals/check-thresholds.mjs" \
+    node "$ROOT/scripts/evals/check-gpt56-measurement.mjs" \
     "$RESULTS" \
     --expected-measurement-config "$BENCHMARK_CONFIG"
 }
@@ -263,13 +263,101 @@ fs.writeFileSync(
 NODE
 }
 
+@test "pure GPT-5.6 measurement validation keeps failures and comparison state invocation-local" {
+  run node --input-type=module - "$ROOT" <<'NODE'
+import { pathToFileURL } from 'node:url';
+
+const root = process.argv[2];
+const { validateMeasurementArtifact } = await import(
+  pathToFileURL(`${root}/scripts/evals/gpt56-measurement-contract.mjs`)
+);
+
+const vars = {
+  case_id: 'comparison-case',
+  min_pass_rate: 0,
+  value_gate_mode: 'measurement',
+  benchmark_expected_provider_labels: ['codex-gpt-5.6-sol-standard'],
+  benchmark_expected_samples: 1,
+  sample_index: 1,
+};
+const configuredTest = {
+  providers: ['codex-gpt-5.6-sol-standard'],
+  vars,
+};
+const validResult = {
+  provider: { label: 'codex-gpt-5.6-sol-standard' },
+  response: { output: 'Complete Sol answer' },
+  success: true,
+  latencyMs: 1250,
+  cost: 0.42,
+  tokenUsage: {
+    prompt: 120,
+    completion: 30,
+    total: 150,
+    cached: 20,
+    assertions: {
+      prompt: 80,
+      completion: 10,
+      total: 90,
+      cached: 15,
+    },
+  },
+  gradingResult: {
+    pass: true,
+    score: 1,
+    reason: 'Rubric satisfied',
+  },
+  testCase: { vars },
+};
+const artifactFor = (result) => ({
+  config: { tests: [configuredTest] },
+  results: { results: [result] },
+});
+const invalidArtifact = artifactFor({
+  ...validResult,
+  response: {},
+});
+const validArtifact = artifactFor(validResult);
+const invalidBefore = JSON.stringify(invalidArtifact);
+const validBefore = JSON.stringify(validArtifact);
+
+const invalidFailures = validateMeasurementArtifact({
+  artifact: invalidArtifact,
+  results: invalidArtifact.results.results,
+  resultsPath: '/tmp/results.json',
+  workingDirectory: '/tmp',
+});
+const validFailures = validateMeasurementArtifact({
+  artifact: validArtifact,
+  results: validArtifact.results.results,
+  resultsPath: '/tmp/results.json',
+  workingDirectory: '/tmp',
+});
+
+if (!invalidFailures.some((failure) => failure.includes('missing target output'))) {
+  throw new Error(`invalid artifact was not rejected: ${JSON.stringify(invalidFailures)}`);
+}
+if (validFailures.length !== 0) {
+  throw new Error(`valid artifact inherited failures: ${JSON.stringify(validFailures)}`);
+}
+if (
+  JSON.stringify(invalidArtifact) !== invalidBefore ||
+  JSON.stringify(validArtifact) !== validBefore
+) {
+  throw new Error('pure validator mutated an input artifact');
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "expected benchmark measurement contract accepts four cases by three providers by configured samples" {
   write_expected_benchmark_artifact complete 2
 
   run_expected_benchmark_checker
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Eval thresholds passed"* ]]
+  [[ "$output" == *"GPT-5.6 measurement contract passed"* ]]
 }
 
 @test "expected benchmark measurement contract rejects a self-declared one-row artifact" {
@@ -591,7 +679,7 @@ JSON
     '["codex-gpt-5.6-sol-standard", "codex-gpt-5.6-terra-standard"]'
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Eval thresholds passed"* ]]
+  [[ "$output" == *"GPT-5.6 measurement contract passed"* ]]
 }
 
 @test "measurement mode does not apply plugin hard guards to a semantic rubric miss" {
@@ -631,7 +719,7 @@ JSON
     '["codex-gpt-5.6-sol-standard"]'
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Eval thresholds passed"* ]]
+  [[ "$output" == *"GPT-5.6 measurement contract passed"* ]]
 }
 
 @test "measurement mode rejects a missing expected provider sample row" {
@@ -1001,7 +1089,7 @@ JSON
     '["codex-gpt-5.6-sol-standard"]'
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Eval thresholds passed"* ]]
+  [[ "$output" == *"GPT-5.6 measurement contract passed"* ]]
 }
 
 @test "measurement mode rejects aggregate grader direct errors" {
@@ -1141,5 +1229,5 @@ JSON
   run_checker
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Eval thresholds passed"* ]]
+  [[ "$output" == *"GPT-5.6 measurement contract passed"* ]]
 }
