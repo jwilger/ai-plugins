@@ -19,6 +19,7 @@ Lightweight behavior review of the GPT-5.6 measurement-contract extraction found
 
 - [ ] scripts/evals/check-thresholds.mjs exits with status 2 when arguments follow the required results JSON path.
 - [ ] The checker prints a concise usage or unknown-argument diagnostic for unsupported trailing arguments.
+- [ ] Regression tests cover at least one unknown trailing option and confirm the normal single-path invocation remains unchanged.
 
 ## Subtasks
 
