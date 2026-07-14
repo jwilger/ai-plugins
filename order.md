@@ -4,7 +4,6 @@
 20260713-hgyz-make-targeted-plugin-eval-mode-install-the-actual-case-plugin-set
 20260713-jsad-document-retained-subagent-slot-recovery-in-final-review-guidance
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
-20260713-h9bn-prove-canonical-status-precedence-in-the-gpt-5-6-calibration-runner
 20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
@@ -26,6 +25,7 @@
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260713-h9bn-prove-canonical-status-precedence-in-the-gpt-5-6-calibration-runner
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
