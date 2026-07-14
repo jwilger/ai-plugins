@@ -1,19 +1,19 @@
 ---
-title: Commit green increments and gate follow-up work on build state
+title: Make final review risk-proportionate and CI-driven
 blocked_by: []
 blocks: []
-tags: [development-discipline, workflow, git, ci, final-review, policy, backlog]
+tags: [development-discipline, final-review, workflow, risk, ci, policy, bug, major, top-priority]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Update development-discipline guidance so each implementation increment is committed and pushed after fast unit tests and lightweight review pass, longer checks may run in CI, and full review gates only the claim that a ticket is complete.
+Implement a risk-proportionate development loop and final-review protocol: preserve green increments through fast tests, lightweight review, commit/push, and CI; select only risk-relevant final lenses; disposition findings by severity and causality; and reserve repeated independent passes for exceptional-risk work.
 
 ## Context / Why
 
-The current workflow held a large green change uncommitted through repeated full-review passes, increasing recovery risk and delaying CI feedback. The desired inner loop is: run the fast unit tests, run lightweight review, commit and push, then repeat until implementation is finished. Longer-running integration, mutation, full-suite, or similarly expensive checks may run only in CI rather than blocking each local increment. Run full review only at the ticket-completion boundary; if full review finds issues, fix them and again pass the fast unit-test/light-review gate, commit, and push before restarting full review. Before addressing full-review findings or starting another ticket, check the build for the latest pushed commit: running or green permits work; failed blocks follow-up work until the failure is understood and resolved. Full-review baselines must be pinned to the pre-ticket commit so incremental pushes to main do not erase or move the reviewed scope.
+The current development-discipline workflow delayed a medium-risk local eval-tooling ticket through repeated broad lens passes, duplicate test execution, routine verification of already-ticketed MINORs, and a hard-coded three-clean-pass protocol. In final-review session 20260709-spx8-gpt56-final-review-20260713-h, all caused findings were MINOR and mapped to existing backlog tickets, yet filter_findings still labeled every one `block`, advance demanded a verifier, and required_clean_iterations=3 prevented completion. This conflicts with the desired inner loop and with proportionate threat/risk modeling. The canonical behavior must live in the actual final-review machinery, skill guidance, fixtures, and tests—not prose alone. This ticket absorbs 20260712-7csp and supersedes the mandatory three-pass/push-blocking policy in 20260711-42si.
 
 ## Acceptance criteria
 
