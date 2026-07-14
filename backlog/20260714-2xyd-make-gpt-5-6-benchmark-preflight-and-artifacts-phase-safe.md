@@ -20,6 +20,7 @@ Split from 20260713-uf3e. Ambient output overrides can collapse execution and gr
 - [ ] Execution and grader calibration always resolve to distinct artifact directories, including under every supported output-root override.
 - [ ] Relative GPT56_BENCHMARK_OUT_ROOT and EVAL_OUT_DIR overrides resolve once against the caller's original working directory, and preparation, canonical execution, and post-run checking use the same absolute paths.
 - [ ] Preparation is covered by the signal-aware lifecycle or clears and marks stale phase artifacts before work begins, so preparation failure or interruption cannot be reported as a completed provider comparison.
+- [ ] Focused regressions distinguish successful preparation, preparation failure, and preparation interruption and prove that no stale result is accepted as fresh evidence.
 
 ## Subtasks
 
