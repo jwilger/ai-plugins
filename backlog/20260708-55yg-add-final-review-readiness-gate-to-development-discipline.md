@@ -17,8 +17,6 @@ The risk-proportionate policy already requires the ticket's actual acceptance cr
 
 ## Acceptance criteria
 
-- [ ] Final-review guidance requires a local readiness checklist before the multi-lens review loop begins.
-
 ## Subtasks
 
 ## Notes / Log
