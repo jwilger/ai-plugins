@@ -10,6 +10,7 @@
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-n3sh-add-cross-project-worktree-safety-guidance
+20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
 20260708-55yg-add-final-review-readiness-gate-to-development-discipline
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260713-jsad-document-retained-subagent-slot-recovery-in-final-review-guidance
@@ -57,4 +58,3 @@
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260714-xkbv-make-final-review-scope-snapshots-work-with-read-only-repository-metadata
 20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
-20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
