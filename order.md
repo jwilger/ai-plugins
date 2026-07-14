@@ -8,7 +8,6 @@
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
 20260713-h9bn-prove-canonical-status-precedence-in-the-gpt-5-6-calibration-runner
 20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
-20260713-uf3e-harden-focused-gpt-5-6-benchmark-runner-overrides-and-preflight-lifecycle
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
 20260713-hkrf-cover-gpt-5-6-benchmark-sample-overrides-and-exact-provider-label-contracts
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
