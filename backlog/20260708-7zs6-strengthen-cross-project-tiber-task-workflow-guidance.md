@@ -20,7 +20,6 @@ Backlog-only capture, explicit transition before active work, and basic PR/MR UR
 - [ ] Tiber guidance makes clear that backlog capture leaves tasks in backlog unless the user explicitly asks to start work.
 - [ ] Guidance requires active work to move tasks to in-progress and requires multiple in-progress tasks to be isolated by separate branches or worktrees.
 - [ ] The change includes eval cases for backlog-only capture, explicit start-work transition, concurrent in-progress isolation, and PR/MR status updates.
-- [ ] PR/MR lifecycle coverage records the URL and stable status changes from draft/open through checks, review, merge, close, or blocked outcomes without regressing backlog-only capture.
 
 ## Subtasks
 
