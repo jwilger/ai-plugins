@@ -62,3 +62,4 @@
 20260714-xkbv-make-final-review-scope-snapshots-work-with-read-only-repository-metadata
 20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
 20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
+20260714-g89d-make-gpt-5-6-provider-locking-stable-across-worktrees-and-the-full-run-lifecycle
