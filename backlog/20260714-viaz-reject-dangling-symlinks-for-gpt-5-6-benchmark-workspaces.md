@@ -20,3 +20,5 @@ Lightweight review reproduced ordinary stale-state behavior where existsSync tre
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Closed as an exact duplicate of existing MINOR backlog task 20260713-2rd3, which already captures the reproduced existsSync/dangling-symlink behavior and preservation criterion.
