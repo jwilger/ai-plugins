@@ -324,6 +324,14 @@ run_development_discipline_codex_cache_final_review_flow() {
   local version
 
   mkdir -p "$cache_parent" "$project_root/.development-discipline"
+  git -C "$project_root" init -q
+  git -C "$project_root" config user.email final-review-fixture@example.test
+  git -C "$project_root" config user.name 'Final Review Fixture'
+  git -C "$project_root" config commit.gpgsign false
+  git -C "$project_root" config core.hooksPath /dev/null
+  git -C "$project_root" commit --allow-empty -qm 'initialize final-review fixture'
+  mkdir -p "$project_root/src"
+  printf '%s\n' 'fixture change' >"$project_root/src/new.rs"
   version="$(jq -r '.version' "$ROOT/plugins/development-discipline/.codex-plugin/plugin.json")"
   ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/$version"
   cat >"$project_root/.development-discipline/final-review.toml" <<'TOML'
