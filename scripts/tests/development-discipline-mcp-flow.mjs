@@ -17,7 +17,10 @@ if (!projectRoot || !routingRoot) {
 }
 
 const child = spawn(command, args, {
-  env: process.env,
+  env: {
+    ...process.env,
+    XDG_STATE_HOME: `${projectRoot}/.development-discipline-state`,
+  },
   stdio: ["pipe", "pipe", "inherit"],
 });
 const lines = createInterface({ input: child.stdout });
@@ -112,6 +115,11 @@ findingLensResults[0] = {
     {
       id: "launcher-real",
       severity: "CRITICAL",
+      causality: "caused",
+      causality_evidence: "The fixture attributes the candidate to src/new.rs.",
+      likelihood: "possible",
+      security_impact: "none",
+      safety_impact: "none",
       path: "src/new.rs",
       message: "changed-file issue",
       relevance: {
@@ -122,6 +130,11 @@ findingLensResults[0] = {
     {
       id: "launcher-stale",
       severity: "MAJOR",
+      causality: "pre-existing",
+      causality_evidence: "The fixture places the candidate in unchanged code.",
+      likelihood: "observed",
+      security_impact: "none",
+      safety_impact: "none",
       path: "src/old.rs",
       message: "unchanged-file issue",
       relevance: {
@@ -172,7 +185,7 @@ const verifiedResponse = await request({
         model_role: verifierAssignment.model_role,
         status: "verified",
         caller_attestation: {
-          model_role: "config-verify",
+          model_role: verifierAssignment.model_role,
           fresh_context: true,
           closed_after_result: true,
         },
@@ -182,6 +195,11 @@ const verifiedResponse = await request({
             lens: "correctness-behavior",
             verdict: "rejected",
             severity: "CRITICAL",
+            causality: "caused",
+            causality_evidence:
+              "The verifier established that the reported scenario is unreachable.",
+            security_impact: "none",
+            safety_impact: "none",
             rationale:
               "The launcher fixture intentionally exercises rejection.",
           },
@@ -191,7 +209,7 @@ const verifiedResponse = await request({
   },
 });
 let currentState = JSON.parse(verifiedResponse.result.content[0].text).state;
-for (let index = 0; index < 3; index += 1) {
+for (let index = 0; index < 2; index += 1) {
   const advancedResponse = await request({
     jsonrpc: "2.0",
     id: 8 + index,
@@ -270,10 +288,14 @@ sensitiveSecurity.findings = [
   {
     id: "sensitive-flow-id",
     severity: "MAJOR",
+    causality: "pre-existing",
+    causality_evidence: "The fixture places the candidate in unchanged code.",
+    likelihood: "observed",
     path: "src/old.rs",
     message: "alice@example.test exploit payload",
     scenario: "private data",
     security_impact: "major",
+    safety_impact: "none",
     suspected_pii: true,
     relevance: {
       category: "diff_changed_file",
@@ -348,6 +370,190 @@ if (
   throw new Error(
     "complete local final-review report details were not returned",
   );
+}
+
+const ticketRiskArguments = {
+  session_id: "bats-verifier-ticket-evidence",
+  base: "HEAD",
+  scope: "uncommitted",
+  project_root: projectRoot,
+  changed_files: ["src/new.rs"],
+  diff_hash: "ticket-evidence",
+  user_request: "Review the changed local tooling behavior.",
+  acceptance_criteria: ["Disposition confirmed findings without deadlock."],
+  unrelated_finding_policy: { default: "report" },
+};
+const ticketScoutResponse = await request(
+  {
+    jsonrpc: "2.0",
+    id: 17,
+    method: "tools/call",
+    params: {
+      name: "final_review.assess_risk",
+      arguments: ticketRiskArguments,
+    },
+  },
+  false,
+);
+const ticketScout = JSON.parse(ticketScoutResponse.result.content[0].text)
+  .assignments[0];
+const ticketDimensions = ticketScout.review_dimensions.map((lens) => {
+  const selected = lens === "correctness-behavior";
+  return {
+    lens,
+    risk: selected ? "high" : "none",
+    evidence: selected
+      ? "The changed disposition transition can deadlock the coordinator."
+      : "No concrete failure path for this dimension.",
+    plausible_failure: selected
+      ? "A confirmed nonblocking finding cannot be documented."
+      : "none",
+    material_impact: selected
+      ? "Review completion becomes impossible."
+      : "none",
+    uncertain: false,
+  };
+});
+const ticketPlanResponse = await request(
+  {
+    jsonrpc: "2.0",
+    id: 18,
+    method: "tools/call",
+    params: {
+      name: "final_review.plan",
+      arguments: {
+        ...ticketRiskArguments,
+        risk_assessment: {
+          assignment_id: ticketScout.assignment_id,
+          subagent_key: ticketScout.subagent_key,
+          overall_risk: "high",
+          dimensions: ticketDimensions,
+          exceptional_triggers: [],
+          split_required: false,
+          plan_assumptions: [],
+          findings: [],
+          caller_attestation: {
+            model_role: ticketScout.model_role,
+            fresh_context: true,
+            closed_after_result: true,
+          },
+        },
+      },
+    },
+  },
+  false,
+);
+const ticketState = JSON.parse(ticketPlanResponse.result.content[0].text).state;
+const ticketLensResults = cleanLensResults(ticketState);
+ticketLensResults[0] = {
+  ...ticketLensResults[0],
+  status: "findings",
+  findings: [
+    {
+      id: "material-auth-regression",
+      severity: "MAJOR",
+      causality: "caused",
+      causality_evidence:
+        "The changed branch appears to disclose protected diagnostics.",
+      likelihood: "possible",
+      security_impact: "major",
+      safety_impact: "none",
+      path: "src/new.rs",
+      message: "The changed branch may disclose protected diagnostics.",
+      relevance: {
+        category: "diff_changed_file",
+        explanation: "The branch is changed by this diff.",
+      },
+    },
+  ],
+};
+const ticketPendingResponse = await request(
+  {
+    jsonrpc: "2.0",
+    id: 19,
+    method: "tools/call",
+    params: {
+      name: "final_review.advance",
+      arguments: {
+        state: ticketState,
+        lens_results: ticketLensResults,
+        current_diff_hash: "ticket-evidence",
+      },
+    },
+  },
+  false,
+);
+if (!ticketPendingResponse.result) {
+  throw new Error(
+    `verifier ticket setup failed: ${JSON.stringify(ticketPendingResponse)}`,
+  );
+}
+const ticketVerifier = JSON.parse(
+  ticketPendingResponse.result.content[0].text,
+).verifier_assignment;
+const ticketAdvancedResponse = await request(
+  {
+    jsonrpc: "2.0",
+    id: 20,
+    method: "tools/call",
+    params: {
+      name: "final_review.advance",
+      arguments: {
+        state: ticketState,
+        lens_results: ticketLensResults,
+        current_diff_hash: "ticket-evidence",
+        unrelated_follow_ups: [
+          {
+            finding_id: "material-auth-regression",
+            lens: "correctness-behavior",
+            ticket_reference: "BACKLOG-SEC-1",
+          },
+        ],
+        verifier_result: {
+          subagent_key: ticketVerifier.subagent_key,
+          assignment_id: ticketVerifier.assignment_id,
+          model_role: ticketVerifier.model_role,
+          status: "verified",
+          verdicts: [
+            {
+              finding_id: "material-auth-regression",
+              lens: "correctness-behavior",
+              verdict: "confirmed",
+              severity: "MINOR",
+              causality: "caused",
+              causality_evidence:
+                "The diff causes only a minor diagnostic disclosure.",
+              security_impact: "minor",
+              safety_impact: "none",
+              rationale: "The confirmed impact belongs in the backlog.",
+            },
+          ],
+          caller_attestation: {
+            model_role: ticketVerifier.model_role,
+            fresh_context: true,
+            closed_after_result: true,
+          },
+        },
+      },
+    },
+  },
+  false,
+);
+if (!ticketAdvancedResponse.result) {
+  throw new Error(
+    `verifier ticket resubmission failed: ${JSON.stringify(ticketAdvancedResponse)}`,
+  );
+}
+const ticketAdvanced = JSON.parse(
+  ticketAdvancedResponse.result.content[0].text,
+);
+if (
+  ticketAdvanced.transition_status !== "advanced" ||
+  ticketAdvanced.filtered.routed[0]?.disposition !== "ticket" ||
+  ticketAdvanced.state.deferred_findings[0]?.ticket_reference !==
+    "BACKLOG-SEC-1"
+) {
+  throw new Error("verifier ticket evidence did not advance the MCP session");
 }
 
 child.stdin.end();
