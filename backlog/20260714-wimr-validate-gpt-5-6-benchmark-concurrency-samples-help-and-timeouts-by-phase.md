@@ -20,6 +20,7 @@ Split from 20260713-uf3e. Inherited concurrency can exceed the supported maximum
 - [ ] PROMPTFOO_MAX_CONCURRENCY accepts only the documented supported range, and an explicitly empty value is either documented as equivalent to unset or rejected distinctly.
 - [ ] Canonical runner help remains available despite an invalid ambient concurrency override, while live and dry-run execution validate before preparation or launch.
 - [ ] GPT56_BENCHMARK_SAMPLES validation applies only to execution; grader calibration remains runnable when an irrelevant stale or malformed sample override is present.
+- [ ] Supported sample counts receive an effective timeout that scales with the documented turn count, or require an explicit EVAL_TIMEOUT with an actionable preflight diagnostic; dry-run prints the effective deadline.
 
 ## Subtasks
 
