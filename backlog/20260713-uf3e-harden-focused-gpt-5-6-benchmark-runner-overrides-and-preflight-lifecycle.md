@@ -30,6 +30,7 @@ Deferred MINOR findings from final review of 20260709-spx8. An inherited PROMPTF
 - [ ] GPT56_BENCHMARK_SAMPLES validation applies only to execution; grader calibration remains runnable when an irrelevant stale or malformed sample override is present.
 - [ ] Canonical eval-runner help remains available even when ambient PROMPTFOO_MAX_CONCURRENCY is invalid; live/dry-run validation still occurs before preparation or launch.
 - [ ] Supported GPT56_BENCHMARK_SAMPLES values either receive a benchmark-specific effective timeout that scales with the documented turn count, or require an explicit EVAL_TIMEOUT with a preflight diagnostic; dry-run prints the effective deadline.
+- [ ] The cross-worktree provider lock lives outside disposable .dependencies caches, fails closed when a checkout's Git-common location cannot be resolved, and regression coverage proves unlink/recreation cannot create a second concurrently acquirable lock.
 
 ## Subtasks
 
