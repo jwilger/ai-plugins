@@ -17,6 +17,7 @@
 20260713-xg6h-prove-exact-gpt-5-6-benchmark-workspace-ownership-marker-contents
 20260713-x8yr-prove-realpath-aware-bidirectional-gpt-5-6-workspace-overlap-rejection
 20260713-hiks-require-strict-types-for-gpt-5-6-measurement-gate-metadata
+20260714-7kxi-exercise-promptfoo-cli-provider-shape-in-gpt-5-6-measurement-fixtures
 20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
 20260713-shcm-cover-upstream-provider-error-passthrough-in-the-gpt-5-6-trace-enforced-provider
 20260713-ffpt-avoid-initializing-the-gpt-5-6-trace-provider-during-unused-cleanup
@@ -51,4 +52,3 @@
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
-20260714-7kxi-exercise-promptfoo-cli-provider-shape-in-gpt-5-6-measurement-fixtures
