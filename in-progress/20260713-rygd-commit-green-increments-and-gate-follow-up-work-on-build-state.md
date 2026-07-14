@@ -40,7 +40,6 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [ ] Automated tests cover low, medium, high, and exceptional risk; shared evidence reuse; caused versus incidental findings at every severity; unchanged-diff deferral; verifier eligibility; targeted post-fix reruns; review-budget decisions; and oversized-ticket splitting.
 - [ ] The coordinator deterministically compiles the risk scout's evidenced per-lens matrix into contract-bound selected lenses and per-lens pass counts: low has zero or one targeted lens once, medium selected lenses once, high applicable broad lenses once, and only explicitly evidenced exceptional dimensions receive a second independent pass by default.
 - [ ] After each review-response content change clears fast tests, lightweight review, push, and the CI running-or-green gate, one delta risk assessment compares the old and new diff; it may add coverage or invalidate evidence but cannot erase unresolved blockers or silently reduce required coverage, while unchanged-diff disposition work triggers no replanning.
-- [ ] Initial final-review planning returns exactly one fresh, diff-bound broad-but-shallow risk-scout assignment before any deep-review lens assignments; it covers every review dimension, consumes shared evidence, and cannot run tests, emit canonical findings, invoke verifiers, or recurse into more planning.
 
 ## Subtasks
 
