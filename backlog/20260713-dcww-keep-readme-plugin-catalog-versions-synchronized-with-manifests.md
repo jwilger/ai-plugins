@@ -18,6 +18,7 @@ MINOR caused finding from the 20260709-spx8 review. README currently advertises 
 ## Acceptance criteria
 
 - [ ] Version-specific plugin troubleshooting documentation, including Tiber Codex cache paths, remains synchronized with the released manifest version or uses manifest-versioned wording that cannot drift.
+- [ ] Both README plugin catalog tables match the authoritative per-harness manifest versions for every listed plugin, including agentic-systems-engineering, advisor, babysit-pr, and tiber.
 
 ## Subtasks
 
