@@ -17,6 +17,8 @@ Lightweight review found the checker accepts both configured {id,label,config} d
 
 ## Acceptance criteria
 
+- [ ] The canonical positive measurement artifact uses Promptfoo 0.121.18's CLI-emitted {id, label, config} grading-provider shape for both testCase.options.provider.text and prompt.config.provider.text, while a separate test retains coverage for any supported normalized alternate shape.
+
 ## Subtasks
 
 ## Notes / Log
