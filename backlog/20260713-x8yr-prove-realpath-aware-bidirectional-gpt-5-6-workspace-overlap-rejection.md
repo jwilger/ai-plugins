@@ -22,3 +22,5 @@ The current overlap matrix checks exact lexical equality only. The implementatio
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Superseded by 20260713-2rd3, which now carries the full realpath-aware bidirectional overlap matrix.
