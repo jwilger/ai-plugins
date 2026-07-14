@@ -25,3 +25,4 @@ MINOR caused finding from the 20260709-spx8 review. README currently advertises 
 ## Notes / Log
 
 - 2026-07-13: 20260709-spx8 final review deferred a caused MINOR: Tiber's launcher now targets cache version 0.9.0 while the plugin README still names 0.6.1. Covered by the version-documentation synchronization criterion.
+- 2026-07-14: 2026-07-14 formal final-review pass 1 for 20260709-spx8 reconfirmed the README marketplace catalog/version mismatch. Deferred as MINOR; covered by this ticket's existing cross-harness catalog synchronization criteria.
