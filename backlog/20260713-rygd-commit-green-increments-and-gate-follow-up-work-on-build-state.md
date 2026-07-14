@@ -32,6 +32,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [ ] Verifier assignments are created only for blocking, disputed, or materially uncertain findings and never merely because a routine MINOR finding was deferred.
 - [ ] One shared test-evidence run is recorded per reviewed diff for all lenses to consume; a lens reruns a broad suite only with a documented lens-specific reason.
 - [ ] Medium-risk review has a roughly 60–90 minute budget checkpoint that forces an explicit ship, split, or escalate decision while never silently omitting a known blocker.
+- [ ] If a ticket grows into a new subsystem or an unusually broad diff, readiness stops final review and requires independently shippable ticket splits.
 
 ## Subtasks
 
