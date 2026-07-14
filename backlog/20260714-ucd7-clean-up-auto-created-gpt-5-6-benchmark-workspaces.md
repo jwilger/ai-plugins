@@ -17,6 +17,8 @@ Verified MINOR production footgun from 20260709-spx8: each live run reaching wor
 
 ## Acceptance criteria
 
+- [ ] Successful, failed, timed-out, and interrupted runs clean an auto-created default workspace, while GPT56_BENCHMARK_WORKSPACE overrides are never removed.
+
 ## Subtasks
 
 ## Notes / Log
