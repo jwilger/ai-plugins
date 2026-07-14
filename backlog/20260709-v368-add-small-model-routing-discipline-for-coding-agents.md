@@ -23,7 +23,6 @@ Use gpt-5.6-luna for bounded read-only or easily reversible helper work with ind
 - [ ] Behavior fixtures cover accepted cheap-model delegation, rejected cheap-model delegation, and rejection of Claude /fast as a cost-saving substitute.
 - [ ] Marketplace docs and metadata are updated without hard-coding this ticket to a specific version bump number.
 - [ ] Validation includes JSON checks, formatting, relevant coverage checks, eval dry-run, and focused provider-backed evidence where credentials allow.
-- [ ] The routing matrix names gpt-5.3-codex-spark and the Claude haiku alias after current availability verification, defines harness fallbacks, and mandates escalation for every excluded high-risk category.
 
 ## Subtasks
 
