@@ -2,18 +2,18 @@
 title: Preserve effective model, latency, and GPT-5.6 cost provenance in eval artifacts
 blocked_by: []
 blocks: []
-tags: [evals, benchmarking, observability, gpt-5.6, minor, backlog]
+tags: [evals, benchmarking, observability, gpt-5.6, codex, dashboard, model-overrides, minor, backlog]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Make eval artifacts and the static dashboard report the actual model and reasoning effort used after overrides, retain latency and grader provenance, and calculate GPT-5.6 token/credit cost accurately.
+Make eval artifacts and dashboards report the actual resolved execution model and reasoning effort after overrides, retain latency and grader provenance, and calculate GPT-5.6 token or credit cost accurately.
 
 ## Context / Why
 
-Discovered while migrating canonical Codex eval defaults to GPT-5.6. Provider labels currently come from the static matrix variant even when CODEX_EVAL_MODEL overrides the effective model; build-site drops latency and does not expose grader model/effort; Promptfoo 0.121.17 has no GPT-5.6 billing entries, so its cost can be missing or zero. These are pre-existing observability limitations and do not block the focused migration benchmark, which will use explicit model labels and calculate documented Codex credit rates separately.
+Discovered while migrating canonical Codex eval defaults to GPT-5.6. Provider labels currently come from the static matrix variant even when CODEX_EVAL_MODEL overrides the effective model; build-site drops latency and does not expose grader model or effort; Promptfoo may lack complete GPT-5.6 billing entries, so cost can be missing or zero. Consolidated scope from 20260713-j3x4 requires the effective-model contract to prevent a static Terra provider ID or label from surviving when CODEX_EVAL_MODEL selects Sol or Luna. Persisted artifacts, aggregation, and the rendered dashboard must agree on the effective model.
 
 ## Acceptance criteria
 
