@@ -12,7 +12,7 @@ claim:
 
 ## Summary
 
-Implement a risk-proportionate development loop and final-review protocol: preserve green increments through fast tests, lightweight review, commit/push, and CI; select only risk-relevant final lenses; disposition findings by severity and causality; and reserve repeated independent passes for exceptional-risk work.
+Implement a risk-proportionate development loop and final-review protocol: preserve green increments through fast tests, lightweight review, commit/push, and CI; use a broad risk scout plus selected confirmation lenses; block only caused or worsened CRITICAL or MAJOR security review findings; and globally prioritize deferred work by value, risk, likelihood, and opportunity cost.
 
 ## Context / Why
 
