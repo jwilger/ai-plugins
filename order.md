@@ -9,7 +9,6 @@
 20260713-h9bn-prove-canonical-status-precedence-in-the-gpt-5-6-calibration-runner
 20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
-20260713-hkrf-cover-gpt-5-6-benchmark-sample-overrides-and-exact-provider-label-contracts
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
 20260714-ucd7-clean-up-auto-created-gpt-5-6-benchmark-workspaces
 20260713-hiks-require-strict-types-for-gpt-5-6-measurement-gate-metadata
@@ -40,6 +39,7 @@
 20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260713-hkrf-cover-gpt-5-6-benchmark-sample-overrides-and-exact-provider-label-contracts
 20260713-shcm-cover-upstream-provider-error-passthrough-in-the-gpt-5-6-trace-enforced-provider
 20260713-ffpt-avoid-initializing-the-gpt-5-6-trace-provider-during-unused-cleanup
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
