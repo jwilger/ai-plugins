@@ -19,6 +19,7 @@
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260714-wimr-validate-gpt-5-6-benchmark-concurrency-samples-help-and-timeouts-by-phase
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260710-dhse-require-explicit-user-approval-before-amending-commits
@@ -57,4 +58,3 @@
 20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
 20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
 20260714-g89d-make-gpt-5-6-provider-locking-stable-across-worktrees-and-the-full-run-lifecycle
-20260714-wimr-validate-gpt-5-6-benchmark-concurrency-samples-help-and-timeouts-by-phase
