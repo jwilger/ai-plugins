@@ -5,6 +5,7 @@ import {
   allowedNormalizedItemTypes,
   allowedRawResponseItemTypes,
   toolNotificationDescription,
+  turnLifecycleRejection,
 } from "./trace-policy.mjs";
 import { assertPreparedGpt56Workspace } from "../../../scripts/evals/gpt56-workspace-policy.mjs";
 
@@ -277,6 +278,14 @@ export default class TraceEnforcedCodexProvider {
       return {
         ...response,
         error: "trace-enforced Codex provider rejected a server request trace",
+      };
+    }
+
+    const lifecycleRejection = turnLifecycleRejection(raw.notifications);
+    if (lifecycleRejection) {
+      return {
+        ...response,
+        error: `trace-enforced Codex provider rejected ${lifecycleRejection}`,
       };
     }
 
