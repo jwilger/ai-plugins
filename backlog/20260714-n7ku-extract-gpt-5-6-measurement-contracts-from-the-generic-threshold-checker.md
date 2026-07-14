@@ -17,6 +17,8 @@ Verified MINOR architecture finding from 20260709-spx8: scripts/evals/check-thre
 
 ## Acceptance criteria
 
+- [ ] A focused pure module owns source/artifact normalization and returns structured contract failures; check-thresholds.mjs remains a thin composition layer and generic-mode regression coverage stays green.
+
 ## Subtasks
 
 ## Notes / Log
