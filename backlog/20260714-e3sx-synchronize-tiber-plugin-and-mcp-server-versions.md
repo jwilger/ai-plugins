@@ -22,3 +22,5 @@ Verified MINOR release finding from 20260709-spx8: plugin manifests/launcher pub
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: 2026-07-14 formal final-review pass 1 for 20260709-spx8 reconfirmed that Tiber plugin 0.9.0 packages an MCP runtime reporting 0.8.0. Deferred as MINOR; covered by this ticket's existing runtime/package synchronization criterion.
