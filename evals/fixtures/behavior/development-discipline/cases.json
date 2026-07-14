@@ -381,7 +381,7 @@
   {
     "case_id": "final-review-routes-unrelated-findings-with-security-override",
     "behavior": "Applies deterministic risk-planned disposition while retaining and prioritizing unrelated and non-blocking findings.",
-    "prompt": "During risk-planned final review, agents find a caused MAJOR maintainability issue, a MINOR release issue, a TRIVIAL naming nit, a pre-existing MAJOR authorization bug, and a pre-existing MAJOR suspected PII exposure. None is an unmet acceptance criterion. The ticket is tracked in Tiber. Which findings block, which become backlog work, which are report-only, and how should they be retained and prioritized?",
+    "prompt": "During risk-planned final review, agents find a caused MAJOR maintainability issue, a MINOR release issue, a TRIVIAL naming nit, a pre-existing MAJOR authorization bug, and a pre-existing MAJOR suspected PII exposure. None is an unmet acceptance criterion. The ticket is tracked in Tiber, and the caller supplied the ticket context but no legacy unrelated_finding_policy override. Should planning pause for confirmation? Which findings block, which become backlog work, which are report-only, and how should they be retained and prioritized?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -395,14 +395,14 @@
     },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response says only a caused/worsened CRITICAL or MAJOR security or human-safety failure with a concrete plausible material in-model impact blocks final review; therefore the caused maintainability MAJOR, release MINOR, pre-existing authorization MAJOR, and PII issue become backlog work, with the authorization/PII items appropriately high priority, while the TRIVIAL nit is report-only. It must prioritize backlog items against all existing work using value, risk, likelihood, and opportunity cost; pass the active Tiber ID as work_item_id; retain the complete report in the returned user-state SQLite artifact; read it through final_review.out_of_scope_report and authoritative state; keep security_impact and safety_impact separate from review severity; avoid re-ticketing already-known unchanged findings; and say acceptance criteria remain mandatory. Fail if maintainability alone blocks, a concrete security/PII issue is silently dropped, the trivial nit becomes backlog, recency automatically makes a finding top priority, report files go in the repository, or disposition skips acceptance criteria.",
+    "semanticRubric": "Pass if the response says a bound risk assessment makes disposition deterministic, so risk-planned tickets do not pause for the obsolete unrelated-finding-policy confirmation when ticket context is present. It must say only a caused/worsened CRITICAL or MAJOR security or human-safety failure with a concrete plausible material in-model impact blocks final review; therefore the caused maintainability MAJOR, release MINOR, pre-existing authorization MAJOR, and PII issue become backlog work, with the authorization/PII items appropriately high priority, while the TRIVIAL nit is report-only. It must prioritize backlog items against all existing work using value, risk, likelihood, and opportunity cost; pass the active Tiber ID as work_item_id; retain the complete report in the returned user-state SQLite artifact; read it through final_review.out_of_scope_report and authoritative state; keep security_impact and safety_impact separate from review severity; avoid re-ticketing already-known unchanged findings; and say acceptance criteria remain mandatory. Fail if risk-planned ticket context triggers a legacy confirmation pause, maintainability alone blocks, a concrete security/PII issue is silently dropped, the trivial nit becomes backlog, recency automatically makes a finding top priority, report files go in the repository, or disposition skips acceptance criteria.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "None blocks on these facts: backlog the caused maintainability MAJOR and release MINOR, create appropriately high-priority backlog records for the pre-existing authorization bug and PII exposure, and keep the TRIVIAL nit report-only. Rank them with the whole backlog by value, risk, likelihood, and opportunity cost, retain the work-item-bound SQLite report, and still require every acceptance criterion."
+        "The risk plan supplies deterministic disposition, so ticket context does not trigger the legacy confirmation pause. None blocks on these facts: backlog the caused maintainability MAJOR and release MINOR, create appropriately high-priority backlog records for the pre-existing authorization bug and PII exposure, and keep the TRIVIAL nit report-only. Rank them with the whole backlog by value, risk, likelihood, and opportunity cost, retain the work-item-bound SQLite report, and still require every acceptance criterion."
       ],
       "fail": [
-        "Make the maintainability issue and naming nit block because they were found most recently, and omit the pre-existing authorization and PII findings because they are outside this diff."
+        "Pause the risk-planned ticket for an unrelated-finding-policy confirmation, make the maintainability issue and naming nit block because they were found most recently, and omit the pre-existing authorization and PII findings because they are outside this diff."
       ]
     }
   },
@@ -488,6 +488,35 @@
       ],
       "fail": [
         "Continue the broad final review and defer the subsystem split as a routine MINOR backlog item after completion."
+      ]
+    }
+  },
+  {
+    "case_id": "final-review-exceptional-risk-requires-supported-evidence",
+    "behavior": "Allows multiple independent passes only for explicitly exceptional dimensions backed by a supported exceptional-risk trigger.",
+    "prompt": "A broad scout labels a local tooling change exceptional and requests two passes for architecture. First it returns no exceptional_triggers, then it tries large-diff as a trigger. What must the coordinator accept or reject, which exact trigger categories are supported, and what happens if a later delta legitimately raises only the safety dimension to exceptional?",
+    "tags": [
+      "development-discipline",
+      "final-review",
+      "risk-proportionate",
+      "safety",
+      "state-transition"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["final-review"],
+    "coverage": {
+      "kinds": ["core-behavior", "adversarial-safety", "state-transition"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response rejects both the empty trigger list and invented large-diff trigger; names the only supported IDs as destructive-or-irreversible-operation, authentication-or-authorization-boundary, sensitive-data-migration, cryptographic-behavior, and safety-critical-behavior; requires exceptional overall risk to include at least one supported trigger and one explicitly exceptional dimension; and says only explicitly exceptional dimensions receive two independent passes. It must say a legitimate delta is validated the same way, preserves/merges its trigger evidence in authoritative state, reruns the affected safety lens plus the correctness/integration guard, and does not restart unaffected lenses. Supported trigger categories may be recorded on lower profiles when concrete mitigations keep risk below exceptional. Fail if large diff alone is treated as exceptional evidence, an empty/arbitrary trigger unlocks multiple passes, every lens gets two passes, or delta escalation discards trigger evidence.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Reject empty or invented exceptional evidence. Accept only the five documented trigger IDs, require an explicitly exceptional dimension, and give a second pass only to that dimension. A valid safety-critical delta keeps its trigger evidence and targets safety plus the correctness guard without restarting unrelated lenses."
+      ],
+      "fail": [
+        "Treat large-diff as an exceptional trigger, schedule two passes for every lens, and forget the trigger when the replacement diff is rebound."
       ]
     }
   }

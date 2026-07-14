@@ -96,6 +96,13 @@ const LENSES: &[&str] = &[
     "production-risk-footguns",
 ];
 const SAFETY_LENS: &str = "safety-human-harm";
+const EXCEPTIONAL_RISK_TRIGGERS: &[&str] = &[
+    "destructive-or-irreversible-operation",
+    "authentication-or-authorization-boundary",
+    "sensitive-data-migration",
+    "cryptographic-behavior",
+    "safety-critical-behavior",
+];
 
 fn main() {
     if let Err(error) = run_stdio(io::stdin().lock(), io::stdout().lock()) {
@@ -1493,7 +1500,8 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
             "Name a concrete plausible failure path and material impact for every elevated risk.",
             "Inspect the change through scope.scope_resolution pinned to scope.baseline_commit; never re-resolve the movable base name.",
             "Mark uncertainty explicitly; uncertainty selects coverage instead of omitting it.",
-            "Identify exceptional-risk triggers. Set split_required=true when the diff has grown into a new subsystem or an unusually broad diff.",
+            "Identify exceptional-risk triggers using only these exact values: destructive-or-irreversible-operation, authentication-or-authorization-boundary, sensitive-data-migration, cryptographic-behavior, safety-critical-behavior. Exceptional overall risk requires at least one supported trigger and an explicitly exceptional dimension; only explicitly exceptional dimensions receive a second independent pass.",
+            "Set split_required=true when the diff has grown into a new subsystem or an unusually broad diff.",
             "When split_required=true, name the applicable scope_growth_triggers and propose at least two split_candidates whose normalized scope_paths collectively cover the changed-file inventory, each with independent acceptance criteria and an independently shippable reason.",
             "Classify security_impact and safety_impact independently for every finding, regardless of which review lens discovered it.",
             "Every caused or worsened CRITICAL/MAJOR security or human-safety finding must name the in-scope changed path that would be remediated.",
@@ -1648,6 +1656,7 @@ fn delta_risk_assignment(
         "instructions": [
             "Return the full current risk matrix and mark affected=true only for dimensions whose concrete failure paths or required confirmation changed.",
             "Mark every newly selected dimension and every dimension containing a new finding as affected.",
+            "Use only these exceptional-risk trigger values: destructive-or-irreversible-operation, authentication-or-authorization-boundary, sensitive-data-migration, cryptographic-behavior, safety-critical-behavior. Exceptional overall risk requires at least one supported trigger and an explicitly exceptional dimension.",
             "If the replacement diff has grown into a new subsystem or an unusually broad diff, set split_required=true and return at least two independently shippable split_candidates covering the replacement changed-file inventory.",
             "Do not remove unresolved blockers or request less coverage; the coordinator enforces a monotonic coverage floor.",
             "Consume the supplied shared test evidence. Do not run tests, invoke a verifier, or request another planner."
@@ -1680,7 +1689,12 @@ fn risk_assessment_output_schema() -> Value {
                     "additionalProperties": false
                 }
             },
-            "exceptional_triggers": { "type": "array", "items": { "type": "string" } },
+            "exceptional_triggers": {
+                "type": "array",
+                "maxItems": EXCEPTIONAL_RISK_TRIGGERS.len(),
+                "uniqueItems": true,
+                "items": { "type": "string", "enum": EXCEPTIONAL_RISK_TRIGGERS }
+            },
             "split_required": { "type": "boolean" },
             "split_rationale": { "type": "string" },
             "scope_growth_triggers": {
@@ -1763,15 +1777,26 @@ fn risk_assessment_output_schema() -> Value {
             "plan_assumptions",
             "findings"
         ],
-        "allOf": [{
-            "if": {
-                "properties": { "split_required": { "const": true } },
-                "required": ["split_required"]
+        "allOf": [
+            {
+                "if": {
+                    "properties": { "overall_risk": { "const": "exceptional" } },
+                    "required": ["overall_risk"]
+                },
+                "then": {
+                    "properties": { "exceptional_triggers": { "minItems": 1 } }
+                }
             },
-            "then": {
-                "required": ["split_rationale", "scope_growth_triggers", "split_candidates"]
+            {
+                "if": {
+                    "properties": { "split_required": { "const": true } },
+                    "required": ["split_required"]
+                },
+                "then": {
+                    "required": ["split_rationale", "scope_growth_triggers", "split_candidates"]
+                }
             }
-        }],
+        ],
         "additionalProperties": false
     })
 }
@@ -1870,6 +1895,38 @@ fn risk_rank(risk: &str) -> u8 {
     }
 }
 
+fn validated_exceptional_triggers(
+    assessment: &serde_json::Map<String, Value>,
+    overall_risk: &str,
+) -> Result<Vec<String>, String> {
+    let triggers = assessment
+        .get("exceptional_triggers")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "risk_assessment_exceptional_triggers_invalid=true".to_string())?;
+    let mut validated = Vec::with_capacity(triggers.len());
+    let mut seen = HashSet::with_capacity(triggers.len());
+    for trigger in triggers {
+        let trigger = trigger
+            .as_str()
+            .ok_or_else(|| "risk_assessment_exceptional_trigger_invalid=true".to_string())?;
+        if !EXCEPTIONAL_RISK_TRIGGERS.contains(&trigger) {
+            return Err(format!(
+                "risk_assessment_exceptional_trigger_unknown={trigger}"
+            ));
+        }
+        if !seen.insert(trigger) {
+            return Err(format!(
+                "risk_assessment_exceptional_trigger_duplicate={trigger}"
+            ));
+        }
+        validated.push(trigger.to_string());
+    }
+    if overall_risk == "exceptional" && validated.is_empty() {
+        return Err("risk_assessment_exceptional_trigger_required=true".to_string());
+    }
+    Ok(validated)
+}
+
 fn compile_risk_plan(
     arguments: &Value,
     changed_files: &[String],
@@ -1917,6 +1974,7 @@ fn compile_risk_plan(
         .and_then(Value::as_str)
         .filter(|risk| matches!(*risk, "low" | "medium" | "high" | "exceptional"))
         .ok_or_else(|| "risk_assessment_overall_risk_invalid=true".to_string())?;
+    let exceptional_triggers = validated_exceptional_triggers(assessment, overall_risk)?;
     let scope_split = validated_scope_split_plan(assessment, changed_files)?;
     let expected_dimensions = expected_assignment
         .get("review_dimensions")
@@ -1979,6 +2037,15 @@ fn compile_risk_plan(
     }
     if by_lens.len() != expected_dimensions.len() {
         return Err("risk_assessment_dimensions_incomplete=true".to_string());
+    }
+    if overall_risk == "exceptional"
+        && !by_lens
+            .values()
+            .any(|dimension| dimension.get("risk").and_then(Value::as_str) == Some("exceptional"))
+    {
+        return Err(
+            "risk_assessment_exceptional_profile_requires_exceptional_lens=true".to_string(),
+        );
     }
     let highest_dimension_risk = expected_dimensions
         .iter()
@@ -2073,7 +2140,7 @@ fn compile_risk_plan(
         "overall_risk": overall_risk,
         "dimensions": dimensions,
         "findings": findings,
-        "exceptional_triggers": assessment.get("exceptional_triggers").cloned().unwrap_or_else(|| json!([])),
+        "exceptional_triggers": exceptional_triggers,
         "plan_assumptions": assessment.get("plan_assumptions").cloned().unwrap_or_else(|| json!([])),
         "selected_lenses": selected_lenses,
         "lens_passes": lens_passes,
@@ -2773,11 +2840,11 @@ fn plan_result_internal(
         arguments.get("unrelated_finding_policy"),
         &configured_lenses,
     )?;
-    let unrelated_finding_policy_confirmation_required =
-        arguments.get("unrelated_finding_policy").is_none()
-            && (!user_request.trim().is_empty()
-                || !acceptance_criteria.is_empty()
-                || !explicit_concerns.is_empty());
+    let unrelated_finding_policy_confirmation_required = compiled_risk_plan.is_none()
+        && arguments.get("unrelated_finding_policy").is_none()
+        && (!user_request.trim().is_empty()
+            || !acceptance_criteria.is_empty()
+            || !explicit_concerns.is_empty());
     let (model_roles, finding_disposition_policy) =
         resolve_model_roles(arguments, &configured_lenses)?;
     let fast_model_role = model_roles.pre_filter.clone();
@@ -4713,6 +4780,15 @@ fn apply_delta_risk_reassessment(
     } else {
         old_overall_risk
     };
+    let mut exceptional_triggers =
+        string_array(state.pointer("/risk_plan/exceptional_triggers"))
+            .ok_or_else(|| "risk_plan_exceptional_triggers_required=true".to_string())?;
+    exceptional_triggers.extend(
+        string_array(compiled.state.get("exceptional_triggers"))
+            .ok_or_else(|| "delta_risk_plan_exceptional_triggers_required=true".to_string())?,
+    );
+    exceptional_triggers.sort();
+    exceptional_triggers.dedup();
 
     let mut delta_history = state
         .pointer("/risk_plan/delta_history")
@@ -4747,6 +4823,7 @@ fn apply_delta_risk_reassessment(
     state["risk_plan"]["shared_test_evidence_id"] =
         compiled.state["shared_test_evidence_id"].clone();
     state["risk_plan"]["overall_risk"] = json!(overall_risk);
+    state["risk_plan"]["exceptional_triggers"] = json!(exceptional_triggers);
     if state["risk_plan"]["overall_risk"] == "medium" {
         state["risk_plan"]["review_budget"]["applies"] = json!(true);
     }
@@ -6883,15 +6960,31 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
     let Some(risk_plan) = state.get("risk_plan").and_then(Value::as_object) else {
         return false;
     };
+    let overall_risk = risk_plan.get("overall_risk").and_then(Value::as_str);
     if risk_plan
         .get("assessment_id")
         .and_then(Value::as_str)
         .is_none_or(str::is_empty)
         || !matches!(
-            risk_plan.get("overall_risk").and_then(Value::as_str),
+            overall_risk,
             Some("low" | "medium" | "high" | "exceptional")
         )
     {
+        return false;
+    }
+    let Some(overall_risk) = overall_risk else {
+        return false;
+    };
+    if validated_exceptional_triggers(risk_plan, overall_risk).is_err() {
+        return false;
+    }
+    let Some(dimensions) = risk_plan.get("dimensions").and_then(Value::as_array) else {
+        return false;
+    };
+    let exceptional_dimension_exists = dimensions
+        .iter()
+        .any(|dimension| dimension.get("risk").and_then(Value::as_str) == Some("exceptional"));
+    if (overall_risk == "exceptional") != exceptional_dimension_exists {
         return false;
     }
     if !review_budget_contract_is_valid(risk_plan) {
@@ -7043,9 +7136,16 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
         return false;
     };
     if lens_passes.len() != selected.len()
-        || selected
-            .iter()
-            .any(|lens| !matches!(lens_passes.get(lens).and_then(Value::as_u64), Some(1 | 2)))
+        || selected.iter().any(|lens| {
+            let Some(passes @ (1 | 2)) = lens_passes.get(lens).and_then(Value::as_u64) else {
+                return true;
+            };
+            let dimension_is_exceptional = dimensions.iter().any(|dimension| {
+                dimension.get("lens").and_then(Value::as_str) == Some(lens)
+                    && dimension.get("risk").and_then(Value::as_str) == Some("exceptional")
+            });
+            (passes == 2) != (overall_risk == "exceptional" && dimension_is_exceptional)
+        })
     {
         return false;
     }
@@ -9129,7 +9229,11 @@ mod tests {
             "subagent_key": assignment["subagent_key"],
             "overall_risk": overall_risk,
             "dimensions": dimensions,
-            "exceptional_triggers": [],
+            "exceptional_triggers": if overall_risk == "exceptional" {
+                json!(["destructive-or-irreversible-operation"])
+            } else {
+                json!([])
+            },
             "split_required": false,
             "plan_assumptions": [],
             "findings": findings,
@@ -9199,7 +9303,11 @@ mod tests {
             "subagent_key": assignment["subagent_key"],
             "overall_risk": overall_risk,
             "dimensions": dimensions,
-            "exceptional_triggers": [],
+            "exceptional_triggers": if overall_risk == "exceptional" {
+                json!(["destructive-or-irreversible-operation"])
+            } else {
+                json!([])
+            },
             "split_required": false,
             "plan_assumptions": [],
             "findings": findings,
@@ -16434,7 +16542,11 @@ pre_filter = "project-pre"
         );
         let scout_schema = risk_assessment_output_schema();
         assert_eq!(
-            scout_schema["allOf"][0]["then"]["required"],
+            scout_schema["allOf"][0]["then"]["properties"]["exceptional_triggers"]["minItems"],
+            1
+        );
+        assert_eq!(
+            scout_schema["allOf"][1]["then"]["required"],
             json!([
                 "split_rationale",
                 "scope_growth_triggers",
@@ -16580,6 +16692,10 @@ pre_filter = "project-pre"
         let required = scout_schema["required"].as_array().unwrap();
         assert!(required.contains(&json!("findings")));
         assert!(required.contains(&json!("shared_test_evidence_id")));
+        assert_eq!(
+            scout_schema["properties"]["exceptional_triggers"]["items"]["enum"],
+            json!(EXCEPTIONAL_RISK_TRIGGERS)
+        );
         assert!(scout_schema["properties"]
             .get("candidate_concerns")
             .is_none());
@@ -16729,6 +16845,31 @@ pre_filter = "project-pre"
         assert_eq!(advanced["complete"], true);
         assert_eq!(advanced["state"]["clean_streak"], 1);
         assert_eq!(advanced["next_assignments"], json!([]));
+    }
+
+    #[test]
+    fn risk_planned_ticket_context_does_not_require_legacy_policy_confirmation() {
+        let mut arguments = assessed_plan_arguments(
+            "risk-planned-deterministic-disposition",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        arguments
+            .as_object_mut()
+            .expect("plan arguments")
+            .remove("unrelated_finding_policy");
+
+        let planned: Value = serde_json::from_str(
+            &plan_result(&arguments).expect("risk-planned ticket uses deterministic disposition"),
+        )
+        .expect("plan json");
+
+        assert_eq!(
+            planned["state"]["unrelated_finding_policy_confirmation_required"],
+            false
+        );
+        assert_eq!(planned["assignments"].as_array().unwrap().len(), 1);
     }
 
     #[test]
@@ -17610,7 +17751,11 @@ pre_filter = "project-pre"
             "current_diff_hash": assignment["current_diff_hash"],
             "overall_risk": overall_risk,
             "dimensions": dimensions,
-            "exceptional_triggers": [],
+            "exceptional_triggers": if overall_risk == "exceptional" {
+                json!(["destructive-or-irreversible-operation"])
+            } else {
+                json!([])
+            },
             "split_required": false,
             "plan_assumptions": [],
             "findings": findings,
@@ -17736,6 +17881,58 @@ pre_filter = "project-pre"
             .unwrap()
             .iter()
             .all(|assignment| assignment["lens"] != "architecture-maintainability"));
+        assert!(review_contract_is_valid(&advanced["state"]));
+    }
+
+    #[test]
+    fn delta_escalation_preserves_exceptional_trigger_evidence() {
+        let arguments = assessed_plan_arguments(
+            "delta-exceptional-trigger",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let replacement_diff_hash = "delta-exceptional-trigger-v2";
+        let base_arguments = json!({
+            "state": planned["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&base_arguments).expect("delta scout required"),
+        )
+        .expect("delta-required json");
+        let mut assessment = delta_risk_assessment_for(
+            &required["delta_risk_assignments"][0],
+            "exceptional",
+            &[("correctness-behavior", "exceptional")],
+            &["correctness-behavior"],
+            json!([]),
+        );
+        assessment["exceptional_triggers"] = json!(["cryptographic-behavior"]);
+        let mut resubmission = base_arguments;
+        resubmission["delta_risk_assessment"] = assessment;
+
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&resubmission).expect("exceptional delta advances"),
+        )
+        .expect("advanced delta json");
+
+        assert_eq!(
+            advanced["state"]["risk_plan"]["overall_risk"],
+            "exceptional"
+        );
+        assert_eq!(
+            advanced["state"]["risk_plan"]["exceptional_triggers"],
+            json!(["cryptographic-behavior"])
+        );
+        assert_eq!(
+            advanced["state"]["risk_plan"]["lens_passes"]["correctness-behavior"],
+            2
+        );
         assert!(review_contract_is_valid(&advanced["state"]));
     }
 
@@ -18256,7 +18453,7 @@ pre_filter = "project-pre"
 
     #[test]
     fn exceptional_second_pass_targets_only_the_exceptional_lens() {
-        let arguments = assessed_plan_arguments(
+        let mut arguments = assessed_plan_arguments(
             "exceptional-targeted-second-pass",
             "exceptional",
             &[
@@ -18265,6 +18462,8 @@ pre_filter = "project-pre"
             ],
             json!([]),
         );
+        arguments["risk_assessment"]["exceptional_triggers"] =
+            json!(["destructive-or-irreversible-operation"]);
         let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
         let first: Value = serde_json::from_str(
             &advance_synthetic_state(&json!({
@@ -18292,6 +18491,81 @@ pre_filter = "project-pre"
         )
         .expect("second advanced json");
         assert_eq!(second["complete"], true);
+    }
+
+    #[test]
+    fn exceptional_risk_requires_a_supported_trigger() {
+        let mut arguments = assessed_plan_arguments(
+            "exceptional-trigger-required",
+            "exceptional",
+            &[("correctness-behavior", "exceptional")],
+            json!([]),
+        );
+        arguments["risk_assessment"]["exceptional_triggers"] = json!([]);
+
+        assert_eq!(
+            plan_result(&arguments).expect_err("empty exceptional triggers must be rejected"),
+            "risk_assessment_exceptional_trigger_required=true"
+        );
+
+        arguments["risk_assessment"]["exceptional_triggers"] = json!(["large-diff"]);
+        assert_eq!(
+            plan_result(&arguments).expect_err("invented exceptional triggers must be rejected"),
+            "risk_assessment_exceptional_trigger_unknown=large-diff"
+        );
+
+        arguments["risk_assessment"]["exceptional_triggers"] = json!([17]);
+        assert_eq!(
+            plan_result(&arguments).expect_err("non-string exceptional triggers must be rejected"),
+            "risk_assessment_exceptional_trigger_invalid=true"
+        );
+
+        arguments["risk_assessment"]["exceptional_triggers"] =
+            json!(["safety-critical-behavior", "safety-critical-behavior"]);
+        assert_eq!(
+            plan_result(&arguments).expect_err("duplicate exceptional triggers must be rejected"),
+            "risk_assessment_exceptional_trigger_duplicate=safety-critical-behavior"
+        );
+
+        arguments["risk_assessment"]["exceptional_triggers"] = json!(["safety-critical-behavior"]);
+        let planned: Value = serde_json::from_str(
+            &plan_result(&arguments).expect("a supported trigger permits exceptional review"),
+        )
+        .expect("plan json");
+        assert_eq!(planned["state"]["required_clean_iterations"], 2);
+        assert_eq!(
+            planned["state"]["risk_plan"]["exceptional_triggers"],
+            json!(["safety-critical-behavior"])
+        );
+
+        let no_exceptional_lens = assessed_plan_arguments(
+            "exceptional-trigger-without-exceptional-lens",
+            "exceptional",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
+        assert_eq!(
+            plan_result(&no_exceptional_lens)
+                .expect_err("exceptional review needs an explicitly exceptional dimension"),
+            "risk_assessment_exceptional_profile_requires_exceptional_lens=true"
+        );
+    }
+
+    #[test]
+    fn risk_contract_rejects_removing_the_exceptional_trigger_evidence() {
+        let arguments = assessed_plan_arguments(
+            "exceptional-trigger-contract",
+            "exceptional",
+            &[("correctness-behavior", "exceptional")],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let mut tampered = planned["state"].clone();
+        tampered["risk_plan"]["exceptional_triggers"] = json!([]);
+        tampered["review_contract_id"] =
+            json!(computed_review_contract_id(&tampered).expect("rehashed contract"));
+
+        assert!(!review_contract_is_valid(&tampered));
     }
 
     #[test]

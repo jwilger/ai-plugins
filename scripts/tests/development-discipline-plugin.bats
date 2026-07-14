@@ -177,3 +177,60 @@ NODE
 
   [ "$status" -eq 0 ]
 }
+
+@test "development-discipline documents supported exceptional review evidence" {
+  run node - "$ROOT" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.argv[2];
+const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
+const skill = read('plugins/development-discipline/skills/final-review/SKILL.md');
+const protocol = read(
+  'plugins/development-discipline/skills/final-review/references/mcp-protocol.md',
+);
+const cases = JSON.parse(read('evals/fixtures/behavior/development-discipline/cases.json'));
+const failures = [];
+const triggers = [
+  'destructive-or-irreversible-operation',
+  'authentication-or-authorization-boundary',
+  'sensitive-data-migration',
+  'cryptographic-behavior',
+  'safety-critical-behavior',
+];
+
+for (const trigger of triggers) {
+  if (!skill.includes(trigger)) failures.push(`final-review guidance missing: ${trigger}`);
+  if (!protocol.includes(trigger)) failures.push(`MCP protocol missing: ${trigger}`);
+}
+
+const exceptional = cases.find(
+  (entry) => entry.case_id === 'final-review-exceptional-risk-requires-supported-evidence',
+);
+if (!exceptional) {
+  failures.push('missing exceptional-risk evidence behavior fixture');
+} else {
+  const rubric = String(exceptional.semanticRubric || '');
+  for (const trigger of triggers) {
+    if (!rubric.includes(trigger)) failures.push(`exceptional-risk fixture missing: ${trigger}`);
+  }
+  if (!rubric.includes('explicitly exceptional dimensions')) {
+    failures.push('exceptional-risk fixture does not target second passes by dimension');
+  }
+}
+
+const disposition = cases.find(
+  (entry) => entry.case_id === 'final-review-routes-unrelated-findings-with-security-override',
+);
+if (!String(disposition?.semanticRubric || '').includes('do not pause')) {
+  failures.push('risk-planned disposition fixture does not reject legacy confirmation pauses');
+}
+
+if (failures.length > 0) {
+  console.error(failures.join('\n'));
+  process.exit(1);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
