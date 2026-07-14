@@ -15,6 +15,8 @@ Pass every configured conditional lens description/objective into the final-revi
 
 ## Acceptance criteria
 
+- [ ] Risk-scout assignments include the validated ID and description/objective for every configured conditional lens in both the bound assessment context and prompt.
+
 ## Subtasks
 
 ## Notes / Log
