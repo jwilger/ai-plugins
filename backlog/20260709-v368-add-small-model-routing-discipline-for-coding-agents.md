@@ -28,3 +28,5 @@ Use gpt-5.6-luna for bounded read-only or easily reversible helper work with ind
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Backlog grooming 2026-07-14: Rewritten from the obsolete gpt-5.3-codex-spark prescription to the current GPT-5.6 Luna/Terra/Sol routing policy. The task remains multi-harness but no longer hard-codes stale Codex routing.
