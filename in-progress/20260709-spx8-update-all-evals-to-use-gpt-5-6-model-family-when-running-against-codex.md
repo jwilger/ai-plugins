@@ -23,7 +23,7 @@ The canonical Codex eval matrix, runner help, README, and semantic grader curren
 - [x] The eval matrix, Codex provider configuration, semantic grader, runner help, README, generated-config tests, and dashboard/site labels are updated with no stale default gpt-5.5 references.
 - [x] Existing environment overrides remain supported and Claude provider configuration is unchanged.
 - [x] Generated-config and dry-run coverage passes, plus a focused provider-backed sample when credentials and approval are available; any unavailable live evidence is stated explicitly.
-- [ ] A documented benchmark compares supported GPT-5.6 candidates on representative standard eval cases and advisor-like eval scenarios using pass rate, latency, token usage, and cost, after verifying exact current model identifiers.
+- [x] A documented benchmark compares supported GPT-5.6 candidates on representative standard eval cases and advisor-like eval scenarios using pass rate, latency, token usage, and cost, after verifying exact current model identifiers.
 - [ ] The selected Codex eval execution and grader model/reasoning split is justified from the benchmark, including grader independence; it does not alter the installed advisor agent governed by 20260711-wtk6.
 
 ## Subtasks
