@@ -27,11 +27,11 @@
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
-20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
 20260713-ehg9-correct-gpt-5-6-benchmark-docs-for-superseded-labels-and-path-lifecycle
 20260713-u2md-remove-stale-live-evals-workflow-documentation
 20260713-hiks-require-strict-types-for-gpt-5-6-measurement-gate-metadata
