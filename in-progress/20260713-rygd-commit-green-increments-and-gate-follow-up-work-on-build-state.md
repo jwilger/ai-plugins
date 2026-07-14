@@ -38,6 +38,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [ ] If a ticket grows into a new subsystem or an unusually broad diff, readiness stops final review and requires independently shippable ticket splits.
 - [ ] The final-review MCP/coordinator, state schema, disposition routing, lens assignment, targeted rerun logic, skill guidance, and fixtures implement these policies rather than relying on caller prose.
 - [ ] Automated tests cover low, medium, high, and exceptional risk; shared evidence reuse; caused versus incidental findings at every severity; unchanged-diff deferral; verifier eligibility; targeted post-fix reruns; review-budget decisions; and oversized-ticket splitting.
+- [ ] The coordinator deterministically compiles the risk scout's evidenced per-lens matrix into contract-bound selected lenses and per-lens pass counts: low has zero or one targeted lens once, medium selected lenses once, high applicable broad lenses once, and only explicitly evidenced exceptional dimensions receive a second independent pass by default.
 
 ## Subtasks
 
