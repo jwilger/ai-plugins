@@ -26,7 +26,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [x] Full-review instructions pin the baseline commit so pushes during review do not move or erase the reviewed diff.
 - [x] Guidance defines fast unit tests plus lightweight review as the local commit-and-push gate for each implementation increment.
 - [x] Guidance permits longer-running integration, mutation, full-suite, and similarly expensive checks to run in CI instead of blocking each local increment.
-- [ ] Final-review planning accepts or derives an explicit risk class from concrete deployment, trust-boundary, reversibility, data, and operational evidence, and enables only lenses justified by that risk.
+- [x] Final-review planning accepts or derives an explicit risk class from concrete deployment, trust-boundary, reversibility, data, and operational evidence, and enables only lenses justified by that risk.
 - [ ] Low-risk work uses lightweight review with at most one optional targeted final lens; medium-risk work uses one targeted full-review pass; high-risk work uses one broad pass.
 - [ ] Multiple independent clean passes are available only for exceptional risk such as destructive or irreversible operations, authentication/authorization boundaries, sensitive-data migrations, cryptographic behavior, or safety-critical behavior.
 - [ ] Deferred and already-known findings are not re-verified or re-reported without materially severity-changing evidence, and they do not block completion or reset clean state when the reviewed diff hash is unchanged and required ticket/report evidence exists.
