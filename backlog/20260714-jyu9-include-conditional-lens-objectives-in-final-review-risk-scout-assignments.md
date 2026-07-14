@@ -17,6 +17,7 @@ Pass every configured conditional lens description/objective into the final-revi
 
 - [ ] Risk-scout assignments include the validated ID and description/objective for every configured conditional lens in both the bound assessment context and prompt.
 - [ ] Changing a conditional lens description after assessment creation invalidates the assessment binding instead of silently accepting stale risk evidence.
+- [ ] Focused Rust and public JSON-RPC tests cover conditional-lens objective delivery and binding validation.
 
 ## Subtasks
 
