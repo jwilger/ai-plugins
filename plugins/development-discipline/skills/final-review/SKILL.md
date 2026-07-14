@@ -213,6 +213,17 @@ policy.
    entire cycle; later calls carry state that the server checks against its
    authoritative session copy. `final_review.plan` rejects any call that omits
    the bound scout assessment, baseline, or shared evidence.
+
+   The scout may report exceptional-risk triggers only with these exact IDs:
+   `destructive-or-irreversible-operation`,
+   `authentication-or-authorization-boundary`, `sensitive-data-migration`,
+   `cryptographic-behavior`, and `safety-critical-behavior`. An exceptional
+   overall profile requires at least one supported trigger and at least one
+   explicitly exceptional dimension. Supported triggers may still be recorded
+   on a lower profile when mitigations keep the concrete risk below
+   exceptional. Only dimensions explicitly assessed as exceptional receive a
+   second independent pass.
+
 2. For every assignment, start a fresh subagent with the complete MCP-generated
    assignment prompt, including its baseline, diff, relevant files, user
    request, acceptance criteria, explicit concerns, and prior defenses. Exclude
@@ -283,7 +294,8 @@ policy.
 5. Repeat only the assignments returned by the coordinator. Low risk normally
    needs the lightweight review and at most one targeted lens; medium risk gets
    one targeted full pass; high risk gets one broad pass; exceptional risk may
-   assign two independent passes only to exceptional dimensions. After a
+   assign two independent passes only to exceptional dimensions backed by the
+   supported trigger evidence above. After a
    blocking fix, rerun affected lenses plus the correctness/integration guard,
    not every unaffected lens. Stop when `final_review.advance` reports
    completion: all planned passes and discovery-saturation checks are satisfied,

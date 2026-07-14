@@ -115,6 +115,26 @@ duplicate, unknown-lens, or rationales without a non-whitespace character fail
 closed. Imported defenses are bound into the initial review contract and
 included in the first assignment for their matching lens.
 
+## Exceptional-Risk Evidence
+
+The scout's `exceptional_triggers` array accepts only these exact values:
+
+- `destructive-or-irreversible-operation`
+- `authentication-or-authorization-boundary`
+- `sensitive-data-migration`
+- `cryptographic-behavior`
+- `safety-critical-behavior`
+
+An `exceptional` overall profile requires at least one supported trigger and at
+least one dimension explicitly assessed as `exceptional`. Only those explicitly
+exceptional dimensions receive two independent passes; every other selected
+dimension receives one. A supported trigger may appear on a lower overall
+profile when the scout's concrete evidence shows that mitigations keep the risk
+below exceptional. Unknown, non-string, duplicate, missing, or empty trigger
+evidence fails closed when applicable. The same validation applies to delta
+assessments, which preserve the union of prior and replacement-diff trigger
+evidence in authoritative state.
+
 ## Scope-Growth And Review-Budget Gates
 
 The broad risk scout evaluates whether the current ticket has grown into either
