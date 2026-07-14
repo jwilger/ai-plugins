@@ -1,14 +1,394 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
 
 const resultsPath = process.argv[2];
+const remainingArgs = process.argv.slice(3);
+let expectedMeasurementConfigPath;
+
+for (let index = 0; index < remainingArgs.length; index += 1) {
+  const argument = remainingArgs[index];
+  if (argument !== "--expected-measurement-config") {
+    console.error("unknown argument");
+    process.exit(2);
+  }
+
+  const value = remainingArgs[index + 1];
+  if (!value || value.startsWith("--")) {
+    console.error("--expected-measurement-config requires a YAML path");
+    process.exit(2);
+  }
+  if (expectedMeasurementConfigPath) {
+    console.error("--expected-measurement-config may be specified only once");
+    process.exit(2);
+  }
+
+  expectedMeasurementConfigPath = path.resolve(value);
+  index += 1;
+}
 
 if (!resultsPath) {
-  console.error("usage: check-thresholds.mjs <results.json>");
+  console.error(
+    "usage: check-thresholds.mjs <results.json> [--expected-measurement-config <promptfooconfig.yaml>]",
+  );
   process.exit(2);
 }
 
-const raw = JSON.parse(fs.readFileSync(resultsPath, "utf8"));
+class SourceContractError extends Error {
+  constructor(contractPath, reason) {
+    super(`${contractPath}: ${reason}`);
+  }
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasExactKeys(value, keys) {
+  return (
+    isPlainObject(value) &&
+    JSON.stringify(Object.keys(value).sort()) ===
+      JSON.stringify([...keys].sort())
+  );
+}
+
+function requireExactKeys(value, keys, contractPath) {
+  if (!hasExactKeys(value, keys)) {
+    throw new SourceContractError(
+      contractPath,
+      "has unexpected or missing keys",
+    );
+  }
+}
+
+function requireNonemptyString(value, contractPath) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new SourceContractError(contractPath, "must be a nonempty string");
+  }
+}
+
+function isWithinDirectory(directory, candidate) {
+  const relative = path.relative(directory, candidate);
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== ".." &&
+      !path.isAbsolute(relative))
+  );
+}
+
+const exactEnvTemplate = /^\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/;
+const anyEnvTemplate = /\{\{[^{}]*\benv\./;
+
+function resolveSourceEnvironment(value, contractPath = "source") {
+  if (Array.isArray(value)) {
+    return value.map((entry, index) =>
+      resolveSourceEnvironment(entry, `${contractPath}[${index}]`),
+    );
+  }
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        resolveSourceEnvironment(entry, `${contractPath}.${key}`),
+      ]),
+    );
+  }
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const match = value.match(exactEnvTemplate);
+  if (match) {
+    const resolved = process.env[match[1]];
+    if (typeof resolved !== "string" || resolved.length === 0) {
+      throw new SourceContractError(
+        contractPath,
+        "required environment reference is unresolved",
+      );
+    }
+    return resolved;
+  }
+  if (anyEnvTemplate.test(value)) {
+    throw new SourceContractError(
+      contractPath,
+      "environment references must occupy the complete string",
+    );
+  }
+  return value;
+}
+
+function validateProviderDescriptor(provider, contractPath) {
+  requireExactKeys(provider, ["id", "label", "config"], contractPath);
+  requireNonemptyString(provider.id, `${contractPath}.id`);
+  requireNonemptyString(provider.label, `${contractPath}.label`);
+  if (!provider.id.startsWith("file://")) {
+    throw new SourceContractError(
+      `${contractPath}.id`,
+      "must name a local provider",
+    );
+  }
+  if (
+    !isPlainObject(provider.config) ||
+    Object.keys(provider.config).length === 0
+  ) {
+    throw new SourceContractError(
+      `${contractPath}.config`,
+      "must be a nonempty object",
+    );
+  }
+}
+
+function validateExpectedMeasurementSource(source) {
+  requireExactKeys(
+    source,
+    [
+      "description",
+      "prompts",
+      "providers",
+      "tests",
+      "defaultTest",
+      "commandLineOptions",
+      "metadata",
+    ],
+    "source",
+  );
+  requireNonemptyString(source.description, "source.description");
+
+  if (
+    !Array.isArray(source.prompts) ||
+    source.prompts.length !== 1 ||
+    typeof source.prompts[0] !== "string" ||
+    source.prompts[0].length === 0
+  ) {
+    throw new SourceContractError(
+      "source.prompts",
+      "must contain exactly one prompt template",
+    );
+  }
+  const promptExpressions = source.prompts[0].match(/\{\{[^{}]+\}\}/g) ?? [];
+  if (
+    promptExpressions.length !== 1 ||
+    !/^\{\{\s*scenario_prompt\s*\}\}$/.test(promptExpressions[0])
+  ) {
+    throw new SourceContractError(
+      "source.prompts[0]",
+      "must contain exactly one scenario_prompt expression",
+    );
+  }
+
+  if (!Array.isArray(source.providers) || source.providers.length === 0) {
+    throw new SourceContractError(
+      "source.providers",
+      "must be a nonempty array",
+    );
+  }
+  const providerLabels = new Set();
+  for (const [index, provider] of source.providers.entries()) {
+    const providerPath = `source.providers[${index}]`;
+    validateProviderDescriptor(provider, providerPath);
+    if (providerLabels.has(provider.label)) {
+      throw new SourceContractError(`${providerPath}.label`, "must be unique");
+    }
+    providerLabels.add(provider.label);
+  }
+
+  requireExactKeys(source.defaultTest, ["options"], "source.defaultTest");
+  requireExactKeys(
+    source.defaultTest.options,
+    ["provider"],
+    "source.defaultTest.options",
+  );
+  requireExactKeys(
+    source.defaultTest.options.provider,
+    ["text"],
+    "source.defaultTest.options.provider",
+  );
+  validateProviderDescriptor(
+    source.defaultTest.options.provider.text,
+    "source.defaultTest.options.provider.text",
+  );
+
+  requireExactKeys(
+    source.commandLineOptions,
+    ["maxConcurrency", "share", "cache", "write"],
+    "source.commandLineOptions",
+  );
+  if (
+    !Number.isInteger(source.commandLineOptions.maxConcurrency) ||
+    source.commandLineOptions.maxConcurrency < 1 ||
+    source.commandLineOptions.maxConcurrency > 2
+  ) {
+    throw new SourceContractError(
+      "source.commandLineOptions.maxConcurrency",
+      "must be an integer from 1 through 2",
+    );
+  }
+  if (
+    source.commandLineOptions.cache !== false ||
+    source.commandLineOptions.share !== false ||
+    source.commandLineOptions.write !== true
+  ) {
+    throw new SourceContractError(
+      "source.commandLineOptions",
+      "must keep cache and sharing disabled and writes enabled",
+    );
+  }
+  if (!isPlainObject(source.metadata)) {
+    throw new SourceContractError("source.metadata", "must be an object");
+  }
+}
+
+function loadExpectedMeasurementTests(modulePath) {
+  const require = createRequire(import.meta.url);
+  const loaded = require(modulePath);
+  const loadTests = loaded?.default ?? loaded;
+  if (typeof loadTests !== "function") {
+    throw new TypeError("source.tests must export a function");
+  }
+
+  const tests = loadTests();
+  if (!Array.isArray(tests) || tests.length === 0) {
+    throw new TypeError("source.tests must return a nonempty array");
+  }
+  return tests;
+}
+
+function loadExpectedMeasurementContract(configPath) {
+  let parseYaml;
+  try {
+    ({ parse: parseYaml } = createRequire(import.meta.url)("yaml"));
+  } catch {
+    throw new SourceContractError(
+      "source",
+      "YAML parser dependency is unavailable",
+    );
+  }
+
+  let realConfigPath;
+  let sourceText;
+  try {
+    realConfigPath = fs.realpathSync(configPath);
+    if (!fs.statSync(realConfigPath).isFile()) {
+      throw new SourceContractError("source", "YAML path is not a file");
+    }
+    sourceText = fs.readFileSync(realConfigPath, "utf8");
+  } catch (error) {
+    if (error instanceof SourceContractError) {
+      throw error;
+    }
+    throw new SourceContractError("source", "YAML could not be read");
+  }
+
+  let parsed;
+  try {
+    parsed = parseYaml(sourceText);
+  } catch {
+    throw new SourceContractError("source", "invalid YAML");
+  }
+  if (!isPlainObject(parsed)) {
+    throw new SourceContractError("source", "YAML root must be an object");
+  }
+
+  const source = resolveSourceEnvironment(parsed);
+  validateExpectedMeasurementSource(source);
+  if (typeof source.tests !== "string" || !source.tests.startsWith("file://")) {
+    throw new SourceContractError(
+      "source.tests",
+      "must be a relative local file URL",
+    );
+  }
+  const relativeTestsPath = source.tests.slice("file://".length);
+  if (
+    relativeTestsPath.length === 0 ||
+    path.isAbsolute(relativeTestsPath) ||
+    path.extname(relativeTestsPath) !== ".cjs"
+  ) {
+    throw new SourceContractError(
+      "source.tests",
+      "must name a relative CommonJS module",
+    );
+  }
+
+  const benchmarkDirectory = fs.realpathSync(path.dirname(realConfigPath));
+  const unresolvedTestsPath = path.resolve(
+    benchmarkDirectory,
+    relativeTestsPath,
+  );
+  let testsPath;
+  try {
+    testsPath = fs.realpathSync(unresolvedTestsPath);
+    if (
+      !isWithinDirectory(benchmarkDirectory, testsPath) ||
+      !fs.statSync(testsPath).isFile()
+    ) {
+      throw new SourceContractError(
+        "source.tests",
+        "must stay within the benchmark directory",
+      );
+    }
+  } catch (error) {
+    if (error instanceof SourceContractError) {
+      throw error;
+    }
+    throw new SourceContractError("source.tests", "module could not be read");
+  }
+
+  let tests;
+  try {
+    tests = loadExpectedMeasurementTests(testsPath);
+  } catch (error) {
+    if (error instanceof SourceContractError) {
+      throw error;
+    }
+    throw new SourceContractError("source.tests", "module could not be loaded");
+  }
+
+  let expectedRuntimeMaxConcurrency = source.commandLineOptions.maxConcurrency;
+  if (process.env.PROMPTFOO_MAX_CONCURRENCY !== undefined) {
+    if (!/^[12]$/.test(process.env.PROMPTFOO_MAX_CONCURRENCY)) {
+      throw new SourceContractError(
+        "runtime.maxConcurrency",
+        "override must be a canonical integer from 1 through 2",
+      );
+    }
+    expectedRuntimeMaxConcurrency = Number(
+      process.env.PROMPTFOO_MAX_CONCURRENCY,
+    );
+  }
+
+  return {
+    benchmarkDirectory,
+    expectedRuntimeMaxConcurrency,
+    source,
+    tests,
+  };
+}
+
+let expectedMeasurementContract;
+if (expectedMeasurementConfigPath) {
+  try {
+    expectedMeasurementContract = loadExpectedMeasurementContract(
+      expectedMeasurementConfigPath,
+    );
+  } catch (error) {
+    console.error(
+      `invalid expected measurement config: ${
+        error instanceof Error ? error.message : "source: invalid contract"
+      }`,
+    );
+    process.exit(2);
+  }
+}
+
+let raw;
+try {
+  raw = JSON.parse(fs.readFileSync(resultsPath, "utf8"));
+} catch {
+  console.error("invalid eval artifact: results JSON could not be read");
+  process.exit(1);
+}
 const results = raw.results?.results || raw.results || [];
 
 if (!Array.isArray(results) || results.length === 0) {
@@ -206,6 +586,498 @@ const operationalErrorPattern =
 const configuredTests = Array.isArray(raw.config?.tests)
   ? raw.config.tests
   : [];
+const expectedMeasurementTests = expectedMeasurementContract?.tests;
+
+function measurementTestKey(testCase) {
+  const vars = testCase?.vars || {};
+  const id = vars.case_id;
+  const sampleIndex = vars.sample_index ?? vars.sampleIndex;
+  if (!isNonEmptyString(id) || !Number.isInteger(sampleIndex)) {
+    return undefined;
+  }
+  return `${id}::${sampleIndex}`;
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function addContractDifference(contractPath) {
+  measurementFailures.push(
+    `${contractPath}: differs from expected measurement config`,
+  );
+}
+
+function compareContractValue(contractPath, actual, expected) {
+  if (stableJson(actual) !== stableJson(expected)) {
+    addContractDifference(contractPath);
+  }
+}
+
+function validatePersistedMeasurementConfig(contract) {
+  const artifactConfig = raw.config;
+  const expectedConfigKeys = [
+    "tags",
+    "description",
+    "prompts",
+    "providers",
+    "tests",
+    "env",
+    "defaultTest",
+    "outputPath",
+    "extensions",
+    "metadata",
+    "evaluateOptions",
+  ];
+  if (!hasExactKeys(artifactConfig, expectedConfigKeys)) {
+    addContractDifference("artifact.config keys");
+  }
+
+  const source = contract.source;
+  compareContractValue(
+    "artifact.config.description",
+    artifactConfig?.description,
+    source.description,
+  );
+  compareContractValue(
+    "artifact.config.prompts",
+    artifactConfig?.prompts,
+    source.prompts,
+  );
+  compareContractValue(
+    "artifact.config.providers",
+    artifactConfig?.providers,
+    source.providers,
+  );
+  compareContractValue(
+    "artifact.config.tests",
+    artifactConfig?.tests,
+    contract.tests,
+  );
+  compareContractValue(
+    "artifact.config.defaultTest",
+    artifactConfig?.defaultTest,
+    {
+      ...source.defaultTest,
+      vars: {},
+      assert: [],
+      metadata: {},
+    },
+  );
+  compareContractValue(
+    "artifact.config.metadata",
+    artifactConfig?.metadata,
+    source.metadata,
+  );
+
+  for (const [key, expected] of [
+    ["tags", {}],
+    ["env", {}],
+    ["extensions", []],
+    ["evaluateOptions", {}],
+  ]) {
+    compareContractValue(
+      `artifact.config.${key}`,
+      artifactConfig?.[key],
+      expected,
+    );
+  }
+  if (
+    !Array.isArray(artifactConfig?.outputPath) ||
+    artifactConfig.outputPath.length === 0 ||
+    !artifactConfig.outputPath.every(
+      (output) => typeof output === "string" && output.length > 0,
+    ) ||
+    !artifactConfig.outputPath.some(
+      (output) => path.resolve(output) === path.resolve(resultsPath),
+    )
+  ) {
+    addContractDifference("artifact.config.outputPath");
+  }
+
+  compareContractValue(
+    "artifact.metadata.promptfooVersion",
+    raw.metadata?.promptfooVersion,
+    "0.121.18",
+  );
+  compareContractValue("artifact.shareableUrl", raw.shareableUrl, null);
+  if (
+    !hasExactKeys(raw.runtimeOptions, [
+      "eventSource",
+      "showProgressBar",
+      "repeat",
+      "maxConcurrency",
+      "cache",
+    ])
+  ) {
+    addContractDifference("artifact.runtimeOptions keys");
+  }
+  compareContractValue(
+    "artifact.runtimeOptions.eventSource",
+    raw.runtimeOptions?.eventSource,
+    "cli",
+  );
+  compareContractValue(
+    "artifact.runtimeOptions.showProgressBar",
+    raw.runtimeOptions?.showProgressBar,
+    true,
+  );
+  compareContractValue(
+    "artifact.runtimeOptions.repeat",
+    raw.runtimeOptions?.repeat,
+    1,
+  );
+  compareContractValue(
+    "artifact.runtimeOptions.maxConcurrency",
+    raw.runtimeOptions?.maxConcurrency,
+    contract.expectedRuntimeMaxConcurrency,
+  );
+  compareContractValue(
+    "artifact.runtimeOptions.cache",
+    raw.runtimeOptions?.cache,
+    source.commandLineOptions.cache,
+  );
+}
+
+function normalizeOptionalSessionVars(vars, contractPath) {
+  if (!isPlainObject(vars)) {
+    addContractDifference(contractPath);
+    return undefined;
+  }
+  const normalized = { ...vars };
+  if (Object.hasOwn(normalized, "sessionId")) {
+    if (
+      typeof normalized.sessionId !== "string" ||
+      normalized.sessionId.trim().length === 0
+    ) {
+      addContractDifference(`${contractPath}.sessionId`);
+      return undefined;
+    }
+    delete normalized.sessionId;
+  }
+  return normalized;
+}
+
+function normalizeResolvedProvider(
+  provider,
+  expectedProvider,
+  contract,
+  contractPath,
+) {
+  if (!isPlainObject(provider)) {
+    addContractDifference(contractPath);
+    return undefined;
+  }
+
+  if (hasExactKeys(provider, ["id", "label", "config"])) {
+    return provider;
+  }
+  if (!hasExactKeys(provider, ["options", "label"])) {
+    addContractDifference(contractPath);
+    return undefined;
+  }
+  if (!hasExactKeys(provider.options, ["id", "config"])) {
+    addContractDifference(`${contractPath}.options`);
+    return undefined;
+  }
+  if (!isPlainObject(provider.options.config)) {
+    addContractDifference(`${contractPath}.options.config`);
+    return undefined;
+  }
+
+  const { basePath, ...semanticConfig } = provider.options.config;
+  if (
+    typeof basePath !== "string" ||
+    path.resolve(basePath) !== path.resolve(contract.benchmarkDirectory)
+  ) {
+    addContractDifference(`${contractPath}.options.config.basePath`);
+  }
+  const normalized = {
+    id: provider.options.id,
+    label: provider.label,
+    config: semanticConfig,
+  };
+  if (stableJson(normalized) !== stableJson(expectedProvider)) {
+    addContractDifference(contractPath);
+  }
+  return normalized;
+}
+
+function normalizePromptConfig(
+  config,
+  expectedProvider,
+  contract,
+  contractPath,
+) {
+  if (
+    !hasExactKeys(config, ["provider"]) ||
+    !hasExactKeys(config.provider, ["text"])
+  ) {
+    addContractDifference(contractPath);
+    return undefined;
+  }
+  const normalizedProvider = normalizeResolvedProvider(
+    config.provider.text,
+    expectedProvider,
+    contract,
+    `${contractPath}.provider.text`,
+  );
+  if (!normalizedProvider) {
+    return undefined;
+  }
+  return { provider: { text: normalizedProvider } };
+}
+
+function renderExpectedPrompt(template, vars) {
+  return template.replace(
+    /\{\{\s*scenario_prompt\s*\}\}/g,
+    String(vars.scenario_prompt),
+  );
+}
+
+function validateMeasurementResultContract(
+  result,
+  resultIndex,
+  expectedTest,
+  expectedProvider,
+  contract,
+) {
+  const resultPath = `artifact.results.results[${resultIndex}]`;
+  const expectedGrader = contract.source.defaultTest.options.provider.text;
+
+  compareContractValue(`${resultPath}.provider`, result.provider, {
+    id: expectedProvider.id,
+    label: expectedProvider.label,
+  });
+
+  const normalizedResultVars = normalizeOptionalSessionVars(
+    result.vars,
+    `${resultPath}.vars`,
+  );
+  if (normalizedResultVars) {
+    compareContractValue(
+      `${resultPath}.vars`,
+      normalizedResultVars,
+      expectedTest.vars,
+    );
+  }
+
+  if (!isPlainObject(result.testCase)) {
+    addContractDifference(`${resultPath}.testCase`);
+  } else {
+    const normalizedTestVars = normalizeOptionalSessionVars(
+      result.testCase.vars,
+      `${resultPath}.testCase.vars`,
+    );
+    const normalizedOptions = normalizePromptConfig(
+      result.testCase.options,
+      expectedGrader,
+      contract,
+      `${resultPath}.testCase.options`,
+    );
+    if (normalizedTestVars && normalizedOptions) {
+      compareContractValue(
+        `${resultPath}.testCase`,
+        {
+          ...result.testCase,
+          vars: normalizedTestVars,
+          options: normalizedOptions,
+        },
+        {
+          ...expectedTest,
+          options: {
+            provider: {
+              text: expectedGrader,
+            },
+          },
+          metadata: {},
+        },
+      );
+    }
+  }
+
+  if (!hasExactKeys(result.prompt, ["raw", "label", "config"])) {
+    addContractDifference(`${resultPath}.prompt`);
+  } else {
+    const normalizedPromptConfig = normalizePromptConfig(
+      result.prompt.config,
+      expectedGrader,
+      contract,
+      `${resultPath}.prompt.config`,
+    );
+    if (normalizedPromptConfig) {
+      compareContractValue(
+        `${resultPath}.prompt`,
+        {
+          ...result.prompt,
+          config: normalizedPromptConfig,
+        },
+        {
+          raw: renderExpectedPrompt(
+            contract.source.prompts[0],
+            expectedTest.vars,
+          ),
+          label: contract.source.prompts[0],
+          config: {
+            provider: {
+              text: expectedGrader,
+            },
+          },
+        },
+      );
+    }
+  }
+}
+
+if (expectedMeasurementContract) {
+  validatePersistedMeasurementConfig(expectedMeasurementContract);
+}
+
+function indexTestsByMeasurementKey(tests) {
+  const indexed = new Map();
+  for (const testCase of tests) {
+    const key = measurementTestKey(testCase);
+    if (!key) {
+      continue;
+    }
+    if (!indexed.has(key)) {
+      indexed.set(key, []);
+    }
+    indexed.get(key).push(testCase);
+  }
+  return indexed;
+}
+
+if (expectedMeasurementTests) {
+  if (configuredTests.length === 0) {
+    measurementFailures.push(
+      "expected measurement contract requires persisted configured tests",
+    );
+  }
+
+  const expectedByKey = indexTestsByMeasurementKey(expectedMeasurementTests);
+  const configuredByKey = indexTestsByMeasurementKey(configuredTests);
+  const expectedProviderByLabel = new Map(
+    expectedMeasurementContract.source.providers.map((provider) => [
+      provider.label,
+      provider,
+    ]),
+  );
+
+  for (const [key, expectedEntries] of expectedByKey) {
+    if (expectedEntries.length !== 1) {
+      measurementFailures.push(
+        `${key}: canonical measurement contract contains duplicate configured tests`,
+      );
+      continue;
+    }
+
+    const configuredEntries = configuredByKey.get(key) || [];
+    if (configuredEntries.length === 0) {
+      measurementFailures.push(
+        `${key}: missing expected configured measurement test`,
+      );
+      continue;
+    }
+    if (configuredEntries.length > 1) {
+      measurementFailures.push(`${key}: duplicate configured measurement test`);
+      continue;
+    }
+
+    const expectedContract = stableJson(expectedEntries[0]);
+    const configuredContract = stableJson(configuredEntries[0]);
+    if (configuredContract !== expectedContract) {
+      measurementFailures.push(
+        `${key}: persisted configured measurement test differs from canonical contract`,
+      );
+    }
+  }
+
+  for (const [index, testCase] of configuredTests.entries()) {
+    const key = measurementTestKey(testCase);
+    if (!key || !hasMeasurementMetadata(testCase?.vars || {})) {
+      measurementFailures.push(
+        `configured test ${index + 1}: unexpected unmarked configured test`,
+      );
+    } else if (!expectedByKey.has(key)) {
+      measurementFailures.push(
+        `${key}: unexpected configured measurement test`,
+      );
+    }
+  }
+
+  const expectedRows = new Map();
+  for (const testCase of expectedMeasurementTests) {
+    const key = measurementTestKey(testCase);
+    for (const label of Array.isArray(testCase?.providers)
+      ? testCase.providers
+      : []) {
+      expectedRows.set(`${key}::${label}`, {
+        id: testCase.vars.case_id,
+        sampleIndex: testCase.vars.sample_index ?? testCase.vars.sampleIndex,
+        label,
+      });
+    }
+  }
+
+  const resultRowCounts = new Map();
+  for (const [index, result] of results.entries()) {
+    const vars = resultVars(result);
+    if (!hasMeasurementMetadata(vars)) {
+      measurementFailures.push(
+        `result ${index + 1}: unexpected unmarked result`,
+      );
+      continue;
+    }
+
+    const id = vars.case_id;
+    const sampleIndex = vars.sample_index ?? vars.sampleIndex;
+    const label = result.provider?.label;
+    const expectedTestEntries =
+      expectedByKey.get(`${id}::${sampleIndex}`) ?? [];
+    const expectedProvider = expectedProviderByLabel.get(label);
+    if (expectedTestEntries.length === 1 && expectedProvider) {
+      validateMeasurementResultContract(
+        result,
+        index,
+        expectedTestEntries[0],
+        expectedProvider,
+        expectedMeasurementContract,
+      );
+    }
+    const rowKey = `${id}::${sampleIndex}::${label}`;
+    if (!expectedRows.has(rowKey)) {
+      measurementFailures.push(
+        `${id}/${label}/sample-${sampleIndex}: unexpected result row`,
+      );
+      continue;
+    }
+    resultRowCounts.set(rowKey, (resultRowCounts.get(rowKey) || 0) + 1);
+  }
+
+  for (const [rowKey, expectedRow] of expectedRows) {
+    const count = resultRowCounts.get(rowKey) || 0;
+    if (count === 0) {
+      measurementFailures.push(
+        `${expectedRow.id}: missing expected result for provider ${expectedRow.label}, sample ${expectedRow.sampleIndex}`,
+      );
+    } else if (count > 1) {
+      measurementFailures.push(
+        `${expectedRow.id}: duplicate result for provider ${expectedRow.label}, sample ${expectedRow.sampleIndex}`,
+      );
+    }
+  }
+}
 
 for (const [testIndex, testCase] of configuredTests.entries()) {
   const vars = testCase?.vars || {};

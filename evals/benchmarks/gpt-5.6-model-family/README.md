@@ -59,6 +59,21 @@ scripts/evals/run-gpt56-benchmark.sh --phase execution
 scripts/evals/run-gpt56-benchmark.sh --phase grader-calibration
 ```
 
+After execution, the runner passes `promptfooconfig.yaml` to the measurement
+gate as the single benchmark contract. The gate parses the source YAML, resolves
+whole-string environment references, loads its repository-local `cases.cjs`,
+and checks the complete Promptfoo 0.121.18 semantic projection: configuration,
+runtime concurrency and cache state, version provenance, provider identities,
+canonical tests, and every result's rendered prompt and grading configuration.
+Promptfoo's documented empty serialization defaults and output paths are the
+only extra config fields accepted; the only ignored result value is an optional
+nonempty runtime `sessionId`.
+
+Use the phase runner for live execution. Direct Promptfoo config use requires
+`GPT56_BENCHMARK_WORKSPACE` to name a workspace prepared by the runner; the
+provider boundary rejects missing, repository-nested, or otherwise unprepared
+workspaces before loading Codex.
+
 Use `--dry-run` to inspect preparation and Promptfoo commands without invoking
 providers. The execution configuration is
 [`promptfooconfig.yaml`](promptfooconfig.yaml), and the frozen-label calibration

@@ -3,6 +3,7 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   RESULTS="$(mktemp)"
+  BENCHMARK_CONFIG="$ROOT/evals/benchmarks/gpt-5.6-model-family/promptfooconfig.yaml"
 }
 
 teardown() {
@@ -11,6 +12,395 @@ teardown() {
 
 run_checker() {
   run node "$ROOT/scripts/evals/check-thresholds.mjs" "$RESULTS"
+}
+
+run_expected_benchmark_checker() {
+  run env \
+    CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="${RESULTS}.skills-home" \
+    CODEX_EVAL_HOME_NO_PLUGINS="${RESULTS}.no-plugins-home" \
+    GPT56_BENCHMARK_WORKSPACE="${RESULTS}.workspace" \
+    GPT56_BENCHMARK_SAMPLES="${EXPECTED_BENCHMARK_SAMPLES:-1}" \
+    PROMPTFOO_MAX_CONCURRENCY="${EXPECTED_MAX_CONCURRENCY:-2}" \
+    node "$ROOT/scripts/evals/check-thresholds.mjs" \
+    "$RESULTS" \
+    --expected-measurement-config "$BENCHMARK_CONFIG"
+}
+
+write_expected_benchmark_artifact() {
+  local mutation="${1:-complete}"
+  local samples="${2:-2}"
+  EXPECTED_BENCHMARK_SAMPLES="$samples"
+
+  node - "$BENCHMARK_CONFIG" "$RESULTS" "$samples" "$mutation" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const { parse } = require('yaml');
+
+const configPath = process.argv[2];
+const resultsPath = process.argv[3];
+const samples = Number(process.argv[4]);
+const mutation = process.argv[5];
+const benchmarkDir = path.dirname(configPath);
+
+process.env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE = `${resultsPath}.skills-home`;
+process.env.CODEX_EVAL_HOME_NO_PLUGINS = `${resultsPath}.no-plugins-home`;
+process.env.GPT56_BENCHMARK_WORKSPACE = `${resultsPath}.workspace`;
+process.env.GPT56_BENCHMARK_SAMPLES = String(samples);
+const source = parse(fs.readFileSync(configPath, 'utf8'));
+const resolveEnv = (value) => {
+  if (Array.isArray(value)) return value.map(resolveEnv);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, resolveEnv(entry)]),
+    );
+  }
+  if (typeof value !== 'string') return value;
+  const match = value.match(/^\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/);
+  return match ? process.env[match[1]] : value;
+};
+const resolvedSource = resolveEnv(source);
+const configuredTests = require(path.join(benchmarkDir, 'cases.cjs'))();
+const grader = resolvedSource.defaultTest.options.provider.text;
+const resolvedGrader = {
+  options: {
+    id: grader.id,
+    config: {
+      ...grader.config,
+      basePath: benchmarkDir,
+    },
+  },
+  label: grader.label,
+};
+const promptConfig = { provider: { text: resolvedGrader } };
+const promptTemplate = resolvedSource.prompts[0];
+const config = {
+  tags: {},
+  description: resolvedSource.description,
+  prompts: resolvedSource.prompts,
+  providers: resolvedSource.providers,
+  tests: configuredTests,
+  env: {},
+  defaultTest: {
+    ...resolvedSource.defaultTest,
+    vars: {},
+    assert: [],
+    metadata: {},
+  },
+  outputPath: [
+    resultsPath,
+    `${resultsPath}.html`,
+    `${resultsPath}.xml`,
+  ],
+  extensions: [],
+  metadata: resolvedSource.metadata,
+  evaluateOptions: {},
+};
+const results = configuredTests.flatMap((testCase) =>
+  testCase.providers.map((provider) => ({
+    provider: {
+      id: resolvedSource.providers.find((entry) => entry.label === provider).id,
+      label: provider,
+    },
+    prompt: {
+      raw: promptTemplate.replace(
+        /\{\{\s*scenario_prompt\s*\}\}/g,
+        testCase.vars.scenario_prompt,
+      ),
+      label: promptTemplate,
+      config: promptConfig,
+    },
+    response: { output: `Complete answer for ${testCase.vars.case_id}` },
+    success: true,
+    latencyMs: 1250,
+    cost: 0.42,
+    tokenUsage: {
+      prompt: 120,
+      completion: 30,
+      total: 150,
+      cached: 20,
+      assertions: {
+        prompt: 80,
+        completion: 10,
+        total: 90,
+        cached: 15,
+      },
+    },
+    gradingResult: {
+      pass: true,
+      score: 1,
+      reason: 'Rubric satisfied',
+      componentResults: [{
+        pass: true,
+        score: 1,
+        reason: 'Rubric satisfied',
+      }],
+    },
+    vars: {
+      ...testCase.vars,
+      sessionId: `session-${testCase.vars.case_id}-${testCase.vars.sample_index}`,
+    },
+    testCase: {
+      ...JSON.parse(JSON.stringify(testCase)),
+      vars: {
+        ...testCase.vars,
+        sessionId: `session-${testCase.vars.case_id}-${testCase.vars.sample_index}`,
+      },
+      options: promptConfig,
+      metadata: {},
+    },
+  })),
+);
+const runtimeOptions = {
+  eventSource: 'cli',
+  showProgressBar: true,
+  repeat: 1,
+  maxConcurrency: 2,
+  cache: false,
+};
+let shareableUrl = null;
+
+if (mutation === 'self-declared-one-row') {
+  configuredTests.splice(0, configuredTests.length, configuredTests[0]);
+  results.splice(1);
+  const onlyProvider = results[0].provider.label;
+  configuredTests[0].providers = [onlyProvider];
+  configuredTests[0].vars.benchmark_expected_provider_labels = [onlyProvider];
+  configuredTests[0].vars.benchmark_expected_samples = 1;
+  results[0].testCase.providers = [onlyProvider];
+  results[0].testCase.vars.benchmark_expected_provider_labels = [onlyProvider];
+  results[0].testCase.vars.benchmark_expected_samples = 1;
+}
+if (mutation === 'configless') {
+  configuredTests.splice(0);
+}
+if (mutation === 'missing-rows') {
+  const omittedCaseId = configuredTests.at(-1).vars.case_id;
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    if (results[index].testCase.vars.case_id === omittedCaseId) {
+      results.splice(index, 1);
+    }
+  }
+  for (let index = configuredTests.length - 1; index >= 0; index -= 1) {
+    if (configuredTests[index].vars.case_id === omittedCaseId) {
+      configuredTests.splice(index, 1);
+    }
+  }
+}
+if (mutation === 'duplicate-row') {
+  results.push(JSON.parse(JSON.stringify(results[0])));
+}
+if (mutation === 'extra-unmarked-row') {
+  results.push({
+    provider: { label: 'unmarked-extra-provider' },
+    response: { output: 'This row is not part of the benchmark contract.' },
+    success: true,
+    gradingResult: { pass: true, score: 1, reason: 'Unmarked extra row' },
+    testCase: {
+      vars: {
+        case_id: 'unmarked-extra-case',
+        min_pass_rate: 0,
+        value_gate_mode: 'none',
+      },
+    },
+  });
+}
+if (mutation === 'missing-required-metrics') {
+  delete results[0].latencyMs;
+  delete results[0].cost;
+  delete results[0].tokenUsage;
+}
+if (mutation === 'unexpected-config-fields') {
+  configuredTests[0].provider = 'unexpected-provider';
+  configuredTests[0].options = { prefix: 'unexpected active Promptfoo option' };
+}
+if (mutation === 'altered-persisted-config') {
+  config.prompts = ['Different top-level prompt'];
+  config.providers = [{ id: 'echo', label: 'not-the-configured-provider' }];
+  config.defaultTest = {
+    options: { provider: { text: { id: 'echo' } } },
+  };
+}
+if (mutation === 'altered-result-contract') {
+  for (const result of results) {
+    result.provider.id = 'echo';
+    result.prompt.label = 'Different prompt label';
+    result.prompt.raw = 'Different rendered prompt';
+    result.prompt.config = { provider: { text: { id: 'echo' } } };
+    result.testCase.vars.scenario_prompt =
+      'Different request than the canonical benchmark';
+    result.testCase.assert = [{ type: 'llm-rubric', value: 'Always pass.' }];
+    result.testCase.options = {
+      provider: { text: { id: 'echo' } },
+    };
+  }
+}
+if (mutation === 'altered-runtime-event-source') {
+  runtimeOptions.eventSource = 'web';
+}
+if (mutation === 'altered-runtime-progress') {
+  runtimeOptions.showProgressBar = false;
+}
+if (mutation === 'altered-runtime-repeat') {
+  runtimeOptions.repeat = 2;
+}
+if (mutation === 'extra-runtime-option') {
+  runtimeOptions.filterPattern = 'only-one-row';
+}
+if (mutation === 'shared-artifact') {
+  shareableUrl = 'https://example.invalid/shared-eval';
+}
+
+fs.writeFileSync(
+  resultsPath,
+  JSON.stringify({
+    config,
+    shareableUrl,
+    metadata: { promptfooVersion: '0.121.18' },
+    runtimeOptions,
+    results: { results },
+  }),
+);
+NODE
+}
+
+@test "expected benchmark measurement contract accepts four cases by three providers by configured samples" {
+  write_expected_benchmark_artifact complete 2
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Eval thresholds passed"* ]]
+}
+
+@test "expected benchmark measurement contract rejects a self-declared one-row artifact" {
+  write_expected_benchmark_artifact self-declared-one-row 2
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+}
+
+@test "expected benchmark measurement contract rejects a configless artifact" {
+  write_expected_benchmark_artifact configless 2
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"persisted configured tests"* ]]
+}
+
+@test "expected benchmark measurement contract rejects missing configured rows" {
+  write_expected_benchmark_artifact missing-rows 2
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+}
+
+@test "expected benchmark measurement contract rejects duplicate result rows" {
+  write_expected_benchmark_artifact duplicate-row 2
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"duplicate result"* ]]
+}
+
+@test "expected benchmark measurement contract rejects extra unmarked result rows" {
+  write_expected_benchmark_artifact extra-unmarked-row 2
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected unmarked result"* ]]
+}
+
+@test "expected benchmark measurement contract rejects rows missing required metrics" {
+  write_expected_benchmark_artifact missing-required-metrics 2
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"invalid measurement latency"* ]]
+  [[ "$output" == *"invalid target token usage"* ]]
+  [[ "$output" == *"invalid grader token usage"* ]]
+  [[ "$output" == *"invalid measurement cost"* ]]
+}
+
+@test "expected benchmark measurement contract rejects unexpected active config fields" {
+  write_expected_benchmark_artifact unexpected-config-fields 2
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"persisted configured measurement test differs from canonical contract"* ]]
+}
+
+@test "expected benchmark measurement contract rejects altered persisted config independently" {
+  write_expected_benchmark_artifact altered-persisted-config 1
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"artifact.config.prompts"* ]]
+  [[ "$output" == *"artifact.config.providers"* ]]
+  [[ "$output" == *"artifact.config.defaultTest"* ]]
+}
+
+@test "expected benchmark measurement contract rejects altered result semantics independently" {
+  write_expected_benchmark_artifact altered-result-contract 1
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"artifact.results.results[0].provider"* ]]
+  [[ "$output" == *"artifact.results.results[0].prompt"* ]]
+  [[ "$output" == *"artifact.results.results[0].testCase"* ]]
+}
+
+@test "expected benchmark measurement contract rejects a non-CLI runtime source" {
+  write_expected_benchmark_artifact altered-runtime-event-source 1
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"artifact.runtimeOptions.eventSource"* ]]
+}
+
+@test "expected benchmark measurement contract rejects runtime repetition" {
+  write_expected_benchmark_artifact altered-runtime-repeat 1
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"artifact.runtimeOptions.repeat"* ]]
+}
+
+@test "expected benchmark measurement contract rejects altered progress mode" {
+  write_expected_benchmark_artifact altered-runtime-progress 1
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"artifact.runtimeOptions.showProgressBar"* ]]
+}
+
+@test "expected benchmark measurement contract rejects extra runtime filters" {
+  write_expected_benchmark_artifact extra-runtime-option 1
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"artifact.runtimeOptions keys"* ]]
+}
+
+@test "expected benchmark measurement contract rejects hosted sharing" {
+  write_expected_benchmark_artifact shared-artifact 1
+
+  run_expected_benchmark_checker
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"artifact.shareableUrl"* ]]
 }
 
 run_configured_checker() {

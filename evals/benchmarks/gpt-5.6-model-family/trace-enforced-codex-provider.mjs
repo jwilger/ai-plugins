@@ -6,6 +6,7 @@ import {
   allowedRawResponseItemTypes,
   toolNotificationDescription,
 } from "./trace-policy.mjs";
+import { assertPreparedGpt56Workspace } from "../../../scripts/evals/gpt56-workspace-policy.mjs";
 
 // package-lock pins @openai/codex-sdk -> @openai/codex 0.144.3, whose npm
 // binary is linked here. Promptfoo otherwise resolves a bare `codex` on PATH.
@@ -144,6 +145,9 @@ export default class TraceEnforcedCodexProvider {
         "trace-enforced Codex provider requires CODEX_HOME to be a resolved absolute path",
       );
     }
+    assertPreparedGpt56Workspace(config.working_dir, {
+      label: "trace-enforced Codex provider working_dir",
+    });
     const inner = await this.providerLoader("openai:codex-app-server", {
       basePath,
       env: this.options.env,

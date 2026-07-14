@@ -6,6 +6,16 @@ setup() {
   MAIN_CHECKOUT="$(cd "$git_common_dir/.." && pwd -P)"
   BENCHMARK_RUNNER="$ROOT/scripts/evals/run-gpt56-benchmark.sh"
   CALIBRATION_CHECKER="$ROOT/scripts/evals/check-gpt56-grader-calibration.mjs"
+  PROVIDER_TEST_ROOT="$(mktemp -d)"
+  GPT56_PROVIDER_TEST_WORKSPACE="$PROVIDER_TEST_ROOT/workspace"
+  mkdir "$GPT56_PROVIDER_TEST_WORKSPACE"
+  printf 'ai-plugins GPT-5.6 benchmark workspace\n' \
+    >"$GPT56_PROVIDER_TEST_WORKSPACE/.ai-plugins-gpt56-workspace"
+  export GPT56_PROVIDER_TEST_WORKSPACE
+}
+
+teardown() {
+  rm -rf "$PROVIDER_TEST_ROOT"
 }
 
 write_calibration_artifact() {
@@ -78,6 +88,7 @@ const results = loadCases().map((testCase) => {
 if (mutation === 'missing-case') {
   results.pop();
 }
+
 if (mutation === 'description-only') {
   for (const [index, result] of results.entries()) {
     results[index] = { testCase: { description: result.testCase.description } };
@@ -153,6 +164,156 @@ if (mutation === 'failed-result') {
 }
 
 fs.writeFileSync(artifact, JSON.stringify({ results: { results } }));
+NODE
+}
+
+write_execution_artifact() {
+  local artifact="$1"
+  local skills_home="$2"
+  local no_plugins_home="$3"
+  local workspace="$4"
+  local persisted_results_path="$5"
+
+  node - \
+    "$ROOT/evals/benchmarks/gpt-5.6-model-family/promptfooconfig.yaml" \
+    "$artifact" \
+    "$skills_home" \
+    "$no_plugins_home" \
+    "$workspace" \
+    "$persisted_results_path" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const { parse } = require('yaml');
+
+const configPath = process.argv[2];
+const artifact = process.argv[3];
+process.env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE = process.argv[4];
+process.env.CODEX_EVAL_HOME_NO_PLUGINS = process.argv[5];
+process.env.GPT56_BENCHMARK_WORKSPACE = process.argv[6];
+const persistedResultsPath = process.argv[7];
+const benchmarkDir = path.dirname(configPath);
+process.env.GPT56_BENCHMARK_SAMPLES = '1';
+const resolveEnv = (value) => {
+  if (Array.isArray(value)) return value.map(resolveEnv);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, resolveEnv(entry)]),
+    );
+  }
+  if (typeof value !== 'string') return value;
+  const match = value.match(/^\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/);
+  return match ? process.env[match[1]] : value;
+};
+const source = resolveEnv(parse(fs.readFileSync(configPath, 'utf8')));
+const configuredTests = require(path.join(benchmarkDir, 'cases.cjs'))();
+const grader = source.defaultTest.options.provider.text;
+const resolvedGrader = {
+  options: {
+    id: grader.id,
+    config: { ...grader.config, basePath: benchmarkDir },
+  },
+  label: grader.label,
+};
+const promptConfig = { provider: { text: resolvedGrader } };
+const promptTemplate = source.prompts[0];
+const trace = {
+  finalResponse: 'Direct answer',
+  items: [{ type: 'agent_message', text: 'Direct answer' }],
+  notifications: [
+    {
+      method: 'rawResponseItem/completed',
+      params: {
+        item: { type: 'message', role: 'assistant', content: [] },
+      },
+    },
+  ],
+  serverRequests: [],
+};
+const results = configuredTests.flatMap((testCase) =>
+  testCase.providers.map((provider) => ({
+    success: true,
+    provider: {
+      id: source.providers.find((entry) => entry.label === provider).id,
+      label: provider,
+    },
+    prompt: {
+      raw: promptTemplate.replace(
+        /\{\{\s*scenario_prompt\s*\}\}/g,
+        testCase.vars.scenario_prompt,
+      ),
+      label: promptTemplate,
+      config: promptConfig,
+    },
+    response: { output: 'Direct answer', raw: trace },
+    latencyMs: 1250,
+    cost: 0.42,
+    tokenUsage: {
+      prompt: 120,
+      completion: 30,
+      total: 150,
+      cached: 20,
+      assertions: {
+        prompt: 80,
+        completion: 10,
+        total: 90,
+        cached: 15,
+      },
+    },
+    gradingResult: {
+      pass: true,
+      score: 1,
+      reason: 'Rubric satisfied',
+      componentResults: [
+        { pass: true, score: 1, reason: 'Rubric satisfied' },
+      ],
+    },
+    vars: { ...testCase.vars, sessionId: `session-${testCase.vars.case_id}` },
+    testCase: {
+      ...JSON.parse(JSON.stringify(testCase)),
+      vars: { ...testCase.vars, sessionId: `session-${testCase.vars.case_id}` },
+      options: promptConfig,
+      metadata: {},
+    },
+  })),
+);
+
+fs.writeFileSync(
+  artifact,
+  JSON.stringify({
+    config: {
+      tags: {},
+      description: source.description,
+      prompts: source.prompts,
+      providers: source.providers,
+      tests: configuredTests,
+      env: {},
+      defaultTest: {
+        ...source.defaultTest,
+        vars: {},
+        assert: [],
+        metadata: {},
+      },
+      outputPath: [
+        persistedResultsPath,
+        `${persistedResultsPath}.html`,
+        `${persistedResultsPath}.xml`,
+      ],
+      extensions: [],
+      metadata: source.metadata,
+      evaluateOptions: {},
+    },
+    shareableUrl: null,
+    metadata: { promptfooVersion: '0.121.18' },
+    runtimeOptions: {
+      eventSource: 'cli',
+      showProgressBar: true,
+      repeat: 1,
+      maxConcurrency: 2,
+      cache: false,
+    },
+    results: { results },
+  }),
+);
 NODE
 }
 
@@ -491,7 +652,12 @@ NODE
   [[ "$output" == *"$no_plugins_home --plugin-mode no-plugins"* ]]
   [[ "$output" == *"$out_root/execution/results.json"* ]]
   [[ "$output" == *"--max-concurrency 2"* ]]
+  expected_measurement_check="check-thresholds.mjs $out_root/execution/results.json --expected-measurement-config $ROOT/evals/benchmarks/gpt-5.6-model-family/promptfooconfig.yaml"
+  [[ "$output" == *"$expected_measurement_check"* ]]
   [[ "$output" == *"check-gpt56-execution-isolation.mjs $out_root/execution/results.json"* ]]
+  measurement_check_line="$(printf '%s\n' "$output" | grep -nF "$expected_measurement_check" | cut -d: -f1)"
+  isolation_check_line="$(printf '%s\n' "$output" | grep -nF "check-gpt56-execution-isolation.mjs $out_root/execution/results.json" | cut -d: -f1)"
+  [ "$measurement_check_line" -lt "$isolation_check_line" ]
   [ ! -e "$skills_home/config.toml" ]
   [ ! -e "$no_plugins_home/config.toml" ]
 
@@ -684,7 +850,11 @@ NODE
       "$BENCHMARK_RUNNER" --dry-run --phase execution
 
     [ "$status" -eq 2 ]
-    [[ "$output" == *"GPT-5.6 benchmark workspace overlaps protected path"* ]]
+    if [ "$protected_kind" = repository ]; then
+      [[ "$output" == *"GPT-5.6 benchmark workspace is beneath an ancestor AGENTS.md"* ]]
+    else
+      [[ "$output" == *"GPT-5.6 benchmark workspace overlaps protected path"* ]]
+    fi
   done
 
   [ ! -e "$ROOT/.dependencies/evals/overlap-fixture-$$" ]
@@ -928,8 +1098,15 @@ NODE
   out_root="$temp_root/out"
   fake_promptfoo="$temp_root/promptfoo"
   marker="$temp_root/promptfoo-invoked"
+  execution_artifact="$temp_root/execution-results.json"
   expected_plugin="agentic-systems-engineering"
   agentic_version="$(jq -r '.version' "$ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
+  write_execution_artifact \
+    "$execution_artifact" \
+    "$skills_home" \
+    "$no_plugins_home" \
+    "$workspace" \
+    "$out_root/execution/results.json"
 
   printf '%s\n' \
     '#!/usr/bin/env bash' \
@@ -945,7 +1122,7 @@ NODE
     '! grep -q "^\\[plugins\\." "$CODEX_EVAL_HOME_NO_PLUGINS/config.toml"' \
     '[ -d "$GPT56_BENCHMARK_WORKSPACE" ]' \
     'mkdir -p "$EVAL_OUT_DIR"' \
-    'node -e "require(\"node:fs\").writeFileSync(process.env.EVAL_OUT_DIR + \"/results.json\", JSON.stringify({results:{results:[{success:true,provider:{label:\"codex-gpt-5.6-terra-standard\"},testCase:{vars:{case_id:\"fixture\",sample_index:1}},response:{output:\"Direct answer\",raw:{finalResponse:\"Direct answer\",items:[{type:\"agent_message\",text:\"Direct answer\"}],notifications:[{method:\"rawResponseItem/completed\",params:{item:{type:\"message\",role:\"assistant\",content:[]}}}],serverRequests:[]}}}]}}))"' \
+    'cp "$EXECUTION_ARTIFACT" "$EVAL_OUT_DIR/results.json"' \
     'printf "%s\\n" "$*" >"$PROMPTFOO_MARKER"' \
     >"$fake_promptfoo"
   chmod +x "$fake_promptfoo"
@@ -954,6 +1131,7 @@ NODE
     OPENAI_API_KEY=fixture \
     AGENTIC_VERSION="$agentic_version" \
     EXPECTED_PLUGIN="$expected_plugin" \
+    EXECUTION_ARTIFACT="$execution_artifact" \
     PROMPTFOO_MARKER="$marker" \
     PROMPTFOO_BIN="$fake_promptfoo" \
     EVAL_TIMEOUT=0 \
@@ -1034,6 +1212,60 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "GPT-5.6 advisor-like rubrics preserve the sanitized scenario and every checklist requirement" {
+  run node - "$ROOT" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = process.argv[2];
+const loadCases = require(
+  path.join(root, 'evals/benchmarks/gpt-5.6-model-family/cases.cjs'),
+);
+const benchmark = JSON.parse(
+  fs.readFileSync(
+    path.join(
+      root,
+      'plugins/advisor/skills/advisor/.plugin-eval/benchmark.json',
+    ),
+    'utf8',
+  ),
+);
+const routingPrefix = 'Use the local Codex skill "advisor" if it helps. ';
+const casesById = new Map(
+  loadCases()
+    .filter((testCase) => testCase.vars.benchmark_category === 'advisor-like')
+    .map((testCase) => [testCase.vars.case_id, testCase]),
+);
+
+for (const scenario of benchmark.scenarios.filter((entry) =>
+  ['ticket-plan-outline', 'tradeoff-recommendation'].includes(entry.id),
+)) {
+  const testCase = casesById.get(`advisor-like-${scenario.id}`);
+  if (!testCase) {
+    throw new Error(`missing advisor-like benchmark case for ${scenario.id}`);
+  }
+
+  const rubric = testCase.assert?.[0]?.value;
+  const sanitizedUserInput = scenario.userInput.replace(routingPrefix, '');
+  if (!rubric.includes(sanitizedUserInput)) {
+    throw new Error(
+      `${scenario.id}: rubric omits the complete sanitized scenario userInput`,
+    );
+  }
+  for (const checklistItem of scenario.successChecklist) {
+    if (!rubric.includes(checklistItem)) {
+      throw new Error(`${scenario.id}: rubric omits checklist item: ${checklistItem}`);
+    }
+  }
+  if (rubric.includes(routingPrefix.trim())) {
+    throw new Error(`${scenario.id}: rubric includes the Advisor routing prefix`);
+  }
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "GPT-5.6 benchmark config isolates provider modes and uses Sol high grading" {
   run node - "$ROOT" <<'NODE'
 const fs = require('node:fs');
@@ -1052,7 +1284,7 @@ const providers = config.providers;
 if (config.tests !== 'file://cases.cjs') {
   throw new Error(`benchmark case loader is not config-relative: ${config.tests}`);
 }
-const expectedWorkspace = "{{ env.GPT56_BENCHMARK_WORKSPACE | default('../../../.dependencies/evals/agent-workspace') }}";
+const expectedWorkspace = '{{ env.GPT56_BENCHMARK_WORKSPACE }}';
 const models = [...new Set(providers.map((provider) => provider.config.model))].sort();
 if (JSON.stringify(models) !== JSON.stringify(['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra'])) {
   throw new Error(`unexpected execution models: ${JSON.stringify(models)}`);
@@ -1060,7 +1292,7 @@ if (JSON.stringify(models) !== JSON.stringify(['gpt-5.6-luna', 'gpt-5.6-sol', 'g
 
 for (const provider of providers) {
   if (provider.config.working_dir !== expectedWorkspace) {
-    throw new Error(`${provider.label}: workspace is not repository-root relative`);
+    throw new Error(`${provider.label}: workspace is not environment-only`);
   }
   if (provider.config.model_reasoning_effort !== 'medium') {
     throw new Error(`${provider.label}: execution effort is not medium`);
@@ -1084,7 +1316,7 @@ if (grader.model !== 'gpt-5.6-sol' || grader.model_reasoning_effort !== 'high') 
   throw new Error(`unexpected grader: ${JSON.stringify(grader)}`);
 }
 if (grader.working_dir !== expectedWorkspace) {
-  throw new Error('grader workspace is not repository-root relative');
+  throw new Error('grader workspace is not environment-only');
 }
 if (!grader.cli_env.CODEX_HOME.includes('CODEX_EVAL_HOME_NO_PLUGINS')) {
   throw new Error('execution grader does not use the calibrated no-plugin home');
@@ -1295,8 +1527,8 @@ for (const grader of graders) {
   if (grader.config.cli_config?.features?.plugins !== false) {
     throw new Error(`${grader.label}: grader does not disable plugin loading`);
   }
-  if (!grader.config.working_dir.includes("default('../../../.dependencies/evals/agent-workspace')")) {
-    throw new Error(`${grader.label}: grader workspace is not repository-root relative`);
+  if (grader.config.working_dir !== '{{ env.GPT56_BENCHMARK_WORKSPACE }}') {
+    throw new Error(`${grader.label}: grader workspace is not environment-only`);
   }
 }
 NODE
@@ -1549,7 +1781,7 @@ const provider = new TraceEnforcedCodexProvider(
     id: 'tool-free-fixture',
     config: {
       model: 'gpt-5.6-terra',
-      working_dir: '/tmp/fixture',
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
       cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
     },
     env: { CODEX_HOME: '/tmp/codex-home-fixture' },
@@ -1568,7 +1800,7 @@ const loadedOptions = loadedContext?.options;
 if (
   loadedOptions?.id !== 'tool-free-fixture' ||
   loadedOptions?.config?.model !== 'gpt-5.6-terra' ||
-  loadedOptions?.config?.working_dir !== '/tmp/fixture' ||
+  loadedOptions?.config?.working_dir !== process.env.GPT56_PROVIDER_TEST_WORKSPACE ||
   loadedOptions?.env?.CODEX_HOME !== '/tmp/codex-home-fixture'
 ) {
   throw new Error(`inner provider options were not preserved: ${JSON.stringify(loadedContext)}`);
@@ -1635,7 +1867,10 @@ const inner = {
 const provider = new TraceEnforcedCodexProvider(
   {
     id: 'trace-enforced-fixture',
-    config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
   },
   async () => inner,
 );
@@ -1708,6 +1943,7 @@ const provider = new TraceEnforcedCodexProvider(
       inherit_process_env: true,
       reuse_server: true,
       network_access_enabled: true,
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
       cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
       cli_config: {
         web_search: 'live',
@@ -1848,7 +2084,10 @@ const inner = {
 const provider = new TraceEnforcedCodexProvider(
   {
     id: 'tool-free-fixture',
-    config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
   },
   async () => inner,
 );
@@ -1895,7 +2134,10 @@ for (const fixture of fixtures) {
   const provider = new TraceEnforcedCodexProvider(
     {
       id: 'tool-free-fixture',
-      config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
     },
     async () => inner,
   );
@@ -1958,7 +2200,10 @@ const inner = {
 const provider = new TraceEnforcedCodexProvider(
   {
     id: 'trace-enforced-fixture',
-    config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
   },
   async (_providerId, context) => {
     loadedContext = context;
@@ -2026,7 +2271,10 @@ const providerLoader = async () => {
 const provider = new TraceEnforcedCodexProvider(
   {
     id: 'trace-enforced-fixture',
-    config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
   },
   providerLoader,
 );
@@ -2092,7 +2340,10 @@ for (const fixture of fixtures) {
   const provider = new TraceEnforcedCodexProvider(
     {
       id: 'trace-enforced-fixture',
-      config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
     },
     async () => inner,
   );
@@ -2126,7 +2377,10 @@ const cleanInner = {
 const cleanProvider = new TraceEnforcedCodexProvider(
   {
     id: 'trace-enforced-fixture',
-    config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
   },
   async () => cleanInner,
 );
@@ -2173,7 +2427,10 @@ const inner = {
 const provider = new TraceEnforcedCodexProvider(
   {
     id: 'trace-enforced-fixture',
-    config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
   },
   async () => inner,
 );
@@ -2231,7 +2488,10 @@ for (const fixture of fixtures) {
   const provider = new TraceEnforcedCodexProvider(
     {
       id: 'trace-enforced-fixture',
-      config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
     },
     async () => inner,
   );
@@ -2252,7 +2512,10 @@ const cleanInner = {
 const cleanProvider = new TraceEnforcedCodexProvider(
   {
     id: 'trace-enforced-fixture',
-    config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
   },
   async () => cleanInner,
 );
@@ -2343,7 +2606,10 @@ for (const fixture of fixtures) {
   const provider = new TraceEnforcedCodexProvider(
     {
       id: 'trace-enforced-fixture',
-      config: { cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' } },
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
     },
     async () => inner,
   );

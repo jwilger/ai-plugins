@@ -13,6 +13,8 @@ const standardCaseIds = new Set([
   "agentic-tool-contracts-and-loops",
   "development-discipline-review-feedback-skepticism",
 ]);
+const advisorRoutingPrefix =
+  'Use the local Codex skill "advisor" if it helps. ';
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
@@ -62,19 +64,30 @@ function advisorLikeCases() {
 
   return benchmark.scenarios
     .filter((scenario) => selected.has(scenario.id))
-    .map((scenario) => ({
-      id: `advisor-like-${scenario.id}`,
-      behavior: scenario.purpose,
-      prompt: `Answer directly without delegating to another agent. ${scenario.userInput.replace(
-        /^Use the local Codex skill "advisor" if it helps\.\s*/,
-        "",
-      )}`,
-      rubric: `Pass only if the response satisfies every requirement: ${scenario.successChecklist.join(
-        " ",
-      )}`,
-      category: "advisor-like",
-      providers: advisorProviderLabels,
-    }));
+    .map((scenario) => {
+      if (!scenario.userInput.startsWith(advisorRoutingPrefix)) {
+        throw new Error(
+          `${scenario.id}: advisor benchmark input lacks the expected routing prefix`,
+        );
+      }
+
+      const sanitizedUserInput = scenario.userInput.slice(
+        advisorRoutingPrefix.length,
+      );
+      return {
+        id: `advisor-like-${scenario.id}`,
+        behavior: scenario.purpose,
+        prompt: `Answer directly without delegating to another agent. ${sanitizedUserInput}`,
+        rubric: [
+          "Pass only if the response satisfies the complete sanitized user request:",
+          sanitizedUserInput,
+          "Every checklist requirement must also be satisfied:",
+          ...scenario.successChecklist.map((requirement) => `- ${requirement}`),
+        ].join("\n"),
+        category: "advisor-like",
+        providers: advisorProviderLabels,
+      };
+    });
 }
 
 function loadBenchmarkCases() {
