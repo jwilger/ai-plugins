@@ -34,6 +34,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [ ] Medium-risk review has a roughly 60–90 minute budget checkpoint that forces an explicit ship, split, or escalate decision while never silently omitting a known blocker.
 - [ ] If a ticket grows into a new subsystem or an unusually broad diff, readiness stops final review and requires independently shippable ticket splits.
 - [ ] The final-review MCP/coordinator, state schema, disposition routing, lens assignment, targeted rerun logic, skill guidance, and fixtures implement these policies rather than relying on caller prose.
+- [ ] Automated tests cover low, medium, high, and exceptional risk; shared evidence reuse; caused versus incidental findings at every severity; unchanged-diff deferral; verifier eligibility; targeted post-fix reruns; review-budget decisions; and oversized-ticket splitting.
 
 ## Subtasks
 
