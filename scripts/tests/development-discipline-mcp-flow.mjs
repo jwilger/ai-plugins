@@ -95,16 +95,23 @@ await request({
   },
 });
 function cleanLensResults(reviewState) {
-  return reviewState.lenses.map((lens) => ({
-    lens,
-    subagent_key: `${reviewState.session_id}:${reviewState.iteration_index}:${lens}`,
-    status: "clean",
-    caller_attestation: {
-      model_role: reviewState.model_roles.lens_review,
-      fresh_context: true,
-      closed_after_result: true,
-    },
-  }));
+  return reviewState.lenses.map((lens) => {
+    const result = {
+      lens,
+      subagent_key: `${reviewState.session_id}:${reviewState.iteration_index}:${lens}`,
+      status: "clean",
+      caller_attestation: {
+        model_role: reviewState.model_roles.lens_review,
+        fresh_context: true,
+        closed_after_result: true,
+      },
+    };
+    if (reviewState.shared_test_evidence) {
+      result.shared_test_evidence_id = reviewState.shared_test_evidence.id;
+      result.additional_broad_test_run = false;
+    }
+    return result;
+  });
 }
 
 const findingLensResults = cleanLensResults(state);
@@ -382,6 +389,14 @@ const ticketRiskArguments = {
   user_request: "Review the changed local tooling behavior.",
   acceptance_criteria: ["Disposition confirmed findings without deadlock."],
   unrelated_finding_policy: { default: "report" },
+  shared_test_evidence: {
+    id: "tests-ticket-evidence",
+    diff_hash: "ticket-evidence",
+    status: "passed",
+    summary: "Fast fixture tests passed for this diff.",
+    commands: ["fixture:fast-tests"],
+    artifact_reference: "fixture://fast-tests/ticket-evidence",
+  },
 };
 const ticketScoutResponse = await request(
   {
@@ -426,6 +441,7 @@ const ticketPlanResponse = await request(
         risk_assessment: {
           assignment_id: ticketScout.assignment_id,
           subagent_key: ticketScout.subagent_key,
+          shared_test_evidence_id: ticketScout.shared_test_evidence.id,
           overall_risk: "high",
           dimensions: ticketDimensions,
           exceptional_triggers: [],
