@@ -17,6 +17,8 @@ Verified MINOR release finding from 20260709-spx8: plugin manifests/launcher pub
 
 ## Acceptance criteria
 
+- [ ] Installing the published Tiber version yields the same semver from both plugin manifests and MCP initialize on every bundled platform, with refreshed package locks, binaries, and checksums.
+
 ## Subtasks
 
 ## Notes / Log
