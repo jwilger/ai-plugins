@@ -1,7 +1,6 @@
 20260713-rygd-commit-green-increments-and-gate-follow-up-work-on-build-state
 20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes
 20260713-hgyz-make-targeted-plugin-eval-mode-install-the-actual-case-plugin-set
-20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
@@ -10,6 +9,7 @@
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-n3sh-add-cross-project-worktree-safety-guidance
+20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
 20260714-xkbv-make-final-review-scope-snapshots-work-with-read-only-repository-metadata
 20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
 20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
