@@ -1,19 +1,19 @@
 ---
-title: Preserve dangling workspace symlinks during GPT-5.6 benchmark preparation
+title: Harden GPT-5.6 benchmark workspace ownership and overlap handling
 blocked_by: []
 blocks: []
-tags: [evals, gpt-5.6, filesystem, safety, minor]
+tags: [evals, gpt-5.6, filesystem, safety, symlinks, ownership, tests, minor, backlog]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Refuse and preserve dangling or other unowned symlinks instead of treating them as absent benchmark workspaces.
+Preserve dangling or unowned symlinks, require the exact ownership marker before recursive recreation, and retain realpath-aware bidirectional overlap protection for benchmark workspaces and credential homes.
 
 ## Context / Why
 
-The GPT-5.6 workspace helper uses existsSync before recursive recreation. A dangling symlink reports absent, so rmSync removes the unowned link and creates a directory at the same path. This MINOR review finding was deferred from 20260709-spx8.
+Final review of 20260709-spx8 found that a dangling workspace symlink is treated as absent and replaced. Related deferred test-depth findings show that current regressions do not prove exact marker contents or the complete realpath-aware ancestor, descendant, symlink-alias, explicit-auth, and default ~/.codex overlap matrix. Consolidate these tightly coupled workspace deletion-authorization and isolation requirements into one bounded filesystem-safety increment.
 
 ## Acceptance criteria
 
