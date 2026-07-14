@@ -1,4 +1,3 @@
-20260709-spx8-update-all-evals-to-use-gpt-5-6-model-family-when-running-against-codex
 20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260713-hgyz-make-targeted-plugin-eval-mode-install-the-actual-case-plugin-set
