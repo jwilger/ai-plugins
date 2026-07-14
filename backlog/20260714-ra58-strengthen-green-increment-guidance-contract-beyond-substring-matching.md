@@ -19,6 +19,7 @@ MINOR test-verification finding from the risk-proportionate review-policy ticket
 
 - [ ] Reject negated or contradictory green-increment, CI-failure, and full-review guidance rather than accepting disconnected phrase presence.
 - [ ] Bind expensive-suite deferral to CI, actual acceptance criteria to full-review start, and post-fix delta assessment to affected-only reruns.
+- [ ] Keep a fast local contract and a semantic behavior fixture with calibrated pass and fail examples.
 
 ## Subtasks
 
