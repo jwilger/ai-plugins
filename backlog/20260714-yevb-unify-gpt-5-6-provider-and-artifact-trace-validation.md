@@ -20,6 +20,7 @@ Verified MINOR architecture finding from 20260709-spx8: both enforcement boundar
 - [ ] One pure shared validator owns the complete trace decision and structured rejection reason, and both trace-enforced-codex-provider.mjs and check-gpt56-execution-isolation.mjs call it with parity tests.
 - [ ] The shared validator enforces method-specific Codex 0.144.3 notification shapes: lifecycle start/completion require nonblank params.threadId and params.turn.id, while error notifications use their protocol-defined identifiers.
 - [ ] The shared validator proves completion is terminal and every relevant turn-scoped notification is ordered within, and associated with, the single active thread/turn lifecycle.
+- [ ] Provider/checker parity tests cover missing and duplicate start/completion, completion-before-start, malformed and mismatched identifiers, post-completion events, and retryable errors outside or mismatched to the active turn.
 
 ## Subtasks
 
