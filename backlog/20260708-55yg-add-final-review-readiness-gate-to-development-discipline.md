@@ -20,6 +20,7 @@ The risk-proportionate policy already requires the ticket's actual acceptance cr
 - [ ] Before final_review.assess or final_review.plan, the enforced workflow produces a readiness result bound to the exact work item, baseline, changed-file inventory, and diff hash.
 - [ ] The result verifies evidence for the ticket's existing acceptance criteria and inventories changed or generated artifacts, schemas, versions and manifests, documentation, required tests and evals, release artifacts, and external blockers without inventing new requirements.
 - [ ] Missing required evidence or an actionable omitted surface stops planning with specific remediation; a manual prose fallback cannot satisfy the enforced readiness gate.
+- [ ] Accepted defenses and tracked blockers reuse the existing prior_defenses and authoritative-state contract; no parallel carry-forward mechanism is introduced.
 
 ## Subtasks
 
