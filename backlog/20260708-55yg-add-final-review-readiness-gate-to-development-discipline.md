@@ -26,3 +26,5 @@ The risk-proportionate policy already requires the ticket's actual acceptance cr
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Backlog grooming 2026-07-14: Narrowed after 20260713-rygd. The active policy already requires actual acceptance criteria before final review; this ticket now owns only the missing mechanically bound evidence and cross-surface readiness inventory.
