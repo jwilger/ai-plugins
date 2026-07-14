@@ -28,3 +28,5 @@ The current CLI/MCP create surface accepts only a title, and the new-task skill 
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Backlog grooming 2026-07-14: Removed the completed 20260707-rpmy parser-migration prerequisite. The detailed atomic-create task is now unblocked; all existing requirements remain unchanged.
