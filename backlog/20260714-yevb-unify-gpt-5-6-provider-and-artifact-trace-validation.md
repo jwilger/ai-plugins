@@ -17,6 +17,8 @@ Verified MINOR architecture finding from 20260709-spx8: both enforcement boundar
 
 ## Acceptance criteria
 
+- [ ] One pure shared validator owns the complete trace decision and structured rejection reason, and both trace-enforced-codex-provider.mjs and check-gpt56-execution-isolation.mjs call it with parity tests.
+
 ## Subtasks
 
 ## Notes / Log
