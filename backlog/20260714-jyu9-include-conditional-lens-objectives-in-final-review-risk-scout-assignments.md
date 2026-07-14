@@ -22,3 +22,5 @@ Pass every configured conditional lens description/objective into the final-revi
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: 2026-07-14: Consolidated from a lightweight review of active policy ticket 20260713-rygd. The scout currently receives custom lens IDs but not their descriptions; classified MINOR and deferred under the global backlog policy.
