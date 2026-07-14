@@ -57,3 +57,4 @@
 20260714-gb9s-bound-final-review-git-pathspec-argv-and-delta-evidence-inventories
 20260714-iv3g-retire-content-addressed-final-review-delta-artifacts
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260714-24xa-tighten-final-review-split-and-budget-decision-contracts
