@@ -221,9 +221,20 @@ const trace = {
   items: [{ type: 'agent_message', text: 'Direct answer' }],
   notifications: [
     {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
+    },
+    {
       method: 'rawResponseItem/completed',
       params: {
         item: { type: 'message', role: 'assistant', content: [] },
+      },
+    },
+    {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'completed' },
       },
     },
   ],
@@ -1551,10 +1562,23 @@ fs.writeFileSync(file, JSON.stringify({
         raw: JSON.stringify({
           finalResponse: 'Direct answer',
           items: [{ id: 'item_0', type: 'agent_message', text: 'Direct answer' }],
-          notifications: [{
-            method: 'rawResponseItem/completed',
-            params: { item: { type: 'message', role: 'assistant', content: [] } },
-          }],
+          notifications: [
+            {
+              method: 'turn/started',
+              params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
+            },
+            {
+              method: 'rawResponseItem/completed',
+              params: { item: { type: 'message', role: 'assistant', content: [] } },
+            },
+            {
+              method: 'turn/completed',
+              params: {
+                threadId: 'thread-1',
+                turn: { id: 'turn-1', status: 'completed' },
+              },
+            },
+          ],
           serverRequests: [],
         }),
       },
@@ -1758,8 +1782,19 @@ const inner = {
         items: [{ type: 'agent_message', text: 'Direct answer' }],
         notifications: [
           {
+            method: 'turn/started',
+            params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
+          },
+          {
             method: 'rawResponseItem/completed',
             params: { item: { type: 'message', role: 'assistant', content: [] } },
+          },
+          {
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-1',
+              turn: { id: 'turn-1', status: 'completed' },
+            },
           },
         ],
         serverRequests: [],
@@ -1842,6 +1877,10 @@ const inner = {
       ],
       notifications: [
         {
+          method: 'turn/started',
+          params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
+        },
+        {
           method: 'item/started',
           params: { item: submittedUserMessage },
         },
@@ -1857,6 +1896,13 @@ const inner = {
               role: 'assistant',
               content: [{ type: 'output_text', text: 'Direct answer' }],
             },
+          },
+        },
+        {
+          method: 'turn/completed',
+          params: {
+            threadId: 'thread-1',
+            turn: { id: 'turn-1', status: 'completed' },
           },
         },
       ],
@@ -1896,6 +1942,184 @@ NODE
   run node "$ROOT/scripts/evals/check-gpt56-execution-isolation.mjs" "$artifact"
 
   rm -f "$artifact"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified 1 direct GPT-5.6 execution result"* ]]
+}
+
+@test "trace-enforced Codex provider and isolation checker require one successful terminal turn" {
+  artifact="$(mktemp)"
+  valid_artifact="${artifact}.valid"
+  run node --input-type=module - "$ROOT" "$artifact" "$valid_artifact" <<'NODE'
+import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
+
+const root = process.argv[2];
+const artifact = process.argv[3];
+const validArtifact = process.argv[4];
+const { default: TraceEnforcedCodexProvider } = await import(
+  pathToFileURL(
+    `${root}/evals/benchmarks/gpt-5.6-model-family/trace-enforced-codex-provider.mjs`,
+  )
+);
+
+const started = {
+  method: 'turn/started',
+  params: {
+    threadId: 'thread-1',
+    turn: { id: 'turn-1' },
+  },
+};
+const rawMessage = {
+  method: 'rawResponseItem/completed',
+  params: {
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+    item: { type: 'message', role: 'assistant', content: [] },
+  },
+};
+const completed = {
+  method: 'turn/completed',
+  params: {
+    threadId: 'thread-1',
+    turn: { id: 'turn-1', status: 'completed' },
+  },
+};
+const retryableError = {
+  method: 'error',
+  params: {
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+    willRetry: true,
+    error: { message: 'Transient provider error' },
+  },
+};
+const nonRetryableError = {
+  ...retryableError,
+  params: {
+    ...retryableError.params,
+    willRetry: false,
+    error: { message: 'Terminal provider error' },
+  },
+};
+const variants = [
+  {
+    id: 'missing-completion',
+    notifications: [started, rawMessage],
+    expected: 'missing turn/completed notification',
+  },
+  {
+    id: 'failed-completion',
+    notifications: [
+      started,
+      rawMessage,
+      {
+        ...completed,
+        params: {
+          ...completed.params,
+          turn: { ...completed.params.turn, status: 'failed' },
+        },
+      },
+    ],
+    expected: 'turn/completed status failed',
+  },
+  {
+    id: 'terminal-error',
+    notifications: [started, nonRetryableError, rawMessage, completed],
+    expected: 'non-retryable error notification',
+  },
+  {
+    id: 'duplicate-completion',
+    notifications: [started, rawMessage, completed, completed],
+    expected: 'duplicate turn/completed notifications',
+  },
+  {
+    id: 'mismatched-turn',
+    notifications: [
+      started,
+      rawMessage,
+      {
+        ...completed,
+        params: {
+          ...completed.params,
+          turn: { ...completed.params.turn, id: 'turn-2' },
+        },
+      },
+    ],
+    expected: 'turn identifiers do not match',
+  },
+];
+const validVariant = {
+  id: 'retryable-then-completed',
+  notifications: [started, retryableError, rawMessage, completed],
+};
+
+const responseFor = (notifications) => ({
+  output: 'Direct answer',
+  raw: JSON.stringify({
+    items: [{ type: 'agent_message', text: 'Direct answer' }],
+    notifications,
+    serverRequests: [],
+  }),
+});
+const providerFor = (notifications) => new TraceEnforcedCodexProvider(
+  {
+    id: 'terminal-lifecycle-fixture',
+    config: {
+      working_dir: process.env.GPT56_PROVIDER_TEST_WORKSPACE,
+      cli_env: { CODEX_HOME: '/tmp/codex-home-fixture' },
+    },
+  },
+  async () => ({
+    buildThreadStartParams: () => ({}),
+    buildTurnStartParams: () => ({}),
+    callApi: async () => responseFor(notifications),
+  }),
+);
+
+for (const variant of variants) {
+  const response = await providerFor(variant.notifications).callApi('Answer directly.');
+  if (!response.error?.includes(variant.expected)) {
+    throw new Error(
+      `${variant.id}: provider accepted invalid lifecycle: ${JSON.stringify(response)}`,
+    );
+  }
+}
+const validResponse = await providerFor(validVariant.notifications).callApi(
+  'Answer directly.',
+);
+if (validResponse.error) {
+  throw new Error(`provider rejected retryable successful lifecycle: ${validResponse.error}`);
+}
+
+const resultFor = (variant) => ({
+  provider: { label: `codex-gpt-5.6-terra-${variant.id}` },
+  testCase: { vars: { case_id: variant.id, sample_index: 1 } },
+  response: responseFor(variant.notifications),
+});
+fs.writeFileSync(
+  artifact,
+  JSON.stringify({ results: { results: variants.map(resultFor) } }),
+);
+fs.writeFileSync(
+  validArtifact,
+  JSON.stringify({ results: { results: [resultFor(validVariant)] } }),
+);
+NODE
+
+  [ "$status" -eq 0 ]
+
+  run node "$ROOT/scripts/evals/check-gpt56-execution-isolation.mjs" "$artifact"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing-completion"*"missing turn/completed notification"* ]]
+  [[ "$output" == *"failed-completion"*"turn/completed status failed"* ]]
+  [[ "$output" == *"terminal-error"*"non-retryable error notification"* ]]
+  [[ "$output" == *"duplicate-completion"*"duplicate turn/completed notifications"* ]]
+  [[ "$output" == *"mismatched-turn"*"turn identifiers do not match"* ]]
+
+  run node "$ROOT/scripts/evals/check-gpt56-execution-isolation.mjs" "$valid_artifact"
+
+  rm -f "$artifact" "$valid_artifact"
   [ "$status" -eq 0 ]
   [[ "$output" == *"verified 1 direct GPT-5.6 execution result"* ]]
 }
@@ -2362,12 +2586,23 @@ const cleanInner = {
       items: normalizedItems,
       notifications: [
         {
+          method: 'turn/started',
+          params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
+        },
+        {
           method: 'rawResponseItem/completed',
           params: { item: { type: 'reasoning', summary: [] } },
         },
         {
           method: 'rawResponseItem/completed',
           params: { item: { type: 'message', role: 'assistant', content: [] } },
+        },
+        {
+          method: 'turn/completed',
+          params: {
+            threadId: 'thread-1',
+            turn: { id: 'turn-1', status: 'completed' },
+          },
         },
       ],
       serverRequests: [],
@@ -2458,8 +2693,19 @@ const baseRaw = {
   items: [{ type: 'agent_message', text: 'Direct answer' }],
   notifications: [
     {
+      method: 'turn/started',
+      params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
+    },
+    {
       method: 'rawResponseItem/completed',
       params: { item: { type: 'message', role: 'assistant', content: [] } },
+    },
+    {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'completed' },
+      },
     },
   ],
 };

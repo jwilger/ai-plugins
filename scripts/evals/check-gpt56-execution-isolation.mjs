@@ -5,6 +5,7 @@ import {
   allowedNormalizedItemTypes,
   allowedRawResponseItemTypes,
   toolNotificationDescription,
+  turnLifecycleRejection,
 } from "../../evals/benchmarks/gpt-5.6-model-family/trace-policy.mjs";
 
 const resultsPath = process.argv[2];
@@ -188,6 +189,11 @@ for (const result of results) {
         failures.push(
           `${caseLabel(result)}: server request activity was recorded`,
         );
+      }
+
+      const lifecycleRejection = turnLifecycleRejection(trace.notifications);
+      if (lifecycleRejection) {
+        failures.push(`${caseLabel(result)}: ${lifecycleRejection}`);
       }
     }
   } catch (error) {

@@ -264,9 +264,20 @@ const provider = new TraceEnforcedCodexProvider(
           items: [{ type: 'agent_message', text: 'Direct answer' }],
           notifications: [
             {
+              method: 'turn/started',
+              params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
+            },
+            {
               method: 'rawResponseItem/completed',
               params: {
                 item: { type: 'message', role: 'assistant', content: [] },
+              },
+            },
+            {
+              method: 'turn/completed',
+              params: {
+                threadId: 'thread-1',
+                turn: { id: 'turn-1', status: 'completed' },
               },
             },
           ],
@@ -419,9 +430,20 @@ const providerLoader = async (providerId, context) => {
         items: [{ type: 'agent_message', text: 'Direct answer' }],
         notifications: [
           {
+            method: 'turn/started',
+            params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
+          },
+          {
             method: 'rawResponseItem/completed',
             params: {
               item: { type: 'message', role: 'assistant', content: [] },
+            },
+          },
+          {
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-1',
+              turn: { id: 'turn-1', status: 'completed' },
             },
           },
         ],
@@ -607,9 +629,20 @@ const provider = new TraceEnforcedCodexProvider(
           items: [{ type: 'agent_message', text: 'Direct answer' }],
           notifications: [
             {
+              method: 'turn/started',
+              params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
+            },
+            {
               method: 'rawResponseItem/completed',
               params: {
                 item: { type: 'message', role: 'assistant', content: [] },
+              },
+            },
+            {
+              method: 'turn/completed',
+              params: {
+                threadId: 'thread-1',
+                turn: { id: 'turn-1', status: 'completed' },
               },
             },
           ],
