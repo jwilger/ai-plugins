@@ -26,3 +26,5 @@ Split from 20260713-uf3e. Inherited concurrency can exceed the supported maximum
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Split from 20260713-uf3e. This ticket exclusively owns concurrency, sample, help, and effective-timeout validation.
