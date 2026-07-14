@@ -4,7 +4,6 @@
 20260713-jsad-document-retained-subagent-slot-recovery-in-final-review-guidance
 20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
-20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
@@ -15,6 +14,7 @@
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
 20260714-g89d-make-gpt-5-6-provider-locking-stable-across-worktrees-and-the-full-run-lifecycle
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
