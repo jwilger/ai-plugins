@@ -18,7 +18,6 @@ Backlog-only capture, explicit transition before active work, and basic PR/MR UR
 ## Acceptance criteria
 
 - [ ] Tiber guidance makes clear that backlog capture leaves tasks in backlog unless the user explicitly asks to start work.
-- [ ] Guidance requires active work to move tasks to in-progress and requires multiple in-progress tasks to be isolated by separate branches or worktrees.
 
 ## Subtasks
 
