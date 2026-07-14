@@ -17,6 +17,8 @@ scripts/evals/run.sh currently defaults targeted Codex composition to every mark
 
 ## Acceptance criteria
 
+- [ ] For each selected behavior suite, targeted mode derives a deterministic, deduplicated plugin set from the selected cases and installs exactly that set for every supported harness.
+
 ## Subtasks
 
 ## Notes / Log
