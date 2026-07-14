@@ -23,6 +23,7 @@
 20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
 20260713-shcm-cover-upstream-provider-error-passthrough-in-the-gpt-5-6-trace-enforced-provider
 20260713-ffpt-avoid-initializing-the-gpt-5-6-trace-provider-during-unused-cleanup
+20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260713-u2md-remove-stale-live-evals-workflow-documentation
 20260713-ehg9-correct-gpt-5-6-benchmark-docs-for-superseded-labels-and-path-lifecycle
@@ -55,4 +56,3 @@
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260714-n7ku-extract-gpt-5-6-measurement-contracts-from-the-generic-threshold-checker
-20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
