@@ -1,6 +1,5 @@
 20260713-rygd-commit-green-increments-and-gate-follow-up-work-on-build-state
 20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes
-20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260713-hgyz-make-targeted-plugin-eval-mode-install-the-actual-case-plugin-set
 20260713-jsad-document-retained-subagent-slot-recovery-in-final-review-guidance
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
@@ -20,6 +19,7 @@
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
