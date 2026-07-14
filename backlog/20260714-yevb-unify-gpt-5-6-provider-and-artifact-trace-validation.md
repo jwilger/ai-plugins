@@ -18,6 +18,7 @@ Verified MINOR architecture finding from 20260709-spx8: both enforcement boundar
 ## Acceptance criteria
 
 - [ ] One pure shared validator owns the complete trace decision and structured rejection reason, and both trace-enforced-codex-provider.mjs and check-gpt56-execution-isolation.mjs call it with parity tests.
+- [ ] The shared validator enforces method-specific Codex 0.144.3 notification shapes: lifecycle start/completion require nonblank params.threadId and params.turn.id, while error notifications use their protocol-defined identifiers.
 
 ## Subtasks
 
