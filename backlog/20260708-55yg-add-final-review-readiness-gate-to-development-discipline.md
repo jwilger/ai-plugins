@@ -17,6 +17,8 @@ The risk-proportionate policy already requires the ticket's actual acceptance cr
 
 ## Acceptance criteria
 
+- [ ] Before final_review.assess or final_review.plan, the enforced workflow produces a readiness result bound to the exact work item, baseline, changed-file inventory, and diff hash.
+
 ## Subtasks
 
 ## Notes / Log
