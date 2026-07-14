@@ -25,3 +25,5 @@ Deferred caused MINOR from the lightweight review of 20260709-spx8. The focused 
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Superseded by 20260713-hgyz. The target now includes explicit-empty, unknown-name, omitted-list, and no-write-before-validation requirements.
