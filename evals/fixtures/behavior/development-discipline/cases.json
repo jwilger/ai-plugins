@@ -435,6 +435,35 @@
     }
   },
   {
+    "case_id": "development-discipline-green-increment-ci-loop",
+    "behavior": "Preserves each green implementation increment through fast local gates and delegates expensive evidence to CI before ticket-completion review.",
+    "prompt": "You are implementing a medium-risk ticket in several small TDD increments. Which checks gate each local commit and push, when may work continue based on CI state, when should full review begin, and what sequence applies if full review requires an edit?",
+    "tags": [
+      "development-discipline",
+      "tdd",
+      "final-review",
+      "ci",
+      "incremental-delivery"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["test-driven-development", "final-review"],
+    "coverage": {
+      "kinds": ["core-behavior", "workflow", "state-transition"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response gives the increment loop as fast unit tests, lightweight review, commit and push, then confirm the latest pushed build is running or green before continuing; says a failed build blocks follow-up work until repaired; assigns long-running integration, mutation, exhaustive, or full-suite checks to CI unless locally needed to diagnose a failure; and starts full review only after the ticket's actual acceptance criteria are implemented. If full review requires an edit, it must first recheck the latest pushed build, apply the edit test-first, repeat fast tests and lightweight review, commit and push, confirm CI is running or green, then run one delta risk assessment and resume only affected/guard assignments. Fail if full review blocks every incremental push, expensive suites run locally after every edit, failed CI is ignored, acceptance criteria can be deferred, or every review lens restarts after a fix.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "For each increment: fast unit tests, lightweight review, commit and push, then verify the latest pushed build is running or green. Leave long suites to CI. Begin full review only after every acceptance criterion is implemented; after a review edit, repeat the green increment gate and use one delta scout to select affected reruns."
+      ],
+      "fail": [
+        "Wait to commit until three broad full-review passes and every exhaustive suite finish locally; continue to the next ticket even if the latest pushed build failed."
+      ]
+    }
+  },
+  {
     "case_id": "final-review-scope-growth-forces-ticket-split",
     "behavior": "Stops initial or delta final-review planning when the scout finds a new subsystem or unusually broad diff without an independently shippable ticket split.",
     "prompt": "During the risk scout, a ticket that began as a small policy edit now adds a separate deployable subsystem and touches an unusually broad set of paths. What structured split evidence must the scout return, and may final_review.plan or a delta reassessment continue reviewing the combined diff?",

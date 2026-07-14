@@ -8,6 +8,11 @@ description: Use when preparing local changes, a branch, pull request, merge req
 Run a local, fresh-context review cycle before creating a pull request, merging,
 or claiming a change is ready.
 
+This is the ticket-completion gate, not the gate for preserving each green
+implementation increment. Start it only after the ticket's actual acceptance
+criteria are implemented and the latest pushed build is running or green. A
+failed build blocks final review and follow-up work until repaired.
+
 Use the plugin's `development-discipline` stdio MCP when available:
 `final_review.plan` assigns reviewers and `final_review.advance` is the canonical
 filter/state transition. If unavailable, a manual pass may produce review
@@ -249,8 +254,14 @@ policy.
    Split and escalate create a terminal hold for that review session.
 
 4. Fix valid findings when remediation was requested; for review-only requests,
-   report without editing. On the initial advancing call that records each
-   disposition, send `caller_decisions` in this shape:
+   report without editing. Before addressing a finding, check the latest pushed
+   build again: running or green permits remediation, while a failed build must
+   be repaired first. Any remediation that changes the diff leaves the current
+   full-review pass: run fast unit tests, run a lightweight review, commit and
+   push, confirm the new latest pushed build is running or green, then submit
+   exactly one diff-bound delta risk assessment. Resume only the assignments it
+   returns; do not restart unaffected lenses. On the initial advancing call
+   that records each disposition, send `caller_decisions` in this shape:
 
    ```json
    [

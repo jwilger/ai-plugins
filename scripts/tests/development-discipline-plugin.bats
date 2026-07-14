@@ -115,3 +115,65 @@ NODE
 
   [ "$status" -eq 0 ]
 }
+
+@test "development-discipline encodes the green increment and CI follow-up loop" {
+  run node - "$ROOT" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.argv[2];
+const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
+const normalize = (value) => value.toLowerCase().replace(/\s+/g, ' ');
+const tdd = normalize(read('plugins/development-discipline/skills/test-driven-development/SKILL.md'));
+const finalReview = normalize(read('plugins/development-discipline/skills/final-review/SKILL.md'));
+const cases = JSON.parse(read('evals/fixtures/behavior/development-discipline/cases.json'));
+const failures = [];
+
+for (const phrase of [
+  'fast unit tests',
+  'commit and push',
+  'latest pushed build',
+  'running or green',
+  'failed build',
+  'long-running',
+  'full review',
+]) {
+  if (!tdd.includes(phrase)) failures.push(`TDD guidance missing: ${phrase}`);
+}
+for (const phrase of [
+  'fast unit tests',
+  'lightweight review',
+  'commit and push',
+  'latest pushed build',
+  'delta risk assessment',
+]) {
+  if (!finalReview.includes(phrase)) failures.push(`final-review guidance missing: ${phrase}`);
+}
+
+const fixture = cases.find(
+  (entry) => entry.case_id === 'development-discipline-green-increment-ci-loop',
+);
+if (!fixture) {
+  failures.push('missing green-increment CI behavior fixture');
+} else {
+  const rubric = normalize(String(fixture.semanticRubric || ''));
+  for (const phrase of [
+    'fast unit tests',
+    'lightweight review',
+    'commit and push',
+    'running or green',
+    'failed',
+    'full review',
+  ]) {
+    if (!rubric.includes(phrase)) failures.push(`green-increment fixture missing: ${phrase}`);
+  }
+}
+
+if (failures.length > 0) {
+  console.error(failures.join('\n'));
+  process.exit(1);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
