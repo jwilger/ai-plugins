@@ -21,6 +21,7 @@ Final-review operability finding from 20260713-rygd. This is distinct from 20260
 - [ ] Preserve exact baseline, changed-file, tracked/untracked-content, and diff-hash binding.
 - [ ] A read-only .git with writable worktree is covered by a focused regression.
 - [ ] Permission failure emits an actionable diagnostic and supported recovery path without silently weakening or bypassing final-review enforcement.
+- [ ] Temporary snapshot state is bounded and cleaned safely.
 
 ## Subtasks
 
