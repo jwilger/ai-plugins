@@ -20,6 +20,7 @@ Discovered while migrating canonical Codex eval defaults to GPT-5.6. Provider la
 - [ ] Every persisted result records the resolved execution model and reasoning effort, and provider/dashboard labels remain accurate when environment overrides are used.
 - [ ] Result summaries retain and render execution latency, token usage, and separate grader model/effort provenance.
 - [ ] GPT-5.6 Sol, Terra, and Luna costs use current documented Codex credit rates (or an explicitly versioned source), with tests preventing missing or zero cost from being presented as real spend.
+- [ ] Focused config, artifact, aggregation, and dashboard regressions cover CODEX_EVAL_MODEL overriding the configured Terra default to both Sol and Luna and prove that no static provider ID or label continues to report Terra.
 
 ## Subtasks
 
