@@ -18,6 +18,7 @@ Split from 20260713-uf3e. Inherited concurrency can exceed the supported maximum
 ## Acceptance criteria
 
 - [ ] PROMPTFOO_MAX_CONCURRENCY accepts only the documented supported range, and an explicitly empty value is either documented as equivalent to unset or rejected distinctly.
+- [ ] Canonical runner help remains available despite an invalid ambient concurrency override, while live and dry-run execution validate before preparation or launch.
 
 ## Subtasks
 
