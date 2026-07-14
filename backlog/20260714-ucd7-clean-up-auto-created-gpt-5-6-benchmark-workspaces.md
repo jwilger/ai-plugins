@@ -22,3 +22,5 @@ Verified MINOR production footgun from 20260709-spx8: each live run reaching wor
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Scope boundary from 20260713-uf3e split: this ticket exclusively owns cleanup of runner-owned default workspaces on success, failure, timeout, and interruption. The replacement split tickets do not duplicate cleanup.
