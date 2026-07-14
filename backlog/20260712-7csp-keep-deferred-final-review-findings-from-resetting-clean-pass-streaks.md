@@ -26,3 +26,4 @@ The current final-review skill tells callers that findings caused by the active 
 ## Notes / Log
 
 - 2026-07-13: Concrete reproduction from 20260712-kwbg formal review: three consecutive full iterations over unchanged diff hash bd9cca00d7d07a58304587cabbbdf07653aa2492 each filtered clean with all MINOR findings routed to existing ticket 20260712-5w5n. After iteration 3, coordinator state reported clean_streak=3 and unresolved_findings=[], but complete=false and verified_clean_iterations=0 because confirmed ticket-routed findings clear the separate verified-clean counter. This is the exact mismatch with the intended same-diff policy: deferred items should not prevent completion or require additional passes.
+- 2026-07-14: 2026-07-14 superseded and absorbed into canonical top-priority ticket 20260713-rygd, which now covers non-blocking unchanged-diff deferral in both guidance and final-review machinery.
