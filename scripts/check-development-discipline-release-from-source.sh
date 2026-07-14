@@ -39,6 +39,12 @@ project_root="$(mktemp -d)"
 trap 'rm -rf "$source_output" "$dist_output" "$project_root"' EXIT
 
 mkdir -p "$project_root/.development-discipline"
+git -C "$project_root" init --quiet
+git -C "$project_root" config user.name "Final Review Fixture"
+git -C "$project_root" config user.email "final-review-fixture@example.test"
+git -C "$project_root" commit --allow-empty --quiet -m "Initialize final-review fixture"
+mkdir -p "$project_root/src"
+printf '%s\n' 'fixture change' >"$project_root/src/new.rs"
 printf '%s\n' \
   '[final_review.models]' \
   'pre_filter = "config-pre"' \

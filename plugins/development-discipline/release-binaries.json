@@ -1,25 +1,25 @@
 {
-  "source_fingerprint": "6ce110fa5f46ea31909b0881be191afc186cebb1a45d7e699672799d976b9704",
+  "source_fingerprint": "7694a7047c19c958433cf6bf617063f70333ef0156680e94d456432e21121c48",
   "binaries": [
     {
       "target": "aarch64-unknown-linux-musl",
       "path": "dist/aarch64-unknown-linux-musl/development-discipline-mcp",
-      "sha256": "da552a05a19f4a4c8a711021dc8ba97e9283a6595b713cd98ed05b2fe69bac9e"
+      "sha256": "666a210323fcfda9db98550c6835b87d9ac7915d423fab14ccbad2ebb7921405"
     },
     {
       "target": "x86_64-unknown-linux-musl",
       "path": "dist/x86_64-unknown-linux-musl/development-discipline-mcp",
-      "sha256": "d3c093a28b57e2710392fbd544c984a9a291ea7ded3b1a2477dbba5f2bd726d0"
+      "sha256": "778c5fabb5b169f046ff8c2a86a13d7657098cd7fc5367139d8322580836bb21"
     },
     {
       "target": "x86_64-apple-darwin",
       "path": "dist/x86_64-apple-darwin/development-discipline-mcp",
-      "sha256": "56d7c3744b311bc58631c1e650e4f3488dfd4a6ac6485420e94322439d35ec8c"
+      "sha256": "cfa95e66435e6afc58bba98ee40ed4b73c8b99e7a39ac876023e09d7ff4df11f"
     },
     {
       "target": "aarch64-apple-darwin",
       "path": "dist/aarch64-apple-darwin/development-discipline-mcp",
-      "sha256": "56d7c3744b311bc58631c1e650e4f3488dfd4a6ac6485420e94322439d35ec8c"
+      "sha256": "cfa95e66435e6afc58bba98ee40ed4b73c8b99e7a39ac876023e09d7ff4df11f"
     }
   ]
 }
