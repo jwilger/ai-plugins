@@ -17,6 +17,8 @@ Caused MINOR deferred from 20260709-spx8. The decision/limits prose still says c
 
 ## Acceptance criteria
 
+- [ ] The benchmark README consistently identifies the current grader calibration as eight labels and scopes every six-label or 6/6 statement explicitly to the superseded pilot.
+
 ## Subtasks
 
 ## Notes / Log
