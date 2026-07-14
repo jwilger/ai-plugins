@@ -56,3 +56,4 @@
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-gb9s-bound-final-review-git-pathspec-argv-and-delta-evidence-inventories
 20260714-iv3g-retire-content-addressed-final-review-delta-artifacts
+20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
