@@ -26,3 +26,5 @@ Split from 20260713-uf3e. The focused and canonical runners can disagree on logi
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Split from 20260713-uf3e. This ticket exclusively owns shared provider-lock identity, storage, acquisition, inheritance, and release.
