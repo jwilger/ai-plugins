@@ -17,6 +17,8 @@ Backlog-only capture, explicit transition before active work, and basic PR/MR UR
 
 ## Acceptance criteria
 
+- [ ] Guidance requires each concurrently active in-progress task to use its own claim, branch, and linked worktree and forbids treating a backlog claim as an informal reservation.
+
 ## Subtasks
 
 ## Notes / Log
