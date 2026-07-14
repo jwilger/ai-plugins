@@ -18,7 +18,6 @@ A caused MINOR operability finding from 20260713-rygd showed that mandatory scop
 ## Acceptance criteria
 
 - [ ] Scope snapshot creation does not require writing objects or refs into the reviewed repository's Git metadata; use an isolated temporary object database or an equivalent immutable snapshot mechanism.
-- [ ] Preserve exact baseline, changed-file, tracked/untracked-content, and diff-hash binding.
 
 ## Subtasks
 
