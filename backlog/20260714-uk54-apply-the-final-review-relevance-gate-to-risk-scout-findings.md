@@ -19,6 +19,7 @@ A caused MAJOR correctness finding from 20260713-rygd showed that scout findings
 
 - [ ] Initial and delta risk-scout findings pass through the same deterministic relevance validation and filtering used for normal lens findings before persistence, disposition, blocker calculation, verifier selection, or follow-up-ticket requirements.
 - [ ] Scout findings claiming acceptance_criteria, user_request, or explicit_user_concern relevance provide exact matched_context; cross-cutting findings provide in-scope changed_diff_evidence; prior-defense findings provide the defense ID and new contradictory changed-diff evidence.
+- [ ] A missing, mismatched, generic, or out-of-scope relevance claim is rejected or retained only as a non-actionable report and cannot force a backlog ticket, verifier, blocker, or review reset.
 
 ## Subtasks
 
