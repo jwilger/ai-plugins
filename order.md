@@ -23,12 +23,12 @@
 20260708-puyh-add-development-workflow-router-skill
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
 20260708-55yg-add-final-review-readiness-gate-to-development-discipline
-20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
+20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
