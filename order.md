@@ -1,8 +1,8 @@
 20260713-rygd-commit-green-increments-and-gate-follow-up-work-on-build-state
 20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes
 20260713-hgyz-make-targeted-plugin-eval-mode-install-the-actual-case-plugin-set
-20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
+20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
