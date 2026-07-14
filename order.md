@@ -13,7 +13,6 @@
 20260713-hkrf-cover-gpt-5-6-benchmark-sample-overrides-and-exact-provider-label-contracts
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
 20260714-ucd7-clean-up-auto-created-gpt-5-6-benchmark-workspaces
-20260713-x8yr-prove-realpath-aware-bidirectional-gpt-5-6-workspace-overlap-rejection
 20260713-hiks-require-strict-types-for-gpt-5-6-measurement-gate-metadata
 20260714-7kxi-exercise-promptfoo-cli-provider-shape-in-gpt-5-6-measurement-fixtures
 20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
