@@ -1,19 +1,19 @@
 ---
-title: Make targeted-plugin eval mode install the actual case plugin set
+title: Make targeted plugin evals install exactly the selected case plugin set
 blocked_by: []
 blocks: []
-tags: [evals, plugin-modes, measurement-validity, codex, claude, major, backlog]
+tags: [evals, plugin-modes, measurement-validity, codex, claude, validation, plugin-loading, major, backlog]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Derive targeted-plugin provider composition from the selected behavior cases so targeted and full-marketplace rows are meaningfully distinct without a manual override.
+Derive targeted provider composition from selected behavior cases, reject explicit empty or unknown plugin selections before writes, and keep targeted and full-marketplace rows meaningfully distinct.
 
 ## Context / Why
 
-Pre-existing MAJOR found while reviewing 20260709-spx8 docs. scripts/evals/run.sh defaults EVAL_TARGETED_PLUGINS to every Codex marketplace plugin, while Claude targeted/full providers both load every Claude plugin; load-harness-cases.cjs does not alter installation. Default targeted and full rows are therefore compositionally identical despite distinct labels. Build the targeted set from selected case metadata for Codex and define an honest Claude equivalent or remove the duplicate label, with dashboard/config regressions.
+scripts/evals/run.sh currently defaults targeted Codex composition to every marketplace plugin, while Claude targeted and full providers are compositionally identical. Separately, prepare-codex-home.mjs accepts an explicitly empty skills-only plugin list and can prepare a zero-plugin home. Treat these as one selection-semantics boundary: omitted selection may mean the documented full set, but an explicitly supplied targeted selection must be nonempty, known, derived from the selected cases, and installed before a row may be labeled targeted.
 
 ## Acceptance criteria
 
