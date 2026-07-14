@@ -25,3 +25,5 @@ Discovered while migrating canonical Codex eval defaults to GPT-5.6. Provider la
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Backlog grooming 2026-07-14: Consolidated 20260713-j3x4 here because effective override labeling is a strict subset of this ticket's model/provenance contract. Its Sol/Luna override regression is now explicit.
