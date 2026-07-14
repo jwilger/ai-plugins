@@ -25,3 +25,5 @@ Split from 20260713-uf3e. Ambient output overrides can collapse execution and gr
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Split from 20260713-uf3e. This ticket exclusively owns phase-safe path resolution, artifact separation, preparation lifecycle, and stale-evidence prevention.
