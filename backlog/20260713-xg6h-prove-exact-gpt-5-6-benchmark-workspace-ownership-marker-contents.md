@@ -22,3 +22,5 @@ Current tests cover an absent marker and the exact valid marker, but not a near-
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Superseded by 20260713-2rd3, which now carries the exact-marker deletion-authorization regression.
