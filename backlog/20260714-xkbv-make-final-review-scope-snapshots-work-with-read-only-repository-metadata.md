@@ -2,18 +2,18 @@
 title: Make final-review scope snapshots work with read-only repository metadata
 blocked_by: []
 blocks: []
-tags: [development-discipline, final-review, operability, git, minor]
+tags: [development-discipline, final-review, git, snapshots, permissions, operability, minor, backlog]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Remove the mandatory final-review scout's dependency on writable repository Git metadata by isolating scope-snapshot objects while preserving exact diff binding.
+Create immutable final-review scope snapshots without writing objects or refs into the reviewed repository's Git metadata, while preserving exact diff binding and actionable recovery.
 
 ## Context / Why
 
-Final-review operability finding from 20260713-rygd. This is distinct from 20260714-gb9s pathspec/evidence-size bounds, 20260714-hmwe ambient signing/hooks, and 20260714-iv3g delta-artifact cleanup; none addresses mandatory snapshot writes to a read-only repository object store.
+A caused MINOR operability finding from 20260713-rygd showed that mandatory scope snapshot creation runs git add, write-tree, and commit-tree against the reviewed repository's object store. Managed workspaces commonly permit working-tree writes while keeping .git metadata read-only, causing final_review.assess_risk to fail before the mandatory scout with no actionable recovery guidance. Use an isolated temporary object database or equivalent immutable snapshot mechanism without weakening scope identity.
 
 ## Acceptance criteria
 
