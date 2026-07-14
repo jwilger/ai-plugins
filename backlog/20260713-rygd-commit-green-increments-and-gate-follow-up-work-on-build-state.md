@@ -26,6 +26,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [ ] Final-review planning accepts or derives an explicit risk class from concrete deployment, trust-boundary, reversibility, data, and operational evidence, and enables only lenses justified by that risk.
 - [ ] Low-risk work uses lightweight review with at most one optional targeted final lens; medium-risk work uses one targeted full-review pass; high-risk work uses one broad pass.
 - [ ] Multiple independent clean passes are available only for exceptional risk such as destructive or irreversible operations, authentication/authorization boundaries, sensitive-data migrations, cryptographic behavior, or safety-critical behavior.
+- [ ] A review iteration is clean when no unresolved blocking finding remains after disposition; caused CRITICAL/MAJOR findings block, incidental or pre-existing CRITICAL/MAJOR and all MINOR findings require appropriately prioritized backlog work, and TRIVIAL findings are report-only.
 
 ## Subtasks
 
