@@ -23,3 +23,5 @@ Caused MINOR deferred from 20260709-spx8. The current fake Promptfoo exits 7, bu
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Scope boundary from 20260713-uf3e split: this ticket owns canonical status precedence and terminal 124/128+ classification; 20260714-2xyd owns artifact freshness and preparation lifecycle.
