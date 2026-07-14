@@ -41,6 +41,7 @@ The current development-discipline workflow delayed a medium-risk local eval-too
 - [ ] After each review-response content change clears fast tests, lightweight review, push, and the CI running-or-green gate, one delta risk assessment compares the old and new diff; it may add coverage or invalidate evidence but cannot erase unresolved blockers or silently reduce required coverage, while unchanged-diff disposition work triggers no replanning.
 - [ ] Failed CI and unmet ticket acceptance criteria remain independent completion gates; among review findings, only caused or worsened CRITICAL/MAJOR security findings block, while every non-security finding and incidental/pre-existing security finding is consolidated into backlog work (TRIVIAL remains report-only) unless an explicit release-security stop applies.
 - [ ] Discovery saturation uses two consecutive independent samples over the same diff: the risk scout is sample one and selected deep reviewers are the confirmation sample; completion requires the confirmation sample to add no semantically new MAJOR/CRITICAL failure path, and any newly discovered path triggers only affected-lens confirmation until a sample adds none.
+- [ ] Initial final-review planning returns exactly one fresh, diff-bound broad-but-shallow risk-scout assignment before any deep-review lens assignments; it covers every review dimension, consumes shared evidence, records canonical semantic failure paths for discovery sample one, and cannot run tests, invoke verifiers, or recurse into more planning.
 
 ## Subtasks
 
