@@ -2,9 +2,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-
-const markerName = ".ai-plugins-gpt56-workspace";
-const markerContents = "ai-plugins GPT-5.6 benchmark workspace\n";
+import {
+  assertSafeGpt56WorkspaceLocation,
+  gpt56WorkspaceMarkerContents,
+  gpt56WorkspaceMarkerName,
+  inspectGpt56Workspace,
+} from "./gpt56-workspace-policy.mjs";
 
 function parseArgs(argv) {
   if (argv.length === 0 || !argv[0].trim()) {
@@ -60,32 +63,13 @@ function pathsOverlap(first, second) {
   return isSameOrAncestor(first, second) || isSameOrAncestor(second, first);
 }
 
-function isEmptyOrOwned(workspace) {
-  if (!fs.existsSync(workspace)) return true;
-  if (!fs.statSync(workspace).isDirectory()) return false;
-
-  const entries = fs.readdirSync(workspace);
-  if (entries.length === 0) return true;
-
-  const marker = path.join(workspace, markerName);
-  if (!fs.existsSync(marker)) return false;
-
-  return fs.readFileSync(marker, "utf8") === markerContents;
-}
-
-function isEmptyDirectory(entry) {
-  return (
-    fs.existsSync(entry) &&
-    fs.statSync(entry).isDirectory() &&
-    fs.readdirSync(entry).length === 0
-  );
-}
-
 try {
   const { checkOnly, protectedPaths, workspace } = parseArgs(
     process.argv.slice(2),
   );
-  const initializeInPlace = isEmptyDirectory(workspace);
+  assertSafeGpt56WorkspaceLocation(workspace);
+  const workspaceState = inspectGpt56Workspace(workspace);
+  const initializeInPlace = workspaceState.kind === "empty";
   const realWorkspace = realPathIfExists(workspace);
   for (const protectedPath of protectedPaths) {
     if (pathsOverlap(realWorkspace, realPathIfExists(protectedPath))) {
@@ -95,7 +79,7 @@ try {
     }
   }
 
-  if (!isEmptyOrOwned(workspace)) {
+  if (workspaceState.kind === "unowned") {
     throw new Error(
       `refusing to replace unowned GPT-5.6 benchmark workspace: ${workspace}`,
     );
@@ -107,9 +91,11 @@ try {
     fs.rmSync(workspace, { recursive: true, force: true });
   }
   fs.mkdirSync(workspace, { recursive: true });
-  fs.writeFileSync(path.join(workspace, markerName), markerContents, {
-    mode: 0o600,
-  });
+  fs.writeFileSync(
+    path.join(workspace, gpt56WorkspaceMarkerName),
+    gpt56WorkspaceMarkerContents,
+    { mode: 0o600 },
+  );
   console.log(`prepared GPT-5.6 benchmark workspace: ${workspace}`);
 } catch (error) {
   console.error(error.message);

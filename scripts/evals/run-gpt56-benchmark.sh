@@ -150,6 +150,7 @@ if [ "$dry_run" -eq 1 ]; then
   print_command node "$root/scripts/evals/prepare-codex-home.mjs" "$no_plugins_home" --plugin-mode no-plugins
   "$root/scripts/evals/run.sh" --dry-run "$config"
   if [ "$phase" = "execution" ]; then
+    print_command node "$root/scripts/evals/check-thresholds.mjs" "$EVAL_OUT_DIR/results.json" --expected-measurement-config "$config"
     print_command node "$root/scripts/evals/check-gpt56-execution-isolation.mjs" "$EVAL_OUT_DIR/results.json"
   else
     print_command node "$root/scripts/evals/check-gpt56-grader-calibration.mjs" "$EVAL_OUT_DIR/results.json"
@@ -177,6 +178,9 @@ node "$root/scripts/evals/prepare-codex-home.mjs" "$no_plugins_home" --plugin-mo
 
 if [ "$phase" = "execution" ]; then
   "$root/scripts/evals/run.sh" "$config"
+  node "$root/scripts/evals/check-thresholds.mjs" \
+    "$EVAL_OUT_DIR/results.json" \
+    --expected-measurement-config "$config"
   node "$root/scripts/evals/check-gpt56-execution-isolation.mjs" "$EVAL_OUT_DIR/results.json"
 else
   runner_status=0

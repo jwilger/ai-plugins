@@ -40,7 +40,7 @@ teardown() {
   [[ "$output" == *"Requires working Claude Code and Codex model authentication"* ]]
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
   [[ "$output" == *"EVAL_PROVIDER_FILTER"* ]]
-  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY    (default: 1)"* ]]
+  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-2; default: 1)"* ]]
   [[ "$output" == *"EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)"* ]]
@@ -66,6 +66,14 @@ teardown() {
   [[ "$output" == *"evals/out/results.json"* ]]
   [[ "$output" == *"evals/out/report.html"* ]]
   [[ "$output" == *"evals/out/results.junit.xml"* ]]
+}
+
+@test "eval runner rejects concurrency above the canonical cap before printing a Promptfoo launch" {
+  run env PROMPTFOO_MAX_CONCURRENCY=3 "$RUNNER" --dry-run
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY must be 1 or 2; got 3"* ]]
+  [[ "$output" != *"promptfoo eval"* ]]
 }
 
 @test "eval runner dry-run uses repo-owned generated paths from outside repo cwd" {
