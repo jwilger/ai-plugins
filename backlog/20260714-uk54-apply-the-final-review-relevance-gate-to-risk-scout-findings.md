@@ -2,18 +2,18 @@
 title: Apply the final-review relevance gate to risk-scout findings
 blocked_by: []
 blocks: []
-tags: [development-discipline, final-review, correctness, relevance, major]
+tags: [development-discipline, final-review, risk-scout, relevance, mcp, correctness, major, backlog]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Route initial and delta risk-scout findings through the same deterministic relevance gate as normal lens findings so generic observations cannot pollute or block the backlog.
+Route initial and delta risk-scout findings through the same structured relevance validation and filtering used for normal lens findings before they can affect disposition or backlog work.
 
 ## Context / Why
 
-Final-review correctness finding from 20260713-rygd. This is not covered by 20260714-jyu9, which supplies conditional-lens objectives but does not enforce relevance evidence; 20260714-24xa covers split/budget contracts; 20260714-ra58 strengthens prose-fixture semantics. This ticket owns the production relevance gate for all initial and delta scout findings.
+A caused MAJOR correctness finding from 20260713-rygd showed that scout findings bypass the normal relevance gate. A shallow scout can label an out-of-scope or generic observation as acceptance_criteria and force follow-up-ticket requirements because scout findings lack matched_context or changed_diff_evidence and are inserted directly. The mandatory scout must not have a weaker evidence contract than the lenses it plans.
 
 ## Acceptance criteria
 
