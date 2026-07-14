@@ -1,19 +1,19 @@
 ---
-title: Strengthen cross-project Tiber task workflow guidance
+title: Enforce concurrent Tiber task isolation and PR/MR lifecycle coverage
 blocked_by: []
 blocks: []
-tags: [tiber, workflow, worktrees, evals]
+tags: [tiber, workflow, worktrees, pr-mr, evals]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Complete the remaining cross-project Tiber workflow guidance for concurrent active-task isolation and PR/MR lifecycle tracking while preserving already-delivered backlog capture and transition behavior.
+Complete the remaining Tiber workflow guidance and behavior coverage for one-branch-or-worktree-per-active-task isolation and PR/MR status progression.
 
 ## Context / Why
 
-Backlog-only capture, explicit transition before active work, and PR/MR status fields already exist through completed Tiber work. The remaining delta is to make concurrent in-progress isolation unambiguous, ensure claims/branches/worktrees stay one-per-active-task, and add missing behavior coverage for PR URL and status changes through review and merge. Do not reimplement the existing new-task or transition guidance.
+Backlog-only capture, explicit transition before active work, and basic PR/MR URL and status guidance are already delivered. Preserve those behaviors through regression coverage but do not reimplement them. The remaining gap is unambiguous isolation for multiple in-progress tasks and end-to-end PR/MR lifecycle fixtures.
 
 ## Acceptance criteria
 
