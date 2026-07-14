@@ -25,3 +25,5 @@ scripts/evals/run.sh currently defaults targeted Codex composition to every mark
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: Backlog grooming 2026-07-14: Consolidated 20260713-jtq4 because fail-closed explicit selection is part of the same plugin-selection contract required to make targeted composition trustworthy.
