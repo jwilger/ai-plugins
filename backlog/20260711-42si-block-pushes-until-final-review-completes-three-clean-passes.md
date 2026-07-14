@@ -27,3 +27,5 @@ The final-review MCP already tracks three-clean-iteration state, prior defenses,
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-14: 2026-07-14 superseded by authoritative risk-proportionate review policy and canonical ticket 20260713-rygd. Mandatory three-pass completion and blocking every push are explicitly replaced by green increment pushes plus risk-selected final review; multiple passes remain only for exceptional-risk work.
