@@ -26,7 +26,6 @@
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260713-u2md-remove-stale-live-evals-workflow-documentation
 20260713-ehg9-correct-gpt-5-6-benchmark-docs-for-superseded-labels-and-path-lifecycle
-20260713-tpb3-synchronize-documented-promptfoo-pins-with-the-package-source-of-truth
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
