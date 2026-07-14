@@ -17,6 +17,8 @@ Split from 20260713-uf3e. The focused and canonical runners can disagree on logi
 
 ## Acceptance criteria
 
+- [ ] A successful live run proves the shared provider lock and its inherited identity remain held during provider execution and post-run artifact checking, then are released after the complete lifecycle.
+
 ## Subtasks
 
 ## Notes / Log
