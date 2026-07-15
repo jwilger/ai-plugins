@@ -49,7 +49,7 @@ function normalizeVerifiedTransitions(state) {
   for (const transition of transitions) {
     if (
       !Number.isSafeInteger(transition?.iteration) ||
-      transition.iteration < 0 ||
+      transition.iteration <= 0 ||
       typeof transition.transition_id !== "string" ||
       !/^[0-9a-f]{16}$/.test(transition.transition_id)
     ) {
