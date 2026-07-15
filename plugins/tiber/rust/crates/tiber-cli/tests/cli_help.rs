@@ -70,3 +70,18 @@ fn help_succeeds_for_the_root_and_every_command_path() {
         );
     }
 }
+
+#[test]
+fn update_help_documents_explicit_option_like_values() {
+    let repo = TempRepo::initialized();
+
+    let output = repo.tiber(["update", "--help"]);
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).expect("help output should be utf8");
+    assert!(
+        stdout.contains("--summary=--tags"),
+        "help lacked explicit option-like value syntax: {stdout}"
+    );
+}
