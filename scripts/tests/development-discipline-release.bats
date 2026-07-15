@@ -34,6 +34,27 @@ setup() {
   [ "$output" = "$normalized_source" ]
 }
 
+@test "development-discipline parity normalization preserves review-budget clock relationships" {
+  local source_output="$BATS_TEST_TMPDIR/source-clock-relationships.jsonl"
+  local dist_output="$BATS_TEST_TMPDIR/dist-clock-relationships.jsonl"
+  local normalized_source
+
+  printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
+  printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"cccccccccccccccc\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"dddddddddddddddd\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":102}}}}"}]}}' >"$dist_output"
+
+  run node "$PARITY_NORMALIZER" "$source_output"
+  [ "$status" -eq 0 ]
+  normalized_source="$output"
+
+  run node "$PARITY_NORMALIZER" "$dist_output"
+  [ "$status" -eq 0 ]
+  [ "$output" != "$normalized_source" ]
+}
+
 @test "development-discipline parity normalization removes derived transition drift" {
   local source_output="$BATS_TEST_TMPDIR/source-transition.jsonl"
   local dist_output="$BATS_TEST_TMPDIR/dist-transition.jsonl"
