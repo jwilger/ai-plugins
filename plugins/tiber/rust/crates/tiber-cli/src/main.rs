@@ -397,22 +397,21 @@ fn main() -> ExitCode {
 
 fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<Cli, clap::Error> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
-    if arguments.get(1).is_some_and(|value| value == "update") {
-        if !has_standalone_help(&arguments, is_bare_update_value_option) {
-            if let Some(pair) = arguments.windows(2).find(|pair| {
-                is_bare_update_value_option(&pair[0]) && is_update_option_token(&pair[1])
-            }) {
-                let option = pair[0].to_string_lossy();
-                let value = pair[1].to_string_lossy();
-                return Err(command_error(
-                    &["update"],
-                    "tiber update",
-                    ErrorKind::InvalidValue,
-                    &format!(
-                        "{option} requires a value; use {option}={value} for that literal value"
-                    ),
-                ));
-            }
+    if arguments.get(1).is_some_and(|value| value == "update")
+        && !has_standalone_help(&arguments, is_bare_update_value_option)
+    {
+        if let Some(pair) = arguments
+            .windows(2)
+            .find(|pair| is_bare_update_value_option(&pair[0]) && is_update_option_token(&pair[1]))
+        {
+            let option = pair[0].to_string_lossy();
+            let value = pair[1].to_string_lossy();
+            return Err(command_error(
+                &["update"],
+                "tiber update",
+                ErrorKind::InvalidValue,
+                &format!("{option} requires a value; use {option}={value} for that literal value"),
+            ));
         }
     }
     if arguments.get(1).is_some_and(|value| value == "subtask")
@@ -429,21 +428,21 @@ fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
             "--after requires a comma-separated predecessor value",
         ));
     }
-    if arguments.get(1).is_some_and(|value| value == "install-bin") {
-        if !has_standalone_help(&arguments, is_bare_install_bin_value_option) {
-            if let Some(pair) = arguments.windows(2).find(|pair| {
-                is_bare_install_bin_value_option(&pair[0]) && is_install_bin_option_token(&pair[1])
-            }) {
-                let value = pair[1].to_string_lossy();
-                return Err(command_error(
-                    &["install-bin"],
-                    "tiber install-bin",
-                    ErrorKind::InvalidValue,
-                    &format!(
-                        "--target-dir requires a value; use --target-dir={value} for that literal path"
-                    ),
-                ));
-            }
+    if arguments.get(1).is_some_and(|value| value == "install-bin")
+        && !has_standalone_help(&arguments, is_bare_install_bin_value_option)
+    {
+        if let Some(pair) = arguments.windows(2).find(|pair| {
+            is_bare_install_bin_value_option(&pair[0]) && is_install_bin_option_token(&pair[1])
+        }) {
+            let value = pair[1].to_string_lossy();
+            return Err(command_error(
+                &["install-bin"],
+                "tiber install-bin",
+                ErrorKind::InvalidValue,
+                &format!(
+                    "--target-dir requires a value; use --target-dir={value} for that literal path"
+                ),
+            ));
         }
     }
 
