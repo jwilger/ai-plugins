@@ -27,3 +27,5 @@ The canonical `just ci` gate compares complete JSON-RPC outputs from sequential 
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-15: Implemented across commits 07b6c942, da1c9863, 7027d09b, 9e11f9ad, 1ffdf41f, cfa46bd2, and 1bb7e27. The normalizer removes cross-run clock/derived-ID drift while preserving session-scoped timestamp equality, contract/transition relationships, malformed and noncanonical state, zero/non-safe iterations, unsafe JSON numbers, and real output differences. Diagnostics fail closed with side+record markers before cleanup and redact malformed payloads. Evidence: focused release/startup tests and the real source-versus-distribution gate pass; `nix develop -c just ci` passes with 242 development-discipline tests, mutation testing 38 caught/6 unviable, and all 360 Bats tests. Formal final review `parity-final-cfa46bd-v5` completed at diff fced6e7d840829974ce5027d20f9c7d7786f2ff6 with no blockers or out-of-scope findings. A confirmation review rejected changing zero timestamps because production explicitly uses 0 as its clock-error fallback and the timestamp contract intentionally preserves equality relationships rather than absolute values.
