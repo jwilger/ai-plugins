@@ -231,3 +231,37 @@ fn install_help_flag_cannot_be_consumed_as_a_target_value() {
         "invalid invocation must not install a launcher"
     );
 }
+
+#[test]
+fn install_short_help_flag_cannot_be_consumed_as_a_target_value() {
+    let repo = TempRepo::initialized();
+    let launcher = repo.path().join("plugin/bin/tiber");
+    fs::create_dir_all(launcher.parent().expect("launcher parent"))
+        .expect("create launcher directory");
+    fs::write(&launcher, "#!/usr/bin/env bash\n").expect("write fake launcher");
+
+    let output = repo.tiber_with_env(
+        ["install-bin", "--target-dir", "-h", "--apply"],
+        [(
+            "TIBER_LAUNCHER_PATH",
+            launcher.to_str().expect("launcher path utf8"),
+        )],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).expect("parser error should be utf8");
+    assert!(stderr.contains("error:"), "missing parser error: {stderr}");
+    assert!(
+        stderr.contains("--target-dir requires a value; use --target-dir=-h for that literal path"),
+        "missing recovery guidance: {stderr}"
+    );
+    assert!(
+        stderr.contains("Usage: tiber install-bin"),
+        "missing parser-generated usage: {stderr}"
+    );
+    assert!(
+        !repo.path().join("-h/tiber").exists(),
+        "invalid invocation must not install a launcher"
+    );
+}
