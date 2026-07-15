@@ -35,14 +35,31 @@ case "$*" in
       '{pluginId: ($plugin + "@ai-plugins"), name: $plugin, marketplaceName: "ai-plugins"}'
     ;;
   "plugin list --available --json")
-    jq -n \
-      --arg root "$FAKE_MARKETPLACE_ROOT" \
-      '{installed: [
-        {name: "engineering-standards", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true},
-        {name: "development-discipline", marketplaceName: "ai-plugins", version: "0.11.0", installed: true, enabled: true},
-        {name: "advisor", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true},
-        {name: "agentic-systems-engineering", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true}
-      ], available: [], marketplaceRoot: $root}'
+    if [ "${FAKE_CODEX_MODE:-healthy}" = "missing-plugin" ]; then
+      jq -n \
+        --arg root "$FAKE_MARKETPLACE_ROOT" \
+        '{installed: [
+          {name: "engineering-standards", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true},
+          {name: "development-discipline", marketplaceName: "ai-plugins", version: "0.11.0", installed: true, enabled: true}
+        ], available: [], marketplaceRoot: $root}'
+    elif [ "${FAKE_CODEX_MODE:-healthy}" = "missing-agentic" ]; then
+      jq -n \
+        --arg root "$FAKE_MARKETPLACE_ROOT" \
+        '{installed: [
+          {name: "engineering-standards", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true},
+          {name: "development-discipline", marketplaceName: "ai-plugins", version: "0.11.0", installed: true, enabled: true},
+          {name: "advisor", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true}
+        ], available: [], marketplaceRoot: $root}'
+    else
+      jq -n \
+        --arg root "$FAKE_MARKETPLACE_ROOT" \
+        '{installed: [
+          {name: "engineering-standards", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true},
+          {name: "development-discipline", marketplaceName: "ai-plugins", version: "0.11.0", installed: true, enabled: true},
+          {name: "advisor", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true},
+          {name: "agentic-systems-engineering", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true}
+        ], available: [], marketplaceRoot: $root}'
+    fi
     ;;
   -C*" debug prompt-input "*)
     printf '%s\n' '[{"content":"engineering-standards:engineering-standards development-discipline:test-driven-development development-discipline:verification-before-completion advisor:advisor agentic-systems-engineering:agentic-systems-engineering"}]'
@@ -88,7 +105,7 @@ teardown() {
   run env PATH="$help_path" "$RUNNER" --help
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Usage: scripts/codex-quality-core.sh install"* ]]
+  [[ "$output" == *"Usage: scripts/codex-quality-core.sh <install|check>"* ]]
   [[ "$output" != *"missing required command"* ]]
   [[ "$output" != *"command not found"* ]]
 }
@@ -106,4 +123,29 @@ teardown() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"unknown command: bogus"* ]]
   [[ "$output" != *"unknown option: --with-agentic"* ]]
+}
+
+@test "check reports a missing core plugin without attempting repair" {
+  touch "$FAKE_CODEX_STATE/marketplace-added"
+  export FAKE_CODEX_MODE=missing-plugin
+
+  run "$RUNNER" check
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing Codex plugin: advisor@ai-plugins"* ]]
+  [[ "$output" == *"rerun '$RUNNER install'"* ]]
+
+  run grep -F "plugin add" "$FAKE_CODEX_LOG"
+  [ "$status" -eq 1 ]
+}
+
+@test "agentic check preserves the opt-in flag in repair guidance" {
+  touch "$FAKE_CODEX_STATE/marketplace-added"
+  export FAKE_CODEX_MODE=missing-agentic
+
+  run "$RUNNER" check --with-agentic
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing Codex plugin: agentic-systems-engineering@ai-plugins"* ]]
+  [[ "$output" == *"rerun '$RUNNER install --with-agentic'"* ]]
 }
