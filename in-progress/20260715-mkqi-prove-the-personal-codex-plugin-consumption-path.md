@@ -21,7 +21,7 @@ Codex is the primary personal-use target, but the current catalog does not prove
 ## Acceptance criteria
 
 - [x] From a clean disposable downstream repository, documented commands install the intended quality-core plugins through the current Codex marketplace mechanism.
-- [ ] A repeatable smoke check proves the expected plugins and representative skills are discoverable and usable in the downstream repository.
+- [x] A repeatable smoke check proves the expected plugins and representative skills are discoverable and usable in the downstream repository.
 - [ ] The install/update path is safe to rerun and detects stale, missing, or partially installed plugin state with actionable diagnostics.
 - [ ] The repository documents Codex as the primary path and clearly scopes Claude Code and general-user polish as secondary follow-up concerns.
 
