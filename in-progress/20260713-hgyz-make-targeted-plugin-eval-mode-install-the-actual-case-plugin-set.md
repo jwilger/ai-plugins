@@ -5,6 +5,9 @@ blocks: []
 tags: [evals, plugin-modes, measurement-validity, codex, claude, validation, plugin-loading, major, backlog]
 pr_mr_url: 
 pr_mr_status: 
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
