@@ -45,6 +45,7 @@ module.exports = function generateTests() {
         samples > 1
           ? `${testCase.case_id} sample ${index + 1}`
           : testCase.case_id,
+      options: { disableVarExpansion: true },
       vars: {
         case_id: testCase.case_id,
         behavior: testCase.behavior,

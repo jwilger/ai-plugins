@@ -64,6 +64,112 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "one behavior fixture preserves list metadata in one target request" {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior" "$FIXTURE_TMP/evals"
+  call_log="$FIXTURE_TMP/target-calls.jsonl"
+  config="$FIXTURE_TMP/promptfooconfig.yaml"
+
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "atomic-list-metadata",
+    "behavior": "preserve list metadata",
+    "prompt": "Return ok.",
+    "plugins": ["alpha", "beta"],
+    "skills": ["one", "two"],
+    "coverage": {"kinds": ["natural-trigger", "hard-guard"]},
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the output is ok.",
+    "hardAssertions": []
+  }
+]
+JSON
+  cat >"$FIXTURE_TMP/evals/matrix.json" <<'JSON'
+{"valueGates":{"defaultBaselineLiftThreshold":0.1}}
+JSON
+  cat >"$FIXTURE_TMP/target-provider.cjs" <<'JS'
+const fs = require("node:fs");
+
+module.exports = class TargetProvider {
+  id() {
+    return "target";
+  }
+
+  async callApi(_prompt, context) {
+    fs.appendFileSync(
+      process.env.TARGET_CALL_LOG,
+      `${JSON.stringify({
+        plugins: context.vars.plugins,
+        skills: context.vars.skills,
+        coverage_kinds: context.vars.coverage_kinds,
+      })}\n`,
+    );
+    return { output: "ok" };
+  }
+};
+JS
+  cat >"$FIXTURE_TMP/grader-provider.cjs" <<'JS'
+module.exports = class GraderProvider {
+  id() {
+    return "grader";
+  }
+
+  async callApi() {
+    return {
+      output: JSON.stringify({ pass: true, score: 1, reason: "ok" }),
+    };
+  }
+};
+JS
+  cat >"$config" <<YAML
+prompts:
+  - "{{scenario_prompt}}"
+providers:
+  - id: file://./target-provider.cjs
+tests: file://$ROOT/evals/promptfoo/load-harness-cases.cjs
+defaultTest:
+  options:
+    provider:
+      text:
+        id: file://./grader-provider.cjs
+commandLineOptions:
+  cache: false
+  share: false
+  write: true
+YAML
+
+  run bash -c '
+    cd "$1"
+    TARGET_CALL_LOG="$2" \
+      PROMPTFOO_DISABLE_VAR_EXPANSION=false \
+      PROMPTFOO_DISABLE_TELEMETRY=1 \
+      PROMPTFOO_CONFIG_DIR="$1/.promptfoo" \
+      "$3" eval -c "$4" --no-cache --no-share -o "$1/results.json"
+  ' _ "$FIXTURE_TMP" "$call_log" "$ROOT/node_modules/.bin/promptfoo" "$config"
+
+  [ "$status" -eq 0 ]
+  call_count="$(wc -l <"$call_log")"
+  printf 'target_call_count=%s\n' "$call_count" >&3
+  [ "$call_count" -eq 1 ]
+  run jq -e -s '
+    . == [{
+      plugins: ["alpha", "beta"],
+      skills: ["one", "two"],
+      coverage_kinds: ["natural-trigger", "hard-guard"]
+    }]
+  ' "$call_log"
+  [ "$status" -eq 0 ]
+  run jq -e '
+    .results.results as $results
+    | ($results | length) == 1
+      and $results[0].testCase.vars.plugins == ["alpha", "beta"]
+      and $results[0].testCase.vars.skills == ["one", "two"]
+      and $results[0].testCase.vars.coverage_kinds == ["natural-trigger", "hard-guard"]
+  ' "$FIXTURE_TMP/results.json"
+  [ "$status" -eq 0 ]
+}
+
 @test "behavior fixture loader rejects duplicate case ids across recursive files" {
   FIXTURE_TMP="$(mktemp -d)"
   mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior/one" "$FIXTURE_TMP/evals/fixtures/behavior/two"
