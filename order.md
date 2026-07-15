@@ -58,3 +58,4 @@
 20260714-24xa-tighten-final-review-split-and-budget-decision-contracts
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260715-yvha-make-development-discipline-release-parity-fixture-use-a-fixed-clock
+20260715-i2h6-preserve-review-budget-timestamp-relationships-in-parity-normalization
