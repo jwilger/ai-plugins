@@ -27,3 +27,5 @@ Formal final review of ticket 20260715-yvha found that replacing every started_a
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-15: Implemented at da1c9863f5754cff17ccd8c03b9c36013d5c0f65. TDD proved the original false negative: retained [100,100] and reset [101,102] both collapsed to [0,0]. First-seen ordinal normalization now preserves timestamp equality relationships. Evidence: focused regression and all 14 release tests green; source/dist parity green; `nix develop -c just ci` green with 242 development-discipline tests, mutation testing 38 caught/6 unviable, and all 352 Bats. Formal final review session clock-rel-final-da1c986-v1 completed clean with no out-of-scope findings.
