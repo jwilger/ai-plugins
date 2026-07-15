@@ -493,8 +493,11 @@ run_development_discipline_cargo_fallback_with_untrusted_target_dir() {
 }
 
 run_development_discipline_cargo_fallback_without_home() {
+  local bash_path
+  bash_path="$(command -v bash)"
+
   env -i \
-    PATH="/bin:/usr/bin" \
+    PATH="${bash_path%/*}:/bin:/usr/bin" \
     DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
     DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
     "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
