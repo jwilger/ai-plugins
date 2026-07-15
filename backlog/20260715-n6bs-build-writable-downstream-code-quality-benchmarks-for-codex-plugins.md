@@ -18,6 +18,7 @@ Current behavior evals mostly score read-only advice and do not establish implem
 ## Acceptance criteria
 
 - [ ] The benchmark runs representative writable feature, bugfix, and refactor scenarios in disposable downstream repositories.
+- [ ] Each scenario compares no-plugin, targeted quality-core, and full-marketplace Codex conditions using the exact plugin set declared by the case.
 
 ## Subtasks
 
