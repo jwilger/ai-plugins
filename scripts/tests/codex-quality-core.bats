@@ -39,43 +39,92 @@ case "$*" in
       '{pluginId: ($plugin + "@ai-plugins"), name: $plugin, marketplaceName: "ai-plugins"}'
     ;;
   "plugin list --available --json")
+    engineering_version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/engineering-standards/.codex-plugin/plugin.json")"
+    discipline_version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/development-discipline/.codex-plugin/plugin.json")"
+    advisor_version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/advisor/.codex-plugin/plugin.json")"
+    agentic_version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
     if [ "${FAKE_CODEX_MODE:-healthy}" = "missing-plugin" ]; then
       jq -n \
         --arg root "$FAKE_MARKETPLACE_ROOT" \
+        --arg engineering_version "$engineering_version" \
+        --arg discipline_version "$discipline_version" \
         '{installed: [
-          {name: "engineering-standards", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true},
-          {name: "development-discipline", marketplaceName: "ai-plugins", version: "0.11.0", installed: true, enabled: true}
+          {name: "engineering-standards", marketplaceName: "ai-plugins", version: $engineering_version, installed: true, enabled: true},
+          {name: "development-discipline", marketplaceName: "ai-plugins", version: $discipline_version, installed: true, enabled: true}
         ], available: [], marketplaceRoot: $root}'
     elif [ "${FAKE_CODEX_MODE:-healthy}" = "missing-agentic" ]; then
       jq -n \
         --arg root "$FAKE_MARKETPLACE_ROOT" \
+        --arg engineering_version "$engineering_version" \
+        --arg discipline_version "$discipline_version" \
+        --arg advisor_version "$advisor_version" \
         '{installed: [
-          {name: "engineering-standards", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true},
-          {name: "development-discipline", marketplaceName: "ai-plugins", version: "0.11.0", installed: true, enabled: true},
-          {name: "advisor", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true}
+          {name: "engineering-standards", marketplaceName: "ai-plugins", version: $engineering_version, installed: true, enabled: true},
+          {name: "development-discipline", marketplaceName: "ai-plugins", version: $discipline_version, installed: true, enabled: true},
+          {name: "advisor", marketplaceName: "ai-plugins", version: $advisor_version, installed: true, enabled: true}
         ], available: [], marketplaceRoot: $root}'
     else
-      advisor_version="0.2.0"
       advisor_enabled=true
       if [ "${FAKE_CODEX_MODE:-healthy}" = "stale-plugin" ]; then
-        advisor_version="0.1.0"
+        advisor_version="0.0.0-stale"
       elif [ "${FAKE_CODEX_MODE:-healthy}" = "disabled-plugin" ]; then
         advisor_enabled=false
       fi
       jq -n \
         --arg root "$FAKE_MARKETPLACE_ROOT" \
+        --arg engineering_version "$engineering_version" \
+        --arg discipline_version "$discipline_version" \
         --arg advisor_version "$advisor_version" \
+        --arg agentic_version "$agentic_version" \
         --argjson advisor_enabled "$advisor_enabled" \
         '{installed: [
-          {name: "engineering-standards", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true},
-          {name: "development-discipline", marketplaceName: "ai-plugins", version: "0.11.0", installed: true, enabled: true},
+          {name: "engineering-standards", marketplaceName: "ai-plugins", version: $engineering_version, installed: true, enabled: true},
+          {name: "development-discipline", marketplaceName: "ai-plugins", version: $discipline_version, installed: true, enabled: true},
           {name: "advisor", marketplaceName: "ai-plugins", version: $advisor_version, installed: true, enabled: $advisor_enabled},
-          {name: "agentic-systems-engineering", marketplaceName: "ai-plugins", version: "0.2.0", installed: true, enabled: true}
+          {name: "agentic-systems-engineering", marketplaceName: "ai-plugins", version: $agentic_version, installed: true, enabled: true}
         ], available: [], marketplaceRoot: $root}'
     fi
     ;;
   -C*" debug prompt-input "*)
-    if [ "${FAKE_CODEX_MODE:-healthy}" = "invisible-skill" ]; then
+    if [ "${FAKE_CODEX_MODE:-healthy}" = "object-document-schema" ]; then
+      jq -n '{message: {
+        type: "message",
+        role: "developer",
+        content: [
+          {type: "input_text", text: "<permissions instructions>\nRead-only smoke.\n</permissions instructions>"},
+          {type: "input_text", text: "<skills_instructions>\n## Skills\n- engineering-standards:engineering-standards: Use for engineering.\n- development-discipline:test-driven-development: Use for implementation.\n- development-discipline:verification-before-completion: Use for verification.\n- advisor:advisor: Use for planning.\n</skills_instructions>"},
+          {type: "input_text", text: "<plugins_instructions>\nPlugin metadata.\n</plugins_instructions>"}
+        ]
+      }}'
+    elif [ "${FAKE_CODEX_MODE:-healthy}" = "object-content-schema" ]; then
+      jq -n '[{
+        type: "message",
+        role: "developer",
+        content: {
+          permissions: {type: "input_text", text: "<permissions instructions>\nRead-only smoke.\n</permissions instructions>"},
+          skills: {type: "input_text", text: "<skills_instructions>\n## Skills\n- engineering-standards:engineering-standards: Use for engineering.\n- development-discipline:test-driven-development: Use for implementation.\n- development-discipline:verification-before-completion: Use for verification.\n- advisor:advisor: Use for planning.\n</skills_instructions>"},
+          plugins: {type: "input_text", text: "<plugins_instructions>\nPlugin metadata.\n</plugins_instructions>"}
+        }
+      }]'
+    elif [ "${FAKE_CODEX_MODE:-healthy}" = "ambiguous-prompt-schema" ]; then
+      for _ in 1 2; do
+        jq -n '[{
+          type: "message",
+          role: "developer",
+          content: [
+            {type: "input_text", text: "<permissions instructions>\nRead-only smoke.\n</permissions instructions>"},
+            {type: "input_text", text: "<skills_instructions>\n## Skills\n- engineering-standards:engineering-standards: Use for engineering.\n- development-discipline:test-driven-development: Use for implementation.\n- development-discipline:verification-before-completion: Use for verification.\n- advisor:advisor: Use for planning.\n</skills_instructions>"},
+            {type: "input_text", text: "<plugins_instructions>\nPlugin metadata.\n</plugins_instructions>"}
+          ]
+        }]'
+      done
+    elif [ "${FAKE_CODEX_MODE:-healthy}" = "incompatible-prompt-schema" ]; then
+      jq -n '[{
+        type: "message",
+        role: "developer",
+        content: [{type: "input_text", text: "A future Codex prompt envelope."}]
+      }]'
+    elif [ "${FAKE_CODEX_MODE:-healthy}" = "invisible-skill" ]; then
       jq -n '[
         {
           type: "message",
@@ -197,6 +246,7 @@ teardown() {
   grep -Fxq "git -C /absolute/path/to/ai-plugins pull --ff-only" "$ROOT/README.md"
   grep -Fxq "/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh install" "$ROOT/README.md"
   grep -Fxq -- "/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh install --with-agentic" "$ROOT/README.md"
+  grep -Fq "Validated with Codex CLI 0.144.x (tested with 0.144.4)" "$ROOT/README.md"
   grep -Fq "start a new Codex thread" "$ROOT/README.md"
 }
 
@@ -230,13 +280,14 @@ teardown() {
 }
 
 @test "check reports a stale core plugin with the matching repair command" {
+  expected_advisor_version="$(jq -er '.version' "$ROOT/plugins/advisor/.codex-plugin/plugin.json")"
   touch "$FAKE_CODEX_STATE/marketplace-added"
   export FAKE_CODEX_MODE=stale-plugin
 
   run "$RUNNER" check
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"stale Codex plugin: advisor@ai-plugins has version 0.1.0; expected 0.2.0"* ]]
+  [[ "$output" == *"stale Codex plugin: advisor@ai-plugins has version 0.0.0-stale; expected $expected_advisor_version"* ]]
   [[ "$output" == *"rerun '$RUNNER install'"* ]]
 }
 
@@ -275,6 +326,48 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"installed skill is not model-visible: advisor:advisor"* ]]
   grep -Fq -- '-c developer_instructions=""' "$FAKE_CODEX_LOG"
+}
+
+@test "check distinguishes an incompatible Codex prompt schema from an invisible skill" {
+  touch "$FAKE_CODEX_STATE/marketplace-added"
+  export FAKE_CODEX_MODE=incompatible-prompt-schema
+
+  run "$RUNNER" check
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unsupported Codex prompt schema"* ]]
+  [[ "$output" == *"validated with Codex CLI 0.144.x (tested with 0.144.4)"* ]]
+  [[ "$output" != *"installed skill is not model-visible"* ]]
+}
+
+@test "check rejects ambiguous multi-document Codex prompt output" {
+  touch "$FAKE_CODEX_STATE/marketplace-added"
+  export FAKE_CODEX_MODE=ambiguous-prompt-schema
+
+  run "$RUNNER" check
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unsupported Codex prompt schema"* ]]
+}
+
+@test "check rejects an object-shaped Codex prompt document" {
+  touch "$FAKE_CODEX_STATE/marketplace-added"
+  export FAKE_CODEX_MODE=object-document-schema
+
+  run "$RUNNER" check
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unsupported Codex prompt schema"* ]]
+}
+
+@test "check rejects object-shaped Codex prompt content" {
+  touch "$FAKE_CODEX_STATE/marketplace-added"
+  export FAKE_CODEX_MODE=object-content-schema
+
+  run "$RUNNER" check
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unsupported Codex prompt schema"* ]]
 }
 
 @test "agentic check preserves the opt-in flag in repair guidance" {

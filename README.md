@@ -41,6 +41,11 @@ missing marketplace, missing, stale, or disabled plugins, and skills that are
 not model-visible, with a matching repair command. To update, pull the local
 checkout and rerun `install` with the same options:
 
+Validated with Codex CLI 0.144.x (tested with 0.144.4), this workflow depends
+on the current plugin JSON and `debug prompt-input` schemas. If Codex changes
+the prompt envelope, `check` fails closed with an explicit compatibility
+diagnostic instead of reporting an installed skill as invisible.
+
 ```shell
 git -C /absolute/path/to/ai-plugins pull --ff-only
 /absolute/path/to/ai-plugins/scripts/codex-quality-core.sh install

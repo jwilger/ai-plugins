@@ -110,38 +110,54 @@ assert_plugins_installed() {
 
 assert_skills_model_visible() {
   local downstream="$1"
-  local prompt_json skill
+  local prompt_json skill skills_registry
 
   prompt_json="$(
     codex -C "$downstream" -c 'developer_instructions=""' debug prompt-input \
       'Plan a small feature and identify the installed workflows that should guide implementation and verification.'
   )"
 
-  for skill in "${representative_skills[@]}"; do
-    if ! jq -e --arg skill "$skill" '
-      any(
+  if ! skills_registry="$(
+    jq -ser '
+      select(length == 1)
+      | .[0]
+      | select(type == "array")
+      | [
         .[]?
         | select(.type == "message" and .role == "developer")
-        | .content as $content
+        | (.content? // []) as $content
+        | select(($content | type) == "array")
         | select(any(
             $content[]?;
             .type == "input_text"
-              and (.text | startswith("<permissions instructions>"))
+              and ((.text? // "") | startswith("<permissions instructions>"))
           ))
         | select(any(
             $content[]?;
             .type == "input_text"
-              and (.text | startswith("<plugins_instructions>"))
+              and ((.text? // "") | startswith("<plugins_instructions>"))
           ))
-        | $content[]?
-        | select(.type == "input_text")
-        | .text
-        | select(startswith("<skills_instructions>"))
-        | split("\n")[];
-        startswith("- " + $skill + ":")
-      )
-    ' \
-      >/dev/null <<<"$prompt_json"; then
+        | [
+            $content[]?
+            | select(.type == "input_text")
+            | (.text? // "")
+            | select(startswith("<skills_instructions>"))
+          ] as $skills
+        | select(($skills | length) == 1)
+        | $skills[0]
+      ] as $registries
+      | select(($registries | length) == 1)
+      | $registries[0]
+    ' <<<"$prompt_json"
+  )"; then
+    printf 'unsupported Codex prompt schema; this check was validated with Codex CLI 0.144.x (tested with 0.144.4). Update Codex or this checkout, then rerun the command.\n' >&2
+    exit 2
+  fi
+
+  for skill in "${representative_skills[@]}"; do
+    if ! jq -ne --arg registry "$skills_registry" --arg skill "$skill" '
+      any($registry | split("\n")[]; startswith("- " + $skill + ":"))
+    ' >/dev/null; then
       printf "installed skill is not model-visible: %s; rerun '%s install%s', then start a new Codex thread.\n" \
         "$skill" "$0" "$install_option" >&2
       exit 1
