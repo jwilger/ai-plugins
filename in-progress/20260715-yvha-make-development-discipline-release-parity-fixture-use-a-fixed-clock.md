@@ -22,7 +22,7 @@ The canonical `just ci` gate compares complete JSON-RPC outputs from sequential 
 
 - [x] The release-from-source parity gate passes repeatedly when source and bundled behavior is identical while still failing for a real output difference.
 - [x] Focused coverage reproduces the former clock-derived mismatch and proves the deterministic fixture contract.
-- [ ] The parity fixture leaves production clock behavior unchanged and normalizes only the exact runtime-derived review-state fields needed to compare sequential runs.
+- [x] The parity fixture leaves production clock behavior unchanged and normalizes only the exact runtime-derived review-state fields needed to compare sequential runs.
 
 ## Subtasks
 
