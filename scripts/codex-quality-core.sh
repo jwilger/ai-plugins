@@ -13,15 +13,18 @@ representative_skills=(
   development-discipline:verification-before-completion
   advisor:advisor
 )
+install_option=""
 
 usage() {
   cat <<'EOF'
-Usage: scripts/codex-quality-core.sh install [--with-agentic]
+Usage: scripts/codex-quality-core.sh <install|check> [--with-agentic]
 
-Install or refresh the Codex quality-core plugins from this checkout, then
-verify that their representative skills are model-visible in a clean temporary
-downstream Git repository. Add --with-agentic for AI-system projects that also
-provide the Promptfoo tooling required by agentic-systems-engineering.
+install  Add or refresh the Codex quality-core plugins from this checkout.
+check    Read only: verify plugin state and model visibility in a clean
+         temporary downstream Git repository.
+
+Add --with-agentic for AI-system projects that also provide the Promptfoo
+tooling required by agentic-systems-engineering.
 EOF
 }
 
@@ -84,18 +87,18 @@ assert_plugins_installed() {
     )"
 
     if [ -z "$actual_version" ]; then
-      printf "missing Codex plugin: %s@%s; rerun '%s install'.\n" \
-        "$plugin" "$marketplace_name" "$0" >&2
+      printf "missing Codex plugin: %s@%s; rerun '%s install%s'.\n" \
+        "$plugin" "$marketplace_name" "$0" "$install_option" >&2
       exit 1
     fi
     if [ "$actual_version" != "$expected_version" ]; then
-      printf 'stale Codex plugin: %s@%s has version %s; expected %s; rerun '\''%s install'\''.\n' \
-        "$plugin" "$marketplace_name" "$actual_version" "$expected_version" "$0" >&2
+      printf 'stale Codex plugin: %s@%s has version %s; expected %s; rerun '\''%s install%s'\''.\n' \
+        "$plugin" "$marketplace_name" "$actual_version" "$expected_version" "$0" "$install_option" >&2
       exit 1
     fi
     if [ "$enabled" != "true" ]; then
-      printf "disabled Codex plugin: %s@%s; rerun '%s install' and enable the plugin.\n" \
-        "$plugin" "$marketplace_name" "$0" >&2
+      printf "disabled Codex plugin: %s@%s; rerun '%s install%s' and enable the plugin.\n" \
+        "$plugin" "$marketplace_name" "$0" "$install_option" >&2
       exit 1
     fi
   done
@@ -113,15 +116,15 @@ assert_skills_model_visible() {
   for skill in "${representative_skills[@]}"; do
     if ! jq -e --arg skill "$skill" 'any(.. | strings; contains($skill))' \
       >/dev/null <<<"$prompt_json"; then
-      printf "installed skill is not model-visible: %s; rerun '%s install', then start a new Codex thread.\n" \
-        "$skill" "$0" >&2
+      printf "installed skill is not model-visible: %s; rerun '%s install%s', then start a new Codex thread.\n" \
+        "$skill" "$0" "$install_option" >&2
       exit 1
     fi
   done
 }
 
 install_quality_core() {
-  local marketplaces_json plugins_json plugin downstream
+  local marketplaces_json plugin
 
   marketplaces_json="$(codex plugin marketplace list --json)"
   if ! assert_marketplace_is_current "$marketplaces_json"; then
@@ -132,16 +135,31 @@ install_quality_core() {
     codex plugin add "$plugin@$marketplace_name" --json >/dev/null
   done
 
+  check_quality_core
+  printf 'Start a new Codex thread in the downstream repository before relying on refreshed plugin behavior.\n'
+}
+
+check_quality_core() {
+  local marketplaces_json plugins_json downstream
+
+  marketplaces_json="$(codex plugin marketplace list --json)"
+  if ! assert_marketplace_is_current "$marketplaces_json"; then
+    printf "missing Codex marketplace: %s; rerun '%s install%s'.\n" \
+      "$marketplace_name" "$0" "$install_option" >&2
+    exit 1
+  fi
+
   plugins_json="$(codex plugin list --available --json)"
   assert_plugins_installed "$plugins_json"
 
   downstream="$(mktemp -d "${TMPDIR:-/tmp}/ai-plugins-codex-smoke.XXXXXX")"
-  trap 'rm -rf "$downstream"' RETURN
+  trap 'rm -rf "$downstream"' EXIT
   git -C "$downstream" init -q
   assert_skills_model_visible "$downstream"
+  rm -rf "$downstream"
+  trap - EXIT
 
   printf 'Codex quality core is installed and model-visible from %s.\n' "$root"
-  printf 'Start a new Codex thread in the downstream repository before relying on refreshed plugin behavior.\n'
 }
 
 if [ "$#" -eq 1 ] && { [ "$1" = "--help" ] || [ "$1" = "-h" ]; }; then
@@ -156,7 +174,7 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
   exit 2
 fi
 
-if [ "$1" != "install" ]; then
+if [ "$1" != "install" ] && [ "$1" != "check" ]; then
   printf 'unknown command: %s\n' "$1" >&2
   usage >&2
   exit 2
@@ -170,6 +188,7 @@ if [ "$#" -eq 2 ]; then
   fi
   core_plugins+=(agentic-systems-engineering)
   representative_skills+=(agentic-systems-engineering:agentic-systems-engineering)
+  install_option=" --with-agentic"
 fi
 
 require_command codex
@@ -178,6 +197,7 @@ require_command jq
 
 case "$1" in
   install) install_quality_core ;;
+  check) check_quality_core ;;
   *)
     printf 'unknown command: %s\n' "$1" >&2
     usage >&2
