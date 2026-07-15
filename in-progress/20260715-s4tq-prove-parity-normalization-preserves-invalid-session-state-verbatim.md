@@ -27,3 +27,5 @@ Formal review finding tests.missing-session-preservation-not-proven: the missing
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-15: Completed in 9e11f9adaf957dbcec62b2386d9becff979268c1. The strengthened assertion failed under a temporary partial-normalization mutation, then all 16 focused release tests, source/distribution parity, and full `just ci` passed (242 development-discipline tests, 38 caught/6 unviable mutants, 354 Bats). Formal low-risk tests-verification review completed clean with no out-of-scope findings.
