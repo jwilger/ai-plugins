@@ -429,7 +429,10 @@ fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
     if arguments.get(1).is_some_and(|value| value == "install-bin")
         && arguments.windows(2).any(|pair| {
             pair[0] == "--target-dir"
-                && matches!(pair[1].to_str(), Some("--dry-run" | "--apply" | "--help"))
+                && matches!(
+                    pair[1].to_str(),
+                    Some("--dry-run" | "--apply" | "--help" | "-h")
+                )
         })
     {
         let value = arguments
