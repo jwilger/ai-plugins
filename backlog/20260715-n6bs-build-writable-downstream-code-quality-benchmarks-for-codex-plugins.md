@@ -17,6 +17,8 @@ Current behavior evals mostly score read-only advice and do not establish implem
 
 ## Acceptance criteria
 
+- [ ] The benchmark runs representative writable feature, bugfix, and refactor scenarios in disposable downstream repositories.
+
 ## Subtasks
 
 ## Notes / Log
