@@ -18,6 +18,7 @@ Codex is the primary personal-use target, but the current catalog does not prove
 ## Acceptance criteria
 
 - [ ] From a clean disposable downstream repository, documented commands install the intended quality-core plugins through the current Codex marketplace mechanism.
+- [ ] A repeatable smoke check proves the expected plugins and representative skills are discoverable and usable in the downstream repository.
 
 ## Subtasks
 
