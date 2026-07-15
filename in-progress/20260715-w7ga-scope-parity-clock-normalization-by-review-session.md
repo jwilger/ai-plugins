@@ -27,3 +27,5 @@ Formal combined review of 20260715-yvha found that the transcript-global timesta
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-15: Completed by 7027d09bb73db7350e4118bdf29a332c8d5b35b2 plus reviewed coverage hardening 9e11f9adaf957dbcec62b2386d9becff979268c1. Session-scoped timestamp ordinals preserve within-session relationships while isolating cross-session collisions; missing/invalid session state is proven unchanged. Focused parity and full `just ci` are green. Formal review completed with the single coverage finding tracked and resolved by 20260715-s4tq; no out-of-scope findings remain.
