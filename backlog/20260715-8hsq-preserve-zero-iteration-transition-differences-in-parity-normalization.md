@@ -17,6 +17,8 @@ Formal review finding parity-normalizer-accepts-zero-iteration: runtime verified
 
 ## Acceptance criteria
 
+- [ ] A focused fixture with iteration 0 and differing transition IDs remains different after normalization.
+
 ## Subtasks
 
 ## Notes / Log
