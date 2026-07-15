@@ -192,6 +192,23 @@ setup() {
   [ "$output" != "$normalized_source" ]
 }
 
+@test "development-discipline parity normalization preserves transition IDs for zero iteration" {
+  local source_output="$BATS_TEST_TMPDIR/source-zero-iteration.jsonl"
+  local dist_output="$BATS_TEST_TMPDIR/dist-zero-iteration.jsonl"
+  local normalized_source
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":0,\"transition_id\":\"1111111111111111\"}]}}"}]}}' >"$source_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":0,\"transition_id\":\"2222222222222222\"}]}}"}]}}' >"$dist_output"
+
+  run node "$PARITY_NORMALIZER" "$source_output"
+  [ "$status" -eq 0 ]
+  normalized_source="$output"
+
+  run node "$PARITY_NORMALIZER" "$dist_output"
+  [ "$status" -eq 0 ]
+  [ "$output" != "$normalized_source" ]
+}
+
 @test "development-discipline parity normalization rejects interior blank records" {
   local malformed_output="$BATS_TEST_TMPDIR/interior-blank.jsonl"
 
