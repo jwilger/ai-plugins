@@ -1,4 +1,3 @@
-20260715-mkqi-prove-the-personal-codex-plugin-consumption-path
 20260713-hgyz-make-targeted-plugin-eval-mode-install-the-actual-case-plugin-set
 20260715-n6bs-build-writable-downstream-code-quality-benchmarks-for-codex-plugins
 20260715-3bk6-make-delivery-workflows-adapt-to-repository-local-policy
