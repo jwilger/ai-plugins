@@ -97,25 +97,6 @@ Options:
 USAGE
 }
 
-codex_marketplace_plugins_csv() {
-  local marketplace="$root/.agents/plugins/marketplace.json"
-  local plugins
-  plugins="$(
-    jq -er '
-      if (.plugins | type) != "array" then
-        empty
-      else
-        [.plugins[].name | select(type == "string" and length > 0)] as $names
-        | if ($names | length) == 0 then empty else ($names | join(",")) end
-      end
-    ' "$marketplace"
-  )" || {
-    echo "Codex marketplace has no plugins: $marketplace" >&2
-    return 2
-  }
-  printf '%s\n' "$plugins"
-}
-
 write_runtime_options() {
   mkdir -p "$generated_dir"
   node - "$runtime_options_file" <<'NODE'
@@ -226,12 +207,97 @@ arm_eval_interrupt_watchdog() {
   eval_watchdog_pid="$!"
 }
 
-selected_codex_provider_plugin_modes() {
+selected_codex_provider_compositions() {
   node - "$generated_metadata_file" <<'NODE'
 const fs = require('fs');
 const metadata = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-for (const mode of metadata.codexProviderPluginModes || []) {
-  console.log(mode);
+const compositions = metadata.providerCompositions;
+
+if (!Array.isArray(compositions)) {
+  throw new Error('generated eval metadata is missing providerCompositions');
+}
+if (compositions.length === 0) {
+  throw new Error('providerCompositions must contain at least one provider');
+}
+
+const supportedProviders = new Set([
+  'anthropic:claude-agent-sdk',
+  'openai:codex-sdk',
+]);
+const supportedPluginModes = new Set([
+  'no-plugins',
+  'targeted-plugins',
+  'full-marketplace',
+]);
+const labels = new Set();
+const byMode = new Map();
+for (const composition of compositions) {
+  if (
+    !composition ||
+    typeof composition !== 'object' ||
+    typeof composition.label !== 'string' ||
+    composition.label.length === 0 ||
+    typeof composition.provider !== 'string' ||
+    typeof composition.providerVariant !== 'string' ||
+    composition.providerVariant.length === 0 ||
+    typeof composition.pluginMode !== 'string' ||
+    composition.pluginMode.length === 0 ||
+    !Array.isArray(composition.plugins)
+  ) {
+    throw new Error('generated eval metadata contains an invalid provider composition');
+  }
+  if (!supportedProviders.has(composition.provider)) {
+    throw new Error(
+      `unsupported provider in provider composition: ${composition.provider}`,
+    );
+  }
+  if (!supportedPluginModes.has(composition.pluginMode)) {
+    throw new Error(
+      `unsupported plugin mode in provider composition: ${composition.pluginMode}`,
+    );
+  }
+  if (composition.label !== `${composition.providerVariant}-${composition.pluginMode}`) {
+    throw new Error(
+      `provider composition label does not match its variant and mode: ${composition.label}`,
+    );
+  }
+  if (labels.has(composition.label)) {
+    throw new Error(`generated eval metadata contains duplicate provider label: ${composition.label}`);
+  }
+  labels.add(composition.label);
+  if (
+    composition.plugins.some(
+      (plugin) =>
+        typeof plugin !== 'string' ||
+        !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(plugin),
+    )
+  ) {
+    throw new Error(`invalid plugin list for provider composition ${composition.label}`);
+  }
+  const canonical = [...new Set(composition.plugins)].sort();
+  if (JSON.stringify(canonical) !== JSON.stringify(composition.plugins)) {
+    throw new Error(`non-canonical plugin list for provider composition ${composition.label}`);
+  }
+  if (composition.pluginMode === 'no-plugins' && composition.plugins.length !== 0) {
+    throw new Error('no-plugins provider composition must be empty');
+  }
+  if (composition.pluginMode !== 'no-plugins' && composition.plugins.length === 0) {
+    throw new Error(`${composition.pluginMode.replace('-plugins', '')} provider composition must not be empty`);
+  }
+
+  if (composition.provider === 'openai:codex-sdk') {
+    const pluginSets = byMode.get(composition.pluginMode) || [];
+    pluginSets.push(composition.plugins);
+    byMode.set(composition.pluginMode, pluginSets);
+  }
+}
+
+for (const [mode, pluginSets] of byMode) {
+  const expected = JSON.stringify(pluginSets[0]);
+  if (pluginSets.some((plugins) => JSON.stringify(plugins) !== expected)) {
+    throw new Error(`inconsistent Codex provider compositions for ${mode}`);
+  }
+  console.log(`${mode}\t${pluginSets[0].join(',')}`);
 }
 NODE
 }
@@ -246,6 +312,7 @@ NODE
 
 prepare_codex_home_for_mode() {
   local mode="$1"
+  local plugins="${2:-}"
   case "$mode" in
     full-marketplace)
       node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_FULL_MARKETPLACE" --plugin-mode full-marketplace >/dev/null
@@ -254,8 +321,7 @@ prepare_codex_home_for_mode() {
       node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_NO_PLUGINS" --plugin-mode no-plugins >/dev/null
       ;;
     targeted-plugins)
-      targeted_plugins="${EVAL_TARGETED_PLUGINS:-$(codex_marketplace_plugins_csv)}"
-      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins "$targeted_plugins" >/dev/null
+      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins "$plugins" >/dev/null
       ;;
     *)
       echo "unknown Codex plugin mode in generated eval config: $mode" >&2
@@ -266,6 +332,7 @@ prepare_codex_home_for_mode() {
 
 print_prepare_codex_home_for_mode() {
   local mode="$1"
+  local plugins="${2:-}"
   case "$mode" in
     full-marketplace)
       printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_full_home" --plugin-mode full-marketplace
@@ -276,8 +343,7 @@ print_prepare_codex_home_for_mode() {
       printf '\n'
       ;;
     targeted-plugins)
-      targeted_plugins="${EVAL_TARGETED_PLUGINS:-$(codex_marketplace_plugins_csv)}"
-      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_targeted_home" --plugin-mode targeted-plugins --plugins "$targeted_plugins"
+      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_targeted_home" --plugin-mode targeted-plugins --plugins "$plugins"
       printf '\n'
       ;;
     *)
@@ -487,15 +553,18 @@ if [ "$dry_run" -eq 1 ]; then
     dry_inspection_config="$dry_inspection_dir/config.yaml"
     generated_metadata_file="$dry_inspection_dir/metadata.json"
     node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$dry_inspection_config" --metadata-output "$generated_metadata_file" >/dev/null
+    codex_provider_compositions="$(selected_codex_provider_compositions)"
     printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_output_file"
     printf '\n'
     if uses_codex_grader; then
       print_prepare_codex_home_for_mode full-marketplace
     fi
-    while IFS= read -r mode; do
-      [ "$mode" != "full-marketplace" ] || continue
-      print_prepare_codex_home_for_mode "$mode"
-    done < <(selected_codex_provider_plugin_modes)
+    if [ -n "$codex_provider_compositions" ]; then
+      while IFS=$'\t' read -r mode provider_plugins; do
+        [ "$mode" != "full-marketplace" ] || continue
+        print_prepare_codex_home_for_mode "$mode" "$provider_plugins"
+      done <<<"$codex_provider_compositions"
+    fi
   fi
   printf '%q ' "${run_cmd[@]}"
   printf '\n'
@@ -523,15 +592,18 @@ export CODEX_EVAL_HOME_TARGETED_PLUGINS="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$ro
 mkdir -p "$PROMPTFOO_CONFIG_DIR"
 
 if [ "$generated_config" -eq 1 ]; then
+  codex_provider_compositions="$(selected_codex_provider_compositions)"
   write_runtime_options
   write_runtime_loader
   if uses_codex_grader; then
     prepare_codex_home_for_mode full-marketplace
   fi
-  while IFS= read -r mode; do
-    [ "$mode" != "full-marketplace" ] || continue
-    prepare_codex_home_for_mode "$mode"
-  done < <(selected_codex_provider_plugin_modes)
+  if [ -n "$codex_provider_compositions" ]; then
+    while IFS=$'\t' read -r mode provider_plugins; do
+      [ "$mode" != "full-marketplace" ] || continue
+      prepare_codex_home_for_mode "$mode" "$provider_plugins"
+    done <<<"$codex_provider_compositions"
+  fi
 fi
 
 set +e

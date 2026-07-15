@@ -315,14 +315,48 @@ SH
   [ "$preparation_invoked" -eq 0 ]
 }
 
-@test "eval runner dry-run prepares targeted Codex home from Codex marketplace plugins" {
-  run "$RUNNER" --dry-run
+@test "eval runner dry-run prepares targeted Codex home from selected behavior cases" {
+  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
   targeted_line="$(printf '%s\n' "$output" | grep -- '--plugin-mode targeted-plugins')"
   [[ "$targeted_line" == *"prepare-codex-home.mjs"* ]]
-  [[ "$targeted_line" == *"--plugins"* ]]
-  [[ "$targeted_line" == *"\\,advisor"* || "$targeted_line" == *"advisor\\,"* || "$targeted_line" == *"--plugins advisor"* ]]
+  [[ "$targeted_line" == *"--plugins tiber"* ]]
+  [[ "$targeted_line" != *"advisor"* ]]
+  [[ "$targeted_line" != *"\\,"* ]]
+}
+
+@test "eval runner prepares a focused Codex home with exactly the selected case plugins" {
+  fixture_root="$(mktemp -d)"
+  fake_promptfoo="$fixture_root/promptfoo"
+  targeted_home="$fixture_root/codex-targeted"
+  cat >"$fake_promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fake_promptfoo"
+
+  run env \
+    OPENAI_API_KEY=fixture \
+    PROMPTFOO_BIN="$fake_promptfoo" \
+    EVAL_OUT_DIR="$fixture_root/out" \
+    EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
+    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-targeted-plugins \
+    EVAL_TIMEOUT=0 \
+    CODEX_EVAL_HOME="$fixture_root/codex-full" \
+    CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_root/codex-full" \
+    CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-none" \
+    CODEX_EVAL_HOME_TARGETED_PLUGINS="$targeted_home" \
+    "$RUNNER"
+
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^\[plugins\.' "$targeted_home/config.toml")" -eq 1 ]
+  grep -q '\[plugins\."tiber@ai-plugins"\]' "$targeted_home/config.toml"
+  ! grep -q 'advisor@ai-plugins' "$targeted_home/config.toml"
+  [ -d "$targeted_home/plugins/cache/ai-plugins/tiber" ]
+  [ "$(find "$targeted_home/plugins/cache/ai-plugins" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ]
+
+  rm -rf "$fixture_root"
 }
 
 @test "eval runner dry-run prepares only Codex grader home for Claude-only provider filter" {
@@ -1119,9 +1153,9 @@ SH
   rm -rf "$fixture_root"
 }
 
-@test "eval runner fails when Codex marketplace has no plugin names" {
+@test "eval runner rejects invalid provider composition metadata before home preparation" {
   fixture_root="$(mktemp -d)"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/.agents/plugins"
+  mkdir -p "$fixture_root/scripts/evals"
   cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/generate-config.mjs" <<'NODE'
@@ -1136,22 +1170,93 @@ fs.writeFileSync(output, `providers:
     label: codex-gpt-5.6-terra-targeted-plugins
     pluginMode: targeted-plugins
 `);
-fs.mkdirSync(path.dirname(metadataOutput), { recursive: true });
-fs.writeFileSync(metadataOutput, JSON.stringify({
-  usesCodexGrader: true,
-  codexProviderPluginModes: ['targeted-plugins'],
-}));
-NODE
-  cat >"$fixture_root/.agents/plugins/marketplace.json" <<'JSON'
-{
-  "plugins": []
+const targeted = {
+  label: 'codex-gpt-5.6-terra-targeted-plugins',
+  provider: 'openai:codex-sdk',
+  providerVariant: 'codex-gpt-5.6-terra',
+  pluginMode: 'targeted-plugins',
+  plugins: ['tiber'],
+};
+const cases = {
+  empty: [],
+  duplicate: [targeted, targeted],
+  inconsistent: [
+    targeted,
+    {
+      ...targeted,
+      label: 'codex-second-targeted-plugins',
+      providerVariant: 'codex-second',
+      plugins: ['advisor'],
+    },
+  ],
+  targeted_empty: [{ ...targeted, plugins: [] }],
+  no_plugins_nonempty: [
+    {
+      ...targeted,
+      label: 'codex-gpt-5.6-terra-no-plugins',
+      pluginMode: 'no-plugins',
+    },
+  ],
+  missing_variant: [{ ...targeted, providerVariant: undefined }],
+  unknown_provider: [{ ...targeted, provider: 'unknown:provider' }],
+  unknown_mode: [
+    {
+      ...targeted,
+      label: 'codex-gpt-5.6-terra-unknown-mode',
+      pluginMode: 'unknown-mode',
+    },
+  ],
+};
+const metadata = { usesCodexGrader: true };
+if (process.env.COMPOSITION_CASE !== 'missing') {
+  metadata.providerCompositions = cases[process.env.COMPOSITION_CASE];
 }
-JSON
+fs.mkdirSync(path.dirname(metadataOutput), { recursive: true });
+fs.writeFileSync(metadataOutput, JSON.stringify(metadata));
+NODE
 
-  run "$fixture_root/scripts/evals/run.sh" --dry-run
+  for fixture in \
+    "missing|generated eval metadata is missing providerCompositions" \
+    "empty|providerCompositions must contain at least one provider" \
+    "duplicate|duplicate provider label" \
+    "inconsistent|inconsistent Codex provider compositions for targeted-plugins" \
+    "targeted_empty|targeted provider composition must not be empty" \
+    "no_plugins_nonempty|no-plugins provider composition must be empty" \
+    "missing_variant|invalid provider composition" \
+    "unknown_provider|unsupported provider in provider composition" \
+    "unknown_mode|unsupported plugin mode in provider composition"; do
+    composition_case="${fixture%%|*}"
+    expected="${fixture#*|}"
+
+    run env COMPOSITION_CASE="$composition_case" "$fixture_root/scripts/evals/run.sh" --dry-run
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"$expected"* ]]
+    [[ "$output" != *"prepare-codex-home.mjs"* ]]
+  done
+
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  grader_home="$fixture_root/grader-home"
+  mkdir -p "$grader_home"
+  printf 'preserve me\n' >"$grader_home/sentinel"
+
+  run env \
+    COMPOSITION_CASE=empty \
+    OPENAI_API_KEY=fixture \
+    PROMPTFOO_BIN=/bin/true \
+    CODEX_EVAL_HOME="$grader_home" \
+    CODEX_EVAL_HOME_FULL_MARKETPLACE="$grader_home" \
+    "$fixture_root/scripts/evals/run.sh"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Codex marketplace has no plugins"* ]]
+  [[ "$output" == *"providerCompositions must contain at least one provider"* ]]
+  [ -f "$grader_home/sentinel" ]
+
+  rm -rf "$fixture_root"
 }
 
 @test "package manifest pins promptfoo and coding harness provider SDKs" {

@@ -86,7 +86,9 @@ function evalMatrix() {
 function manifestPlugins(file) {
   return readPlugins(file)
     .map(normalizePlugin)
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) =>
+      left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+    );
 }
 
 function allMarketplacePlugins() {
@@ -100,7 +102,7 @@ function allMarketplacePlugins() {
   }
 
   return [...byName.values()].sort((left, right) =>
-    left.name.localeCompare(right.name),
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
   );
 }
 
@@ -333,14 +335,17 @@ function configFor(suite) {
   const providers = filteredProviderEntries(providerEntries);
   const providerVariants = uniqueById(providers.map((entry) => entry.variant));
   const pluginModes = uniqueById(providers.map((entry) => entry.pluginMode));
+  const providerCompositions = providers.map((entry) => ({
+    label: entry.label,
+    provider: entry.variant.provider,
+    providerVariant: entry.variant.id,
+    pluginMode: entry.pluginMode.id,
+    plugins: entry.plugins.map((plugin) => plugin.name),
+  }));
   const metadata = {
     suite,
     usesCodexGrader: true,
-    codexProviderPluginModes: uniqueById(
-      providers
-        .filter((entry) => entry.variant.provider === "openai:codex-sdk")
-        .map((entry) => entry.pluginMode),
-    ).map((mode) => mode.id),
+    providerCompositions,
   };
 
   const yaml = `# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
@@ -380,6 +385,7 @@ tracing:
 metadata:
   suite: ${suite}
   testLoaderByPluginMode: ${suite === "behavior" ? `${testLoader}?pluginMode={{ provider.pluginMode }}` : testLoader}
+  providerCompositions: ${JSON.stringify(providerCompositions)}
   matrix:
     pluginModes:
 ${indentedList(pluginModes, 6, (mode) => `- id: ${mode.id}`)}
