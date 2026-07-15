@@ -101,6 +101,40 @@ fn update_help_cannot_be_consumed_as_a_missing_summary_value() {
 }
 
 #[test]
+fn assigned_update_help_cannot_be_consumed_as_a_missing_summary_value() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Original title"]));
+
+    let output = repo.tiber([
+        "update",
+        "original-title",
+        "--summary",
+        "--help=topic",
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).expect("parser error should be utf8");
+    assert!(stderr.contains("error:"), "missing parser error: {stderr}");
+    assert!(
+        stderr.contains("--summary requires a value; use --summary=--help=topic"),
+        "missing recovery guidance: {stderr}"
+    );
+    assert!(
+        stderr.contains("Usage: tiber update"),
+        "missing parser-generated usage: {stderr}"
+    );
+    let shown = repo.tiber(["show", "original-title"]);
+    assert!(
+        !String::from_utf8(shown.stdout)
+            .expect("show output should be utf8")
+            .contains("## Summary\n\n--help=topic\n"),
+        "invalid invocation must not write assigned help as a summary"
+    );
+}
+
+#[test]
 fn update_short_help_cannot_be_consumed_as_a_missing_summary_value() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
