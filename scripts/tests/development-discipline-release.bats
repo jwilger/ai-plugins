@@ -210,6 +210,57 @@ setup() {
   [ "$output" != "$normalized_source" ]
 }
 
+@test "development-discipline parity normalization preserves non-safe iteration transition IDs" {
+  local source_output="$BATS_TEST_TMPDIR/source-non-safe-iteration.jsonl"
+  local dist_output="$BATS_TEST_TMPDIR/dist-non-safe-iteration.jsonl"
+  local normalized_source
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":1.5,\"transition_id\":\"1111111111111111\"}]}}"}]}}' >"$source_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":1.5,\"transition_id\":\"2222222222222222\"}]}}"}]}}' >"$dist_output"
+
+  run node "$PARITY_NORMALIZER" "$source_output"
+  [ "$status" -eq 0 ]
+  normalized_source="$output"
+
+  run node "$PARITY_NORMALIZER" "$dist_output"
+  [ "$status" -eq 0 ]
+  [ "$output" != "$normalized_source" ]
+}
+
+@test "development-discipline parity normalization preserves unsafe outer JSON integers" {
+  local source_output="$BATS_TEST_TMPDIR/source-unsafe-outer-integer.jsonl"
+  local dist_output="$BATS_TEST_TMPDIR/dist-unsafe-outer-integer.jsonl"
+  local normalized_source
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"unrelated":9007199254740992,"result":{}}' >"$source_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"unrelated":9007199254740993,"result":{}}' >"$dist_output"
+
+  run node "$PARITY_NORMALIZER" "$source_output"
+  [ "$status" -eq 0 ]
+  normalized_source="$output"
+
+  run node "$PARITY_NORMALIZER" "$dist_output"
+  [ "$status" -eq 0 ]
+  [ "$output" != "$normalized_source" ]
+}
+
+@test "development-discipline parity normalization preserves unsafe integers inside review payloads" {
+  local source_output="$BATS_TEST_TMPDIR/source-unsafe-payload-integer.jsonl"
+  local dist_output="$BATS_TEST_TMPDIR/dist-unsafe-payload-integer.jsonl"
+  local normalized_source
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}},\"unrelated\":9007199254740992}"}]}}' >"$source_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}},\"unrelated\":9007199254740993}"}]}}' >"$dist_output"
+
+  run node "$PARITY_NORMALIZER" "$source_output"
+  [ "$status" -eq 0 ]
+  normalized_source="$output"
+
+  run node "$PARITY_NORMALIZER" "$dist_output"
+  [ "$status" -eq 0 ]
+  [ "$output" != "$normalized_source" ]
+}
+
 @test "development-discipline parity normalization rejects interior blank records" {
   local malformed_output="$BATS_TEST_TMPDIR/interior-blank.jsonl"
 
@@ -230,7 +281,7 @@ setup() {
 
   printf '%s\n%s\n' \
     '{"jsonrpc":"2.0","id":1,"result":{}}' \
-    '{"jsonrpc":"2.0","id":2,"result":' >"$malformed_output"
+    '{"jsonrpc":"2.0","id":2.5,"sensitive":"parity-sensitive-payload","result":' >"$malformed_output"
 
   run node "$PARITY_NORMALIZER" "$malformed_output"
 
@@ -238,9 +289,10 @@ setup() {
   [[ "$output" == *"$malformed_output"* ]]
   [[ "$output" == *"record=2"* ]]
   [[ "$output" == *"invalid JSON"* ]]
+  [[ "$output" != *"parity-sensitive-payload"* ]]
 }
 
-@test "development-discipline parity reports normalization failures before cleanup" {
+@test "development-discipline parity reports normalization and mismatch failures before cleanup" {
   local fake_bin="$BATS_TEST_TMPDIR/parity-fake-bin"
   local real_node
   local real_rm
@@ -272,9 +324,13 @@ setup() {
     '    */dist/*) side=distribution ;;' \
     '    *) side=source ;;' \
     '  esac' \
-    '  printf "%s\n" '\''{"jsonrpc":"2.0","id":1,"result":{}}'\''' \
+    '  if [ "${PARITY_DIFFER_SIDE:-}" = "$side" ]; then' \
+    '    printf "%s\n" '\''{"jsonrpc":"2.0","id":1,"result":{"different":true}}'\''' \
+    '  else' \
+    '    printf "%s\n" '\''{"jsonrpc":"2.0","id":1,"result":{}}'\''' \
+    '  fi' \
     '  if [ "$side" = "$PARITY_FAIL_SIDE" ]; then' \
-    '    printf "%s\n" '\''{"jsonrpc":"2.0","id":2,"result":'\''' \
+    '    printf "%s\n" '\''{"jsonrpc":"2.0","id":2,"sensitive":"parity-sensitive-payload","result":'\''' \
     '  fi' \
     '  exit 0' \
     'fi' \
@@ -297,6 +353,7 @@ setup() {
       REAL_NODE="$real_node" \
       REAL_RM="$real_rm" \
       PARITY_FLOW_SCRIPT="$ROOT/scripts/tests/development-discipline-mcp-flow.mjs" \
+      PARITY_DIFFER_SIDE= \
       PARITY_FAIL_SIDE="$side" \
       PARITY_TOOLCHAIN="$toolchain" \
       CARGO_HOME="$BATS_TEST_TMPDIR/cargo-$side" \
@@ -306,6 +363,8 @@ setup() {
     [ "$status" -ne 0 ]
     [[ "$output" == *"development-discipline-release-parity-normalization-failed=true side=$side"* ]]
     [[ "$output" != *"development-discipline-release-parity-normalization-failed=true side=$opposite_side"* ]]
+    [[ "$output" == *"record=2"* ]]
+    [[ "$output" != *"parity-sensitive-payload"* ]]
 
     marker_line=-1
     cleanup_line=-1
@@ -319,6 +378,34 @@ setup() {
     [ "$marker_line" -ge 0 ]
     [ "$cleanup_line" -gt "$marker_line" ]
   done
+
+  run env \
+    PATH="$fake_bin:$PATH" \
+    REAL_NODE="$real_node" \
+    REAL_RM="$real_rm" \
+    PARITY_FLOW_SCRIPT="$ROOT/scripts/tests/development-discipline-mcp-flow.mjs" \
+    PARITY_DIFFER_SIDE=distribution \
+    PARITY_FAIL_SIDE= \
+    PARITY_TOOLCHAIN="$toolchain" \
+    CARGO_HOME="$BATS_TEST_TMPDIR/cargo-mismatch" \
+    RUSTUP_HOME="$BATS_TEST_TMPDIR/rustup-mismatch" \
+    bash "$PARITY_CHECK"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"development-discipline-release-parity-mismatch=true"* ]]
+  [[ "$output" != *"development-discipline-release-parity-normalization-failed=true"* ]]
+
+  marker_line=-1
+  cleanup_line=-1
+  for line_index in "${!lines[@]}"; do
+    if [ "${lines[$line_index]}" = "development-discipline-release-parity-mismatch=true" ]; then
+      marker_line="$line_index"
+    elif [ "${lines[$line_index]}" = "parity-test-cleanup-started=true" ]; then
+      cleanup_line="$line_index"
+    fi
+  done
+  [ "$marker_line" -ge 0 ]
+  [ "$cleanup_line" -gt "$marker_line" ]
 }
 
 detect_target() {

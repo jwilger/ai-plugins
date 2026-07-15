@@ -494,10 +494,10 @@ run_development_discipline_cargo_fallback_with_untrusted_target_dir() {
 
 run_development_discipline_cargo_fallback_without_home() {
   local bash_path
-  bash_path="$(command -v bash)"
+  bash_path="${BASH%/*}"
 
   env -i \
-    PATH="${bash_path%/*}:/bin:/usr/bin" \
+    PATH="$bash_path:/bin:/usr/bin" \
     DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
     DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
     "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
@@ -740,11 +740,22 @@ install_stale_tiber_cache_launcher() {
 }
 
 @test "development-discipline MCP Cargo fallback handles unset HOME" {
+  local untrusted_bin="$TMPROOT/home-unset-untrusted-bin"
+
+  mkdir -p "$untrusted_bin"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'echo "home-unset-untrusted-bash-executed" >&2' \
+    'exit 99' >"$untrusted_bin/bash"
+  chmod +x "$untrusted_bin/bash"
+  PATH="$untrusted_bin:$PATH"
+
   run run_development_discipline_cargo_fallback_without_home
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"development-discipline.mcp.missing_cargo"* ]]
   [[ "$output" != *"unbound variable"* ]]
+  [[ "$output" != *"home-unset-untrusted-bash-executed"* ]]
 }
 
 @test "tiber MCP manifest command prefers Claude plugin root when present" {

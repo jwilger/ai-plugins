@@ -13,6 +13,36 @@ const contractIds = new Map();
 const transitionIds = new Map();
 const reviewBudgetStartTimesBySession = new Map();
 
+function hasNonLosslessJsonNumber(jsonText) {
+  for (let index = 0; index < jsonText.length; index += 1) {
+    if (jsonText[index] === '"') {
+      index += 1;
+      while (index < jsonText.length && jsonText[index] !== '"') {
+        if (jsonText[index] === "\\") {
+          index += 1;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    if (jsonText[index] !== "-" && !/[0-9]/.test(jsonText[index])) {
+      continue;
+    }
+    const numberToken = jsonText
+      .slice(index)
+      .match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/)?.[0];
+    if (!numberToken) {
+      continue;
+    }
+    if (JSON.stringify(Number(numberToken)) !== numberToken) {
+      return true;
+    }
+    index += numberToken.length - 1;
+  }
+  return false;
+}
+
 function normalizedReviewBudgetStartTime(sessionId, startedAt) {
   if (!reviewBudgetStartTimesBySession.has(sessionId)) {
     reviewBudgetStartTimesBySession.set(sessionId, new Map());
@@ -89,22 +119,28 @@ function normalizeReviewState(payload) {
 function normalizeResponse(response) {
   const content = response?.result?.content;
   if (!Array.isArray(content)) {
-    return response;
+    return false;
   }
+  let normalized = false;
   for (const item of content) {
-    if (item?.type !== "text" || typeof item.text !== "string") {
+    if (
+      item?.type !== "text" ||
+      typeof item.text !== "string" ||
+      hasNonLosslessJsonNumber(item.text)
+    ) {
       continue;
     }
     try {
       const payload = JSON.parse(item.text);
       if (normalizeReviewState(payload)) {
         item.text = JSON.stringify(payload);
+        normalized = true;
       }
     } catch {
       // Ordinary diagnostic and reviewer-prompt text is not parity state.
     }
   }
-  return response;
+  return normalized;
 }
 
 const lines = readFileSync(inputPath, "utf8").split("\n");
@@ -119,6 +155,7 @@ const normalizedLines = lines.map((line, index) => {
     );
   }
 
+  const preserveLine = hasNonLosslessJsonNumber(line);
   let response;
   try {
     response = JSON.parse(line);
@@ -128,7 +165,11 @@ const normalizedLines = lines.map((line, index) => {
     );
   }
 
-  return JSON.stringify(normalizeResponse(response));
+  if (preserveLine) {
+    return line;
+  }
+
+  return normalizeResponse(response) ? JSON.stringify(response) : line;
 });
 
 process.stdout.write(`${normalizedLines.join("\n")}\n`);
