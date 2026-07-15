@@ -398,11 +398,7 @@ fn main() -> ExitCode {
 fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<Cli, clap::Error> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
     if arguments.get(1).is_some_and(|value| value == "update") {
-        let has_standalone_help = arguments.iter().enumerate().any(|(index, value)| {
-            value == "--help"
-                && (index == 0 || !is_bare_update_value_option(&arguments[index - 1]))
-        });
-        if !has_standalone_help {
+        if !has_standalone_help(&arguments, is_bare_update_value_option) {
             if let Some(pair) = arguments.windows(2).find(|pair| {
                 is_bare_update_value_option(&pair[0]) && is_update_option_token(&pair[1])
             }) {
@@ -434,27 +430,43 @@ fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
         ));
     }
     if arguments.get(1).is_some_and(|value| value == "install-bin") {
-        if let Some(pair) = arguments
-            .windows(2)
-            .find(|pair| pair[0] == "--target-dir" && is_install_bin_option_token(&pair[1]))
-        {
-            let value = pair[1].to_string_lossy();
-            return Err(command_error(
-                &["install-bin"],
-                "tiber install-bin",
-                ErrorKind::InvalidValue,
-                &format!(
-                    "--target-dir requires a value; use --target-dir={value} for that literal path"
-                ),
-            ));
+        if !has_standalone_help(&arguments, is_bare_install_bin_value_option) {
+            if let Some(pair) = arguments.windows(2).find(|pair| {
+                is_bare_install_bin_value_option(&pair[0])
+                    && is_install_bin_option_token(&pair[1])
+            }) {
+                let value = pair[1].to_string_lossy();
+                return Err(command_error(
+                    &["install-bin"],
+                    "tiber install-bin",
+                    ErrorKind::InvalidValue,
+                    &format!(
+                        "--target-dir requires a value; use --target-dir={value} for that literal path"
+                    ),
+                ));
+            }
         }
     }
 
     Cli::try_parse_from(normalized_cli_arguments(arguments))
 }
 
+fn has_standalone_help(
+    arguments: &[OsString],
+    is_bare_value_option: fn(&OsString) -> bool,
+) -> bool {
+    arguments.iter().enumerate().any(|(index, value)| {
+        value == "--help"
+            && (index == 0 || !is_bare_value_option(&arguments[index.saturating_sub(1)]))
+    })
+}
+
 fn is_bare_update_value_option(value: &OsString) -> bool {
     value.to_str().is_some_and(is_update_value_option_name)
+}
+
+fn is_bare_install_bin_value_option(value: &OsString) -> bool {
+    value == "--target-dir"
 }
 
 fn is_update_option_token(value: &OsString) -> bool {
