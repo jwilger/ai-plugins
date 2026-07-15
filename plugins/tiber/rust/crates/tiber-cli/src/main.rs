@@ -428,7 +428,8 @@ fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
     }
     if arguments.get(1).is_some_and(|value| value == "install-bin")
         && arguments.windows(2).any(|pair| {
-            pair[0] == "--target-dir" && matches!(pair[1].to_str(), Some("--dry-run" | "--apply"))
+            pair[0] == "--target-dir"
+                && matches!(pair[1].to_str(), Some("--dry-run" | "--apply" | "--help"))
         })
     {
         let value = arguments
@@ -440,7 +441,9 @@ fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
             &["install-bin"],
             "tiber install-bin",
             ErrorKind::InvalidValue,
-            &format!("{value} is an install mode; use --target-dir={value} for that literal path"),
+            &format!(
+                "--target-dir requires a value; use --target-dir={value} for that literal path"
+            ),
         ));
     }
 
