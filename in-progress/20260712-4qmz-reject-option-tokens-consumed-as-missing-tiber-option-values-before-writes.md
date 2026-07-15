@@ -30,3 +30,4 @@ Final review of the Clap migration confirmed this behavior already existed in th
 
 - 2026-07-12: Ticket rpmy's review-driven remediation now rejects `--dry-run`/`--apply` when supplied as separate `install-bin --target-dir` values (including reordered modes), while preserving explicit literal paths through `--target-dir=--dry-run` or `--target-dir=--apply`. Keep this backlog item focused on the remaining pre-existing update-field/recognized-option consumption cases and any generalized parser policy.
 - 2026-07-15: Green update-parser increment committed and pushed as 6bad7e9; tiber-rust passes and lightweight review is clean. Further increments await a CI signal, but CI runs only for PRs while the final-review gate prohibits opening a PR before ticket completion.
+- 2026-07-15: Maintainer confirmed this repository does not use PRs. Continue with local green gates on the feature worktree, run final review before merging to main, and verify trunk CI after push.
