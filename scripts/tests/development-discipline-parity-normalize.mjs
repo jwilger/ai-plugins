@@ -11,13 +11,17 @@ if (!inputPath) {
 
 const contractIds = new Map();
 const transitionIds = new Map();
-const reviewBudgetStartTimes = new Map();
+const reviewBudgetStartTimesBySession = new Map();
 
-function normalizedReviewBudgetStartTime(startedAt) {
-  if (!reviewBudgetStartTimes.has(startedAt)) {
-    reviewBudgetStartTimes.set(startedAt, reviewBudgetStartTimes.size + 1);
+function normalizedReviewBudgetStartTime(sessionId, startedAt) {
+  if (!reviewBudgetStartTimesBySession.has(sessionId)) {
+    reviewBudgetStartTimesBySession.set(sessionId, new Map());
   }
-  return reviewBudgetStartTimes.get(startedAt);
+  const startTimes = reviewBudgetStartTimesBySession.get(sessionId);
+  if (!startTimes.has(startedAt)) {
+    startTimes.set(startedAt, startTimes.size + 1);
+  }
+  return startTimes.get(startedAt);
 }
 
 function normalizedContractId(contractId) {
@@ -63,17 +67,20 @@ function normalizeReviewState(payload) {
 
   const startedAt = state?.risk_plan?.review_budget?.started_at_epoch_seconds;
   const contractId = state.review_contract_id;
+  const sessionId = state.session_id;
   if (
     !Number.isSafeInteger(startedAt) ||
     startedAt < 0 ||
     typeof contractId !== "string" ||
-    !/^[0-9a-f]{16}$/.test(contractId)
+    !/^[0-9a-f]{16}$/.test(contractId) ||
+    typeof sessionId !== "string" ||
+    !/^[A-Za-z0-9._:-]{1,128}$/.test(sessionId)
   ) {
     return false;
   }
 
   state.risk_plan.review_budget.started_at_epoch_seconds =
-    normalizedReviewBudgetStartTime(startedAt);
+    normalizedReviewBudgetStartTime(sessionId, startedAt);
   state.review_contract_id = normalizedContractId(contractId);
   normalizeVerifiedTransitions(state);
   return true;
