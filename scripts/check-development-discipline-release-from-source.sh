@@ -65,8 +65,14 @@ run_flow() {
 
 run_flow "$source_binary" "$source_output"
 run_flow "$dist_binary" "$dist_output"
-node "$parity_normalizer" "$source_output" >"$source_normalized"
-node "$parity_normalizer" "$dist_output" >"$dist_normalized"
+if ! node "$parity_normalizer" "$source_output" >"$source_normalized"; then
+  echo "development-discipline-release-parity-normalization-failed=true side=source" >&2
+  exit 1
+fi
+if ! node "$parity_normalizer" "$dist_output" >"$dist_normalized"; then
+  echo "development-discipline-release-parity-normalization-failed=true side=distribution" >&2
+  exit 1
+fi
 
 if ! cmp "$source_normalized" "$dist_normalized" >/dev/null; then
   diff -u "$source_normalized" "$dist_normalized" || true

@@ -4,6 +4,7 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd -P)"
   DETECTOR="$ROOT/plugins/development-discipline/scripts/detect-target.sh"
   COMPLETE_CHECK="$ROOT/scripts/check-development-discipline-release-complete.sh"
+  PARITY_CHECK="$ROOT/scripts/check-development-discipline-release-from-source.sh"
   PARITY_NORMALIZER="$ROOT/scripts/tests/development-discipline-parity-normalize.mjs"
   FAKE_BIN="$BATS_TEST_TMPDIR/fake-bin"
   mkdir -p "$FAKE_BIN"
@@ -219,6 +220,105 @@ setup() {
   run node "$PARITY_NORMALIZER" "$malformed_output"
 
   [ "$status" -ne 0 ]
+  [[ "$output" == *"$malformed_output"* ]]
+  [[ "$output" == *"record=2"* ]]
+  [[ "$output" == *"blank record"* ]]
+}
+
+@test "development-discipline parity normalization identifies invalid JSON records" {
+  local malformed_output="$BATS_TEST_TMPDIR/invalid-json.jsonl"
+
+  printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"result":{}}' \
+    '{"jsonrpc":"2.0","id":2,"result":' >"$malformed_output"
+
+  run node "$PARITY_NORMALIZER" "$malformed_output"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"$malformed_output"* ]]
+  [[ "$output" == *"record=2"* ]]
+  [[ "$output" == *"invalid JSON"* ]]
+}
+
+@test "development-discipline parity reports normalization failures before cleanup" {
+  local fake_bin="$BATS_TEST_TMPDIR/parity-fake-bin"
+  local real_node
+  local real_rm
+  local toolchain
+  local side
+  local opposite_side
+  local marker_line
+  local cleanup_line
+  local line_index
+
+  real_node="$(command -v node)"
+  real_rm="$(command -v rm)"
+  toolchain="$(awk -F'"' '/^channel = "/ { print $2; exit }' "$ROOT/plugins/development-discipline/rust/rust-toolchain.toml")"
+  mkdir -p "$fake_bin"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'if [ "$1" = "toolchain" ] && [ "$2" = "list" ]; then' \
+    '  printf "%s\n" "$PARITY_TOOLCHAIN-x86_64-unknown-linux-gnu (active)"' \
+    '  exit 0' \
+    'fi' \
+    'if [ "$1" = "run" ]; then' \
+    '  exit 0' \
+    'fi' \
+    'exit 1' >"$fake_bin/rustup"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'if [ "$1" = "$PARITY_FLOW_SCRIPT" ]; then' \
+    '  case "$2" in' \
+    '    */dist/*) side=distribution ;;' \
+    '    *) side=source ;;' \
+    '  esac' \
+    '  printf "%s\n" '\''{"jsonrpc":"2.0","id":1,"result":{}}'\''' \
+    '  if [ "$side" = "$PARITY_FAIL_SIDE" ]; then' \
+    '    printf "%s\n" '\''{"jsonrpc":"2.0","id":2,"result":'\''' \
+    '  fi' \
+    '  exit 0' \
+    'fi' \
+    'exec "$REAL_NODE" "$@"' >"$fake_bin/node"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'echo "parity-test-cleanup-started=true"' \
+    'exec "$REAL_RM" "$@"' >"$fake_bin/rm"
+  chmod +x "$fake_bin/rustup" "$fake_bin/node" "$fake_bin/rm"
+
+  for side in source distribution; do
+    if [ "$side" = "source" ]; then
+      opposite_side="distribution"
+    else
+      opposite_side="source"
+    fi
+
+    run env \
+      PATH="$fake_bin:$PATH" \
+      REAL_NODE="$real_node" \
+      REAL_RM="$real_rm" \
+      PARITY_FLOW_SCRIPT="$ROOT/scripts/tests/development-discipline-mcp-flow.mjs" \
+      PARITY_FAIL_SIDE="$side" \
+      PARITY_TOOLCHAIN="$toolchain" \
+      CARGO_HOME="$BATS_TEST_TMPDIR/cargo-$side" \
+      RUSTUP_HOME="$BATS_TEST_TMPDIR/rustup-$side" \
+      bash "$PARITY_CHECK"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"development-discipline-release-parity-normalization-failed=true side=$side"* ]]
+    [[ "$output" != *"development-discipline-release-parity-normalization-failed=true side=$opposite_side"* ]]
+
+    marker_line=-1
+    cleanup_line=-1
+    for line_index in "${!lines[@]}"; do
+      if [ "${lines[$line_index]}" = "development-discipline-release-parity-normalization-failed=true side=$side" ]; then
+        marker_line="$line_index"
+      elif [ "${lines[$line_index]}" = "parity-test-cleanup-started=true" ]; then
+        cleanup_line="$line_index"
+      fi
+    done
+    [ "$marker_line" -ge 0 ]
+    [ "$cleanup_line" -gt "$marker_line" ]
+  done
 }
 
 detect_target() {
