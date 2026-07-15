@@ -457,11 +457,11 @@ fn is_update_option_token(value: &OsString) -> bool {
     let Some(value) = value.to_str() else {
         return false;
     };
-    if matches!(value, "--help" | "-h") {
+    if value == "-h" {
         return true;
     }
     let option = value.split_once('=').map_or(value, |(option, _)| option);
-    is_update_value_option_name(option)
+    option == "--help" || is_update_value_option_name(option)
 }
 
 fn is_update_value_option_name(option: &str) -> bool {
