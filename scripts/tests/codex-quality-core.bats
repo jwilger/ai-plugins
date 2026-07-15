@@ -92,3 +92,18 @@ teardown() {
   [[ "$output" != *"missing required command"* ]]
   [[ "$output" != *"command not found"* ]]
 }
+
+@test "agentic systems guidance is an explicit opt-in" {
+  run "$RUNNER" install --with-agentic
+
+  [ "$status" -eq 0 ]
+  grep -Fqx "plugin add agentic-systems-engineering@ai-plugins --json" "$FAKE_CODEX_LOG"
+}
+
+@test "an invalid command is reported before its otherwise valid option" {
+  run "$RUNNER" bogus --with-agentic
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unknown command: bogus"* ]]
+  [[ "$output" != *"unknown option: --with-agentic"* ]]
+}
