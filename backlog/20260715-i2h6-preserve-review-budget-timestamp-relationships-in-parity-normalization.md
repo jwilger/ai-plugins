@@ -19,6 +19,7 @@ Formal final review of ticket 20260715-yvha found that replacing every started_a
 
 - [ ] The parity normalizer removes absolute clock drift while preserving the equality pattern of started_at_epoch_seconds values within a transcript.
 - [ ] Focused coverage fails when source retains a review-budget start time but the distribution resets it between records.
+- [ ] The focused release suite, release-from-source parity gate, and full repository CI pass at the fixed commit.
 
 ## Subtasks
 
