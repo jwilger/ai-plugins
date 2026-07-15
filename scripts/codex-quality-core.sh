@@ -41,19 +41,43 @@ require_command() {
   fi
 }
 
-configured_marketplace_root() {
+parse_configured_marketplace_root() {
   local marketplaces_json="$1"
 
-  jq -r --arg name "$marketplace_name" \
-    '.marketplaces[]? | select(.name == $name) | .root' \
-    <<<"$marketplaces_json"
+  if ! configured_marketplace_root_value="$(
+    jq -ser --arg name "$marketplace_name" '
+      def nonempty_string: type == "string" and length > 0;
+
+      select(length == 1)
+      | .[0]
+      | select(type == "object")
+      | .marketplaces as $marketplaces
+      | select(($marketplaces | type) == "array")
+      | select(all(
+          $marketplaces[];
+          type == "object"
+            and (.name? | nonempty_string)
+            and (.root? | nonempty_string)
+        ))
+      | select(
+          ([$marketplaces[].name] | unique | length)
+            == ($marketplaces | length)
+        )
+      | [$marketplaces[] | select(.name == $name)] as $matches
+      | if ($matches | length) == 0 then "" else $matches[0].root end
+    ' <<<"$marketplaces_json"
+  )"; then
+    printf 'unsupported Codex marketplace schema; this helper was validated with Codex CLI 0.144.x (tested with 0.144.4). No marketplace or plugin changes were made.\n' >&2
+    exit 2
+  fi
 }
 
 assert_marketplace_is_current() {
   local marketplaces_json="$1"
   local configured_root
 
-  configured_root="$(configured_marketplace_root "$marketplaces_json")"
+  parse_configured_marketplace_root "$marketplaces_json"
+  configured_root="$configured_marketplace_root_value"
   if [ -z "$configured_root" ]; then
     return 1
   fi
@@ -63,6 +87,39 @@ assert_marketplace_is_current() {
     printf '  configured: %s\n' "$configured_root" >&2
     printf '  requested:  %s\n' "$root" >&2
     printf "Resolve the source deliberately with 'codex plugin marketplace remove %s', then rerun this command.\n" "$marketplace_name" >&2
+    exit 2
+  fi
+}
+
+validate_plugin_state_json() {
+  local plugins_json="$1"
+
+  if ! validated_plugins_json="$(
+    jq -sce '
+      def nonempty_string: type == "string" and length > 0;
+      def valid_plugin:
+        type == "object"
+          and (.name? | nonempty_string)
+          and (.marketplaceName? | nonempty_string)
+          and (.version? | nonempty_string)
+          and ((.installed? | type) == "boolean")
+          and ((.enabled? | type) == "boolean");
+
+      select(length == 1)
+      | .[0]
+      | select(type == "object")
+      | select((.installed? | type) == "array")
+      | select((.available? | type) == "array")
+      | select(all(.installed[]; valid_plugin and .installed))
+      | select(all(.available[]; valid_plugin and (.installed | not)))
+      | (.installed + .available) as $plugins
+      | select(
+          ($plugins | map([.marketplaceName, .name]) | unique | length)
+            == ($plugins | length)
+        )
+    ' <<<"$plugins_json"
+  )"; then
+    printf 'unsupported Codex plugin state schema; this helper was validated with Codex CLI 0.144.x (tested with 0.144.4). Use compatible Codex and ai-plugins versions before rerunning.\n' >&2
     exit 2
   fi
 }
@@ -101,7 +158,7 @@ assert_plugins_installed() {
       exit 1
     fi
     if [ "$enabled" != "true" ]; then
-      printf "disabled Codex plugin: %s@%s; rerun '%s install%s' and enable the plugin.\n" \
+      printf "disabled Codex plugin: %s@%s; rerun '%s install%s' to re-enable it.\n" \
         "$plugin" "$marketplace_name" "$0" "$install_option" >&2
       exit 1
     fi
@@ -166,10 +223,18 @@ assert_skills_model_visible() {
 }
 
 install_quality_core() {
-  local marketplaces_json plugin
+  local marketplaces_json plugins_json plugin marketplace_missing
 
   marketplaces_json="$(codex plugin marketplace list --json)"
+  marketplace_missing=0
   if ! assert_marketplace_is_current "$marketplaces_json"; then
+    marketplace_missing=1
+  fi
+
+  plugins_json="$(codex plugin list --available --json)"
+  validate_plugin_state_json "$plugins_json"
+
+  if [ "$marketplace_missing" -eq 1 ]; then
     codex plugin marketplace add "$root" --json >/dev/null
   fi
 
@@ -192,7 +257,8 @@ check_quality_core() {
   fi
 
   plugins_json="$(codex plugin list --available --json)"
-  assert_plugins_installed "$plugins_json"
+  validate_plugin_state_json "$plugins_json"
+  assert_plugins_installed "$validated_plugins_json"
 
   owns_downstream=0
   if [ -n "$downstream_arg" ]; then
