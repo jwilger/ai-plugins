@@ -27,3 +27,5 @@ The canonical `just ci` gate consistently fails `development-discipline MCP Carg
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-15: Completed in commit 087fa9204e2627f8e9e4e52e3e62df17d1022ef0, pushed directly to main. The fixture resolves trusted Bash before `env -i`, keeps HOME/CARGO/CARGO_HOME and inherited PATH absent, and reaches `development-discipline.mcp.missing_cargo`. Verification: focused test green; all 32 MCP startup tests green; local `nix develop -c just ci` green (44 mutation cases, 344 Bats); formal low-risk final review clean with one correctness lens and no findings; trunk CI run https://github.com/jwilger/ai-plugins/actions/runs/29395768157 green including aggregate CI gate.
