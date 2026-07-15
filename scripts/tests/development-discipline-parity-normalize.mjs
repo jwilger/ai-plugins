@@ -11,6 +11,14 @@ if (!inputPath) {
 
 const contractIds = new Map();
 const transitionIds = new Map();
+const reviewBudgetStartTimes = new Map();
+
+function normalizedReviewBudgetStartTime(startedAt) {
+  if (!reviewBudgetStartTimes.has(startedAt)) {
+    reviewBudgetStartTimes.set(startedAt, reviewBudgetStartTimes.size + 1);
+  }
+  return reviewBudgetStartTimes.get(startedAt);
+}
 
 function normalizedContractId(contractId) {
   if (!contractIds.has(contractId)) {
@@ -64,7 +72,8 @@ function normalizeReviewState(payload) {
     return false;
   }
 
-  state.risk_plan.review_budget.started_at_epoch_seconds = 0;
+  state.risk_plan.review_budget.started_at_epoch_seconds =
+    normalizedReviewBudgetStartTime(startedAt);
   state.review_contract_id = normalizedContractId(contractId);
   normalizeVerifiedTransitions(state);
   return true;
