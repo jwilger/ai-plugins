@@ -32,11 +32,12 @@ The repo includes a promptfoo-based OSS eval lane that runs behavior scenarios
 through Promptfoo's native Claude Code and Codex coding-agent providers. The
 runner generates config from the marketplace manifests and labels no-plugin,
 targeted-plugin, and full-marketplace behavior modes. Codex uses a separate
-generated home for each mode, but the targeted home defaults to every Codex
-marketplace plugin unless `EVAL_TARGETED_PLUGINS` narrows it. Claude loads the
-full Claude marketplace in both plugin-enabled modes. Therefore the default run
-measures an empty baseline and full marketplace composition; the targeted label
-represents a distinct composition only when its override is set. The lane writes
+generated home for each mode. For both harnesses, targeted mode installs the
+deterministic, deduplicated union of plugins declared by the selected behavior
+cases; `EVAL_CASE_FILTER` narrows both the cases and their installed plugin set.
+Full-marketplace mode installs the complete harness-specific catalog, and
+no-plugin mode installs none. The generated config records exact installed
+provider compositions separately from individual case targets. The lane writes
 JSON, HTML, and JUnit artifacts under `evals/out/`, then builds a static
 dashboard under `site/evals/`. Hosted promptfoo sharing is not used as the
 durable record. Promptfoo is pinned at `0.121.18`; prompt response caching and
@@ -83,7 +84,7 @@ generated repo-owned artifacts.
 
 The Codex MCP manifest starts through an absolute `/bin/sh` launcher so Codex
 does not need `bash` on its MCP startup `PATH`. Reinstall or upgrade the plugin
-from marketplace version `0.2.0` or newer if Codex reports `No such file or
+from marketplace version `0.2.1` or newer if Codex reports `No such file or
 directory` while starting the `promptfoo` MCP server.
 
 Promptfoo's `mcp` provider is a different feature: it treats an MCP server as

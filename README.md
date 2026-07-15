@@ -78,7 +78,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                                                       | 0.2.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                      | 0.2.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                                             | 0.2.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.1.4   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.2.1   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                            | 0.1.0   |
 | [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, final review, debugging, review handling, and skill authoring.                            | 0.11.0  |
 | [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.8.0   |
@@ -90,7 +90,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                                                       | 0.2.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                      | 0.2.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic, portfolio-grade engineering regime: a guardrail skill and a scaffold skill.                                             | 0.2.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.1.4   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.2.1   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                            | 0.1.0   |
 | [advisor](plugins/advisor/README.md)                                         | Read-only planning advisor for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                                                   | 0.1.0   |
 | [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for TDD, verification, final review, debugging, review handling, and skill authoring.                            | 0.11.0  |
@@ -196,11 +196,15 @@ agent providers: `anthropic:claude-agent-sdk` for Claude Code and
 `openai:codex-sdk` for Codex. The runner generates the promptfoo config from
 the current marketplace manifests and labels no-plugin, targeted-plugin, and
 full-marketplace behavior modes. Codex uses a separate generated home for each
-mode, but the targeted home defaults to every Codex marketplace plugin unless
-`EVAL_TARGETED_PLUGINS` narrows it. Claude loads the full Claude marketplace in
-both plugin-enabled modes. Therefore the default run measures an empty baseline
-and full marketplace composition; the targeted label represents a distinct
-composition only when its override is set. Promptfoo is pinned at `0.121.18`;
+mode. For both harnesses, targeted mode installs the deterministic, deduplicated
+union of plugins declared by the selected behavior cases; `EVAL_CASE_FILTER`
+therefore narrows both the cases and their installed plugin set. Full-marketplace
+mode still installs the complete harness-specific catalog, while no-plugin mode
+installs none. The generated config records each provider's exact installed
+composition separately from the plugins targeted by an individual case. An
+unfiltered targeted run may equal Claude's full catalog today, but it excludes
+Codex-only plugins with no selected behavior case and remains a distinct measured
+composition. Promptfoo is pinned at `0.121.18`;
 the Promptfoo, Codex SDK, and Claude Agent SDK packages are pinned in
 `package.json` and `package-lock.json`. The runner disables prompt response
 caching and hosted sharing so a behavior run is a fresh local record.

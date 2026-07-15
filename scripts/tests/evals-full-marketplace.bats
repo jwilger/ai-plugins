@@ -367,6 +367,41 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "generated metadata records exact filtered provider plugin compositions" {
+  FIXTURE_TMP="$(mktemp -d)"
+  generated_config="$FIXTURE_TMP/config.yaml"
+  generated_metadata="$FIXTURE_TMP/metadata.json"
+
+  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture node \
+    "$ROOT/scripts/evals/generate-config.mjs" \
+    --suite behavior \
+    --output "$generated_config" \
+    --metadata-output "$generated_metadata"
+
+  [ "$status" -eq 0 ]
+  jq -e '
+    def plugins($label):
+      [.providerCompositions[] | select(.label == $label) | .plugins] | first;
+    plugins("claude-code-sonnet-targeted-plugins") == ["tiber"]
+      and plugins("codex-gpt-5.6-terra-targeted-plugins") == ["tiber"]
+      and plugins("claude-code-sonnet-no-plugins") == []
+      and plugins("codex-gpt-5.6-terra-no-plugins") == []
+      and (plugins("claude-code-sonnet-full-marketplace") | index("advisor") | not)
+      and (plugins("codex-gpt-5.6-terra-full-marketplace") | index("advisor") != null)
+  ' "$generated_metadata"
+  run node - "$generated_config" "$generated_metadata" <<'NODE'
+const fs = require('node:fs');
+const YAML = require('yaml');
+const config = YAML.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const metadata = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+
+if (JSON.stringify(config.metadata.providerCompositions) !== JSON.stringify(metadata.providerCompositions)) {
+  throw new Error('YAML and sidecar provider compositions differ');
+}
+NODE
+  [ "$status" -eq 0 ]
+}
+
 @test "codex eval home preparation supports no-plugin and targeted-plugin modes" {
   NO_PLUGINS_HOME="$(mktemp -d)"
   TARGETED_HOME="$(mktemp -d)"

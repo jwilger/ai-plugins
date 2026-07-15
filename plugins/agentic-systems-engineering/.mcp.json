@@ -4,7 +4,7 @@
       "command": "/bin/sh",
       "args": [
         "-c",
-        "set -eu; if [ -n \"${PATH:-}\" ]; then PATH=\"$PATH:/bin:/usr/bin:/run/current-system/sw/bin\"; else PATH=\"/bin:/usr/bin:/run/current-system/sw/bin\"; fi; export PATH; candidate=\"${CODEX_HOME:-${HOME:-}/.codex}/plugins/cache/ai-plugins/agentic-systems-engineering/0.2.0/bin/promptfoo-mcp\"; if [ -x \"$candidate\" ]; then exec \"$candidate\"; fi; echo \"promptfoo.mcp_launcher_missing\" >&2; exit 127"
+        "set -eu; if [ -n \"${PATH:-}\" ]; then PATH=\"$PATH:/bin:/usr/bin:/run/current-system/sw/bin\"; else PATH=\"/bin:/usr/bin:/run/current-system/sw/bin\"; fi; export PATH; candidate=\"${CODEX_HOME:-${HOME:-}/.codex}/plugins/cache/ai-plugins/agentic-systems-engineering/0.2.1/bin/promptfoo-mcp\"; if [ -x \"$candidate\" ]; then exec \"$candidate\"; fi; echo \"promptfoo.mcp_launcher_missing\" >&2; exit 127"
       ],
       "description": "Promptfoo MCP server for validating configs, running focused evals, inspecting results, and developing eval cases from Codex."
     }
