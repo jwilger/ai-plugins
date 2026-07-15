@@ -16,11 +16,12 @@ representative_skills=(
 
 usage() {
   cat <<'EOF'
-Usage: scripts/codex-quality-core.sh install
+Usage: scripts/codex-quality-core.sh install [--with-agentic]
 
 Install or refresh the Codex quality-core plugins from this checkout, then
 verify that their representative skills are model-visible in a clean temporary
-downstream Git repository.
+downstream Git repository. Add --with-agentic for AI-system projects that also
+provide the Promptfoo tooling required by agentic-systems-engineering.
 EOF
 }
 
@@ -150,9 +151,25 @@ fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-if [ "$#" -ne 1 ]; then
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
   usage >&2
   exit 2
+fi
+
+if [ "$1" != "install" ]; then
+  printf 'unknown command: %s\n' "$1" >&2
+  usage >&2
+  exit 2
+fi
+
+if [ "$#" -eq 2 ]; then
+  if [ "$2" != "--with-agentic" ]; then
+    printf 'unknown option: %s\n' "$2" >&2
+    usage >&2
+    exit 2
+  fi
+  core_plugins+=(agentic-systems-engineering)
+  representative_skills+=(agentic-systems-engineering:agentic-systems-engineering)
 fi
 
 require_command codex
