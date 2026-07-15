@@ -17,6 +17,7 @@ function parseArgs(argv) {
     codexHome: argv[0],
     pluginMode: "full-marketplace",
     plugins: null,
+    pluginsProvided: false,
   };
 
   for (let index = 1; index < argv.length; index += 1) {
@@ -24,7 +25,12 @@ function parseArgs(argv) {
     if (arg === "--plugin-mode") {
       args.pluginMode = argv[++index];
     } else if (arg === "--plugins") {
-      args.plugins = argv[++index]
+      const value = argv[++index];
+      if (value === undefined) {
+        throw new Error("--plugins requires a comma-separated plugin list");
+      }
+      args.pluginsProvided = true;
+      args.plugins = value
         .split(",")
         .map((plugin) => plugin.trim())
         .filter(Boolean);
@@ -49,13 +55,19 @@ function parseArgs(argv) {
     throw new Error(`unknown plugin mode: ${args.pluginMode}`);
   }
   if (
-    args.pluginMode === "targeted-plugins" &&
-    (!args.plugins || args.plugins.length === 0)
+    args.pluginsProvided &&
+    ["targeted-plugins", "skills-only-marketplace"].includes(args.pluginMode) &&
+    args.plugins.length === 0
   ) {
+    throw new Error(
+      `${args.pluginMode} mode requires a non-empty --plugins list`,
+    );
+  }
+  if (args.pluginMode === "targeted-plugins" && !args.pluginsProvided) {
     throw new Error("targeted-plugins mode requires --plugins");
   }
   if (
-    args.plugins &&
+    args.pluginsProvided &&
     !["targeted-plugins", "skills-only-marketplace"].includes(args.pluginMode)
   ) {
     throw new Error(
