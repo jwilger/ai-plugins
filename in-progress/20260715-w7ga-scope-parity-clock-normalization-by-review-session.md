@@ -1,6 +1,6 @@
 ---
 title: Scope parity clock normalization by review session
-blocked_by: []
+blocked_by: [20260715-s4tq-prove-parity-normalization-preserves-invalid-session-state-verbatim]
 blocks: [20260715-yvha-make-development-discipline-release-parity-fixture-use-a-fixed-clock]
 tags: [development-discipline, release-parity, tests, bug]
 pr_mr_url: 

@@ -1,7 +1,7 @@
 ---
 title: Prove parity normalization preserves invalid session state verbatim
 blocked_by: []
-blocks: []
+blocks: [20260715-w7ga-scope-parity-clock-normalization-by-review-session]
 tags: []
 pr_mr_url: 
 pr_mr_status: 
