@@ -27,3 +27,5 @@ Formal review finding parity-normalizer-accepts-zero-iteration: runtime verified
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-15: Implemented and committed as 1ffdf41f9711a2366a6c9ee99f4e2a8d7fb96777. TDD evidence: the isolated iteration-0 fixture failed before the guard change because distinct malformed transition IDs normalized equal; after requiring a positive safe integer, all 17 focused release/parity tests and the source/distribution parity gate passed. Full `nix develop -c just ci` passed (242 development-discipline tests; mutation score 38 caught, 6 unviable; 355 Bats tests). Formal final review session zero-iteration-final-1ffdf41-v1 completed clean with one correctness lens, no findings, and no out-of-scope observations.
