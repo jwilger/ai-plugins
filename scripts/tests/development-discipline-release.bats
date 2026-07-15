@@ -22,8 +22,8 @@ setup() {
   local dist_output="$BATS_TEST_TMPDIR/dist.jsonl"
   local normalized_source
 
-  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
-  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' >"$dist_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' >"$dist_output"
 
   run node "$PARITY_NORMALIZER" "$source_output"
   [ "$status" -eq 0 ]
@@ -40,11 +40,11 @@ setup() {
   local normalized_source
 
   printf '%s\n%s\n' \
-    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' \
-    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
   printf '%s\n%s\n' \
-    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"cccccccccccccccc\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' \
-    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"dddddddddddddddd\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":102}}}}"}]}}' >"$dist_output"
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"cccccccccccccccc\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"dddddddddddddddd\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":102}}}}"}]}}' >"$dist_output"
 
   run node "$PARITY_NORMALIZER" "$source_output"
   [ "$status" -eq 0 ]
@@ -55,13 +55,34 @@ setup() {
   [ "$output" != "$normalized_source" ]
 }
 
+@test "development-discipline parity normalization isolates clocks between review sessions" {
+  local source_output="$BATS_TEST_TMPDIR/source-session-clocks.jsonl"
+  local dist_output="$BATS_TEST_TMPDIR/dist-session-clocks.jsonl"
+  local normalized_source
+
+  printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-two\",\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
+  printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"cccccccccccccccc\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-two\",\"review_contract_id\":\"dddddddddddddddd\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":102}}}}"}]}}' >"$dist_output"
+
+  run node "$PARITY_NORMALIZER" "$source_output"
+  [ "$status" -eq 0 ]
+  normalized_source="$output"
+
+  run node "$PARITY_NORMALIZER" "$dist_output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$normalized_source" ]
+}
+
 @test "development-discipline parity normalization removes derived transition drift" {
   local source_output="$BATS_TEST_TMPDIR/source-transition.jsonl"
   local dist_output="$BATS_TEST_TMPDIR/dist-transition.jsonl"
   local normalized_source
 
-  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":1,\"transition_id\":\"1111111111111111\"}]}}"}]}}' >"$source_output"
-  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}},\"verified_clean_iterations\":[{\"iteration\":1,\"transition_id\":\"2222222222222222\"}]}}"}]}}' >"$dist_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":1,\"transition_id\":\"1111111111111111\"}]}}"}]}}' >"$source_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}},\"verified_clean_iterations\":[{\"iteration\":1,\"transition_id\":\"2222222222222222\"}]}}"}]}}' >"$dist_output"
 
   run node "$PARITY_NORMALIZER" "$source_output"
   [ "$status" -eq 0 ]
@@ -77,8 +98,8 @@ setup() {
   local dist_output="$BATS_TEST_TMPDIR/dist-unrelated.jsonl"
   local normalized_source
 
-  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}},\"unrelated\":{\"started_at_epoch_seconds\":1}}"}]}}' >"$source_output"
-  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}},\"unrelated\":{\"started_at_epoch_seconds\":2}}"}]}}' >"$dist_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}},\"unrelated\":{\"started_at_epoch_seconds\":1}}"}]}}' >"$source_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}},\"unrelated\":{\"started_at_epoch_seconds\":2}}"}]}}' >"$dist_output"
 
   run node "$PARITY_NORMALIZER" "$source_output"
   [ "$status" -eq 0 ]
@@ -106,17 +127,34 @@ setup() {
   [ "$output" != "$normalized_source" ]
 }
 
+@test "development-discipline parity normalization preserves state without a canonical session ID" {
+  local source_output="$BATS_TEST_TMPDIR/source-missing-session.jsonl"
+  local dist_output="$BATS_TEST_TMPDIR/dist-missing-session.jsonl"
+  local normalized_source
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
+  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' >"$dist_output"
+
+  run node "$PARITY_NORMALIZER" "$source_output"
+  [ "$status" -eq 0 ]
+  normalized_source="$output"
+
+  run node "$PARITY_NORMALIZER" "$dist_output"
+  [ "$status" -eq 0 ]
+  [ "$output" != "$normalized_source" ]
+}
+
 @test "development-discipline parity normalization preserves contract ID relationships" {
   local source_output="$BATS_TEST_TMPDIR/source-contract-relationships.jsonl"
   local dist_output="$BATS_TEST_TMPDIR/dist-contract-relationships.jsonl"
   local normalized_source
 
   printf '%s\n%s\n' \
-    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' \
-    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
   printf '%s\n%s\n' \
-    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' \
-    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"cccccccccccccccc\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' >"$dist_output"
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"cccccccccccccccc\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' >"$dist_output"
 
   run node "$PARITY_NORMALIZER" "$source_output"
   [ "$status" -eq 0 ]
@@ -133,11 +171,11 @@ setup() {
   local normalized_source
 
   printf '%s\n%s\n' \
-    '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":1,\"transition_id\":\"1111111111111111\"}]}}"}]}}' \
-    '{"jsonrpc":"2.0","id":8,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":2,\"transition_id\":\"1111111111111111\"}]}}"}]}}' >"$source_output"
+    '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":1,\"transition_id\":\"1111111111111111\"}]}}"}]}}' \
+    '{"jsonrpc":"2.0","id":8,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}},\"verified_clean_iterations\":[{\"iteration\":2,\"transition_id\":\"1111111111111111\"}]}}"}]}}' >"$source_output"
   printf '%s\n%s\n' \
-    '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"cccccccccccccccc\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}},\"verified_clean_iterations\":[{\"iteration\":1,\"transition_id\":\"2222222222222222\"}]}}"}]}}' \
-    '{"jsonrpc":"2.0","id":8,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"dddddddddddddddd\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}},\"verified_clean_iterations\":[{\"iteration\":2,\"transition_id\":\"3333333333333333\"}]}}"}]}}' >"$dist_output"
+    '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"cccccccccccccccc\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}},\"verified_clean_iterations\":[{\"iteration\":1,\"transition_id\":\"2222222222222222\"}]}}"}]}}' \
+    '{"jsonrpc":"2.0","id":8,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review-one\",\"review_contract_id\":\"dddddddddddddddd\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}},\"verified_clean_iterations\":[{\"iteration\":2,\"transition_id\":\"3333333333333333\"}]}}"}]}}' >"$dist_output"
 
   run node "$PARITY_NORMALIZER" "$source_output"
   [ "$status" -eq 0 ]
