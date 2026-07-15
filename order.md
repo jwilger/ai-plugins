@@ -10,6 +10,7 @@
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-n3sh-add-cross-project-worktree-safety-guidance
+20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
@@ -28,7 +29,6 @@
 20260714-wimr-validate-gpt-5-6-benchmark-concurrency-samples-help-and-timeouts-by-phase
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
-20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
 20260714-ucd7-clean-up-auto-created-gpt-5-6-benchmark-workspaces
