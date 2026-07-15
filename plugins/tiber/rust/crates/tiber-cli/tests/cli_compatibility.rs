@@ -80,3 +80,21 @@ fn adjacent_assigned_update_options_remain_valid() {
         "unexpected task: {task}"
     );
 }
+
+#[test]
+fn explicit_update_option_like_value_is_stored_literally() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Literal option value"]));
+
+    let update = repo.tiber(["update", "literal-option-value", "--summary=--tags"]);
+
+    assert_success(update);
+    let show = repo.tiber(["show", "literal-option-value"]);
+    assert_success_ref(&show);
+    let task = String::from_utf8(show.stdout).expect("show output should be utf8");
+    assert!(
+        task.contains("## Summary\n\n--tags\n"),
+        "explicit option-like value was not stored literally: {task}"
+    );
+}
