@@ -398,18 +398,25 @@ fn main() -> ExitCode {
 fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<Cli, clap::Error> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
     if arguments.get(1).is_some_and(|value| value == "update") {
-        if let Some(pair) = arguments
-            .windows(2)
-            .find(|pair| is_bare_update_value_option(&pair[0]) && is_update_option_token(&pair[1]))
-        {
-            let option = pair[0].to_string_lossy();
-            let value = pair[1].to_string_lossy();
-            return Err(command_error(
-                &["update"],
-                "tiber update",
-                ErrorKind::InvalidValue,
-                &format!("{option} requires a value; use {option}={value} for that literal value"),
-            ));
+        let has_standalone_help = arguments.iter().enumerate().any(|(index, value)| {
+            value == "--help"
+                && (index == 0 || !is_bare_update_value_option(&arguments[index - 1]))
+        });
+        if !has_standalone_help {
+            if let Some(pair) = arguments.windows(2).find(|pair| {
+                is_bare_update_value_option(&pair[0]) && is_update_option_token(&pair[1])
+            }) {
+                let option = pair[0].to_string_lossy();
+                let value = pair[1].to_string_lossy();
+                return Err(command_error(
+                    &["update"],
+                    "tiber update",
+                    ErrorKind::InvalidValue,
+                    &format!(
+                        "{option} requires a value; use {option}={value} for that literal value"
+                    ),
+                ));
+            }
         }
     }
     if arguments.get(1).is_some_and(|value| value == "subtask")

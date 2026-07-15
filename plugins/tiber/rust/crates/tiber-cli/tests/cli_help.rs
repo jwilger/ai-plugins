@@ -85,3 +85,32 @@ fn update_help_documents_explicit_option_like_values() {
         "help lacked explicit option-like value syntax: {stdout}"
     );
 }
+
+#[test]
+fn standalone_update_help_precedes_later_missing_value_errors() {
+    let repo = TempRepo::initialized();
+
+    let output = repo.tiber([
+        "update",
+        "task",
+        "--help",
+        "--summary",
+        "--tags",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "standalone help failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "standalone help wrote stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("help output should be utf8");
+    assert!(
+        stdout.contains("Usage: tiber update"),
+        "help lacked update usage: {stdout}"
+    );
+}
