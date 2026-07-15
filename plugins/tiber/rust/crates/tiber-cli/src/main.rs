@@ -432,8 +432,7 @@ fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
     if arguments.get(1).is_some_and(|value| value == "install-bin") {
         if !has_standalone_help(&arguments, is_bare_install_bin_value_option) {
             if let Some(pair) = arguments.windows(2).find(|pair| {
-                is_bare_install_bin_value_option(&pair[0])
-                    && is_install_bin_option_token(&pair[1])
+                is_bare_install_bin_value_option(&pair[0]) && is_install_bin_option_token(&pair[1])
             }) {
                 let value = pair[1].to_string_lossy();
                 return Err(command_error(

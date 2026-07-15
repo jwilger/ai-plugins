@@ -90,13 +90,7 @@ fn update_help_documents_explicit_option_like_values() {
 fn standalone_update_help_precedes_later_missing_value_errors() {
     let repo = TempRepo::initialized();
 
-    let output = repo.tiber([
-        "update",
-        "task",
-        "--help",
-        "--summary",
-        "--tags",
-    ]);
+    let output = repo.tiber(["update", "task", "--help", "--summary", "--tags"]);
 
     assert!(
         output.status.success(),
