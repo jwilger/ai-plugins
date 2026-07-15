@@ -20,7 +20,6 @@ The canonical `just ci` gate compares complete JSON-RPC outputs from sequential 
 
 ## Acceptance criteria
 
-- [ ] The source and bundled MCP fixture runs receive the same deterministic epoch value, independent of wall-clock second boundaries.
 - [ ] The release-from-source parity gate passes repeatedly when source and bundled behavior is identical while still failing for a real output difference.
 - [ ] Focused coverage reproduces the former clock-derived mismatch and proves the deterministic fixture contract.
 
