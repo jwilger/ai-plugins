@@ -53,3 +53,30 @@ fn free_text_and_path_values_may_start_with_hyphens() {
         );
     }
 }
+
+#[test]
+fn adjacent_assigned_update_options_remain_valid() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Assigned fields"]));
+
+    let update = repo.tiber([
+        "update",
+        "assigned-fields",
+        "--summary=Assigned summary",
+        "--tags=alpha,beta",
+    ]);
+
+    assert_success(update);
+    let show = repo.tiber(["show", "assigned-fields"]);
+    assert_success_ref(&show);
+    let task = String::from_utf8(show.stdout).expect("show output should be utf8");
+    assert!(
+        task.contains("tags: [alpha, beta]\n"),
+        "unexpected task: {task}"
+    );
+    assert!(
+        task.contains("## Summary\n\nAssigned summary\n"),
+        "unexpected task: {task}"
+    );
+}
