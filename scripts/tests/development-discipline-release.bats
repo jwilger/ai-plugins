@@ -132,15 +132,21 @@ setup() {
   local dist_output="$BATS_TEST_TMPDIR/dist-missing-session.jsonl"
   local normalized_source
 
-  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' >"$source_output"
-  printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' >"$dist_output"
+  printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"aaaaaaaaaaaaaaaa\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":100}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review one\",\"review_contract_id\":\"bbbbbbbbbbbbbbbb\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":101}}}}"}]}}' >"$source_output"
+  printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"state\":{\"review_contract_id\":\"cccccccccccccccc\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":102}}}}"}]}}' \
+    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"state\":{\"session_id\":\"review two\",\"review_contract_id\":\"dddddddddddddddd\",\"risk_plan\":{\"review_budget\":{\"started_at_epoch_seconds\":103}}}}"}]}}' >"$dist_output"
 
   run node "$PARITY_NORMALIZER" "$source_output"
   [ "$status" -eq 0 ]
+  [ "$output" = "$(<"$source_output")" ]
   normalized_source="$output"
 
   run node "$PARITY_NORMALIZER" "$dist_output"
   [ "$status" -eq 0 ]
+  [ "$output" = "$(<"$dist_output")" ]
   [ "$output" != "$normalized_source" ]
 }
 
