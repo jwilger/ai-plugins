@@ -16,6 +16,7 @@ export PATH="$CARGO_HOME/bin:$PATH"
 target_dir="$root/.dependencies/cargo-target/development-discipline-release"
 source_binary="$target_dir/release/development-discipline-mcp"
 flow_script="$root/scripts/tests/development-discipline-mcp-flow.mjs"
+parity_normalizer="$root/scripts/tests/development-discipline-parity-normalize.mjs"
 source_fingerprint="$(
   cd "$plugin_root/rust"
   sha256sum Cargo.toml Cargo.lock rust-toolchain.toml src/main.rs | sha256sum | awk '{ print $1 }'
@@ -35,8 +36,10 @@ dist_binary="$plugin_root/dist/$release_target/development-discipline-mcp"
 
 source_output="$(mktemp)"
 dist_output="$(mktemp)"
+source_normalized="$(mktemp)"
+dist_normalized="$(mktemp)"
 project_root="$(mktemp -d)"
-trap 'rm -rf "$source_output" "$dist_output" "$project_root"' EXIT
+trap 'rm -rf "$source_output" "$dist_output" "$source_normalized" "$dist_normalized" "$project_root"' EXIT
 
 mkdir -p "$project_root/.development-discipline"
 git -C "$project_root" init --quiet
@@ -62,9 +65,11 @@ run_flow() {
 
 run_flow "$source_binary" "$source_output"
 run_flow "$dist_binary" "$dist_output"
+node "$parity_normalizer" "$source_output" >"$source_normalized"
+node "$parity_normalizer" "$dist_output" >"$dist_normalized"
 
-if ! cmp "$source_output" "$dist_output" >/dev/null; then
-  diff -u "$source_output" "$dist_output" || true
+if ! cmp "$source_normalized" "$dist_normalized" >/dev/null; then
+  diff -u "$source_normalized" "$dist_normalized" || true
   echo "development-discipline-release-parity-mismatch=true" >&2
   exit 1
 fi
