@@ -59,3 +59,4 @@
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260715-yvha-make-development-discipline-release-parity-fixture-use-a-fixed-clock
 20260715-8hsq-preserve-zero-iteration-transition-differences-in-parity-normalization
+20260715-3kkp-label-parity-normalization-failures-by-side-and-record
