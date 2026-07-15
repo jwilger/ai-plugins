@@ -428,11 +428,7 @@ fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
     }
     if arguments.get(1).is_some_and(|value| value == "install-bin")
         && arguments.windows(2).any(|pair| {
-            pair[0] == "--target-dir"
-                && matches!(
-                    pair[1].to_str(),
-                    Some("--dry-run" | "--apply" | "--help" | "-h")
-                )
+            pair[0] == "--target-dir" && is_install_bin_option_token(&pair[1])
         })
     {
         let value = arguments
@@ -472,6 +468,20 @@ fn is_update_value_option_name(option: &str) -> bool {
     matches!(
         option,
         "--title" | "--summary" | "--context" | "--tags" | "--pr-mr-url" | "--pr-mr-status"
+    )
+}
+
+fn is_install_bin_option_token(value: &OsString) -> bool {
+    let Some(value) = value.to_str() else {
+        return false;
+    };
+    if value == "-h" {
+        return true;
+    }
+    let option = value.split_once('=').map_or(value, |(option, _)| option);
+    matches!(
+        option,
+        "--target-dir" | "--dry-run" | "--apply" | "--help"
     )
 }
 
