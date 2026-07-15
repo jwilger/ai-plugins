@@ -1,7 +1,7 @@
 ---
 title: Make the HOME-unset development-discipline launcher test provide trusted Bash
 blocked_by: []
-blocks: []
+blocks: [20260715-yvha-make-development-discipline-release-parity-fixture-use-a-fixed-clock]
 tags: [development-discipline, tests, nix, hermeticity, ci, minor, backlog]
 pr_mr_url: 
 pr_mr_status: 

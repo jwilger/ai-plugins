@@ -1,6 +1,6 @@
 ---
 title: Make development-discipline release parity deterministic across clock drift
-blocked_by: []
+blocked_by: [20260715-s8xp-make-the-home-unset-development-discipline-launcher-test-provide-trusted-bash]
 blocks: [20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes]
 tags: [development-discipline, tests, release, hermeticity, ci, major, backlog]
 pr_mr_url: 
