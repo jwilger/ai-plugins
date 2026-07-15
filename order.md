@@ -4,6 +4,7 @@
 20260708-puyh-add-development-workflow-router-skill
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
 20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
+20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
@@ -33,7 +34,6 @@
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
-20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
 20260713-ehg9-correct-gpt-5-6-benchmark-docs-for-superseded-labels-and-path-lifecycle
