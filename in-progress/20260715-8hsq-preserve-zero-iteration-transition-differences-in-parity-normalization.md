@@ -22,7 +22,7 @@ Formal review finding parity-normalizer-accepts-zero-iteration: runtime verified
 
 - [x] A focused fixture with iteration 0 and differing transition IDs remains different after normalization.
 - [x] Only positive safe-integer verified iteration values have transition IDs normalized.
-- [ ] The regression demonstrates the pre-fix masking behavior, then focused parity and full repository gates pass.
+- [x] The regression demonstrates the pre-fix masking behavior, then focused parity and full repository gates pass.
 
 ## Subtasks
 
