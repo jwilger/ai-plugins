@@ -1,7 +1,7 @@
 ---
 title: Preserve zero-iteration transition differences in parity normalization
 blocked_by: []
-blocks: []
+blocks: [20260715-yvha-make-development-discipline-release-parity-fixture-use-a-fixed-clock]
 tags: []
 pr_mr_url: 
 pr_mr_status: 

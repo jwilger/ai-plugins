@@ -1,6 +1,6 @@
 ---
 title: Make development-discipline release parity deterministic across clock drift
-blocked_by: [20260715-i2h6-preserve-review-budget-timestamp-relationships-in-parity-normalization, 20260715-s8xp-make-the-home-unset-development-discipline-launcher-test-provide-trusted-bash, 20260715-w7ga-scope-parity-clock-normalization-by-review-session]
+blocked_by: [20260715-8hsq-preserve-zero-iteration-transition-differences-in-parity-normalization, 20260715-i2h6-preserve-review-budget-timestamp-relationships-in-parity-normalization, 20260715-s8xp-make-the-home-unset-development-discipline-launcher-test-provide-trusted-bash, 20260715-w7ga-scope-parity-clock-normalization-by-review-session]
 blocks: [20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes]
 tags: [development-discipline, tests, release, hermeticity, ci, major, backlog]
 pr_mr_url: 
