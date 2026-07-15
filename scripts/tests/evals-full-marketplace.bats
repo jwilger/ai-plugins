@@ -189,6 +189,33 @@ NODE
   [[ "$output" == *'Duplicate case_id "duplicate"'* ]]
 }
 
+@test "selected behavior plugins are deduplicated in canonical order" {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior"
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {"case_id":"selected-one","plugins":["zeta-plugin","alpha-plugin"]},
+  {"case_id":"selected-two","plugins":["middle-plugin","alpha-plugin"]},
+  {"case_id":"excluded","plugins":["excluded-plugin"]}
+]
+JSON
+
+  run node - "$ROOT" "$FIXTURE_TMP" <<'NODE'
+const path = require('node:path');
+const root = process.argv[2];
+const fixtureRoot = process.argv[3];
+const { selectedBehaviorPluginNames } = require(path.join(root, 'evals/promptfoo/fixtures.cjs'));
+const actual = selectedBehaviorPluginNames({ root: fixtureRoot, caseFilter: 'selected-' });
+const expected = ['alpha-plugin', 'middle-plugin', 'zeta-plugin'];
+
+if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+  throw new Error(`${JSON.stringify(actual)} != ${JSON.stringify(expected)}`);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "coverage checker requires every skill to have exhaustive behavior coverage or an explicit decision" {
   run node "$ROOT/scripts/evals/check-coverage.mjs"
 
@@ -292,6 +319,52 @@ JSON
   [[ "$output" == *"pluginMode: targeted-plugins"* ]]
   [[ "$output" == *"pluginMode: full-marketplace"* ]]
   [[ "$output" == *"load-harness-cases.cjs?pluginMode={{ provider.pluginMode }}"* ]]
+}
+
+@test "filtered behavior config gives Claude targeted provider exactly the selected case plugins" {
+  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture node - "$ROOT" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+const root = process.argv[2];
+const result = spawnSync(
+  process.execPath,
+  [path.join(root, 'scripts/evals/generate-config.mjs'), '--suite', 'behavior', '--stdout'],
+  { cwd: root, encoding: 'utf8', env: process.env },
+);
+if (result.status !== 0) {
+  process.stderr.write(result.stderr || result.stdout);
+  process.exit(result.status);
+}
+
+function providerPluginPaths(label) {
+  const marker = `    label: ${label}\n`;
+  const start = result.stdout.indexOf(marker);
+  if (start < 0) throw new Error(`missing provider ${label}`);
+  const next = result.stdout.indexOf('\n  - id:', start + marker.length);
+  const section = result.stdout.slice(start, next < 0 ? undefined : next);
+  return [...section.matchAll(/^\s+path: "([^"]+)"$/gm)]
+    .map((match) => match[1])
+    .sort();
+}
+
+const targeted = providerPluginPaths('claude-code-sonnet-targeted-plugins');
+const full = providerPluginPaths('claude-code-sonnet-full-marketplace');
+const expectedTargeted = [path.join(root, 'plugins/tiber')];
+const expectedFull = JSON.parse(
+  fs.readFileSync(path.join(root, '.claude-plugin/marketplace.json'), 'utf8'),
+).plugins.map(({ name }) => path.join(root, 'plugins', name)).sort();
+
+if (JSON.stringify(targeted) !== JSON.stringify(expectedTargeted)) {
+  throw new Error(`targeted provider paths ${JSON.stringify(targeted)} != ${JSON.stringify(expectedTargeted)}`);
+}
+if (JSON.stringify(full) !== JSON.stringify(expectedFull)) {
+  throw new Error(`full provider paths ${JSON.stringify(full)} != ${JSON.stringify(expectedFull)}`);
+}
+NODE
+
+  [ "$status" -eq 0 ]
 }
 
 @test "codex eval home preparation supports no-plugin and targeted-plugin modes" {

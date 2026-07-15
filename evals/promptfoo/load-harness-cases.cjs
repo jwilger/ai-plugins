@@ -3,7 +3,7 @@ const {
   coverageKinds,
   fileUrl,
   loadMatrix,
-  loadBehaviorCases,
+  selectedBehaviorCases,
   valueGateMode,
 } = require("./fixtures.cjs");
 const fs = require("fs");
@@ -35,9 +35,7 @@ module.exports = function generateTests() {
   );
   const filter = process.env.EVAL_CASE_FILTER || runtime.caseFilter;
   const evalMatrix = matrix();
-  const cases = loadBehaviorCases().filter(
-    (testCase) => !filter || testCase.case_id.includes(filter),
-  );
+  const cases = selectedBehaviorCases({ caseFilter: filter });
 
   return cases.flatMap((testCase) =>
     Array.from({ length: samples }, (_, index) => ({

@@ -15,12 +15,14 @@ make_codex_only_eval_fixture() {
   mkdir -p \
     "$FIXTURE_TMP/scripts/evals" \
     "$FIXTURE_TMP/evals/promptfoo" \
+    "$FIXTURE_TMP/evals/fixtures/behavior" \
     "$FIXTURE_TMP/.claude-plugin" \
     "$FIXTURE_TMP/.agents/plugins" \
     "$FIXTURE_TMP/plugins/shared/skills/shared-skill" \
     "$FIXTURE_TMP/plugins/codex-only/skills/codex-skill"
   cp "$GENERATOR" "$FIXTURE_TMP/scripts/evals/generate-config.mjs"
   cp "$ROOT/evals/promptfoo/assert-full-marketplace-canary.cjs" "$FIXTURE_TMP/evals/promptfoo/assert-full-marketplace-canary.cjs"
+  cp "$ROOT/evals/promptfoo/fixtures.cjs" "$FIXTURE_TMP/evals/promptfoo/fixtures.cjs"
   cat >"$FIXTURE_TMP/evals/matrix.json" <<'JSON'
 {
   "providerVariants": [
@@ -41,9 +43,18 @@ make_codex_only_eval_fixture() {
   ],
   "pluginModes": [
     {"id": "no-plugins"},
+    {"id": "targeted-plugins"},
     {"id": "full-marketplace"}
   ]
 }
+JSON
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "shared-case",
+    "plugins": ["shared"]
+  }
+]
 JSON
   cat >"$FIXTURE_TMP/.claude-plugin/marketplace.json" <<'JSON'
 {
@@ -275,6 +286,24 @@ if (claudeSection.includes(codexOnlyPath)) {
 NODE
 
   [ "$status" -eq 0 ]
+}
+
+@test "generated targeted config fails when a selected plugin is unavailable to a harness" {
+  make_codex_only_eval_fixture
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "codex-only-case",
+    "plugins": ["codex-only"]
+  }
+]
+JSON
+
+  run env EVAL_CASE_FILTER=codex-only-case node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"selected behavior plugin(s) unavailable to Claude Code: codex-only"* ]]
+  [[ "$output" != *$'\nproviders:\n'* ]]
 }
 
 @test "generated claude plugin paths are absolute so generated configs can move" {
