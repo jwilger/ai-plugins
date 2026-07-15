@@ -111,12 +111,24 @@ const lines = readFileSync(inputPath, "utf8").split("\n");
 if (lines.at(-1) === "") {
   lines.pop();
 }
-if (lines.some((line) => line.length === 0)) {
-  throw new Error("JSONL output contains a blank record");
-}
+const normalizedLines = lines.map((line, index) => {
+  const recordNumber = index + 1;
+  if (line.length === 0) {
+    throw new Error(
+      `JSONL input ${JSON.stringify(inputPath)} record=${recordNumber}: blank record`,
+    );
+  }
 
-const normalizedLines = lines.map((line) =>
-  JSON.stringify(normalizeResponse(JSON.parse(line))),
-);
+  let response;
+  try {
+    response = JSON.parse(line);
+  } catch {
+    throw new Error(
+      `JSONL input ${JSON.stringify(inputPath)} record=${recordNumber}: invalid JSON`,
+    );
+  }
+
+  return JSON.stringify(normalizeResponse(response));
+});
 
 process.stdout.write(`${normalizedLines.join("\n")}\n`);
