@@ -21,7 +21,7 @@ Formal combined review of 20260715-yvha found that the transcript-global timesta
 ## Acceptance criteria
 
 - [x] Equivalent transcripts normalize equally when independent review sessions share one source timestamp but straddle timestamps in the distribution run.
-- [ ] Within one stable review session, retained and reset review-budget timestamps remain distinguishable.
+- [x] Within one stable review session, retained and reset review-budget timestamps remain distinguishable.
 - [ ] The normalizer only applies session-scoped clock canonicalization to canonical review state with a valid stable session_id, and focused/full CI gates pass.
 
 ## Subtasks
