@@ -377,6 +377,8 @@ fn assigned_install_option_cannot_be_consumed_as_a_target_value() {
         [
             "install-bin",
             "--target-dir",
+            "valid-target",
+            "--target-dir",
             "--target-dir=corrected",
             "--apply",
         ],
@@ -395,6 +397,10 @@ fn assigned_install_option_cannot_be_consumed_as_a_target_value() {
             "--target-dir requires a value; use --target-dir=--target-dir=corrected for that literal path"
         ),
         "missing recovery guidance: {stderr}"
+    );
+    assert!(
+        !stderr.contains("--target-dir=valid-target for that literal path"),
+        "guidance quoted the value from the wrong option occurrence: {stderr}"
     );
     assert!(
         stderr.contains("Usage: tiber install-bin"),
