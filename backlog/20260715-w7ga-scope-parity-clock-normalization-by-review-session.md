@@ -17,6 +17,8 @@ Formal combined review of 20260715-yvha found that the transcript-global timesta
 
 ## Acceptance criteria
 
+- [ ] Equivalent transcripts normalize equally when independent review sessions share one source timestamp but straddle timestamps in the distribution run.
+
 ## Subtasks
 
 ## Notes / Log
