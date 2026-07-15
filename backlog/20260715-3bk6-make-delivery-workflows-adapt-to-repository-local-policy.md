@@ -17,6 +17,8 @@ Reusable skills currently conflict with repositories that deliver directly to ma
 
 ## Acceptance criteria
 
+- [ ] Skill guidance explicitly gives repository-local instructions precedence over generic delivery defaults.
+
 ## Subtasks
 
 ## Notes / Log
