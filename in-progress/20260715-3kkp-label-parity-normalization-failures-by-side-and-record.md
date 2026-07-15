@@ -20,7 +20,7 @@ Formal review finding parity-normalizer-loses-failure-context: set -e exits on u
 
 ## Acceptance criteria
 
-- [ ] Blank and invalid JSONL failures identify the input and one-based record number.
+- [x] Blank and invalid JSONL failures identify the input and one-based record number.
 - [ ] The parity shell emits a side-specific source or distribution normalization failure marker before cleanup.
 - [ ] Focused failure-path coverage and full repository gates pass.
 
