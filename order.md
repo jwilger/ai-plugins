@@ -1,6 +1,7 @@
 20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes
 20260715-mkqi-prove-the-personal-codex-plugin-consumption-path
 20260713-hgyz-make-targeted-plugin-eval-mode-install-the-actual-case-plugin-set
+20260715-n6bs-build-writable-downstream-code-quality-benchmarks-for-codex-plugins
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
@@ -58,5 +59,4 @@
 20260714-iv3g-retire-content-addressed-final-review-delta-artifacts
 20260714-24xa-tighten-final-review-split-and-budget-decision-contracts
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
-20260715-n6bs-build-writable-downstream-code-quality-benchmarks-for-codex-plugins
 20260715-3bk6-make-delivery-workflows-adapt-to-repository-local-policy
