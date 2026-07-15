@@ -20,7 +20,7 @@ Formal review finding tests.missing-session-preservation-not-proven: the missing
 
 ## Acceptance criteria
 
-- [ ] The missing-session fixture asserts each normalized record is unchanged from its own input, so partial normalization is detected.
+- [x] The missing-session fixture asserts each normalized record is unchanged from its own input, so partial normalization is detected.
 - [ ] A present-but-invalid session_id fixture proves noncanonical review state is preserved without partial normalization.
 - [ ] The strengthened regression fails against a partial-normalization mutation and all focused/full repository gates pass.
 
