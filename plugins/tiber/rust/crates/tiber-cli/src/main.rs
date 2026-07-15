@@ -265,6 +265,9 @@ struct SubtaskAddArgs {
 
 #[derive(Args)]
 #[command(args_override_self = true)]
+#[command(
+    after_help = "To use a recognized option token as a literal field value, attach it with `=` (for example, `--summary=--tags`)."
+)]
 #[command(group(
     ArgGroup::new("field")
         .required(true)
