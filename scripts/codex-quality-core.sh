@@ -118,7 +118,18 @@ assert_skills_model_visible() {
   )"
 
   for skill in "${representative_skills[@]}"; do
-    if ! jq -e --arg skill "$skill" 'any(.. | strings; contains($skill))' \
+    if ! jq -e --arg skill "$skill" '
+      any(
+        .[]?
+        | select(.type == "message" and .role == "developer")
+        | .content[]?
+        | select(.type == "input_text")
+        | .text
+        | select(startswith("<skills_instructions>"))
+        | split("\n")[];
+        startswith("- " + $skill + ":")
+      )
+    ' \
       >/dev/null <<<"$prompt_json"; then
       printf "installed skill is not model-visible: %s; rerun '%s install%s', then start a new Codex thread.\n" \
         "$skill" "$0" "$install_option" >&2

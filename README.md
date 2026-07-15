@@ -4,6 +4,53 @@ A **multi-harness marketplace of AI coding-assistant plugins** for
 [Claude Code](https://code.claude.com), [Codex](https://openai.com/codex/), and
 other harnesses that adopt plugin or marketplace concepts.
 
+## Personal Codex quality core
+
+Codex is this repository's primary target: its first job is to support the
+maintainer's personal Codex workflow and help produce exemplary code in
+downstream projects. Claude Code support is secondary, while general-user
+ergonomics are tertiary; other users may be better served by treating these
+plugins as examples and composing a quality core for their own work.
+
+From a local `ai-plugins` checkout, install or refresh the default quality core:
+
+```shell
+scripts/codex-quality-core.sh install
+```
+
+The default installs `engineering-standards`, `development-discipline`, and
+`advisor`. For an AI-system project that already provides the required
+Promptfoo tooling, opt in to `agentic-systems-engineering` as well:
+
+```shell
+scripts/codex-quality-core.sh install --with-agentic
+```
+
+Then verify the installed plugins and representative skills from a downstream
+Git repository without modifying it:
+
+```shell
+/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh check "$PWD"
+# For the opt-in composition:
+/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh check "$PWD" --with-agentic
+```
+
+Both commands are safe to rerun. `install` refuses to silently replace an
+`ai-plugins` marketplace that points to another checkout. `check` reports a
+missing marketplace, missing, stale, or disabled plugins, and skills that are
+not model-visible, with a matching repair command. To update, pull the local
+checkout and rerun `install` with the same options:
+
+```shell
+git -C /absolute/path/to/ai-plugins pull --ff-only
+/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh install
+# For the opt-in composition:
+/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh install --with-agentic
+```
+
+Then rerun the matching `check` command above and start a new Codex thread
+before relying on the refreshed skill set.
+
 ## Plugin catalog
 
 Most plugins ship both a `.claude-plugin/` and a `.codex-plugin/` manifest and
