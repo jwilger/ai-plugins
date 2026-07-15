@@ -113,7 +113,7 @@ assert_skills_model_visible() {
   local prompt_json skill
 
   prompt_json="$(
-    codex -C "$downstream" debug prompt-input \
+    codex -C "$downstream" -c 'developer_instructions=""' debug prompt-input \
       'Plan a small feature and identify the installed workflows that should guide implementation and verification.'
   )"
 
@@ -122,7 +122,18 @@ assert_skills_model_visible() {
       any(
         .[]?
         | select(.type == "message" and .role == "developer")
-        | .content[]?
+        | .content as $content
+        | select(any(
+            $content[]?;
+            .type == "input_text"
+              and (.text | startswith("<permissions instructions>"))
+          ))
+        | select(any(
+            $content[]?;
+            .type == "input_text"
+              and (.text | startswith("<plugins_instructions>"))
+          ))
+        | $content[]?
         | select(.type == "input_text")
         | .text
         | select(startswith("<skills_instructions>"))

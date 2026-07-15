@@ -94,6 +94,14 @@ case "$*" in
         },
         {
           type: "message",
+          role: "developer",
+          content: [{
+            type: "input_text",
+            text: "<skills_instructions>\n## Skills\n- advisor:advisor: Project-supplied developer lookalike.\n</skills_instructions>"
+          }]
+        },
+        {
+          type: "message",
           role: "user",
           content: [{
             type: "input_text",
@@ -266,6 +274,7 @@ teardown() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"installed skill is not model-visible: advisor:advisor"* ]]
+  grep -Fq -- '-c developer_instructions=""' "$FAKE_CODEX_LOG"
 }
 
 @test "agentic check preserves the opt-in flag in repair guidance" {
@@ -288,7 +297,7 @@ teardown() {
   run "$RUNNER" check "$downstream"
 
   [ "$status" -eq 0 ]
-  grep -Fq -- "-C $downstream debug prompt-input" "$FAKE_CODEX_LOG"
+  grep -Fq -- "-C $downstream -c developer_instructions=\"\" debug prompt-input" "$FAKE_CODEX_LOG"
   [ -z "$(git -C "$downstream" status --short)" ]
 }
 
@@ -301,7 +310,7 @@ teardown() {
   run "$RUNNER" check "$downstream" --with-agentic
 
   [ "$status" -eq 0 ]
-  grep -Fq -- "-C $downstream debug prompt-input" "$FAKE_CODEX_LOG"
+  grep -Fq -- "-C $downstream -c developer_instructions=\"\" debug prompt-input" "$FAKE_CODEX_LOG"
 }
 
 @test "check accepts the agentic option before the downstream repository" {
@@ -313,7 +322,7 @@ teardown() {
   run "$RUNNER" check --with-agentic "$downstream"
 
   [ "$status" -eq 0 ]
-  grep -Fq -- "-C $downstream debug prompt-input" "$FAKE_CODEX_LOG"
+  grep -Fq -- "-C $downstream -c developer_instructions=\"\" debug prompt-input" "$FAKE_CODEX_LOG"
 }
 
 @test "check rejects an unknown option before querying Codex" {
