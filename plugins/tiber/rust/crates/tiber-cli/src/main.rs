@@ -426,24 +426,21 @@ fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
             "--after requires a comma-separated predecessor value",
         ));
     }
-    if arguments.get(1).is_some_and(|value| value == "install-bin")
-        && arguments
+    if arguments.get(1).is_some_and(|value| value == "install-bin") {
+        if let Some(pair) = arguments
             .windows(2)
-            .any(|pair| pair[0] == "--target-dir" && is_install_bin_option_token(&pair[1]))
-    {
-        let value = arguments
-            .windows(2)
-            .find(|pair| pair[0] == "--target-dir")
-            .and_then(|pair| pair[1].to_str())
-            .unwrap_or("install mode");
-        return Err(command_error(
-            &["install-bin"],
-            "tiber install-bin",
-            ErrorKind::InvalidValue,
-            &format!(
-                "--target-dir requires a value; use --target-dir={value} for that literal path"
-            ),
-        ));
+            .find(|pair| pair[0] == "--target-dir" && is_install_bin_option_token(&pair[1]))
+        {
+            let value = pair[1].to_string_lossy();
+            return Err(command_error(
+                &["install-bin"],
+                "tiber install-bin",
+                ErrorKind::InvalidValue,
+                &format!(
+                    "--target-dir requires a value; use --target-dir={value} for that literal path"
+                ),
+            ));
+        }
     }
 
     Cli::try_parse_from(normalized_cli_arguments(arguments))
