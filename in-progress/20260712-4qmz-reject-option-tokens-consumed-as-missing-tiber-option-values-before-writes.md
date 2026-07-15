@@ -22,7 +22,7 @@ Final review of the Clap migration confirmed this behavior already existed in th
 
 - [x] When a value-taking option is immediately followed by a recognized option token, Tiber emits parser usage on stderr, exits with the stable parser error status, and performs no task or filesystem write.
 - [x] Legitimate hyphen-leading option values remain expressible through a documented unambiguous syntax such as `--option=--value`.
-- [ ] Focused integration tests cover both update-task and install-bin no-write cases plus the supported explicit hyphen-leading value form.
+- [x] Focused integration tests cover both update-task and install-bin no-write cases plus the supported explicit hyphen-leading value form.
 
 ## Subtasks
 
