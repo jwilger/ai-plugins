@@ -59,4 +59,3 @@
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260715-yvha-make-development-discipline-release-parity-fixture-use-a-fixed-clock
 20260715-w7ga-scope-parity-clock-normalization-by-review-session
-20260715-s4tq-prove-parity-normalization-preserves-invalid-session-state-verbatim
