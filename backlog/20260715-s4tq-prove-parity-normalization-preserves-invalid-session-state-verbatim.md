@@ -17,6 +17,8 @@ Formal review finding tests.missing-session-preservation-not-proven: the missing
 
 ## Acceptance criteria
 
+- [ ] The missing-session fixture asserts each normalized record is unchanged from its own input, so partial normalization is detected.
+
 ## Subtasks
 
 ## Notes / Log
