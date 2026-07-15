@@ -21,6 +21,7 @@ Reusable skills currently conflict with repositories that deliver directly to ma
 - [ ] The workflow supports direct-to-trunk, PR/MR, and local-only delivery without inventing a pull-request requirement.
 - [ ] Commit, push, review, and CI actions remain proportional to risk and require authorization for destructive or externally visible operations.
 - [ ] Behavior fixtures cover all supported delivery modes and reject contradictory specialist guidance after routing.
+- [ ] Documentation explains the precedence chain and the evidence required before claiming delivery complete.
 
 ## Subtasks
 
