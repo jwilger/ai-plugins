@@ -5,6 +5,9 @@ blocks: [20260715-w7ga-scope-parity-clock-normalization-by-review-session]
 tags: []
 pr_mr_url: 
 pr_mr_status: 
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
