@@ -1,7 +1,7 @@
 ---
 title: Make development-discipline release parity fixture use a fixed clock
 blocked_by: []
-blocks: []
+blocks: [20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-values-before-writes]
 tags: [development-discipline, tests, release, hermeticity, ci, major, backlog]
 pr_mr_url: 
 pr_mr_status: 

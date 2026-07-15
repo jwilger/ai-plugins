@@ -1,6 +1,6 @@
 ---
 title: Reject option tokens consumed as missing Tiber option values before writes
-blocked_by: []
+blocked_by: [20260715-yvha-make-development-discipline-release-parity-fixture-use-a-fixed-clock]
 blocks: []
 tags: [tiber, cli, major, safety, backlog]
 pr_mr_url: 
