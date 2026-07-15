@@ -28,3 +28,4 @@ scripts/evals/run.sh currently defaults targeted Codex composition to every mark
 ## Notes / Log
 
 - 2026-07-14: Backlog grooming 2026-07-14: Consolidated 20260713-jtq4 because fail-closed explicit selection is part of the same plugin-selection contract required to make targeted composition trustworthy.
+- 2026-07-15: 2026-07-15: A focused Codex live run of tiber-new-task-command-backlog-capture configured one fixture, one sample, and one provider but Promptfoo executed 10 target requests. The loader returned one case; Promptfoo expanded plugins (1) × skills (2) × coverage_kinds (5) into a Cartesian sweep, collapsing those arrays to scalar result vars. This invalidates current sample accounting and inflated an 11-fixture run to 73 reported cases. Treat preservation of list metadata as part of targeted-composition measurement validity.
