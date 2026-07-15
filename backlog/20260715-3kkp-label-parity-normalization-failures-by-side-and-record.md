@@ -9,7 +9,11 @@ pr_mr_status:
 
 ## Summary
 
+Make parity normalization failures identify source versus distribution and the failing JSONL record before temporary artifacts are cleaned.
+
 ## Context / Why
+
+Formal review finding parity-normalizer-loses-failure-context: set -e exits on unlabeled normalizer errors before the parity marker/diff, while the EXIT trap deletes raw captures.
 
 ## Acceptance criteria
 
