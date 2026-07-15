@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "../..");
+const require = createRequire(import.meta.url);
+const { selectedBehaviorPluginNames } = require(
+  path.join(root, "evals/promptfoo/fixtures.cjs"),
+);
 const evalWorkspace = path.join(root, ".dependencies/evals/agent-workspace");
 const advisoryPromptPrefix =
   "Answer the scenario as an advisory behavior question. Treat each scenario as stateless: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Use installed marketplace plugin and skill guidance when it is relevant, naming the relevant plugin or skill in the answer. When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording. Apply plugin-specific safety gates and documented commands exactly instead of replacing them with generic setup or validation advice. Do not run shell commands, start evals, mutate files, or inspect repository state.";
@@ -187,8 +192,48 @@ function providerEntry(variant, pluginMode, plugins) {
     label: `${variant.id}-${pluginMode.id}`,
     variant,
     pluginMode,
+    plugins,
     config: providerFor(variant, pluginMode, plugins),
   };
+}
+
+function namedPlugins(pluginNames, marketplacePlugins, harnessName) {
+  const byName = new Map(
+    marketplacePlugins.map((plugin) => [plugin.name, plugin]),
+  );
+  const missing = pluginNames.filter((pluginName) => !byName.has(pluginName));
+
+  if (missing.length > 0) {
+    throw new Error(
+      `selected behavior plugin(s) unavailable to ${harnessName}: ${missing.join(", ")}`,
+    );
+  }
+
+  return pluginNames.map((pluginName) => byName.get(pluginName));
+}
+
+function pluginsForProvider(variant, pluginMode, pluginSets) {
+  if (pluginMode.id === "no-plugins") {
+    return [];
+  }
+
+  const harness =
+    variant.provider === "anthropic:claude-agent-sdk"
+      ? pluginSets.claude
+      : variant.provider === "openai:codex-sdk"
+        ? pluginSets.codex
+        : null;
+  if (!harness) {
+    throw new Error(`unsupported provider variant: ${variant.id}`);
+  }
+
+  if (pluginMode.id === "targeted-plugins") {
+    return harness.targeted;
+  }
+  if (pluginMode.id === "full-marketplace") {
+    return harness.full;
+  }
+  throw new Error(`unsupported plugin mode: ${pluginMode.id}`);
 }
 
 function providerMatches(entry, term) {
@@ -236,7 +281,29 @@ function uniqueById(items) {
 function configFor(suite) {
   const allPlugins = allMarketplacePlugins();
   const claudePlugins = manifestPlugins(".claude-plugin/marketplace.json");
+  const codexPlugins = manifestPlugins(".agents/plugins/marketplace.json");
   const matrix = evalMatrix();
+  const usesTargetedMode =
+    suite === "behavior" &&
+    matrix.pluginModes.some(
+      (pluginMode) => pluginMode.id === "targeted-plugins",
+    );
+  const targetedPluginNames = usesTargetedMode
+    ? selectedBehaviorPluginNames({
+        root,
+        caseFilter: process.env.EVAL_CASE_FILTER,
+      })
+    : [];
+  const pluginSets = {
+    claude: {
+      full: claudePlugins,
+      targeted: namedPlugins(targetedPluginNames, claudePlugins, "Claude Code"),
+    },
+    codex: {
+      full: codexPlugins,
+      targeted: namedPlugins(targetedPluginNames, codexPlugins, "Codex"),
+    },
+  };
   const testLoader =
     suite === "canary"
       ? fileUrl(path.join(root, "evals/promptfoo/load-canary-cases.cjs"))
@@ -249,11 +316,19 @@ function configFor(suite) {
     suite === "behavior"
       ? matrix.providerVariants.flatMap((variant) =>
           matrix.pluginModes.map((pluginMode) =>
-            providerEntry(variant, pluginMode, claudePlugins),
+            providerEntry(
+              variant,
+              pluginMode,
+              pluginsForProvider(variant, pluginMode, pluginSets),
+            ),
           ),
         )
       : matrix.providerVariants.map((variant) =>
-          providerEntry(variant, { id: "full-marketplace" }, claudePlugins),
+          providerEntry(
+            variant,
+            { id: "full-marketplace" },
+            pluginsForProvider(variant, { id: "full-marketplace" }, pluginSets),
+          ),
         );
   const providers = filteredProviderEntries(providerEntries);
   const providerVariants = uniqueById(providers.map((entry) => entry.variant));

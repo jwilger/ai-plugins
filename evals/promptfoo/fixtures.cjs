@@ -66,6 +66,49 @@ function loadBehaviorCases(options = {}) {
   return cases;
 }
 
+function selectedBehaviorCases(options = {}) {
+  const cases = loadBehaviorCases(options);
+  const caseFilter = options.caseFilter;
+  const selected = caseFilter
+    ? cases.filter((testCase) => testCase.case_id.includes(caseFilter))
+    : cases;
+
+  if (selected.length === 0) {
+    throw new Error(
+      `no behavior cases match case filter ${JSON.stringify(caseFilter)}`,
+    );
+  }
+
+  return selected;
+}
+
+function selectedBehaviorPluginNames(options = {}) {
+  const pluginNames = new Set();
+
+  for (const testCase of selectedBehaviorCases(options)) {
+    if (!Array.isArray(testCase.plugins) || testCase.plugins.length === 0) {
+      throw new Error(
+        `${testCase.fixture_file}: ${testCase.case_id} must declare a non-empty plugins array`,
+      );
+    }
+
+    for (const pluginName of testCase.plugins) {
+      if (
+        typeof pluginName !== "string" ||
+        pluginName.length === 0 ||
+        pluginName.trim() !== pluginName
+      ) {
+        throw new Error(
+          `${testCase.fixture_file}: ${testCase.case_id} declares an invalid plugin name`,
+        );
+      }
+      pluginNames.add(pluginName);
+    }
+  }
+
+  return [...pluginNames].sort();
+}
+
 function caseById(caseId, options = {}) {
   return loadBehaviorCases(options).find(
     (testCase) => testCase.case_id === caseId,
@@ -77,7 +120,9 @@ function fileUrl(file, base = process.cwd()) {
 }
 
 function loadMatrix(options = {}) {
-  const matrixFile = options.matrixFile || path.join(options.root || process.cwd(), "evals/matrix.json");
+  const matrixFile =
+    options.matrixFile ||
+    path.join(options.root || process.cwd(), "evals/matrix.json");
   return JSON.parse(fs.readFileSync(matrixFile, "utf8"));
 }
 
@@ -111,6 +156,8 @@ module.exports = {
   fileUrl,
   loadBehaviorCases,
   loadMatrix,
+  selectedBehaviorCases,
+  selectedBehaviorPluginNames,
   valueGateMode,
   walkJsonFiles,
 };
