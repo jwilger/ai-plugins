@@ -106,12 +106,7 @@ fn assigned_update_help_cannot_be_consumed_as_a_missing_summary_value() {
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Original title"]));
 
-    let output = repo.tiber([
-        "update",
-        "original-title",
-        "--summary",
-        "--help=topic",
-    ]);
+    let output = repo.tiber(["update", "original-title", "--summary", "--help=topic"]);
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
