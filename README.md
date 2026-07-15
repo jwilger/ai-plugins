@@ -26,6 +26,13 @@ Promptfoo tooling, opt in to `agentic-systems-engineering` as well:
 scripts/codex-quality-core.sh install --with-agentic
 ```
 
+The opt-in is global to the current CODEX_HOME, not scoped to one downstream
+repository. It remains active for later Codex sessions until removed explicitly:
+
+```shell
+codex plugin remove agentic-systems-engineering@ai-plugins
+```
+
 Then verify the installed plugins and representative skills from a downstream
 Git repository without modifying it:
 
