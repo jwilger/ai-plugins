@@ -17,6 +17,8 @@ The canonical `just ci` gate compares complete JSON-RPC outputs from sequential 
 
 ## Acceptance criteria
 
+- [ ] The source and bundled MCP fixture runs receive the same deterministic epoch value, independent of wall-clock second boundaries.
+
 ## Subtasks
 
 ## Notes / Log
