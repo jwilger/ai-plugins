@@ -28,3 +28,5 @@ Codex is the primary personal-use target, but the current catalog does not prove
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-15: Implemented through fd11e80: default and agentic Codex quality-core install/check workflow, strict marketplace/plugin/prompt schema validation, rerunnable stale/disabled repair, conflict/spoof/incompatibility diagnostics, downstream model-visibility smoke, and Codex-primary documentation. Verification: full just ci passed (388 Bats; 44 mutants, 38 caught/6 unviable), focused 28/28, real Codex 0.144.4 disposable install/check/removal smoke passed with downstream clean, and enforced final review completed 1/1 clean with no findings. Push CI run 29437294914 is in progress.
