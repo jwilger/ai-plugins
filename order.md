@@ -57,3 +57,4 @@
 20260714-iv3g-retire-content-addressed-final-review-delta-artifacts
 20260714-24xa-tighten-final-review-split-and-budget-decision-contracts
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
+20260715-mkqi-prove-the-personal-codex-plugin-consumption-path
