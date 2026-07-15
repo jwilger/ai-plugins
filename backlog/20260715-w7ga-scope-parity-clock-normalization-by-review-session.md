@@ -1,7 +1,7 @@
 ---
 title: Scope parity clock normalization by review session
 blocked_by: []
-blocks: []
+blocks: [20260715-yvha-make-development-discipline-release-parity-fixture-use-a-fixed-clock]
 tags: [development-discipline, release-parity, tests, bug]
 pr_mr_url: 
 pr_mr_status: 
