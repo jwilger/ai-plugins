@@ -456,9 +456,15 @@ fn has_standalone_help(
     is_bare_value_option: fn(&OsString) -> bool,
 ) -> bool {
     arguments.iter().enumerate().any(|(index, value)| {
-        value == "--help"
+        is_help_request(value)
             && (index == 0 || !is_bare_value_option(&arguments[index.saturating_sub(1)]))
     })
+}
+
+fn is_help_request(value: &OsString) -> bool {
+    value
+        .to_str()
+        .is_some_and(|value| value == "--help" || value.starts_with("-h"))
 }
 
 fn is_bare_update_value_option(value: &OsString) -> bool {
