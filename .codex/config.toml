@@ -1,21 +1,23 @@
-# Project-scoped MCP servers. Both commands are supplied by this project's
-# development environment, rather than installed through Codex globally.
+# Project-scoped MCP servers. All launch from project-local, pinned tools.
 
 [mcp_servers.emc]
-command = "emc"
-args = ["mcp", "stdio"]
-cwd = "/home/jwilger/projects/ai-plugins"
+command = "sh"
+args = ["-c", "root=\"$(git rev-parse --show-toplevel)\" || exit; cd \"$root\" || exit; exec \"$root/.dependencies/cargo/bin/emc\" mcp stdio"]
 startup_timeout_sec = 60
 tool_timeout_sec = 120
 enabled = true
-required = true
 
 [mcp_servers.tiber]
-command = "tiber"
-args = ["mcp", "stdio"]
-cwd = "/home/jwilger/projects/ai-plugins"
+command = "sh"
+args = ["-c", "root=\"$(git rev-parse --show-toplevel)\" || exit; cd \"$root\" || exit; exec \"$root/plugins/tiber/bin/tiber\" mcp stdio"]
 env_vars = ["SSH_AUTH_SOCK"]
 startup_timeout_sec = 60
 tool_timeout_sec = 120
 enabled = true
-required = true
+
+[mcp_servers.promptfoo]
+command = "sh"
+args = ["-c", "root=\"$(git rev-parse --show-toplevel)\" || exit; cd \"$root\" || exit; exec \"$root/plugins/agentic-systems-engineering/bin/promptfoo-mcp\""]
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+enabled = true
