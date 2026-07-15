@@ -105,7 +105,8 @@ teardown() {
   run env PATH="$help_path" "$RUNNER" --help
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Usage: scripts/codex-quality-core.sh <install|check>"* ]]
+  [[ "$output" == *"scripts/codex-quality-core.sh install [--with-agentic]"* ]]
+  [[ "$output" == *"scripts/codex-quality-core.sh check [--with-agentic] [DOWNSTREAM]"* ]]
   [[ "$output" != *"missing required command"* ]]
   [[ "$output" != *"command not found"* ]]
 }
@@ -148,4 +149,37 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"missing Codex plugin: agentic-systems-engineering@ai-plugins"* ]]
   [[ "$output" == *"rerun '$RUNNER install --with-agentic'"* ]]
+}
+
+@test "check renders plugin context in the caller's downstream repository" {
+  downstream="$TMPROOT/downstream"
+  mkdir "$downstream"
+  git -C "$downstream" init -q
+  touch "$FAKE_CODEX_STATE/marketplace-added"
+
+  run "$RUNNER" check "$downstream"
+
+  [ "$status" -eq 0 ]
+  grep -Fq -- "-C $downstream debug prompt-input" "$FAKE_CODEX_LOG"
+  [ -z "$(git -C "$downstream" status --short)" ]
+}
+
+@test "check accepts the downstream repository before the agentic option" {
+  downstream="$TMPROOT/downstream"
+  mkdir "$downstream"
+  git -C "$downstream" init -q
+  touch "$FAKE_CODEX_STATE/marketplace-added"
+
+  run "$RUNNER" check "$downstream" --with-agentic
+
+  [ "$status" -eq 0 ]
+  grep -Fq -- "-C $downstream debug prompt-input" "$FAKE_CODEX_LOG"
+}
+
+@test "check rejects an unknown option before querying Codex" {
+  run "$RUNNER" check --with-agenti
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unknown option: --with-agenti"* ]]
+  [ ! -s "$FAKE_CODEX_LOG" ]
 }

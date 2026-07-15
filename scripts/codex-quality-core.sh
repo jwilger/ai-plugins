@@ -14,10 +14,14 @@ representative_skills=(
   advisor:advisor
 )
 install_option=""
+downstream_arg=""
+with_agentic=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/codex-quality-core.sh <install|check> [--with-agentic]
+Usage:
+  scripts/codex-quality-core.sh install [--with-agentic]
+  scripts/codex-quality-core.sh check [--with-agentic] [DOWNSTREAM]
 
 install  Add or refresh the Codex quality-core plugins from this checkout.
 check    Read only: verify plugin state and model visibility in a clean
@@ -140,7 +144,7 @@ install_quality_core() {
 }
 
 check_quality_core() {
-  local marketplaces_json plugins_json downstream
+  local marketplaces_json plugins_json downstream owns_downstream
 
   marketplaces_json="$(codex plugin marketplace list --json)"
   if ! assert_marketplace_is_current "$marketplaces_json"; then
@@ -152,12 +156,24 @@ check_quality_core() {
   plugins_json="$(codex plugin list --available --json)"
   assert_plugins_installed "$plugins_json"
 
-  downstream="$(mktemp -d "${TMPDIR:-/tmp}/ai-plugins-codex-smoke.XXXXXX")"
-  trap 'rm -rf "$downstream"' EXIT
-  git -C "$downstream" init -q
+  owns_downstream=0
+  if [ -n "$downstream_arg" ]; then
+    if [ ! -d "$downstream_arg" ] || ! git -C "$downstream_arg" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      printf 'downstream path must be a Git repository: %s\n' "$downstream_arg" >&2
+      exit 2
+    fi
+    downstream="$(cd "$downstream_arg" && pwd -P)"
+  else
+    downstream="$(mktemp -d "${TMPDIR:-/tmp}/ai-plugins-codex-smoke.XXXXXX")"
+    owns_downstream=1
+    trap 'rm -rf "$downstream"' EXIT
+    git -C "$downstream" init -q
+  fi
   assert_skills_model_visible "$downstream"
-  rm -rf "$downstream"
-  trap - EXIT
+  if [ "$owns_downstream" -eq 1 ]; then
+    rm -rf "$downstream"
+    trap - EXIT
+  fi
 
   printf 'Codex quality core is installed and model-visible from %s.\n' "$root"
 }
@@ -169,23 +185,53 @@ fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+if [ "$#" -lt 1 ]; then
   usage >&2
   exit 2
 fi
 
-if [ "$1" != "install" ] && [ "$1" != "check" ]; then
-  printf 'unknown command: %s\n' "$1" >&2
+command_name="$1"
+shift
+
+if [ "$command_name" != "install" ] && [ "$command_name" != "check" ]; then
+  printf 'unknown command: %s\n' "$command_name" >&2
   usage >&2
   exit 2
 fi
 
-if [ "$#" -eq 2 ]; then
-  if [ "$2" != "--with-agentic" ]; then
-    printf 'unknown option: %s\n' "$2" >&2
-    usage >&2
-    exit 2
-  fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --with-agentic)
+      if [ "$with_agentic" -eq 1 ]; then
+        printf 'option specified more than once: --with-agentic\n' >&2
+        usage >&2
+        exit 2
+      fi
+      with_agentic=1
+      ;;
+    -*)
+      printf 'unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      if [ "$command_name" = "install" ]; then
+        printf 'unexpected argument for install: %s\n' "$1" >&2
+        usage >&2
+        exit 2
+      fi
+      if [ -n "$downstream_arg" ]; then
+        printf 'too many downstream paths\n' >&2
+        usage >&2
+        exit 2
+      fi
+      downstream_arg="$1"
+      ;;
+  esac
+  shift
+done
+
+if [ "$with_agentic" -eq 1 ]; then
   core_plugins+=(agentic-systems-engineering)
   representative_skills+=(agentic-systems-engineering:agentic-systems-engineering)
   install_option=" --with-agentic"
@@ -195,7 +241,7 @@ require_command codex
 require_command git
 require_command jq
 
-case "$1" in
+case "$command_name" in
   install) install_quality_core ;;
   check) check_quality_core ;;
   *)
