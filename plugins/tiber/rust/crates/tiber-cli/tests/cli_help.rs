@@ -137,3 +137,37 @@ fn standalone_install_help_precedes_later_missing_value_errors() {
         "help lacked install-bin usage: {stdout}"
     );
 }
+
+#[test]
+fn attached_short_standalone_help_precedes_later_missing_value_errors() {
+    let repo = TempRepo::initialized();
+    let cases: &[(&[&str], &str)] = &[
+        (
+            &["update", "task", "-hfoo", "--summary", "--tags"],
+            "Usage: tiber update",
+        ),
+        (
+            &["install-bin", "-hfoo", "--target-dir", "--apply"],
+            "Usage: tiber install-bin",
+        ),
+    ];
+
+    for (arguments, expected_usage) in cases {
+        let output = repo.tiber(*arguments);
+        assert!(
+            output.status.success(),
+            "standalone attached short help failed for {arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "standalone attached short help wrote stderr for {arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).expect("help output should be utf8");
+        assert!(
+            stdout.contains(expected_usage),
+            "help lacked {expected_usage:?} for {arguments:?}: {stdout}"
+        );
+    }
+}
