@@ -395,6 +395,53 @@ NODE
   [[ "$output" == *"unknown targeted plugin(s): missing-plugin"* ]]
 }
 
+@test "explicitly empty targeted and skills-only lists fail before replacing an eval home" {
+  FIXTURE_TMP="$(mktemp -d)"
+
+  for plugin_mode in targeted-plugins skills-only-marketplace; do
+    eval_home="$FIXTURE_TMP/$plugin_mode"
+    mkdir -p "$eval_home"
+    printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
+    printf 'preserve me\n' >"$eval_home/sentinel"
+
+    run env OPENAI_API_KEY=fixture node \
+      "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+      "$eval_home" \
+      --plugin-mode "$plugin_mode" \
+      --plugins ""
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"$plugin_mode mode requires a non-empty --plugins list"* ]]
+    [ -f "$eval_home/sentinel" ]
+    [ ! -f "$eval_home/config.toml" ]
+  done
+}
+
+@test "omitted skills-only list retains full marketplace behavior" {
+  FIXTURE_TMP="$(mktemp -d)"
+  eval_home="$FIXTURE_TMP/skills-only"
+
+  run env OPENAI_API_KEY=fixture node \
+    "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+    "$eval_home" \
+    --plugin-mode skills-only-marketplace
+
+  [ "$status" -eq 0 ]
+  expected_count="$(jq '.plugins | length' "$ROOT/.agents/plugins/marketplace.json")"
+  [ "$(grep -c '^\[plugins\.' "$eval_home/config.toml")" -eq "$expected_count" ]
+
+  while IFS= read -r plugin; do
+    grep -q "\\[plugins\\.\"${plugin}@ai-plugins\"\\]" "$eval_home/config.toml"
+    [ -d "$eval_home/plugins/cache/ai-plugins/$plugin" ]
+  done < <(jq -r '.plugins[].name' "$ROOT/.agents/plugins/marketplace.json")
+
+  agentic_version="$(jq -r '.version' "$ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
+  agentic_cache="$eval_home/plugins/cache/ai-plugins/agentic-systems-engineering/$agentic_version"
+  [ -d "$agentic_cache/skills" ]
+  [ ! -e "$agentic_cache/bin" ]
+  [ ! -e "$agentic_cache/.mcp.json" ]
+}
+
 @test "improvement loop scope guards reject edits outside their allowed surfaces" {
   TMP_REPO="$(mktemp -d)"
   tmp_repo="$TMP_REPO"
