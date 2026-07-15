@@ -20,6 +20,7 @@ Current behavior evals mostly score read-only advice and do not establish implem
 - [ ] The benchmark runs representative writable feature, bugfix, and refactor scenarios in disposable downstream repositories.
 - [ ] Each scenario compares no-plugin, targeted quality-core, and full-marketplace Codex conditions using the exact plugin set declared by the case.
 - [ ] Scoring combines deterministic black-box tests, type and lint checks, mutation quality where appropriate, diff scope, and calibrated semantic rubrics only where deterministic checks are insufficient.
+- [ ] Sample counts, aggregation rules, pass thresholds, and release gates are declared before execution and report both success rate and relevant reliability metrics.
 
 ## Subtasks
 
