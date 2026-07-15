@@ -394,6 +394,21 @@ fn main() -> ExitCode {
 
 fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<Cli, clap::Error> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
+    if arguments.get(1).is_some_and(|value| value == "update") {
+        if let Some(pair) = arguments
+            .windows(2)
+            .find(|pair| is_bare_update_value_option(&pair[0]) && is_update_option_token(&pair[1]))
+        {
+            let option = pair[0].to_string_lossy();
+            let value = pair[1].to_string_lossy();
+            return Err(command_error(
+                &["update"],
+                "tiber update",
+                ErrorKind::InvalidValue,
+                &format!("{option} requires a value; use {option}={value} for that literal value"),
+            ));
+        }
+    }
     if arguments.get(1).is_some_and(|value| value == "subtask")
         && arguments.get(2).is_some_and(|value| value == "add")
         && arguments.len() >= 6
@@ -427,6 +442,28 @@ fn parse_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
     }
 
     Cli::try_parse_from(normalized_cli_arguments(arguments))
+}
+
+fn is_bare_update_value_option(value: &OsString) -> bool {
+    value.to_str().is_some_and(is_update_value_option_name)
+}
+
+fn is_update_option_token(value: &OsString) -> bool {
+    let Some(value) = value.to_str() else {
+        return false;
+    };
+    if matches!(value, "--help" | "-h") {
+        return true;
+    }
+    let option = value.split_once('=').map_or(value, |(option, _)| option);
+    is_update_value_option_name(option)
+}
+
+fn is_update_value_option_name(option: &str) -> bool {
+    matches!(
+        option,
+        "--title" | "--summary" | "--context" | "--tags" | "--pr-mr-url" | "--pr-mr-status"
+    )
 }
 
 fn command_error(
