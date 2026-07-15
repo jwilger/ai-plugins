@@ -1,7 +1,7 @@
 ---
 title: Label parity normalization failures by side and record
 blocked_by: []
-blocks: []
+blocks: [20260715-yvha-make-development-discipline-release-parity-fixture-use-a-fixed-clock]
 tags: []
 pr_mr_url: 
 pr_mr_status: 
