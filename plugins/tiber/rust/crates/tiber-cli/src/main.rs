@@ -457,7 +457,7 @@ fn is_update_option_token(value: &OsString) -> bool {
     let Some(value) = value.to_str() else {
         return false;
     };
-    if value == "-h" {
+    if value.starts_with("-h") {
         return true;
     }
     let option = value.split_once('=').map_or(value, |(option, _)| option);
