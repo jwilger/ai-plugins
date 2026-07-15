@@ -9,7 +9,11 @@ pr_mr_status:
 
 ## Summary
 
+Treat iteration zero as malformed parity state so its transition ID remains observable.
+
 ## Context / Why
+
+Formal review finding parity-normalizer-accepts-zero-iteration: runtime verified_clean_iterations start at 1, but the normalizer currently accepts 0 and can mask differing malformed transition IDs.
 
 ## Acceptance criteria
 
