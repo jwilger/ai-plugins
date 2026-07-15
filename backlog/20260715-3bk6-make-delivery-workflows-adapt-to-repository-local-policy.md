@@ -18,6 +18,7 @@ Reusable skills currently conflict with repositories that deliver directly to ma
 ## Acceptance criteria
 
 - [ ] Skill guidance explicitly gives repository-local instructions precedence over generic delivery defaults.
+- [ ] The workflow supports direct-to-trunk, PR/MR, and local-only delivery without inventing a pull-request requirement.
 
 ## Subtasks
 
