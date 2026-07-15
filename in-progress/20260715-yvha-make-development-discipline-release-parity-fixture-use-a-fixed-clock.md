@@ -5,6 +5,9 @@ blocks: [20260712-4qmz-reject-option-tokens-consumed-as-missing-tiber-option-val
 tags: [development-discipline, tests, release, hermeticity, ci, major, backlog]
 pr_mr_url: 
 pr_mr_status: 
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
