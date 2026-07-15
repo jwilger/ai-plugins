@@ -19,6 +19,7 @@ The canonical `just ci` gate consistently fails `development-discipline MCP Carg
 
 - [ ] The HOME-unset fixture starts the repository launcher with a trusted Bash while still omitting HOME and excluding Cargo from PATH.
 - [ ] The focused test reaches and asserts the launcher’s `development-discipline.mcp.missing_cargo` diagnostic instead of failing at shebang resolution.
+- [ ] The complete MCP startup Bats file and repository CI gate pass without weakening the launcher’s untrusted-tool protections.
 
 ## Subtasks
 
