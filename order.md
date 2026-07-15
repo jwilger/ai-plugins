@@ -3,6 +3,7 @@
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
+20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
@@ -12,7 +13,6 @@
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
 20260714-xkbv-make-final-review-scope-snapshots-work-with-read-only-repository-metadata
-20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
 20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
 20260708-55yg-add-final-review-readiness-gate-to-development-discipline
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
