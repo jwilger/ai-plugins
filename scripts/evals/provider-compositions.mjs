@@ -18,7 +18,27 @@ function sameStringLists(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export function parseProviderCompositions(value) {
+function parseExpectedProviderLabels(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(
+      "generated eval metadata is missing non-empty providerLabels",
+    );
+  }
+  if (value.some((label) => typeof label !== "string" || label.length === 0)) {
+    throw new Error(
+      "generated eval metadata contains an invalid provider label",
+    );
+  }
+  const uniqueLabels = new Set(value);
+  if (uniqueLabels.size !== value.length) {
+    throw new Error(
+      "generated eval metadata contains duplicate configured provider labels",
+    );
+  }
+  return uniqueLabels;
+}
+
+export function parseProviderCompositions(value, options = {}) {
   if (!Array.isArray(value)) {
     throw new Error("generated eval metadata is missing providerCompositions");
   }
@@ -130,6 +150,30 @@ export function parseProviderCompositions(value) {
     });
   }
 
+  if (Object.hasOwn(options, "expectedProviderLabels")) {
+    const expectedLabels = parseExpectedProviderLabels(
+      options.expectedProviderLabels,
+    );
+    const missing = [...expectedLabels]
+      .filter((label) => !labels.has(label))
+      .sort();
+    const extra = [...labels]
+      .filter((label) => !expectedLabels.has(label))
+      .sort();
+    if (missing.length > 0 || extra.length > 0) {
+      const details = [];
+      if (missing.length > 0) {
+        details.push(`missing: ${missing.join(", ")}`);
+      }
+      if (extra.length > 0) {
+        details.push(`extra: ${extra.join(", ")}`);
+      }
+      throw new Error(
+        `provider composition labels do not match configured providers: ${details.join("; ")}`,
+      );
+    }
+  }
+
   return { providerCompositions, codexPluginSelections };
 }
 
@@ -137,6 +181,7 @@ function printCodexPluginSelections(metadataFile) {
   const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
   const { codexPluginSelections } = parseProviderCompositions(
     metadata.providerCompositions,
+    { expectedProviderLabels: metadata.providerLabels },
   );
   for (const selection of codexPluginSelections) {
     process.stdout.write(

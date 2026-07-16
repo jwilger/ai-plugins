@@ -1185,6 +1185,12 @@ const targeted = {
   pluginMode: 'targeted-plugins',
   plugins: ['tiber'],
 };
+const noPlugins = {
+  ...targeted,
+  label: 'codex-gpt-5.6-terra-no-plugins',
+  pluginMode: 'no-plugins',
+  plugins: [],
+};
 const cases = {
   empty: [],
   duplicate: [targeted, targeted],
@@ -1218,8 +1224,41 @@ const cases = {
   duplicate_plugin: [{ ...targeted, plugins: ['tiber', 'tiber'] }],
   unsorted_plugins: [{ ...targeted, plugins: ['tiber', 'advisor'] }],
   invalid_plugin_name: [{ ...targeted, plugins: ['Tiber'] }],
+  missing_composition_label: [targeted],
+  extra_composition_label: [targeted, noPlugins],
+  both_missing_and_extra: [
+    targeted,
+    {
+      label: 'claude-b-full-marketplace',
+      provider: 'anthropic:claude-agent-sdk',
+      providerVariant: 'claude-b',
+      pluginMode: 'full-marketplace',
+      plugins: ['advisor'],
+    },
+    {
+      label: 'claude-c-no-plugins',
+      provider: 'anthropic:claude-agent-sdk',
+      providerVariant: 'claude-c',
+      pluginMode: 'no-plugins',
+      plugins: [],
+    },
+  ],
+  order_insensitive: [targeted, noPlugins],
 };
-const metadata = { usesCodexGrader: true };
+const providerLabelsByCase = {
+  missing_composition_label: [targeted.label, noPlugins.label],
+  extra_composition_label: [targeted.label],
+  both_missing_and_extra: [
+    'claude-z-no-plugins',
+    targeted.label,
+    'claude-a-full-marketplace',
+  ],
+  order_insensitive: [noPlugins.label, targeted.label],
+};
+const metadata = {
+  usesCodexGrader: true,
+  providerLabels: providerLabelsByCase[process.env.COMPOSITION_CASE] || [targeted.label],
+};
 if (process.env.COMPOSITION_CASE !== 'missing') {
   metadata.providerCompositions = cases[process.env.COMPOSITION_CASE];
 }
@@ -1240,7 +1279,10 @@ NODE
     "label_mismatch|provider composition label does not match its variant and mode" \
     "duplicate_plugin|non-canonical plugin list" \
     "unsorted_plugins|non-canonical plugin list" \
-    "invalid_plugin_name|invalid plugin list"; do
+    "invalid_plugin_name|invalid plugin list" \
+    "missing_composition_label|provider composition labels do not match configured providers: missing: codex-gpt-5.6-terra-no-plugins" \
+    "extra_composition_label|provider composition labels do not match configured providers: extra: codex-gpt-5.6-terra-no-plugins" \
+    "both_missing_and_extra|provider composition labels do not match configured providers: missing: claude-a-full-marketplace, claude-z-no-plugins; extra: claude-b-full-marketplace, claude-c-no-plugins"; do
     composition_case="${fixture%%|*}"
     expected="${fixture#*|}"
 
@@ -1251,26 +1293,40 @@ NODE
     [[ "$output" != *"prepare-codex-home.mjs"* ]]
   done
 
+  run env COMPOSITION_CASE=order_insensitive "$fixture_root/scripts/evals/run.sh" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--plugin-mode no-plugins"* ]]
+  [[ "$output" == *"--plugin-mode targeted-plugins"* ]]
+
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 SH
   chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
-  grader_home="$fixture_root/grader-home"
-  mkdir -p "$grader_home"
-  printf 'preserve me\n' >"$grader_home/sentinel"
+  for fixture in \
+    "empty|providerCompositions must contain at least one provider" \
+    "missing_composition_label|provider composition labels do not match configured providers: missing: codex-gpt-5.6-terra-no-plugins" \
+    "extra_composition_label|provider composition labels do not match configured providers: extra: codex-gpt-5.6-terra-no-plugins"; do
+    composition_case="${fixture%%|*}"
+    expected="${fixture#*|}"
+    grader_home="$fixture_root/grader-home-$composition_case"
+    mkdir -p "$grader_home"
+    printf 'ai-plugins Codex eval home\n' >"$grader_home/.ai-plugins-eval-home"
+    printf 'preserve me\n' >"$grader_home/sentinel"
 
-  run env \
-    COMPOSITION_CASE=empty \
-    OPENAI_API_KEY=fixture \
-    PROMPTFOO_BIN=/bin/true \
-    CODEX_EVAL_HOME="$grader_home" \
-    CODEX_EVAL_HOME_FULL_MARKETPLACE="$grader_home" \
-    "$fixture_root/scripts/evals/run.sh"
+    run env \
+      COMPOSITION_CASE="$composition_case" \
+      OPENAI_API_KEY=fixture \
+      PROMPTFOO_BIN=/bin/true \
+      CODEX_EVAL_HOME="$grader_home" \
+      CODEX_EVAL_HOME_FULL_MARKETPLACE="$grader_home" \
+      "$fixture_root/scripts/evals/run.sh"
 
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"providerCompositions must contain at least one provider"* ]]
-  [ -f "$grader_home/sentinel" ]
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"$expected"* ]]
+    [ -f "$grader_home/sentinel" ]
+  done
 
   rm -rf "$fixture_root"
 }
