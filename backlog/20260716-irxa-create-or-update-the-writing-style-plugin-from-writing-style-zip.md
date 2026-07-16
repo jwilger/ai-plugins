@@ -21,6 +21,7 @@ Source material is at ~/Downloads/writing-style.zip. Treat Codex personal use as
 - [ ] The resulting skill is concise, executable by Codex, and gives clear guidance for producing and revising prose while preserving user intent.
 - [ ] Codex marketplace metadata is complete; Claude Code metadata is added or updated when the skill is compatible with that harness.
 - [ ] Plugin manifests, versions, marketplace entries, catalog documentation, and plugin README stay synchronized with repository conventions.
+- [ ] Relevant deterministic validation and behavior evals pass, with evidence recorded before the task is closed.
 
 ## Subtasks
 
