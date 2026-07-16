@@ -20,7 +20,7 @@ scripts/evals/run.sh currently defaults targeted Codex composition to every mark
 
 ## Acceptance criteria
 
-- [ ] For each selected behavior suite, targeted mode derives a deterministic, deduplicated plugin set from the selected cases and installs exactly that set for every supported harness.
+- [x] For each selected behavior suite, targeted mode derives a deterministic, deduplicated plugin set from the selected cases and installs exactly that set for every supported harness.
 - [ ] An explicitly supplied empty targeted or skills-only plugin selection, or any unknown plugin name, fails with a clear validation error before replacing or writing the eval home.
 - [ ] Omitting the plugin list where the documented contract means full marketplace retains that behavior; omission is not conflated with an explicitly empty selection.
 - [ ] Generated config and dashboard regressions prove targeted and full-marketplace rows differ compositionally when selected cases use a proper subset. If Claude cannot express an honest targeted composition, remove the duplicate targeted label rather than misrepresenting it.
