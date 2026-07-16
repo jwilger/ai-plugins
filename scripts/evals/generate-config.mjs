@@ -335,6 +335,7 @@ function configFor(suite) {
   const providers = filteredProviderEntries(providerEntries);
   const providerVariants = uniqueById(providers.map((entry) => entry.variant));
   const pluginModes = uniqueById(providers.map((entry) => entry.pluginMode));
+  const providerLabels = providers.map((entry) => entry.label);
   const providerCompositions = providers.map((entry) => ({
     label: entry.label,
     provider: entry.variant.provider,
@@ -345,6 +346,7 @@ function configFor(suite) {
   const metadata = {
     suite,
     usesCodexGrader: true,
+    providerLabels,
     providerCompositions,
   };
 
@@ -385,6 +387,7 @@ tracing:
 metadata:
   suite: ${suite}
   testLoaderByPluginMode: ${suite === "behavior" ? `${testLoader}?pluginMode={{ provider.pluginMode }}` : testLoader}
+  providerLabels: ${JSON.stringify(providerLabels)}
   providerCompositions: ${JSON.stringify(providerCompositions)}
   matrix:
     pluginModes:
