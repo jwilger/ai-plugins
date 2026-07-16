@@ -17,6 +17,8 @@ Source material is at ~/Downloads/writing-style.zip. Treat Codex personal use as
 
 ## Acceptance criteria
 
+- [ ] The archive is inspected safely and its useful writing-style guidance is incorporated into the appropriate new or existing plugin without importing irrelevant or unsafe artifacts.
+
 ## Subtasks
 
 ## Notes / Log
