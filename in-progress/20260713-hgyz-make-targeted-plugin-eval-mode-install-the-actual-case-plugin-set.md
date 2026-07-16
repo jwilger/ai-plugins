@@ -24,7 +24,7 @@ scripts/evals/run.sh currently defaults targeted Codex composition to every mark
 - [x] An explicitly supplied empty targeted or skills-only plugin selection, or any unknown plugin name, fails with a clear validation error before replacing or writing the eval home.
 - [x] Omitting the plugin list where the documented contract means full marketplace retains that behavior; omission is not conflated with an explicitly empty selection.
 - [x] Generated config and dashboard regressions prove targeted and full-marketplace rows differ compositionally when selected cases use a proper subset. If Claude cannot express an honest targeted composition, remove the duplicate targeted label rather than misrepresenting it.
-- [ ] Generated behavior-eval cases preserve list-valued metadata such as plugins, skills, and coverage_kinds as atomic metadata rather than Promptfoo variable-sweep dimensions; a one-fixture, one-sample, one-provider run produces exactly one target request, with a regression test.
+- [x] Generated behavior-eval cases preserve list-valued metadata such as plugins, skills, and coverage_kinds as atomic metadata rather than Promptfoo variable-sweep dimensions; a one-fixture, one-sample, one-provider run produces exactly one target request, with a regression test.
 
 ## Subtasks
 
