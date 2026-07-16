@@ -452,6 +452,28 @@ NODE
   done
 }
 
+@test "unknown targeted and skills-only selections fail before replacing an eval home" {
+  FIXTURE_TMP="$(mktemp -d)"
+
+  for plugin_mode in targeted-plugins skills-only-marketplace; do
+    eval_home="$FIXTURE_TMP/$plugin_mode"
+    mkdir -p "$eval_home"
+    printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
+    printf 'preserve me\n' >"$eval_home/sentinel"
+
+    run env OPENAI_API_KEY=fixture node \
+      "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+      "$eval_home" \
+      --plugin-mode "$plugin_mode" \
+      --plugins missing-plugin
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"unknown targeted plugin(s): missing-plugin"* ]]
+    [ -f "$eval_home/sentinel" ]
+    [ ! -f "$eval_home/config.toml" ]
+  done
+}
+
 @test "omitted skills-only list retains full marketplace behavior" {
   FIXTURE_TMP="$(mktemp -d)"
   eval_home="$FIXTURE_TMP/skills-only"

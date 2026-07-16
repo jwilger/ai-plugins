@@ -12,6 +12,14 @@ setup() {
   SIGNAL_GRANDCHILD_PID=""
 }
 
+copy_eval_runner() {
+  destination="$1"
+  cp "$RUNNER" "$destination"
+  cp \
+    "$ROOT/scripts/evals/provider-compositions.mjs" \
+    "${destination%/*}/provider-compositions.mjs"
+}
+
 teardown() {
   [ -z "$SIGNAL_EVAL_PGID" ] || kill -KILL -- "-$SIGNAL_EVAL_PGID" 2>/dev/null || true
   if [ -n "$SIGNAL_RUNNER_PID" ]; then
@@ -273,7 +281,7 @@ SH
   config="$temp_root/promptfooconfig.yaml"
   preparation_marker="$temp_root/preparation-invoked"
   mkdir -p "$fixture_main/scripts/evals" "$fake_bin"
-  cp "$RUNNER" "$fixture_main/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_main/scripts/evals/run.sh"
   printf 'prompts: []\nproviders: []\ntests: []\n' >"$config"
 
   git -C "$fixture_main" init -q
@@ -443,7 +451,7 @@ SH
 @test "eval runner uses project-local Promptfoo state for real runs" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
@@ -589,7 +597,7 @@ NODE
 @test "eval runner exits successfully when promptfoo sample failures meet thresholds" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
@@ -646,7 +654,7 @@ SH
 @test "eval runner clears stale timeout status before a successful run" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin" "$fixture_root/evals/out"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
   cat >"$fixture_root/evals/out/status.json" <<'JSON'
@@ -746,7 +754,7 @@ SH
 @test "eval runner times out a hanging promptfoo invocation" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
@@ -773,7 +781,7 @@ SH
 @test "eval runner treats timeout as failure even when partial results pass thresholds" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
@@ -821,7 +829,7 @@ SH
 @test "eval runner treats interrupted promptfoo as failure even when partial results pass thresholds" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
@@ -868,7 +876,7 @@ SH
   SIGNAL_FIXTURE_ROOT="$(mktemp -d)"
   fixture_root="$SIGNAL_FIXTURE_ROOT"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
@@ -939,7 +947,7 @@ SH
   SIGNAL_FIXTURE_ROOT="$(mktemp -d)"
   fixture_root="$SIGNAL_FIXTURE_ROOT"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
@@ -1029,7 +1037,7 @@ SH
   SIGNAL_FIXTURE_ROOT="$(mktemp -d)"
   fixture_root="$SIGNAL_FIXTURE_ROOT"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
@@ -1128,7 +1136,7 @@ SH
 @test "eval runner force-kills a promptfoo process that ignores timeout termination" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
@@ -1156,7 +1164,7 @@ SH
 @test "eval runner rejects invalid provider composition metadata before home preparation" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals"
-  cp "$RUNNER" "$fixture_root/scripts/evals/run.sh"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   chmod +x "$fixture_root/scripts/evals/run.sh"
   cat >"$fixture_root/scripts/evals/generate-config.mjs" <<'NODE'
 #!/usr/bin/env node
@@ -1206,6 +1214,10 @@ const cases = {
       pluginMode: 'unknown-mode',
     },
   ],
+  label_mismatch: [{ ...targeted, label: 'mismatched-label' }],
+  duplicate_plugin: [{ ...targeted, plugins: ['tiber', 'tiber'] }],
+  unsorted_plugins: [{ ...targeted, plugins: ['tiber', 'advisor'] }],
+  invalid_plugin_name: [{ ...targeted, plugins: ['Tiber'] }],
 };
 const metadata = { usesCodexGrader: true };
 if (process.env.COMPOSITION_CASE !== 'missing') {
@@ -1224,7 +1236,11 @@ NODE
     "no_plugins_nonempty|no-plugins provider composition must be empty" \
     "missing_variant|invalid provider composition" \
     "unknown_provider|unsupported provider in provider composition" \
-    "unknown_mode|unsupported plugin mode in provider composition"; do
+    "unknown_mode|unsupported plugin mode in provider composition" \
+    "label_mismatch|provider composition label does not match its variant and mode" \
+    "duplicate_plugin|non-canonical plugin list" \
+    "unsorted_plugins|non-canonical plugin list" \
+    "invalid_plugin_name|invalid plugin list"; do
     composition_case="${fixture%%|*}"
     expected="${fixture#*|}"
 

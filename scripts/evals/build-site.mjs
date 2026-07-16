@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { parseProviderCompositions } from "./provider-compositions.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const outDir = path.join(root, "evals/out");
@@ -8,77 +9,81 @@ const siteDir = path.join(root, "site/evals");
 const resultsPath = path.join(outDir, "results.json");
 const statusPath = path.join(outDir, "status.json");
 
-function readResults(file) {
+function readArtifact(file) {
   const raw = JSON.parse(fs.readFileSync(file, "utf8"));
   const results = raw.results?.results || raw.results || raw.prompts || [];
+  const cases = Array.isArray(results)
+    ? results.map((result, index) => {
+        const testCase =
+          result.testCase?.vars || result.testCase || result.vars || {};
+        const grading = result.gradingResult || result;
+        const pass = Boolean(grading.pass ?? result.success ?? result.pass);
+        const reason =
+          grading.reason ||
+          result.reason ||
+          grading.error ||
+          result.error ||
+          result.failureReason ||
+          "";
+        const blocked = isProviderUnavailable(reason);
+        const provider =
+          result.provider?.label ||
+          result.provider?.id ||
+          result.provider ||
+          result.prompt?.provider ||
+          "unknown-provider";
+        const providerVariant =
+          testCase.provider_variant ||
+          testCase.providerVariant ||
+          String(provider).replace(
+            /-(no-plugins|targeted-plugins|full-marketplace)$/,
+            "",
+          );
+        const pluginMode =
+          String(provider).match(
+            /(no-plugins|targeted-plugins|full-marketplace)$/,
+          )?.[1] ||
+          testCase.plugin_mode ||
+          testCase.pluginMode ||
+          "unknown";
+        return {
+          id: testCase.case_id || result.description || `case-${index + 1}`,
+          behavior: testCase.behavior || "",
+          provider,
+          providerVariant,
+          pluginMode,
+          plugins: normalizeList(testCase.plugins || testCase.plugin),
+          skills: normalizeList(testCase.skills || testCase.skill),
+          sampleIndex: Number(testCase.sample_index ?? 1),
+          minPassRate: Number(
+            testCase.min_pass_rate ?? testCase.minPassRate ?? 1,
+          ),
+          valueGateMode:
+            testCase.value_gate_mode || testCase.valueGateMode || "standard",
+          baselineLiftThreshold: Number(
+            testCase.baseline_lift_threshold ??
+              testCase.baselineLiftThreshold ??
+              0.1,
+          ),
+          hardGuardStatus:
+            testCase.hard_guard_status || testCase.hardGuardStatus || "unknown",
+          tokenUsage: result.tokenUsage || grading.tokenUsage || null,
+          cost: Number(result.cost ?? grading.cost ?? 0),
+          pass,
+          blocked,
+          status: pass ? "passed" : blocked ? "blocked" : "failed",
+          score: Number(grading.score ?? (pass ? 1 : 0)),
+          reason,
+        };
+      })
+    : [];
 
-  if (Array.isArray(results)) {
-    return results.map((result, index) => {
-      const testCase =
-        result.testCase?.vars || result.testCase || result.vars || {};
-      const grading = result.gradingResult || result;
-      const pass = Boolean(grading.pass ?? result.success ?? result.pass);
-      const reason =
-        grading.reason ||
-        result.reason ||
-        grading.error ||
-        result.error ||
-        result.failureReason ||
-        "";
-      const blocked = isProviderUnavailable(reason);
-      const provider =
-        result.provider?.label ||
-        result.provider?.id ||
-        result.provider ||
-        result.prompt?.provider ||
-        "unknown-provider";
-      const providerVariant =
-        testCase.provider_variant ||
-        testCase.providerVariant ||
-        String(provider).replace(
-          /-(no-plugins|targeted-plugins|full-marketplace)$/,
-          "",
-        );
-      const pluginMode =
-        String(provider).match(
-          /(no-plugins|targeted-plugins|full-marketplace)$/,
-        )?.[1] ||
-        testCase.plugin_mode ||
-        testCase.pluginMode ||
-        "unknown";
-      return {
-        id: testCase.case_id || result.description || `case-${index + 1}`,
-        behavior: testCase.behavior || "",
-        provider,
-        providerVariant,
-        pluginMode,
-        plugins: normalizeList(testCase.plugins || testCase.plugin),
-        skills: normalizeList(testCase.skills || testCase.skill),
-        sampleIndex: Number(testCase.sample_index ?? 1),
-        minPassRate: Number(
-          testCase.min_pass_rate ?? testCase.minPassRate ?? 1,
-        ),
-        valueGateMode:
-          testCase.value_gate_mode || testCase.valueGateMode || "standard",
-        baselineLiftThreshold: Number(
-          testCase.baseline_lift_threshold ??
-            testCase.baselineLiftThreshold ??
-            0.1,
-        ),
-        hardGuardStatus:
-          testCase.hard_guard_status || testCase.hardGuardStatus || "unknown",
-        tokenUsage: result.tokenUsage || grading.tokenUsage || null,
-        cost: Number(result.cost ?? grading.cost ?? 0),
-        pass,
-        blocked,
-        status: pass ? "passed" : blocked ? "blocked" : "failed",
-        score: Number(grading.score ?? (pass ? 1 : 0)),
-        reason,
-      };
-    });
-  }
-
-  return [];
+  return {
+    cases,
+    ...normalizeProviderCompositions(
+      raw.config?.metadata?.providerCompositions,
+    ),
+  };
 }
 
 function normalizeList(value) {
@@ -105,6 +110,41 @@ function normalizeList(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeProviderCompositions(value) {
+  if (value === undefined) {
+    return {
+      providerCompositions: [],
+      providerCompositionStatus: {
+        state: "unavailable",
+        reason:
+          "Installed provider composition metadata is unavailable for this artifact.",
+      },
+    };
+  }
+
+  let providerCompositions;
+  try {
+    ({ providerCompositions } = parseProviderCompositions(value));
+  } catch {
+    return {
+      providerCompositions: [],
+      providerCompositionStatus: {
+        state: "invalid",
+        reason:
+          "Installed provider composition metadata is invalid for this artifact.",
+      },
+    };
+  }
+
+  return {
+    providerCompositions,
+    providerCompositionStatus: {
+      state: "available",
+      reason: "Installed provider composition metadata was recorded.",
+    },
+  };
 }
 
 function isProviderUnavailable(reason) {
@@ -356,7 +396,12 @@ function readStatus(file, cases) {
 
 fs.mkdirSync(siteDir, { recursive: true });
 
-const cases = fs.existsSync(resultsPath) ? readResults(resultsPath) : [];
+const artifact = fs.existsSync(resultsPath)
+  ? readArtifact(resultsPath)
+  : normalizeProviderCompositions(undefined);
+const cases = artifact.cases || [];
+const providerCompositions = artifact.providerCompositions;
+const providerCompositionStatus = artifact.providerCompositionStatus;
 const runStatus = readStatus(statusPath, cases);
 const aggregates = aggregateCases(cases);
 const pluginSummaries = aggregateDimension(cases, "plugins", "plugin");
@@ -391,6 +436,8 @@ const summary = {
   aggregates,
   pluginSummaries,
   skillSummaries,
+  providerCompositions,
+  providerCompositionStatus,
   valueGateSummaries: valueGates,
   cases,
 };
@@ -441,6 +488,20 @@ function summaryRows(items, idName) {
 
 const pluginRows = summaryRows(pluginSummaries, "plugin");
 const skillRows = summaryRows(skillSummaries, "skill");
+const providerCompositionRows =
+  providerCompositionStatus.state === "available"
+    ? providerCompositions
+        .map(
+          (composition) => `<tr>
+  <td>${escapeHtml(composition.label)}</td>
+  <td>${escapeHtml(composition.provider)}</td>
+  <td>${escapeHtml(composition.providerVariant)}</td>
+  <td>${escapeHtml(composition.pluginMode)}</td>
+  <td>${composition.plugins.length > 0 ? escapeHtml(composition.plugins.join(", ")) : "None"}</td>
+</tr>`,
+        )
+        .join("\n")
+    : `<tr><td colspan="5">${escapeHtml(providerCompositionStatus.reason)}</td></tr>`;
 const valueGateRows =
   valueGates
     .map(
@@ -497,7 +558,16 @@ const html = `<!doctype html>
 ${caseRows}
       </tbody>
     </table>
-    <h2>Plugin summary</h2>
+    <h2>Installed provider composition</h2>
+    <table>
+      <thead>
+        <tr><th>Provider label</th><th>Provider</th><th>Provider variant</th><th>Plugin mode</th><th>Installed plugins</th></tr>
+      </thead>
+      <tbody>
+${providerCompositionRows}
+      </tbody>
+    </table>
+    <h2>Case-target plugin summary</h2>
     <table>
       <thead>
         <tr><th>Provider</th><th>Plugin mode</th><th>Plugin</th><th>Passed</th><th>Pass rate</th><th>Cases</th></tr>
