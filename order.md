@@ -59,3 +59,4 @@
 20260714-24xa-tighten-final-review-split-and-budget-decision-contracts
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260716-irxa-create-or-update-the-writing-style-plugin-from-writing-style-zip
+20260716-v2ji-make-provider-eval-timeouts-safely-resumable-without-matrix-expansion
