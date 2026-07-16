@@ -12,6 +12,7 @@ const supportedPluginModes = new Set([
   "targeted-plugins",
   "full-marketplace",
 ]);
+const pluginModeOrder = ["full-marketplace", "no-plugins", "targeted-plugins"];
 const pluginNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function sameStringLists(left, right) {
@@ -177,12 +178,95 @@ export function parseProviderCompositions(value, options = {}) {
   return { providerCompositions, codexPluginSelections };
 }
 
-function printCodexPluginSelections(metadataFile) {
+function canonicalProspectivePath(value, cwd) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error("selected Codex eval home path must not be empty");
+  }
+
+  const absolute = path.resolve(cwd, value);
+  const missingSegments = [];
+  let existingAncestor = absolute;
+  while (!fs.existsSync(existingAncestor)) {
+    const parent = path.dirname(existingAncestor);
+    if (parent === existingAncestor) {
+      throw new Error(`cannot resolve Codex eval home path: ${value}`);
+    }
+    missingSegments.unshift(path.basename(existingAncestor));
+    existingAncestor = parent;
+  }
+
+  return path.join(fs.realpathSync(existingAncestor), ...missingSegments);
+}
+
+function pathsOverlap(left, right) {
+  const relative = path.relative(left, right);
+  return (
+    relative === "" ||
+    (relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function pathComparisonKey(value) {
+  return path.normalize(value).normalize("NFC").toLowerCase();
+}
+
+export function validateCodexHomeLayout({
+  codexPluginSelections,
+  usesCodexGrader,
+  codexHomes,
+  cwd = process.cwd(),
+}) {
+  const requiredModes = new Set(
+    codexPluginSelections.map((selection) => selection.pluginMode),
+  );
+  if (usesCodexGrader) {
+    requiredModes.add("full-marketplace");
+  }
+
+  const requiredHomes = pluginModeOrder
+    .filter((pluginMode) => requiredModes.has(pluginMode))
+    .map((pluginMode) => ({
+      pluginMode,
+      path: canonicalProspectivePath(codexHomes[pluginMode], cwd),
+    }))
+    .map((home) => ({
+      ...home,
+      comparisonPath: pathComparisonKey(home.path),
+    }));
+
+  for (let leftIndex = 0; leftIndex < requiredHomes.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < requiredHomes.length;
+      rightIndex += 1
+    ) {
+      const left = requiredHomes[leftIndex];
+      const right = requiredHomes[rightIndex];
+      if (
+        pathsOverlap(left.comparisonPath, right.comparisonPath) ||
+        pathsOverlap(right.comparisonPath, left.comparisonPath)
+      ) {
+        throw new Error(
+          `Codex eval homes overlap for incompatible compositions: ${left.pluginMode} (${left.path}) and ${right.pluginMode} (${right.path})`,
+        );
+      }
+    }
+  }
+}
+
+function printCodexPluginSelections(metadataFile, codexHomes) {
   const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
   const { codexPluginSelections } = parseProviderCompositions(
     metadata.providerCompositions,
     { expectedProviderLabels: metadata.providerLabels },
   );
+  validateCodexHomeLayout({
+    codexPluginSelections,
+    usesCodexGrader: Boolean(metadata.usesCodexGrader),
+    codexHomes,
+  });
   for (const selection of codexPluginSelections) {
     process.stdout.write(
       `${selection.pluginMode}\t${selection.plugins.join(",")}\n`,
@@ -193,8 +277,17 @@ function printCodexPluginSelections(metadataFile) {
 const invokedPath =
   process.argv[1] && pathToFileURL(path.resolve(process.argv[1]));
 if (invokedPath?.href === import.meta.url) {
-  if (!process.argv[2]) {
+  if (process.argv.length < 6) {
     throw new Error("provider composition metadata file is required");
   }
-  printCodexPluginSelections(process.argv[2]);
+  try {
+    printCodexPluginSelections(process.argv[2], {
+      "full-marketplace": process.argv[3],
+      "no-plugins": process.argv[4],
+      "targeted-plugins": process.argv[5],
+    });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 2;
+  }
 }

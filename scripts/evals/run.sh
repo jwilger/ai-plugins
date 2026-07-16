@@ -208,7 +208,11 @@ arm_eval_interrupt_watchdog() {
 }
 
 selected_codex_provider_compositions() {
-  node "$root/scripts/evals/provider-compositions.mjs" "$generated_metadata_file"
+  node "$root/scripts/evals/provider-compositions.mjs" \
+    "$generated_metadata_file" \
+    "$1" \
+    "$2" \
+    "$3"
 }
 
 uses_codex_grader() {
@@ -462,7 +466,10 @@ if [ "$dry_run" -eq 1 ]; then
     dry_inspection_config="$dry_inspection_dir/config.yaml"
     generated_metadata_file="$dry_inspection_dir/metadata.json"
     node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$dry_inspection_config" --metadata-output "$generated_metadata_file" >/dev/null
-    codex_provider_compositions="$(selected_codex_provider_compositions)"
+    codex_provider_compositions="$(selected_codex_provider_compositions \
+      "$dry_full_home" \
+      "$dry_no_plugins_home" \
+      "$dry_targeted_home")"
     printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_output_file"
     printf '\n'
     if uses_codex_grader; then
@@ -501,7 +508,10 @@ export CODEX_EVAL_HOME_TARGETED_PLUGINS="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$ro
 mkdir -p "$PROMPTFOO_CONFIG_DIR"
 
 if [ "$generated_config" -eq 1 ]; then
-  codex_provider_compositions="$(selected_codex_provider_compositions)"
+  codex_provider_compositions="$(selected_codex_provider_compositions \
+    "$CODEX_EVAL_HOME_FULL_MARKETPLACE" \
+    "$CODEX_EVAL_HOME_NO_PLUGINS" \
+    "$CODEX_EVAL_HOME_TARGETED_PLUGINS")"
   write_runtime_options
   write_runtime_loader
   if uses_codex_grader; then
