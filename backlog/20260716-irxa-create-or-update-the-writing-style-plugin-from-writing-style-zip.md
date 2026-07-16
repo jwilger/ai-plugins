@@ -20,6 +20,7 @@ Source material is at ~/Downloads/writing-style.zip. Treat Codex personal use as
 - [ ] The archive is inspected safely and its useful writing-style guidance is incorporated into the appropriate new or existing plugin without importing irrelevant or unsafe artifacts.
 - [ ] The resulting skill is concise, executable by Codex, and gives clear guidance for producing and revising prose while preserving user intent.
 - [ ] Codex marketplace metadata is complete; Claude Code metadata is added or updated when the skill is compatible with that harness.
+- [ ] Plugin manifests, versions, marketplace entries, catalog documentation, and plugin README stay synchronized with repository conventions.
 
 ## Subtasks
 
