@@ -60,3 +60,4 @@
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260716-irxa-create-or-update-the-writing-style-plugin-from-writing-style-zip
 20260716-v2ji-make-provider-eval-timeouts-safely-resumable-without-matrix-expansion
+20260716-ya64-make-eval-hard-guards-distinguish-refusals-from-forbidden-intent
