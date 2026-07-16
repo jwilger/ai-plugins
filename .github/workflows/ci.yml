@@ -1,8 +1,8 @@
 name: CI
 
 # Public repo: pull_request is reachable from forks, so every job below stays
-# on GitHub-hosted ubuntu-latest. Direct pushes to trunk run the same gate, and
-# merge_group preserves coverage for repositories that opt into PR mode.
+# on GitHub-hosted Ubuntu runners. Direct pushes to trunk run the same gate,
+# and merge_group preserves coverage for repositories that opt into PR mode.
 
 on:
   push:
@@ -18,7 +18,10 @@ permissions:
 jobs:
   quality:
     name: Quality gate
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04's AppArmor policy strips capabilities from unprivileged user
+    # namespaces, so the Nix Bubblewrap binary cannot construct the verifier's
+    # mount namespace. Keep the sandbox tests on the supported 22.04 image.
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
