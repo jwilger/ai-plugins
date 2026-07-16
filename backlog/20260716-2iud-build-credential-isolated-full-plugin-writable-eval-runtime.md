@@ -21,6 +21,7 @@ Deferred from the skills-first Rust pilot. True full-plugin execution requires a
 - [ ] Full plugin MCP, hook, and executable surfaces run inside a disposable filesystem, PID, resource, and network boundary with allowlisted egress.
 - [ ] Containment canaries prove host-home reads, sibling writes, command-network access, credential access, process escape, and artifact exfiltration fail closed.
 - [ ] Only secret-scanned allowlisted evidence leaves the disposable runtime; contaminated raw output is quarantined and never shared.
+- [ ] The skills-only pilot remains the default until this boundary passes adversarial review and repeatable end-to-end tests.
 
 ## Subtasks
 
