@@ -56,11 +56,11 @@ Default eval posture matches intended use:
   not expose those knobs in this repo's generated config.
 - Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with medium reasoning
   effort, a read-only sandbox, no approvals, streaming, deep tracing disabled,
-  and isolated generated homes containing no plugins, an explicitly overridden
-  targeted set, or every repo plugin according to the behavior mode. Without
-  that override, targeted and full homes contain the same plugins. Independent
-  model grading defaults to `gpt-5.6-sol` with high reasoning. Both execution
-  and grader roles retain separate environment overrides.
+  and isolated generated homes containing no plugins, the selected cases'
+  deterministic plugin union, or the complete harness-specific catalog
+  according to the behavior mode. Independent model grading defaults to
+  `gpt-5.6-sol` with high reasoning. Both execution and grader roles retain
+  separate environment overrides.
 
 Canaries are separate from behavior evals. Canaries explicitly prove plugin and
 skill loading; behavior prompts remain natural and do not name `ai-plugins`.

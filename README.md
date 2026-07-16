@@ -220,10 +220,9 @@ Default eval harness posture:
   those knobs in this repo's generated config.
 - Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with
   `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
-  deep tracing disabled, and isolated generated homes containing no plugins, an
-  explicitly overridden targeted set, or every repo plugin according to the
-  behavior mode. Without that override, targeted and full homes contain the
-  same plugins.
+  deep tracing disabled, and isolated generated homes containing no plugins,
+  the selected cases' deterministic plugin union, or the complete
+  harness-specific catalog according to the behavior mode.
   Model-graded assertions independently default to
   `gpt-5.6-sol` with high reasoning through the same SDK, so OpenAI model access
   goes through local Codex auth rather than `OPENAI_API_KEY`. Override the two
