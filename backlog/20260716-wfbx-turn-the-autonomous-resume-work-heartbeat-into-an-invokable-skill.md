@@ -17,6 +17,8 @@ The current session proved that a persistent timer can emit a custom wake event 
 
 ## Acceptance criteria
 
+- [ ] Invoking the skill starts at most one non-blocking, session-scoped heartbeat with a configurable interval and a 15-minute default.
+
 ## Subtasks
 
 ## Notes / Log
