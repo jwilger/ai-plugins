@@ -18,6 +18,7 @@ Deferred from the skills-first Rust pilot. True full-plugin execution requires a
 ## Acceptance criteria
 
 - [ ] Codex inference authenticates through a revocable credential boundary that model-invoked commands and plugin subprocesses cannot read or replay.
+- [ ] Full plugin MCP, hook, and executable surfaces run inside a disposable filesystem, PID, resource, and network boundary with allowlisted egress.
 
 ## Subtasks
 
