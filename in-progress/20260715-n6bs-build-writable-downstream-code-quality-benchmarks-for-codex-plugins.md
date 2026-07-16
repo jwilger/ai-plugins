@@ -21,6 +21,7 @@ Re-scoped after the first Promptfoo wiring security review. The immediate decisi
 ## Acceptance criteria
 
 - [ ] The diagnostic runs the Rust expense-report feature case in fresh disposable repositories for three samples each of no skills, the declared quality-core skills, and all marketplace skills.
+- [ ] Only sanitized skills-only plugin projections are loaded; live execution fails closed without dedicated API-key authentication, blocked sibling and host reads/writes, blocked command network access, and finite wall, CPU, memory, process, output, and workspace limits.
 
 ## Subtasks
 
