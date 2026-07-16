@@ -12,7 +12,7 @@ claim:
 
 ## Summary
 
-Build a safe, non-promotional writable Rust benchmark that measures whether Codex produces better downstream code with no skills, the declared quality-core skills, and all marketplace skills.
+Build a safe, non-promotional writable Rust benchmark that measures whether Codex produces better downstream code with no marketplace skills (while retaining Codex-bundled system skills), the declared quality-core marketplace skills, and all marketplace skills.
 
 ## Context / Why
 
