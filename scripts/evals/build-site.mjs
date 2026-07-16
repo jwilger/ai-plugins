@@ -82,6 +82,7 @@ function readArtifact(file) {
     cases,
     ...normalizeProviderCompositions(
       raw.config?.metadata?.providerCompositions,
+      raw.config?.providers,
     ),
   };
 }
@@ -112,7 +113,7 @@ function normalizeList(value) {
     .filter(Boolean);
 }
 
-function normalizeProviderCompositions(value) {
+function normalizeProviderCompositions(value, configuredProviders) {
   if (value === undefined) {
     return {
       providerCompositions: [],
@@ -126,7 +127,12 @@ function normalizeProviderCompositions(value) {
 
   let providerCompositions;
   try {
-    ({ providerCompositions } = parseProviderCompositions(value));
+    const expectedProviderLabels = Array.isArray(configuredProviders)
+      ? configuredProviders.map((provider) => provider?.label)
+      : undefined;
+    ({ providerCompositions } = parseProviderCompositions(value, {
+      expectedProviderLabels,
+    }));
   } catch {
     return {
       providerCompositions: [],
