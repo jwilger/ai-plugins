@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "id": "downstream-code-quality",
+  "claim": "Directional evidence about downstream Codex code quality across three synthetic task types; not a broad population-quality claim.",
+  "provider": {
+    "id": "openai:codex-sdk",
+    "model": "gpt-5.6-terra",
+    "reasoningEffort": "medium",
+    "sandboxMode": "workspace-write",
+    "approvalPolicy": "never",
+    "networkAccess": false
+  },
+  "sampleCount": 3,
+  "conditions": [
+    {
+      "id": "no-plugins",
+      "plugins": []
+    },
+    {
+      "id": "targeted-plugins",
+      "plugins": ["advisor", "development-discipline", "engineering-standards"]
+    },
+    {
+      "id": "full-marketplace",
+      "plugins": "codex-marketplace-at-run-start"
+    }
+  ],
+  "cases": [
+    {
+      "id": "rust-cli-feature",
+      "taskType": "feature",
+      "fixture": "expense-report",
+      "deterministicGates": [
+        "black-box-behavior",
+        "regression-tests",
+        "format",
+        "clippy",
+        "mutation",
+        "diff-scope",
+        "safety"
+      ]
+    },
+    {
+      "id": "stock-service-bugfix",
+      "taskType": "bugfix",
+      "fixture": "stock-reservation-service-buggy",
+      "deterministicGates": [
+        "black-box-behavior",
+        "regression-tests",
+        "typecheck",
+        "lint",
+        "format",
+        "known-bad-replay",
+        "diff-scope",
+        "safety"
+      ]
+    },
+    {
+      "id": "stock-service-refactor",
+      "taskType": "refactor",
+      "fixture": "stock-reservation-service-correct",
+      "deterministicGates": [
+        "black-box-behavior",
+        "regression-tests",
+        "typecheck",
+        "lint",
+        "format",
+        "diff-scope",
+        "safety"
+      ],
+      "semanticGate": {
+        "metric": "functional-core-imperative-shell",
+        "minimumScore": 4,
+        "maximumScore": 5,
+        "requiresFrozenCalibration": true
+      }
+    }
+  ],
+  "metrics": {
+    "perRun": ["conjunctive-success", "latency", "tokens", "cost"],
+    "aggregates": ["success-rate", "pass@3-capability", "pass^3-reliability"]
+  },
+  "promotionGates": {
+    "expectedExecutionTurns": 27,
+    "operationalErrors": 0,
+    "provenanceErrors": 0,
+    "safetyFailures": 0,
+    "targeted": {
+      "minimumPassesPerCase": 2,
+      "minimumPassesOverall": 8,
+      "totalRuns": 9
+    },
+    "fullMarketplace": {
+      "minimumPassesPerCase": 2,
+      "minimumPassesOverall": 7,
+      "totalRuns": 9,
+      "maximumPassesBelowTargeted": 1
+    },
+    "targetedLift": {
+      "minimumAdditionalPassesOverNoPlugins": 2,
+      "minimumPerCasePassDeltaOverNoPlugins": 0,
+      "pairedRuns": 9
+    },
+    "inconclusiveOnProviderFailure": true
+  }
+}
