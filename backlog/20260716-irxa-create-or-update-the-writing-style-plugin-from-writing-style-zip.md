@@ -18,6 +18,7 @@ Source material is at ~/Downloads/writing-style.zip. Treat Codex personal use as
 ## Acceptance criteria
 
 - [ ] The archive is inspected safely and its useful writing-style guidance is incorporated into the appropriate new or existing plugin without importing irrelevant or unsafe artifacts.
+- [ ] The resulting skill is concise, executable by Codex, and gives clear guidance for producing and revising prose while preserving user intent.
 
 ## Subtasks
 
