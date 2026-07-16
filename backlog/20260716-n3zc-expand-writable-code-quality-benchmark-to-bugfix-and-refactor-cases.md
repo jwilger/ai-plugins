@@ -17,6 +17,8 @@ Deferred from ticket 20260715-n6bs so the first evidence can focus on a safely c
 
 ## Acceptance criteria
 
+- [ ] Adds realistic bugfix and refactor fixtures in TypeScript or Python with public-surface deterministic verifiers.
+
 ## Subtasks
 
 ## Notes / Log
