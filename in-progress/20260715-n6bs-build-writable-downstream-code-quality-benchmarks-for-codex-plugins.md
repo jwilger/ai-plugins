@@ -20,8 +20,6 @@ Re-scoped after the first Promptfoo wiring security review. The immediate decisi
 
 ## Acceptance criteria
 
-- [ ] Artifacts preserve machine-readable results, reviewer-facing output, latency, token usage, and cost without exposing secrets or private project data.
-
 ## Subtasks
 
 ## Notes / Log
