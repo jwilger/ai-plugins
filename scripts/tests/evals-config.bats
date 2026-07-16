@@ -458,6 +458,32 @@ NODE
   cmp "$auth_home/auth.json" "$eval_home/auth.json"
 }
 
+@test "codex eval home preparation can omit all copied auth material" {
+  FIXTURE_TMP="$(mktemp -d)"
+  auth_home="$FIXTURE_TMP/auth-source"
+  eval_home="$FIXTURE_TMP/eval-home"
+  mkdir -p "$auth_home" "$eval_home"
+  printf '%s\n' '{"token":"oauth-secret"}' >"$auth_home/auth.json"
+  printf '%s\n' '{"token":"credential-secret"}' \
+    >"$auth_home/.credentials.json"
+  printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
+  printf '%s\n' '{"token":"stale-oauth-secret"}' >"$eval_home/auth.json"
+  printf '%s\n' '{"token":"stale-credential-secret"}' \
+    >"$eval_home/.credentials.json"
+
+  run env -u OPENAI_API_KEY -u CODEX_API_KEY \
+    CODEX_EVAL_AUTH_HOME="$auth_home" \
+    node "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+    "$eval_home" \
+    --plugin-mode no-plugins \
+    --no-seed-auth
+
+  [ "$status" -eq 0 ]
+  [ -f "$eval_home/config.toml" ]
+  [ ! -e "$eval_home/auth.json" ]
+  [ ! -e "$eval_home/.credentials.json" ]
+}
+
 @test "codex eval home preparation refuses the real codex home by default" {
   tmp_home="$(mktemp -d)"
 

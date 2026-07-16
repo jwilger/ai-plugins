@@ -44,6 +44,7 @@ mark_benchmark_workspace() {
   [[ "$output" == *"$home_root/no-skills --plugin-mode no-plugins"* ]]
   [[ "$output" == *"$home_root/targeted-quality-skills --plugin-mode skills-only-marketplace --plugins advisor\,development-discipline\,engineering-standards"* ]]
   [[ "$output" == *"$home_root/all-marketplace-skills --plugin-mode skills-only-marketplace"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c -- '--no-seed-auth')" -eq 3 ]
   [[ "$output" == *"openai-codex-sdk-no-skills"* ]]
   [[ "$output" == *"openai-codex-sdk-targeted-quality-skills"* ]]
   [[ "$output" == *"openai-codex-sdk-all-marketplace-skills"* ]]
