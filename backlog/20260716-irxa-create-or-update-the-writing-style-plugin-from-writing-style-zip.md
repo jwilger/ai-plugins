@@ -13,7 +13,7 @@ Use the supplied writing-style.zip archive to create a writing-style plugin, or 
 
 ## Context / Why
 
-Source material is at ~/Downloads/writing-style.zip. Treat Codex personal use as the primary target, Claude Code as the secondary target, and human-facing reuse as tertiary. Inspect the archive before deciding whether to add a new plugin or reconcile it with an existing marketplace plugin.
+Source material is now at the main checkout's repository root as writing-style.zip (moved there by the user from ~/Downloads/writing-style.zip). Treat Codex personal use as the primary target, Claude Code as the secondary target, and human-facing reuse as tertiary. Inspect the archive before deciding whether to add a new plugin or reconcile it with an existing marketplace plugin.
 
 ## Acceptance criteria
 
