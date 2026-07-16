@@ -188,8 +188,9 @@ eval workflow skips provider-backed behavior evals instead of pretending they
 ran.
 
 The dashboard includes latest-run status, provider/case/sample pass rates,
-threshold status, and plugin/skill summaries so regressions can be traced back
-to the marketplace surface they exercise.
+threshold status, exact installed provider compositions, and separate
+case-target plugin/skill summaries so regressions can be traced back to both the
+loaded marketplace surface and the behavior each scenario exercises.
 
 The canonical promptfoo behavior evals run through Promptfoo's native coding
 agent providers: `anthropic:claude-agent-sdk` for Claude Code and
