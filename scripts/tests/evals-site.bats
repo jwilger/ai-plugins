@@ -9,6 +9,20 @@ setup() {
   cat >"$TMPROOT/evals/out/results.json" <<'JSON'
 {
   "config": {
+    "providers": [
+      {
+        "id": "openai:codex-sdk",
+        "label": "codex-gpt-5.6-terra-targeted-plugins"
+      },
+      {
+        "id": "openai:codex-sdk",
+        "label": "codex-gpt-5.6-terra-full-marketplace"
+      },
+      {
+        "id": "openai:codex-sdk",
+        "label": "codex-gpt-5.6-terra-no-plugins"
+      }
+    ],
     "metadata": {
       "providerCompositions": [
         {
@@ -230,7 +244,10 @@ teardown() {
     duplicate_plugin \
     unsorted_plugins \
     invalid_plugin_name \
-    inconsistent_codex_mode_set; do
+    inconsistent_codex_mode_set \
+    missing_composition \
+    extra_composition \
+    missing_configured_providers; do
     node - \
       "$original_results" \
       "$TMPROOT/evals/out/results.json" \
@@ -288,6 +305,21 @@ switch (compositionCase) {
     });
     break;
   }
+  case "missing_composition":
+    artifact.config.metadata.providerCompositions = compositions.slice(0, -1);
+    break;
+  case "extra_composition":
+    compositions.push({
+      label: "claude-extra-full-marketplace",
+      provider: "anthropic:claude-agent-sdk",
+      providerVariant: "claude-extra",
+      pluginMode: "full-marketplace",
+      plugins: ["advisor"],
+    });
+    break;
+  case "missing_configured_providers":
+    delete artifact.config.providers;
+    break;
   default:
     throw new Error(`unknown composition case: ${compositionCase}`);
 }
