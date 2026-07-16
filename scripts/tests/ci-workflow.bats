@@ -29,3 +29,9 @@ setup() {
 
   [ "$status" -eq 0 ]
 }
+
+@test "runs Bubblewrap-backed quality tests on a user-namespace-capable image" {
+  run yq -e '.jobs.quality."runs-on" == "ubuntu-22.04"' "$WORKFLOW"
+
+  [ "$status" -eq 0 ]
+}
