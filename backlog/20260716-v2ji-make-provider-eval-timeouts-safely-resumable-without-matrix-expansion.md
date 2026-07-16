@@ -9,7 +9,11 @@ pr_mr_status:
 
 ## Summary
 
+Preserve completed provider-backed eval work across watchdog timeouts and resume the exact remaining case/provider matrix without duplication.
+
 ## Context / Why
+
+A full 276-case behavior eval hit the runner's 90-minute GNU timeout. The TERM/KILL path did not produce usable incremental outputs. Promptfoo 0.121.18 advertises --resume, but resuming this generated dynamic-provider eval reconstructed 36 prompt entries instead of 6 and announced 1,656 cases instead of 276. The malformed resume was paused with SIGINT, which did save state cleanly. The runner needs a repository-owned, fail-closed resume contract rather than relying on raw Promptfoo replay semantics.
 
 ## Acceptance criteria
 
