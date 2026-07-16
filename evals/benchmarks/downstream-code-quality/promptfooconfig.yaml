@@ -1,0 +1,316 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Writable downstream Codex code-quality benchmark
+
+prompts:
+  - |
+    Complete this coding task in the provided repository. The task is self-contained. Use any installed skill guidance when relevant.
+
+    {{ scenario_prompt }}
+
+providers:
+  - id: openai:codex-sdk
+    label: openai-codex-sdk-no-marketplace-skills
+    config:
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-5.6-terra') }}"
+      model_reasoning_effort: "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}"
+      working_dir: "{{ workspace }}"
+      sandbox_mode: workspace-write
+      approval_policy: never
+      network_access_enabled: false
+      web_search_enabled: false
+      web_search_mode: disabled
+      skip_git_repo_check: false
+      persist_threads: false
+      codex_path_override: "{{ env.CODE_QUALITY_CODEX_LAUNCHER }}"
+      inherit_process_env: false
+      enable_streaming: false
+      deep_tracing: false
+      cli_env:
+        CODEX_HOME: "{{ codex_home }}"
+        HOME: "{{ codex_home }}"
+        TMPDIR: "{{ codex_tmp }}"
+        CODE_QUALITY_BWRAP_BIN: "{{ env.CODE_QUALITY_BWRAP_BIN }}"
+        CODE_QUALITY_BWRAP_EXPECTED_SHA256: "{{ env.CODE_QUALITY_BWRAP_EXPECTED_SHA256 }}"
+        CODE_QUALITY_NIX_STORE_CLOSURE: "{{ env.CODE_QUALITY_NIX_STORE_CLOSURE }}"
+        CODE_QUALITY_NIX_STORE_CLOSURE_EXPECTED_SHA256: "{{ env.CODE_QUALITY_NIX_STORE_CLOSURE_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_EXPECTED_VERSION: "{{ env.CODE_QUALITY_CODEX_EXPECTED_VERSION }}"
+        CODE_QUALITY_CODEX_REAL_BIN: "{{ env.CODE_QUALITY_CODEX_REAL_BIN }}"
+        CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_RG_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RG_EXPECTED_SHA256 }}"
+        CODE_QUALITY_NODE_BIN: "{{ env.CODE_QUALITY_NODE_BIN }}"
+        CODE_QUALITY_OUTPUT_MAX_BYTES: "{{ env.CODE_QUALITY_OUTPUT_MAX_BYTES }}"
+        CODE_QUALITY_PRLIMIT_BIN: "{{ env.CODE_QUALITY_PRLIMIT_BIN }}"
+        CODE_QUALITY_PRLIMIT_EXPECTED_SHA256: "{{ env.CODE_QUALITY_PRLIMIT_EXPECTED_SHA256 }}"
+        CODE_QUALITY_SYSTEMD_RUN_BIN: "{{ env.CODE_QUALITY_SYSTEMD_RUN_BIN }}"
+        CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256: "{{ env.CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256 }}"
+        CODE_QUALITY_TIMEOUT_BIN: "{{ env.CODE_QUALITY_TIMEOUT_BIN }}"
+        CODE_QUALITY_TIMEOUT_EXPECTED_SHA256: "{{ env.CODE_QUALITY_TIMEOUT_EXPECTED_SHA256 }}"
+        CODE_QUALITY_TOOL_PATH: "{{ env.CODE_QUALITY_TOOL_PATH }}"
+        CODE_QUALITY_WALL_TIMEOUT_SECONDS: "{{ env.CODE_QUALITY_WALL_TIMEOUT_SECONDS }}"
+        CODE_QUALITY_WORKSPACE_MAX_BYTES: "{{ env.CODE_QUALITY_WORKSPACE_MAX_BYTES }}"
+        CODE_QUALITY_WORKSPACE_MAX_ENTRIES: "{{ env.CODE_QUALITY_WORKSPACE_MAX_ENTRIES }}"
+      cli_config:
+        web_search: disabled
+        history:
+          persistence: none
+        sandbox_workspace_write:
+          exclude_slash_tmp: true
+          exclude_tmpdir_env_var: true
+          network_access: false
+          writable_roots: []
+        shell_environment_policy:
+          inherit: none
+          experimental_use_profile: false
+          ignore_default_excludes: false
+          set:
+            PATH: "{{ env.CODE_QUALITY_TOOL_PATH }}"
+            HOME: "{{ workspace }}/.home"
+            CARGO_HOME: "{{ workspace }}/.cargo-home"
+            CARGO_TARGET_DIR: "{{ workspace }}/target"
+            TMPDIR: "{{ workspace }}/.tmp"
+            GIT_CONFIG_GLOBAL: /dev/null
+            GIT_CONFIG_NOSYSTEM: "1"
+            LANG: C.UTF-8
+            LC_ALL: C.UTF-8
+        features:
+          apps: false
+          auth_elicitation: false
+          browser_use: false
+          browser_use_external: false
+          browser_use_full_cdp_access: false
+          code_mode_host: false
+          computer_use: false
+          enable_request_compression: true
+          fast_mode: false
+          goals: false
+          guardian_approval: true
+          hooks: false
+          image_generation: false
+          in_app_browser: false
+          mentions_v2: false
+          plugins: false
+          personality: false
+          plugin_sharing: false
+          remote_compaction_v2: false
+          remote_plugin: false
+          secret_auth_storage: false
+          shell_snapshot: false
+          shell_tool: true
+          skill_mcp_dependency_install: false
+          tool_call_mcp_elicitation: false
+          tool_suggest: false
+          unified_exec: true
+          workspace_dependencies: false
+          multi_agent: false
+          enable_fanout: false
+  - id: openai:codex-sdk
+    label: openai-codex-sdk-targeted-quality-skills
+    config:
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-5.6-terra') }}"
+      model_reasoning_effort: "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}"
+      working_dir: "{{ workspace }}"
+      sandbox_mode: workspace-write
+      approval_policy: never
+      network_access_enabled: false
+      web_search_enabled: false
+      web_search_mode: disabled
+      skip_git_repo_check: false
+      persist_threads: false
+      codex_path_override: "{{ env.CODE_QUALITY_CODEX_LAUNCHER }}"
+      inherit_process_env: false
+      enable_streaming: false
+      deep_tracing: false
+      cli_env:
+        CODEX_HOME: "{{ codex_home }}"
+        HOME: "{{ codex_home }}"
+        TMPDIR: "{{ codex_tmp }}"
+        CODE_QUALITY_BWRAP_BIN: "{{ env.CODE_QUALITY_BWRAP_BIN }}"
+        CODE_QUALITY_BWRAP_EXPECTED_SHA256: "{{ env.CODE_QUALITY_BWRAP_EXPECTED_SHA256 }}"
+        CODE_QUALITY_NIX_STORE_CLOSURE: "{{ env.CODE_QUALITY_NIX_STORE_CLOSURE }}"
+        CODE_QUALITY_NIX_STORE_CLOSURE_EXPECTED_SHA256: "{{ env.CODE_QUALITY_NIX_STORE_CLOSURE_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_EXPECTED_VERSION: "{{ env.CODE_QUALITY_CODEX_EXPECTED_VERSION }}"
+        CODE_QUALITY_CODEX_REAL_BIN: "{{ env.CODE_QUALITY_CODEX_REAL_BIN }}"
+        CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_RG_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RG_EXPECTED_SHA256 }}"
+        CODE_QUALITY_NODE_BIN: "{{ env.CODE_QUALITY_NODE_BIN }}"
+        CODE_QUALITY_OUTPUT_MAX_BYTES: "{{ env.CODE_QUALITY_OUTPUT_MAX_BYTES }}"
+        CODE_QUALITY_PRLIMIT_BIN: "{{ env.CODE_QUALITY_PRLIMIT_BIN }}"
+        CODE_QUALITY_PRLIMIT_EXPECTED_SHA256: "{{ env.CODE_QUALITY_PRLIMIT_EXPECTED_SHA256 }}"
+        CODE_QUALITY_SYSTEMD_RUN_BIN: "{{ env.CODE_QUALITY_SYSTEMD_RUN_BIN }}"
+        CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256: "{{ env.CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256 }}"
+        CODE_QUALITY_TIMEOUT_BIN: "{{ env.CODE_QUALITY_TIMEOUT_BIN }}"
+        CODE_QUALITY_TIMEOUT_EXPECTED_SHA256: "{{ env.CODE_QUALITY_TIMEOUT_EXPECTED_SHA256 }}"
+        CODE_QUALITY_TOOL_PATH: "{{ env.CODE_QUALITY_TOOL_PATH }}"
+        CODE_QUALITY_WALL_TIMEOUT_SECONDS: "{{ env.CODE_QUALITY_WALL_TIMEOUT_SECONDS }}"
+        CODE_QUALITY_WORKSPACE_MAX_BYTES: "{{ env.CODE_QUALITY_WORKSPACE_MAX_BYTES }}"
+        CODE_QUALITY_WORKSPACE_MAX_ENTRIES: "{{ env.CODE_QUALITY_WORKSPACE_MAX_ENTRIES }}"
+      cli_config:
+        web_search: disabled
+        history:
+          persistence: none
+        sandbox_workspace_write:
+          exclude_slash_tmp: true
+          exclude_tmpdir_env_var: true
+          network_access: false
+          writable_roots: []
+        shell_environment_policy:
+          inherit: none
+          experimental_use_profile: false
+          ignore_default_excludes: false
+          set:
+            PATH: "{{ env.CODE_QUALITY_TOOL_PATH }}"
+            HOME: "{{ workspace }}/.home"
+            CARGO_HOME: "{{ workspace }}/.cargo-home"
+            CARGO_TARGET_DIR: "{{ workspace }}/target"
+            TMPDIR: "{{ workspace }}/.tmp"
+            GIT_CONFIG_GLOBAL: /dev/null
+            GIT_CONFIG_NOSYSTEM: "1"
+            LANG: C.UTF-8
+            LC_ALL: C.UTF-8
+        features:
+          apps: false
+          auth_elicitation: false
+          browser_use: false
+          browser_use_external: false
+          browser_use_full_cdp_access: false
+          code_mode_host: false
+          computer_use: false
+          enable_request_compression: true
+          fast_mode: false
+          goals: false
+          guardian_approval: true
+          hooks: false
+          image_generation: false
+          in_app_browser: false
+          mentions_v2: false
+          plugins: true
+          personality: false
+          plugin_sharing: false
+          remote_compaction_v2: false
+          remote_plugin: false
+          secret_auth_storage: false
+          shell_snapshot: false
+          shell_tool: true
+          skill_mcp_dependency_install: false
+          tool_call_mcp_elicitation: false
+          tool_suggest: false
+          unified_exec: true
+          workspace_dependencies: false
+          multi_agent: false
+          enable_fanout: false
+  - id: openai:codex-sdk
+    label: openai-codex-sdk-all-marketplace-skills
+    config:
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-5.6-terra') }}"
+      model_reasoning_effort: "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}"
+      working_dir: "{{ workspace }}"
+      sandbox_mode: workspace-write
+      approval_policy: never
+      network_access_enabled: false
+      web_search_enabled: false
+      web_search_mode: disabled
+      skip_git_repo_check: false
+      persist_threads: false
+      codex_path_override: "{{ env.CODE_QUALITY_CODEX_LAUNCHER }}"
+      inherit_process_env: false
+      enable_streaming: false
+      deep_tracing: false
+      cli_env:
+        CODEX_HOME: "{{ codex_home }}"
+        HOME: "{{ codex_home }}"
+        TMPDIR: "{{ codex_tmp }}"
+        CODE_QUALITY_BWRAP_BIN: "{{ env.CODE_QUALITY_BWRAP_BIN }}"
+        CODE_QUALITY_BWRAP_EXPECTED_SHA256: "{{ env.CODE_QUALITY_BWRAP_EXPECTED_SHA256 }}"
+        CODE_QUALITY_NIX_STORE_CLOSURE: "{{ env.CODE_QUALITY_NIX_STORE_CLOSURE }}"
+        CODE_QUALITY_NIX_STORE_CLOSURE_EXPECTED_SHA256: "{{ env.CODE_QUALITY_NIX_STORE_CLOSURE_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_EXPECTED_VERSION: "{{ env.CODE_QUALITY_CODEX_EXPECTED_VERSION }}"
+        CODE_QUALITY_CODEX_REAL_BIN: "{{ env.CODE_QUALITY_CODEX_REAL_BIN }}"
+        CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_RG_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RG_EXPECTED_SHA256 }}"
+        CODE_QUALITY_NODE_BIN: "{{ env.CODE_QUALITY_NODE_BIN }}"
+        CODE_QUALITY_OUTPUT_MAX_BYTES: "{{ env.CODE_QUALITY_OUTPUT_MAX_BYTES }}"
+        CODE_QUALITY_PRLIMIT_BIN: "{{ env.CODE_QUALITY_PRLIMIT_BIN }}"
+        CODE_QUALITY_PRLIMIT_EXPECTED_SHA256: "{{ env.CODE_QUALITY_PRLIMIT_EXPECTED_SHA256 }}"
+        CODE_QUALITY_SYSTEMD_RUN_BIN: "{{ env.CODE_QUALITY_SYSTEMD_RUN_BIN }}"
+        CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256: "{{ env.CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256 }}"
+        CODE_QUALITY_TIMEOUT_BIN: "{{ env.CODE_QUALITY_TIMEOUT_BIN }}"
+        CODE_QUALITY_TIMEOUT_EXPECTED_SHA256: "{{ env.CODE_QUALITY_TIMEOUT_EXPECTED_SHA256 }}"
+        CODE_QUALITY_TOOL_PATH: "{{ env.CODE_QUALITY_TOOL_PATH }}"
+        CODE_QUALITY_WALL_TIMEOUT_SECONDS: "{{ env.CODE_QUALITY_WALL_TIMEOUT_SECONDS }}"
+        CODE_QUALITY_WORKSPACE_MAX_BYTES: "{{ env.CODE_QUALITY_WORKSPACE_MAX_BYTES }}"
+        CODE_QUALITY_WORKSPACE_MAX_ENTRIES: "{{ env.CODE_QUALITY_WORKSPACE_MAX_ENTRIES }}"
+      cli_config:
+        web_search: disabled
+        history:
+          persistence: none
+        sandbox_workspace_write:
+          exclude_slash_tmp: true
+          exclude_tmpdir_env_var: true
+          network_access: false
+          writable_roots: []
+        shell_environment_policy:
+          inherit: none
+          experimental_use_profile: false
+          ignore_default_excludes: false
+          set:
+            PATH: "{{ env.CODE_QUALITY_TOOL_PATH }}"
+            HOME: "{{ workspace }}/.home"
+            CARGO_HOME: "{{ workspace }}/.cargo-home"
+            CARGO_TARGET_DIR: "{{ workspace }}/target"
+            TMPDIR: "{{ workspace }}/.tmp"
+            GIT_CONFIG_GLOBAL: /dev/null
+            GIT_CONFIG_NOSYSTEM: "1"
+            LANG: C.UTF-8
+            LC_ALL: C.UTF-8
+        features:
+          apps: false
+          auth_elicitation: false
+          browser_use: false
+          browser_use_external: false
+          browser_use_full_cdp_access: false
+          code_mode_host: false
+          computer_use: false
+          enable_request_compression: true
+          fast_mode: false
+          goals: false
+          guardian_approval: true
+          hooks: false
+          image_generation: false
+          in_app_browser: false
+          mentions_v2: false
+          plugins: true
+          personality: false
+          plugin_sharing: false
+          remote_compaction_v2: false
+          remote_plugin: false
+          secret_auth_storage: false
+          shell_snapshot: false
+          shell_tool: true
+          skill_mcp_dependency_install: false
+          tool_call_mcp_elicitation: false
+          tool_suggest: false
+          unified_exec: true
+          workspace_dependencies: false
+          multi_agent: false
+          enable_fanout: false
+
+tests: file://cases.cjs
+
+tracing:
+  enabled: false
+
+metadata:
+  benchmark: downstream-code-quality
+  providerLabels:
+    - openai-codex-sdk-no-marketplace-skills
+    - openai-codex-sdk-targeted-quality-skills
+    - openai-codex-sdk-all-marketplace-skills
+
+commandLineOptions:
+  maxConcurrency: 1
+  share: false
+  cache: false
+  write: false

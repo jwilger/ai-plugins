@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use std::io::{self, Read};
 #[cfg(host_escape_probe)]
 use std::net::TcpStream;
+#[cfg(nix_store_source_probe)]
+use std::path::Path;
 use std::process::ExitCode;
 
 const MAXIMUM: u128 = u64::MAX as u128;
@@ -153,6 +155,11 @@ fn host_escape_violations() -> Vec<String> {
     violations
 }
 
+#[cfg(nix_store_source_probe)]
+fn unlisted_nix_source_is_visible() -> bool {
+    Path::new(env!("EXPENSE_REPORT_TEST_NIX_SOURCE_PATH")).exists()
+}
+
 #[cfg(sandbox_root_probe)]
 fn sandbox_root_exceeds_scratch_limit() -> bool {
     let payload = vec![b'x'; 1024 * 1024];
@@ -183,6 +190,12 @@ fn main() -> ExitCode {
             eprintln!("{}", violations.join("|"));
             return ExitCode::FAILURE;
         }
+    }
+
+    #[cfg(nix_store_source_probe)]
+    if unlisted_nix_source_is_visible() {
+        eprintln!("unlisted-nix-source-visible");
+        return ExitCode::FAILURE;
     }
 
     #[cfg(sandbox_root_probe)]

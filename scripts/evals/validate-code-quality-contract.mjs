@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 const identifierPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const expectedConditions = [
-  "no-skills",
+  "no-marketplace-skills",
   "targeted-quality-skills",
   "all-marketplace-skills",
 ];
@@ -121,12 +121,14 @@ export function validateBenchmarkContract(contract) {
       throw new Error(`${label} must be ${String(expected)}`);
     }
   }
-  assertCanonicalPluginList(contract.conditions[0].plugins, "no-skills");
+  assertCanonicalPluginList(contract.conditions[0].plugins, "no-marketplace-skills");
   if (contract.conditions[0].plugins.length !== 0) {
-    throw new Error("no-skills composition must be empty");
+    throw new Error("no-marketplace-skills composition must be empty");
   }
-  if (contract.conditions[0].surface !== "none") {
-    throw new Error("no-skills surface must be none");
+  if (contract.conditions[0].surface !== "codex-bundled-skills-only") {
+    throw new Error(
+      "no-marketplace-skills surface must be codex-bundled-skills-only",
+    );
   }
   assertCanonicalPluginList(
     contract.conditions[1].plugins,
@@ -222,6 +224,7 @@ export function validateBenchmarkContract(contract) {
     throw new Error("completeRuns must equal expectedExecutionTurns");
   }
   for (const key of [
+    "providerErrors",
     "operationalErrors",
     "provenanceErrors",
     "safetyFailures",

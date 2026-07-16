@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+node_bin=${CODE_QUALITY_NODE_BIN:-}
+case "$node_bin" in
+  /*) ;;
+  *)
+    echo 'CODE_QUALITY_BOUNDARY_ERROR:configuration:node-runtime-unavailable' >&2
+    exit 64
+    ;;
+esac
+if [ ! -f "$node_bin" ] || [ ! -x "$node_bin" ]; then
+  echo 'CODE_QUALITY_BOUNDARY_ERROR:configuration:node-runtime-unavailable' >&2
+  exit 64
+fi
+
+case "$0" in
+  */*) script_dir=${0%/*} ;;
+  *)
+    echo 'CODE_QUALITY_BOUNDARY_ERROR:configuration:entrypoint-not-absolute' >&2
+    exit 64
+    ;;
+esac
+
+exec "$node_bin" "$script_dir/code-quality-codex-boundary.mjs" "$@"

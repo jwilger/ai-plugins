@@ -576,7 +576,7 @@ NODE
   rm -rf "$temp_root"
 }
 
-@test "trace-enforced provider pins app-server to the repo-local Codex 0.144.3 CLI" {
+@test "trace-enforced provider pins app-server to the repo-local Codex 0.144.5 CLI" {
   run node --input-type=module - "$ROOT" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
@@ -588,11 +588,11 @@ const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json')));
 const lockedCli = lock.packages?.['node_modules/@openai/codex'];
 const lockedSdk = lock.packages?.['node_modules/@openai/codex-sdk'];
 if (
-  lockedCli?.version !== '0.144.3' ||
+  lockedCli?.version !== '0.144.5' ||
   lockedCli?.bin?.codex !== 'bin/codex.js' ||
-  lockedSdk?.dependencies?.['@openai/codex'] !== '0.144.3'
+  lockedSdk?.dependencies?.['@openai/codex'] !== '0.144.5'
 ) {
-  throw new Error('package-lock.json does not pin the Codex 0.144.3 CLI');
+  throw new Error('package-lock.json does not pin the Codex 0.144.5 CLI');
 }
 
 const { default: TraceEnforcedCodexProvider } = await import(

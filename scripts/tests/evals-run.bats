@@ -1419,7 +1419,7 @@ const lock = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const deps = pkg.devDependencies || {};
 const expected = {
   promptfoo: '0.121.18',
-  '@openai/codex-sdk': '0.144.3',
+  '@openai/codex-sdk': '0.144.5',
   '@anthropic-ai/claude-agent-sdk': '0.3.201',
 };
 
@@ -1438,7 +1438,7 @@ const resolvedSdkVersions = [...new Set(
     .filter(([entry]) => entry.endsWith('node_modules/@openai/codex-sdk'))
     .map(([, metadata]) => metadata.version),
 )];
-if (JSON.stringify(resolvedSdkVersions) !== JSON.stringify(['0.144.3'])) {
+if (JSON.stringify(resolvedSdkVersions) !== JSON.stringify(['0.144.5'])) {
   throw new Error(`stale Codex SDK copies remain in package-lock: ${resolvedSdkVersions.join(', ')}`);
 }
 NODE
