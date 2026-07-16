@@ -18,6 +18,7 @@ Deferred from ticket 20260715-n6bs so the first evidence can focus on a safely c
 ## Acceptance criteria
 
 - [ ] Adds realistic bugfix and refactor fixtures in TypeScript or Python with public-surface deterministic verifiers.
+- [ ] Each case declares the case-relevant targeted skills and compares no skills, targeted skills, and all marketplace skills under the pilot containment boundary.
 
 ## Subtasks
 
