@@ -9,7 +9,7 @@ import {
 } from "./trace-policy.mjs";
 import { assertPreparedGpt56Workspace } from "../../../scripts/evals/gpt56-workspace-policy.mjs";
 
-// package-lock pins @openai/codex-sdk -> @openai/codex 0.144.3, whose npm
+// package-lock pins @openai/codex-sdk -> @openai/codex 0.144.5, whose npm
 // binary is linked here. Promptfoo otherwise resolves a bare `codex` on PATH.
 const pinnedCodexPath = fileURLToPath(
   new URL("../../../node_modules/.bin/codex", import.meta.url),
@@ -108,7 +108,7 @@ function withoutPromptConfig(context) {
 /**
  * Promptfoo provider wrapper that starts every Codex app-server thread and turn
  * without an execution environment and rejects any tool use observed in the
- * app-server trace. Codex 0.144.3 still exposes code-mode tools for GPT-5.6;
+ * app-server trace. Codex 0.144.5 still exposes code-mode tools for GPT-5.6;
  * this wrapper makes their use a provider error rather than claiming the model
  * has no tools.
  */

@@ -4,6 +4,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  NixStoreClosureError,
+  nixStoreMountArgs,
+  validatedNixStoreClosure,
+} from "./nix-store-closure.mjs";
+
 const sandboxLimits = Object.freeze({
   addressSpaceBytes: 128 * 1024 * 1024,
   coreBytes: 0,
@@ -16,6 +22,26 @@ const sandboxLimits = Object.freeze({
 const workspaceMarker = ".git/.ai-plugins-code-quality-workspace";
 const workspaceMarkerContents =
   "ai-plugins downstream code-quality workspace\n";
+const aggregateScopeChildArgument = "--ai-plugins-aggregate-scope-child";
+const aggregateScopeLimits = Object.freeze({
+  outputBytes: 256 * 1024,
+  timeoutMilliseconds: 150_000,
+});
+const cleanupObservationLimits = Object.freeze({
+  pollMilliseconds: 10,
+  timeoutMilliseconds: 1_000,
+});
+
+class PublicVerifierOperationalError extends Error {
+  constructor(code) {
+    super(code);
+    this.code = code;
+  }
+}
+
+function operational(code) {
+  throw new PublicVerifierOperationalError(code);
+}
 
 function requireDirectory(candidate, description) {
   if (!fs.existsSync(candidate) || !fs.statSync(candidate).isDirectory()) {
@@ -65,6 +91,192 @@ function requireNixTool(name, environmentVariable, expectedPath) {
   return executable;
 }
 
+function requirePinnedSystemdRun() {
+  if (process.platform !== "linux") {
+    operational("linux-sandbox-required");
+  }
+  const configured = process.env.CODE_QUALITY_SYSTEMD_RUN_BIN;
+  if (!configured || !path.isAbsolute(configured)) {
+    operational("systemd-run-path-missing");
+  }
+  let executable;
+  let metadata;
+  let contents;
+  try {
+    fs.accessSync(configured, fs.constants.X_OK);
+    executable = fs.realpathSync(configured);
+    metadata = fs.lstatSync(executable);
+    contents = fs.readFileSync(executable);
+  } catch {
+    operational("systemd-run-unavailable");
+  }
+  if (
+    !/^\/nix\/store\/[0-9a-z]{32}-systemd-[^/]+\/bin\/systemd-run$/u.test(
+      executable,
+    ) ||
+    !metadata.isFile() ||
+    metadata.isSymbolicLink() ||
+    metadata.uid !== 0 ||
+    (metadata.mode & 0o022) !== 0
+  ) {
+    operational("systemd-run-not-flake-selected");
+  }
+  const expectedSha256 = process.env.CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256;
+  if (!/^[0-9a-f]{64}$/u.test(expectedSha256 ?? "")) {
+    operational("systemd-run-sha256-missing");
+  }
+  if (
+    crypto.createHash("sha256").update(contents).digest("hex") !==
+    expectedSha256
+  ) {
+    operational("systemd-run-integrity-mismatch");
+  }
+  return executable;
+}
+
+function requireNixEnvTool() {
+  for (const directory of (process.env.PATH || "").split(path.delimiter)) {
+    if (!path.isAbsolute(directory)) continue;
+    const candidate = path.join(directory, "env");
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      const canonicalDirectory = fs.realpathSync(directory);
+      const canonical = fs.realpathSync(candidate);
+      if (
+        /^\/nix\/store\/[0-9a-z]{32}-[^/]+\/bin$/u.test(canonicalDirectory) &&
+        /^\/nix\/store\/[0-9a-z]{32}-[^/]+\/bin\/[^/]+$/u.test(canonical)
+      ) {
+        return path.join(canonicalDirectory, "env");
+      }
+    } catch {
+      // Continue until the flake-selected immutable env executable is found.
+    }
+  }
+  operational("nix-tool-env-missing");
+}
+
+function requireSystemdRuntimeDirectory() {
+  const runtimeDirectory = `/run/user/${process.getuid()}`;
+  try {
+    const metadata = fs.lstatSync(runtimeDirectory);
+    if (
+      fs.realpathSync(runtimeDirectory) !== runtimeDirectory ||
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink() ||
+      metadata.uid !== process.getuid() ||
+      (metadata.mode & 0o077) !== 0
+    ) {
+      operational("systemd-runtime-directory-unsafe");
+    }
+  } catch (error) {
+    if (error instanceof PublicVerifierOperationalError) throw error;
+    operational("systemd-runtime-directory-unavailable");
+  }
+  return runtimeDirectory;
+}
+
+function readCgroupValue(cgroupRoot, name) {
+  try {
+    const value = fs.readFileSync(path.join(cgroupRoot, name), "utf8").trim();
+    if (!value || value.length > 128) operational("resource-scope-invalid");
+    return value;
+  } catch (error) {
+    if (error instanceof PublicVerifierOperationalError) throw error;
+    operational("resource-scope-invalid");
+  }
+}
+
+function requireAggregateScope(unit) {
+  if (
+    !/^ai-plugins-code-quality-public-verifier-[1-9][0-9]*-[0-9a-f]{16}$/u.test(
+      unit,
+    )
+  ) {
+    operational("resource-scope-invalid");
+  }
+  let cgroupPath;
+  try {
+    const unified = fs
+      .readFileSync("/proc/self/cgroup", "utf8")
+      .trim()
+      .split("\n")
+      .find((line) => line.startsWith("0::"));
+    cgroupPath = unified?.slice(3);
+  } catch {
+    operational("resource-scope-invalid");
+  }
+  if (
+    !cgroupPath ||
+    !cgroupPath.split("/").includes(`${unit}.scope`) ||
+    cgroupPath.includes("\0")
+  ) {
+    operational("resource-scope-invalid");
+  }
+  const cgroupRoot = path.join("/sys/fs/cgroup", cgroupPath);
+  try {
+    const canonical = fs.realpathSync(cgroupRoot);
+    if (
+      canonical !== path.resolve(cgroupRoot) ||
+      !canonical.startsWith("/sys/fs/cgroup/") ||
+      !fs.lstatSync(canonical).isDirectory()
+    ) {
+      operational("resource-scope-invalid");
+    }
+  } catch (error) {
+    if (error instanceof PublicVerifierOperationalError) throw error;
+    operational("resource-scope-invalid");
+  }
+  if (
+    readCgroupValue(cgroupRoot, "memory.max") !== "8589934592" ||
+    readCgroupValue(cgroupRoot, "memory.swap.max") !== "0" ||
+    readCgroupValue(cgroupRoot, "pids.max") !== "512"
+  ) {
+    operational("resource-scope-invalid");
+  }
+  const [quota, period, ...extra] = readCgroupValue(
+    cgroupRoot,
+    "cpu.max",
+  ).split(" ");
+  if (
+    extra.length !== 0 ||
+    !/^[1-9][0-9]*$/u.test(quota) ||
+    !/^[1-9][0-9]*$/u.test(period) ||
+    Number(quota) !== 4 * Number(period)
+  ) {
+    operational("resource-scope-invalid");
+  }
+}
+
+function publicVerifierEnvironment() {
+  const environment = {
+    AI_PLUGINS_BWRAP_BIN: process.env.AI_PLUGINS_BWRAP_BIN ?? "",
+    AI_PLUGINS_PRLIMIT_BIN: process.env.AI_PLUGINS_PRLIMIT_BIN ?? "",
+    CODE_QUALITY_NIX_STORE_CLOSURE:
+      process.env.CODE_QUALITY_NIX_STORE_CLOSURE ?? "",
+    CODE_QUALITY_NIX_STORE_CLOSURE_EXPECTED_SHA256:
+      process.env.CODE_QUALITY_NIX_STORE_CLOSURE_EXPECTED_SHA256 ?? "",
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+  };
+  return environment;
+}
+
+function requireExactPublicVerifierEnvironment() {
+  const expected = publicVerifierEnvironment();
+  if (
+    JSON.stringify(Object.keys(process.env).sort()) !==
+      JSON.stringify(Object.keys(expected).sort()) ||
+    Object.keys(expected).some((name) => process.env[name] !== expected[name])
+  ) {
+    operational("resource-scope-environment-invalid");
+  }
+}
+
+function writeOperationalError(code) {
+  process.stderr.write(`expense-report:operational-failure:${code}\n`);
+  process.exitCode = 2;
+}
+
 function parseArgs(argv) {
   if (argv.length !== 4 || argv[0] !== "--workspace" || argv[2] !== "--bin") {
     throw new Error(
@@ -94,18 +306,26 @@ function parseArgs(argv) {
   ) {
     throw new Error("expense-report executable must be inside its workspace");
   }
+  const bwrap = requireNixTool(
+    "bwrap",
+    "AI_PLUGINS_BWRAP_BIN",
+    /^\/nix\/store\/[0-9a-z]{32}-bubblewrap-[^/]+\/bin\/bwrap$/,
+  );
+  const prlimit = requireNixTool(
+    "prlimit",
+    "AI_PLUGINS_PRLIMIT_BIN",
+    /^\/nix\/store\/[0-9a-z]{32}-util-linux-[^/]+\/bin\/prlimit$/,
+  );
+  const nixStoreClosure = validatedNixStoreClosure({
+    expectedSha256: process.env.CODE_QUALITY_NIX_STORE_CLOSURE_EXPECTED_SHA256,
+    manifest: process.env.CODE_QUALITY_NIX_STORE_CLOSURE,
+    requiredPaths: [prlimit],
+  });
   return {
-    bwrap: requireNixTool(
-      "bwrap",
-      "AI_PLUGINS_BWRAP_BIN",
-      /^\/nix\/store\/[0-9a-z]{32}-bubblewrap-[^/]+\/bin\/bwrap$/,
-    ),
+    bwrap,
     executable: canonicalExecutable,
-    prlimit: requireNixTool(
-      "prlimit",
-      "AI_PLUGINS_PRLIMIT_BIN",
-      /^\/nix\/store\/[0-9a-z]{32}-util-linux-[^/]+\/bin\/prlimit$/,
-    ),
+    nixStoreClosure,
+    prlimit,
     relativeExecutable,
     workspace,
   };
@@ -281,11 +501,7 @@ function sandboxArgs(target, args) {
     String(sandboxLimits.scratchBytes),
     "--tmpfs",
     "/",
-    "--dir",
-    "/nix",
-    "--ro-bind",
-    "/nix/store",
-    "/nix/store",
+    ...nixStoreMountArgs(target.nixStoreClosure),
     "--dir",
     "/workspace",
     "--ro-bind",
@@ -416,6 +632,18 @@ function survivingProcessCount(identities) {
   }).length;
 }
 
+async function observeSurvivingProcesses(identities) {
+  const deadline = Date.now() + cleanupObservationLimits.timeoutMilliseconds;
+  let survivingProcesses = survivingProcessCount(identities);
+  while (survivingProcesses > 0 && Date.now() < deadline) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, cleanupObservationLimits.pollMilliseconds),
+    );
+    survivingProcesses = survivingProcessCount(identities);
+  }
+  return survivingProcesses;
+}
+
 function runProcess(target, args, input) {
   return new Promise((resolve) => {
     const outputLimit = 64 * 1024;
@@ -442,7 +670,7 @@ function runProcess(target, args, input) {
       terminate("TIMEOUT");
     }, 5_000);
 
-    function finish(status, signal) {
+    async function finish(status, signal) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -464,14 +692,16 @@ function runProcess(target, args, input) {
           processError = "SANDBOX_STATUS";
         }
       }
+      const cleanup =
+        trackedProcesses.length > 0
+          ? {
+              trackedProcesses: trackedProcesses.length,
+              survivingProcesses:
+                await observeSurvivingProcesses(trackedProcesses),
+            }
+          : undefined;
       resolve({
-        cleanup:
-          trackedProcesses.length > 0
-            ? {
-                trackedProcesses: trackedProcesses.length,
-                survivingProcesses: survivingProcessCount(trackedProcesses),
-              }
-            : undefined,
+        cleanup,
         status: candidateStatus,
         signal,
         error: processError,
@@ -501,7 +731,7 @@ function runProcess(target, args, input) {
           child.stderr.destroy();
           child.stdio[3].destroy();
           child.unref();
-          finish(null, "SIGKILL");
+          void finish(null, "SIGKILL");
         }, 250);
       }
     }
@@ -548,10 +778,10 @@ function runProcess(target, args, input) {
     });
     child.on("error", (error) => {
       processError = error.code || error.message;
-      if (!child.pid) finish(null, null);
+      if (!child.pid) void finish(null, null);
     });
     child.on("close", (status, signal) => {
-      finish(status, signal);
+      void finish(status, signal);
     });
     child.stdin.on("error", () => {});
     child.stdin.end(input);
@@ -587,8 +817,8 @@ async function runScenario(target, scenario) {
   };
 }
 
-try {
-  const target = parseArgs(process.argv.slice(2));
+async function executeVerifier(argv) {
+  const target = parseArgs(argv);
   const checks = [];
   for (const scenario of scenarios) {
     const check = await runScenario(target, scenario);
@@ -608,7 +838,163 @@ try {
   };
   process.stdout.write(`${JSON.stringify(report)}\n`);
   process.exitCode = report.pass ? 0 : 1;
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 2;
+}
+
+async function executeInAggregateScope(argv) {
+  const systemdRun = requirePinnedSystemdRun();
+  const systemdRuntimeDirectory = requireSystemdRuntimeDirectory();
+  const envTool = requireNixEnvTool();
+  const childEnvironment = publicVerifierEnvironment();
+  const unit = `ai-plugins-code-quality-public-verifier-${process.pid}-${crypto
+    .randomBytes(8)
+    .toString("hex")}`;
+  const child = spawn(
+    systemdRun,
+    [
+      "--user",
+      "--scope",
+      "--quiet",
+      "--collect",
+      "--expand-environment=false",
+      `--unit=${unit}`,
+      "--property=MemoryMax=8589934592",
+      "--property=MemorySwapMax=0",
+      "--property=TasksMax=512",
+      "--property=CPUQuota=400%",
+      "--property=OOMPolicy=kill",
+      "--property=KillMode=control-group",
+      "--",
+      envTool,
+      "-i",
+      ...Object.entries(childEnvironment).map(
+        ([name, value]) => `${name}=${value}`,
+      ),
+      process.execPath,
+      import.meta.filename,
+      aggregateScopeChildArgument,
+      unit,
+      ...argv,
+    ],
+    {
+      detached: true,
+      env: {
+        LANG: "C.UTF-8",
+        LC_ALL: "C.UTF-8",
+        PATH: path.dirname(systemdRun),
+        XDG_RUNTIME_DIR: systemdRuntimeDirectory,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  await new Promise((resolve) => {
+    const stdout = [];
+    const stderr = [];
+    let outputBytes = 0;
+    let terminationReason;
+    let forceKillTimer;
+
+    function signalChild(signal) {
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
+        try {
+          child.kill(signal);
+        } catch {
+          // The aggregate scope has already exited.
+        }
+      }
+    }
+
+    function terminate(reason) {
+      if (terminationReason) return;
+      terminationReason = reason;
+      signalChild("SIGTERM");
+      forceKillTimer = setTimeout(() => signalChild("SIGKILL"), 5_000);
+      forceKillTimer.unref();
+    }
+
+    const signalHandlers = new Map();
+    for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+      const handler = () => terminate("cancelled");
+      signalHandlers.set(signal, handler);
+      process.once(signal, handler);
+    }
+    const timeout = setTimeout(
+      () => terminate("timeout"),
+      aggregateScopeLimits.timeoutMilliseconds,
+    );
+    timeout.unref();
+
+    function collect(chunks, chunk) {
+      outputBytes += Buffer.byteLength(chunk);
+      if (outputBytes > aggregateScopeLimits.outputBytes) {
+        terminate("output-limit");
+        return;
+      }
+      chunks.push(chunk);
+    }
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => collect(stdout, chunk));
+    child.stderr.on("data", (chunk) => collect(stderr, chunk));
+    child.on("error", () => terminate("spawn-failed"));
+    child.on("close", (status, signal) => {
+      clearTimeout(timeout);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      for (const [name, handler] of signalHandlers) {
+        process.removeListener(name, handler);
+      }
+      if (terminationReason) {
+        writeOperationalError(`resource-scope-${terminationReason}`);
+      } else if (
+        [0, 1].includes(status) &&
+        signal === null &&
+        stderr.join("") === ""
+      ) {
+        process.stdout.write(stdout.join(""));
+        process.exitCode = status;
+      } else if (
+        status === 2 &&
+        signal === null &&
+        stdout.join("") === "" &&
+        Buffer.byteLength(stderr.join("")) <= aggregateScopeLimits.outputBytes
+      ) {
+        process.stderr.write(stderr.join(""));
+        process.exitCode = 2;
+      } else {
+        writeOperationalError("resource-scope-failed");
+      }
+      resolve();
+    });
+  });
+}
+
+const mainArguments = process.argv.slice(2);
+if (mainArguments[0] === aggregateScopeChildArgument) {
+  try {
+    if (mainArguments.length < 3) operational("resource-scope-invalid");
+    requireExactPublicVerifierEnvironment();
+    requireAggregateScope(mainArguments[1]);
+    await executeVerifier(mainArguments.slice(2));
+  } catch (error) {
+    if (error instanceof NixStoreClosureError) {
+      writeOperationalError(error.code);
+    } else if (error instanceof PublicVerifierOperationalError) {
+      writeOperationalError(error.code);
+    } else {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 2;
+    }
+  }
+} else {
+  try {
+    await executeInAggregateScope(mainArguments);
+  } catch (error) {
+    if (error instanceof PublicVerifierOperationalError) {
+      writeOperationalError(error.code);
+    } else {
+      writeOperationalError("unexpected");
+    }
+  }
 }

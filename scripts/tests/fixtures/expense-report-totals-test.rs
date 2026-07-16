@@ -2,9 +2,9 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 #[test]
-fn validate_reports_the_number_of_records() {
+fn totals_aggregates_sorts_and_filters_inclusively() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_expense-report"))
-        .arg("validate")
+        .args(["totals", "--minimum-cents", "150"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -13,11 +13,14 @@ fn validate_reports_the_number_of_records() {
         .stdin
         .as_mut()
         .expect("stdin should be piped")
-        .write_all(b"food,125\ntravel,400\n")
-        .expect("input should be written");
+        .write_all(b"travel,200\nfood,100\nfood,50\n")
+        .expect("fixture input should be written");
 
     let output = child.wait_with_output().expect("process should finish");
 
     assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "valid,2\n");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "food,150\ntravel,200\n"
+    );
 }

@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { snapshotRegularTree } from "./code-quality-tree-hash.mjs";
 import { loadBenchmarkContract } from "./validate-code-quality-contract.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
@@ -11,9 +12,13 @@ const benchmarkDir = path.join(
   root,
   "evals/benchmarks/downstream-code-quality",
 );
-const contract = loadBenchmarkContract(
-  path.join(benchmarkDir, "benchmark.json"),
-);
+const contractPath = path.join(benchmarkDir, "benchmark.json");
+const contractBytes = fs.readFileSync(contractPath);
+const contract = loadBenchmarkContract(contractPath);
+const contractSha256 = crypto
+  .createHash("sha256")
+  .update(contractBytes)
+  .digest("hex");
 const rootMarker = ".ai-plugins-code-quality-work-root";
 const rootMarkerContents = "ai-plugins downstream code-quality work root\n";
 const workspaceMarker = "ai-plugins downstream code-quality workspace\n";
@@ -165,10 +170,10 @@ function git(workspace, args, options = {}) {
     LC_ALL: "C.UTF-8",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
-    GIT_AUTHOR_NAME: "ai-plugins benchmark",
-    GIT_AUTHOR_EMAIL: "benchmark@example.invalid",
-    GIT_COMMITTER_NAME: "ai-plugins benchmark",
-    GIT_COMMITTER_EMAIL: "benchmark@example.invalid",
+    GIT_AUTHOR_NAME: "Developer",
+    GIT_AUTHOR_EMAIL: "developer@example.invalid",
+    GIT_COMMITTER_NAME: "Developer",
+    GIT_COMMITTER_EMAIL: "developer@example.invalid",
     GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
     GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
   };
@@ -218,7 +223,14 @@ function resolveFixture(caseConfig) {
   return fixture;
 }
 
-function prepareWorkspace({ caseConfig, fixture, mode, sample, workRoot }) {
+function prepareWorkspace({
+  caseConfig,
+  fixture,
+  fixtureDigest,
+  mode,
+  sample,
+  workRoot,
+}) {
   const workspace = path.join(
     workRoot,
     caseConfig.id,
@@ -236,14 +248,7 @@ function prepareWorkspace({ caseConfig, fixture, mode, sample, workRoot }) {
   });
   git(workspace, ["init", "--quiet", "--initial-branch=main"]);
   git(workspace, ["add", "--all"]);
-  git(workspace, ["commit", "--quiet", "-m", "fixture baseline"]);
-
-  const hook = path.join(workspace, ".git/hooks/pre-push");
-  fs.writeFileSync(
-    hook,
-    "#!/usr/bin/env sh\necho 'benchmark workspaces may not push' >&2\nexit 1\n",
-    { mode: 0o755 },
-  );
+  git(workspace, ["commit", "--quiet", "-m", "Initial project state"]);
   fs.writeFileSync(
     path.join(workspace, ".git/.ai-plugins-code-quality-workspace"),
     workspaceMarker,
@@ -266,6 +271,7 @@ function prepareWorkspace({ caseConfig, fixture, mode, sample, workRoot }) {
     sample,
     workspace,
     baselineOid,
+    fixtureDigest,
   };
 }
 
@@ -288,10 +294,13 @@ try {
     throw new Error(`unknown benchmark case: ${args.caseId}`);
   }
   const fixturesByCase = new Map(
-    selectedCases.map((caseConfig) => [
-      caseConfig.id,
-      resolveFixture(caseConfig),
-    ]),
+    selectedCases.map((caseConfig) => {
+      const fixture = resolveFixture(caseConfig);
+      return [
+        caseConfig.id,
+        { fixture, fixtureDigest: snapshotRegularTree(fixture).digest },
+      ];
+    }),
   );
 
   fs.rmSync(workRoot, { recursive: true, force: true });
@@ -302,10 +311,12 @@ try {
   for (const caseConfig of selectedCases) {
     for (let sample = 1; sample <= args.samples; sample += 1) {
       for (const condition of contract.conditions) {
+        const fixtureState = fixturesByCase.get(caseConfig.id);
         workspaces.push(
           prepareWorkspace({
             caseConfig,
-            fixture: fixturesByCase.get(caseConfig.id),
+            fixture: fixtureState.fixture,
+            fixtureDigest: fixtureState.fixtureDigest,
             mode: condition.id,
             sample,
             workRoot,
@@ -318,6 +329,8 @@ try {
   const manifest = {
     schemaVersion: 1,
     benchmarkId: contract.id,
+    runId: crypto.randomBytes(32).toString("hex"),
+    contractSha256,
     sampleCount: args.samples,
     workspaces,
   };

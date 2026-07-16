@@ -47,7 +47,7 @@ explicit plugin-mode setting; records raw app-server events; and rejects tool
 use, server requests, incomplete traces, and unknown notifications. A separate
 artifact checker applies the same fail-closed trace policy after execution. The
 wrapper also forces the repository-local `node_modules/.bin/codex` executable;
-the lockfile pins Promptfoo 0.121.18 and the Codex CLI and SDK at 0.144.3 so a
+the lockfile pins Promptfoo 0.121.18 and the Codex CLI and SDK at 0.144.5 so a
 different globally installed Codex version cannot change run provenance.
 
 Both phases run with a maximum concurrency of two and use isolated, freshly
