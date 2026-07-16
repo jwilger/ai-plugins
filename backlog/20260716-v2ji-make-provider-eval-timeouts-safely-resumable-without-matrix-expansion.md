@@ -21,6 +21,7 @@ A full 276-case behavior eval hit the runner's 90-minute GNU timeout. The TERM/K
 - [ ] The runner exposes a documented resume workflow that retains the cross-worktree provider lock, isolated Codex homes, output ownership checks, and provider-composition validation.
 - [ ] Resume validates the expected case/provider/sample identity and refuses to run if reconstruction changes the matrix cardinality or duplicates prompt/provider combinations.
 - [ ] Regression tests reproduce the dynamic-matrix expansion risk and prove a 276-row run cannot silently become 1,656 rows on resume.
+- [ ] Timeout shutdown prefers Promptfoo's graceful pause signal before bounded TERM/KILL escalation, with clear status and recovery diagnostics.
 
 ## Subtasks
 
