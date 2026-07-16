@@ -20,7 +20,6 @@ Re-scoped after the first Promptfoo wiring security review. The immediate decisi
 
 ## Acceptance criteria
 
-- [ ] Sample counts, aggregation rules, pass thresholds, and release gates are declared before execution and report both success rate and relevant reliability metrics.
 - [ ] Artifacts preserve machine-readable results, reviewer-facing output, latency, token usage, and cost without exposing secrets or private project data.
 
 ## Subtasks
