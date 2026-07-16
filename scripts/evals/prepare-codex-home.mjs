@@ -18,6 +18,7 @@ function parseArgs(argv) {
     pluginMode: "full-marketplace",
     plugins: null,
     pluginsProvided: false,
+    seedAuth: true,
   };
 
   for (let index = 1; index < argv.length; index += 1) {
@@ -34,6 +35,8 @@ function parseArgs(argv) {
         .split(",")
         .map((plugin) => plugin.trim())
         .filter(Boolean);
+    } else if (arg === "--no-seed-auth") {
+      args.seedAuth = false;
     } else {
       throw new Error(`unknown argument: ${arg}`);
     }
@@ -41,7 +44,7 @@ function parseArgs(argv) {
 
   if (!args.codexHome) {
     throw new Error(
-      "Usage: node scripts/evals/prepare-codex-home.mjs <codex-home> [--plugin-mode no-plugins|targeted-plugins|full-marketplace|skills-only-marketplace] [--plugins comma,list]",
+      "Usage: node scripts/evals/prepare-codex-home.mjs <codex-home> [--plugin-mode no-plugins|targeted-plugins|full-marketplace|skills-only-marketplace] [--plugins comma,list] [--no-seed-auth]",
     );
   }
   if (
@@ -307,7 +310,7 @@ function main() {
     evalHomeMarkerContents,
     { mode: 0o600 },
   );
-  seedAuth(resolvedHome);
+  if (args.seedAuth) seedAuth(resolvedHome);
   writeConfig(resolvedHome, plugins);
 
   for (const plugin of plugins) {

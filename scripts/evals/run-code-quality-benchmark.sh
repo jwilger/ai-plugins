@@ -131,12 +131,13 @@ else
 fi
 
 print_command node "$root/scripts/evals/prepare-codex-home.mjs" \
-  "$home_root/no-skills" --plugin-mode no-plugins
+  "$home_root/no-skills" --plugin-mode no-plugins --no-seed-auth
 print_command node "$root/scripts/evals/prepare-codex-home.mjs" \
   "$home_root/targeted-quality-skills" --plugin-mode skills-only-marketplace \
-  --plugins "$targeted_plugins"
+  --plugins "$targeted_plugins" --no-seed-auth
 print_command node "$root/scripts/evals/prepare-codex-home.mjs" \
-  "$home_root/all-marketplace-skills" --plugin-mode skills-only-marketplace
+  "$home_root/all-marketplace-skills" --plugin-mode skills-only-marketplace \
+  --no-seed-auth
 
 printf 'execution EVAL_CASE_FILTER=%s EVAL_SAMPLES=%s\n' "$case_id" "$samples"
 EVAL_OUT_DIR="$out_root" \
