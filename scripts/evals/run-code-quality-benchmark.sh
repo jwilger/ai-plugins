@@ -3,12 +3,13 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 benchmark_dir="$root/evals/benchmarks/downstream-code-quality"
+contract="$benchmark_dir/benchmark.json"
 dry_run=0
 case_id=""
 
 usage() {
   printf '%s\n' \
-    'Usage: scripts/evals/run-code-quality-benchmark.sh --dry-run --case CASE_ID' \
+    'Usage: scripts/evals/run-code-quality-benchmark.sh --dry-run [--case CASE_ID]' \
     '' \
     'Plans a writable downstream Codex benchmark comparison.'
 }
@@ -39,16 +40,28 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ "$case_id" = 'rust-cli-feature' ] || {
-  printf 'unknown or missing benchmark case: %s\n' "$case_id" >&2
-  exit 2
-}
 [ "$dry_run" -eq 1 ] || {
   echo 'live code-quality benchmark execution is not available yet' >&2
   exit 2
 }
 
-samples="${CODE_QUALITY_SAMPLES:-3}"
+mapfile -t all_case_ids < <(jq -er '.cases[].id' "$contract")
+if [ -n "$case_id" ]; then
+  case_ids=()
+  for configured_case in "${all_case_ids[@]}"; do
+    if [ "$configured_case" = "$case_id" ]; then
+      case_ids+=("$configured_case")
+    fi
+  done
+  [ "${#case_ids[@]}" -eq 1 ] || {
+    printf 'unknown benchmark case: %s\n' "$case_id" >&2
+    exit 2
+  }
+else
+  case_ids=("${all_case_ids[@]}")
+fi
+
+samples="${CODE_QUALITY_SAMPLES:-$(jq -er '.sampleCount' "$contract")}"
 [[ "$samples" =~ ^([1-9]|10)$ ]] || {
   printf 'CODE_QUALITY_SAMPLES must be a canonical integer from 1 through 10; got %q\n' "$samples" >&2
   exit 2
@@ -57,8 +70,8 @@ samples="${CODE_QUALITY_SAMPLES:-3}"
 work_root="$(realpath -m -- "${CODE_QUALITY_WORK_ROOT:-${TMPDIR:-/tmp}/ai-plugins-code-quality-${UID}-$$}")"
 home_root="$(realpath -m -- "${CODE_QUALITY_HOME_ROOT:-$root/.dependencies/evals/code-quality-homes}")"
 out_root="$(realpath -m -- "${CODE_QUALITY_OUT_ROOT:-$root/evals/out/downstream-code-quality}")"
-targeted_plugins='advisor,development-discipline,engineering-standards'
-modes=(no-plugins targeted-plugins full-marketplace)
+targeted_plugins="$(jq -er '.conditions[] | select(.id == "targeted-plugins") | .plugins | join(",")' "$contract")"
+mapfile -t modes < <(jq -er '.conditions[].id' "$contract")
 
 paths_overlap() {
   local first="$1"
@@ -88,13 +101,34 @@ print_command() {
   printf '\n'
 }
 
-for sample in $(seq 1 "$samples"); do
-  for mode in "${modes[@]}"; do
-    workspace="$work_root/$case_id/sample-$sample/$mode"
-    printf 'workspace %s\n' "$workspace"
-    printf 'provider openai-codex-sdk-%s workspace %s\n' "$mode" "$workspace"
+for configured_case in "${case_ids[@]}"; do
+  for sample in $(seq 1 "$samples"); do
+    for mode in "${modes[@]}"; do
+      workspace="$work_root/$configured_case/sample-$sample/$mode"
+      printf 'workspace %s\n' "$workspace"
+      printf 'provider openai-codex-sdk-%s workspace %s\n' "$mode" "$workspace"
+    done
   done
 done
+
+printf 'metric pass@%s capability\n' "$samples"
+printf 'metric pass^%s reliability\n' "$samples"
+canonical_samples="$(jq -er '.sampleCount' "$contract")"
+if [ -z "$case_id" ] && [ "$samples" = "$canonical_samples" ]; then
+  printf 'gate targeted-overall %s/%s\n' \
+    "$(jq -er '.promotionGates.targeted.minimumPassesOverall' "$contract")" \
+    "$(jq -er '.promotionGates.targeted.totalRuns' "$contract")"
+  printf 'gate full-overall %s/%s\n' \
+    "$(jq -er '.promotionGates.fullMarketplace.minimumPassesOverall' "$contract")" \
+    "$(jq -er '.promotionGates.fullMarketplace.totalRuns' "$contract")"
+  printf 'gate targeted-lift %s/%s\n' \
+    "$(jq -er '.promotionGates.targetedLift.minimumAdditionalPassesOverNoPlugins' "$contract")" \
+    "$(jq -er '.promotionGates.targetedLift.pairedRuns' "$contract")"
+  printf 'gate targeted-per-case-no-regression >=%s\n' \
+    "$(jq -er '.promotionGates.targetedLift.minimumPerCasePassDeltaOverNoPlugins' "$contract")"
+else
+  echo 'promotion gates disabled: diagnostic noncanonical run'
+fi
 
 print_command node "$root/scripts/evals/prepare-codex-home.mjs" \
   "$home_root/no-plugins" --plugin-mode no-plugins
@@ -104,8 +138,11 @@ print_command node "$root/scripts/evals/prepare-codex-home.mjs" \
 print_command node "$root/scripts/evals/prepare-codex-home.mjs" \
   "$home_root/full-marketplace" --plugin-mode full-marketplace
 
+printf 'execution EVAL_CASE_FILTER=%s EVAL_SAMPLES=%s\n' "$case_id" "$samples"
 EVAL_OUT_DIR="$out_root" \
   EVAL_TIMEOUT=0 \
+  EVAL_CASE_FILTER="$case_id" \
+  EVAL_SAMPLES="$samples" \
   "$root/scripts/evals/run.sh" --dry-run "$benchmark_dir/promptfooconfig.yaml"
 print_command node "$root/scripts/evals/check-code-quality-benchmark.mjs" \
   "$out_root/results.json"

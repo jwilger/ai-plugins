@@ -33,6 +33,10 @@ teardown() {
   [[ "$output" == *"openai-codex-sdk-no-plugins"* ]]
   [[ "$output" == *"openai-codex-sdk-targeted-plugins"* ]]
   [[ "$output" == *"openai-codex-sdk-full-marketplace"* ]]
+  [[ "$output" == *"execution EVAL_CASE_FILTER=rust-cli-feature EVAL_SAMPLES=1"* ]]
+  [[ "$output" == *"--filter-pattern rust-cli-feature"* ]]
+  [[ "$output" == *"promotion gates disabled: diagnostic noncanonical run"* ]]
+  [[ "$output" != *"gate targeted-overall"* ]]
   [[ "$output" == *"$out_root/results.json"* ]]
   [[ "$output" == *"check-code-quality-benchmark.mjs"* ]]
   [ ! -e "$work_root" ]
@@ -78,4 +82,24 @@ teardown() {
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"benchmark paths overlap"* ]]
+}
+
+@test "code-quality benchmark default dry-run predeclares three task types by three modes by three samples" {
+  run env \
+    CODE_QUALITY_WORK_ROOT="$TEMP_ROOT/workspaces" \
+    CODE_QUALITY_HOME_ROOT="$TEMP_ROOT/homes" \
+    CODE_QUALITY_OUT_ROOT="$TEMP_ROOT/out" \
+    "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^workspace ')" -eq 27 ]
+  [[ "$output" == *"rust-cli-feature/sample-3/full-marketplace"* ]]
+  [[ "$output" == *"stock-service-bugfix/sample-3/full-marketplace"* ]]
+  [[ "$output" == *"stock-service-refactor/sample-3/full-marketplace"* ]]
+  [[ "$output" == *"metric pass@3 capability"* ]]
+  [[ "$output" == *"metric pass^3 reliability"* ]]
+  [[ "$output" == *"gate targeted-overall 8/9"* ]]
+  [[ "$output" == *"gate full-overall 7/9"* ]]
+  [[ "$output" == *"gate targeted-lift 2/9"* ]]
+  [[ "$output" == *"gate targeted-per-case-no-regression >=0"* ]]
 }
