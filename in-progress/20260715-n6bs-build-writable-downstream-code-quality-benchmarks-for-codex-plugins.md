@@ -20,6 +20,8 @@ Re-scoped after the first Promptfoo wiring security review. The immediate decisi
 
 ## Acceptance criteria
 
+- [ ] The diagnostic runs the Rust expense-report feature case in fresh disposable repositories for three samples each of no skills, the declared quality-core skills, and all marketplace skills.
+
 ## Subtasks
 
 ## Notes / Log
