@@ -24,6 +24,7 @@ Re-scoped after the first Promptfoo wiring security review. The immediate decisi
 - [ ] Only sanitized skills-only plugin projections are loaded; live execution fails closed without dedicated API-key authentication, blocked sibling and host reads/writes, blocked command network access, and finite wall, CPU, memory, process, output, and workspace limits.
 - [ ] Trusted post-turn scoring rebuilds candidate source in the verifier sandbox and combines public black-box behavior, format, clippy, locked tests, candidate-regression replay against the baseline, diff scope, and safety checks.
 - [ ] The contract predeclares three samples, success rate, pass@3 capability, pass^3 reliability, diagnostic thresholds, and a non-promotional claim; provider, operational, provenance, safety, and candidate failures remain distinct.
+- [ ] Allowlisted artifacts preserve input and composition hashes, tool/model versions, sanitized diff evidence, skill activations, latency, token usage, and cost; raw transcripts stay private and ephemeral, are secret-scanned, and are never shared.
 
 ## Subtasks
 
