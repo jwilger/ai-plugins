@@ -20,34 +20,43 @@
           # Toolchain provided by Nix. Anything installed globally outside Nix
           # (npm -g, etc.) is redirected into ./.dependencies/ by the shellHook
           # below so it never leaks into your home directory.
-          packages = with pkgs; [
-            bash
-            git
-            jq
-            ripgrep
-            fd
-            nodejs_22
-            nix
-            cargo
-            cargo-mutants
-            cargo-zigbuild
-            file
-            chromium
-            clippy
-            rustc
-            rustfmt
-            rustup
-            zig
-            just
-            lefthook
-            util-linux
-            prettier
-            bats
-            actionlint
-            yq-go
-          ];
+          packages =
+            (with pkgs; [
+              bash
+              git
+              jq
+              ripgrep
+              fd
+              nodejs_22
+              nix
+              cargo
+              cargo-mutants
+              cargo-zigbuild
+              file
+              chromium
+              clippy
+              rustc
+              rustfmt
+              rustup
+              zig
+              just
+              lefthook
+              util-linux
+              prettier
+              bats
+              actionlint
+              yq-go
+            ])
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
 
           shellHook = ''
+            ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+              # Candidate verifiers resolve these exact flake-selected tools;
+              # they must not discover security boundaries through caller PATH.
+              export AI_PLUGINS_BWRAP_BIN="${pkgs.bubblewrap}/bin/bwrap"
+              export AI_PLUGINS_PRLIMIT_BIN="${pkgs.util-linux}/bin/prlimit"
+            ''}
+
             # Give hook installation an unambiguous, lockfile-selected Lefthook
             # source and expected version.
             export AI_PLUGINS_LEFTHOOK_BIN="${pkgs.lefthook}/bin/lefthook"

@@ -5,11 +5,23 @@ setup() {
   RUNNER="$ROOT/scripts/evals/run-code-quality-benchmark.sh"
   WORKSPACE_PREPARER="$ROOT/scripts/evals/prepare-code-quality-workspaces.mjs"
   CONTRACT_VALIDATOR="$ROOT/scripts/evals/validate-code-quality-contract.mjs"
+  EXPENSE_VERIFIER="$ROOT/evals/benchmarks/downstream-code-quality/verifiers/expense-report.mjs"
   TEMP_ROOT="$(mktemp -d)"
 }
 
 teardown() {
+  if [ -n "${HOST_SERVER_PID:-}" ]; then
+    kill "$HOST_SERVER_PID" 2>/dev/null || true
+    wait "$HOST_SERVER_PID" 2>/dev/null || true
+  fi
   rm -rf "$TEMP_ROOT"
+}
+
+mark_benchmark_workspace() {
+  local workspace="$1"
+  git -C "$workspace" init --quiet --initial-branch=main
+  printf 'ai-plugins downstream code-quality workspace\n' \
+    >"$workspace/.git/.ai-plugins-code-quality-workspace"
 }
 
 @test "code-quality benchmark dry-run plans an isolated three-mode Rust feature slice without writing" {
@@ -241,4 +253,308 @@ teardown() {
   [[ "$output" == *"missing benchmark fixture: stock-reservation-service-buggy"* ]]
   grep -q 'preserve prior work' "$work_root/sentinel"
   [ -d "$work_root/rust-cli-feature/sample-1/no-plugins/.git" ]
+}
+
+@test "expense-report verifier rejects the baseline and accepts a known-good public CLI" {
+  work_root="$TEMP_ROOT/workspaces"
+  node "$WORKSPACE_PREPARER" "$work_root" \
+    --case rust-cli-feature \
+    --samples 1 >/dev/null
+  workspace="$work_root/rust-cli-feature/sample-1/no-plugins"
+  target_dir="$workspace/target"
+  CARGO_TARGET_DIR="$target_dir" cargo build \
+    --locked \
+    --manifest-path "$workspace/Cargo.toml" >/dev/null
+
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$workspace" \
+    --bin "$target_dir/debug/expense-report"
+
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.pass' <<<"$output")" = false ]
+  [ "$(jq -r '.checks[] | select(.id == "totals-duplicate-order") | .pass' <<<"$output")" = false ]
+
+  candidate_workspace="$TEMP_ROOT/candidates"
+  mkdir "$candidate_workspace"
+  mark_benchmark_workspace "$candidate_workspace"
+  passing_cli="$candidate_workspace/expense-report-passing"
+  rustc --edition 2024 \
+    --check-cfg 'cfg(host_escape_probe)' \
+    --check-cfg 'cfg(known_bad_adjacent)' \
+    --check-cfg 'cfg(known_bad_total_order)' \
+    --check-cfg 'cfg(known_bad_u8_minimum)' \
+    --check-cfg 'cfg(sandbox_root_probe)' \
+    --check-cfg 'cfg(stderr_secret_probe)' \
+    "$ROOT/scripts/tests/fixtures/expense-report-passing.rs" \
+    -o "$passing_cli"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$passing_cli"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.pass' <<<"$output")" = true ]
+  [ "$(jq '[.checks[] | select(.pass == false)] | length' <<<"$output")" -eq 0 ]
+
+  stderr_leak_cli="$candidate_workspace/expense-report-stderr-leak"
+  rustc --edition 2024 \
+    --cfg stderr_secret_probe \
+    --check-cfg 'cfg(host_escape_probe)' \
+    --check-cfg 'cfg(known_bad_adjacent)' \
+    --check-cfg 'cfg(known_bad_total_order)' \
+    --check-cfg 'cfg(known_bad_u8_minimum)' \
+    --check-cfg 'cfg(sandbox_root_probe)' \
+    --check-cfg 'cfg(stderr_secret_probe)' \
+    "$ROOT/scripts/tests/fixtures/expense-report-passing.rs" \
+    -o "$stderr_leak_cli"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$stderr_leak_cli"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"ghp_FAKE_BENCHMARK_SECRET_DO_NOT_PERSIST"* ]]
+
+  sandbox_root_cli="$candidate_workspace/expense-report-sandbox-root"
+  rustc --edition 2024 \
+    --cfg sandbox_root_probe \
+    --check-cfg 'cfg(host_escape_probe)' \
+    --check-cfg 'cfg(known_bad_adjacent)' \
+    --check-cfg 'cfg(known_bad_total_order)' \
+    --check-cfg 'cfg(known_bad_u8_minimum)' \
+    --check-cfg 'cfg(sandbox_root_probe)' \
+    --check-cfg 'cfg(stderr_secret_probe)' \
+    "$ROOT/scripts/tests/fixtures/expense-report-passing.rs" \
+    -o "$sandbox_root_cli"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$sandbox_root_cli"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.pass' <<<"$output")" = true ]
+
+  adjacent_only_cli="$candidate_workspace/expense-report-adjacent-only"
+  rustc --edition 2024 \
+    --cfg known_bad_adjacent \
+    --check-cfg 'cfg(host_escape_probe)' \
+    --check-cfg 'cfg(known_bad_adjacent)' \
+    --check-cfg 'cfg(known_bad_total_order)' \
+    --check-cfg 'cfg(known_bad_u8_minimum)' \
+    --check-cfg 'cfg(sandbox_root_probe)' \
+    --check-cfg 'cfg(stderr_secret_probe)' \
+    "$ROOT/scripts/tests/fixtures/expense-report-passing.rs" \
+    -o "$adjacent_only_cli"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$adjacent_only_cli"
+
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.checks[] | select(.id == "totals-duplicate-order") | .pass' <<<"$output")" = false ]
+
+  total_order_cli="$candidate_workspace/expense-report-total-order"
+  rustc --edition 2024 \
+    --cfg known_bad_total_order \
+    --check-cfg 'cfg(host_escape_probe)' \
+    --check-cfg 'cfg(known_bad_adjacent)' \
+    --check-cfg 'cfg(known_bad_total_order)' \
+    --check-cfg 'cfg(known_bad_u8_minimum)' \
+    --check-cfg 'cfg(sandbox_root_probe)' \
+    --check-cfg 'cfg(stderr_secret_probe)' \
+    "$ROOT/scripts/tests/fixtures/expense-report-passing.rs" \
+    -o "$total_order_cli"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$total_order_cli"
+
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.checks[] | select(.id == "totals-orders-by-category-not-amount") | .pass' <<<"$output")" = false ]
+
+  undersized_minimum_cli="$candidate_workspace/expense-report-u8-minimum"
+  rustc --edition 2024 \
+    --cfg known_bad_u8_minimum \
+    --check-cfg 'cfg(host_escape_probe)' \
+    --check-cfg 'cfg(known_bad_adjacent)' \
+    --check-cfg 'cfg(known_bad_total_order)' \
+    --check-cfg 'cfg(known_bad_u8_minimum)' \
+    --check-cfg 'cfg(sandbox_root_probe)' \
+    --check-cfg 'cfg(stderr_secret_probe)' \
+    "$ROOT/scripts/tests/fixtures/expense-report-passing.rs" \
+    -o "$undersized_minimum_cli"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$undersized_minimum_cli"
+
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.checks[] | select(.id == "totals-minimum-larger-than-u32") | .pass' <<<"$output")" = false ]
+}
+
+@test "expense-report verifier bounds a timed-out candidate and its pipe-holding descendant" {
+  candidate_workspace="$TEMP_ROOT/candidates"
+  mkdir "$candidate_workspace"
+  mark_benchmark_workspace "$candidate_workspace"
+  hanging_cli="$candidate_workspace/expense-report-hanging"
+  rustc --edition 2024 \
+    "$ROOT/scripts/tests/fixtures/expense-report-hanging.rs" \
+    -o "$hanging_cli"
+
+  run timeout 6.5s node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$hanging_cli"
+  verifier_status="$status"
+  verifier_output="$output"
+
+  [ "$verifier_status" -eq 1 ]
+  [ "$(jq -r '.checks[0].observed.status' <<<"$verifier_output")" = "error:TIMEOUT" ]
+  [ "$(jq -r '.checks[0].observed.cleanup.trackedProcesses' <<<"$verifier_output")" -ge 2 ]
+  [ "$(jq -r '.checks[0].observed.cleanup.survivingProcesses' <<<"$verifier_output")" -eq 0 ]
+}
+
+@test "expense-report verifier rejects unusable executables and bounds output flooding" {
+  candidate_workspace="$TEMP_ROOT/candidates"
+  mkdir "$candidate_workspace"
+  mark_benchmark_workspace "$candidate_workspace"
+  node_bin="$(realpath "$(command -v node)")"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$candidate_workspace/missing"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"expense-report executable is missing"* ]]
+
+  non_executable="$candidate_workspace/not-executable"
+  cp "$ROOT/scripts/tests/fixtures/expense-report-passing.rs" "$non_executable"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$non_executable"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"expense-report file is not executable"* ]]
+
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$node_bin"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"expense-report executable must be inside its workspace"* ]]
+
+  root_workspace_cli="$candidate_workspace/expense-report-root-workspace"
+  rustc --edition 2024 \
+    --check-cfg 'cfg(host_escape_probe)' \
+    --check-cfg 'cfg(known_bad_adjacent)' \
+    --check-cfg 'cfg(known_bad_total_order)' \
+    --check-cfg 'cfg(known_bad_u8_minimum)' \
+    --check-cfg 'cfg(sandbox_root_probe)' \
+    --check-cfg 'cfg(stderr_secret_probe)' \
+    "$ROOT/scripts/tests/fixtures/expense-report-passing.rs" \
+    -o "$root_workspace_cli"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace / \
+    --bin "$root_workspace_cli"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"prepared benchmark workspace marker"* ]]
+
+  flooding_cli="$candidate_workspace/expense-report-flooding"
+  rustc --edition 2024 \
+    "$ROOT/scripts/tests/fixtures/expense-report-flooding.rs" \
+    -o "$flooding_cli"
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$flooding_cli"
+
+  [ "$status" -eq 1 ]
+  [ "$(jq -r '.checks[0].observed.status' <<<"$output")" = "error:OUTPUT_LIMIT" ]
+  [ "${#output}" -lt 10000 ]
+
+  run env \
+    -u AI_PLUGINS_BWRAP_BIN \
+    -u AI_PLUGINS_PRLIMIT_BIN \
+    PATH="$candidate_workspace" \
+    "$node_bin" "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$flooding_cli"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AI_PLUGINS_BWRAP_BIN must be set by the ai-plugins Nix devshell"* ]]
+
+  run env AI_PLUGINS_BWRAP_BIN="$node_bin" \
+    "$node_bin" "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$flooding_cli"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"bwrap is not the flake-selected Nix package executable"* ]]
+}
+
+@test "expense-report verifier isolates candidates from host files and network" {
+  candidate_workspace="$TEMP_ROOT/candidate-workspace"
+  mkdir "$candidate_workspace"
+  mark_benchmark_workspace "$candidate_workspace"
+  secret_path="$TEMP_ROOT/host-secret"
+  mutation_path="$TEMP_ROOT/host-mutation"
+  port_path="$TEMP_ROOT/host-server-port"
+  printf 'benchmark-host-secret\n' >"$secret_path"
+
+  node -e '
+    const fs = require("node:fs");
+    const net = require("node:net");
+    const server = net.createServer((socket) => socket.end());
+    server.listen(0, "127.0.0.1", () => {
+      fs.writeFileSync(process.argv[1], String(server.address().port));
+    });
+  ' "$port_path" &
+  HOST_SERVER_PID=$!
+  for _ in {1..100}; do
+    [ -s "$port_path" ] && break
+    sleep 0.01
+  done
+  [ -s "$port_path" ]
+  network_address="127.0.0.1:$(<"$port_path")"
+
+  hostile_cli="$candidate_workspace/expense-report-hostile"
+  env \
+    EXPENSE_REPORT_TEST_SECRET_PATH="$secret_path" \
+    EXPENSE_REPORT_TEST_MUTATION_PATH="$mutation_path" \
+    EXPENSE_REPORT_TEST_NETWORK_ADDRESS="$network_address" \
+    rustc --edition 2024 \
+      --cfg host_escape_probe \
+      --check-cfg 'cfg(host_escape_probe)' \
+      --check-cfg 'cfg(known_bad_adjacent)' \
+      --check-cfg 'cfg(known_bad_total_order)' \
+      --check-cfg 'cfg(known_bad_u8_minimum)' \
+      --check-cfg 'cfg(sandbox_root_probe)' \
+      --check-cfg 'cfg(stderr_secret_probe)' \
+      "$ROOT/scripts/tests/fixtures/expense-report-passing.rs" \
+      -o "$hostile_cli"
+
+  run "$hostile_cli" totals
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"benchmark-host-secret"* ]]
+  [[ "$output" == *"wrote-host"* ]]
+  [[ "$output" == *"reached-host-network"* ]]
+  [[ "$output" == *"resource-limit:Max cpu time="* ]]
+  [[ "$output" == *"resource-limit:Max address space="* ]]
+  [[ "$output" == *"resource-limit:Max processes="* ]]
+  [ -f "$mutation_path" ]
+  rm -f "$mutation_path"
+
+  run node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$hostile_cli"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.pass' <<<"$output")" = true ]
+  [[ "$output" != *"benchmark-host-secret"* ]]
+  [ ! -e "$mutation_path" ]
+
+  fake_tools="$TEMP_ROOT/fake-tools"
+  mkdir "$fake_tools"
+  node_bin="$(realpath "$(command -v node)")"
+  ln -s "$node_bin" "$fake_tools/bwrap"
+  ln -s "$node_bin" "$fake_tools/prlimit"
+  run env PATH="$fake_tools:$PATH" \
+    node "$EXPENSE_VERIFIER" \
+    --workspace "$candidate_workspace" \
+    --bin "$hostile_cli"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.pass' <<<"$output")" = true ]
 }
