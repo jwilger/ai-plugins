@@ -18,6 +18,7 @@ The current session proved that a persistent timer can emit a custom wake event 
 ## Acceptance criteria
 
 - [ ] Invoking the skill starts at most one non-blocking, session-scoped heartbeat with a configurable interval and a 15-minute default.
+- [ ] Every tick reads structured goal state and emits a real model wake/yield event only when a goal is active, telling the agent to continue and to run `/goal resume` if paused.
 
 ## Subtasks
 
