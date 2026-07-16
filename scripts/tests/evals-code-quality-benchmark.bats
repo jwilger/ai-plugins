@@ -37,20 +37,20 @@ mark_benchmark_workspace() {
     "$RUNNER" --dry-run --case rust-cli-feature
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rust-cli-feature/sample-1/no-plugins"* ]]
-  [[ "$output" == *"rust-cli-feature/sample-1/targeted-plugins"* ]]
-  [[ "$output" == *"rust-cli-feature/sample-1/full-marketplace"* ]]
+  [[ "$output" == *"rust-cli-feature/sample-1/no-skills"* ]]
+  [[ "$output" == *"rust-cli-feature/sample-1/targeted-quality-skills"* ]]
+  [[ "$output" == *"rust-cli-feature/sample-1/all-marketplace-skills"* ]]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 3 ]
-  [[ "$output" == *"$home_root/no-plugins --plugin-mode no-plugins"* ]]
-  [[ "$output" == *"$home_root/targeted-plugins --plugin-mode targeted-plugins --plugins advisor\,development-discipline\,engineering-standards"* ]]
-  [[ "$output" == *"$home_root/full-marketplace --plugin-mode full-marketplace"* ]]
-  [[ "$output" == *"openai-codex-sdk-no-plugins"* ]]
-  [[ "$output" == *"openai-codex-sdk-targeted-plugins"* ]]
-  [[ "$output" == *"openai-codex-sdk-full-marketplace"* ]]
+  [[ "$output" == *"$home_root/no-skills --plugin-mode no-plugins"* ]]
+  [[ "$output" == *"$home_root/targeted-quality-skills --plugin-mode skills-only-marketplace --plugins advisor\,development-discipline\,engineering-standards"* ]]
+  [[ "$output" == *"$home_root/all-marketplace-skills --plugin-mode skills-only-marketplace"* ]]
+  [[ "$output" == *"openai-codex-sdk-no-skills"* ]]
+  [[ "$output" == *"openai-codex-sdk-targeted-quality-skills"* ]]
+  [[ "$output" == *"openai-codex-sdk-all-marketplace-skills"* ]]
   [[ "$output" == *"execution EVAL_CASE_FILTER=rust-cli-feature EVAL_SAMPLES=1"* ]]
   [[ "$output" == *"--filter-pattern rust-cli-feature"* ]]
-  [[ "$output" == *"promotion gates disabled: diagnostic noncanonical run"* ]]
-  [[ "$output" != *"gate targeted-overall"* ]]
+  [[ "$output" == *"diagnostic gates disabled: noncanonical run"* ]]
+  [[ "$output" != *"gate complete-runs"* ]]
   [[ "$output" == *"$out_root/results.json"* ]]
   [[ "$output" == *"check-code-quality-benchmark.mjs"* ]]
   [ ! -e "$work_root" ]
@@ -98,7 +98,7 @@ mark_benchmark_workspace() {
   [[ "$output" == *"benchmark paths overlap"* ]]
 }
 
-@test "code-quality benchmark default dry-run predeclares three task types by three modes by three samples" {
+@test "code-quality benchmark default dry-run predeclares a nine-turn non-promotional skills diagnostic" {
   run env \
     CODE_QUALITY_WORK_ROOT="$TEMP_ROOT/workspaces" \
     CODE_QUALITY_HOME_ROOT="$TEMP_ROOT/homes" \
@@ -106,16 +106,32 @@ mark_benchmark_workspace() {
     "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^workspace ')" -eq 27 ]
-  [[ "$output" == *"rust-cli-feature/sample-3/full-marketplace"* ]]
-  [[ "$output" == *"stock-service-bugfix/sample-3/full-marketplace"* ]]
-  [[ "$output" == *"stock-service-refactor/sample-3/full-marketplace"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c '^workspace ')" -eq 9 ]
+  [[ "$output" == *"rust-cli-feature/sample-3/no-skills"* ]]
+  [[ "$output" == *"rust-cli-feature/sample-3/targeted-quality-skills"* ]]
+  [[ "$output" == *"rust-cli-feature/sample-3/all-marketplace-skills"* ]]
+  [[ "$output" != *"stock-service-"* ]]
   [[ "$output" == *"metric pass@3 capability"* ]]
   [[ "$output" == *"metric pass^3 reliability"* ]]
-  [[ "$output" == *"gate targeted-overall 8/9"* ]]
-  [[ "$output" == *"gate full-overall 7/9"* ]]
-  [[ "$output" == *"gate targeted-lift 2/9"* ]]
-  [[ "$output" == *"gate targeted-per-case-no-regression >=0"* ]]
+  [[ "$output" == *"claim non-promotional"* ]]
+  [[ "$output" == *"gate complete-runs 9/9"* ]]
+  [[ "$output" == *"gate operational-errors 0"* ]]
+  [[ "$output" == *"gate provenance-errors 0"* ]]
+  [[ "$output" == *"gate safety-failures 0"* ]]
+}
+
+@test "code-quality benchmark reduced-sample dry-run does not claim canonical diagnostic gates" {
+  run env \
+    CODE_QUALITY_WORK_ROOT="$TEMP_ROOT/workspaces" \
+    CODE_QUALITY_HOME_ROOT="$TEMP_ROOT/homes" \
+    CODE_QUALITY_OUT_ROOT="$TEMP_ROOT/out" \
+    CODE_QUALITY_SAMPLES=1 \
+    "$RUNNER" --dry-run --case rust-cli-feature
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^workspace ')" -eq 3 ]
+  [[ "$output" == *"diagnostic gates disabled: noncanonical run"* ]]
+  [[ "$output" != *"gate complete-runs"* ]]
 }
 
 @test "code-quality workspace preparation creates three clean standalone Rust fixture repositories with identical baselines" {
@@ -130,7 +146,7 @@ mark_benchmark_workspace() {
   [ -f "$work_root/.ai-plugins-code-quality-work-root" ]
 
   baseline=""
-  for mode in no-plugins targeted-plugins full-marketplace; do
+  for mode in no-skills targeted-quality-skills all-marketplace-skills; do
     workspace="$work_root/rust-cli-feature/sample-1/$mode"
     [ -f "$workspace/Cargo.toml" ]
     [ -f "$workspace/Cargo.lock" ]
@@ -186,6 +202,35 @@ mark_benchmark_workspace() {
   done
 }
 
+@test "code-quality contract validation rejects drift from the non-promotional diagnostic invariants" {
+  contract="$ROOT/evals/benchmarks/downstream-code-quality/benchmark.json"
+
+  while IFS=$'\t' read -r name mutation expected; do
+    candidate="$TEMP_ROOT/diagnostic-$name.json"
+    jq "$mutation" "$contract" >"$candidate"
+
+    run node "$CONTRACT_VALIDATOR" "$candidate"
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"$expected"* ]]
+  done <<'CASES'
+samples	.sampleCount = 2	sampleCount must be exactly 3
+targeted	.conditions[1].plugins = ["development-discipline"]	targeted-quality-skills plugins must be exactly
+auth	.provider.authentication = "copied-oauth-file"	provider authentication must be dedicated-api-key-only
+cases	.cases += [.cases[0]]	duplicate case id: rust-cli-feature
+task	.cases[0].taskType = "refactor"	rust-cli-feature taskType must be feature
+fixture-shape	.cases[0].fixture = "unrelated-fixture"	rust-cli-feature fixture must be expense-report
+gates	.cases[0].deterministicGates = ["format"]	rust-cli-feature deterministic gates must be exactly
+metrics	.metrics.aggregates = ["success-rate"]	benchmark aggregate metrics must be exactly
+turns	.diagnosticGates.expectedExecutionTurns = 8	expectedExecutionTurns must equal cases x conditions x samples
+complete	.diagnosticGates.completeRuns = 8	completeRuns must equal expectedExecutionTurns
+operational	.diagnosticGates.operationalErrors = 1	operationalErrors must be zero
+provenance	.diagnosticGates.provenanceErrors = 1	provenanceErrors must be zero
+safety	.diagnosticGates.safetyFailures = 1	safetyFailures must be zero
+candidate	.diagnosticGates.candidateFailuresAreMeasurementOutcomes = false	candidate failures must remain measurement outcomes
+CASES
+}
+
 @test "code-quality workspace preparation preserves symlink-marked and unowned nonempty roots" {
   symlink_root="$TEMP_ROOT/symlink-root"
   marker_target="$TEMP_ROOT/marker-target"
@@ -238,7 +283,7 @@ mark_benchmark_workspace() {
   [ ! -e "$work_root" ]
 }
 
-@test "code-quality workspace preparation preflights a selected fixture before replacing owned work" {
+@test "code-quality workspace preparation rejects an unknown case before replacing owned work" {
   work_root="$TEMP_ROOT/workspaces"
   node "$WORKSPACE_PREPARER" "$work_root" \
     --case rust-cli-feature \
@@ -250,9 +295,9 @@ mark_benchmark_workspace() {
     --samples 1
 
   [ "$status" -eq 2 ]
-  [[ "$output" == *"missing benchmark fixture: stock-reservation-service-buggy"* ]]
+  [[ "$output" == *"unknown benchmark case: stock-service-bugfix"* ]]
   grep -q 'preserve prior work' "$work_root/sentinel"
-  [ -d "$work_root/rust-cli-feature/sample-1/no-plugins/.git" ]
+  [ -d "$work_root/rust-cli-feature/sample-1/no-skills/.git" ]
 }
 
 @test "expense-report verifier rejects the baseline and accepts a known-good public CLI" {
@@ -260,7 +305,7 @@ mark_benchmark_workspace() {
   node "$WORKSPACE_PREPARER" "$work_root" \
     --case rust-cli-feature \
     --samples 1 >/dev/null
-  workspace="$work_root/rust-cli-feature/sample-1/no-plugins"
+  workspace="$work_root/rust-cli-feature/sample-1/no-skills"
   target_dir="$workspace/target"
   CARGO_TARGET_DIR="$target_dir" cargo build \
     --locked \

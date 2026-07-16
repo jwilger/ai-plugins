@@ -4,9 +4,36 @@ import { pathToFileURL } from "node:url";
 
 const identifierPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const expectedConditions = [
-  "no-plugins",
-  "targeted-plugins",
-  "full-marketplace",
+  "no-skills",
+  "targeted-quality-skills",
+  "all-marketplace-skills",
+];
+const expectedTargetedPlugins = [
+  "advisor",
+  "development-discipline",
+  "engineering-standards",
+];
+const expectedPerRunMetrics = [
+  "conjunctive-success",
+  "outcome-class",
+  "latency",
+  "tokens",
+  "cost",
+];
+const expectedAggregateMetrics = [
+  "success-rate",
+  "pass@3-capability",
+  "pass^3-reliability",
+];
+const expectedRustFeatureGates = [
+  "source-rebuild",
+  "black-box-behavior",
+  "regression-tests",
+  "baseline-regression-replay",
+  "format",
+  "clippy",
+  "diff-scope",
+  "safety",
 ];
 
 function assertObject(value, label) {
@@ -34,20 +61,23 @@ function assertCanonicalPluginList(value, label) {
   }
 }
 
+function assertExactArray(value, expected, label) {
+  if (
+    !Array.isArray(value) ||
+    JSON.stringify(value) !== JSON.stringify(expected)
+  ) {
+    throw new Error(`${label} must be exactly: ${expected.join(", ")}`);
+  }
+}
+
 export function validateBenchmarkContract(contract) {
   assertObject(contract, "benchmark contract");
   if (contract.schemaVersion !== 1) {
     throw new Error("benchmark contract schemaVersion must be 1");
   }
   assertIdentifier(contract.id, "benchmark id");
-  if (
-    !Number.isInteger(contract.sampleCount) ||
-    contract.sampleCount < 1 ||
-    contract.sampleCount > 10
-  ) {
-    throw new Error(
-      "benchmark sampleCount must be an integer from 1 through 10",
-    );
+  if (contract.sampleCount !== 3) {
+    throw new Error("benchmark sampleCount must be exactly 3");
   }
 
   if (!Array.isArray(contract.conditions)) {
@@ -63,18 +93,62 @@ export function validateBenchmarkContract(contract) {
       `benchmark conditions must be exactly: ${expectedConditions.join(", ")}`,
     );
   }
-  assertCanonicalPluginList(contract.conditions[0].plugins, "no-plugins");
+  if (contract.promotionEligible !== false) {
+    throw new Error("benchmark must remain non-promotional");
+  }
+  if (
+    typeof contract.claim !== "string" ||
+    !contract.claim.startsWith("Non-promotional directional evidence")
+  ) {
+    throw new Error("benchmark claim must remain explicitly non-promotional");
+  }
+  assertObject(contract.provider, "benchmark provider");
+  const expectedProvider = {
+    id: "openai:codex-sdk",
+    model: "gpt-5.6-terra",
+    reasoningEffort: "medium",
+    sandboxMode: "workspace-write",
+    approvalPolicy: "never",
+    networkAccess: false,
+    authentication: "dedicated-api-key-only",
+  };
+  for (const [key, expected] of Object.entries(expectedProvider)) {
+    if (contract.provider[key] !== expected) {
+      const label =
+        key === "authentication"
+          ? "provider authentication"
+          : `provider ${key}`;
+      throw new Error(`${label} must be ${String(expected)}`);
+    }
+  }
+  assertCanonicalPluginList(contract.conditions[0].plugins, "no-skills");
   if (contract.conditions[0].plugins.length !== 0) {
-    throw new Error("no-plugins composition must be empty");
+    throw new Error("no-skills composition must be empty");
   }
-  assertCanonicalPluginList(contract.conditions[1].plugins, "targeted-plugins");
-  if (contract.conditions[1].plugins.length === 0) {
-    throw new Error("targeted-plugins composition must not be empty");
+  if (contract.conditions[0].surface !== "none") {
+    throw new Error("no-skills surface must be none");
   }
-  if (contract.conditions[2].plugins !== "codex-marketplace-at-run-start") {
+  assertCanonicalPluginList(
+    contract.conditions[1].plugins,
+    "targeted-quality-skills",
+  );
+  assertExactArray(
+    contract.conditions[1].plugins,
+    expectedTargetedPlugins,
+    "targeted-quality-skills plugins",
+  );
+  if (contract.conditions[1].surface !== "skills-only") {
+    throw new Error("targeted-quality-skills surface must be skills-only");
+  }
+  if (
+    contract.conditions[2].plugins !== "codex-marketplace-skills-at-run-start"
+  ) {
     throw new Error(
-      "full-marketplace composition must resolve from the Codex marketplace at run start",
+      "all-marketplace-skills composition must resolve from the Codex marketplace at run start",
     );
+  }
+  if (contract.conditions[2].surface !== "skills-only") {
+    throw new Error("all-marketplace-skills surface must be skills-only");
   }
 
   if (!Array.isArray(contract.cases) || contract.cases.length === 0) {
@@ -101,6 +175,65 @@ export function validateBenchmarkContract(contract) {
     ) {
       throw new Error(`invalid deterministic gates for ${testCase.id}`);
     }
+  }
+  if (
+    contract.cases.length !== 1 ||
+    contract.cases[0].id !== "rust-cli-feature"
+  ) {
+    throw new Error("benchmark must contain exactly the rust-cli-feature case");
+  }
+  const rustFeature = contract.cases[0];
+  if (rustFeature.taskType !== "feature") {
+    throw new Error("rust-cli-feature taskType must be feature");
+  }
+  if (rustFeature.fixture !== "expense-report") {
+    throw new Error("rust-cli-feature fixture must be expense-report");
+  }
+  assertExactArray(
+    rustFeature.deterministicGates,
+    expectedRustFeatureGates,
+    "rust-cli-feature deterministic gates",
+  );
+
+  assertObject(contract.metrics, "benchmark metrics");
+  assertExactArray(
+    contract.metrics.perRun,
+    expectedPerRunMetrics,
+    "benchmark per-run metrics",
+  );
+  assertExactArray(
+    contract.metrics.aggregates,
+    expectedAggregateMetrics,
+    "benchmark aggregate metrics",
+  );
+
+  assertObject(contract.diagnosticGates, "benchmark diagnostic gates");
+  const expectedTurns =
+    contract.cases.length * contract.conditions.length * contract.sampleCount;
+  if (contract.diagnosticGates.expectedExecutionTurns !== expectedTurns) {
+    throw new Error(
+      "expectedExecutionTurns must equal cases x conditions x samples",
+    );
+  }
+  if (
+    contract.diagnosticGates.completeRuns !==
+    contract.diagnosticGates.expectedExecutionTurns
+  ) {
+    throw new Error("completeRuns must equal expectedExecutionTurns");
+  }
+  for (const key of [
+    "operationalErrors",
+    "provenanceErrors",
+    "safetyFailures",
+  ]) {
+    if (contract.diagnosticGates[key] !== 0) {
+      throw new Error(`${key} must be zero`);
+    }
+  }
+  if (
+    contract.diagnosticGates.candidateFailuresAreMeasurementOutcomes !== true
+  ) {
+    throw new Error("candidate failures must remain measurement outcomes");
   }
 
   return contract;

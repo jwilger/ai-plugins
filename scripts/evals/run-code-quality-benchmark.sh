@@ -70,7 +70,7 @@ samples="${CODE_QUALITY_SAMPLES:-$(jq -er '.sampleCount' "$contract")}"
 work_root="$(realpath -m -- "${CODE_QUALITY_WORK_ROOT:-${TMPDIR:-/tmp}/ai-plugins-code-quality-${UID}-$$}")"
 home_root="$(realpath -m -- "${CODE_QUALITY_HOME_ROOT:-$root/.dependencies/evals/code-quality-homes}")"
 out_root="$(realpath -m -- "${CODE_QUALITY_OUT_ROOT:-$root/evals/out/downstream-code-quality}")"
-targeted_plugins="$(jq -er '.conditions[] | select(.id == "targeted-plugins") | .plugins | join(",")' "$contract")"
+targeted_plugins="$(jq -er '.conditions[] | select(.id == "targeted-quality-skills") | .plugins | join(",")' "$contract")"
 mapfile -t modes < <(jq -er '.conditions[].id' "$contract")
 
 paths_overlap() {
@@ -113,30 +113,30 @@ done
 
 printf 'metric pass@%s capability\n' "$samples"
 printf 'metric pass^%s reliability\n' "$samples"
-canonical_samples="$(jq -er '.sampleCount' "$contract")"
-if [ -z "$case_id" ] && [ "$samples" = "$canonical_samples" ]; then
-  printf 'gate targeted-overall %s/%s\n' \
-    "$(jq -er '.promotionGates.targeted.minimumPassesOverall' "$contract")" \
-    "$(jq -er '.promotionGates.targeted.totalRuns' "$contract")"
-  printf 'gate full-overall %s/%s\n' \
-    "$(jq -er '.promotionGates.fullMarketplace.minimumPassesOverall' "$contract")" \
-    "$(jq -er '.promotionGates.fullMarketplace.totalRuns' "$contract")"
-  printf 'gate targeted-lift %s/%s\n' \
-    "$(jq -er '.promotionGates.targetedLift.minimumAdditionalPassesOverNoPlugins' "$contract")" \
-    "$(jq -er '.promotionGates.targetedLift.pairedRuns' "$contract")"
-  printf 'gate targeted-per-case-no-regression >=%s\n' \
-    "$(jq -er '.promotionGates.targetedLift.minimumPerCasePassDeltaOverNoPlugins' "$contract")"
+echo 'claim non-promotional'
+planned_turns=$((${#case_ids[@]} * samples * ${#modes[@]}))
+expected_turns="$(jq -er '.diagnosticGates.expectedExecutionTurns' "$contract")"
+if [ "$planned_turns" -eq "$expected_turns" ]; then
+  printf 'gate complete-runs %s/%s\n' \
+    "$(jq -er '.diagnosticGates.completeRuns' "$contract")" \
+    "$expected_turns"
+  printf 'gate operational-errors %s\n' \
+    "$(jq -er '.diagnosticGates.operationalErrors' "$contract")"
+  printf 'gate provenance-errors %s\n' \
+    "$(jq -er '.diagnosticGates.provenanceErrors' "$contract")"
+  printf 'gate safety-failures %s\n' \
+    "$(jq -er '.diagnosticGates.safetyFailures' "$contract")"
 else
-  echo 'promotion gates disabled: diagnostic noncanonical run'
+  echo 'diagnostic gates disabled: noncanonical run'
 fi
 
 print_command node "$root/scripts/evals/prepare-codex-home.mjs" \
-  "$home_root/no-plugins" --plugin-mode no-plugins
+  "$home_root/no-skills" --plugin-mode no-plugins
 print_command node "$root/scripts/evals/prepare-codex-home.mjs" \
-  "$home_root/targeted-plugins" --plugin-mode targeted-plugins \
+  "$home_root/targeted-quality-skills" --plugin-mode skills-only-marketplace \
   --plugins "$targeted_plugins"
 print_command node "$root/scripts/evals/prepare-codex-home.mjs" \
-  "$home_root/full-marketplace" --plugin-mode full-marketplace
+  "$home_root/all-marketplace-skills" --plugin-mode skills-only-marketplace
 
 printf 'execution EVAL_CASE_FILTER=%s EVAL_SAMPLES=%s\n' "$case_id" "$samples"
 EVAL_OUT_DIR="$out_root" \
