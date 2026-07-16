@@ -367,6 +367,85 @@ SH
   rm -rf "$fixture_root"
 }
 
+@test "eval runner rejects selected Codex home aliases and overlaps before preparing any home" {
+  for layout in exact-alias symlinked-descendant case-alias-descendant; do
+    fixture_root="$(mktemp -d)"
+    fake_promptfoo="$fixture_root/promptfoo"
+    full_home="$fixture_root/full-home"
+    mkdir -p "$full_home"
+    printf 'ai-plugins Codex eval home\n' >"$full_home/.ai-plugins-eval-home"
+    printf 'preserve config\n' >"$full_home/config.toml"
+    printf 'preserve sentinel\n' >"$full_home/sentinel"
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_promptfoo"
+    chmod +x "$fake_promptfoo"
+
+    case "$layout" in
+      exact-alias)
+        targeted_home="$full_home"
+        ;;
+      symlinked-descendant)
+        ln -s "$full_home" "$fixture_root/full-home-link"
+        targeted_home="$(realpath -m --relative-to="$ROOT" "$fixture_root/full-home-link/targeted")"
+        ;;
+      case-alias-descendant)
+        full_home="$fixture_root/CaseHome"
+        mkdir -p "$full_home"
+        printf 'ai-plugins Codex eval home\n' >"$full_home/.ai-plugins-eval-home"
+        printf 'preserve config\n' >"$full_home/config.toml"
+        printf 'preserve sentinel\n' >"$full_home/sentinel"
+        targeted_home="$fixture_root/casehome/targeted"
+        ;;
+    esac
+
+    run env \
+      OPENAI_API_KEY=fixture \
+      PROMPTFOO_BIN="$fake_promptfoo" \
+      EVAL_OUT_DIR="$fixture_root/out" \
+      EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
+      EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-targeted-plugins \
+      EVAL_TIMEOUT=0 \
+      CODEX_EVAL_HOME="$full_home" \
+      CODEX_EVAL_HOME_FULL_MARKETPLACE="$full_home" \
+      CODEX_EVAL_HOME_TARGETED_PLUGINS="$targeted_home" \
+      "$RUNNER"
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Codex eval homes overlap for incompatible compositions"* ]]
+    [[ "$output" == *"full-marketplace"* ]]
+    [[ "$output" == *"targeted-plugins"* ]]
+    grep -q '^preserve config$' "$full_home/config.toml"
+    grep -q '^preserve sentinel$' "$full_home/sentinel"
+    [ ! -e "$full_home/targeted" ]
+
+    rm -rf "$fixture_root"
+  done
+}
+
+@test "eval runner ignores overlapping homes for unselected Codex modes" {
+  fixture_root="$(mktemp -d)"
+  fake_promptfoo="$fixture_root/promptfoo"
+  shared_home="$fixture_root/shared-home"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_promptfoo"
+  chmod +x "$fake_promptfoo"
+
+  run env \
+    OPENAI_API_KEY=fixture \
+    PROMPTFOO_BIN="$fake_promptfoo" \
+    EVAL_OUT_DIR="$fixture_root/out" \
+    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra \
+    EVAL_TIMEOUT=0 \
+    CODEX_EVAL_HOME="$shared_home" \
+    CODEX_EVAL_HOME_FULL_MARKETPLACE="$shared_home" \
+    CODEX_EVAL_HOME_NO_PLUGINS="$shared_home" \
+    CODEX_EVAL_HOME_TARGETED_PLUGINS="$shared_home" \
+    "$RUNNER"
+
+  [ "$status" -eq 0 ]
+  [ -f "$shared_home/config.toml" ]
+
+  rm -rf "$fixture_root"
+}
+
 @test "eval runner dry-run prepares only Codex grader home for Claude-only provider filter" {
   run env EVAL_PROVIDER_FILTER=claude "$RUNNER" --dry-run
 
