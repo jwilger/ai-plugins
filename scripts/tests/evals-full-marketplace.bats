@@ -382,7 +382,8 @@ NODE
   jq -e '
     def plugins($label):
       [.providerCompositions[] | select(.label == $label) | .plugins] | first;
-    plugins("claude-code-sonnet-targeted-plugins") == ["tiber"]
+    (.providerLabels | sort) == ([.providerCompositions[].label] | sort)
+      and plugins("claude-code-sonnet-targeted-plugins") == ["tiber"]
       and plugins("codex-gpt-5.6-terra-targeted-plugins") == ["tiber"]
       and plugins("claude-code-sonnet-no-plugins") == []
       and plugins("codex-gpt-5.6-terra-no-plugins") == []
@@ -397,6 +398,9 @@ const metadata = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 
 if (JSON.stringify(config.metadata.providerCompositions) !== JSON.stringify(metadata.providerCompositions)) {
   throw new Error('YAML and sidecar provider compositions differ');
+}
+if (JSON.stringify(config.metadata.providerLabels) !== JSON.stringify(metadata.providerLabels)) {
+  throw new Error('YAML and sidecar provider labels differ');
 }
 NODE
   [ "$status" -eq 0 ]
