@@ -9,7 +9,11 @@ pr_mr_status:
 
 ## Summary
 
+Create an invokable Codex-first skill that starts and manages a real goal-aware resume-work heartbeat, using model wake/yield events rather than an unread terminal loop.
+
 ## Context / Why
+
+The current session proved that a persistent timer can emit a custom wake event through the model-yield mechanism. Package that behavior for reuse with a 15-minute default interval. On each tick, inspect structured goal state and, only when a goal is active, prompt autonomous continuation and recommend `/goal resume` if the goal loop is paused. Treat the mechanism as best-effort across model-capacity or turn pauses; do not claim it survives a killed tool host, computer crash, or harness without a wake/yield primitive. Codex personal use is primary; other harnesses may use a documented capability-based fallback.
 
 ## Acceptance criteria
 
