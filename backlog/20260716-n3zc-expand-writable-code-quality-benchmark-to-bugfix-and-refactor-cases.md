@@ -20,6 +20,7 @@ Deferred from ticket 20260715-n6bs so the first evidence can focus on a safely c
 - [ ] Adds realistic bugfix and refactor fixtures in TypeScript or Python with public-surface deterministic verifiers.
 - [ ] Each case declares the case-relevant targeted skills and compares no skills, targeted skills, and all marketplace skills under the pilot containment boundary.
 - [ ] Scoring covers behavior, regression tests, strict type/lint/format gates, diff scope, safety, and a calibrated semantic architecture rubric only where deterministic checks are insufficient.
+- [ ] Sample counts and cross-case aggregation are declared before provider execution, and artifacts remain compatible with the pilot result schema.
 
 ## Subtasks
 
