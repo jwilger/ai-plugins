@@ -12,11 +12,11 @@ claim:
 
 ## Summary
 
-Measure whether the marketplace makes Codex produce better code in disposable downstream repositories, comparing no plugins, targeted quality-core plugins, and the full marketplace.
+Build a safe, non-promotional writable Rust benchmark that measures whether Codex produces better downstream code with no skills, the declared quality-core skills, and all marketplace skills.
 
 ## Context / Why
 
-Current behavior evals mostly score read-only advice and do not establish implementation-quality lift. Build realistic writable feature, bugfix, and refactor scenarios with public-surface verifiers. Start with a real personal project when suitable; otherwise use a Rust CLI plus one TypeScript or Python service. Exact targeted-plugin composition from ticket hgyz is a prerequisite. Keep fixtures scrubbed and disposable.
+Re-scoped after the first Promptfoo wiring security review. The immediate decision-quality need is directional evidence about skill-driven code quality, not broad multi-language or full executable-plugin coverage. Run the expense-report feature case with three samples per condition using skills-only projections, bounded execution, API-key-only auth, trusted source rebuilds, explicit failure taxonomy, and sanitized artifacts. Defer TypeScript bugfix/refactor expansion and true full-plugin runtime execution to follow-up tickets.
 
 ## Acceptance criteria
 
