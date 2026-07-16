@@ -18,6 +18,7 @@ A full 276-case behavior eval hit the runner's 90-minute GNU timeout. The TERM/K
 ## Acceptance criteria
 
 - [ ] A timed-out or intentionally paused provider eval preserves a stable eval identifier and enough completed-row state to continue without rerunning successful provider calls.
+- [ ] The runner exposes a documented resume workflow that retains the cross-worktree provider lock, isolated Codex homes, output ownership checks, and provider-composition validation.
 
 ## Subtasks
 
