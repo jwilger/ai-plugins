@@ -17,6 +17,8 @@ Deferred from the skills-first Rust pilot. True full-plugin execution requires a
 
 ## Acceptance criteria
 
+- [ ] Codex inference authenticates through a revocable credential boundary that model-invoked commands and plugin subprocesses cannot read or replay.
+
 ## Subtasks
 
 ## Notes / Log
