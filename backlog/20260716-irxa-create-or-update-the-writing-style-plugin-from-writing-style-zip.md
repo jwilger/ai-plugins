@@ -26,3 +26,5 @@ Source material is now at the main checkout's repository root as writing-style.z
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-16: User moved the source archive into the repository root as writing-style.zip on 2026-07-15; future work should copy or otherwise make it available to the linked feature worktree without committing the archive unless intentional.
