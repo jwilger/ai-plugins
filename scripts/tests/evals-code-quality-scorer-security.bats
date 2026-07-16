@@ -33,19 +33,13 @@ setup() {
   CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256="$(
     sha256sum "$CODE_QUALITY_SYSTEMD_RUN_BIN" | cut -d' ' -f1
   )"
-  EXCLUDED_NIX_SOURCE="$(
-    find /nix/store -mindepth 1 -maxdepth 1 -type d -name '*-source' -print \
-      | LC_ALL=C sort \
-      | while IFS= read -r candidate; do
-          if [ -f "$candidate/.agents/plugins/marketplace.json" ] \
-            && [ -f "$candidate/scripts/evals/run-code-quality-benchmark.sh" ] \
-            && ! grep -Fxq -- "$candidate" "$NIX_STORE_CLOSURE"; then
-            printf '%s\n' "$candidate"
-            break
-          fi
-        done
-  )"
-  [ -n "$EXCLUDED_NIX_SOURCE" ]
+  excluded_nix_source_fixture="$TEST_ROOT/source"
+  mkdir "$excluded_nix_source_fixture"
+  printf 'unlisted Nix source canary\n' \
+    >"$excluded_nix_source_fixture/canary"
+  EXCLUDED_NIX_SOURCE="$(nix-store --add "$excluded_nix_source_fixture")"
+  [ -d "$EXCLUDED_NIX_SOURCE" ]
+  ! grep -Fxq -- "$EXCLUDED_NIX_SOURCE" "$NIX_STORE_CLOSURE"
 
   node "$PREPARER" "$WORK_ROOT" --case rust-cli-feature --samples 1 \
     >"$TEST_ROOT/manifest.stdout"
