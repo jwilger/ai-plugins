@@ -22,6 +22,7 @@ A full 276-case behavior eval hit the runner's 90-minute GNU timeout. The TERM/K
 - [ ] Resume validates the expected case/provider/sample identity and refuses to run if reconstruction changes the matrix cardinality or duplicates prompt/provider combinations.
 - [ ] Regression tests reproduce the dynamic-matrix expansion risk and prove a 276-row run cannot silently become 1,656 rows on resume.
 - [ ] Timeout shutdown prefers Promptfoo's graceful pause signal before bounded TERM/KILL escalation, with clear status and recovery diagnostics.
+- [ ] Relevant deterministic tests, full CI, and a provider-backed pause/resume exercise pass before closure.
 
 ## Subtasks
 
