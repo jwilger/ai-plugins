@@ -507,15 +507,21 @@ RUST
     4s ]
 
   descendant_pids=()
-  pending_pids=("$PUBLIC_VERIFIER_PID")
-  while [ "${#pending_pids[@]}" -gt 0 ]; do
-    parent_pid="${pending_pids[0]}"
-    pending_pids=("${pending_pids[@]:1}")
-    [ -r "/proc/$parent_pid/task/$parent_pid/children" ] || continue
-    for child_pid in $(<"/proc/$parent_pid/task/$parent_pid/children"); do
-      descendant_pids+=("$child_pid")
-      pending_pids+=("$child_pid")
+  for _ in {1..500}; do
+    descendant_pids=()
+    pending_pids=("$PUBLIC_VERIFIER_PID")
+    while [ "${#pending_pids[@]}" -gt 0 ]; do
+      parent_pid="${pending_pids[0]}"
+      pending_pids=("${pending_pids[@]:1}")
+      [ -r "/proc/$parent_pid/task/$parent_pid/children" ] || continue
+      for child_pid in $(<"/proc/$parent_pid/task/$parent_pid/children"); do
+        descendant_pids+=("$child_pid")
+        pending_pids+=("$child_pid")
+      done
     done
+    [ "${#descendant_pids[@]}" -ge 2 ] && break
+    kill -0 "$PUBLIC_VERIFIER_PID" 2>/dev/null || break
+    sleep 0.01
   done
   [ "${#descendant_pids[@]}" -ge 2 ]
   for child_pid in "${descendant_pids[@]}"; do

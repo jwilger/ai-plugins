@@ -489,8 +489,8 @@ fixture_root='@FIXTURE_ROOT@'
 printf '%s\n' "$@" >"$fixture_root/systemd-run-args"
 if [ -e "$fixture_root/systemd-auto-cancel" ]; then
   printf '%s\n' "$$" >"$fixture_root/systemd-run-pid"
-  kill -TERM "$PPID"
   trap 'printf "%s\n" terminated >"@FIXTURE_ROOT@/systemd-run-terminated"; exit 143' TERM
+  kill -TERM "$PPID"
   sleep 10
 fi
 while [ "$#" -gt 0 ] && [ "$1" != -- ]; do

@@ -3,18 +3,26 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs =
-    { nixpkgs, flake-utils, ... }:
-    flake-utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-      in
-      {
-        devShells.default = pkgs.mkShell {
+    { nixpkgs, ... }:
+    let
+      supportedSystems = [
+        "aarch64-darwin"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "x86_64-linux"
+      ];
+    in
+    {
+      devShells = nixpkgs.lib.genAttrs supportedSystems (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        {
+          default = pkgs.mkShell {
           name = "ai-plugins";
 
           # Toolchain provided by Nix. Anything installed globally outside Nix
@@ -107,7 +115,8 @@
             echo "  just:  $(just --version) · node $(node --version) · npm $(npm --version)"
             echo "  Global npm installs -> ./.dependencies/ (git-ignored)"
           '';
-        };
-      }
-    );
+          };
+        }
+      );
+    };
 }
