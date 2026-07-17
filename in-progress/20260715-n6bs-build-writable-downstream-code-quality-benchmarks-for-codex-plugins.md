@@ -29,3 +29,5 @@ Re-scoped after the first Promptfoo wiring security review. The immediate decisi
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-17: 2026-07-16: Hosted CI repair is green. Fresh canonical `run-code-quality-benchmark.sh --dry-run` verified exactly 3 conditions x 3 samples and diagnostic gates; `--runtime-preflight` verified the pinned Nix execution closure. No prior sanitized result or live benchmark process exists. Live execution has not started because `CODE_QUALITY_OPENAI_API_KEY` is absent locally, no provider-key GitHub Actions secret/reference is configured, and the fail-closed contract forbids using normal Codex login state. Keep the task in progress until the canonical provider-backed run produces and passes sanitized evidence.
