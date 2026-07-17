@@ -4,6 +4,7 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   PREPARER="$ROOT/scripts/evals/prepare-code-quality-workspaces.mjs"
   SCORER="$ROOT/evals/benchmarks/downstream-code-quality/verifiers/score-expense-report.mjs"
+  PUBLIC_VERIFIER="$ROOT/evals/benchmarks/downstream-code-quality/verifiers/expense-report.mjs"
   TREE_HASH="$ROOT/scripts/evals/code-quality-tree-hash.mjs"
   TRUSTED_FIXTURE="$ROOT/evals/benchmarks/downstream-code-quality/fixtures/expense-report"
   TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ai-plugins-scorer-security.XXXXXX")"
@@ -265,6 +266,13 @@ RUST
   [ -z "$(find "$VERIFIER_TMP" -mindepth 1 -print -quit)" ]
 }
 
+@test "aggregate scope wrappers set kernel OOM grouping without a versioned scope policy" {
+  for wrapper in "$SCORER" "$PUBLIC_VERIFIER"; do
+    ! grep -Fq -- '"--property=OOMPolicy=kill"' "$wrapper"
+    grep -Fq -- 'memory.oom.group' "$wrapper"
+  done
+}
+
 @test "scorer contains its full process tree in the fixed aggregate systemd scope" {
   scorer_stdout="$TEST_ROOT/scorer.stdout"
   scorer_stderr="$TEST_ROOT/scorer.stderr"
@@ -307,7 +315,11 @@ RUST
   [ "$(systemctl --user show "$scope_unit" --property=TasksMax --value)" = 512 ]
   [ "$(systemctl --user show "$scope_unit" --property=CPUQuotaPerSecUSec --value)" = \
     4s ]
-  [ "$(systemctl --user show "$scope_unit" --property=OOMPolicy --value)" = kill ]
+  scope_cgroup="$(
+    systemctl --user show "$scope_unit" --property=ControlGroup --value
+  )"
+  [ -n "$scope_cgroup" ]
+  [ "$(cat "/sys/fs/cgroup$scope_cgroup/memory.oom.group")" = 1 ]
   [ "$(systemctl --user show "$scope_unit" --property=KillMode --value)" = \
     control-group ]
 
@@ -505,6 +517,11 @@ RUST
   [ "$(systemctl --user show "$scope_unit" --property=TasksMax --value)" = 512 ]
   [ "$(systemctl --user show "$scope_unit" --property=CPUQuotaPerSecUSec --value)" = \
     4s ]
+  scope_cgroup="$(
+    systemctl --user show "$scope_unit" --property=ControlGroup --value
+  )"
+  [ -n "$scope_cgroup" ]
+  [ "$(cat "/sys/fs/cgroup$scope_cgroup/memory.oom.group")" = 1 ]
 
   descendant_pids=()
   for _ in {1..500}; do

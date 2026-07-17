@@ -498,6 +498,18 @@ while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
 done
 [ "$#" -gt 1 ] || exit 70
 shift
+if [ "${1##*/}" = resource-scope-entry ]; then
+  scope_entry="$1"
+  shift
+  [ "$#" -gt 1 ] || exit 70
+  scope_entry_marker="$1"
+  shift
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "$line"
+  done <"$scope_entry" >"$fixture_root/resource-scope-entry"
+  printf '%s\n' entered >"$scope_entry_marker"
+  unset XDG_RUNTIME_DIR
+fi
 exec "$@"
 SH
   sed -i "s|@FIXTURE_ROOT@|$FIXTURE_ROOT|g" "$TOOL_ROOT/systemd-run"
@@ -1069,7 +1081,16 @@ NODE
   prlimit_argv="$(paste -sd'|' "$FIXTURE_ROOT/prlimit-args")"
   systemd_argv="$(paste -sd'|' "$FIXTURE_ROOT/systemd-run-args")"
   [[ "$systemd_argv" == \
-    "--user|--scope|--quiet|--collect|--expand-environment=false|--unit=ai-plugins-code-quality-"*"|--property=MemoryMax=8589934592|--property=MemorySwapMax=0|--property=TasksMax=512|--property=CPUQuota=400%|--property=OOMPolicy=kill|--property=KillMode=control-group|--|/tmp/workspace-runtime-"*"/resource-scope-entry|"* ]]
+    "--user|--scope|--quiet|--collect|--expand-environment=false|--unit=ai-plugins-code-quality-"*"|--property=MemoryMax=8589934592|--property=MemorySwapMax=0|--property=TasksMax=512|--property=CPUQuota=400%|--property=KillMode=control-group|--|/tmp/workspace-runtime-"*"/resource-scope-entry|"* ]]
+  [[ "$systemd_argv" != *"OOMPolicy"* ]]
+  scope_entry="$FIXTURE_ROOT/resource-scope-entry"
+  grep -Fq -- 'oom_group="/sys/fs/cgroup${cgroup_path}/memory.oom.group"' "$scope_entry"
+  grep -Fq -- 'printf "%s\n" 1 >"$oom_group"' "$scope_entry"
+  grep -Fq -- 'IFS= read -r oom_group_value <"$oom_group"' "$scope_entry"
+  grep -Fq -- '[ "$oom_group_value" = 1 ]' "$scope_entry"
+  oom_group_line="$(grep -Fn -- 'memory.oom.group' "$scope_entry" | head -n 1 | cut -d: -f1)"
+  marker_line="$(grep -Fn -- 'entered >"$scope_entry_marker"' "$scope_entry" | cut -d: -f1)"
+  [ "$oom_group_line" -lt "$marker_line" ]
   [[ "$timeout_argv" == \
     "--signal=TERM|--kill-after=5s|3600s|/tmp/workspace-runtime-"*"/runtime-tools/prlimit|"* ]]
   [[ "$prlimit_argv" == \

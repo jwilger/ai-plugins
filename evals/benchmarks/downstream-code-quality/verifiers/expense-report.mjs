@@ -186,6 +186,31 @@ function readCgroupValue(cgroupRoot, name) {
   }
 }
 
+function setAndRequireAggregateOomGroup(cgroupRoot) {
+  const oomGroup = path.join(cgroupRoot, "memory.oom.group");
+  try {
+    const metadata = fs.lstatSync(oomGroup);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      operational("resource-scope-invalid");
+    }
+    const descriptor = fs.openSync(
+      oomGroup,
+      fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW,
+    );
+    try {
+      fs.writeFileSync(descriptor, "1\n", { encoding: "utf8" });
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  } catch (error) {
+    if (error instanceof PublicVerifierOperationalError) throw error;
+    operational("resource-scope-invalid");
+  }
+  if (readCgroupValue(cgroupRoot, "memory.oom.group") !== "1") {
+    operational("resource-scope-invalid");
+  }
+}
+
 function requireAggregateScope(unit) {
   if (
     !/^ai-plugins-code-quality-public-verifier-[1-9][0-9]*-[0-9a-f]{16}$/u.test(
@@ -245,6 +270,7 @@ function requireAggregateScope(unit) {
   ) {
     operational("resource-scope-invalid");
   }
+  setAndRequireAggregateOomGroup(cgroupRoot);
 }
 
 function publicVerifierEnvironment() {
@@ -861,7 +887,6 @@ async function executeInAggregateScope(argv) {
       "--property=MemorySwapMax=0",
       "--property=TasksMax=512",
       "--property=CPUQuota=400%",
-      "--property=OOMPolicy=kill",
       "--property=KillMode=control-group",
       "--",
       envTool,
