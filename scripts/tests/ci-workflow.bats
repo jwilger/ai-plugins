@@ -60,15 +60,37 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'sudo systemctl is-active --quiet systemd-logind.service'* ]]
   [[ "$output" == *'sudo loginctl enable-linger "$user"'* ]]
-  [[ "$output" == *'sudo systemctl set-property --runtime "user@$uid.service"'* ]]
+  [[ "$output" == *'ai-plugins-user-delegate.conf'* ]]
+  [[ "$output" == *'/run/systemd/system/user@${uid}.service.d/ai-plugins-ci.conf'* ]]
+  [[ "$output" == *"'[Service]'"* ]]
   [[ "$output" == *'Delegate=cpu memory pids'* ]]
-  [[ "$output" == *'sudo systemctl start "user@$uid.service"'* ]]
+  [[ "$output" == *'sudo install -D -m 0644 "$delegate_source" "$delegate_drop_in"'* ]]
+  [[ "$output" == *'sudo systemctl daemon-reload'* ]]
+  [[ "$output" == *'sudo systemctl restart "user@$uid.service"'* ]]
+  [[ "$output" != *'sudo systemctl set-property'* ]]
   [[ "$output" == *'sudo systemctl is-active --quiet "user@$uid.service"'* ]]
   [[ "$output" == *'DelegateControllers'* ]]
   [[ "$output" == *'test -S "$runtime_dir/systemd/private"'* ]]
   [[ "$output" == *'XDG_RUNTIME_DIR="$runtime_dir" systemctl --user show-environment'* ]]
   [[ "$output" == *'XDG_RUNTIME_DIR=$runtime_dir'* ]]
   [[ "$output" == *'GITHUB_ENV'* ]]
+
+  linger_line=""
+  install_line=""
+  reload_line=""
+  restart_line=""
+  probe_line=""
+  for index in "${!lines[@]}"; do
+    [[ "${lines[$index]}" == *'sudo loginctl enable-linger'* ]] && linger_line="$index"
+    [[ "${lines[$index]}" == *'sudo install -D -m 0644'* ]] && install_line="$index"
+    [[ "${lines[$index]}" == *'sudo systemctl daemon-reload'* ]] && reload_line="$index"
+    [[ "${lines[$index]}" == *'sudo systemctl restart'* ]] && restart_line="$index"
+    [[ "${lines[$index]}" == *'systemctl --user show-environment'* ]] && probe_line="$index"
+  done
+  [ "$linger_line" -lt "$install_line" ]
+  [ "$install_line" -lt "$reload_line" ]
+  [ "$reload_line" -lt "$restart_line" ]
+  [ "$restart_line" -lt "$probe_line" ]
 
   run yq -r \
     '.jobs.quality.steps[] | select(.name == "Full gate") | .run' \

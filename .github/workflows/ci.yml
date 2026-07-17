@@ -39,12 +39,19 @@ jobs:
           uid="$(id -u)"
           user="$(id -un)"
           runtime_dir="/run/user/$uid"
+          delegate_source="$RUNNER_TEMP/ai-plugins-user-delegate.conf"
+          delegate_drop_in="/run/systemd/system/user@${uid}.service.d/ai-plugins-ci.conf"
 
           sudo systemctl is-active --quiet systemd-logind.service
           sudo loginctl enable-linger "$user"
-          sudo systemctl set-property --runtime "user@$uid.service" \
-            "Delegate=cpu memory pids"
-          sudo systemctl start "user@$uid.service"
+          # Delegation is allocation-time state, so Jammy cannot apply it with
+          # `systemctl set-property` after the user manager already exists.
+          printf '%s\n' \
+            '[Service]' \
+            'Delegate=cpu memory pids' > "$delegate_source"
+          sudo install -D -m 0644 "$delegate_source" "$delegate_drop_in"
+          sudo systemctl daemon-reload
+          sudo systemctl restart "user@$uid.service"
           sudo systemctl is-active --quiet "user@$uid.service"
 
           delegated_controllers="$(
