@@ -49,7 +49,8 @@ jobs:
           # `systemctl set-property` after the user manager already exists.
           printf '%s\n' \
             '[Service]' \
-            'Delegate=cpu memory pids' > "$delegate_source"
+            'Delegate=cpu memory pids' \
+            'LimitSTACK=67108864' > "$delegate_source"
           sudo install -D -m 0644 "$delegate_source" "$delegate_drop_in"
           sudo systemctl daemon-reload
           # Load the override before enabling linger so an activation raced by
@@ -106,6 +107,18 @@ jobs:
             esac
           done
 
+          # The trusted Rust scorer caps compiler subprocesses at a 64 MiB
+          # stack. GitHub's runner session supplies a lower hard limit, which
+          # an unprivileged user manager cannot raise for its own units.
+          manager_stack_limit="$(
+            sudo systemctl show "$user_manager_unit" \
+              --property=LimitSTACK --value
+          )"
+          [ "$manager_stack_limit" = 67108864 ] || {
+            echo "user systemd manager has stack limit $manager_stack_limit; expected 67108864" >&2
+            exit 1
+          }
+
           test ! -L "$runtime_dir"
           test "$(stat -c '%u:%a' "$runtime_dir")" = "$uid:700"
           test -S "$runtime_dir/systemd/private"
@@ -127,6 +140,7 @@ jobs:
               --collect \
               --unit="ai-plugins-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
               --property=Type=exec \
+              --property=LimitSTACK=67108864 \
               --working-directory="$GITHUB_WORKSPACE" \
               --setenv=PATH="$PATH" \
               --setenv=HOME="$HOME" \
