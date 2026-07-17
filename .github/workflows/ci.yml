@@ -41,9 +41,10 @@ jobs:
           runtime_dir="/run/user/$uid"
           delegate_source="$RUNNER_TEMP/ai-plugins-user-delegate.conf"
           delegate_drop_in="/run/systemd/system/user@${uid}.service.d/ai-plugins-ci.conf"
+          user_manager_unit="user@$uid.service"
+          runtime_unit="user-runtime-dir@$uid.service"
 
           sudo systemctl is-active --quiet systemd-logind.service
-          sudo loginctl enable-linger "$user"
           # Delegation is allocation-time state, so Jammy cannot apply it with
           # `systemctl set-property` after the user manager already exists.
           printf '%s\n' \
@@ -51,11 +52,48 @@ jobs:
             'Delegate=cpu memory pids' > "$delegate_source"
           sudo install -D -m 0644 "$delegate_source" "$delegate_drop_in"
           sudo systemctl daemon-reload
-          sudo systemctl restart "user@$uid.service"
-          sudo systemctl is-active --quiet "user@$uid.service"
+          # Load the override before enabling linger so an activation raced by
+          # logind cannot start the manager with the old delegation contract.
+          sudo loginctl enable-linger "$user"
+
+          activate_user_manager() {
+            if sudo systemctl is-active --quiet "$user_manager_unit"; then
+              sudo systemctl restart "$user_manager_unit" || return
+            else
+              sudo systemctl reset-failed "$user_manager_unit" "$runtime_unit" || true
+              sudo systemctl start "$user_manager_unit" || return
+            fi
+            sudo systemctl is-active --quiet "$user_manager_unit"
+          }
+
+          diagnose_user_manager() {
+            sudo systemctl status --no-pager --full \
+              "$user_manager_unit" "$runtime_unit" || true
+            sudo systemctl show "$user_manager_unit" "$runtime_unit" \
+              --property=ActiveState,SubState,Result,ExecMainStatus,ControlGroup,DelegateControllers || true
+            sudo journalctl --boot --no-pager --lines=100 \
+              --unit="$user_manager_unit" --unit="$runtime_unit" || true
+          }
+
+          activation_succeeded=false
+          for attempt in 1 2 3; do
+            if activate_user_manager; then
+              activation_succeeded=true
+              break
+            fi
+            echo "user systemd manager activation attempt $attempt failed" >&2
+            diagnose_user_manager
+            sudo systemctl reset-failed "$user_manager_unit" "$runtime_unit" || true
+            if [ "$attempt" -lt 3 ]; then
+              sleep "$attempt"
+            fi
+          done
+          if [ "$activation_succeeded" != true ]; then
+            exit 1
+          fi
 
           delegated_controllers="$(
-            sudo systemctl show "user@$uid.service" \
+            sudo systemctl show "$user_manager_unit" \
               --property=DelegateControllers --value
           )"
           for controller in cpu memory pids; do
