@@ -1362,13 +1362,32 @@ const scopeEntryMarker = join(runtimeSupport, "resource-scope-entered");
 const resourceScopeEntry = join(runtimeSupport, "resource-scope-entry");
 writeFileSync(
   resourceScopeEntry,
-  `#!${shell}\n` +
-    "set -eu\n" +
-    "scope_entry_marker=$1\n" +
-    "shift\n" +
-    'printf "%s\\n" entered >"$scope_entry_marker"\n' +
-    "unset XDG_RUNTIME_DIR\n" +
-    'exec "$@"\n',
+  [
+    `#!${shell}`,
+    "set -eu",
+    "cgroup_path=",
+    "while IFS=: read -r hierarchy controllers candidate; do",
+    '  if [ "$hierarchy" = 0 ] && [ -z "$controllers" ]; then',
+    "    cgroup_path=$candidate",
+    "    break",
+    "  fi",
+    "done </proc/self/cgroup",
+    'case "$cgroup_path" in',
+    "  /*) ;;",
+    "  *) exit 70 ;;",
+    "esac",
+    'oom_group="/sys/fs/cgroup${cgroup_path}/memory.oom.group"',
+    '[ -f "$oom_group" ] && [ ! -L "$oom_group" ]',
+    'printf "%s\\n" 1 >"$oom_group"',
+    'IFS= read -r oom_group_value <"$oom_group"',
+    '[ "$oom_group_value" = 1 ]',
+    "scope_entry_marker=$1",
+    "shift",
+    'printf "%s\\n" entered >"$scope_entry_marker"',
+    "unset XDG_RUNTIME_DIR",
+    'exec "$@"',
+    "",
+  ].join("\n"),
   { mode: 0o500 },
 );
 const workspaceExporter = join(runtimeSupport, "workspace-exporter");
@@ -1672,7 +1691,6 @@ const child = spawn(
     "--property=MemorySwapMax=0",
     "--property=TasksMax=512",
     "--property=CPUQuota=400%",
-    "--property=OOMPolicy=kill",
     "--property=KillMode=control-group",
     "--",
     resourceScopeEntry,

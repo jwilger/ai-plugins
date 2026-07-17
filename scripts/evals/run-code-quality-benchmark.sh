@@ -750,6 +750,22 @@ promptfoo_scope_entry="$scratch_root/promptfoo-scope-entry"
 printf '%s\n' \
   "#!$scope_bash_bin" \
   'set -euo pipefail' \
+  'cgroup_path=' \
+  'while IFS=: read -r hierarchy controllers candidate; do' \
+  '  if [ "$hierarchy" = 0 ] && [ -z "$controllers" ]; then' \
+  '    cgroup_path=$candidate' \
+  '    break' \
+  '  fi' \
+  'done </proc/self/cgroup' \
+  'case "$cgroup_path" in' \
+  '  /*) ;;' \
+  '  *) exit 70 ;;' \
+  'esac' \
+  'oom_group="/sys/fs/cgroup${cgroup_path}/memory.oom.group"' \
+  '[ -f "$oom_group" ] && [ ! -L "$oom_group" ]' \
+  'printf "%s\n" 1 >"$oom_group"' \
+  'IFS= read -r oom_group_value <"$oom_group"' \
+  '[ "$oom_group_value" = 1 ]' \
   'unset XDG_RUNTIME_DIR' \
   'exec "$@"' \
   >"$promptfoo_scope_entry"
@@ -864,7 +880,6 @@ env -i \
     --property=MemorySwapMax=0 \
     --property=TasksMax=768 \
     --property=CPUQuota=600% \
-    --property=OOMPolicy=kill \
     --property=KillMode=control-group \
     -- \
     "$promptfoo_scope_entry" \

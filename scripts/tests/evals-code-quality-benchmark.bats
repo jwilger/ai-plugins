@@ -354,10 +354,18 @@ for (const property of [
   "MemorySwapMax=0",
   "TasksMax=768",
   "CPUQuota=600%",
-  "OOMPolicy=kill",
   "KillMode=control-group",
 ]) {
   assert.ok(source.includes(`--property=${property}`));
+}
+assert.ok(!source.includes("--property=OOMPolicy=kill"));
+for (const fragment of [
+  "'oom_group=\"/sys/fs/cgroup${cgroup_path}/memory.oom.group\"'",
+  "'printf \"%s\\n\" 1 >\"$oom_group\"'",
+  "'IFS= read -r oom_group_value <\"$oom_group\"'",
+  "'[ \"$oom_group_value\" = 1 ]'",
+]) {
+  assert.ok(source.includes(fragment));
 }
 assert.match(source, /'unset XDG_RUNTIME_DIR'/);
 assert.match(source, /XDG_RUNTIME_DIR="\/run\/user\/\$UID"/);
