@@ -34,8 +34,66 @@ jobs:
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
 
+      - name: Provision delegated user systemd
+        run: |
+          uid="$(id -u)"
+          user="$(id -un)"
+          runtime_dir="/run/user/$uid"
+
+          sudo systemctl is-active --quiet systemd-logind.service
+          sudo loginctl enable-linger "$user"
+          sudo systemctl set-property --runtime "user@$uid.service" \
+            "Delegate=cpu memory pids"
+          sudo systemctl start "user@$uid.service"
+          sudo systemctl is-active --quiet "user@$uid.service"
+
+          delegated_controllers="$(
+            sudo systemctl show "user@$uid.service" \
+              --property=DelegateControllers --value
+          )"
+          for controller in cpu memory pids; do
+            case " $delegated_controllers " in
+              *" $controller "*) ;;
+              *)
+                echo "user systemd manager is missing delegated $controller control" >&2
+                exit 1
+                ;;
+            esac
+          done
+
+          test ! -L "$runtime_dir"
+          test "$(stat -c '%u:%a' "$runtime_dir")" = "$uid:700"
+          test -S "$runtime_dir/systemd/private"
+          XDG_RUNTIME_DIR="$runtime_dir" systemctl --user show-environment >/dev/null
+
+          echo "XDG_RUNTIME_DIR=$runtime_dir" >> "$GITHUB_ENV"
+
       - name: Full gate
-        run: nix develop -c just ci
+        run: |
+          runtime_dir="$XDG_RUNTIME_DIR"
+          nix_bin="$(command -v nix)"
+
+          XDG_RUNTIME_DIR="$runtime_dir" \
+            systemd-run \
+              --user \
+              --wait \
+              --pipe \
+              --quiet \
+              --collect \
+              --unit="ai-plugins-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --property=Type=exec \
+              --working-directory="$GITHUB_WORKSPACE" \
+              --setenv=PATH="$PATH" \
+              --setenv=HOME="$HOME" \
+              --setenv=CI=true \
+              --setenv=GITHUB_ACTIONS=true \
+              --setenv=XDG_RUNTIME_DIR="$runtime_dir" \
+              "$nix_bin" develop -c bash -eu -o pipefail -c '
+                bats --print-output-on-failure \
+                  --filter "scorer contains its full process tree in the fixed aggregate systemd scope|direct public verifier uses the fixed aggregate scope without ambient secrets" \
+                  scripts/tests/evals-code-quality-scorer-security.bats
+                just ci
+              '
 
   codex-cross-harness:
     name: Codex cross-harness manifests
