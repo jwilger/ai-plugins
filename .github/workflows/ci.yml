@@ -118,6 +118,34 @@ jobs:
             echo "user systemd manager has stack limit $manager_stack_limit; expected 67108864" >&2
             exit 1
           }
+          # Ubuntu's PAM stack can reapply the runner session's lower hard
+          # limit after PID 1 applies the unit property. Correct and verify
+          # the live manager so it can honor the transient gate service's
+          # explicit 64 MiB limit.
+          manager_pid="$(
+            sudo systemctl show "$user_manager_unit" \
+              --property=MainPID --value
+          )"
+          case "$manager_pid" in
+            ''|*[!0-9]*|0)
+              echo "user systemd manager has invalid MainPID: $manager_pid" >&2
+              exit 1
+              ;;
+          esac
+          sudo prlimit --pid "$manager_pid" --stack=67108864:67108864
+          read -r manager_stack_soft manager_stack_hard manager_stack_units < <(
+            sudo prlimit --pid "$manager_pid" --stack --raw --noheadings \
+              --output=SOFT,HARD,UNITS
+          )
+          [ "$manager_stack_soft" = 67108864 ] || {
+            echo "user systemd manager has soft stack limit $manager_stack_soft; expected 67108864" >&2
+            exit 1
+          }
+          [ "$manager_stack_hard" = 67108864 ] || {
+            echo "user systemd manager has hard stack limit $manager_stack_hard; expected 67108864" >&2
+            exit 1
+          }
+          [ "$manager_stack_units" = bytes ]
 
           test ! -L "$runtime_dir"
           test "$(stat -c '%u:%a' "$runtime_dir")" = "$uid:700"
@@ -131,6 +159,9 @@ jobs:
           runtime_dir="$XDG_RUNTIME_DIR"
           nix_bin="$(command -v nix)"
 
+          # Command substitutions in the single-quoted payload intentionally
+          # expand in the inner Bash process, not in this workflow shell.
+          # shellcheck disable=SC2016
           XDG_RUNTIME_DIR="$runtime_dir" \
             systemd-run \
               --user \
@@ -148,6 +179,10 @@ jobs:
               --setenv=GITHUB_ACTIONS=true \
               --setenv=XDG_RUNTIME_DIR="$runtime_dir" \
               "$nix_bin" develop -c bash -eu -o pipefail -c '
+                [ "$(ulimit -Hs)" = 65536 ] || {
+                  echo "full gate hard stack limit is $(ulimit -Hs) KiB; expected 65536" >&2
+                  exit 1
+                }
                 bats --print-output-on-failure \
                   --filter "scorer contains its full process tree in the fixed aggregate systemd scope|direct public verifier uses the fixed aggregate scope without ambient secrets" \
                   scripts/tests/evals-code-quality-scorer-security.bats
