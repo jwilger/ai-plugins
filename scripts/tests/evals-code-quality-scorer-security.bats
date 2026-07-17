@@ -84,6 +84,46 @@ mark_benchmark_workspace() {
     >"$workspace/.git/.ai-plugins-code-quality-workspace"
 }
 
+wait_for_aggregate_scope_ready() {
+  local owner_pid="$1"
+  local cgroup_root="$2"
+  local attempt parent_pid child_pid children_file child_list
+  local -a pending_pids
+
+  # Preserve the successful snapshot for the caller's explicit assertions.
+  oom_group_value=""
+  descendant_pids=()
+  for attempt in {1..500}; do
+    oom_group_value=""
+    if [ -r "$cgroup_root/memory.oom.group" ]; then
+      IFS= read -r oom_group_value \
+        <"$cgroup_root/memory.oom.group" 2>/dev/null || true
+    fi
+
+    descendant_pids=()
+    pending_pids=("$owner_pid")
+    while [ "${#pending_pids[@]}" -gt 0 ]; do
+      parent_pid="${pending_pids[0]}"
+      pending_pids=("${pending_pids[@]:1}")
+      children_file="/proc/$parent_pid/task/$parent_pid/children"
+      if ! child_list="$(<"$children_file")" 2>/dev/null; then
+        continue
+      fi
+      for child_pid in $child_list; do
+        descendant_pids+=("$child_pid")
+        pending_pids+=("$child_pid")
+      done
+    done
+
+    if [ "$oom_group_value" = 1 ] && [ "${#descendant_pids[@]}" -ge 2 ]; then
+      return 0
+    fi
+    kill -0 "$owner_pid" 2>/dev/null || break
+    sleep 0.01
+  done
+  return 1
+}
+
 @test "scorer emits only bounded hashed change evidence and trusted digests" {
   secret_name="secret_github_pat.rs"
   secret_value="ghp_FAKE_SCORER_SECRET_MUST_NOT_APPEAR"
@@ -319,28 +359,27 @@ RUST
     systemctl --user show "$scope_unit" --property=ControlGroup --value
   )"
   [ -n "$scope_cgroup" ]
-  [ "$(cat "/sys/fs/cgroup$scope_cgroup/memory.oom.group")" = 1 ]
   [ "$(systemctl --user show "$scope_unit" --property=KillMode --value)" = \
     control-group ]
 
-  descendant_pids=()
-  pending_pids=("$SCORER_PID")
-  while [ "${#pending_pids[@]}" -gt 0 ]; do
-    parent_pid="${pending_pids[0]}"
-    pending_pids=("${pending_pids[@]:1}")
-    [ -r "/proc/$parent_pid/task/$parent_pid/children" ] || continue
-    for child_pid in $(<"/proc/$parent_pid/task/$parent_pid/children"); do
-      descendant_pids+=("$child_pid")
-      pending_pids+=("$child_pid")
-    done
-  done
+  wait_for_aggregate_scope_ready \
+    "$SCORER_PID" "/sys/fs/cgroup$scope_cgroup" || true
+  [ "$oom_group_value" = 1 ]
   [ "${#descendant_pids[@]}" -ge 2 ]
+  inspected_environments=0
   for child_pid in "${descendant_pids[@]}"; do
-    [ -r "/proc/$child_pid/environ" ] || continue
-    ! tr '\0' '\n' <"/proc/$child_pid/environ" \
-      | grep -aEq \
-        '^(ALL_PROXY|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CODEX_API_KEY|HTTPS_PROXY|OPENAI_API_KEY)='
+    if ! environment_snapshot="$(
+      tr '\0' '\n' 2>/dev/null <"/proc/$child_pid/environ"
+    )"; then
+      continue
+    fi
+    [ -n "$environment_snapshot" ] || continue
+    inspected_environments=$((inspected_environments + 1))
+    ! grep -aEq \
+      '^(ALL_PROXY|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CODEX_API_KEY|HTTPS_PROXY|OPENAI_API_KEY)=' \
+      <<<"$environment_snapshot"
   done
+  [ "$inspected_environments" -ge 1 ]
 
   set +e
   wait "$SCORER_PID"
@@ -521,32 +560,24 @@ RUST
     systemctl --user show "$scope_unit" --property=ControlGroup --value
   )"
   [ -n "$scope_cgroup" ]
-  [ "$(cat "/sys/fs/cgroup$scope_cgroup/memory.oom.group")" = 1 ]
-
-  descendant_pids=()
-  for _ in {1..500}; do
-    descendant_pids=()
-    pending_pids=("$PUBLIC_VERIFIER_PID")
-    while [ "${#pending_pids[@]}" -gt 0 ]; do
-      parent_pid="${pending_pids[0]}"
-      pending_pids=("${pending_pids[@]:1}")
-      [ -r "/proc/$parent_pid/task/$parent_pid/children" ] || continue
-      for child_pid in $(<"/proc/$parent_pid/task/$parent_pid/children"); do
-        descendant_pids+=("$child_pid")
-        pending_pids+=("$child_pid")
-      done
-    done
-    [ "${#descendant_pids[@]}" -ge 2 ] && break
-    kill -0 "$PUBLIC_VERIFIER_PID" 2>/dev/null || break
-    sleep 0.01
-  done
+  wait_for_aggregate_scope_ready \
+    "$PUBLIC_VERIFIER_PID" "/sys/fs/cgroup$scope_cgroup" || true
+  [ "$oom_group_value" = 1 ]
   [ "${#descendant_pids[@]}" -ge 2 ]
+  inspected_environments=0
   for child_pid in "${descendant_pids[@]}"; do
-    [ -r "/proc/$child_pid/environ" ] || continue
-    ! tr '\0' '\n' <"/proc/$child_pid/environ" \
-      | grep -aEq \
-        '^(ALL_PROXY|AWS_SECRET_ACCESS_KEY|CODEX_API_KEY|OPENAI_API_KEY)='
+    if ! environment_snapshot="$(
+      tr '\0' '\n' 2>/dev/null <"/proc/$child_pid/environ"
+    )"; then
+      continue
+    fi
+    [ -n "$environment_snapshot" ] || continue
+    inspected_environments=$((inspected_environments + 1))
+    ! grep -aEq \
+      '^(ALL_PROXY|AWS_SECRET_ACCESS_KEY|CODEX_API_KEY|OPENAI_API_KEY)=' \
+      <<<"$environment_snapshot"
   done
+  [ "$inspected_environments" -ge 1 ]
 
   verifier_status=0
   wait "$PUBLIC_VERIFIER_PID" || verifier_status=$?
