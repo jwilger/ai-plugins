@@ -1028,14 +1028,18 @@ function buildRun(row, rawEntries, artifactEntry, runtimeState) {
 }
 
 function rawResultsArray(raw) {
-  const summary = raw?.results?.version === 3 ? raw.results : raw;
-  if (
-    !isPlainObject(summary) ||
-    summary.version !== 3 ||
-    !Array.isArray(summary.results) ||
-    summary.results.length > maximumResults
-  ) {
-    throw new CheckFailure("raw-results-schema-invalid");
+  const summary = isPlainObject(raw?.results) ? raw.results : raw;
+  if (!isPlainObject(summary)) {
+    throw new CheckFailure("raw-results-envelope-invalid");
+  }
+  if (summary.version !== 3) {
+    throw new CheckFailure("raw-results-version-invalid");
+  }
+  if (!Array.isArray(summary.results)) {
+    throw new CheckFailure("raw-results-array-invalid");
+  }
+  if (summary.results.length > maximumResults) {
+    throw new CheckFailure("raw-results-count-invalid");
   }
   return summary.results;
 }
