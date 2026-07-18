@@ -407,6 +407,7 @@ assert.match(
   source,
   /trusted_promptfoo_path="\$\(dirname "\$node_bin"\):\$PATH"/,
 );
+assert.match(source, /host_tmp="\$scratch_root\/host-tmp"[\s\S]*work_root="\$host_tmp\/workspaces"/);
 assert.match(source, /PATH="\$trusted_promptfoo_path"/);
 assert.match(
   source,
