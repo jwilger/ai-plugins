@@ -1035,7 +1035,7 @@ function rawResultsArray(raw) {
     !Array.isArray(summary.results) ||
     summary.results.length > maximumResults
   ) {
-    throw new CheckFailure("raw-results-invalid");
+    throw new CheckFailure("raw-results-schema-invalid");
   }
   return summary.results;
 }
@@ -1211,9 +1211,9 @@ function main() {
       readPrivateFile(
         arguments_.resultsFile,
         maximumResultsBytes,
-        "raw-results-invalid",
+        "raw-results-file-invalid",
       ),
-      "raw-results-invalid",
+      "raw-results-schema-invalid",
     );
     const sanitized = buildSanitized(
       runtimeState,
