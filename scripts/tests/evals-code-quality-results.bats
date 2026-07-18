@@ -1239,7 +1239,7 @@ NODE
       select(.conditionId == $mode and .sampleIndex == 1) |
       .complete == false and
       .outcomeClass == "provenance-failure" and
-      .diagnosticCode == "raw-binding-invalid"
+      .diagnosticCode == "raw-binding-test-case-run-id"
     )
   ' "$OUTPUT"
   run grep -E 'PRIVATE|SUBSTITUTED PROMPT' "$OUTPUT"
