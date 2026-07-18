@@ -948,6 +948,9 @@ function buildRun(row, rawEntries, artifactEntry, runtimeState) {
       outcomeClass: artifactEntry?.present
         ? "provenance-failure"
         : "operational-failure",
+      diagnosticCode: artifactEntry?.present
+        ? "raw-result-missing"
+        : "turn-output-missing",
       skillActivations: [],
     };
   }
@@ -957,6 +960,7 @@ function buildRun(row, rawEntries, artifactEntry, runtimeState) {
       complete: false,
       pass: false,
       outcomeClass: "provenance-failure",
+      diagnosticCode: "raw-result-duplicate",
       skillActivations: [],
     };
   }
@@ -967,6 +971,7 @@ function buildRun(row, rawEntries, artifactEntry, runtimeState) {
       complete: false,
       pass: false,
       outcomeClass: "provenance-failure",
+      diagnosticCode: "raw-binding-invalid",
       skillActivations: [],
     };
   }
@@ -984,6 +989,7 @@ function buildRun(row, rawEntries, artifactEntry, runtimeState) {
       complete: Boolean(metrics),
       pass: false,
       outcomeClass: classifiedMissingArtifact(result),
+      diagnosticCode: "artifact-missing",
       ...(metrics ? { metrics } : {}),
       ...activationFields,
     };
@@ -997,6 +1003,7 @@ function buildRun(row, rawEntries, artifactEntry, runtimeState) {
       complete: Boolean(metrics),
       pass: false,
       outcomeClass: "provenance-failure",
+      diagnosticCode: "artifact-invalid-or-disagrees",
       ...(metrics ? { metrics } : {}),
       ...activationFields,
     };
@@ -1007,6 +1014,7 @@ function buildRun(row, rawEntries, artifactEntry, runtimeState) {
       complete: Boolean(metrics),
       pass: false,
       outcomeClass: "provenance-failure",
+      diagnosticCode: "activation-telemetry-unavailable",
       ...(metrics ? { metrics } : {}),
       skillActivations: [],
     };

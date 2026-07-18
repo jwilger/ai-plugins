@@ -970,6 +970,7 @@ NODE
     .diagnostics.outcomes.provenanceFailure == 1 and
     (.runs | map(select(.outcomeClass == "provenance-failure")) | length) == 1 and
     (.runs[] | select(.outcomeClass == "provenance-failure") |
+      .diagnosticCode == "activation-telemetry-unavailable" and
       .skillActivations == [] and
       (has("skillActivationEvidence") | not)
     )
@@ -990,7 +991,9 @@ NODE
   jq -e '
     .diagnosticEligible == false and
     .diagnostics.provenanceFailures == 1 and
-    .diagnostics.outcomes.provenanceFailure == 1
+    .diagnostics.outcomes.provenanceFailure == 1 and
+    (.runs[] | select(.outcomeClass == "provenance-failure") |
+      .diagnosticCode == "activation-telemetry-unavailable")
   ' "$OUTPUT"
 }
 
@@ -1235,7 +1238,8 @@ NODE
     (.runs[] |
       select(.conditionId == $mode and .sampleIndex == 1) |
       .complete == false and
-      .outcomeClass == "provenance-failure"
+      .outcomeClass == "provenance-failure" and
+      .diagnosticCode == "raw-binding-invalid"
     )
   ' "$OUTPUT"
   run grep -E 'PRIVATE|SUBSTITUTED PROMPT' "$OUTPUT"
@@ -1260,6 +1264,7 @@ NODE
     (.runs[] |
       select(.conditionId == $mode and .sampleIndex == 1) |
       .outcomeClass == "provenance-failure" and
+      .diagnosticCode == "artifact-invalid-or-disagrees" and
       .pass == false
     )
   ' "$OUTPUT"
