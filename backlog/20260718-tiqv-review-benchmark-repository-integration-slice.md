@@ -17,6 +17,8 @@ Split from 20260715-n6bs after formal final review returned scope_split_hold for
 
 ## Acceptance criteria
 
+- [ ] Runtime and tool inputs are reproducibly pinned.
+
 ## Subtasks
 
 ## Notes / Log
