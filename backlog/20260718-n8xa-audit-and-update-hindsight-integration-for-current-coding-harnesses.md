@@ -22,6 +22,7 @@ For each supported coding harness (including Codex and Claude Code where applica
 - [ ] Bank selection and isolation, lifecycle hooks, recall/retain behavior, MCP settings, budgets/filters, and secret handling are verified for each supported harness.
 - [ ] Focused automated tests or smoke checks cover configuration validity, hook execution, bank routing, targeted recall, session retention, and safe failure behavior.
 - [ ] Harness-specific differences and intentionally unsupported Hindsight features are documented; shared configuration does not erase required differences.
+- [ ] All affected plugin versions and marketplace metadata are bumped consistently, and required behavior evals plus `just ci` pass.
 
 ## Subtasks
 
