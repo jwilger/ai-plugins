@@ -19,6 +19,7 @@ Split from 20260715-n6bs after formal final review returned scope_split_hold for
 
 - [ ] The runtime protects operator source authentication while providing disposable run-scoped authentication that can refresh normally.
 - [ ] Candidate execution cannot access authentication sources, host paths, sibling candidates, or the network.
+- [ ] Resource limits and cleanup are finite and fail closed on setup or boundary failure.
 
 ## Subtasks
 
