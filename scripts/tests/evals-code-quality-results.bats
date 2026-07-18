@@ -764,6 +764,7 @@ run_checker() {
   provenance_mode="$(jq -r '.rows[2].mode' "$RUNTIME_MANIFEST")"
 
   safety_artifact="$ARTIFACT_ROOT/rust-cli-feature/sample-1/$safety_mode.json"
+  provenance_artifact="$ARTIFACT_ROOT/rust-cli-feature/sample-1/$provenance_mode.json"
   jq '
     .pass = false |
     .outcomeClass = "safety-failure" |
@@ -771,12 +772,15 @@ run_checker() {
   ' "$safety_artifact" >"$safety_artifact.updated"
   chmod 600 "$safety_artifact.updated"
   mv "$safety_artifact.updated" "$safety_artifact"
+  jq '.verifierCompositionSha256 = ("0" * 64)' \
+    "$provenance_artifact" >"$provenance_artifact.updated"
+  chmod 600 "$provenance_artifact.updated"
+  mv "$provenance_artifact.updated" "$provenance_artifact"
   rm "$ARTIFACT_ROOT/rust-cli-feature/sample-1/$operational_mode.json"
 
   jq \
     --arg safety "$safety_mode" \
-    --arg operational "$operational_mode" \
-    --arg provenance "$provenance_mode" '
+    --arg operational "$operational_mode" '
       .results.results |= map(
         if .vars.sample_index == 1 and .vars.condition_id == $safety then
           .success = false |
@@ -791,8 +795,6 @@ run_checker() {
           .gradingResult.pass = false |
           .gradingResult.score = 0 |
           .error = "CODE_QUALITY_BOUNDARY_ERROR:configuration:node-runtime-unavailable"
-        elif .vars.sample_index == 1 and .vars.condition_id == $provenance then
-          .vars.composition_hash = ("0" * 64)
         else . end
       )
     ' "$RAW_RESULTS" >"$RAW_RESULTS.updated"
@@ -804,7 +806,7 @@ run_checker() {
   [ "$status" -eq 0 ]
   jq -e '
     .diagnosticEligible == false and
-    .diagnostics.completeRuns == 8 and
+    .diagnostics.completeRuns == 9 and
     .diagnostics.safetyFailures == 1 and
     .diagnostics.operationalFailures == 1 and
     .diagnostics.provenanceFailures == 1 and
@@ -1096,7 +1098,7 @@ NODE
   [[ "$output" != *"$WORKSPACE_MANIFEST"* ]]
 }
 
-@test "checker preserves a classified boundary safety failure without its detail" {
+@test "checker preserves a sanitized boundary safety diagnostic" {
   prepare_trusted_runtime
   write_valid_benchmark_inputs
   mode="$(jq -r '.rows[0].mode' "$RUNTIME_MANIFEST")"
@@ -1126,10 +1128,11 @@ NODE
     (.runs[] |
       select(.conditionId == $mode and .sampleIndex == 1) |
       .complete == true and
-      .outcomeClass == "safety-failure"
+      .outcomeClass == "safety-failure" and
+      .diagnosticCode == "boundary-safety-output-limit-exceeded"
     )
   ' "$OUTPUT"
-  run grep -E 'CODE_QUALITY_BOUNDARY_ERROR|output-limit-exceeded' "$OUTPUT"
+  run grep -E 'CODE_QUALITY_BOUNDARY_ERROR|/tmp|/home' "$OUTPUT"
   [ "$status" -eq 1 ]
 }
 
@@ -1221,7 +1224,7 @@ NODE
   jq --arg mode "$mode" '
     .results.results |= map(
       if .vars.sample_index == 1 and .vars.condition_id == $mode then
-        .testCase.vars.run_id = ("0" * 64) |
+        .testCase.vars.workspace = "/tmp/substituted-workspace" |
         .testCase.vars.scenario_prompt = "PRIVATE SUBSTITUTED PROMPT"
       else . end
     )
@@ -1239,11 +1242,32 @@ NODE
       select(.conditionId == $mode and .sampleIndex == 1) |
       .complete == false and
       .outcomeClass == "provenance-failure" and
-      .diagnosticCode == "raw-binding-test-case-run-id-value"
+      .diagnosticCode == "raw-binding-test-case-workspace-value"
     )
   ' "$OUTPUT"
   run grep -E 'PRIVATE|SUBSTITUTED PROMPT' "$OUTPUT"
   [ "$status" -eq 1 ]
+}
+
+@test "checker derives provenance from trusted inputs rather than rendered metadata" {
+  prepare_trusted_runtime
+  write_valid_benchmark_inputs
+  jq '
+    .results.results[0].vars.fixture_digest = ("0" * 64) |
+    .results.results[0].testCase.vars.fixture_digest = ("1" * 64)
+  ' \
+    "$RAW_RESULTS" >"$RAW_RESULTS.updated"
+  chmod 600 "$RAW_RESULTS.updated"
+  mv "$RAW_RESULTS.updated" "$RAW_RESULTS"
+
+  run_checker
+
+  [ "$status" -eq 0 ]
+  jq -e '
+    .diagnosticEligible == true and
+    .diagnostics.provenanceFailures == 0 and
+    all(.runs[]; .complete == true)
+  ' "$OUTPUT"
 }
 
 @test "checker rejects an artifact whose pass outcome contradicts its gates" {

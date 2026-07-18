@@ -289,6 +289,7 @@ case " $* " in
     printf '%s\n' hostile >.git/config
     rm original-working-tree-file
     printf '%s\n' candidate >candidate-working-tree-file
+    ln candidate-working-tree-file candidate-hardlink
     ;;
 esac
 case " $* " in
@@ -1124,7 +1125,8 @@ NODE
   [[ "$timeout_argv" == \
     "--signal=TERM|--kill-after=5s|3600s|/tmp/workspace-runtime-"*"/runtime-tools/prlimit|"* ]]
   [[ "$prlimit_argv" == \
-    "--as=8589934592|--cpu=1800|--fsize=1073741824|--nproc=512|--nofile=1024|--core=0|--|/tmp/workspace-runtime-"*"/runtime-tools/bwrap|"* ]]
+    "--as=8589934592|--cpu=1800|--fsize=1073741824|--nofile=1024|--core=0|--|/tmp/workspace-runtime-"*"/runtime-tools/bwrap|"* ]]
+  [[ "$prlimit_argv" != *"--nproc="* ]]
 }
 
 @test "Codex boundary catches cancellation delivered during detached spawn" {
@@ -1844,6 +1846,9 @@ NODE
   [ "$status" -eq 0 ]
   [ ! -e "$WORKSPACE/original-working-tree-file" ]
   [ "$(cat "$WORKSPACE/candidate-working-tree-file")" = candidate ]
+  [ "$(cat "$WORKSPACE/candidate-hardlink")" = candidate ]
+  [ "$(stat -c %h "$WORKSPACE/candidate-working-tree-file")" -eq 1 ]
+  [ "$(stat -c %h "$WORKSPACE/candidate-hardlink")" -eq 1 ]
   [ "$(cat "$WORKSPACE/.git/.ai-plugins-code-quality-workspace")" = \
     'ai-plugins downstream code-quality workspace' ]
   [ ! -e "$WORKSPACE/.git/config" ]

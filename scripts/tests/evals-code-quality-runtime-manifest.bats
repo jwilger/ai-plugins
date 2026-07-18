@@ -11,7 +11,7 @@ setup() {
   ASSERTION="$ROOT/evals/benchmarks/downstream-code-quality/assertions/expense-report.cjs"
   TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ai-plugins-runtime-manifest.XXXXXX")"
   WORK_ROOT="$TEST_ROOT/workspaces"
-  RUNTIME_ROOT="$TEST_ROOT/runtime"
+  RUNTIME_ROOT="$TEST_ROOT/host-tmp/runtime"
   ARTIFACT_ROOT="$TEST_ROOT/artifacts"
 
   CODEX_RESOLUTION="$(node "$CODEX_RESOLVER")"
@@ -47,6 +47,7 @@ setup() {
   printf 'ai-plugins downstream code-quality run root\n' \
     >"$TEST_ROOT/.ai-plugins-code-quality-run-root"
   chmod 600 "$TEST_ROOT/.ai-plugins-code-quality-run-root"
+  mkdir -m 700 "$TEST_ROOT/host-tmp"
   mkdir -m 700 "$ARTIFACT_ROOT"
 
   node "$WORKSPACE_PREPARER" "$WORK_ROOT" \
@@ -294,7 +295,7 @@ prepare_runtime() {
     node -e 'require(process.argv[1])()' "$CASE_LOADER"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"forbidden runtime credential"* ]]
+  [[ "$output" == *"runtime disposable auth invalid"* ]]
 }
 
 @test "runtime evidence only advertises skill directories backed by SKILL.md" {
@@ -482,7 +483,7 @@ NODE
   [ -z "$(find "$other_artifacts" -mindepth 1 -print -quit)" ]
 }
 
-@test "post-turn assertion rejects stale runtime vars before invoking the scorer" {
+@test "post-turn assertion rejects stale execution vars before invoking the scorer" {
   prepare_runtime
 
   run env \
@@ -496,7 +497,7 @@ const testCase = loadCases()[0];
 try {
   assertion("", {
     provider: { label: testCase.providers[0] },
-    vars: { ...testCase.vars, run_id: "0".repeat(64) },
+    vars: { ...testCase.vars, workspace: "/tmp/substituted-workspace" },
   });
 } catch (error) {
   process.stdout.write(error.message);

@@ -1580,7 +1580,8 @@ NODE
   work_root="$TEMP_ROOT/workspaces"
   verifier_out="$TEMP_ROOT/artifacts"
   verifier_tmp="$TEMP_ROOT/verifier-tmp"
-  runtime_root="$TEMP_ROOT/runtime"
+  runtime_root="$TEMP_ROOT/host-tmp/runtime"
+  mkdir -m 700 "$TEMP_ROOT/host-tmp"
   node "$WORKSPACE_PREPARER" "$work_root" \
     --case rust-cli-feature \
     --samples 1 >/dev/null
@@ -1692,7 +1693,8 @@ NODE
   verifier_out="$TEMP_ROOT/artifacts"
   verifier_tmp="$TEMP_ROOT/verifier-tmp"
   escaped="$TEMP_ROOT/escaped"
-  runtime_root="$TEMP_ROOT/runtime"
+  runtime_root="$TEMP_ROOT/host-tmp/runtime"
+  mkdir -m 700 "$TEMP_ROOT/host-tmp"
   node "$WORKSPACE_PREPARER" "$work_root" \
     --case rust-cli-feature \
     --samples 1 >/dev/null
