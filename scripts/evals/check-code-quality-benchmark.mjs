@@ -639,8 +639,15 @@ function rawBindingDiagnostic(result, row, runtimeState) {
   ];
   for (const [source, vars] of variableSets) {
     for (const [variable, field] of bindingFields) {
+      const diagnosticPrefix =
+        `raw-binding-${source}-${variable.replaceAll("_", "-")}`;
+      if (!Object.hasOwn(vars, variable)) {
+        return `${diagnosticPrefix}-missing`;
+      }
       if (!sameValue(vars[variable], row[field])) {
-        return `raw-binding-${source}-${variable.replaceAll("_", "-")}`;
+        return typeof vars[variable] === typeof row[field]
+          ? `${diagnosticPrefix}-value`
+          : `${diagnosticPrefix}-type`;
       }
     }
   }
@@ -656,8 +663,14 @@ function rawBindingDiagnostic(result, row, runtimeState) {
       ["scenario-prompt", scenarioPrompt],
     ]) {
       const variable = name.replaceAll("-", "_");
+      const diagnosticPrefix = `raw-binding-${source}-${name}`;
+      if (!Object.hasOwn(vars, variable)) {
+        return `${diagnosticPrefix}-missing`;
+      }
       if (!sameValue(vars[variable], expected)) {
-        return `raw-binding-${source}-${name}`;
+        return typeof vars[variable] === typeof expected
+          ? `${diagnosticPrefix}-value`
+          : `${diagnosticPrefix}-type`;
       }
     }
   }
