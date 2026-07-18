@@ -41,6 +41,7 @@ setup() {
   CODEX_RESOLVER="$ROOT/scripts/evals/resolve-code-quality-codex.mjs"
   WORKSPACE_PREPARER="$ROOT/scripts/evals/prepare-code-quality-workspaces.mjs"
   RUNTIME_PREPARER="$ROOT/scripts/evals/prepare-code-quality-runtime.mjs"
+  AUTH_PREPARER="$ROOT/scripts/evals/prepare-code-quality-auth.mjs"
   CONTRACT_VALIDATOR="$ROOT/scripts/evals/validate-code-quality-contract.mjs"
   EXPENSE_VERIFIER="$ROOT/evals/benchmarks/downstream-code-quality/verifiers/expense-report.mjs"
   SOURCE_SCORER="$ROOT/evals/benchmarks/downstream-code-quality/verifiers/score-expense-report.mjs"
@@ -48,6 +49,11 @@ setup() {
   EXPENSE_ASSERTION="$ROOT/evals/benchmarks/downstream-code-quality/assertions/expense-report.cjs"
   PROMPTFOO_CONFIG="$ROOT/evals/benchmarks/downstream-code-quality/promptfooconfig.yaml"
   TEMP_ROOT="$(mktemp -d)"
+  export CODE_QUALITY_CODEX_AUTH_HOME="$TEMP_ROOT/auth-home"
+  mkdir -m 700 "$CODE_QUALITY_CODEX_AUTH_HOME"
+  printf '%s\n' '{"auth_mode":"chatgpt","tokens":{"access_token":"fixture-access-token","refresh_token":"fixture-refresh-token"}}' \
+    >"$CODE_QUALITY_CODEX_AUTH_HOME/auth.json"
+  chmod 600 "$CODE_QUALITY_CODEX_AUTH_HOME/auth.json"
   printf 'ai-plugins downstream code-quality run root\n' \
     >"$TEMP_ROOT/.ai-plugins-code-quality-run-root"
   chmod 600 "$TEMP_ROOT/.ai-plugins-code-quality-run-root"
@@ -124,6 +130,8 @@ mark_benchmark_workspace() {
   [[ "$output" == *"rust-cli-feature/sample-1/all-marketplace-skills"* ]]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-code-quality-workspaces.mjs')" -eq 1 ]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-code-quality-runtime.mjs')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -c 'prepare-code-quality-auth.mjs')" -eq 2 ]
+  [[ "$output" != *"CODE_QUALITY_OPENAI_API_KEY"* ]]
   [[ "$output" == *"$work_root/manifest.json $runtime_root"* ]]
   [[ "$output" == *"openai-codex-sdk-no-marketplace-skills"* ]]
   [[ "$output" == *"openai-codex-sdk-targeted-quality-skills"* ]]
@@ -218,19 +226,23 @@ mark_benchmark_workspace() {
   [[ "$output" != *"gate complete-runs"* ]]
 }
 
-@test "live code-quality benchmark requires a dedicated key before creating scratch state" {
+@test "live code-quality benchmark requires existing Codex login before creating scratch state" {
   work_root="$TEMP_ROOT/live-workspaces"
   runtime_root="$TEMP_ROOT/live-runtime"
   out_root="$TEMP_ROOT/live-out"
+  auth_home="$TEMP_ROOT/missing-auth-home"
+  mkdir "$auth_home"
 
   run env -u CODE_QUALITY_OPENAI_API_KEY \
+    CODE_QUALITY_CODEX_AUTH_HOME="$auth_home" \
     CODE_QUALITY_WORK_ROOT="$work_root" \
     CODE_QUALITY_RUNTIME_ROOT="$runtime_root" \
     CODE_QUALITY_OUT_ROOT="$out_root" \
     "$RUNNER" --case rust-cli-feature
 
   [ "$status" -eq 2 ]
-  [[ "$output" == *"CODE_QUALITY_OPENAI_API_KEY"* ]]
+  [[ "$output" == *"ChatGPT-backed Codex login"* ]]
+  [[ "$output" != *"CODE_QUALITY_OPENAI_API_KEY"* ]]
   [ ! -e "$work_root" ]
   [ ! -e "$runtime_root" ]
   [ ! -e "$out_root" ]
@@ -238,7 +250,6 @@ mark_benchmark_workspace() {
 
 @test "live code-quality benchmark refuses a noncanonical sample count" {
   run env \
-    CODE_QUALITY_OPENAI_API_KEY=sk-test-dedicated-code-quality-key-123456 \
     CODE_QUALITY_WORK_ROOT="$TEMP_ROOT/live-workspaces" \
     CODE_QUALITY_RUNTIME_ROOT="$TEMP_ROOT/live-runtime" \
     CODE_QUALITY_OUT_ROOT="$TEMP_ROOT/live-out" \
@@ -250,6 +261,76 @@ mark_benchmark_workspace() {
   [ ! -e "$TEMP_ROOT/live-workspaces" ]
 }
 
+@test "ChatGPT auth uses shared disposable state across isolated Codex homes" {
+  work_root="$TEMP_ROOT/auth-workspaces"
+  runtime_root="$TEMP_ROOT/auth-runtime"
+  node "$WORKSPACE_PREPARER" "$work_root" \
+    --case rust-cli-feature \
+    --samples 1 >/dev/null
+  node "$RUNTIME_PREPARER" "$work_root/manifest.json" "$runtime_root" \
+    >/dev/null
+
+  run node "$AUTH_PREPARER" \
+    "$CODE_QUALITY_CODEX_AUTH_HOME/auth.json" \
+    "$runtime_root/manifest.json"
+
+  [ "$status" -eq 0 ]
+  mapfile -t codex_homes < <(jq -r '.rows[].codexHome' "$runtime_root/manifest.json")
+  [ "${#codex_homes[@]}" -eq 3 ]
+  for codex_home in "${codex_homes[@]}"; do
+    cmp -s "$CODE_QUALITY_CODEX_AUTH_HOME/auth.json" "$codex_home/auth.json"
+    [ "$(stat -c '%a' "$codex_home/auth.json")" = 600 ]
+  done
+
+  printf '%s\n' '{"auth_mode":"chatgpt","tokens":{"access_token":"refreshed-access","refresh_token":"refreshed-rotation"}}' \
+    >"${codex_homes[0]}/auth.json"
+  [[ "$(<"$CODE_QUALITY_CODEX_AUTH_HOME/auth.json")" == *'fixture-access-token'* ]]
+  [[ "$(<"${codex_homes[1]}/auth.json")" == *'refreshed-rotation'* ]]
+}
+
+@test "ChatGPT auth preparation validates every destination before copying" {
+  work_root="$TEMP_ROOT/auth-preflight-workspaces"
+  runtime_root="$TEMP_ROOT/auth-preflight-runtime"
+  node "$WORKSPACE_PREPARER" "$work_root" \
+    --case rust-cli-feature \
+    --samples 1 >/dev/null
+  node "$RUNTIME_PREPARER" "$work_root/manifest.json" "$runtime_root" \
+    >/dev/null
+  mapfile -t codex_homes < <(jq -r '.rows[].codexHome' "$runtime_root/manifest.json")
+  printf '%s\n' stale >"${codex_homes[1]}/auth.json"
+
+  run node "$AUTH_PREPARER" \
+    "$CODE_QUALITY_CODEX_AUTH_HOME/auth.json" \
+    "$runtime_root/manifest.json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"auth-destination-exists"* ]]
+  [ ! -e "${codex_homes[0]}/auth.json" ]
+  [ "$(<"${codex_homes[1]}/auth.json")" = stale ]
+  [ ! -e "${codex_homes[2]}/auth.json" ]
+}
+
+@test "ChatGPT auth cleanup removes only disposable copies" {
+  work_root="$TEMP_ROOT/auth-cleanup-workspaces"
+  runtime_root="$TEMP_ROOT/auth-cleanup-runtime"
+  node "$WORKSPACE_PREPARER" "$work_root" \
+    --case rust-cli-feature \
+    --samples 1 >/dev/null
+  node "$RUNTIME_PREPARER" "$work_root/manifest.json" "$runtime_root" \
+    >/dev/null
+  node "$AUTH_PREPARER" \
+    "$CODE_QUALITY_CODEX_AUTH_HOME/auth.json" \
+    "$runtime_root/manifest.json" >/dev/null
+
+  run node "$AUTH_PREPARER" --remove "$runtime_root/manifest.json"
+
+  [ "$status" -eq 0 ]
+  [ -f "$CODE_QUALITY_CODEX_AUTH_HOME/auth.json" ]
+  while IFS= read -r codex_home; do
+    [ ! -e "$codex_home/auth.json" ]
+  done < <(jq -r '.rows[].codexHome' "$runtime_root/manifest.json")
+}
+
 @test "live benchmark rejects unsafe or stale output before scratch setup" {
   missing_tmp_parent="$TEMP_ROOT/missing-tmp/private"
   unowned_out="$TEMP_ROOT/unowned-out"
@@ -257,7 +338,6 @@ mark_benchmark_workspace() {
   printf 'preserve operator data\n' >"$unowned_out/operator-file"
 
   run env \
-    CODE_QUALITY_OPENAI_API_KEY=sk-test-dedicated-code-quality-key-123456 \
     CODE_QUALITY_OUT_ROOT="$unowned_out" \
     TMPDIR="$missing_tmp_parent" \
     "$RUNNER"
@@ -274,7 +354,6 @@ mark_benchmark_workspace() {
   printf '{"prior":"evidence"}\n' >"$owned_out/results.json"
 
   run env \
-    CODE_QUALITY_OPENAI_API_KEY=sk-test-dedicated-code-quality-key-123456 \
     CODE_QUALITY_OUT_ROOT="$owned_out" \
     TMPDIR="$missing_tmp_parent" \
     "$RUNNER"
@@ -735,7 +814,7 @@ NODE
   done <<'CASES'
 samples	.sampleCount = 2	sampleCount must be exactly 3
 targeted	.conditions[1].plugins = ["development-discipline"]	targeted-quality-skills plugins must be exactly
-auth	.provider.authentication = "copied-oauth-file"	provider authentication must be dedicated-api-key-only
+auth	.provider.authentication = "dedicated-api-key-only"	provider authentication must be chatgpt-login-disposable-copy
 cases	.cases += [.cases[0]]	duplicate case id: rust-cli-feature
 task	.cases[0].taskType = "refactor"	rust-cli-feature taskType must be feature
 fixture-shape	.cases[0].fixture = "unrelated-fixture"	rust-cli-feature fixture must be expense-report

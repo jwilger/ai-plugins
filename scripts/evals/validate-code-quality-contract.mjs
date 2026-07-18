@@ -110,7 +110,7 @@ export function validateBenchmarkContract(contract) {
     sandboxMode: "workspace-write",
     approvalPolicy: "never",
     networkAccess: false,
-    authentication: "dedicated-api-key-only",
+    authentication: "chatgpt-login-disposable-copy",
   };
   for (const [key, expected] of Object.entries(expectedProvider)) {
     if (contract.provider[key] !== expected) {

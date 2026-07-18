@@ -7,13 +7,13 @@ benchmark_dir="$root/evals/benchmarks/downstream-code-quality"
 contract="$benchmark_dir/benchmark.json"
 workspace_preparer="$root/scripts/evals/prepare-code-quality-workspaces.mjs"
 runtime_preparer="$root/scripts/evals/prepare-code-quality-runtime.mjs"
+auth_preparer="$root/scripts/evals/prepare-code-quality-auth.mjs"
 boundary_launcher="$root/scripts/evals/code-quality-codex-boundary"
 boundary_runtime="$root/scripts/evals/code-quality-codex-boundary.mjs"
 codex_resolver="$root/scripts/evals/resolve-code-quality-codex.mjs"
 secret_scanner="$root/scripts/evals/scan-code-quality-secrets.mjs"
 result_checker="$root/scripts/evals/check-code-quality-benchmark.mjs"
 secret_scan_options=(
-  --secret-env CODE_QUALITY_OPENAI_API_KEY
   --secret-env OPENAI_API_KEY
   --secret-env CODEX_API_KEY
   --secret-env ANTHROPIC_API_KEY
@@ -43,7 +43,7 @@ usage() {
     'Usage: scripts/evals/run-code-quality-benchmark.sh [--dry-run | --runtime-preflight] [--case CASE_ID]' \
     '' \
     'Runs the isolated nine-turn downstream Codex code-quality diagnostic.' \
-    'Live execution requires CODE_QUALITY_OPENAI_API_KEY.' \
+    'Live execution requires an existing ChatGPT-backed Codex login.' \
     '--runtime-preflight prints the pinned candidate PATH and Nix runtime closure.'
 }
 
@@ -329,6 +329,8 @@ print_plan() {
     --case "$case_id" --samples "$samples"
   print_command node "$runtime_preparer" "$work_root/manifest.json" \
     "$runtime_root"
+  print_command node "$auth_preparer" '<chatgpt-codex-home>/auth.json' \
+    "$runtime_root/manifest.json"
   printf 'execution EVAL_CASE_FILTER=%s EVAL_SAMPLES=%s\n' \
     "$case_id" "$samples"
   printf 'CODE_QUALITY_RUNTIME_MANIFEST=%s\n' \
@@ -336,9 +338,11 @@ print_plan() {
   EVAL_OUT_DIR="$raw_root" \
     EVAL_TIMEOUT=20h \
     EVAL_CASE_FILTER="$case_id" \
-    EVAL_SAMPLES="$samples" \
+  EVAL_SAMPLES="$samples" \
     "$root/scripts/evals/run.sh" --dry-run \
       "$benchmark_dir/promptfooconfig.yaml"
+  print_command node "$auth_preparer" --remove \
+    "$runtime_root/manifest.json"
   print_command node "$secret_scanner" \
     "${secret_scan_options[@]}" "$raw_root" "$artifact_root"
   print_command node "$result_checker" \
@@ -366,9 +370,14 @@ if [ "$dry_run" -eq 1 ]; then
   exit 0
 fi
 
-if [ -z "${CODE_QUALITY_OPENAI_API_KEY:-}" ] ||
-  [ "${#CODE_QUALITY_OPENAI_API_KEY}" -lt 20 ]; then
-  echo 'CODE_QUALITY_OPENAI_API_KEY must contain a dedicated benchmark API key' >&2
+auth_source_home="${CODE_QUALITY_CODEX_AUTH_HOME:-${CODEX_HOME:-$HOME/.codex}}"
+auth_source="$auth_source_home/auth.json"
+if [ ! -f "$auth_source" ] || [ -L "$auth_source" ] ||
+  [ "$(stat -c '%u' "$auth_source")" -ne "$UID" ] ||
+  [ "$((8#$(stat -c '%a' "$auth_source") & 8#077))" -ne 0 ] ||
+  ! jq -e '.auth_mode == "chatgpt" and (.tokens | type == "object")' \
+    "$auth_source" >/dev/null 2>&1; then
+  echo 'live execution requires a private ChatGPT-backed Codex login auth.json' >&2
   exit 2
 fi
 canonical_samples="$(jq -er '.sampleCount' "$contract")"
@@ -385,6 +394,7 @@ fi
 for required in \
   "$workspace_preparer" \
   "$runtime_preparer" \
+  "$auth_preparer" \
   "$boundary_launcher" \
   "$boundary_runtime" \
   "$codex_resolver" \
@@ -438,6 +448,7 @@ mkdir -m 700 \
 scan_status=0
 run_status=1
 sanitized_created=0
+auth_seeded=0
 cleanup_safe=1
 node_bin=""
 promptfoo_pid=""
@@ -559,6 +570,15 @@ cleanup() {
   if [ "$cleanup_safe" -ne 1 ]; then
     echo "preserving active benchmark scratch state: $scratch_root" >&2
     exit "$status"
+  fi
+  if [ "$auth_seeded" -eq 1 ]; then
+    if "$node_bin" "$auth_preparer" --remove "$runtime_manifest" \
+      >/dev/null 2>&1; then
+      auth_seeded=0
+    else
+      scan_status=1
+      status=1
+    fi
   fi
   for candidate in \
     "$raw_root" \
@@ -745,6 +765,8 @@ env -i \
   "$node_bin" "$runtime_preparer" \
     "$workspace_manifest" "$runtime_root" >/dev/null
 runtime_manifest="$runtime_root/manifest.json"
+"$node_bin" "$auth_preparer" "$auth_source" "$runtime_manifest" >/dev/null
+auth_seeded=1
 
 promptfoo_scope_entry="$scratch_root/promptfoo-scope-entry"
 printf '%s\n' \
@@ -828,8 +850,6 @@ env -i \
   LC_ALL=C.UTF-8 \
   GIT_CONFIG_GLOBAL=/dev/null \
   GIT_CONFIG_NOSYSTEM=1 \
-  OPENAI_API_KEY="$CODE_QUALITY_OPENAI_API_KEY" \
-  CODEX_API_KEY="$CODE_QUALITY_OPENAI_API_KEY" \
   CODE_QUALITY_WORKSPACE_MANIFEST="$workspace_manifest" \
   CODE_QUALITY_RUNTIME_MANIFEST="$runtime_manifest" \
   CODE_QUALITY_VERIFIER_OUT_ROOT="$artifact_root" \

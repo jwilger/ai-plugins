@@ -30,6 +30,9 @@ setup() {
     >"$CODEX_HOME_FIXTURE/.ai-plugins-eval-home"
   printf '%s\n' '[marketplaces.ai-plugins]' 'source_type = "local"' \
     >"$CODEX_HOME_FIXTURE/config.toml"
+  printf '%s\n' '{"auth_mode":"chatgpt","tokens":{"access_token":"fixture-chatgpt-access","refresh_token":"fixture-chatgpt-refresh"}}' \
+    >"$CODEX_HOME_FIXTURE/auth.json"
+  chmod 600 "$CODEX_HOME_FIXTURE/auth.json"
   mkdir -p \
     "$CODEX_HOME_FIXTURE/marketplace/.agents/plugins" \
     "$CODEX_HOME_FIXTURE/plugins/cache/ai-plugins/fixture/0.1.0/skills/fixture" \
@@ -106,8 +109,9 @@ printf '%s\n' "$*" >>"$CODEX_HOME/invocations"
 printf '%s\n' "$@" >"$CODEX_HOME/received-args"
 case " $* " in
   *' --model fixture-leak-probe '*)
-    [ "$OPENAI_API_KEY" = fixture-api-key ]
-    [ "$CODEX_API_KEY" = fixture-api-key ]
+    [ -z "${OPENAI_API_KEY:-}" ]
+    [ -z "${CODEX_API_KEY:-}" ]
+    [ -r "$CODEX_HOME/auth.json" ]
     [ -z "${HOST_ONLY_SECRET:-}" ]
     LEAK_PROBE_FILE="$CODEX_HOME/leak-probe" \
       "$FAKE_SAFE_SHELL_SOURCE" -c '
@@ -178,10 +182,10 @@ case " $* " in
     printf '%s\n' immutable-inputs-protected
     ;;
   *' --model fixture-inner-sandbox-probe '*)
-    [ "$OPENAI_API_KEY" = fixture-api-key ]
-    [ "$CODEX_API_KEY" = fixture-api-key ]
-    printf '%s\n' codex-retained-api-key >"$CODEX_HOME/codex-key-proof"
-    printf '%s\n' codex-retained-api-key
+    [ -z "${OPENAI_API_KEY:-}" ]
+    [ -z "${CODEX_API_KEY:-}" ]
+    [ -r "$CODEX_HOME/auth.json" ]
+    printf '%s\n' codex-retained-chatgpt-auth
     checker="$CODEX_HOME/inner-sandbox-check"
     cat >"$checker" <<'CHECK'
 #!/bin/bash
@@ -215,6 +219,11 @@ CHECK
           --dev /dev \
           -- /bin/bash "$INNER_CHECKER"
       '
+    ;;
+  *' --model fixture-auth-refresh-probe '*)
+    printf '%s\n' '{"auth_mode":"chatgpt","tokens":{"access_token":"refreshed-access","refresh_token":"rotated-refresh"}}' \
+      >"$CODEX_HOME/auth.json.refresh"
+    mv "$CODEX_HOME/auth.json.refresh" "$CODEX_HOME/auth.json"
     ;;
 esac
 case " $* " in
@@ -312,6 +321,8 @@ printf '%s\n' "$@" >"$fixture_root/bwrap-args"
 safe_shell_source=
 workspace_input_source=
 workspace_output_source=
+auth_input_source=
+auth_output_source=
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -336,11 +347,17 @@ while [ "$#" -gt 0 ]; do
       if [ "$3" = /runtime/workspace-input ]; then
         workspace_input_source="$2"
       fi
+      if [ "$3" = /runtime/auth-input/auth.json ]; then
+        auth_input_source="$2"
+      fi
       shift 3
       ;;
     --bind)
       if [ "$3" = /runtime/workspace-output ]; then
         workspace_output_source="$2"
+      fi
+      if [ "$3" = /runtime/auth-output/auth.json ]; then
+        auth_output_source="$2"
       fi
       shift 3
       ;;
@@ -363,6 +380,8 @@ done
 [ "$#" -gt 4 ] || exit 70
 [ -n "$workspace_input_source" ] || exit 70
 [ -n "$workspace_output_source" ] || exit 70
+[ -n "$auth_input_source" ] || exit 70
+[ -n "$auth_output_source" ] || exit 70
 shift
 workspace_argument="$1"
 workspace_max_bytes="$2"
@@ -380,10 +399,16 @@ if [ "${working_directory:-}" = /workspace ]; then
   working_directory="$fixture_root/workspace"
 fi
 [ -n "$working_directory" ] && cd "$working_directory"
+auth_original="$fixture_root/original-auth.json"
+cp "$fixture_root/codex-home/auth.json" "$auth_original"
+cp "$auth_input_source" "$fixture_root/codex-home/auth.json"
 set +e
 "$fixture_root/codex-runtime/bin/codex" "$@"
 codex_status=$?
 set -e
+cp "$fixture_root/codex-home/auth.json" "$auth_output_source"
+cp "$auth_original" "$fixture_root/codex-home/auth.json"
+chmod 600 "$fixture_root/codex-home/auth.json"
 
 unsafe_entry="$(
   find "$working_directory" -xdev \
@@ -520,7 +545,6 @@ build_boundary_env() {
   BOUNDARY_ENV=(
     "PATH=$SAFE_TOOL_PATH"
     'HOST_ONLY_SECRET=must-not-cross-boundary'
-    'OPENAI_API_KEY=fixture-api-key'
     "CODEX_HOME=${BOUNDARY_CODEX_HOME:-$CODEX_HOME_FIXTURE}"
     "HOME=$REAL_HOME"
     "TMPDIR=${BOUNDARY_PRIVATE_TMP:-$PRIVATE_TMP}"
@@ -666,6 +690,7 @@ prepare_real_discovery_runtime() {
   local resolver="$ROOT/scripts/evals/resolve-code-quality-codex.mjs"
   local workspace_preparer="$ROOT/scripts/evals/prepare-code-quality-workspaces.mjs"
   local runtime_preparer="$ROOT/scripts/evals/prepare-code-quality-runtime.mjs"
+  local auth_preparer="$ROOT/scripts/evals/prepare-code-quality-auth.mjs"
   local resolution
   local discovery_codex_bin
   local discovery_codex_sha256
@@ -740,6 +765,9 @@ NODE
     "$(realpath "$(command -v node)")" "$runtime_preparer" \
       "$DISCOVERY_WORK_ROOT/manifest.json" \
       "$DISCOVERY_RUNTIME_ROOT" >/dev/null
+  node "$auth_preparer" \
+    "$CODEX_HOME_FIXTURE/auth.json" \
+    "$DISCOVERY_RUNTIME_ROOT/manifest.json" >/dev/null
 
   DISCOVERY_RUNTIME_MANIFEST="$DISCOVERY_RUNTIME_ROOT/manifest.json"
   select_discovery_mode targeted-quality-skills
@@ -914,7 +942,6 @@ function resolveTemplates(value) {
 }
 
 const codex = new Codex({
-  apiKey: process.env.OPENAI_API_KEY,
   codexPathOverride: launcher,
   config: resolveTemplates(provider.cli_config),
   env: process.env,
@@ -1036,6 +1063,9 @@ NODE
   [[ "$boundary_argv" != *".ai-plugins-eval-home"* ]]
   [[ "$boundary_argv" != *".ai-plugins-execution-surface.json"* ]]
   [[ "$boundary_argv" == *"--ro-bind|/tmp/workspace-runtime-"*"/codex-home-inputs/config.toml|/runtime/codex-home/config.toml"* ]]
+  [[ "$boundary_argv" == *"--ro-bind|/tmp/workspace-runtime-"*"/codex-home-inputs/auth.json|/runtime/auth-input/auth.json"* ]]
+  [[ "$boundary_argv" == *"--bind|/tmp/workspace-runtime-"*"/refreshed-auth.json|/runtime/auth-output/auth.json"* ]]
+  [[ "$boundary_argv" != *"|$CODEX_HOME_FIXTURE/auth.json|"* ]]
   [[ "$boundary_argv" == *"--ro-bind|/tmp/workspace-runtime-"*"/codex-home-inputs/plugins|/runtime/codex-home/plugins"* ]]
   [[ "$boundary_argv" == *"--dir|/runtime/codex-home/skills|--ro-bind|/tmp/workspace-runtime-"*"/codex-home-inputs/skills/.system|/runtime/codex-home/skills/.system"* ]]
   [[ "$boundary_argv" == *"--dir|/runtime/marketplace|--ro-bind|/tmp/workspace-runtime-"*"/marketplace|/runtime/marketplace"* ]]
@@ -1312,7 +1342,7 @@ NODE
   [ ! -e "$FIXTURE_ROOT/bwrap-args" ]
 }
 
-@test "Codex receives its API key while a model-run shell cannot recover credentials" {
+@test "Codex receives disposable ChatGPT auth without API-key environment variables" {
   run_boundary \
     exec \
     --experimental-json \
@@ -1322,6 +1352,19 @@ NODE
 
   [ "$status" -eq 0 ]
   [ "$(cat "$CODEX_HOME_FIXTURE/leak-probe")" = model-shell-clean ]
+}
+
+@test "Codex boundary preserves refreshed ChatGPT auth for later turns" {
+  run_boundary \
+    exec \
+    --experimental-json \
+    --model fixture-auth-refresh-probe \
+    --sandbox workspace-write \
+    --cd "$WORKSPACE"
+
+  [ "$status" -eq 0 ]
+  jq -e '.tokens.refresh_token == "rotated-refresh"' \
+    "$CODEX_HOME_FIXTURE/auth.json"
 }
 
 @test "Codex boundary rejects a config override that gives model tools network access" {
@@ -1710,7 +1753,7 @@ NODE
   done
 }
 
-@test "real packaged inner sandbox starts with fresh proc and no model-visible API key" {
+@test "real packaged inner sandbox starts with fresh proc and no API-key environment" {
   command -v bwrap >/dev/null || skip 'bubblewrap is unavailable'
   command -v codex >/dev/null || skip 'Codex is unavailable'
   prepare_real_nix_closure
@@ -1727,8 +1770,7 @@ NODE
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"inner-sandbox-clean"* ]]
-  [[ "$output" == *"codex-retained-api-key"* ]]
-  [ ! -e "$CODEX_HOME_FIXTURE/codex-key-proof" ]
+  [[ "$output" == *"codex-retained-chatgpt-auth"* ]]
 }
 
 @test "bounded workspace tmpfs contains open-unlinked disk growth" {
@@ -1809,7 +1851,7 @@ NODE
     "$git_digest_before" ]
 }
 
-@test "installed Codex sandbox strips API keys from the model tool environment" {
+@test "installed Codex sandbox hides authentication from model tools" {
   command -v codex >/dev/null || skip 'Codex is unavailable'
   real_codex="$(realpath "$(command -v codex)")"
   runtime_root="$(dirname "$(dirname "$real_codex")")"
@@ -1819,7 +1861,11 @@ NODE
   probe_home="$FIXTURE_ROOT/installed-codex-sandbox-home"
   mkdir -p "$probe_home"
   chmod 700 "$probe_home"
+  printf '%s\n' '{"auth_mode":"chatgpt","tokens":{"access_token":"sandbox-auth-canary"}}' \
+    >"$probe_home/auth.json"
+  chmod 600 "$probe_home/auth.json"
   probe='set -eu
+[ ! -r "@AUTH_FILE@" ]
 for environment in /proc/[0-9]*/environ; do
   [ -r "$environment" ] || continue
   while IFS= read -r -d "" entry; do
@@ -1832,6 +1878,7 @@ for environment in /proc/[0-9]*/environ; do
   done <"$environment"
 done
 printf "model-shell-clean\\n"'
+  probe="${probe//@AUTH_FILE@/$probe_home/auth.json}"
 
   # This regression isolates PID/proc and environment behavior. The production
   # config disables networking; leaving it enabled here avoids a nested

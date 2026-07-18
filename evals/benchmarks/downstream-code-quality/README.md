@@ -38,13 +38,20 @@ Inspect the exact candidate command path and Nix runtime closure separately:
 nix develop -c scripts/evals/run-code-quality-benchmark.sh --runtime-preflight
 ```
 
-Live execution requires a dedicated API key. Normal Codex login files are not
-copied or used:
+Live execution reuses an existing ChatGPT-backed Codex login. The runner reads
+`${CODEX_HOME:-$HOME/.codex}/auth.json`, validates that it is private and owned
+by the current user, and creates run-scoped disposable auth state linked into
+each otherwise-independent sample home. Promptfoo runs one turn at a time, so
+token refreshes and refresh-token rotation carry forward to later turns.
+Candidate commands receive neither API-key variables nor access to the auth
+file. Cleanup removes the disposable state without modifying the source login:
 
 ```shell
-CODE_QUALITY_OPENAI_API_KEY=… \
-  nix develop -c scripts/evals/run-code-quality-benchmark.sh
+nix develop -c scripts/evals/run-code-quality-benchmark.sh
 ```
+
+Set `CODE_QUALITY_CODEX_AUTH_HOME` only when the source Codex login is stored in
+a different private directory.
 
 The provider run can take many hours. Every turn has finite resource and wall
 limits, and the outer run also has a finite timeout. Raw Promptfoo results,
