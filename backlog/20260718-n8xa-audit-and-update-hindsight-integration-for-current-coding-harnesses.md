@@ -20,6 +20,7 @@ For each supported coding harness (including Codex and Claude Code where applica
 - [ ] An inventory identifies every Hindsight integration/configuration/documentation surface by coding harness and the exact supported Hindsight version.
 - [ ] Each harness integration matches the official Hindsight documentation for its supported version, with versioned source provenance recorded in repository documentation.
 - [ ] Bank selection and isolation, lifecycle hooks, recall/retain behavior, MCP settings, budgets/filters, and secret handling are verified for each supported harness.
+- [ ] Focused automated tests or smoke checks cover configuration validity, hook execution, bank routing, targeted recall, session retention, and safe failure behavior.
 
 ## Subtasks
 
