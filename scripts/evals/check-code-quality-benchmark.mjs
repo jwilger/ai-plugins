@@ -624,37 +624,53 @@ function sameValue(first, second) {
   return first === second;
 }
 
-function validateRawBinding(result, row, runtimeState) {
+function rawBindingDiagnostic(result, row, runtimeState) {
   if (
     !isPlainObject(result) ||
     !isPlainObject(result.vars) ||
     !isPlainObject(result.testCase) ||
     !isPlainObject(result.testCase.vars)
   ) {
-    return false;
+    return "raw-binding-shape-invalid";
   }
-  const variableSets = [result.vars, result.testCase.vars];
-  for (const vars of variableSets) {
+  const variableSets = [
+    ["result", result.vars],
+    ["test-case", result.testCase.vars],
+  ];
+  for (const [source, vars] of variableSets) {
     for (const [variable, field] of bindingFields) {
-      if (!sameValue(vars[variable], row[field])) return false;
+      if (!sameValue(vars[variable], row[field])) {
+        return `raw-binding-${source}-${variable.replaceAll("_", "-")}`;
+      }
     }
   }
   const providerLabel = `openai-codex-sdk-${row.mode}`;
   const scenarioPrompt = promptFor(row);
-  return (
-    variableSets.every(
-      (vars) =>
-        vars.runtime_manifest_sha256 === runtimeState.runtimeManifestSha256 &&
-        vars.expected_provider_label === providerLabel &&
-        vars.benchmark_expected_samples === 3 &&
-        vars.min_pass_rate === 0 &&
-        vars.value_gate_mode === "measurement" &&
-        vars.scenario_prompt === scenarioPrompt,
-    ) &&
-    inputHashFor(row, contract.id) === row.inputHash &&
-    result.provider?.id === contract.provider.id &&
-    result.provider?.label === providerLabel
-  );
+  for (const [source, vars] of variableSets) {
+    for (const [name, expected] of [
+      ["runtime-manifest-sha256", runtimeState.runtimeManifestSha256],
+      ["expected-provider-label", providerLabel],
+      ["benchmark-expected-samples", 3],
+      ["min-pass-rate", 0],
+      ["value-gate-mode", "measurement"],
+      ["scenario-prompt", scenarioPrompt],
+    ]) {
+      const variable = name.replaceAll("-", "_");
+      if (!sameValue(vars[variable], expected)) {
+        return `raw-binding-${source}-${name}`;
+      }
+    }
+  }
+  if (inputHashFor(row, contract.id) !== row.inputHash) {
+    return "raw-binding-input-hash-derived";
+  }
+  if (result.provider?.id !== contract.provider.id) {
+    return "raw-binding-provider-id";
+  }
+  if (result.provider?.label !== providerLabel) {
+    return "raw-binding-provider-label";
+  }
+  return null;
 }
 
 function sanitizeUsageObject(value, allowAssertions) {
@@ -965,13 +981,14 @@ function buildRun(row, rawEntries, artifactEntry, runtimeState) {
     };
   }
   const result = rawEntries[0];
-  if (!validateRawBinding(result, row, runtimeState)) {
+  const bindingDiagnostic = rawBindingDiagnostic(result, row, runtimeState);
+  if (bindingDiagnostic) {
     return {
       ...base,
       complete: false,
       pass: false,
       outcomeClass: "provenance-failure",
-      diagnosticCode: "raw-binding-invalid",
+      diagnosticCode: bindingDiagnostic,
       skillActivations: [],
     };
   }
