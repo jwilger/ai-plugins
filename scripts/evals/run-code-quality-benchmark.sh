@@ -424,7 +424,7 @@ printf 'ai-plugins downstream code-quality run root\n' \
 chmod 600 "$scratch_root/.ai-plugins-code-quality-run-root"
 host_tmp="$scratch_root/host-tmp"
 work_root="$host_tmp/workspaces"
-runtime_root="$scratch_root/runtime"
+runtime_root="$host_tmp/runtime"
 raw_root="$scratch_root/raw"
 artifact_root="$scratch_root/artifacts"
 verifier_tmp_root="$scratch_root/verifier-tmp"
@@ -584,13 +584,21 @@ cleanup() {
     "$raw_root" \
     "$artifact_root" \
     "$host_home" \
-    "$host_tmp" \
     "$promptfoo_config_root" \
     "$promptfoo_cache" \
     "$provenance_file" \
     "$private_log"; do
     [ ! -e "$candidate" ] || scan_paths+=("$candidate")
   done
+  [ ! -e "$work_root" ] || scan_paths+=("$work_root")
+  if [ -d "$host_tmp" ] && [ ! -L "$host_tmp" ]; then
+    while IFS= read -r -d '' candidate; do
+      case "$candidate" in
+        "$work_root"|"$runtime_root") continue ;;
+      esac
+      scan_paths+=("$candidate")
+    done < <(find "$host_tmp" -mindepth 1 -maxdepth 1 -print0)
+  fi
   [ ! -e "$runtime_root" ] || exact_scan_paths+=("$runtime_root")
   if [ -n "$node_bin" ] &&
     { [ -x "$secret_scanner" ] || [ -f "$secret_scanner" ]; }; then
