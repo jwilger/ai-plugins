@@ -1426,6 +1426,7 @@ NODE
   [ "$(jq -r '.[].providers[0]' <<<"$output" | sort | paste -sd, -)" = \
     "openai-codex-sdk-all-marketplace-skills,openai-codex-sdk-no-marketplace-skills,openai-codex-sdk-targeted-quality-skills" ]
   [ "$(jq '[.[].vars.workspace] | unique | length' <<<"$output")" -eq 3 ]
+  [ "$(jq '[.[].options.disableVarExpansion == true] | all' <<<"$output")" = true ]
   [ "$(jq '[.[].vars.baseline_oid] | unique | length' <<<"$output")" -eq 1 ]
   [ "$(jq '[.[].vars.scenario_prompt | contains("development-discipline") or contains("engineering-standards") or contains("advisor")] | any' <<<"$output")" = false ]
   [ "$(jq '[.[].vars.scenario_prompt | test("\\b(eval(uation)?|disposable|treatment|condition)\\b"; "i")] | any' <<<"$output")" = false ]
