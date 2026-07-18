@@ -1,6 +1,6 @@
 ---
 title: Build writable downstream code-quality benchmarks for Codex plugins
-blocked_by: [20260718-zcsh-review-benchmark-contract-and-scorer-slice]
+blocked_by: [20260718-iksx-review-codex-subscription-auth-runtime-boundary-slice, 20260718-zcsh-review-benchmark-contract-and-scorer-slice]
 blocks: []
 tags: [codex, evals, quality, major, backlog]
 pr_mr_url: 
