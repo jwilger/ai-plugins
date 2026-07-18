@@ -16,7 +16,7 @@ Build a safe, non-promotional writable Rust benchmark that measures whether Code
 
 ## Context / Why
 
-Re-scoped after the first Promptfoo wiring security review. The immediate decision-quality need is directional evidence about marketplace-skill-driven code quality, not broad multi-language or full executable-plugin coverage. Run the expense-report feature case with three samples per condition using the Codex-bundled system-skill baseline plus no marketplace skills, targeted skills-only projections, and all-marketplace skills-only projections; use bounded execution, API-key-only auth, trusted source rebuilds, explicit failure taxonomy, and sanitized artifacts. Defer TypeScript bugfix/refactor expansion and true full-plugin runtime execution to follow-up tickets.
+Re-scoped after the first Promptfoo wiring security review. The immediate decision-quality need is directional evidence about marketplace-skill-driven code quality, not broad multi-language or full executable-plugin coverage. Run the expense-report feature case with three samples per condition using the Codex-bundled system-skill baseline plus no marketplace skills, targeted skills-only projections, and all-marketplace skills-only projections; use bounded execution, existing ChatGPT-backed Codex authentication copied into disposable per-sample homes, trusted source rebuilds, explicit failure taxonomy, and sanitized artifacts. Defer TypeScript bugfix/refactor expansion and true full-plugin runtime execution to follow-up tickets.
 
 ## Acceptance criteria
 
