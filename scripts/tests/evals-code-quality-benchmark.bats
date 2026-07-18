@@ -407,7 +407,14 @@ assert.match(
   source,
   /trusted_promptfoo_path="\$\(dirname "\$node_bin"\):\$PATH"/,
 );
-assert.match(source, /host_tmp="\$scratch_root\/host-tmp"[\s\S]*work_root="\$host_tmp\/workspaces"/);
+assert.match(
+  source,
+  /host_tmp="\$scratch_root\/host-tmp"[\s\S]*work_root="\$host_tmp\/workspaces"[\s\S]*runtime_root="\$host_tmp\/runtime"/,
+);
+const cleanup = source.slice(source.indexOf("cleanup() {"));
+assert.match(cleanup, /find "\$host_tmp" -mindepth 1 -maxdepth 1 -print0/);
+assert.match(cleanup, /"\$work_root"\|"\$runtime_root"\) continue/);
+assert.match(cleanup, /scan_paths\+=\("\$work_root"\)/);
 assert.match(source, /PATH="\$trusted_promptfoo_path"/);
 assert.match(
   source,
