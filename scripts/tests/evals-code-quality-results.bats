@@ -52,9 +52,10 @@ prepare_runtime() {
   WORK_ROOT="$1"
   WORKSPACE_MANIFEST="$WORK_ROOT/manifest.json"
   RUN_ROOT="$TEST_ROOT/run"
-  RUNTIME_ROOT="$RUN_ROOT/runtime"
+  HOST_TMP="$RUN_ROOT/host-tmp"
+  RUNTIME_ROOT="$HOST_TMP/runtime"
   RUNTIME_MANIFEST="$RUNTIME_ROOT/manifest.json"
-  mkdir -m 700 "$RUN_ROOT"
+  mkdir -m 700 "$RUN_ROOT" "$HOST_TMP"
   printf 'ai-plugins downstream code-quality run root\n' \
     >"$RUN_ROOT/.ai-plugins-code-quality-run-root"
   chmod 600 "$RUN_ROOT/.ai-plugins-code-quality-run-root"
@@ -66,7 +67,7 @@ prepare_runtime() {
 }
 
 prepare_trusted_runtime() {
-  prepare_runtime "$TEST_ROOT/run/workspaces"
+  prepare_runtime "$TEST_ROOT/run/host-tmp/workspaces"
 }
 
 prepare_external_workspace_runtime() {
