@@ -426,7 +426,9 @@ assert.match(cleanup, /"\$work_root"\|"\$runtime_root"\) continue/);
 assert.match(cleanup, /scan_paths\+=\("\$work_root"\)/);
 assert.ok(!cleanup.includes('"${scan_paths[@]}" >/dev/null 2>&1'));
 assert.ok(!cleanup.includes('"${exact_scan_paths[@]}" >/dev/null 2>&1'));
+assert.match(cleanup, /code-quality benchmark generic scan failed at root index %s/);
 assert.ok(!source.includes('tail -n 80 -- "$private_log"'));
+assert.match(source, /code-quality benchmark provider exited with status %s/);
 assert.match(source, /PATH="\$trusted_promptfoo_path"/);
 assert.match(
   source,
