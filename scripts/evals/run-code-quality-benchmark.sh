@@ -605,7 +605,7 @@ cleanup() {
     if [ "${#scan_paths[@]}" -eq 0 ] ||
       ! "$node_bin" "$secret_scanner" \
         "${secret_scan_options[@]}" \
-        "${scan_paths[@]}" >/dev/null 2>&1; then
+        "${scan_paths[@]}"; then
       scan_status=1
       status=1
     fi
@@ -614,7 +614,7 @@ cleanup() {
         --profile codex-runtime \
         --exact-only \
         "${secret_scan_options[@]}" \
-        "${exact_scan_paths[@]}" >/dev/null 2>&1; then
+        "${exact_scan_paths[@]}"; then
       scan_status=1
       status=1
     fi

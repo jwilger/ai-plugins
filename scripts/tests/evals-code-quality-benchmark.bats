@@ -42,6 +42,7 @@ setup() {
   WORKSPACE_PREPARER="$ROOT/scripts/evals/prepare-code-quality-workspaces.mjs"
   RUNTIME_PREPARER="$ROOT/scripts/evals/prepare-code-quality-runtime.mjs"
   AUTH_PREPARER="$ROOT/scripts/evals/prepare-code-quality-auth.mjs"
+  RUNTIME_EVIDENCE="$ROOT/scripts/evals/code-quality-runtime-evidence.mjs"
   CONTRACT_VALIDATOR="$ROOT/scripts/evals/validate-code-quality-contract.mjs"
   EXPENSE_VERIFIER="$ROOT/evals/benchmarks/downstream-code-quality/verifiers/expense-report.mjs"
   SOURCE_SCORER="$ROOT/evals/benchmarks/downstream-code-quality/verifiers/score-expense-report.mjs"
@@ -281,6 +282,14 @@ mark_benchmark_workspace() {
     cmp -s "$CODE_QUALITY_CODEX_AUTH_HOME/auth.json" "$codex_home/auth.json"
     [ "$(stat -c '%a' "$codex_home/auth.json")" = 600 ]
   done
+  first_mode="$(jq -r '.rows[0].mode' "$runtime_root/manifest.json")"
+  run node "$RUNTIME_EVIDENCE" \
+    --codex-home "${codex_homes[0]}" \
+    --mode "$first_mode" \
+    --phase pre-turn
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.compositionHash' <<<"$output")" = \
+    "$(jq -r '.rows[0].compositionHash' "$runtime_root/manifest.json")" ]
 
   printf '%s\n' '{"auth_mode":"chatgpt","tokens":{"access_token":"refreshed-access","refresh_token":"refreshed-rotation"}}' \
     >"${codex_homes[0]}/auth.json"
@@ -415,6 +424,9 @@ const cleanup = source.slice(source.indexOf("cleanup() {"));
 assert.match(cleanup, /find "\$host_tmp" -mindepth 1 -maxdepth 1 -print0/);
 assert.match(cleanup, /"\$work_root"\|"\$runtime_root"\) continue/);
 assert.match(cleanup, /scan_paths\+=\("\$work_root"\)/);
+assert.ok(!cleanup.includes('"${scan_paths[@]}" >/dev/null 2>&1'));
+assert.ok(!cleanup.includes('"${exact_scan_paths[@]}" >/dev/null 2>&1'));
+assert.ok(!source.includes('tail -n 80 -- "$private_log"'));
 assert.match(source, /PATH="\$trusted_promptfoo_path"/);
 assert.match(
   source,
