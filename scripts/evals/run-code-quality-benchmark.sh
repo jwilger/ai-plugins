@@ -590,6 +590,13 @@ cleanup() {
     "$private_log"; do
     [ ! -e "$candidate" ] || scan_paths+=("$candidate")
   done
+  if [ -d "$work_root" ] && [ ! -L "$work_root" ]; then
+    if ! find "$work_root" -type d -exec chmod 700 {} + ||
+      ! find "$work_root" -type f -exec chmod 600 {} +; then
+      scan_status=1
+      status=1
+    fi
+  fi
   [ ! -e "$work_root" ] || scan_paths+=("$work_root")
   if [ -d "$host_tmp" ] && [ ! -L "$host_tmp" ]; then
     while IFS= read -r -d '' candidate; do

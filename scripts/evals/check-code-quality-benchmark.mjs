@@ -312,7 +312,8 @@ function assertRunLayout({
   if (
     artifactRoot !== path.join(runRoot, "artifacts") ||
     provenanceFile !== path.join(runRoot, "provenance.json") ||
-    runtimeManifestFile !== path.join(runRoot, "runtime", "manifest.json")
+    runtimeManifestFile !==
+      path.join(runRoot, "host-tmp", "runtime", "manifest.json")
   ) {
     throw new CheckFailure("run-layout-invalid");
   }
@@ -324,7 +325,7 @@ function assertRunLayout({
   assertPrivateDirectory(path.join(runRoot, "raw"), "run-layout-invalid");
   assertPrivateDirectory(artifactRoot, "run-layout-invalid");
   assertPrivateDirectory(
-    path.join(runRoot, "workspaces"),
+    path.join(runRoot, "host-tmp", "workspaces"),
     "run-layout-invalid",
   );
   const marker = readPrivateFile(
@@ -1196,7 +1197,7 @@ function main() {
     const runRoot = assertRunLayout(arguments_);
     const runtimeState = loadBoundRuntime(
       arguments_.runtimeManifestFile,
-      path.join(runRoot, "workspaces", "manifest.json"),
+      path.join(runRoot, "host-tmp", "workspaces", "manifest.json"),
     );
     const provenance = loadProvenance(arguments_.provenanceFile, runtimeState);
     const verifierCompositionSha256 = loadTrustedVerifierCompositionSha256();
