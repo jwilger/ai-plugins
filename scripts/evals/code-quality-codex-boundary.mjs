@@ -659,6 +659,7 @@ const workspace = parsedInvocation.workspace;
 const sandboxWorkspace = "/workspace";
 const sandboxCodexHome = "/runtime/codex-home";
 const sandboxPrivateTmp = "/runtime/tmp";
+const uid = process.getuid?.() ?? 65_534;
 
 function rewriteConfigWorkspace(override) {
   return override.replaceAll(workspace, sandboxWorkspace);
@@ -746,7 +747,6 @@ const expectedResourceBwrapSha256 =
   process.env.CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256;
 const expectedRgSha256 = process.env.CODE_QUALITY_CODEX_RG_EXPECTED_SHA256;
 const safeToolPath = process.env.CODE_QUALITY_TOOL_PATH;
-const apiKey = process.env.OPENAI_API_KEY;
 const timeout = process.env.CODE_QUALITY_TIMEOUT_BIN;
 const prlimit = process.env.CODE_QUALITY_PRLIMIT_BIN;
 const systemdRun = process.env.CODE_QUALITY_SYSTEMD_RUN_BIN;
@@ -772,7 +772,6 @@ if (
   !expectedResourceBwrapSha256 ||
   !expectedRgSha256 ||
   !safeToolPath ||
-  !apiKey ||
   !timeout ||
   !prlimit ||
   !systemdRun ||
@@ -955,6 +954,17 @@ const codexHomeConfig = canonicalRegularFile(
   join(codexHome, "config.toml"),
   "codex-home-config-invalid",
 );
+const codexHomeAuth = canonicalRegularFile(
+  join(codexHome, "auth.json"),
+  "codex-home-auth-invalid",
+);
+const codexHomeAuthMetadata = lstatSync(codexHomeAuth);
+if (
+  codexHomeAuthMetadata.uid !== uid ||
+  (codexHomeAuthMetadata.mode & 0o077) !== 0
+) {
+  fail("configuration", "codex-home-auth-not-private", 64);
+}
 const codexHomeExecutionSurface = canonicalRegularFile(
   join(codexHome, ".ai-plugins-execution-surface.json"),
   "codex-home-execution-surface-invalid",
@@ -1120,7 +1130,6 @@ const nixStoreMounts = nixStoreClosure.flatMap((storePath) => [
   storePath,
   storePath,
 ]);
-const uid = process.getuid?.() ?? 65_534;
 const gid = process.getgid?.() ?? 65_534;
 const systemdRuntimeDir = `/run/user/${uid}`;
 const systemdRuntimeMetadata = canonicalDirectory(
@@ -1167,6 +1176,8 @@ for (const directory of [
   mkdirSync(directory, { mode: 0o700 });
 }
 const snapshotCodexHomeConfig = join(codexHomeInputs, "config.toml");
+const snapshotCodexHomeAuth = join(codexHomeInputs, "auth.json");
+const refreshedCodexHomeAuth = join(runtimeSupport, "refreshed-auth.json");
 try {
   copyFileSync(
     codexHomeConfig,
@@ -1179,6 +1190,34 @@ try {
   }
 } catch {
   fail("runtime", "codex-home-config-snapshot-failed", 70);
+}
+try {
+  const authBytes = readFileSync(codexHomeAuth);
+  const auth = JSON.parse(authBytes.toString("utf8"));
+  if (
+    auth?.auth_mode !== "chatgpt" ||
+    !auth.tokens ||
+    typeof auth.tokens !== "object" ||
+    Array.isArray(auth.tokens)
+  ) {
+    fail("configuration", "codex-home-auth-invalid", 64);
+  }
+  copyFileSync(
+    codexHomeAuth,
+    snapshotCodexHomeAuth,
+    constants.COPYFILE_FICLONE,
+  );
+  chmodSync(snapshotCodexHomeAuth, 0o600);
+  if (!readFileSync(snapshotCodexHomeAuth).equals(authBytes)) {
+    fail("integrity", "codex-home-auth-snapshot-mismatch", 65);
+  }
+  writeFileSync(refreshedCodexHomeAuth, authBytes, {
+    flag: "wx",
+    mode: 0o600,
+  });
+} catch (error) {
+  if (error?.category) throw error;
+  fail("runtime", "codex-home-auth-snapshot-failed", 70);
 }
 const snapshotCodexHomeSystemSkills = copyTreeSnapshot(
   codexHomeSystemSkills,
@@ -1196,6 +1235,41 @@ const snapshotCodexHomePlugins = codexHomePlugins
       workspaceMaxEntries,
     )
   : null;
+
+function persistRefreshedAuth() {
+  try {
+    const refreshedBytes = readFileSync(refreshedCodexHomeAuth);
+    if (refreshedBytes.length < 2 || refreshedBytes.length > 64 * 1024) {
+      return "size-invalid";
+    }
+    const refreshed = JSON.parse(refreshedBytes.toString("utf8"));
+    if (
+      refreshed?.auth_mode !== "chatgpt" ||
+      !refreshed.tokens ||
+      typeof refreshed.tokens !== "object" ||
+      Array.isArray(refreshed.tokens)
+    ) {
+      return "shape-invalid";
+    }
+    const currentMetadata = lstatSync(codexHomeAuth);
+    if (
+      !currentMetadata.isFile() ||
+      currentMetadata.isSymbolicLink() ||
+      currentMetadata.uid !== uid ||
+      (currentMetadata.mode & 0o077) !== 0 ||
+      realpathSync(codexHomeAuth) !== codexHomeAuth
+    ) {
+      return "destination-invalid";
+    }
+    writeFileSync(codexHomeAuth, refreshedBytes, { flag: "w", mode: 0o600 });
+    chmodSync(codexHomeAuth, 0o600);
+    return readFileSync(codexHomeAuth).equals(refreshedBytes)
+      ? null
+      : "write-mismatch";
+  } catch {
+    return "write-failed";
+  }
+}
 const snapshotMarketplace = copyTreeSnapshot(
   codexHomeMarketplace,
   join(runtimeSupport, "marketplace"),
@@ -1407,6 +1481,10 @@ workspace_max_bytes=$2
 workspace_max_entries=$3
 shift 3
 
+if ! "$copy_tool" -a -- /runtime/auth-input/auth.json "$CODEX_HOME/auth.json"; then
+  printf "%s\\n" "CODE_QUALITY_BOUNDARY_ERROR:runtime:auth-copy-in-failed" >&2
+  exit 70
+fi
 if ! "$copy_tool" -a -- /runtime/workspace-input/. "$workspace"/; then
   printf "%s\\n" "CODE_QUALITY_BOUNDARY_ERROR:safety:workspace-copy-in-failed" >&2
   exit 77
@@ -1438,6 +1516,11 @@ set +e
   /runtime/codex-package/bin/codex "$@"
 codex_status=$?
 set -e
+
+if ! "$copy_tool" -a -- "$CODEX_HOME/auth.json" /runtime/auth-output/auth.json; then
+  printf "%s\\n" "CODE_QUALITY_BOUNDARY_ERROR:runtime:auth-copy-out-failed" >&2
+  exit 70
+fi
 
 unsafe_entry="$("$find_tool" "$workspace" -xdev -path "$workspace/.git" -prune -o ! -type d ! -type f -print -quit)"
 unsafe_hardlink="$("$find_tool" "$workspace" -xdev -path "$workspace/.git" -prune -o -type f -links +1 -print -quit)"
@@ -1576,6 +1659,16 @@ const bwrapArgv = [
   "--dir",
   "/runtime",
   "--dir",
+  "/runtime/auth-input",
+  "--ro-bind",
+  snapshotCodexHomeAuth,
+  "/runtime/auth-input/auth.json",
+  "--dir",
+  "/runtime/auth-output",
+  "--bind",
+  refreshedCodexHomeAuth,
+  "/runtime/auth-output/auth.json",
+  "--dir",
   "/runtime/marketplace",
   "--ro-bind",
   snapshotMarketplace,
@@ -1713,8 +1806,6 @@ const child = spawn(
   {
     detached: true,
     env: {
-      CODEX_API_KEY: apiKey,
-      OPENAI_API_KEY: apiKey,
       PATH: safeToolPath,
       XDG_RUNTIME_DIR: systemdRuntimeDir,
     },
@@ -1866,6 +1957,15 @@ child.once("close", (code, signal) => {
     resourceScopeEntered = false;
   }
   function finishWithCleanup(exitCode) {
+    const authRefreshError = persistRefreshedAuth();
+    if (authRefreshError) {
+      console.error(
+        `CODE_QUALITY_BOUNDARY_ERROR:runtime:auth-refresh-${authRefreshError}`,
+      );
+      cleanupRuntimeSupport();
+      finishAfterOutputDrains(70);
+      return;
+    }
     if (!cleanupRuntimeSupport()) {
       console.error("CODE_QUALITY_BOUNDARY_ERROR:runtime:cleanup-failed");
       finishAfterOutputDrains(70);

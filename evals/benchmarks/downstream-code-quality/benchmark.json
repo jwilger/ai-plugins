@@ -10,7 +10,7 @@
     "sandboxMode": "workspace-write",
     "approvalPolicy": "never",
     "networkAccess": false,
-    "authentication": "dedicated-api-key-only"
+    "authentication": "chatgpt-login-disposable-copy"
   },
   "sampleCount": 3,
   "conditions": [
