@@ -19,6 +19,7 @@ Split from 20260715-n6bs after formal final review returned scope_split_hold for
 
 - [ ] Runtime and tool inputs are reproducibly pinned.
 - [ ] CI and documentation make only claims supported by dry-run or provider-backed evidence as applicable.
+- [ ] The intended-use threat model, authentication prerequisites, and recovery behavior are documented.
 
 ## Subtasks
 
