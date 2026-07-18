@@ -26,6 +26,7 @@ module.exports = function loadCodeQualityCases() {
     const expectedProviderLabel = providerLabelFor(row.mode);
     return {
       description: `${row.caseId} sample ${row.sample} ${row.mode}`,
+      options: { disableVarExpansion: true },
       providers: [expectedProviderLabel],
       vars: {
         baseline_oid: row.baselineOid,
