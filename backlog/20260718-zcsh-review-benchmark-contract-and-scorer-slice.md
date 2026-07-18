@@ -18,6 +18,7 @@ Split from 20260715-n6bs after formal final review returned scope_split_hold for
 ## Acceptance criteria
 
 - [ ] Benchmark metrics and outcome taxonomy are predeclared and mechanically enforced.
+- [ ] Trusted scoring and regression replay detect incomplete, duplicate, unexpected, and provenance-mismatched results.
 
 ## Subtasks
 
