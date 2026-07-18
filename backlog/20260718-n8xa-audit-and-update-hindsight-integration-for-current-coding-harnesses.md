@@ -17,6 +17,8 @@ For each supported coding harness (including Codex and Claude Code where applica
 
 ## Acceptance criteria
 
+- [ ] An inventory identifies every Hindsight integration/configuration/documentation surface by coding harness and the exact supported Hindsight version.
+
 ## Subtasks
 
 ## Notes / Log
