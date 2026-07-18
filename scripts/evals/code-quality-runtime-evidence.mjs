@@ -151,6 +151,37 @@ function parseExecutionSurfaceFile(bytes) {
   return surface;
 }
 
+function validateDisposableAuth(codexHome) {
+  const authPath = path.join(codexHome, "auth.json");
+  const stat = fs.lstatSync(authPath, { throwIfNoEntry: false });
+  if (!stat) return;
+  try {
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      stat.uid !== process.getuid() ||
+      (stat.mode & 0o077) !== 0 ||
+      fs.realpathSync(authPath) !== authPath ||
+      stat.size < 2 ||
+      stat.size > 64 * 1024
+    ) {
+      fail("provenance", "runtime-disposable-auth-invalid");
+    }
+    const auth = JSON.parse(fs.readFileSync(authPath, "utf8"));
+    if (
+      auth?.auth_mode !== "chatgpt" ||
+      !auth.tokens ||
+      typeof auth.tokens !== "object" ||
+      Array.isArray(auth.tokens)
+    ) {
+      fail("provenance", "runtime-disposable-auth-invalid");
+    }
+  } catch (error) {
+    if (error instanceof RuntimeEvidenceError) throw error;
+    fail("provenance", "runtime-disposable-auth-invalid");
+  }
+}
+
 function validateSkillTree(snapshot, skillsRoot, namespace, allowedFiles) {
   const normalizedRoot = slashPath(skillsRoot);
   const skillDirectories = snapshot.directories
@@ -372,8 +403,12 @@ export function measureRuntimeEvidence({
   }
   let snapshot;
   try {
-    snapshot = snapshotRegularTree(codexHome, limits);
+    validateDisposableAuth(codexHome);
+    snapshot = snapshotRegularTree(codexHome, limits, {
+      ignoredRootEntries: ["auth.json"],
+    });
   } catch (error) {
+    if (error instanceof RuntimeEvidenceError) throw error;
     if (!fs.lstatSync(codexHome, { throwIfNoEntry: false })) {
       fail("operational", "runtime-codex-home-unavailable");
     }
