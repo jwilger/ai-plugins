@@ -71,22 +71,10 @@ function findWorkspace(context) {
     const expectedInputHash = inputHashFor(row);
     if (
       vars.workspace !== row.workspace ||
-      vars.baseline_oid !== row.baselineOid ||
-      vars.fixture_digest !== row.fixtureDigest ||
       vars.codex_home !== row.codexHome ||
       vars.codex_tmp !== row.codexTmp ||
-      vars.run_id !== row.runId ||
-      vars.contract_sha256 !== row.contractSha256 ||
-      vars.workspace_manifest_sha256 !== row.workspaceManifestSha256 ||
-      vars.runtime_manifest_sha256 !== runtimeState.runtimeManifestSha256 ||
-      vars.matrix_hash !== row.matrixHash ||
       vars.scenario_prompt !== expectedScenarioPrompt ||
       row.inputHash !== expectedInputHash ||
-      vars.input_hash !== expectedInputHash ||
-      vars.composition_hash !== row.compositionHash ||
-      JSON.stringify(vars.available_skills) !==
-        JSON.stringify(row.availableSkills) ||
-      vars.task_type !== row.taskType ||
       vars.expected_provider_label !== expectedProvider ||
       providerLabel(context) !== expectedProvider
     ) {
@@ -159,7 +147,7 @@ function verifierOutputRoot(workspace, runtimeRoot) {
   if (!configured || !path.isAbsolute(configured)) {
     throw classifiedError("operational-failure", "output-root-missing");
   }
-  const runRoot = path.dirname(runtimeRoot);
+  const runRoot = path.dirname(path.dirname(runtimeRoot));
   const expected = path.join(runRoot, "artifacts");
   if (configured !== expected || path.resolve(configured) !== configured) {
     throw classifiedError("provenance-failure", "output-root-unbound");

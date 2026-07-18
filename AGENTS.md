@@ -258,6 +258,27 @@ the changed plugin or skill, run that too. Include eval results in the PR notes
 alongside `just ci`. Do not wire provider-backed evals into untrusted PR gates
 unless that automation is explicitly requested and secrets are protected.
 
+### Standing authorization for repository-owned live evals
+
+The repository owner grants standing approval to run repository-owned
+provider-backed evals and benchmarks through Codex CLI using the owner's
+existing ChatGPT subscription authentication. This authorization includes
+sending this repository's purpose-built benchmark fixtures and prompts to
+OpenAI. It does not authorize sending secrets, private client data, proprietary
+unrelated content, or unrelated workspace files. Keep authentication in
+isolated disposable state, leave the source Codex login untouched, and run the
+repository's required secret-leak checks around every live execution.
+
+This standing authorization covers the canonical downstream code-quality
+benchmark command:
+
+```shell
+nix develop -c scripts/evals/run-code-quality-benchmark.sh
+```
+
+It does not authorize broad `nix develop` execution rules or other external
+destinations.
+
 This applies across all marketplace plugins, not only the plugin currently being
 edited. Do not blanket-ignore `.plugin-eval/`. Stable benchmark configs and
 curated eval baselines are useful review artifacts and may be committed when

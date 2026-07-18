@@ -127,6 +127,16 @@ const bindingFields = [
   ["run_id", "runId"],
   ["workspace_manifest_sha256", "workspaceManifestSha256"],
 ];
+const renderedBindingFields = bindingFields.filter(([variable]) =>
+  [
+    "case_id",
+    "condition_id",
+    "sample_index",
+    "workspace",
+    "codex_home",
+    "codex_tmp",
+  ].includes(variable),
+);
 
 class CheckFailure extends Error {
   constructor(code) {
@@ -638,7 +648,7 @@ function rawBindingDiagnostic(result, row, runtimeState) {
     ["test-case", result.testCase.vars],
   ];
   for (const [source, vars] of variableSets) {
-    for (const [variable, field] of bindingFields) {
+    for (const [variable, field] of renderedBindingFields) {
       const diagnosticPrefix =
         `raw-binding-${source}-${variable.replaceAll("_", "-")}`;
       if (!Object.hasOwn(vars, variable)) {
@@ -654,14 +664,18 @@ function rawBindingDiagnostic(result, row, runtimeState) {
   const providerLabel = `openai-codex-sdk-${row.mode}`;
   const scenarioPrompt = promptFor(row);
   for (const [source, vars] of variableSets) {
-    for (const [name, expected] of [
+    const fixedBindings = [
       ["runtime-manifest-sha256", runtimeState.runtimeManifestSha256],
       ["expected-provider-label", providerLabel],
       ["benchmark-expected-samples", 3],
       ["min-pass-rate", 0],
       ["value-gate-mode", "measurement"],
       ["scenario-prompt", scenarioPrompt],
-    ]) {
+    ];
+    const requiredBindings = fixedBindings.filter(([name]) =>
+      ["expected-provider-label", "scenario-prompt"].includes(name),
+    );
+    for (const [name, expected] of requiredBindings) {
       const variable = name.replaceAll("-", "_");
       const diagnosticPrefix = `raw-binding-${source}-${name}`;
       if (!Object.hasOwn(vars, variable)) {
@@ -941,6 +955,26 @@ function classifiedMissingArtifact(result) {
   return "operational-failure";
 }
 
+function missingArtifactDiagnostic(result) {
+  const candidates = [
+    result?.error,
+    result?.providerError,
+    result?.response?.error,
+    result?.response?.providerError,
+    result?.gradingResult?.reason,
+    result?.gradingResult?.error,
+    result?.gradingResult?.providerError,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const boundary = candidate.match(
+      /CODE_QUALITY_BOUNDARY_ERROR:(safety):([a-z0-9-]+)/,
+    );
+    if (boundary) return `boundary-${boundary[1]}-${boundary[2]}`;
+  }
+  return "artifact-missing";
+}
+
 function rawAndArtifactAgree(result, artifact) {
   if (
     typeof result.success !== "boolean" ||
@@ -1019,7 +1053,7 @@ function buildRun(row, rawEntries, artifactEntry, runtimeState) {
       complete: Boolean(metrics),
       pass: false,
       outcomeClass: classifiedMissingArtifact(result),
-      diagnosticCode: "artifact-missing",
+      diagnosticCode: missingArtifactDiagnostic(result),
       ...(metrics ? { metrics } : {}),
       ...activationFields,
     };

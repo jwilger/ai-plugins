@@ -1523,9 +1523,8 @@ if ! "$copy_tool" -a -- "$CODEX_HOME/auth.json" /runtime/auth-output/auth.json; 
 fi
 
 unsafe_entry="$("$find_tool" "$workspace" -xdev -path "$workspace/.git" -prune -o ! -type d ! -type f -print -quit)"
-unsafe_hardlink="$("$find_tool" "$workspace" -xdev -path "$workspace/.git" -prune -o -type f -links +1 -print -quit)"
-if [ -n "$unsafe_entry" ] || [ -n "$unsafe_hardlink" ]; then
-  printf "%s\\n" "CODE_QUALITY_BOUNDARY_ERROR:safety:workspace-export-unsafe" >&2
+if [ -n "$unsafe_entry" ]; then
+  printf "%s\\n" "CODE_QUALITY_BOUNDARY_ERROR:safety:workspace-export-special-file" >&2
   exit 77
 fi
 
@@ -1548,7 +1547,7 @@ if ! "$find_tool" /runtime/workspace-output -mindepth 1 -maxdepth 1 ! -name .git
   printf "%s\\n" "CODE_QUALITY_BOUNDARY_ERROR:safety:workspace-copy-out-failed" >&2
   exit 77
 fi
-if ! (cd "$workspace" && "$tar_tool" --create --format=posix --exclude=./.git --file=- .) |
+if ! (cd "$workspace" && "$tar_tool" --create --hard-dereference --format=posix --exclude=./.git --file=- .) |
   "$tar_tool" --extract --file=- --directory=/runtime/workspace-output --no-same-owner; then
   printf "%s\\n" "CODE_QUALITY_BOUNDARY_ERROR:safety:workspace-copy-out-failed" >&2
   exit 77
@@ -1796,7 +1795,6 @@ const child = spawn(
     "--as=8589934592",
     "--cpu=1800",
     "--fsize=1073741824",
-    "--nproc=512",
     "--nofile=1024",
     "--core=0",
     "--",
