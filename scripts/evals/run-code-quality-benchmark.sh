@@ -606,6 +606,15 @@ cleanup() {
       ! "$node_bin" "$secret_scanner" \
         "${secret_scan_options[@]}" \
         "${scan_paths[@]}"; then
+      for candidate_index in "${!scan_paths[@]}"; do
+        if ! "$node_bin" "$secret_scanner" \
+          "${secret_scan_options[@]}" \
+          "${scan_paths[$candidate_index]}" >/dev/null 2>&1; then
+          printf 'code-quality benchmark generic scan failed at root index %s\n' \
+            "$candidate_index" >&2
+          break
+        fi
+      done
       scan_status=1
       status=1
     fi
@@ -955,6 +964,8 @@ if [ "$promptfoo_status" -ge 128 ]; then
   echo 'code-quality benchmark provider execution was interrupted' >&2
   run_status="$promptfoo_status"
 elif [ "$checker_status" -ne 0 ]; then
+  printf 'code-quality benchmark provider exited with status %s\n' \
+    "$promptfoo_status" >&2
   echo 'code-quality benchmark result validation failed' >&2
   run_status="$checker_status"
 else
