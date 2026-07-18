@@ -44,6 +44,7 @@ setup() {
   AUTH_PREPARER="$ROOT/scripts/evals/prepare-code-quality-auth.mjs"
   RUNTIME_EVIDENCE="$ROOT/scripts/evals/code-quality-runtime-evidence.mjs"
   CONTRACT_VALIDATOR="$ROOT/scripts/evals/validate-code-quality-contract.mjs"
+  RESULT_CHECKER="$ROOT/scripts/evals/check-code-quality-benchmark.mjs"
   EXPENSE_VERIFIER="$ROOT/evals/benchmarks/downstream-code-quality/verifiers/expense-report.mjs"
   SOURCE_SCORER="$ROOT/evals/benchmarks/downstream-code-quality/verifiers/score-expense-report.mjs"
   CASE_LOADER="$ROOT/evals/benchmarks/downstream-code-quality/cases.cjs"
@@ -374,10 +375,11 @@ mark_benchmark_workspace() {
 }
 
 @test "live runner resolves the execution surface before runtime preparation and scopes Promptfoo" {
-  run node - "$RUNNER" <<'NODE'
+  run node - "$RUNNER" "$RESULT_CHECKER" <<'NODE'
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
 const source = fs.readFileSync(process.argv[2], "utf8");
+const checker = fs.readFileSync(process.argv[3], "utf8");
 
 const resolution = source.indexOf('codex_resolution="$("$node_bin" "$codex_resolver")"');
 const boundary = source.indexOf('boundary_sha256="$("$node_bin" -');
@@ -424,12 +426,21 @@ const cleanup = source.slice(source.indexOf("cleanup() {"));
 assert.match(cleanup, /find "\$host_tmp" -mindepth 1 -maxdepth 1 -print0/);
 assert.match(cleanup, /"\$work_root"\|"\$runtime_root"\) continue/);
 assert.match(cleanup, /scan_paths\+=\("\$work_root"\)/);
+assert.match(cleanup, /find "\$work_root" -type d -exec chmod 700 \{\} \+/);
+assert.match(cleanup, /find "\$work_root" -type f -exec chmod 600 \{\} \+/);
 assert.ok(!cleanup.includes('"${scan_paths[@]}" >/dev/null 2>&1'));
 assert.ok(!cleanup.includes('"${exact_scan_paths[@]}" >/dev/null 2>&1'));
 assert.match(cleanup, /code-quality benchmark generic scan failed at root index %s/);
 assert.ok(!source.includes('tail -n 80 -- "$private_log"'));
 assert.match(source, /code-quality benchmark provider exited with status %s/);
 assert.match(source, /PATH="\$trusted_promptfoo_path"/);
+assert.match(checker, /path\.join\(runRoot, "host-tmp", "runtime", "manifest\.json"\)/);
+assert.match(checker, /path\.join\(runRoot, "host-tmp", "workspaces"\)/);
+assert.match(
+  checker,
+  /path\.join\(runRoot, "host-tmp", "workspaces", "manifest\.json"\)/,
+);
+assert.ok(!checker.includes('path.join(runRoot, "workspaces"'));
 assert.match(
   source,
   /toolchain_sha256="\$\(printf '%s\\n' "\$\{tool_records\[@\]\}" \| LC_ALL=C sort/,
