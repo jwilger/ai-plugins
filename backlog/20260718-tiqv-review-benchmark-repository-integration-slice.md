@@ -1,7 +1,7 @@
 ---
 title: Review benchmark repository integration slice
 blocked_by: []
-blocks: []
+blocks: [20260715-n6bs-build-writable-downstream-code-quality-benchmarks-for-codex-plugins]
 tags: [evals, codex, ci, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
