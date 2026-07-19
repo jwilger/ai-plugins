@@ -17,6 +17,8 @@ Implementation notes: Keep an explicit port option for scripts, bookmarks, and o
 
 ## Acceptance criteria
 
+- [ ] Starting the dashboard without a port chooses an available local port and prints the complete URL.
+
 ## Subtasks
 
 ## Notes / Log
