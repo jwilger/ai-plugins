@@ -13,7 +13,7 @@ Add a lightweight guide that recognizes the current stage of development work an
 
 ## Context / Why
 
-Implementation notes:\n\nThe router is a lifecycle dispatcher, not a replacement for test-driven-development, systematic-debugging, verification-before-completion, final-review, receiving-code-review, PR/CI monitoring, documentation, security, OpenAI, or browser skills. Define phase precedence and stop/skip rules, respect repository-local instructions, invoke only skills available in the current harness, and explain a safe fallback when a named specialist is unavailable. The cross-project preflight task 20260708-dsfg is a prerequisite so the router does not immediately need a second structural rewrite.
+Implementation notes: The router is a lifecycle dispatcher, not a replacement for test-driven-development, systematic-debugging, verification-before-completion, final-review, receiving-code-review, PR/CI monitoring, documentation, security, OpenAI, or browser skills. Define phase precedence and stop/skip rules, respect repository-local instructions, invoke only skills available in the current harness, and explain a safe fallback when a named specialist is unavailable. The cross-project preflight task 20260708-dsfg is a prerequisite so the router does not immediately need a second structural rewrite.
 
 ## Acceptance criteria
 
