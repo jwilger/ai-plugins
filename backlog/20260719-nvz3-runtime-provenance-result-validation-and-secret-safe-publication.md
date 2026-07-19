@@ -18,6 +18,7 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 ## Acceptance criteria
 
 - [ ] Bind input, workspace, runtime, tool, fixture, and verifier provenance.
+- [ ] Enforce bounded private reads and secret scanning, and reject duplicate, missing, malformed, inconsistent, or disagreeing raw/artifact data.
 
 ## Subtasks
 
