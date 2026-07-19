@@ -1,5 +1,5 @@
 ---
-title: Add single-command detailed task creation to Tiber
+title: Create a complete Tiber ticket in one command
 blocked_by: []
 blocks: []
 tags: [tiber, cli, mcp, developer-experience]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add an atomic one-invocation CLI and one-call MCP workflow for creating a fully specified Tiber backlog task without sequential follow-up mutations.
+Allow the Tiber command line and integration server to create a fully detailed backlog ticket in one operation, including its description, context, acceptance criteria, notes, tags, and optional pull-request details. Invalid input must not leave a partly created ticket.
 
 ## Context / Why
 
