@@ -13,7 +13,7 @@ Add clear guidance for choosing among GPT-5.6 Luna, Terra, and Sol based on the 
 
 ## Context / Why
 
-Implementation notes:\n\nUse gpt-5.6-luna for bounded read-only or easily reversible helper work with independent verification, gpt-5.6-terra for normal substantive implementation and review, and gpt-5.6-sol for advisor work, blocking or disputed verification, architecture, security or human-safety analysis, ambiguous debugging, destructive changes, and completion claims. These are task-local helper routes rather than global defaults. Verify current harness support during implementation, fail visibly instead of silently downgrading, and keep Claude-specific routing aligned with its current supported aliases; Claude /fast is not a cost-routing substitute.
+Implementation notes: Use gpt-5.6-luna for bounded read-only or easily reversible helper work with independent verification, gpt-5.6-terra for normal substantive implementation and review, and gpt-5.6-sol for advisor work, blocking or disputed verification, architecture, security or human-safety analysis, ambiguous debugging, destructive changes, and completion claims. These are task-local helper routes rather than global defaults. Verify current harness support during implementation, fail visibly instead of silently downgrading, and keep Claude-specific routing aligned with its current supported aliases; Claude /fast is not a cost-routing substitute.
 
 ## Acceptance criteria
 
