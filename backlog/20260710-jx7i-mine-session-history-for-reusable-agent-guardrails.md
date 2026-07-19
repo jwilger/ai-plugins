@@ -1,5 +1,5 @@
 ---
-title: Mine session history for reusable agent guardrails
+title: Turn recurring session mistakes into reusable safeguards
 blocked_by: [20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline]
 blocks: []
 tags: [development-discipline, skills, hindsight, guardrails, privacy, workflow]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add a Claude Code and Codex development-discipline skill that mines available session history for recurring mistakes or corrections, proposes durable guardrails, and routes each proposal to the correct project or marketplace surface.
+Add a workflow that reviews available session history for repeated mistakes or corrections, proposes durable safeguards, and routes each proposal to the right project or shared plugin. It must protect private information and require approval before making external or cross-project changes.
 
 ## Context / Why
 
