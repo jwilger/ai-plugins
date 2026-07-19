@@ -27,3 +27,5 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-19: Isolation check found prepare-code-quality-workspaces.mjs imports code-quality-tree-hash.mjs. Added that shared utility to this review scope (overlapping provenance ownership) so the slice is actually executable in isolation; no production code changed.
