@@ -22,3 +22,5 @@ Add development-discipline guardrails that treat GitHub Actions as an authoritat
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-19: Positive example from ticket 20260714-24xa: a full-marketplace canary returned a nonzero result, but inspection showed both harnesses named every loaded plugin and Codex accurately described eval-case-reporter. The actual defect was a prompt/checker mismatch requiring a literal skill name even though the prompt allowed a capability description. Correct behavior was to say the failure was not a plugin-loading failure, file the eval-harness defect separately, and avoid mixing that unrelated fix into the active final-review contract ticket. Use this as a concrete example of evidence-based failure classification and scope containment.
