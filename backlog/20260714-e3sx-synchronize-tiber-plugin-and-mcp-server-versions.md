@@ -13,7 +13,7 @@ Ensure the Tiber plugin, server, packages, bundled programs, and checksums all r
 
 ## Context / Why
 
-Implementation notes:\n\nVerified MINOR release finding from 20260709-spx8: plugin manifests/launcher publish 0.9.0 while the Rust workspace, Cargo.lock, and shipped MCP binary still report 0.8.0.
+Implementation notes: Verified MINOR release finding from 20260709-spx8: plugin manifests/launcher publish 0.9.0 while the Rust workspace, Cargo.lock, and shipped MCP binary still report 0.8.0.
 
 ## Acceptance criteria
 
