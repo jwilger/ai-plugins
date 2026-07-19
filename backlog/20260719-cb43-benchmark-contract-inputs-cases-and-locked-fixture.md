@@ -19,6 +19,7 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 
 - [ ] Declare the exact independent condition/sample/case matrix, provider and prompt inputs, deterministic gates, and locked Rust fixture.
 - [ ] Reject malformed, duplicate, incomplete, or inconsistent workspace matrices and contract values.
+- [ ] Complete final review against the isolated slice with current diff-bound verification evidence.
 
 ## Subtasks
 
