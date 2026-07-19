@@ -67,3 +67,4 @@
 20260716-2iud-build-credential-isolated-full-plugin-writable-eval-runtime
 20260718-n8xa-audit-and-update-hindsight-integration-for-current-coding-harnesses
 20260719-yqyy-let-each-tiber-dashboard-choose-an-available-port
+20260719-pvk7-store-real-line-breaks-in-tiber-ticket-text
