@@ -2607,7 +2607,10 @@ fn validated_scope_split_plan(
         normalized_scope_paths.dedup();
         if let Some((existing_id, _)) = candidate_ownership
             .iter()
-            .find(|(_, ownership)| ownership == &owned_changed_files)
+            .find(|(_, ownership)| {
+                ownership.is_subset(&owned_changed_files)
+                    || owned_changed_files.is_subset(ownership)
+            })
         {
             return Err(format!(
                 "review_split_candidate_scope_fully_overlapping ids={existing_id},{id}"
@@ -9683,6 +9686,18 @@ mod tests {
             "test_git_init",
         )
         .expect("initialize test Git repository");
+        run_git(
+            &root,
+            &[
+                "config".to_string(),
+                "commit.gpgsign".to_string(),
+                "false".to_string(),
+            ],
+            None,
+            None,
+            "test_git_disable_commit_signing",
+        )
+        .expect("disable signing in disposable test repository");
         run_git(
             &root,
             &[
@@ -18519,6 +18534,52 @@ pre_filter = "project-pre"
                 .expect_err("different declarations cannot hide identical ownership"),
             "review_split_candidate_scope_fully_overlapping ids=source-directory,source-file"
         );
+    }
+
+    #[test]
+    fn scope_growth_rejects_candidate_ownership_subsumed_by_a_peer() {
+        let mut arguments = initial_scope_split_arguments("scope-split-subsumed-ownership");
+        arguments["risk_assessment"]["split_candidates"][0]["scope_paths"] =
+            json!(["src/lib.rs", "tests/lib_test.rs"]);
+        arguments["risk_assessment"]["split_candidates"][1]["scope_paths"] =
+            json!(["tests/lib_test.rs"]);
+
+        assert_eq!(
+            plan_result_at(&arguments, 3_000)
+                .expect_err("a candidate wholly owned by a peer is not an independent split"),
+            "review_split_candidate_scope_fully_overlapping ids=coordinator-policy,integration-tests"
+        );
+    }
+
+    #[test]
+    fn scope_growth_allows_partial_overlap_with_distinct_effective_ownership() {
+        let mut arguments = initial_scope_split_arguments("scope-split-partial-overlap");
+        arguments["changed_files"] =
+            json!(["src/lib.rs", "shared/schema.json", "tests/lib_test.rs"]);
+        let mut scout_arguments = arguments.clone();
+        scout_arguments
+            .as_object_mut()
+            .expect("scout arguments")
+            .remove("risk_assessment");
+        let scout: Value = serde_json::from_str(
+            &risk_assessment_result(&scout_arguments).expect("risk scout"),
+        )
+        .expect("risk scout json");
+        let assignment = &scout["assignments"][0];
+        arguments["risk_assessment"]["assignment_id"] = assignment["assignment_id"].clone();
+        arguments["risk_assessment"]["subagent_key"] = assignment["subagent_key"].clone();
+        arguments["risk_assessment"]["split_candidates"][0]["scope_paths"] =
+            json!(["src/lib.rs", "shared/schema.json"]);
+        arguments["risk_assessment"]["split_candidates"][1]["scope_paths"] =
+            json!(["shared/schema.json", "tests/lib_test.rs"]);
+
+        let split: Value = serde_json::from_str(
+            &plan_result_at(&arguments, 3_000)
+                .expect("partially overlapping candidates retain distinct delivery ownership"),
+        )
+        .expect("scope split json");
+
+        assert_eq!(split["transition_status"], "split_confirmation_required");
     }
 
     #[test]
