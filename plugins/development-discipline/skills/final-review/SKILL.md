@@ -1,6 +1,6 @@
 ---
 name: final-review
-description: Use when preparing local changes, a branch, pull request, merge request, or merge-to-main for final review before publishing, opening a PR, merging, or claiming readiness.
+description: Use when preparing local changes, a branch, pull request, merge request, or merge-to-main for final review before publishing, opening a PR, merging, or claiming readiness, including scope growth, proposed work splits, and medium-risk review-budget checkpoints.
 ---
 
 # Final Review
@@ -20,6 +20,76 @@ observations, but it does not satisfy this final-review gate and cannot support 
 PR, merge, or readiness claim. Disclose that enforcement is unavailable and
 stop before claiming completion. Read `references/mcp-protocol.md` only for MCP
 arguments, model routing, verifier details, or packaging fallback.
+
+## Scope-Growth Guardrail
+
+Tell the initial risk assessment and `final_review.plan` whether the reviewed
+work is `review_lifecycle: landed` or `unlanded`; the coordinator propagates it
+through delta reassessment. When reviewing a child created from a prior split,
+also pass its contract-bound `split_lineage` (root and parent work item IDs,
+generation, and source diff hash). Generation one is the maximum: a
+generation-one child cannot split recursively, even after its diff changes.
+
+For unlanded work, the risk scout must set `split_required: true` when the ticket
+has grown into a new subsystem or an unusually broad diff. It must name the
+corresponding `scope_growth_triggers`, give a nonblank split rationale, and
+propose 2-16 `split_candidates`.
+Every candidate needs a stable ID, title, normalized scope paths, independent
+acceptance criteria, an independently shippable reason, and structured
+`delivery_boundaries` proving distinct build, test, and shipping mechanisms.
+Paths, path aliases, or synthetic path-filtered diffs are not delivery-boundary
+evidence. Candidate ownership cannot fully overlap, and their combined paths
+must cover the changed-file inventory.
+
+The coordinator persists a contract-bound `scope_split_hold`. The hold means
+exactly: it returns no assignments, the review remains incomplete, and no later
+advance or weakened same-session replan can bypass confirmation. It
+returns
+`split_confirmation_required` with a bounded preview; tracker mutation and
+blocking dependencies remain unauthorized. Show that exact preview to the
+user. Call `final_review.confirm_split` only after explicit user confirmation;
+standing execution approval never confirms a split.
+
+These invariants are non-bypassable:
+
+- Reject weakened same-session replanning while the hold is active.
+- Never infer split confirmation from standing execution approval.
+- Reject every recursive child split, even after the child's diff changes.
+
+Use `delivery-tickets` by default, which forbids blocking dependencies. Use
+`delivery-tickets-with-blocking-dependencies` only when the user confirms it
+and supplies a concrete causal prerequisite—not administrative review ordering.
+
+For already-landed work, broadness authorizes retrospective review batching
+only. It does not authorize delivery decomposition, tracker tickets, or a
+review-only branch. Never manufacture or push synthetic review-only branches,
+create recursive split tickets, or use Tiber `blocks` relationships for
+administrative review. Review batches stay inside the original work item; only
+a concrete unresolved defect or unfinished independently deliverable change may
+become a follow-up ticket.
+
+## Medium-Risk Review Budget
+
+For a medium-risk session, the coordinator records a server-timed 75-minute
+checkpoint. Apply this contract when `advance_kind` is
+`review_budget_checkpoint`:
+
+- The coordinator has already persisted the submitted review or delta findings
+  to authoritative state and returned no further reviewer assignments.
+- Make the next call with the returned state, unchanged `current_diff_hash`,
+  empty `lens_results`, and exactly one `review_budget_decision` with a nonblank
+  rationale.
+- For unlanded reviews, the choices are `ship`, `split`, or `escalate`; `split`
+  requires at least two distinct ticket references. For landed reviews, the
+  choices are only `ship` or `escalate` because landed work cannot be decomposed
+  into delivery tickets. `escalate` requires a nonblank escalation reference.
+- Reject `ship` until every independent delivery gate passes: acceptance
+  criteria are met, the latest pushed CI build is running or green, and every
+  blocking finding is resolved. Once valid, `ship` is terminal and schedules no
+  more reviewers.
+- For unlanded reviews, `split` creates a terminal hold. `escalate` creates one
+  in either lifecycle. Each hold preserves blockers, schedules no reviewers,
+  and rejects every later `final_review.advance` for that session.
 
 ## Scope
 
@@ -96,41 +166,6 @@ it in `final_review.plan` as a bounded `prior_defenses` entry with exact `id`,
 at least one non-whitespace character.
 The MCP binds imported defenses into the initial contract and gives each one to
 the matching first-iteration lens. Do not rely on conversation context alone.
-
-Tell the initial risk assessment and `final_review.plan` whether the reviewed
-work is `review_lifecycle: landed` or `unlanded`; the coordinator propagates it
-through delta reassessment. When reviewing a child created from a prior split,
-also pass its contract-bound `split_lineage` (root and parent work item IDs,
-generation, and source diff hash). Generation one is the maximum: a
-generation-one child cannot split recursively, even after its diff changes.
-
-For unlanded work, the risk scout must set `split_required: true` when the ticket
-has grown into a new subsystem or an unusually broad diff. It must name the
-corresponding `scope_growth_triggers` and propose 2-16 `split_candidates`.
-Every candidate needs a stable ID, title, normalized scope paths, independent
-acceptance criteria, an independently shippable reason, and structured
-`delivery_boundaries` proving distinct build, test, and shipping mechanisms.
-Paths, path aliases, or synthetic path-filtered diffs are not delivery-boundary
-evidence. Candidate ownership cannot fully overlap, and their combined paths
-must cover the changed-file inventory.
-
-The coordinator persists a contract-bound `scope_split_hold`, returns no deep
-review assignments, and rejects later advances or weakened same-session
-replanning. It returns `split_confirmation_required` with a bounded preview;
-tracker mutation and blocking dependencies remain unauthorized. Show that exact
-preview to the user. Call `final_review.confirm_split` only after explicit user
-confirmation. Use `delivery-tickets` by default, which forbids blocking
-dependencies. Use `delivery-tickets-with-blocking-dependencies` only when the
-user confirms it and supplies a concrete causal prerequisite—not administrative
-review ordering.
-
-For already-landed work, broadness authorizes retrospective review batching
-only. It does not authorize delivery decomposition, tracker tickets, or a
-review-only branch. Never manufacture or push synthetic review-only branches,
-create recursive split tickets, or use Tiber `blocks` relationships for
-administrative review. Review batches stay inside the original work item; only
-a concrete unresolved defect or unfinished independently deliverable change may
-become a follow-up ticket.
 
 ## Default Lenses
 
@@ -276,18 +311,6 @@ policy.
    human-safety candidates open. A rejected finding is removed; the iteration
    may count as clean when no other blocking, malformed, or needs-human finding
    remains.
-
-   For a medium-risk session, the coordinator records a server-timed 75-minute
-   checkpoint. When `advance_kind` is `review_budget_checkpoint`, the submitted
-   review or delta results have already been applied to authoritative state and
-   no further reviewer is assigned. Make the next call with that returned
-   state, the unchanged `current_diff_hash`, empty `lens_results`, and exactly
-   one `review_budget_decision`: `ship`, `split`, or `escalate`, with a nonblank
-   rationale. `split` also requires at least two distinct ticket references;
-   `escalate` requires a nonblank escalation reference. `ship` terminates final
-   review and schedules no more reviewers, but never overrides unmet acceptance
-   criteria, a failed/not-started CI gate, or an unresolved blocking finding.
-   Split and escalate create a terminal hold for that review session.
 
 4. Fix valid findings when remediation was requested; for review-only requests,
    report without editing. Before addressing a finding, check the latest pushed
