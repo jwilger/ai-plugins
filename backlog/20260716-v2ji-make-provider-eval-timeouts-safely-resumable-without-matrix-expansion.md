@@ -1,5 +1,5 @@
 ---
-title: Make provider eval timeouts safely resumable without matrix expansion
+title: Resume timed-out provider evaluations without repeating completed work
 blocked_by: []
 blocks: []
 tags: []
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Preserve completed provider-backed eval work across watchdog timeouts and resume the exact remaining case/provider matrix without duplication.
+Preserve completed provider-backed evaluation results after a timeout or planned pause, then resume exactly the remaining cases without duplicates or an unexpectedly expanded test matrix. Recovery must keep the existing isolation and validation safeguards.
 
 ## Context / Why
 
