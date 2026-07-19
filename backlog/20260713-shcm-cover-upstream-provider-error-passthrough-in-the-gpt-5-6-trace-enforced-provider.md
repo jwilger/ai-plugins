@@ -1,5 +1,5 @@
 ---
-title: Cover upstream provider-error passthrough in the GPT-5.6 trace-enforced provider
+title: Preserve original provider errors in GPT-5.6 evaluations
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, tests, promptfoo, isolation, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add focused regression coverage proving the GPT-5.6 trace-enforced Promptfoo provider preserves an existing upstream provider error unchanged instead of replacing it with a trace-verification error.
+Add a focused test proving that when the upstream evaluation provider already reports an error, the trace-checking wrapper returns that error unchanged instead of replacing it with a secondary trace-validation failure.
 
 ## Context / Why
 
