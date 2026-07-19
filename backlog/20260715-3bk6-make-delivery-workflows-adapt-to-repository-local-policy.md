@@ -13,7 +13,7 @@ Make shared development guidance follow the repository’s stated way of deliver
 
 ## Context / Why
 
-Reusable skills currently conflict with repositories that deliver directly to main, including this one. Define policy precedence as repository instructions first, workflow router second, and specialist skills third. Support direct-to-trunk, PR/MR, and local-only workflows while preserving safety, fresh verification, and evidence-before-claims.
+Implementation notes:\n\nReusable skills currently conflict with repositories that deliver directly to main, including this one. Define policy precedence as repository instructions first, workflow router second, and specialist skills third. Support direct-to-trunk, PR/MR, and local-only workflows while preserving safety, fresh verification, and evidence-before-claims.
 
 ## Acceptance criteria
 
