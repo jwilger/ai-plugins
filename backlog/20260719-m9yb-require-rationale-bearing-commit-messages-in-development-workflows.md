@@ -15,6 +15,8 @@ Add development-discipline guardrails that require every authored commit to incl
 
 ## Acceptance criteria
 
+- [ ] Applicable commit guidance explicitly requires a message body that explains why the change is necessary.
+
 ## Subtasks
 
 ## Notes / Log
