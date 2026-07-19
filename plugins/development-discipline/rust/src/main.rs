@@ -2231,7 +2231,9 @@ fn validated_scope_split_plan(
         .collect::<Vec<_>>();
     let mut covered_changed_files = HashSet::new();
     let mut candidate_ids = HashSet::with_capacity(candidates.len());
-    let mut normalized_candidates = Vec::with_capacity(candidates.len());
+    let mut normalized_candidates: Vec<Value> = Vec::with_capacity(candidates.len());
+    let mut candidate_ownership: Vec<(String, HashSet<String>)> =
+        Vec::with_capacity(candidates.len());
     for (index, candidate) in candidates.iter().enumerate() {
         let candidate = candidate
             .as_object()
@@ -2292,6 +2294,7 @@ fn validated_scope_split_plan(
             ));
         }
         let mut normalized_scope_paths = Vec::with_capacity(scope_paths.len());
+        let mut owned_changed_files = HashSet::new();
         for scope_path in scope_paths {
             let normalized = normalize_review_path(&scope_path, None)
                 .ok_or_else(|| format!("review_split_candidate_scope_path_invalid id={id}"))?;
@@ -2301,6 +2304,7 @@ fn validated_scope_split_plan(
                     || changed_file.starts_with(&format!("{normalized}/"))
                 {
                     covered_changed_files.insert(changed_file.clone());
+                    owned_changed_files.insert(changed_file.clone());
                     path_in_scope = true;
                 }
             }
@@ -2313,6 +2317,15 @@ fn validated_scope_split_plan(
         }
         normalized_scope_paths.sort();
         normalized_scope_paths.dedup();
+        if let Some((existing_id, _)) = candidate_ownership
+            .iter()
+            .find(|(_, ownership)| ownership == &owned_changed_files)
+        {
+            return Err(format!(
+                "review_split_candidate_scope_fully_overlapping ids={existing_id},{id}"
+            ));
+        }
+        candidate_ownership.push((id.to_string(), owned_changed_files));
         normalized_candidates.push(json!({
             "id": id,
             "title": candidate_text["title"],
@@ -17687,6 +17700,51 @@ pre_filter = "project-pre"
             }))
             .expect("retry response");
         assert_eq!(retry["error"]["message"], "review_session_exists=true");
+    }
+
+    #[test]
+    fn scope_growth_rejects_fully_overlapping_split_candidates() {
+        let mut arguments = initial_scope_split_arguments("scope-split-overlap");
+        arguments["risk_assessment"]["split_candidates"][0]["scope_paths"] =
+            json!(["src/lib.rs", "tests/lib_test.rs"]);
+        arguments["risk_assessment"]["split_candidates"][1]["scope_paths"] =
+            json!(["src/lib.rs", "tests/lib_test.rs"]);
+
+        assert_eq!(
+            plan_result_at(&arguments, 3_000)
+                .expect_err("fully overlapping candidates are not a meaningful split"),
+            "review_split_candidate_scope_fully_overlapping ids=coordinator-policy,integration-tests"
+        );
+    }
+
+    #[test]
+    fn scope_growth_rejects_distinct_paths_with_identical_effective_ownership() {
+        let mut arguments = initial_scope_split_arguments("scope-split-effective-overlap");
+        arguments["risk_assessment"]["split_candidates"] = json!([{
+            "id": "source-directory",
+            "title": "Ship the source directory",
+            "scope_paths": ["src"],
+            "acceptance_criteria": ["The source policy is independently usable."],
+            "independently_shippable_reason": "The source policy has its own release artifact."
+        }, {
+            "id": "source-file",
+            "title": "Ship the source file",
+            "scope_paths": ["src/lib.rs"],
+            "acceptance_criteria": ["The source file is independently usable."],
+            "independently_shippable_reason": "The source file has its own release artifact."
+        }, {
+            "id": "integration-tests",
+            "title": "Ship the integration tests",
+            "scope_paths": ["tests/lib_test.rs"],
+            "acceptance_criteria": ["Integration tests consume the released policy."],
+            "independently_shippable_reason": "The tests can follow the policy release."
+        }]);
+
+        assert_eq!(
+            plan_result_at(&arguments, 3_000)
+                .expect_err("different declarations cannot hide identical ownership"),
+            "review_split_candidate_scope_fully_overlapping ids=source-directory,source-file"
+        );
     }
 
     #[test]
