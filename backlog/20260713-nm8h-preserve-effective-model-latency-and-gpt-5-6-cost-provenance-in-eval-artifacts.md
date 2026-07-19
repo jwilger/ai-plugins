@@ -13,7 +13,7 @@ Make evaluation results and dashboards show the model and reasoning level that a
 
 ## Context / Why
 
-Discovered while migrating canonical Codex eval defaults to GPT-5.6. Provider labels currently come from the static matrix variant even when CODEX_EVAL_MODEL overrides the effective model; build-site drops latency and does not expose grader model or effort; Promptfoo may lack complete GPT-5.6 billing entries, so cost can be missing or zero. Consolidated scope from 20260713-j3x4 requires the effective-model contract to prevent a static Terra provider ID or label from surviving when CODEX_EVAL_MODEL selects Sol or Luna. Persisted artifacts, aggregation, and the rendered dashboard must agree on the effective model.
+Implementation notes:\n\nDiscovered while migrating canonical Codex eval defaults to GPT-5.6. Provider labels currently come from the static matrix variant even when CODEX_EVAL_MODEL overrides the effective model; build-site drops latency and does not expose grader model or effort; Promptfoo may lack complete GPT-5.6 billing entries, so cost can be missing or zero. Consolidated scope from 20260713-j3x4 requires the effective-model contract to prevent a static Terra provider ID or label from surviving when CODEX_EVAL_MODEL selects Sol or Luna. Persisted artifacts, aggregation, and the rendered dashboard must agree on the effective model.
 
 ## Acceptance criteria
 
