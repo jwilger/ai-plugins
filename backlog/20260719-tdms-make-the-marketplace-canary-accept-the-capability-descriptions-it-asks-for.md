@@ -2,7 +2,7 @@
 title: Make the marketplace canary accept the capability descriptions it asks for
 blocked_by: []
 blocks: []
-tags: []
+tags: [evals, canary, prompt-contract, codex]
 pr_mr_url: 
 pr_mr_status: 
 ---
