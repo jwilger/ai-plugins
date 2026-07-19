@@ -1,5 +1,5 @@
 ---
-title: Add an artifact-obligation readiness gate before final-review planning
+title: Check required evidence before final review begins
 blocked_by: []
 blocks: []
 tags: [development-discipline, final-review, readiness, artifacts, release-integration, evals]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add a scope-bound readiness result that verifies required acceptance evidence and catches missing schema, version, documentation, generated-artifact, eval, release, or blocker work before the risk scout and formal review begin.
+Add a readiness check that confirms the ticket’s acceptance evidence and related deliverables are present before formal review starts. Missing tests, documentation, versions, generated files, evaluations, release artifacts, or tracked blockers should be identified early with specific next steps.
 
 ## Context / Why
 
