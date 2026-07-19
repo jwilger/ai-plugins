@@ -19,6 +19,7 @@ Final-review split from 20260719-cb43 at diff hash b190d81690f3657f5230580fb083b
 
 - [ ] Validate exact runtime rows against workspace rows, immutable input hashes, matrix hashes, and skill-composition evidence.
 - [ ] Require canonical private non-overlapping runtime paths and exact ownership markers.
+- [ ] Produce deterministic bounded hashes for regular symlink-free file trees and reject unsupported entry types or exceeded limits.
 
 ## Subtasks
 
