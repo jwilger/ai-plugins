@@ -18,6 +18,7 @@ Ticket 20260708-puyh is a concrete example: text intended to span multiple lines
 ## Acceptance criteria
 
 - [ ] Multiline text entered through supported Tiber interfaces is stored and rendered with real line breaks.
+- [ ] Existing literal backslash-n text can be distinguished from intentional backslash characters and repaired safely.
 
 ## Subtasks
 
