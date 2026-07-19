@@ -4220,7 +4220,9 @@ fn review_budget_checkpoint_summary(state: &Value, now_epoch_seconds: u64) -> Va
         .pointer("/risk_plan/review_budget/started_at_epoch_seconds")
         .and_then(Value::as_u64)
         .unwrap_or(now_epoch_seconds);
-    let landed = state.pointer("/scope/review_lifecycle").and_then(Value::as_str)
+    let landed = state
+        .pointer("/scope/review_lifecycle")
+        .and_then(Value::as_str)
         == Some("landed");
     json!({
         "checkpoint_minutes": MEDIUM_RISK_REVIEW_BUDGET_MINUTES,
@@ -4379,7 +4381,10 @@ fn review_budget_decision_transition(
         .and_then(Value::as_str)
         .unwrap_or("unknown");
     if kind == "split"
-        && state.pointer("/scope/review_lifecycle").and_then(Value::as_str) == Some("landed")
+        && state
+            .pointer("/scope/review_lifecycle")
+            .and_then(Value::as_str)
+            == Some("landed")
     {
         return Err("review_budget_split_forbidden_for_landed_review=true".to_string());
     }
