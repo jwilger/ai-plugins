@@ -1,5 +1,5 @@
 ---
-title: Turn the autonomous resume-work heartbeat into an invokable skill
+title: Make automatic goal resumption available as a reusable skill
 blocked_by: []
 blocks: []
 tags: []
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Create an invokable Codex-first skill that starts and manages a real goal-aware resume-work heartbeat, using model wake/yield events rather than an unread terminal loop.
+Create a Codex-first skill that periodically wakes an active goal and prompts work to continue, with safe start, status, stop, and restart behavior. Use each coding tool’s supported wake mechanism and clearly document when automatic resumption cannot work.
 
 ## Context / Why
 
