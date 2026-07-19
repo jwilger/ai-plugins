@@ -17,6 +17,8 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 
 ## Acceptance criteria
 
+- [ ] Rebuild and score candidate code in bounded trusted sandboxes and bind the exact scoring composition and fixture.
+
 ## Subtasks
 
 ## Notes / Log
