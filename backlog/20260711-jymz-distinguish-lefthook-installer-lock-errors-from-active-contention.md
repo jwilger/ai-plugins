@@ -13,7 +13,7 @@ Give users different, actionable messages when the Lefthook installer is genuine
 
 ## Context / Why
 
-The preliminary nonblocking flock currently maps every nonzero result to worktrees.hook_install_locked. That hides ordinary filesystem failures such as a read-only or missing state directory, exhausted space, and stale permissions. Preserve the contention diagnostic only when the lock was opened successfully and is actually held; lock-path/open failures need a separate stable diagnostic that retains the underlying filesystem cause and remediation.
+Implementation notes:\n\nThe preliminary nonblocking flock currently maps every nonzero result to worktrees.hook_install_locked. That hides ordinary filesystem failures such as a read-only or missing state directory, exhausted space, and stale permissions. Preserve the contention diagnostic only when the lock was opened successfully and is actually held; lock-path/open failures need a separate stable diagnostic that retains the underlying filesystem cause and remediation.
 
 ## Acceptance criteria
 
