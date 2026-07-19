@@ -17,6 +17,8 @@ Final-review split from 20260719-cb43 at diff hash b190d81690f3657f5230580fb083b
 
 ## Acceptance criteria
 
+- [ ] Prepare a fresh clean Git repository for every selected case, sample, and condition.
+
 ## Subtasks
 
 ## Notes / Log
