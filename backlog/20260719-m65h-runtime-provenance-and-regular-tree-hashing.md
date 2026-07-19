@@ -1,7 +1,7 @@
 ---
 title: Runtime provenance and regular-tree hashing
 blocked_by: []
-blocks: []
+blocks: [20260719-cb43-benchmark-contract-inputs-cases-and-locked-fixture]
 tags: [evals, benchmark, provenance, hashing, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
