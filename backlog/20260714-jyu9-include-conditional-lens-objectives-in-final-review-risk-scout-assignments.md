@@ -1,5 +1,5 @@
 ---
-title: Include conditional lens objectives in final-review risk-scout assignments
+title: Explain custom review checks to the risk scout
 blocked_by: []
 blocks: []
 tags: [development-discipline, final-review, risk-planning, mcp, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Pass every configured conditional lens description/objective into the final-review risk scout's diff-bound assignment so custom migration, domain, and safety risks can be classified from their intended meaning.
+Include the purpose of every custom review check in the risk scout’s assignment. This lets the scout evaluate specialized migration, domain, and safety risks from their intended meaning instead of seeing only an unexplained identifier.
 
 ## Context / Why
 
