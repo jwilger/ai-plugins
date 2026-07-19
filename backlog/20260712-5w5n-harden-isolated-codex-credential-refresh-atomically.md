@@ -13,7 +13,7 @@ Update copied Codex credentials as one safe filesystem operation, with private f
 
 ## Context / Why
 
-Deferred MINOR findings from lightweight review of 20260712-kwbg. The current refresh copies directly over the destination and chmods afterward, so interruption or a filesystem error could leave a partial credential file, and an existing destination symlink could redirect the write outside the isolated eval home. Current focused coverage asserts refreshed auth.json contents but does not exercise .credentials.json or mode 0600.
+Implementation notes:\n\nDeferred MINOR findings from lightweight review of 20260712-kwbg. The current refresh copies directly over the destination and chmods afterward, so interruption or a filesystem error could leave a partial credential file, and an existing destination symlink could redirect the write outside the isolated eval home. Current focused coverage asserts refreshed auth.json contents but does not exercise .credentials.json or mode 0600.
 
 ## Acceptance criteria
 
