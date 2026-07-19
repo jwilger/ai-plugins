@@ -13,7 +13,7 @@ Do not replace symbolic links or workspaces that are not clearly owned by the be
 
 ## Context / Why
 
-Final review of 20260709-spx8 found that a dangling workspace symlink is treated as absent and replaced. Related deferred test-depth findings show that current regressions do not prove exact marker contents or the complete realpath-aware ancestor, descendant, symlink-alias, explicit-auth, and default ~/.codex overlap matrix. Consolidate these tightly coupled workspace deletion-authorization and isolation requirements into one bounded filesystem-safety increment.
+Implementation notes:\n\nFinal review of 20260709-spx8 found that a dangling workspace symlink is treated as absent and replaced. Related deferred test-depth findings show that current regressions do not prove exact marker contents or the complete realpath-aware ancestor, descendant, symlink-alias, explicit-auth, and default ~/.codex overlap matrix. Consolidate these tightly coupled workspace deletion-authorization and isolation requirements into one bounded filesystem-safety increment.
 
 ## Acceptance criteria
 
