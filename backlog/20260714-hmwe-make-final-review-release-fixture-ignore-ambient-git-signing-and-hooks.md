@@ -1,5 +1,5 @@
 ---
-title: Make final-review release fixture ignore ambient Git signing and hooks
+title: Keep final-review release tests independent of local Git settings
 blocked_by: []
 blocks: []
 tags: [development-discipline, tests, git, hermeticity, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make the temporary Git fixture used by the development-discipline source/release parity flow independent of ambient signing and hook configuration.
+Make the temporary Git repository used by release checks ignore a developer’s signing and hook configuration. Local preferences should not cause an otherwise isolated test to fail or hang.
 
 ## Context / Why
 
