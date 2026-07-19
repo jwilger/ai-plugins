@@ -2548,16 +2548,17 @@ fn validated_scope_split_plan(
                         "review_split_candidate_delivery_boundary_too_long id={id} boundary={boundary} field={field} max_chars={MAX_SPLIT_DELIVERY_EVIDENCE_CHARS}"
                     ));
                 }
+                let normalized_value = value.trim();
                 if *field != "evidence_kind"
-                    && (Path::new(value).is_absolute()
-                        || normalize_review_path(value, None)
+                    && (Path::new(normalized_value).is_absolute()
+                        || normalize_review_path(normalized_value, None)
                             .is_some_and(|path| declared_scope_paths.contains(&path)))
                 {
                     return Err(format!(
                         "review_split_candidate_delivery_boundary_path_only id={id} boundary={boundary} field={field}"
                     ));
                 }
-                normalized_evidence.insert((*field).to_string(), json!(value));
+                normalized_evidence.insert((*field).to_string(), json!(normalized_value));
             }
             normalized_delivery_boundaries
                 .insert(boundary.to_string(), Value::Object(normalized_evidence));
@@ -18517,6 +18518,23 @@ pre_filter = "project-pre"
                 )
             );
         }
+    }
+
+    #[test]
+    fn scope_growth_normalizes_delivery_boundary_whitespace_before_overlap_check() {
+        let mut arguments = initial_scope_split_arguments("scope-split-boundary-whitespace");
+        arguments["risk_assessment"]["split_candidates"][1]["delivery_boundaries"]["build"] =
+            json!({
+                "evidence_kind": "independent-build",
+                "command": "  build coordinator policy ",
+                "artifact": " coordinator policy package  "
+            });
+
+        assert_eq!(
+            plan_result_at(&arguments, 3_000)
+                .expect_err("whitespace cannot disguise shared delivery evidence"),
+            "review_split_candidate_delivery_boundary_overlapping ids=coordinator-policy,integration-tests boundary=build"
+        );
     }
 
     #[test]
