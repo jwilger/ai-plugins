@@ -397,7 +397,10 @@ impl ReviewCoordinator {
         result: &Value,
         arguments: &Value,
     ) -> Result<(), String> {
-        if !matches!(tool_name, "final_review.plan" | "final_review.advance") {
+        if !matches!(
+            tool_name,
+            "final_review.plan" | "final_review.advance" | "final_review.confirm_split"
+        ) {
             return Ok(());
         }
         let text = result
@@ -469,7 +472,10 @@ impl ReviewCoordinator {
             return Ok(());
         }
         if tool_name == "final_review.advance"
-            && payload.get("transition_status").and_then(Value::as_str) != Some("advanced")
+            && !matches!(
+                payload.get("transition_status").and_then(Value::as_str),
+                Some("advanced" | "split_confirmation_required")
+            )
         {
             return Ok(());
         }
@@ -772,6 +778,27 @@ fn tools() -> Value {
             }
         },
         {
+            "name": "final_review.confirm_split",
+            "description": "Confirm an unlanded split preview before representing it as tracker tickets or blocking dependencies.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "state": { "type": "object" },
+                    "confirmation_id": { "type": "string", "pattern": "^split-[0-9a-f]{16}$" },
+                    "explicit_user_confirmation": { "const": true },
+                    "tracker_representation": { "type": "string", "enum": ["delivery-tickets", "delivery-tickets-with-blocking-dependencies"] },
+                    "blocking_dependencies_reason": { "type": "string", "minLength": 1, "maxLength": MAX_SPLIT_DELIVERY_EVIDENCE_CHARS, "pattern": "\\S" }
+                },
+                "required": ["state", "confirmation_id", "explicit_user_confirmation", "tracker_representation"],
+                "allOf": [{
+                    "if": { "properties": { "tracker_representation": { "const": "delivery-tickets-with-blocking-dependencies" } }, "required": ["tracker_representation"] },
+                    "then": { "required": ["blocking_dependencies_reason"] },
+                    "else": { "not": { "required": ["blocking_dependencies_reason"] } }
+                }]
+            }
+        },
+        {
             "name": "final_review.clean_status",
             "description": "Compatibility helper for reporting clean-streak completion from caller-carried state after server-authoritative validation.",
             "inputSchema": {
@@ -930,6 +957,7 @@ fn call_tool_at(name: &str, arguments: &Value, now_epoch_seconds: u64) -> Result
             true,
             now_epoch_seconds,
         )?)),
+        "final_review.confirm_split" => Ok(text_content(confirm_scope_split(arguments)?)),
         "final_review.clean_status" => Ok(text_content(clean_status(arguments))),
         "final_review.out_of_scope_report" => Ok(text_content(out_of_scope_report(arguments)?)),
         "final_review.assess_risk" => Ok(text_content(risk_assessment_result(arguments)?)),
@@ -2600,13 +2628,24 @@ fn validated_scope_split_plan(
             .cmp(&right.get("id").and_then(Value::as_str))
     });
     let landed = review_lifecycle == "landed";
+    let confirmation_material = Value::Array(normalized_candidates.clone()).to_string();
+    let confirmation_id = format!(
+        "split-{}",
+        stable_storage_digest(&[rationale, &confirmation_material])
+    );
     Ok(Some(json!({
         "required": true,
         "hold": !landed,
         "advisory": landed,
         "rationale": rationale,
         "triggers": ordered_triggers,
-        "candidates": normalized_candidates
+        "candidates": normalized_candidates,
+        "confirmation_id": confirmation_id,
+        "confirmation_required": !landed,
+        "tracker_mutation_authorized": false,
+        "blocking_dependencies_authorized": false,
+        "confirmed_representation": null,
+        "blocking_dependencies_reason": null
     })))
 }
 
@@ -3303,9 +3342,11 @@ fn plan_result_internal(
         "calling_agent_responsibility": "Launch each assignment as a real fresh-context subagent in the current harness. Use the assigned subagent_key, close the subagent after collecting its result, then append caller_attestation with the assigned model role, fresh_context=true, and closed_after_result=true before final_review.advance. Do not ask this MCP server to impersonate subagents."
     });
     if split_hold {
-        response["transition_status"] = json!("ticket_split_required");
-        response["advance_kind"] = json!("scope_split_hold");
+        response["transition_status"] = json!("split_confirmation_required");
+        response["advance_kind"] = json!("scope_split_confirmation");
         response["scope_split"] = scope_split;
+        response["tracker_mutation_authorized"] = json!(false);
+        response["blocking_dependencies_authorized"] = json!(false);
         response["complete"] = json!(false);
         response["completion_blockers"] = Value::Array(unresolved_findings(&response["state"]));
         response["assignments"] = json!([]);
@@ -4017,6 +4058,101 @@ fn scope_split_hold_active(state: &Value) -> bool {
         .pointer("/risk_plan/scope_split/hold")
         .and_then(Value::as_bool)
         == Some(true)
+}
+
+fn confirm_scope_split(arguments: &Value) -> Result<String, String> {
+    let mut state = arguments
+        .get("state")
+        .cloned()
+        .ok_or_else(|| "state is required".to_string())?;
+    if !review_contract_is_valid(&state) {
+        return Err("review_contract_invalid=true".to_string());
+    }
+    if !scope_split_hold_active(&state) {
+        return Err("review_scope_split_confirmation_not_required=true".to_string());
+    }
+    if state
+        .pointer("/risk_plan/scope_split/confirmation_required")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err("review_scope_split_already_confirmed=true".to_string());
+    }
+    let object = arguments
+        .as_object()
+        .ok_or_else(|| "split_confirmation_arguments_invalid=true".to_string())?;
+    let representation = object
+        .get("tracker_representation")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            matches!(
+                *value,
+                "delivery-tickets" | "delivery-tickets-with-blocking-dependencies"
+            )
+        })
+        .ok_or_else(|| "split_confirmation_tracker_representation_invalid=true".to_string())?;
+    let blocking = representation == "delivery-tickets-with-blocking-dependencies";
+    let expected_fields = if blocking { 5 } else { 4 };
+    if object.len() != expected_fields
+        || object
+            .get("explicit_user_confirmation")
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return Err("split_confirmation_explicit_user_confirmation_required=true".to_string());
+    }
+    let confirmation_id = object
+        .get("confirmation_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "split_confirmation_id_required=true".to_string())?;
+    if state
+        .pointer("/risk_plan/scope_split/confirmation_id")
+        .and_then(Value::as_str)
+        != Some(confirmation_id)
+    {
+        return Err("split_confirmation_id_mismatch=true".to_string());
+    }
+    let blocking_reason = if blocking {
+        let reason = object
+            .get("blocking_dependencies_reason")
+            .and_then(Value::as_str)
+            .filter(|reason| {
+                !reason.trim().is_empty()
+                    && reason.chars().count() <= MAX_SPLIT_DELIVERY_EVIDENCE_CHARS
+            })
+            .ok_or_else(|| {
+                "split_confirmation_blocking_dependencies_reason_required=true".to_string()
+            })?;
+        json!(reason)
+    } else {
+        Value::Null
+    };
+    state["risk_plan"]["scope_split"]["confirmation_required"] = json!(false);
+    state["risk_plan"]["scope_split"]["tracker_mutation_authorized"] = json!(true);
+    state["risk_plan"]["scope_split"]["blocking_dependencies_authorized"] = json!(blocking);
+    state["risk_plan"]["scope_split"]["confirmed_representation"] = json!(representation);
+    state["risk_plan"]["scope_split"]["blocking_dependencies_reason"] = blocking_reason;
+    state["review_contract_id"] = json!(computed_review_contract_id(&state)
+        .ok_or_else(|| "review_contract_rebind_failed=true".to_string())?);
+    if !review_contract_is_valid(&state) {
+        return Err("review_contract_rebind_invalid=true".to_string());
+    }
+    Ok(json!({
+        "state": state,
+        "transition_status": "ticket_split_required",
+        "advance_kind": "scope_split_hold",
+        "scope_split": state["risk_plan"]["scope_split"],
+        "tracker_mutation_authorized": true,
+        "blocking_dependencies_authorized": blocking,
+        "complete": false,
+        "assignments": [],
+        "instruction": if blocking {
+            "Create only the explicitly confirmed delivery tickets and blocking dependencies."
+        } else {
+            "Create only the explicitly confirmed delivery tickets; do not create blocking dependencies."
+        }
+    })
+    .to_string())
 }
 
 fn review_budget_checkpoint_summary(state: &Value, now_epoch_seconds: u64) -> Value {
@@ -5185,9 +5321,11 @@ fn apply_delta_risk_reassessment(
         let completion_blockers = unresolved_findings(&state);
         return Ok(json!({
             "state": state,
-            "transition_status": "advanced",
-            "advance_kind": "scope_split_hold",
+            "transition_status": "split_confirmation_required",
+            "advance_kind": "scope_split_confirmation",
             "scope_split": scope_split,
+            "tracker_mutation_authorized": false,
+            "blocking_dependencies_authorized": false,
             "complete": false,
             "completion_blockers": completion_blockers,
             "next_assignments": [],
@@ -7570,7 +7708,7 @@ fn scope_split_contract_is_valid(
         .and_then(Value::as_str)
         .unwrap_or("unlanded");
     let landed = lifecycle == "landed";
-    if fields.len() != 6
+    if fields.len() != 12
         || fields.get("required").and_then(Value::as_bool) != Some(true)
         || fields.get("hold").and_then(Value::as_bool) != Some(!landed)
         || fields.get("advisory").and_then(Value::as_bool) != Some(landed)
@@ -7589,15 +7727,60 @@ fn scope_split_contract_is_valid(
     let Some(assessment) = assessment.as_object() else {
         return false;
     };
-    validated_scope_split_plan(
+    let Some(normalized) = validated_scope_split_plan(
         assessment,
         &changed_files,
         lifecycle,
         state.pointer("/scope/split_lineage"),
     )
     .ok()
-    .flatten()
-    .is_some_and(|normalized| &normalized == scope_split)
+    .flatten() else {
+        return false;
+    };
+    let confirmation_required = fields.get("confirmation_required").and_then(Value::as_bool);
+    let tracker_authorized = fields
+        .get("tracker_mutation_authorized")
+        .and_then(Value::as_bool);
+    let blocking_authorized = fields
+        .get("blocking_dependencies_authorized")
+        .and_then(Value::as_bool);
+    let representation = fields
+        .get("confirmed_representation")
+        .and_then(Value::as_str);
+    let reason = fields.get("blocking_dependencies_reason");
+    let confirmation_valid = if landed || confirmation_required == Some(true) {
+        tracker_authorized == Some(false)
+            && blocking_authorized == Some(false)
+            && representation.is_none()
+            && reason.is_some_and(Value::is_null)
+    } else {
+        confirmation_required == Some(false)
+            && tracker_authorized == Some(true)
+            && matches!(
+                representation,
+                Some("delivery-tickets" | "delivery-tickets-with-blocking-dependencies")
+            )
+            && (blocking_authorized == Some(true))
+                == (representation == Some("delivery-tickets-with-blocking-dependencies"))
+            && if blocking_authorized == Some(true) {
+                reason
+                    .and_then(Value::as_str)
+                    .is_some_and(|reason| !reason.trim().is_empty())
+            } else {
+                reason.is_some_and(Value::is_null)
+            }
+    };
+    if !confirmation_valid {
+        return false;
+    }
+    let mut comparable = scope_split.clone();
+    comparable["confirmation_required"] = normalized["confirmation_required"].clone();
+    comparable["tracker_mutation_authorized"] = normalized["tracker_mutation_authorized"].clone();
+    comparable["blocking_dependencies_authorized"] =
+        normalized["blocking_dependencies_authorized"].clone();
+    comparable["confirmed_representation"] = Value::Null;
+    comparable["blocking_dependencies_reason"] = Value::Null;
+    comparable == normalized
 }
 
 fn review_budget_contract_is_valid(risk_plan: &serde_json::Map<String, Value>) -> bool {
@@ -17086,9 +17269,14 @@ pre_filter = "project-pre"
         .expect("response");
 
         let tools = response["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 6);
-        assert_eq!(tools[4]["name"], "final_review.out_of_scope_report");
-        assert_eq!(tools[5]["name"], "final_review.assess_risk");
+        assert_eq!(tools.len(), 7);
+        assert_eq!(tools[3]["name"], "final_review.confirm_split");
+        assert_eq!(
+            tools[3]["inputSchema"]["allOf"][0]["else"]["not"]["required"],
+            json!(["blocking_dependencies_reason"])
+        );
+        assert_eq!(tools[5]["name"], "final_review.out_of_scope_report");
+        assert_eq!(tools[6]["name"], "final_review.assess_risk");
         assert_eq!(
             tools[0]["inputSchema"]["properties"]["required_clean_iterations"]["minimum"],
             DEFAULT_CLEAN_ITERATIONS
@@ -17103,12 +17291,12 @@ pre_filter = "project-pre"
                 "shared_test_evidence"
             ])
         );
-        assert!(tools[5]["inputSchema"]["required"]
+        assert!(tools[6]["inputSchema"]["required"]
             .as_array()
             .expect("risk scout required fields")
             .contains(&json!("baseline_commit")));
         assert_eq!(
-            tools[5]["inputSchema"]["properties"]["baseline_commit"]["pattern"],
+            tools[6]["inputSchema"]["properties"]["baseline_commit"]["pattern"],
             "^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$"
         );
         assert_eq!(
@@ -17872,7 +18060,10 @@ pre_filter = "project-pre"
         )
         .expect("scope split json");
 
-        assert_eq!(split["transition_status"], "ticket_split_required");
+        assert_eq!(split["transition_status"], "split_confirmation_required");
+        assert_eq!(split["tracker_mutation_authorized"], false);
+        assert_eq!(split["blocking_dependencies_authorized"], false);
+        assert!(split["scope_split"]["confirmation_id"].is_string());
         assert_eq!(split["state"]["lenses"], json!([]));
         assert_eq!(split["assignments"], json!([]));
         assert_eq!(
@@ -17883,6 +18074,105 @@ pre_filter = "project-pre"
             ["architecture-maintainability"]
             .is_string());
         assert!(review_contract_is_valid(&split["state"]));
+
+        let confirmed: Value = serde_json::from_str(
+            &confirm_scope_split(&json!({
+                "state": split["state"],
+                "confirmation_id": split["scope_split"]["confirmation_id"],
+                "explicit_user_confirmation": true,
+                "tracker_representation": "delivery-tickets"
+            }))
+            .expect("explicit confirmation authorizes delivery tickets"),
+        )
+        .expect("confirmed split json");
+        assert_eq!(confirmed["transition_status"], "ticket_split_required");
+        assert_eq!(confirmed["tracker_mutation_authorized"], true);
+        assert_eq!(confirmed["blocking_dependencies_authorized"], false);
+        assert!(review_contract_is_valid(&confirmed["state"]));
+
+        let blocking: Value = serde_json::from_str(
+            &confirm_scope_split(&json!({
+                "state": split["state"],
+                "confirmation_id": split["scope_split"]["confirmation_id"],
+                "explicit_user_confirmation": true,
+                "tracker_representation": "delivery-tickets-with-blocking-dependencies",
+                "blocking_dependencies_reason": "The second deliverable consumes the first package's published API."
+            }))
+            .expect("stronger confirmation authorizes technical blocking dependencies"),
+        )
+        .expect("blocking split json");
+        assert_eq!(blocking["blocking_dependencies_authorized"], true);
+        assert!(review_contract_is_valid(&blocking["state"]));
+    }
+
+    #[test]
+    fn json_rpc_split_confirmation_updates_authoritative_state() {
+        let arguments = initial_scope_split_arguments("confirmed-scope-split");
+        let mut coordinator = ReviewCoordinator::with_clock(|| 3_000);
+        let planned = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": arguments }
+            }))
+            .expect("split preview response");
+        let preview: Value = serde_json::from_str(
+            planned["result"]["content"][0]["text"]
+                .as_str()
+                .expect("split preview text"),
+        )
+        .expect("split preview json");
+        let confirmed = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.confirm_split",
+                    "arguments": {
+                        "state": preview["state"],
+                        "confirmation_id": preview["scope_split"]["confirmation_id"],
+                        "explicit_user_confirmation": true,
+                        "tracker_representation": "delivery-tickets"
+                    }
+                }
+            }))
+            .expect("confirmed split response");
+        let confirmation: Value = serde_json::from_str(
+            confirmed["result"]["content"][0]["text"]
+                .as_str()
+                .expect("confirmed split text"),
+        )
+        .expect("confirmed split json");
+
+        assert_eq!(confirmation["tracker_mutation_authorized"], true);
+        assert_eq!(
+            coordinator.sessions.get("confirmed-scope-split"),
+            Some(&confirmation["state"])
+        );
+
+        let replay = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.confirm_split",
+                    "arguments": {
+                        "state": confirmation["state"],
+                        "confirmation_id": confirmation["scope_split"]["confirmation_id"],
+                        "explicit_user_confirmation": true,
+                        "tracker_representation": "delivery-tickets-with-blocking-dependencies",
+                        "blocking_dependencies_reason": "Escalate the previously confirmed representation."
+                    }
+                }
+            }))
+            .expect("replayed confirmation response");
+        assert_eq!(
+            replay["error"]["message"],
+            "review_scope_split_already_confirmed=true"
+        );
     }
 
     #[test]
@@ -17901,7 +18191,7 @@ pre_filter = "project-pre"
         )
         .expect("scope split json");
 
-        assert_eq!(split["transition_status"], "ticket_split_required");
+        assert_eq!(split["transition_status"], "split_confirmation_required");
         assert_eq!(split["state"]["lenses"], json!([]));
         assert_eq!(split["assignments"], json!([]));
         assert_eq!(
@@ -17969,8 +18259,8 @@ pre_filter = "project-pre"
         )
         .expect("scope split json");
 
-        assert_eq!(split["transition_status"], "ticket_split_required");
-        assert_eq!(split["advance_kind"], "scope_split_hold");
+        assert_eq!(split["transition_status"], "split_confirmation_required");
+        assert_eq!(split["advance_kind"], "scope_split_confirmation");
         assert_eq!(split["complete"], false);
         assert_eq!(split["assignments"], json!([]));
         assert_eq!(split["state"]["lenses"], json!([]));
@@ -18405,8 +18695,8 @@ pre_filter = "project-pre"
                 .expect("delta scope growth persists a terminal split hold"),
         )
         .expect("delta split json");
-        assert_eq!(split["transition_status"], "advanced");
-        assert_eq!(split["advance_kind"], "scope_split_hold");
+        assert_eq!(split["transition_status"], "split_confirmation_required");
+        assert_eq!(split["advance_kind"], "scope_split_confirmation");
         assert_eq!(split["state"]["scope"]["diff_hash"], replacement_diff_hash);
         assert_eq!(split["state"]["risk_plan"]["scope_split"]["hold"], true);
         assert_eq!(split["state"]["lenses"], json!([]));
