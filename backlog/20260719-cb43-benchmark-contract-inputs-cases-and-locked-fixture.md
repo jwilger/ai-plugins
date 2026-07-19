@@ -5,9 +5,6 @@ blocks: [20260718-zcsh-review-benchmark-contract-and-scorer-slice]
 tags: [evals, benchmark, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
