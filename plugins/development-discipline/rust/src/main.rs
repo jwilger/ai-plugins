@@ -579,6 +579,7 @@ fn tools() -> Value {
                     "base": { "type": "string", "minLength": 1, "pattern": "\\S" },
                     "baseline_commit": baseline_commit_schema(),
                     "scope": { "type": "string", "enum": ["base", "uncommitted"] },
+                    "review_lifecycle": { "type": "string", "enum": ["unlanded", "landed"] },
                     "required_clean_iterations": { "type": "integer", "minimum": DEFAULT_CLEAN_ITERATIONS, "maximum": MAX_CLEAN_ITERATIONS },
                     "user_request": { "type": "string" },
                     "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
@@ -795,6 +796,7 @@ fn tools() -> Value {
                     "base": { "type": "string", "minLength": 1, "pattern": "\\S" },
                     "baseline_commit": baseline_commit_schema(),
                     "scope": { "type": "string", "enum": ["base", "uncommitted"] },
+                    "review_lifecycle": { "type": "string", "enum": ["unlanded", "landed"] },
                     "user_request": { "type": "string" },
                     "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
                     "explicit_concerns": { "type": "array", "items": { "type": "string" } },
@@ -1383,7 +1385,18 @@ fn generated_delta_evidence(
     Ok(normalized)
 }
 
+fn review_lifecycle(arguments: &Value) -> Result<&str, String> {
+    match arguments.get("review_lifecycle") {
+        None => Ok("unlanded"),
+        Some(Value::String(lifecycle)) if matches!(lifecycle.as_str(), "unlanded" | "landed") => {
+            Ok(lifecycle)
+        }
+        Some(_) => Err("review_lifecycle_invalid expected=unlanded|landed".to_string()),
+    }
+}
+
 fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
+    let review_lifecycle = review_lifecycle(arguments)?;
     let scope = match arguments.get("scope") {
         None => "base".to_string(),
         Some(Value::String(scope)) if matches!(scope.as_str(), "base" | "uncommitted") => {
@@ -1460,6 +1473,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
     let mut binding = json!({
         "session_id": session_id,
         "scope": scope,
+        "review_lifecycle": review_lifecycle,
         "base": base,
         "project_root": project_root,
         "diff_hash": diff_hash,
@@ -1519,6 +1533,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         "close_after_result": true,
         "scope": {
             "kind": scope,
+            "review_lifecycle": review_lifecycle,
             "base": base,
             "project_root": project_root,
             "changed_files": changed_files,
@@ -1597,6 +1612,7 @@ fn delta_risk_arguments(
         "base": state.pointer("/scope/base").and_then(Value::as_str).unwrap_or(DEFAULT_BASE),
         "baseline_commit": state.pointer("/scope/baseline_commit").cloned().unwrap_or(Value::Null),
         "scope": state.pointer("/scope/kind").and_then(Value::as_str).unwrap_or("base"),
+        "review_lifecycle": state.pointer("/scope/review_lifecycle").and_then(Value::as_str).unwrap_or("unlanded"),
         "project_root": state.pointer("/scope/project_root").and_then(Value::as_str).unwrap_or("."),
         "changed_files": current_changed_files,
         "diff_hash": current_diff_hash,
@@ -1975,7 +1991,11 @@ fn compile_risk_plan(
         .filter(|risk| matches!(*risk, "low" | "medium" | "high" | "exceptional"))
         .ok_or_else(|| "risk_assessment_overall_risk_invalid=true".to_string())?;
     let exceptional_triggers = validated_exceptional_triggers(assessment, overall_risk)?;
-    let scope_split = validated_scope_split_plan(assessment, changed_files)?;
+    let lifecycle = expected_assignment
+        .pointer("/scope/review_lifecycle")
+        .and_then(Value::as_str)
+        .unwrap_or("unlanded");
+    let scope_split = validated_scope_split_plan(assessment, changed_files, lifecycle)?;
     let expected_dimensions = expected_assignment
         .get("review_dimensions")
         .and_then(Value::as_array)
@@ -2089,7 +2109,11 @@ fn compile_risk_plan(
         };
         lens_passes.insert(lens.clone(), json!(passes));
     }
-    let split_hold = scope_split.is_some();
+    let split_hold = scope_split
+        .as_ref()
+        .and_then(|split| split.get("hold"))
+        .and_then(Value::as_bool)
+        == Some(true);
     let required_clean_iterations = if split_hold {
         1
     } else {
@@ -2163,6 +2187,7 @@ fn compile_risk_plan(
 fn validated_scope_split_plan(
     assessment: &serde_json::Map<String, Value>,
     changed_files: &[String],
+    review_lifecycle: &str,
 ) -> Result<Option<Value>, String> {
     let split_required = assessment
         .get("split_required")
@@ -2350,9 +2375,11 @@ fn validated_scope_split_plan(
             .and_then(Value::as_str)
             .cmp(&right.get("id").and_then(Value::as_str))
     });
+    let landed = review_lifecycle == "landed";
     Ok(Some(json!({
         "required": true,
-        "hold": true,
+        "hold": !landed,
+        "advisory": landed,
         "rationale": rationale,
         "triggers": ordered_triggers,
         "candidates": normalized_candidates
@@ -2757,6 +2784,7 @@ fn plan_result_internal(
     if require_risk_assessment && arguments.get("risk_assessment").is_none() {
         return Err("risk_assessment_required_before_final_review_plan=true".to_string());
     }
+    let review_lifecycle = review_lifecycle(arguments)?;
     let scope = match arguments.get("scope") {
         None => "base".to_string(),
         Some(Value::String(scope)) => scope.clone(),
@@ -2923,6 +2951,7 @@ fn plan_result_internal(
         "review_contract_id": null,
         "scope": {
             "kind": scope,
+            "review_lifecycle": review_lifecycle,
             "base": base,
             "changed_files": changed_files,
             "diff_hash": diff_hash,
@@ -3054,6 +3083,10 @@ fn plan_result_internal(
         response["complete"] = json!(false);
         response["completion_blockers"] = Value::Array(unresolved_findings(&response["state"]));
         response["assignments"] = json!([]);
+    } else if scope_split.get("advisory").and_then(Value::as_bool) == Some(true) {
+        response["transition_status"] = json!("retrospective_review");
+        response["advance_kind"] = json!("review_assignments");
+        response["scope_split"] = scope_split;
     }
     let response = response.to_string();
     if response.len() > MAX_REQUEST_BYTES {
@@ -6877,6 +6910,10 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
     let work_item_id = state.get("work_item_id")?;
     let report_binding_id = state.get("report_binding_id")?;
     let scope = state.pointer("/scope/kind").and_then(Value::as_str)?;
+    let review_lifecycle = state
+        .pointer("/scope/review_lifecycle")
+        .and_then(Value::as_str)
+        .filter(|lifecycle| matches!(*lifecycle, "unlanded" | "landed"))?;
     let base = state.pointer("/scope/base").and_then(Value::as_str)?;
     let project_root = state
         .pointer("/scope/project_root")
@@ -6910,11 +6947,12 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
         .cloned()
         .unwrap_or_else(|| json!({}));
     let mut hasher = DefaultHasher::new();
-    "final-review-contract-v3".hash(&mut hasher);
+    "final-review-contract-v4".hash(&mut hasher);
     session_id.hash(&mut hasher);
     work_item_id.to_string().hash(&mut hasher);
     report_binding_id.to_string().hash(&mut hasher);
     scope.hash(&mut hasher);
+    review_lifecycle.hash(&mut hasher);
     base.hash(&mut hasher);
     project_root.hash(&mut hasher);
     diff_hash.hash(&mut hasher);
@@ -7293,9 +7331,15 @@ fn scope_split_contract_is_valid(
     let Some(fields) = scope_split.as_object() else {
         return false;
     };
-    if fields.len() != 5
+    let lifecycle = state
+        .pointer("/scope/review_lifecycle")
+        .and_then(Value::as_str)
+        .unwrap_or("unlanded");
+    let landed = lifecycle == "landed";
+    if fields.len() != 6
         || fields.get("required").and_then(Value::as_bool) != Some(true)
-        || fields.get("hold").and_then(Value::as_bool) != Some(true)
+        || fields.get("hold").and_then(Value::as_bool) != Some(!landed)
+        || fields.get("advisory").and_then(Value::as_bool) != Some(landed)
     {
         return false;
     }
@@ -7311,7 +7355,7 @@ fn scope_split_contract_is_valid(
     let Some(assessment) = assessment.as_object() else {
         return false;
     };
-    validated_scope_split_plan(assessment, &changed_files)
+    validated_scope_split_plan(assessment, &changed_files, lifecycle)
         .ok()
         .flatten()
         .is_some_and(|normalized| &normalized == scope_split)
@@ -9293,6 +9337,26 @@ mod tests {
         findings: Value,
         project_root: Option<&Path>,
     ) -> Value {
+        assessed_plan_arguments_for_diff_at_root_and_lifecycle(
+            session_id,
+            diff_hash,
+            overall_risk,
+            selected,
+            findings,
+            project_root,
+            None,
+        )
+    }
+
+    fn assessed_plan_arguments_for_diff_at_root_and_lifecycle(
+        session_id: &str,
+        diff_hash: &str,
+        overall_risk: &str,
+        selected: &[(&str, &str)],
+        findings: Value,
+        project_root: Option<&Path>,
+        review_lifecycle: Option<&str>,
+    ) -> Value {
         let mut arguments = json!({
             "session_id": session_id,
             "base": "origin/main",
@@ -9305,6 +9369,9 @@ mod tests {
         });
         if let Some(project_root) = project_root {
             arguments["project_root"] = json!(project_root);
+        }
+        if let Some(review_lifecycle) = review_lifecycle {
+            arguments["review_lifecycle"] = json!(review_lifecycle);
         }
         let resolved_root = resolved_project_root_string(&arguments).expect("test project root");
         arguments["baseline_commit"] = json!(git_text(
@@ -17748,6 +17815,64 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn landed_scope_growth_batches_review_without_a_ticket_split_hold() {
+        let mut arguments = assessed_plan_arguments_for_diff_at_root_and_lifecycle(
+            "landed-scope-review",
+            "landed-scope-review-diff",
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+            None,
+            Some("landed"),
+        );
+        arguments["risk_assessment"]["split_required"] = json!(true);
+        arguments["risk_assessment"]["split_rationale"] =
+            json!("The diff introduces independently shippable policy and integration work.");
+        arguments["risk_assessment"]["scope_growth_triggers"] = json!(["new-subsystem"]);
+        arguments["risk_assessment"]["split_candidates"] = json!([{
+            "id": "coordinator-policy",
+            "title": "Ship the coordinator policy",
+            "scope_paths": ["src/lib.rs"],
+            "acceptance_criteria": ["Coordinator policy is independently usable."],
+            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact."
+        }, {
+            "id": "integration-tests",
+            "title": "Ship the integration tests",
+            "scope_paths": ["tests/lib_test.rs"],
+            "acceptance_criteria": ["Integration tests consume the released policy."],
+            "independently_shippable_reason": "The integration coverage can follow after the coordinator release."
+        }]);
+
+        let reviewed: Value = serde_json::from_str(
+            &plan_result_at(&arguments, 3_000)
+                .expect("landed broad work remains reviewable without delivery decomposition"),
+        )
+        .expect("landed review response");
+
+        assert_eq!(reviewed["transition_status"], "retrospective_review");
+        assert_eq!(reviewed["state"]["scope"]["review_lifecycle"], "landed");
+        assert_eq!(reviewed["state"]["risk_plan"]["scope_split"]["hold"], false);
+        assert_eq!(
+            reviewed["state"]["risk_plan"]["scope_split"]["advisory"],
+            true
+        );
+        assert!(!reviewed["assignments"]
+            .as_array()
+            .expect("landed review assignments")
+            .is_empty());
+
+        let mut tampered = reviewed["state"].clone();
+        tampered["scope"]["review_lifecycle"] = json!("unlanded");
+        assert!(!review_contract_is_valid(&tampered));
+
+        let mut invalid = reviewed["state"].clone();
+        invalid["scope"]["review_lifecycle"] = json!("retrospective");
+        invalid["review_contract_id"] =
+            json!(computed_review_contract_id(&invalid).unwrap_or_default());
+        assert!(!review_contract_is_valid(&invalid));
+    }
+
+    #[test]
     fn delta_scope_growth_stops_before_rebinding_review_state() {
         let arguments = assessed_plan_arguments(
             "delta-scope-growth",
@@ -17768,7 +17893,7 @@ pre_filter = "project-pre"
             "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
         });
         let required: Value = serde_json::from_str(
-            &advance_with_contract_validation_at(&resubmission, false, 5_500)
+            &advance_with_contract_validation_at(&resubmission, false, 1_500)
                 .expect("delta scout required"),
         )
         .expect("delta response json");
@@ -17799,7 +17924,7 @@ pre_filter = "project-pre"
         resubmission["delta_risk_assessment"] = assessment;
 
         let split: Value = serde_json::from_str(
-            &advance_with_contract_validation_at(&resubmission, false, 5_500)
+            &advance_with_contract_validation_at(&resubmission, false, 1_500)
                 .expect("delta scope growth persists a terminal split hold"),
         )
         .expect("delta split json");
@@ -17824,6 +17949,84 @@ pre_filter = "project-pre"
             "review_scope_split_hold_active=true"
         );
         assert_eq!(state["scope"]["diff_hash"], "delta-scope-growth-diff");
+    }
+
+    #[test]
+    fn landed_delta_scope_growth_remains_advisory_and_keeps_review_assignments() {
+        let arguments = assessed_plan_arguments_for_diff_at_root_and_lifecycle(
+            "landed-delta-scope-growth",
+            "landed-delta-scope-growth-diff",
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+            None,
+            Some("landed"),
+        );
+        let planned: Value = serde_json::from_str(
+            &plan_result_at(&arguments, 1_000).expect("landed medium-risk plan"),
+        )
+        .expect("plan json");
+        assert!(planned["state"]["risk_plan"]["scope_split"].is_null());
+        let mut tampered_no_split = planned["state"].clone();
+        tampered_no_split["scope"]["review_lifecycle"] = json!("unlanded");
+        assert!(!review_contract_is_valid(&tampered_no_split));
+        let replacement_diff_hash = "landed-delta-scope-growth-v2";
+        let mut resubmission = json!({
+            "state": planned["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(&resubmission, false, 1_500)
+                .expect("delta scout required"),
+        )
+        .expect("delta response json");
+        let mut assessment = delta_risk_assessment_for(
+            &required["delta_risk_assignments"][0],
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            &["architecture-maintainability"],
+            json!([]),
+        );
+        assessment["split_required"] = json!(true);
+        assessment["split_rationale"] =
+            json!("The landed response includes two independently reviewable areas.");
+        assessment["scope_growth_triggers"] = json!(["new-subsystem"]);
+        assessment["split_candidates"] = json!([{
+            "id": "original-policy",
+            "title": "Review the original policy edit",
+            "scope_paths": ["src/lib.rs"],
+            "acceptance_criteria": ["The original policy behavior is reviewed."],
+            "independently_shippable_reason": "The already-landed policy has its own release artifact."
+        }, {
+            "id": "new-subsystem",
+            "title": "Review the new subsystem",
+            "scope_paths": ["tests/lib_test.rs"],
+            "acceptance_criteria": ["The subsystem integration contract is reviewed."],
+            "independently_shippable_reason": "The already-landed subsystem has an independent integration contract."
+        }]);
+        resubmission["delta_risk_assessment"] = assessment;
+
+        let reviewed: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(&resubmission, false, 1_500)
+                .expect("landed delta remains reviewable"),
+        )
+        .expect("landed delta json");
+
+        assert_eq!(reviewed["advance_kind"], "delta_reassessment");
+        assert_eq!(reviewed["state"]["scope"]["review_lifecycle"], "landed");
+        assert_eq!(reviewed["state"]["risk_plan"]["scope_split"]["hold"], false);
+        assert_eq!(
+            reviewed["state"]["risk_plan"]["scope_split"]["advisory"],
+            true
+        );
+        assert!(!reviewed["next_assignments"]
+            .as_array()
+            .expect("landed delta assignments")
+            .is_empty());
+        assert!(review_contract_is_valid(&reviewed["state"]));
     }
 
     #[test]
