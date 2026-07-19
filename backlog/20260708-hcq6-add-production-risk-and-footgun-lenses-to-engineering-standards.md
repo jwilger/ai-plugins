@@ -13,7 +13,7 @@ Add practical engineering guidance for risks that often appear only under real u
 
 ## Context / Why
 
-development-discipline final review and lightweight TDD review already include a production-risk-footguns lens. The remaining responsibility is the reusable engineering standard that shapes design before review. Cover partial failure, retry/loop bounds, contention, cache and cleanup hazards, N+1/fanout/resource growth, and thundering herds, but derive findings from the actual deployment and trust boundary. For a local single-owner tool, focus on mistakes, crashes, interruption, stale state, filesystem failure, and remote data loss rather than malicious local processes or intentional bypass.
+Implementation notes:\n\ndevelopment-discipline final review and lightweight TDD review already include a production-risk-footguns lens. The remaining responsibility is the reusable engineering standard that shapes design before review. Cover partial failure, retry/loop bounds, contention, cache and cleanup hazards, N+1/fanout/resource growth, and thundering herds, but derive findings from the actual deployment and trust boundary. For a local single-owner tool, focus on mistakes, crashes, interruption, stale state, filesystem failure, and remote data loss rather than malicious local processes or intentional bypass.
 
 ## Acceptance criteria
 
