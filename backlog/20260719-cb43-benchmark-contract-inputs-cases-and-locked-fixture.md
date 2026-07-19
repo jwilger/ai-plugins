@@ -17,6 +17,8 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 
 ## Acceptance criteria
 
+- [ ] Declare the exact independent condition/sample/case matrix, provider and prompt inputs, deterministic gates, and locked Rust fixture.
+
 ## Subtasks
 
 ## Notes / Log
