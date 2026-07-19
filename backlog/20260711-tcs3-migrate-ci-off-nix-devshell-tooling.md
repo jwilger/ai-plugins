@@ -1,5 +1,5 @@
 ---
-title: Migrate CI off Nix devshell tooling
+title: Run GitHub CI without installing the Nix development environment
 blocked_by: []
 blocks: []
 tags: [ci, github-actions, developer-experience, tooling]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Replace Nix realization inside GitHub Actions with pinned standard hosted-runner setup while preserving the repository's existing CI semantics and keeping Nix/EMC integration explicitly local-only.
+Replace Nix setup in GitHub Actions with pinned tools available on standard hosted runners, while preserving every existing quality check and final aggregate result. Nix-specific development checks should remain available locally.
 
 ## Context / Why
 
