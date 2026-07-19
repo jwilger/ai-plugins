@@ -19,6 +19,7 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 
 - [ ] Bind input, workspace, runtime, tool, fixture, and verifier provenance.
 - [ ] Enforce bounded private reads and secret scanning, and reject duplicate, missing, malformed, inconsistent, or disagreeing raw/artifact data.
+- [ ] Preserve recognized boundary diagnostics while mapping unknown or oversized safety suffixes to boundary-safety-unknown.
 
 ## Subtasks
 
