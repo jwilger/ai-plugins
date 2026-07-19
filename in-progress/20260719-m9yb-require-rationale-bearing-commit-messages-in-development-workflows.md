@@ -19,7 +19,7 @@ Add development-discipline guardrails that require every authored commit to incl
 ## Acceptance criteria
 
 - [x] Applicable commit guidance explicitly requires a message body that explains why the change is necessary.
-- [ ] Behavior tests reject or flag subject-only commits in workflows governed by the plugin.
+- [x] Behavior tests reject or flag subject-only commits in workflows governed by the plugin.
 - [ ] Documentation gives a concise compliant commit example and preserves the no-Co-Authored-By rule.
 
 ## Subtasks
