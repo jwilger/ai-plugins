@@ -476,7 +476,15 @@
     "plugins": ["development-discipline"],
     "skills": ["rationale-commit-messages"],
     "coverage": {
-      "kinds": ["core-behavior", "workflow", "policy-enforcement"]
+      "kinds": [
+        "core-behavior",
+        "workflow",
+        "policy-enforcement",
+        "natural-trigger",
+        "scope-boundary",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
     },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.67,
