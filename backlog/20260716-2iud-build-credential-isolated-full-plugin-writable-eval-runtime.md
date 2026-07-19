@@ -1,5 +1,5 @@
 ---
-title: Build credential-isolated full-plugin writable eval runtime
+title: Safely evaluate complete plugins that can run code
 blocked_by: []
 blocks: []
 tags: []
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Create a hostile-capable execution boundary for writable evals that can safely load full plugins, including MCP servers, hooks, and binaries, without exposing maintainer credentials or host state.
+Build an isolated writable evaluation environment for full plugins, including their servers, hooks, and executable programs. Plugin code must not be able to read or replay maintainer credentials, access host data, escape resource limits, or export unreviewed artifacts.
 
 ## Context / Why
 
