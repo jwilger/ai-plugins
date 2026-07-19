@@ -5,9 +5,6 @@ blocks: []
 tags: [evals, benchmark, rust, fixture, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
