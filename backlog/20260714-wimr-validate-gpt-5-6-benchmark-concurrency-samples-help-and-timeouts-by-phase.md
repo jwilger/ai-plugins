@@ -1,5 +1,5 @@
 ---
-title: Validate GPT-5.6 benchmark concurrency, samples, help, and timeouts by phase
+title: Validate benchmark settings for each evaluation phase
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, validation, timeouts, concurrency, cli, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Give the focused benchmark wrapper strict phase-aware contracts for concurrency, sample overrides, help, and effective deadlines.
+Give GPT-5.6 benchmark commands clear rules for parallelism, sample counts, help output, and time limits. Settings should be validated only where they apply, and supported workloads should receive a realistic deadline.
 
 ## Context / Why
 
