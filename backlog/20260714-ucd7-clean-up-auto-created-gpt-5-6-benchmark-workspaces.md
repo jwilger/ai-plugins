@@ -13,7 +13,7 @@ Clean up only the temporary workspaces created automatically by the benchmark ru
 
 ## Context / Why
 
-Verified MINOR production footgun from 20260709-spx8: each live run reaching workspace preparation leaves an ai-plugins-gpt56-workspace-* directory and marker in TMPDIR because the runner has no cleanup trap.
+Implementation notes:\n\nVerified MINOR production footgun from 20260709-spx8: each live run reaching workspace preparation leaves an ai-plugins-gpt56-workspace-* directory and marker in TMPDIR because the runner has no cleanup trap.
 
 ## Acceptance criteria
 
