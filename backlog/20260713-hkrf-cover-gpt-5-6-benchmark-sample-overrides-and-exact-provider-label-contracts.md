@@ -13,7 +13,7 @@ Strengthen the focused GPT-5.6 benchmark loader/config regression coverage for r
 
 ## Context / Why
 
-Deferred MINOR from the fresh-context review of 20260709-spx8. The current regression proves the representative case categories, exact advisor-like workloads, direct/no-Advisor wording, and advisor-like provider suffix. It does not independently prove GPT56_BENCHMARK_SAMPLES expansion or enumerate all six unique standard/advisor-like Sol/Terra/Luna labels. This does not block the one-sample migration benchmark.
+Implementation notes:\n\nDeferred MINOR from the fresh-context review of 20260709-spx8. The current regression proves the representative case categories, exact advisor-like workloads, direct/no-Advisor wording, and advisor-like provider suffix. It does not independently prove GPT56_BENCHMARK_SAMPLES expansion or enumerate all six unique standard/advisor-like Sol/Terra/Luna labels. This does not block the one-sample migration benchmark.
 
 ## Acceptance criteria
 
