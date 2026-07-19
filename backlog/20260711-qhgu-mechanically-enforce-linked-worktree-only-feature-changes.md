@@ -1,5 +1,5 @@
 ---
-title: Mechanically enforce linked-worktree-only feature changes
+title: Prevent feature changes in the main coordination checkout
 blocked_by: []
 blocks: []
 tags: [bug, worktrees, engineering-standards, development-discipline, guardrails]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Mechanically guard normal agent pre-edit entrypoints and Git integration operations against accidental feature work in the main coordination checkout while preserving legitimate coordination operations.
+Add automatic checks that stop ordinary feature edits and integration work from happening in the repository’s main coordination checkout. Legitimate coordination work should remain available, and blocked users should get a clear path to the correct linked worktree.
 
 ## Context / Why
 
