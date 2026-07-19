@@ -1,5 +1,5 @@
 ---
-title: Clean up auto-created GPT-5.6 benchmark workspaces
+title: Remove temporary GPT-5.6 benchmark workspaces after every run
 blocked_by: []
 blocks: []
 tags: [minor, evals, cleanup, workspace, operability]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Remove only runner-owned PID-unique default GPT-5.6 workspaces on every exit while preserving explicitly configured workspaces.
+Clean up only the temporary workspaces created automatically by the benchmark runner, whether a run succeeds, fails, times out, or is interrupted. Never remove a workspace that the user configured explicitly.
 
 ## Context / Why
 
