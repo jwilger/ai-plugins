@@ -1,5 +1,5 @@
 ---
-title: Clarify Lefthook crash recovery when descendants retain the installer lock
+title: Explain when a crashed hook installer still holds its lock
 blocked_by: []
 blocks: []
 tags: [bug, worktrees, lefthook, documentation, review-follow-up]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Correct Lefthook installer recovery guidance to explain that an inherited flock remains held until the last surviving lock-inheriting descendant exits.
+Correct the recovery guidance for a Lefthook installer crash. If a surviving child process still holds the shared lock, users must wait for or stop that process group before retrying; the original installer process ending is not always enough.
 
 ## Context / Why
 
