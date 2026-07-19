@@ -13,7 +13,7 @@ Resolve benchmark paths consistently, keep execution and grading results separat
 
 ## Context / Why
 
-Implementation notes:\n\nSplit from 20260713-uf3e. Ambient output overrides can collapse execution and grader calibration into the same paths, relative overrides can resolve differently across phases, and Codex-home preparation currently occurs before the canonical lifecycle clears or marks prior artifacts and installs signal handling. This task owns path resolution, phase separation, and stale-evidence-safe preparation; it does not own diagnostic wording, canonical exit-status precedence, provider locking, timeout policy, or default-workspace cleanup.
+Implementation notes: Split from 20260713-uf3e. Ambient output overrides can collapse execution and grader calibration into the same paths, relative overrides can resolve differently across phases, and Codex-home preparation currently occurs before the canonical lifecycle clears or marks prior artifacts and installs signal handling. This task owns path resolution, phase separation, and stale-evidence-safe preparation; it does not own diagnostic wording, canonical exit-status precedence, provider locking, timeout policy, or default-workspace cleanup.
 
 ## Acceptance criteria
 
