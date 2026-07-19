@@ -9,7 +9,11 @@ pr_mr_status:
 
 ## Summary
 
+Make task titles and main descriptions clear to a typical product manager. A reader should understand the problem, the desired outcome, and why it matters without needing specialist engineering knowledge.
+
 ## Context / Why
+
+Implementation notes: Update the relevant ticket-writing skills and templates. Keep specialist terms out of the title and main description when plain language is accurate. When a technical term is necessary, explain it where it first appears or move the deeper detail into a clearly labeled Implementation notes section.
 
 ## Acceptance criteria
 
