@@ -5,9 +5,6 @@ blocks: []
 tags: [development-discipline, final-review, mcp, contracts, guardrails, major, backlog]
 pr_mr_url: 
 pr_mr_status: 
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
