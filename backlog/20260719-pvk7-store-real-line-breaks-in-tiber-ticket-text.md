@@ -17,6 +17,8 @@ Ticket 20260708-puyh is a concrete example: text intended to span multiple lines
 
 ## Acceptance criteria
 
+- [ ] Multiline text entered through supported Tiber interfaces is stored and rendered with real line breaks.
+
 ## Subtasks
 
 ## Notes / Log
