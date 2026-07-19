@@ -1,5 +1,5 @@
 ---
-title: Keep README plugin catalog versions synchronized with manifests
+title: Keep README plugin versions consistent with released manifests
 blocked_by: []
 blocks: []
 tags: [marketplace, documentation, versions, validation, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make the README harness catalog versions derive from or validate against plugin manifests so plugin releases cannot leave user-facing version rows stale.
+Automatically check or update the plugin versions shown in README catalog tables and troubleshooting guidance. User-facing documentation should not advertise an older version than the authoritative release manifests.
 
 ## Context / Why
 
