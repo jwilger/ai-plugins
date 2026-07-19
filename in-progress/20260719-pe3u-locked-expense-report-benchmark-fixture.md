@@ -1,7 +1,7 @@
 ---
 title: Locked expense-report benchmark fixture
 blocked_by: []
-blocks: [20260719-cb43-benchmark-contract-inputs-cases-and-locked-fixture]
+blocks: []
 tags: [evals, benchmark, rust, fixture, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 

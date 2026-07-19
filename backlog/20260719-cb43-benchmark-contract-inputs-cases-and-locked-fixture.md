@@ -1,6 +1,6 @@
 ---
 title: Benchmark contract, inputs, cases, and locked fixture
-blocked_by: [20260719-62jw-isolated-workspace-matrix-preparation, 20260719-m65h-runtime-provenance-and-regular-tree-hashing, 20260719-pe3u-locked-expense-report-benchmark-fixture]
+blocked_by: [20260719-62jw-isolated-workspace-matrix-preparation, 20260719-m65h-runtime-provenance-and-regular-tree-hashing]
 blocks: [20260718-zcsh-review-benchmark-contract-and-scorer-slice]
 tags: [evals, benchmark, final-review, scope-split]
 pr_mr_url: 
