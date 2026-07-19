@@ -20,6 +20,7 @@ Final-review split from 20260719-cb43 at diff hash b190d81690f3657f5230580fb083b
 - [ ] Provide a dependency-free locked Rust fixture with a deterministic validate baseline.
 - [ ] Include behavior-focused baseline coverage and repository-local candidate guidance.
 - [ ] Keep build, cache, home, and temporary artifacts ignored inside the fixture.
+- [ ] Complete final review on the isolated diff with current verification evidence.
 
 ## Subtasks
 
