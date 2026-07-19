@@ -13,7 +13,7 @@ Add focused regression coverage proving the GPT-5.6 trace-enforced Promptfoo pro
 
 ## Context / Why
 
-Deferred MINOR from the fresh review of 20260709-spx8. The implementation already returns upstream provider errors before inspecting raw traces, but the focused isolation fixtures cover only nominally successful responses. This is test-depth hardening and does not block the current wrapper correction.
+Implementation notes:\n\nDeferred MINOR from the fresh review of 20260709-spx8. The implementation already returns upstream provider errors before inspecting raw traces, but the focused isolation fixtures cover only nominally successful responses. This is test-depth hardening and does not block the current wrapper correction.
 
 ## Acceptance criteria
 
