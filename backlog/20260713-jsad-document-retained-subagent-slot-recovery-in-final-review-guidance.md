@@ -1,5 +1,5 @@
 ---
-title: Document retained subagent slot recovery in final-review guidance
+title: Explain how to recover a reviewer slot safely
 blocked_by: []
 blocks: []
 tags: [development-discipline, final-review, subagents, workflow, guidance, minor]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Teach final-review orchestrators how to release a collaboration slot retained by a completed reviewer without reusing that reviewer or falsifying fresh-context attestations.
+Document how final review can recover when a completed reviewer still occupies a limited agent slot. The recovery must free the slot without reusing that reviewer or falsely claiming that the replacement review started with fresh context.
 
 ## Context / Why
 
