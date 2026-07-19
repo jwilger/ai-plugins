@@ -19,6 +19,7 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 
 - [ ] Provide the pinned runtime tools and closure identities required by the benchmark contract and scorer.
 - [ ] Verify the repository devshell exposes the expected runtime-tool surface without global or unpinned substitutions.
+- [ ] Complete final review against the isolated slice with current diff-bound verification evidence.
 
 ## Subtasks
 
