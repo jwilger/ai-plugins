@@ -1,6 +1,6 @@
 ---
 title: Review benchmark contract and scorer slice
-blocked_by: [20260719-zk46-nix-runtime-toolchain-and-focused-integration-surface]
+blocked_by: []
 blocks: [20260715-n6bs-build-writable-downstream-code-quality-benchmarks-for-codex-plugins]
 tags: [evals, codex, final-review, scope-split]
 pr_mr_url: 
