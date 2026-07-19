@@ -13,7 +13,7 @@ Make the temporary Git repository used by release checks ignore a developer’s 
 
 ## Context / Why
 
-Lightweight review of the 639d220 CI repair found that the fixture's empty commit inherits global commit.gpgSign and core.hooksPath settings. On a developer machine this can fail or hang an otherwise hermetic release check. Disable signing and hooks for that one temporary-repository commit, and add focused coverage if practical. This is a MINOR local-tooling reliability issue with no security or human-safety impact.
+Implementation notes:\n\nLightweight review of the 639d220 CI repair found that the fixture's empty commit inherits global commit.gpgSign and core.hooksPath settings. On a developer machine this can fail or hang an otherwise hermetic release check. Disable signing and hooks for that one temporary-repository commit, and add focused coverage if practical. This is a MINOR local-tooling reliability issue with no security or human-safety impact.
 
 ## Acceptance criteria
 
