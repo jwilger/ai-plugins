@@ -1,5 +1,5 @@
 ---
-title: Strengthen green-increment guidance contract beyond substring matching
+title: Test development guidance for meaning, not just matching phrases
 blocked_by: []
 blocks: []
 tags: [development-discipline, tests, skills, final-review, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make the green-increment workflow contract reject contradictory or inverted guidance instead of checking only disconnected required phrases.
+Strengthen the fast policy checks so contradictory instructions cannot pass merely because they contain expected words. Tests should verify the intended relationship among small verified commits, CI failures, acceptance evidence, and follow-up review.
 
 ## Context / Why
 
