@@ -13,7 +13,7 @@ Make the strict GPT-5.6 measurement gate's positive fixture exercise Promptfoo 0
 
 ## Context / Why
 
-Lightweight review found the checker accepts both configured {id,label,config} descriptors and an alternate resolved {options:{id,config,basePath},label} shape, while the canonical positive fixture covers only the alternate branch. This is a MINOR test-fidelity gap: current production compatibility is supported but not directly proven by the fast fixture.
+Implementation notes:\n\nLightweight review found the checker accepts both configured {id,label,config} descriptors and an alternate resolved {options:{id,config,basePath},label} shape, while the canonical positive fixture covers only the alternate branch. This is a MINOR test-fidelity gap: current production compatibility is supported but not directly proven by the fast fixture.
 
 ## Acceptance criteria
 
