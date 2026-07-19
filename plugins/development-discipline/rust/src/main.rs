@@ -64,6 +64,7 @@ const MAX_REVIEW_BUDGET_REFERENCES: usize = 16;
 const MAX_SPLIT_CANDIDATES: usize = 16;
 const MAX_SPLIT_CANDIDATE_TITLE_BYTES: usize = 256;
 const MAX_SPLIT_CANDIDATE_REASON_BYTES: usize = 2 * 1024;
+const MAX_SPLIT_DELIVERY_EVIDENCE_CHARS: usize = 512;
 const MAX_SPLIT_CANDIDATE_CRITERIA: usize = 32;
 const MAX_SPLIT_CANDIDATE_PATHS: usize = 256;
 static OPAQUE_FINGERPRINT_HASHER: OnceLock<RandomState> = OnceLock::new();
@@ -1681,7 +1682,7 @@ fn delta_risk_arguments(
             })
         })
         .collect::<Vec<_>>();
-    Ok(json!({
+    let mut arguments = json!({
         "session_id": session_id,
         "base": state.pointer("/scope/base").and_then(Value::as_str).unwrap_or(DEFAULT_BASE),
         "baseline_commit": state.pointer("/scope/baseline_commit").cloned().unwrap_or(Value::Null),
@@ -1698,7 +1699,14 @@ fn delta_risk_arguments(
         "explicit_concerns": state.pointer("/context/explicit_concerns").cloned().unwrap_or_else(|| json!([])),
         "conditional_lenses": conditional_lenses,
         "pre_filter_model_role": state.pointer("/model_roles/pre_filter").and_then(Value::as_str).unwrap_or("fast-filter")
-    }))
+    });
+    if arguments["split_lineage"].is_null() {
+        arguments
+            .as_object_mut()
+            .expect("delta risk arguments are an object")
+            .remove("split_lineage");
+    }
+    Ok(arguments)
 }
 
 fn delta_risk_assignment(
@@ -1925,6 +1933,39 @@ fn split_candidate_schema() -> Value {
                 "minLength": 1,
                 "maxLength": MAX_SPLIT_CANDIDATE_REASON_BYTES / 4,
                 "pattern": "\\S"
+            },
+            "delivery_boundaries": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "build": {
+                        "type": "object", "additionalProperties": false,
+                        "properties": {
+                            "evidence_kind": { "const": "independent-build" },
+                            "command": { "type": "string", "minLength": 1, "maxLength": MAX_SPLIT_DELIVERY_EVIDENCE_CHARS, "pattern": "\\S" },
+                            "artifact": { "type": "string", "minLength": 1, "maxLength": MAX_SPLIT_DELIVERY_EVIDENCE_CHARS, "pattern": "\\S" }
+                        },
+                        "required": ["evidence_kind", "command", "artifact"]
+                    },
+                    "test": {
+                        "type": "object", "additionalProperties": false,
+                        "properties": {
+                            "evidence_kind": { "const": "independent-test" },
+                            "command": { "type": "string", "minLength": 1, "maxLength": MAX_SPLIT_DELIVERY_EVIDENCE_CHARS, "pattern": "\\S" }
+                        },
+                        "required": ["evidence_kind", "command"]
+                    },
+                    "shipping": {
+                        "type": "object", "additionalProperties": false,
+                        "properties": {
+                            "evidence_kind": { "const": "independent-shipping" },
+                            "artifact": { "type": "string", "minLength": 1, "maxLength": MAX_SPLIT_DELIVERY_EVIDENCE_CHARS, "pattern": "\\S" },
+                            "mechanism": { "type": "string", "enum": ["package-publish", "release-artifact", "service-deploy", "independent-merge"] }
+                        },
+                        "required": ["evidence_kind", "artifact", "mechanism"]
+                    }
+                },
+                "required": ["build", "test", "shipping"]
             }
         },
         "required": [
@@ -1932,7 +1973,8 @@ fn split_candidate_schema() -> Value {
             "title",
             "scope_paths",
             "acceptance_criteria",
-            "independently_shippable_reason"
+            "independently_shippable_reason",
+            "delivery_boundaries"
         ],
         "additionalProperties": false
     })
@@ -2394,6 +2436,90 @@ fn validated_scope_split_plan(
             }
             candidate_text.insert(field, value.to_string());
         }
+        let delivery_boundaries = candidate
+            .get("delivery_boundaries")
+            .and_then(Value::as_object)
+            .filter(|boundaries| boundaries.len() == 3)
+            .ok_or_else(|| {
+                format!(
+                    "review_split_candidate_delivery_boundaries_required id={id} fields=build,test,shipping"
+                )
+            })?;
+        let mut normalized_delivery_boundaries = serde_json::Map::new();
+        let declared_scope_paths = candidate
+            .get("scope_paths")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter_map(|path| normalize_review_path(path, None))
+            .collect::<HashSet<_>>();
+        for (boundary, fields) in [
+            ("build", &["evidence_kind", "command", "artifact"][..]),
+            ("test", &["evidence_kind", "command"][..]),
+            ("shipping", &["evidence_kind", "artifact", "mechanism"][..]),
+        ] {
+            let evidence = delivery_boundaries
+                .get(boundary)
+                .and_then(Value::as_object)
+                .filter(|evidence| evidence.len() == fields.len())
+                .ok_or_else(|| {
+                    format!(
+                        "review_split_candidate_delivery_boundary_invalid id={id} boundary={boundary}"
+                    )
+                })?;
+            let expected_kind = format!("independent-{boundary}");
+            if evidence.get("evidence_kind").and_then(Value::as_str) != Some(expected_kind.as_str())
+            {
+                return Err(format!(
+                    "review_split_candidate_delivery_boundary_evidence_kind_invalid id={id} boundary={boundary} expected={expected_kind}"
+                ));
+            }
+            if boundary == "shipping"
+                && !matches!(
+                    evidence.get("mechanism").and_then(Value::as_str),
+                    Some(
+                        "package-publish"
+                            | "release-artifact"
+                            | "service-deploy"
+                            | "independent-merge"
+                    )
+                )
+            {
+                return Err(format!(
+                    "review_split_candidate_shipping_mechanism_invalid id={id}"
+                ));
+            }
+            let mut normalized_evidence = serde_json::Map::new();
+            for field in fields {
+                let value = evidence
+                    .get(*field)
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| {
+                        format!(
+                            "review_split_candidate_delivery_boundary_field_required id={id} boundary={boundary} field={field}"
+                        )
+                    })?;
+                if value.chars().count() > MAX_SPLIT_DELIVERY_EVIDENCE_CHARS {
+                    return Err(format!(
+                        "review_split_candidate_delivery_boundary_too_long id={id} boundary={boundary} field={field} max_chars={MAX_SPLIT_DELIVERY_EVIDENCE_CHARS}"
+                    ));
+                }
+                if *field != "evidence_kind"
+                    && (Path::new(value).is_absolute()
+                        || normalize_review_path(value, None)
+                            .is_some_and(|path| declared_scope_paths.contains(&path)))
+                {
+                    return Err(format!(
+                        "review_split_candidate_delivery_boundary_path_only id={id} boundary={boundary} field={field}"
+                    ));
+                }
+                normalized_evidence.insert((*field).to_string(), json!(value));
+            }
+            normalized_delivery_boundaries
+                .insert(boundary.to_string(), Value::Object(normalized_evidence));
+        }
         let criteria = strict_string_array(
             candidate.get("acceptance_criteria"),
             "split_candidate_acceptance_criteria",
@@ -2453,7 +2579,8 @@ fn validated_scope_split_plan(
             "title": candidate_text["title"],
             "scope_paths": normalized_scope_paths,
             "acceptance_criteria": criteria,
-            "independently_shippable_reason": candidate_text["independently_shippable_reason"]
+            "independently_shippable_reason": candidate_text["independently_shippable_reason"],
+            "delivery_boundaries": normalized_delivery_boundaries
         }));
     }
     if let Some(uncovered) = normalized_changed_files
@@ -9391,6 +9518,25 @@ mod tests {
         })
     }
 
+    fn test_delivery_boundaries(component: &str) -> Value {
+        json!({
+            "build": {
+                "evidence_kind": "independent-build",
+                "command": format!("build {component}"),
+                "artifact": format!("{component} package")
+            },
+            "test": {
+                "evidence_kind": "independent-test",
+                "command": format!("test {component}")
+            },
+            "shipping": {
+                "evidence_kind": "independent-shipping",
+                "artifact": format!("{component} package"),
+                "mechanism": "package-publish"
+            }
+        })
+    }
+
     fn test_baseline_commit(project_root: &Path, revision: &str) -> String {
         git_text(
             project_root,
@@ -9457,7 +9603,6 @@ mod tests {
             findings,
             project_root,
             None,
-            None,
         )
     }
 
@@ -9468,8 +9613,7 @@ mod tests {
         selected: &[(&str, &str)],
         findings: Value,
         project_root: Option<&Path>,
-        review_lifecycle: Option<&str>,
-        split_lineage: Option<Value>,
+        review_metadata: Option<(&str, Value)>,
     ) -> Value {
         let mut arguments = json!({
             "session_id": session_id,
@@ -9484,11 +9628,11 @@ mod tests {
         if let Some(project_root) = project_root {
             arguments["project_root"] = json!(project_root);
         }
-        if let Some(review_lifecycle) = review_lifecycle {
+        if let Some((review_lifecycle, split_lineage)) = review_metadata {
             arguments["review_lifecycle"] = json!(review_lifecycle);
-        }
-        if let Some(split_lineage) = split_lineage {
-            arguments["split_lineage"] = split_lineage;
+            if !split_lineage.is_null() {
+                arguments["split_lineage"] = split_lineage;
+            }
         }
         let resolved_root = resolved_project_root_string(&arguments).expect("test project root");
         arguments["baseline_commit"] = json!(git_text(
@@ -17015,7 +17159,8 @@ pre_filter = "project-pre"
                 "title",
                 "scope_paths",
                 "acceptance_criteria",
-                "independently_shippable_reason"
+                "independently_shippable_reason",
+                "delivery_boundaries"
             ])
         );
     }
@@ -17697,13 +17842,15 @@ pre_filter = "project-pre"
             "title": "Ship the coordinator policy",
             "scope_paths": ["src/lib.rs"],
             "acceptance_criteria": ["Coordinator policy is independently usable."],
-            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact."
+            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact.",
+            "delivery_boundaries": test_delivery_boundaries("coordinator policy")
         }, {
             "id": "integration-tests",
             "title": "Ship the integration tests",
             "scope_paths": ["tests/lib_test.rs"],
             "acceptance_criteria": ["Integration tests consume the released policy."],
-            "independently_shippable_reason": "The integration coverage can follow after the coordinator release."
+            "independently_shippable_reason": "The integration coverage can follow after the coordinator release.",
+            "delivery_boundaries": test_delivery_boundaries("integration fixture")
         }]);
         arguments
     }
@@ -17789,13 +17936,15 @@ pre_filter = "project-pre"
             "title": "Ship the coordinator policy",
             "scope_paths": ["src/lib.rs"],
             "acceptance_criteria": ["Coordinator policy is independently usable."],
-            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact."
+            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact.",
+            "delivery_boundaries": test_delivery_boundaries("coordinator policy")
         }, {
             "id": "integration-tests",
             "title": "Ship the dashboard integration",
             "scope_paths": ["tests/lib_test.rs"],
             "acceptance_criteria": ["Dashboard integration consumes the released policy."],
-            "independently_shippable_reason": "The dashboard can follow after the coordinator release."
+            "independently_shippable_reason": "The dashboard can follow after the coordinator release.",
+            "delivery_boundaries": test_delivery_boundaries("dashboard integration")
         }]);
         arguments
             .as_object_mut()
@@ -17887,6 +18036,55 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn scope_growth_rejects_path_only_delivery_claims() {
+        let mut arguments = initial_scope_split_arguments("scope-split-path-only");
+        arguments["risk_assessment"]["split_candidates"][0]["independently_shippable_reason"] =
+            json!("The source path can be filtered into its own branch.");
+        arguments["risk_assessment"]["split_candidates"][1]["independently_shippable_reason"] =
+            json!("The test path can be filtered into another branch.");
+        arguments["risk_assessment"]["split_candidates"][0]["delivery_boundaries"] = json!({
+            "build": { "evidence_kind": "independent-build", "command": "/workspace/src/lib.rs", "artifact": "src/lib.rs" },
+            "test": { "evidence_kind": "independent-test", "command": "src/lib.rs" },
+            "shipping": { "evidence_kind": "independent-shipping", "artifact": "src/lib.rs", "mechanism": "release-artifact" }
+        });
+        arguments["risk_assessment"]["split_candidates"][1]["delivery_boundaries"] = json!({
+            "build": { "evidence_kind": "independent-build", "command": "tests/lib_test.rs", "artifact": "tests/lib_test.rs" },
+            "test": { "evidence_kind": "independent-test", "command": "tests/lib_test.rs" },
+            "shipping": { "evidence_kind": "independent-shipping", "artifact": "tests/lib_test.rs", "mechanism": "release-artifact" }
+        });
+
+        assert_eq!(
+            plan_result_at(&arguments, 3_000)
+                .expect_err("path-filtered review scopes are not delivery boundaries"),
+            "review_split_candidate_delivery_boundary_path_only id=coordinator-policy boundary=build field=command"
+        );
+    }
+
+    #[test]
+    fn split_delivery_evidence_uses_the_schema_character_limit_at_runtime() {
+        let schema = split_candidate_schema();
+        assert_eq!(
+            schema["properties"]["delivery_boundaries"]["properties"]["build"]["properties"]
+                ["command"]["maxLength"],
+            MAX_SPLIT_DELIVERY_EVIDENCE_CHARS
+        );
+        let mut arguments = initial_scope_split_arguments("scope-split-boundary-limit");
+        arguments["risk_assessment"]["split_candidates"][0]["delivery_boundaries"]["build"]
+            ["command"] = json!("é".repeat(MAX_SPLIT_DELIVERY_EVIDENCE_CHARS));
+        plan_result_at(&arguments, 3_000)
+            .expect("the exact schema character limit is accepted at runtime");
+
+        let mut too_long = initial_scope_split_arguments("scope-split-boundary-too-long");
+        too_long["risk_assessment"]["split_candidates"][0]["delivery_boundaries"]["build"]
+            ["command"] = json!("é".repeat(MAX_SPLIT_DELIVERY_EVIDENCE_CHARS + 1));
+        assert_eq!(
+            plan_result_at(&too_long, 3_000)
+                .expect_err("one character beyond the schema limit is rejected at runtime"),
+            "review_split_candidate_delivery_boundary_too_long id=coordinator-policy boundary=build field=command max_chars=512"
+        );
+    }
+
+    #[test]
     fn scope_growth_rejects_fully_overlapping_split_candidates() {
         let mut arguments = initial_scope_split_arguments("scope-split-overlap");
         arguments["risk_assessment"]["split_candidates"][0]["scope_paths"] =
@@ -17909,19 +18107,22 @@ pre_filter = "project-pre"
             "title": "Ship the source directory",
             "scope_paths": ["src"],
             "acceptance_criteria": ["The source policy is independently usable."],
-            "independently_shippable_reason": "The source policy has its own release artifact."
+            "independently_shippable_reason": "The source policy has its own release artifact.",
+            "delivery_boundaries": test_delivery_boundaries("source policy")
         }, {
             "id": "source-file",
             "title": "Ship the source file",
             "scope_paths": ["src/lib.rs"],
             "acceptance_criteria": ["The source file is independently usable."],
-            "independently_shippable_reason": "The source file has its own release artifact."
+            "independently_shippable_reason": "The source file has its own release artifact.",
+            "delivery_boundaries": test_delivery_boundaries("source file")
         }, {
             "id": "integration-tests",
             "title": "Ship the integration tests",
             "scope_paths": ["tests/lib_test.rs"],
             "acceptance_criteria": ["Integration tests consume the released policy."],
-            "independently_shippable_reason": "The tests can follow the policy release."
+            "independently_shippable_reason": "The tests can follow the policy release.",
+            "delivery_boundaries": test_delivery_boundaries("integration tests")
         }]);
 
         assert_eq!(
@@ -17940,13 +18141,15 @@ pre_filter = "project-pre"
             &[("architecture-maintainability", "medium")],
             json!([]),
             None,
-            Some("unlanded"),
-            Some(json!({
-                "root_work_item_id": "root-ticket",
-                "parent_work_item_id": "split-child-one",
-                "generation": 1,
-                "source_diff_hash": "root-source-diff"
-            })),
+            Some((
+                "unlanded",
+                json!({
+                    "root_work_item_id": "root-ticket",
+                    "parent_work_item_id": "split-child-one",
+                    "generation": 1,
+                    "source_diff_hash": "root-source-diff"
+                }),
+            )),
         );
         arguments["risk_assessment"]["split_required"] = json!(true);
         arguments["risk_assessment"]["split_rationale"] =
@@ -18009,8 +18212,7 @@ pre_filter = "project-pre"
             &[("architecture-maintainability", "medium")],
             json!([]),
             None,
-            Some("unlanded"),
-            Some(lineage.clone()),
+            Some(("unlanded", lineage.clone())),
         );
         let planned: Value = serde_json::from_str(
             &plan_result_at(&arguments, 3_000).expect("lineage-bearing review plan"),
@@ -18094,8 +18296,7 @@ pre_filter = "project-pre"
             &[("architecture-maintainability", "medium")],
             json!([]),
             None,
-            Some("landed"),
-            None,
+            Some(("landed", Value::Null)),
         );
         arguments["risk_assessment"]["split_required"] = json!(true);
         arguments["risk_assessment"]["split_rationale"] =
@@ -18106,13 +18307,15 @@ pre_filter = "project-pre"
             "title": "Ship the coordinator policy",
             "scope_paths": ["src/lib.rs"],
             "acceptance_criteria": ["Coordinator policy is independently usable."],
-            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact."
+            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact.",
+            "delivery_boundaries": test_delivery_boundaries("landed coordinator policy")
         }, {
             "id": "integration-tests",
             "title": "Ship the integration tests",
             "scope_paths": ["tests/lib_test.rs"],
             "acceptance_criteria": ["Integration tests consume the released policy."],
-            "independently_shippable_reason": "The integration coverage can follow after the coordinator release."
+            "independently_shippable_reason": "The integration coverage can follow after the coordinator release.",
+            "delivery_boundaries": test_delivery_boundaries("landed integration tests")
         }]);
 
         let reviewed: Value = serde_json::from_str(
@@ -18185,13 +18388,15 @@ pre_filter = "project-pre"
             "title": "Keep the original policy edit",
             "scope_paths": ["src/lib.rs"],
             "acceptance_criteria": ["The original policy behavior remains independently releasable."],
-            "independently_shippable_reason": "It preserves the original ticket boundary."
+            "independently_shippable_reason": "It preserves the original ticket boundary.",
+            "delivery_boundaries": test_delivery_boundaries("original policy")
         }, {
             "id": "new-subsystem",
             "title": "Build the new subsystem separately",
             "scope_paths": ["tests/lib_test.rs"],
             "acceptance_criteria": ["The subsystem has an independent integration contract."],
-            "independently_shippable_reason": "It can be released after the policy behavior."
+            "independently_shippable_reason": "It can be released after the policy behavior.",
+            "delivery_boundaries": test_delivery_boundaries("new subsystem")
         }]);
         resubmission["delta_risk_assessment"] = assessment;
 
@@ -18232,8 +18437,7 @@ pre_filter = "project-pre"
             &[("architecture-maintainability", "medium")],
             json!([]),
             None,
-            Some("landed"),
-            None,
+            Some(("landed", Value::Null)),
         );
         let planned: Value = serde_json::from_str(
             &plan_result_at(&arguments, 1_000).expect("landed medium-risk plan"),
@@ -18272,13 +18476,15 @@ pre_filter = "project-pre"
             "title": "Review the original policy edit",
             "scope_paths": ["src/lib.rs"],
             "acceptance_criteria": ["The original policy behavior is reviewed."],
-            "independently_shippable_reason": "The already-landed policy has its own release artifact."
+            "independently_shippable_reason": "The already-landed policy has its own release artifact.",
+            "delivery_boundaries": test_delivery_boundaries("already-landed policy")
         }, {
             "id": "new-subsystem",
             "title": "Review the new subsystem",
             "scope_paths": ["tests/lib_test.rs"],
             "acceptance_criteria": ["The subsystem integration contract is reviewed."],
-            "independently_shippable_reason": "The already-landed subsystem has an independent integration contract."
+            "independently_shippable_reason": "The already-landed subsystem has an independent integration contract.",
+            "delivery_boundaries": test_delivery_boundaries("already-landed subsystem")
         }]);
         resubmission["delta_risk_assessment"] = assessment;
 
