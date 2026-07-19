@@ -18,6 +18,7 @@ Implementation notes: Keep an explicit port option for scripts, bookmarks, and o
 ## Acceptance criteria
 
 - [ ] Starting the dashboard without a port chooses an available local port and prints the complete URL.
+- [ ] Dashboards for multiple projects can start at the same time on one machine without using the same port.
 
 ## Subtasks
 
