@@ -1,7 +1,7 @@
 ---
 title: Review Codex subscription-auth runtime boundary slice
 blocked_by: []
-blocks: [20260715-n6bs-build-writable-downstream-code-quality-benchmarks-for-codex-plugins]
+blocks: []
 tags: [evals, codex, auth, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
