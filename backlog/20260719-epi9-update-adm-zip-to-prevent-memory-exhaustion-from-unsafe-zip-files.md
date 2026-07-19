@@ -17,6 +17,8 @@ adm-zip is a transitive development dependency brought in through Promptfoo, Hug
 
 ## Acceptance criteria
 
+- [ ] package-lock.json resolves adm-zip to version 0.6.0 or newer.
+
 ## Subtasks
 
 ## Notes / Log
