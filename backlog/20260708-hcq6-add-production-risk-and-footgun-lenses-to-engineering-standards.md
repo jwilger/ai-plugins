@@ -1,5 +1,5 @@
 ---
-title: Add production-risk and footgun lenses to engineering-standards
+title: Help designs avoid hidden production risks
 blocked_by: []
 blocks: []
 tags: [engineering-standards, production-risk, reliability, evals]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add proportional production-risk and hidden-footgun guidance to engineering-standards, cross-referencing rather than duplicating the existing development-discipline review lens.
+Add practical engineering guidance for risks that often appear only under real use, such as partial failures, uncontrolled retries, stale caches, cleanup problems, resource growth, and traffic spikes. The guidance should stay proportionate to how the software is actually deployed.
 
 ## Context / Why
 
