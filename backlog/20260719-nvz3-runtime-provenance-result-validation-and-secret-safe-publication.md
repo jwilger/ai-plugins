@@ -17,6 +17,8 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 
 ## Acceptance criteria
 
+- [ ] Bind input, workspace, runtime, tool, fixture, and verifier provenance.
+
 ## Subtasks
 
 ## Notes / Log
