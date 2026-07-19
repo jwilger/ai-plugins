@@ -17,6 +17,8 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 
 ## Acceptance criteria
 
+- [ ] Provide the pinned runtime tools and closure identities required by the benchmark contract and scorer.
+
 ## Subtasks
 
 ## Notes / Log
