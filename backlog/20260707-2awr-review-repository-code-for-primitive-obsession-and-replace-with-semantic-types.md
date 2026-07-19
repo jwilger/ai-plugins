@@ -1,5 +1,5 @@
 ---
-title: Review repository code for primitive obsession and replace with semantic types
+title: Replace unclear basic values with meaningful domain types across the repository
 blocked_by: [20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession]
 blocks: []
 tags: [refactor, semantic-types, engineering-standards, technical-debt]
@@ -7,7 +7,7 @@ tags: [refactor, semantic-types, engineering-standards, technical-debt]
 
 ## Summary
 
-Inventory every repository domain boundary and replace primitive-obsessed domain data with named semantic types in bounded component slices while preserving observable behavior.
+Review each code-bearing component and replace strings, numbers, and other basic values that represent business concepts with named types that enforce valid values. Work in reviewable component-sized steps, preserve behavior, and document cases that correctly remain at input or output boundaries.
 
 ## Context / Why
 
