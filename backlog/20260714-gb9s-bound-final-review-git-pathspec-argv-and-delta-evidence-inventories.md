@@ -1,5 +1,5 @@
 ---
-title: Bound final-review Git pathspec argv and delta-evidence inventories
+title: Keep large final reviews within operating-system and evidence-size limits
 blocked_by: []
 blocks: []
 tags: [development-discipline, final-review, reliability, scalability, minor]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Chunk or stream final-review Git pathspecs and compact oversized changed-path inventories so valid maximum-size review scopes cannot exceed OS argv limits or the coordinator's 128 KiB evidence envelope.
+Process large changed-file lists in bounded pieces so a valid maximum-size final review cannot exceed command-line or coordinator evidence limits. Preserve the same review scope and fail safely with actionable information.
 
 ## Context / Why
 
