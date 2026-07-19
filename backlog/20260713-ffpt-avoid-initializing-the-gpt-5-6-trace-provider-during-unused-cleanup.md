@@ -1,5 +1,5 @@
 ---
-title: Avoid initializing the GPT-5.6 trace provider during unused cleanup
+title: Do not start an unused GPT-5.6 provider during cleanup
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, promptfoo, process-lifecycle, tests, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make cleanup on an unused GPT-5.6 trace-enforced Promptfoo provider a no-op instead of lazily starting an app-server process solely to stop it.
+Make cleanup a true no-op when the GPT-5.6 provider was never used. Stopping an unused provider should not start a server process solely so it can be stopped.
 
 ## Context / Why
 
