@@ -1,5 +1,5 @@
 ---
-title: Make the eval launch-race regression prove pre-publication signal handling
+title: Prove evaluation interruption is handled before process startup finishes
 blocked_by: []
 blocks: []
 tags: [evals, signals, tests, race-condition, minor, review-follow-up]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Strengthen the real-SIGINT launch-boundary regression so it proves the runner's signal trap executes while eval_pid is still unpublished, rather than allowing the test to pass through the ordinary published-PID path.
+Strengthen the launch-timing test so it definitively proves an interrupt is handled before the evaluation process identifier is published. The test must not accidentally pass through the normal post-start path.
 
 ## Context / Why
 
