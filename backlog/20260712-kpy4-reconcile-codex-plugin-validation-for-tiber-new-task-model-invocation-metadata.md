@@ -13,7 +13,7 @@ Resolve the pre-existing mismatch between Tiber's new-task skill metadata and th
 
 ## Context / Why
 
-Discovered while validating the unrelated Clap parser release slice. The field predates that change and may be intentional for Claude Code, so remediation must preserve multi-harness behavior instead of changing the active parser ticket.
+Implementation notes:\n\nDiscovered while validating the unrelated Clap parser release slice. The field predates that change and may be intentional for Claude Code, so remediation must preserve multi-harness behavior instead of changing the active parser ticket.
 
 ## Acceptance criteria
 
