@@ -29,3 +29,4 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 ## Notes / Log
 
 - 2026-07-19: Isolation check found prepare-code-quality-workspaces.mjs imports code-quality-tree-hash.mjs. Added that shared utility to this review scope (overlapping provenance ownership) so the slice is actually executable in isolation; no production code changed.
+- 2026-07-19: Import check additionally found cases.cjs requires manifest.cjs and runtime-manifest.cjs. Added both shared contract utilities to the isolated scope; this matches the earlier broader contract split and prevents a non-executable review artifact.
