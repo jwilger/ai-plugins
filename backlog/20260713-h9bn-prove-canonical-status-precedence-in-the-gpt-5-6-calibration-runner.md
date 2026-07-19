@@ -13,7 +13,7 @@ Add tests proving the focused calibration command reports the original benchmark
 
 ## Context / Why
 
-Caused MINOR deferred from 20260709-spx8. The current fake Promptfoo exits 7, but canonical scripts/evals/run.sh converts that to generic checker status 1 on the deliberately failed artifact, so the test does not distinguish canonical status precedence from custom-checker failure. Build a controlled no-artifact/distinctive-status fixture and separately prove checker invocation and returned-status precedence.
+Implementation notes:\n\nCaused MINOR deferred from 20260709-spx8. The current fake Promptfoo exits 7, but canonical scripts/evals/run.sh converts that to generic checker status 1 on the deliberately failed artifact, so the test does not distinguish canonical status precedence from custom-checker failure. Build a controlled no-artifact/distinctive-status fixture and separately prove checker invocation and returned-status precedence.
 
 ## Acceptance criteria
 
