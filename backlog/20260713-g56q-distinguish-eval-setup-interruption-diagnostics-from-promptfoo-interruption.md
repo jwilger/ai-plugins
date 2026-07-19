@@ -1,5 +1,5 @@
 ---
-title: Distinguish eval setup interruption diagnostics from Promptfoo interruption
+title: Report whether an interrupted evaluation was still setting up or already running
 blocked_by: []
 blocks: []
 tags: [evals, signals, diagnostics, operability, minor, review-follow-up]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Report setup-phase Ctrl-C with phase-accurate terminal and status.json wording instead of claiming a Promptfoo eval was interrupted before Promptfoo starts.
+Use accurate messages when a user stops an evaluation. An interruption during dependency or configuration setup should not claim that the provider evaluation had already started, while interruptions after launch should retain the existing run-specific wording.
 
 ## Context / Why
 
