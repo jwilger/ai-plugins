@@ -1,7 +1,7 @@
 ---
 title: Nix runtime toolchain and focused integration surface
 blocked_by: []
-blocks: []
+blocks: [20260718-zcsh-review-benchmark-contract-and-scorer-slice]
 tags: [nix, devshell, evals, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
