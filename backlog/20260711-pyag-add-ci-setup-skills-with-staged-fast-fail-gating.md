@@ -13,7 +13,7 @@ Update generated CI workflows so inexpensive checks fail quickly, independent ch
 
 ## Context / Why
 
-engineering-standards:scaffold already owns generic CI generation and its playbook, so do not create a competing general CI skill unless trigger evidence proves a distinct user-facing responsibility. Add the reusable staged fast-fail model there, including always-run aggregation/reporting and deliberate cancellation behavior. Add platform-specific references only where GitHub Actions, GitLab CI, Forgejo, or another system has irreducible syntax or capability differences.
+Implementation notes:\n\nengineering-standards:scaffold already owns generic CI generation and its playbook, so do not create a competing general CI skill unless trigger evidence proves a distinct user-facing responsibility. Add the reusable staged fast-fail model there, including always-run aggregation/reporting and deliberate cancellation behavior. Add platform-specific references only where GitHub Actions, GitLab CI, Forgejo, or another system has irreducible syntax or capability differences.
 
 ## Acceptance criteria
 
