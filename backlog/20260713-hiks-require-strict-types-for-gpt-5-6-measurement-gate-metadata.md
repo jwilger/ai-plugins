@@ -1,5 +1,5 @@
 ---
-title: Require strict types for GPT-5.6 measurement-gate metadata
+title: Reject incorrectly typed GPT-5.6 measurement settings
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, validation, types, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make the focused GPT-5.6 measurement gate reject malformed metadata instead of accepting values that JavaScript numeric coercion turns into zero.
+Make the measurement checker reject malformed values instead of letting automatic JavaScript conversion turn values such as an empty string or false into an accepted zero. Invalid artifacts should produce a clear diagnostic.
 
 ## Context / Why
 
