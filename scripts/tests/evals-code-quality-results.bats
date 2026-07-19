@@ -1136,6 +1136,41 @@ NODE
   [ "$status" -eq 1 ]
 }
 
+@test "checker bounds unknown boundary safety diagnostics" {
+  prepare_trusted_runtime
+  write_valid_benchmark_inputs
+  mode="$(jq -r '.rows[0].mode' "$RUNTIME_MANIFEST")"
+  rm "$ARTIFACT_ROOT/rust-cli-feature/sample-1/$mode.json"
+  oversized_suffix="$(printf 'x%.0s' {1..4096})"
+  jq --arg mode "$mode" --arg suffix "$oversized_suffix" '
+    .results.results |= map(
+      if .vars.sample_index == 1 and .vars.condition_id == $mode then
+        .success = false |
+        .score = 0 |
+        .failureReason = 2 |
+        .gradingResult.pass = false |
+        .gradingResult.score = 0 |
+        .error = ("CODE_QUALITY_BOUNDARY_ERROR:safety:" + $suffix)
+      else . end
+    )
+  ' "$RAW_RESULTS" >"$RAW_RESULTS.updated"
+  chmod 600 "$RAW_RESULTS.updated"
+  mv "$RAW_RESULTS.updated" "$RAW_RESULTS"
+
+  run_checker
+
+  [ "$status" -eq 0 ]
+  jq -e --arg mode "$mode" '
+    .diagnosticEligible == false and
+    (.runs[] |
+      select(.conditionId == $mode and .sampleIndex == 1) |
+      .diagnosticCode == "boundary-safety-unknown"
+    )
+  ' "$OUTPUT"
+  run grep -F "$oversized_suffix" "$OUTPUT"
+  [ "$status" -eq 1 ]
+}
+
 @test "checker keeps an unprefixed bound provider error distinct from operational failures" {
   prepare_trusted_runtime
   write_valid_benchmark_inputs

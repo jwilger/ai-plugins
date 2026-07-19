@@ -970,7 +970,43 @@ function missingArtifactDiagnostic(result) {
     const boundary = candidate.match(
       /CODE_QUALITY_BOUNDARY_ERROR:(safety):([a-z0-9-]+)/,
     );
-    if (boundary) return `boundary-${boundary[1]}-${boundary[2]}`;
+    if (boundary) {
+      const knownSafetyCodes = new Set([
+        "output-limit-exceeded",
+        "trusted-workspace-marker-lost",
+        "workspace-byte-limit-exceeded",
+        "workspace-copy-in-failed",
+        "workspace-copy-out-failed",
+        "workspace-entry-limit-exceeded",
+        "workspace-export-incomplete",
+        "workspace-export-special-file",
+        "workspace-publish-failed",
+      ]);
+      const scanLabels = [
+        "marketplace",
+        "plugins",
+        "state",
+        "system-skills",
+        "workspace",
+      ];
+      const scanFailures = [
+        "byte-limit-exceeded",
+        "entry-limit-exceeded",
+        "hardlink-detected",
+        "scan-failed",
+        "special-file-detected",
+        "symlink-detected",
+      ];
+      for (const label of scanLabels) {
+        for (const failure of scanFailures) {
+          knownSafetyCodes.add(`${label}-${failure}`);
+        }
+      }
+      const code = knownSafetyCodes.has(boundary[2])
+        ? boundary[2]
+        : "unknown";
+      return `boundary-${boundary[1]}-${code}`;
+    }
   }
   return "artifact-missing";
 }
