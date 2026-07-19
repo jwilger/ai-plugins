@@ -1,5 +1,5 @@
 ---
-title: Add GPT-5.6 model-routing discipline for coding agents
+title: Choose the right GPT-5.6 model for each coding task
 blocked_by: []
 blocks: []
 tags: [development-discipline, model-routing, gpt-5.6, codex, claude-code, evals]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add conservative task-local routing among GPT-5.6 Luna, Terra, and Sol for Codex coding-agent work, retain a current verified Claude equivalent where supported, and escalate before ambiguity, risk, or completion responsibility makes a cheaper route inappropriate.
+Add clear guidance for choosing among GPT-5.6 Luna, Terra, and Sol based on the difficulty, risk, and responsibility of each coding task. Lower-cost models should be used only when the work is bounded and independently verifiable, with visible escalation when stronger reasoning is needed.
 
 ## Context / Why
 
