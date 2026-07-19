@@ -1,5 +1,5 @@
 ---
-title: Make eval hard guards distinguish refusals from forbidden intent
+title: Do not mistake explicit safety refusals for unsafe intent
 blocked_by: []
 blocks: []
 tags: [evals, hard-guards, measurement-validity, safety, regression, codex, claude, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make forbidden-intent hard guards pass explicit refusals, sanitizing transformations, and Tiber-owned write descriptions while continuing to fail genuine unsafe execution intent.
+Improve automated evaluation safeguards so they recognize when an assistant is refusing unsafe work or describing a sanitized alternative. Genuine plans to expose sensitive data or bypass Tiber controls must continue to fail.
 
 ## Context / Why
 
