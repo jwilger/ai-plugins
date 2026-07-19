@@ -36,6 +36,7 @@ const requiredCases = [
   'development-discipline-systematic-debugging-root-cause',
   'development-discipline-final-review-clean-iterations',
   'development-discipline-tdd-lightweight-post-implementation-review',
+  'development-discipline-rationale-bearing-commit-message',
 ];
 
 function readJson(relativePath) {
@@ -86,8 +87,11 @@ if (readmeRowCount !== 2) {
   fail(`expected README catalog row in both harness tables, found ${readmeRowCount}`);
 }
 
-const fixturesPath = path.join(root, 'evals/fixtures/behavior/full-marketplace/cases.json');
-const cases = readJson('evals/fixtures/behavior/full-marketplace/cases.json');
+const fixturePaths = [
+  'evals/fixtures/behavior/full-marketplace/cases.json',
+  'evals/fixtures/behavior/development-discipline/cases.json',
+];
+const cases = fixturePaths.flatMap(readJson);
 for (const caseId of requiredCases) {
   const testCase = cases.find((entry) => entry.case_id === caseId);
   if (!testCase) {
@@ -109,7 +113,7 @@ for (const caseId of requiredCases) {
 }
 
 if (failures.length > 0) {
-  console.error(`${fixturesPath}\n${failures.join('\n')}`);
+  console.error(`${fixturePaths.join('\n')}\n${failures.join('\n')}`);
   process.exit(1);
 }
 NODE
