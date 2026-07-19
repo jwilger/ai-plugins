@@ -1,5 +1,5 @@
 ---
-title: Correct GPT-5.6 benchmark docs for superseded labels and path lifecycle
+title: Correct outdated labels and file-lifecycle claims in benchmark documentation
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, documentation, reproducibility, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make the GPT-5.6 benchmark README consistently separate six-label superseded pilot evidence from the current eight-label method and describe path cleanup/reuse exactly.
+Update the GPT-5.6 benchmark documentation so older six-label pilot results are clearly separated from the current eight-label method, and so claims about which files and directories are recreated or reused match actual behavior.
 
 ## Context / Why
 
