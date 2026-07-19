@@ -9,7 +9,11 @@ pr_mr_status:
 
 ## Summary
 
+Allow Tiber dashboards for several projects to run on the same machine without port conflicts. When no port is specified, the dashboard should choose an available local port and clearly print the URL it selected.
+
 ## Context / Why
+
+Implementation notes: Keep an explicit port option for scripts, bookmarks, and other workflows that need a predictable address. Automatic selection should ask the operating system for an available port instead of guessing from a fixed range, and startup errors should identify any explicitly requested port that is already in use.
 
 ## Acceptance criteria
 
