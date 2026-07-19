@@ -745,7 +745,7 @@ fn tools() -> Value {
                     "current_diff_hash": { "type": "string" },
                     "current_changed_files": { "type": "array", "items": { "type": "string" } },
                     "current_shared_test_evidence": shared_test_evidence_schema(),
-                    "delta_risk_assessment": delta_risk_assessment_output_schema(),
+                    "delta_risk_assessment": delta_risk_assessment_output_schema(false),
                     "security_escalations": {
                         "type": "array",
                         "items": {
@@ -1630,7 +1630,11 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
             "Mark uncertainty explicitly; uncertainty selects coverage instead of omitting it.",
             "Identify exceptional-risk triggers using only these exact values: destructive-or-irreversible-operation, authentication-or-authorization-boundary, sensitive-data-migration, cryptographic-behavior, safety-critical-behavior. Exceptional overall risk requires at least one supported trigger and an explicitly exceptional dimension; only explicitly exceptional dimensions receive a second independent pass.",
             "Set split_required=true when the diff has grown into a new subsystem or an unusually broad diff.",
-            "When split_required=true, name the applicable scope_growth_triggers and propose at least two split_candidates whose normalized scope_paths collectively cover the changed-file inventory, each with independent acceptance criteria and an independently shippable reason.",
+            if review_lifecycle == "landed" {
+                "For an already-landed review, split_required means internal retrospective review batching only: name the applicable scope_growth_triggers and split_rationale, omit split_candidates, and never propose delivery tickets, branches, or blocking dependencies."
+            } else {
+                "When split_required=true, name the applicable scope_growth_triggers and propose at least two split_candidates whose normalized scope_paths collectively cover the changed-file inventory, each with independent acceptance criteria and an independently shippable reason."
+            },
             "Classify security_impact and safety_impact independently for every finding, regardless of which review lens discovered it.",
             "Every caused or worsened CRITICAL/MAJOR security or human-safety finding must name the in-scope changed path that would be remediated.",
             "Record canonical semantic failure paths, but do not run tests, invoke a verifier, or request another planner.",
@@ -1661,7 +1665,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         "shared_test_evidence": shared_test_evidence,
         "constraints": constraints,
         "prompt": prompt,
-        "expected_output_schema": risk_assessment_output_schema(),
+        "expected_output_schema": risk_assessment_output_schema(review_lifecycle != "landed"),
         "caller_append_schema": caller_attestation_schema()
     });
     let response = json!({
@@ -1777,7 +1781,12 @@ fn delta_risk_assignment(
     assignment["prior_diff_hash"] = json!(prior_diff_hash);
     assignment["current_diff_hash"] = json!(current_diff_hash);
     assignment["delta_evidence"] = current_delta_evidence.clone();
-    assignment["expected_output_schema"] = delta_risk_assessment_output_schema();
+    let review_lifecycle = state
+        .pointer("/scope/review_lifecycle")
+        .and_then(Value::as_str)
+        .unwrap_or("unlanded");
+    assignment["expected_output_schema"] =
+        delta_risk_assessment_output_schema(review_lifecycle != "landed");
     assignment["prompt"] = json!(json!({
         "role": "delta-risk-scout",
         "objective": "Compare the prior reviewed diff with the replacement diff, identify only risk dimensions materially affected by the response changes, and preserve or add required coverage without removing prior obligations.",
@@ -1796,7 +1805,11 @@ fn delta_risk_assignment(
             "Return the full current risk matrix and mark affected=true only for dimensions whose concrete failure paths or required confirmation changed.",
             "Mark every newly selected dimension and every dimension containing a new finding as affected.",
             "Use only these exceptional-risk trigger values: destructive-or-irreversible-operation, authentication-or-authorization-boundary, sensitive-data-migration, cryptographic-behavior, safety-critical-behavior. Exceptional overall risk requires at least one supported trigger and an explicitly exceptional dimension.",
-            "If the replacement diff has grown into a new subsystem or an unusually broad diff, set split_required=true and return at least two independently shippable split_candidates covering the replacement changed-file inventory.",
+            if review_lifecycle == "landed" {
+                "If the already-landed replacement diff is unusually broad, set split_required=true for internal retrospective review batching, name split_rationale and scope_growth_triggers, omit split_candidates, and never propose delivery tickets, branches, or blocking dependencies."
+            } else {
+                "If the replacement diff has grown into a new subsystem or an unusually broad diff, set split_required=true and return at least two independently shippable split_candidates covering the replacement changed-file inventory."
+            },
             "Do not remove unresolved blockers or request less coverage; the coordinator enforces a monotonic coverage floor.",
             "Consume the supplied shared test evidence. Do not run tests, invoke a verifier, or request another planner."
         ]
@@ -1804,7 +1817,7 @@ fn delta_risk_assignment(
     Ok((arguments, assignment))
 }
 
-fn risk_assessment_output_schema() -> Value {
+fn risk_assessment_output_schema(delivery_split_candidates_required: bool) -> Value {
     json!({
         "type": "object",
         "properties": {
@@ -1931,8 +1944,10 @@ fn risk_assessment_output_schema() -> Value {
                     "properties": { "split_required": { "const": true } },
                     "required": ["split_required"]
                 },
-                "then": {
-                    "required": ["split_rationale", "scope_growth_triggers", "split_candidates"]
+                "then": if delivery_split_candidates_required {
+                    json!({ "required": ["split_rationale", "scope_growth_triggers", "split_candidates"] })
+                } else {
+                    json!({ "required": ["split_rationale", "scope_growth_triggers"] })
                 }
             }
         ],
@@ -2020,8 +2035,8 @@ fn split_candidate_schema() -> Value {
     })
 }
 
-fn delta_risk_assessment_output_schema() -> Value {
-    let mut schema = risk_assessment_output_schema();
+fn delta_risk_assessment_output_schema(delivery_split_candidates_required: bool) -> Value {
+    let mut schema = risk_assessment_output_schema(delivery_split_candidates_required);
     let properties = schema["properties"]
         .as_object_mut()
         .expect("risk assessment properties are an object");
@@ -2374,25 +2389,6 @@ fn validated_scope_split_plan(
         }
         return Ok(None);
     }
-    if let Some(lineage) = split_lineage.filter(|lineage| lineage.is_object()) {
-        let generation = lineage
-            .get("generation")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        if generation >= 1 {
-            return Err(format!(
-                "review_recursive_split_rejected root_work_item_id={} generation={generation} source_diff_hash={}",
-                lineage
-                    .get("root_work_item_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown"),
-                lineage
-                    .get("source_diff_hash")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown")
-            ));
-        }
-    }
     if rationale.trim().is_empty() {
         return Err("review_split_rationale_required=true".to_string());
     }
@@ -2417,6 +2413,46 @@ fn validated_scope_split_plan(
         if !unique_triggers.insert(trigger.clone()) {
             return Err(format!(
                 "review_split_scope_growth_trigger_duplicate={trigger}"
+            ));
+        }
+    }
+    let mut ordered_triggers = triggers;
+    ordered_triggers.sort();
+    if review_lifecycle == "landed" {
+        if !candidates.is_empty() {
+            return Err("review_landed_delivery_split_candidates_forbidden=true".to_string());
+        }
+        return Ok(Some(json!({
+            "required": false,
+            "hold": false,
+            "advisory": true,
+            "rationale": rationale,
+            "triggers": ordered_triggers,
+            "candidates": [],
+            "confirmation_id": null,
+            "confirmation_required": false,
+            "tracker_mutation_authorized": false,
+            "blocking_dependencies_authorized": false,
+            "confirmed_representation": null,
+            "blocking_dependencies_reason": null
+        })));
+    }
+    if let Some(lineage) = split_lineage.filter(|lineage| lineage.is_object()) {
+        let generation = lineage
+            .get("generation")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if generation >= 1 {
+            return Err(format!(
+                "review_recursive_split_rejected root_work_item_id={} generation={generation} source_diff_hash={}",
+                lineage
+                    .get("root_work_item_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown"),
+                lineage
+                    .get("source_diff_hash")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
             ));
         }
     }
@@ -2647,14 +2683,11 @@ fn validated_scope_split_plan(
         ));
     }
 
-    let mut ordered_triggers = triggers;
-    ordered_triggers.sort();
     normalized_candidates.sort_by(|left, right| {
         left.get("id")
             .and_then(Value::as_str)
             .cmp(&right.get("id").and_then(Value::as_str))
     });
-    let landed = review_lifecycle == "landed";
     let confirmation_material = Value::Array(normalized_candidates.clone()).to_string();
     let confirmation_id = format!(
         "split-{}",
@@ -2662,13 +2695,13 @@ fn validated_scope_split_plan(
     );
     Ok(Some(json!({
         "required": true,
-        "hold": !landed,
-        "advisory": landed,
+        "hold": true,
+        "advisory": false,
         "rationale": rationale,
         "triggers": ordered_triggers,
         "candidates": normalized_candidates,
         "confirmation_id": confirmation_id,
-        "confirmation_required": !landed,
+        "confirmation_required": true,
         "tracker_mutation_authorized": false,
         "blocking_dependencies_authorized": false,
         "confirmed_representation": null,
@@ -7736,10 +7769,13 @@ fn scope_split_contract_is_valid(
         .and_then(Value::as_str)
         .unwrap_or("unlanded");
     let landed = lifecycle == "landed";
+    let expected_required = !landed;
+    let expected_hold = !landed;
+    let expected_advisory = landed;
     if fields.len() != 12
-        || fields.get("required").and_then(Value::as_bool) != Some(true)
-        || fields.get("hold").and_then(Value::as_bool) != Some(!landed)
-        || fields.get("advisory").and_then(Value::as_bool) != Some(landed)
+        || fields.get("required").and_then(Value::as_bool) != Some(expected_required)
+        || fields.get("hold").and_then(Value::as_bool) != Some(expected_hold)
+        || fields.get("advisory").and_then(Value::as_bool) != Some(expected_advisory)
     {
         return false;
     }
@@ -17382,7 +17418,7 @@ pre_filter = "project-pre"
                 .len(),
             3
         );
-        let scout_schema = risk_assessment_output_schema();
+        let scout_schema = risk_assessment_output_schema(true);
         assert_eq!(
             scout_schema["allOf"][0]["then"]["properties"]["exceptional_triggers"]["minItems"],
             1
@@ -17394,6 +17430,11 @@ pre_filter = "project-pre"
                 "scope_growth_triggers",
                 "split_candidates"
             ])
+        );
+        let landed_scout_schema = risk_assessment_output_schema(false);
+        assert_eq!(
+            landed_scout_schema["allOf"][1]["then"]["required"],
+            json!(["split_rationale", "scope_growth_triggers"])
         );
         assert_eq!(
             scout_schema["properties"]["split_candidates"]["items"]["required"],
@@ -18797,23 +18838,8 @@ pre_filter = "project-pre"
         );
         arguments["risk_assessment"]["split_required"] = json!(true);
         arguments["risk_assessment"]["split_rationale"] =
-            json!("The diff introduces independently shippable policy and integration work.");
+            json!("The landed diff is broad enough to batch retrospective review internally.");
         arguments["risk_assessment"]["scope_growth_triggers"] = json!(["new-subsystem"]);
-        arguments["risk_assessment"]["split_candidates"] = json!([{
-            "id": "coordinator-policy",
-            "title": "Ship the coordinator policy",
-            "scope_paths": ["src/lib.rs"],
-            "acceptance_criteria": ["Coordinator policy is independently usable."],
-            "independently_shippable_reason": "The coordinator behavior has its own tests and release artifact.",
-            "delivery_boundaries": test_delivery_boundaries("landed coordinator policy")
-        }, {
-            "id": "integration-tests",
-            "title": "Ship the integration tests",
-            "scope_paths": ["tests/lib_test.rs"],
-            "acceptance_criteria": ["Integration tests consume the released policy."],
-            "independently_shippable_reason": "The integration coverage can follow after the coordinator release.",
-            "delivery_boundaries": test_delivery_boundaries("landed integration tests")
-        }]);
 
         let reviewed: Value = serde_json::from_str(
             &plan_result_at(&arguments, 3_000)
@@ -18825,9 +18851,18 @@ pre_filter = "project-pre"
         assert_eq!(reviewed["state"]["scope"]["review_lifecycle"], "landed");
         assert_eq!(reviewed["state"]["risk_plan"]["scope_split"]["hold"], false);
         assert_eq!(
+            reviewed["state"]["risk_plan"]["scope_split"]["required"],
+            false
+        );
+        assert_eq!(
             reviewed["state"]["risk_plan"]["scope_split"]["advisory"],
             true
         );
+        assert_eq!(
+            reviewed["state"]["risk_plan"]["scope_split"]["candidates"],
+            json!([])
+        );
+        assert!(reviewed["state"]["risk_plan"]["scope_split"]["confirmation_id"].is_null());
         assert!(!reviewed["assignments"]
             .as_array()
             .expect("landed review assignments")
@@ -18842,6 +18877,32 @@ pre_filter = "project-pre"
         invalid["review_contract_id"] =
             json!(computed_review_contract_id(&invalid).unwrap_or_default());
         assert!(!review_contract_is_valid(&invalid));
+    }
+
+    #[test]
+    fn landed_scope_growth_rejects_delivery_split_candidates() {
+        let mut arguments = assessed_plan_arguments_for_diff_at_root_and_lifecycle(
+            "landed-delivery-candidates",
+            "landed-delivery-candidates-diff",
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+            None,
+            Some(("landed", Value::Null)),
+        );
+        arguments["risk_assessment"]["split_required"] = json!(true);
+        arguments["risk_assessment"]["split_rationale"] =
+            json!("The landed diff is broad enough to batch review.");
+        arguments["risk_assessment"]["scope_growth_triggers"] = json!(["unusually-broad-diff"]);
+        arguments["risk_assessment"]["split_candidates"] = json!([{
+            "id": "review-only-ticket"
+        }]);
+
+        assert_eq!(
+            plan_result_at(&arguments, 3_000)
+                .expect_err("landed review cannot propose delivery-ticket decomposition"),
+            "review_landed_delivery_split_candidates_forbidden=true"
+        );
     }
 
     #[test]
@@ -18968,21 +19029,6 @@ pre_filter = "project-pre"
         assessment["split_rationale"] =
             json!("The landed response includes two independently reviewable areas.");
         assessment["scope_growth_triggers"] = json!(["new-subsystem"]);
-        assessment["split_candidates"] = json!([{
-            "id": "original-policy",
-            "title": "Review the original policy edit",
-            "scope_paths": ["src/lib.rs"],
-            "acceptance_criteria": ["The original policy behavior is reviewed."],
-            "independently_shippable_reason": "The already-landed policy has its own release artifact.",
-            "delivery_boundaries": test_delivery_boundaries("already-landed policy")
-        }, {
-            "id": "new-subsystem",
-            "title": "Review the new subsystem",
-            "scope_paths": ["tests/lib_test.rs"],
-            "acceptance_criteria": ["The subsystem integration contract is reviewed."],
-            "independently_shippable_reason": "The already-landed subsystem has an independent integration contract.",
-            "delivery_boundaries": test_delivery_boundaries("already-landed subsystem")
-        }]);
         resubmission["delta_risk_assessment"] = assessment;
 
         let reviewed: Value = serde_json::from_str(
@@ -18995,8 +19041,16 @@ pre_filter = "project-pre"
         assert_eq!(reviewed["state"]["scope"]["review_lifecycle"], "landed");
         assert_eq!(reviewed["state"]["risk_plan"]["scope_split"]["hold"], false);
         assert_eq!(
+            reviewed["state"]["risk_plan"]["scope_split"]["required"],
+            false
+        );
+        assert_eq!(
             reviewed["state"]["risk_plan"]["scope_split"]["advisory"],
             true
+        );
+        assert_eq!(
+            reviewed["state"]["risk_plan"]["scope_split"]["candidates"],
+            json!([])
         );
         assert!(!reviewed["next_assignments"]
             .as_array()
