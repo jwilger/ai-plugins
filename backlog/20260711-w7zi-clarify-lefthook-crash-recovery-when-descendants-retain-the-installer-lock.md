@@ -13,7 +13,7 @@ Correct Lefthook installer recovery guidance to explain that an inherited flock 
 
 ## Context / Why
 
-AGENTS currently says flock releases after a crash, but the intentional no-fork behavior means leader death is insufficient when a descendant retains the descriptor. Update every canonical recovery surface to distinguish those cases and direct the operator to wait for or terminate the surviving process group before retrying. This is documentation of real contention, distinct from the false-contention diagnostic bug in 20260711-jymz.
+Implementation notes:\n\nAGENTS currently says flock releases after a crash, but the intentional no-fork behavior means leader death is insufficient when a descendant retains the descriptor. Update every canonical recovery surface to distinguish those cases and direct the operator to wait for or terminate the surviving process group before retrying. This is documentation of real contention, distinct from the false-contention diagnostic bug in 20260711-jymz.
 
 ## Acceptance criteria
 
