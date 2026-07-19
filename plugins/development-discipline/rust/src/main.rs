@@ -18523,12 +18523,11 @@ pre_filter = "project-pre"
     #[test]
     fn scope_growth_normalizes_delivery_boundary_whitespace_before_overlap_check() {
         let mut arguments = initial_scope_split_arguments("scope-split-boundary-whitespace");
-        arguments["risk_assessment"]["split_candidates"][1]["delivery_boundaries"]["build"] =
-            json!({
-                "evidence_kind": "independent-build",
-                "command": "  build coordinator policy ",
-                "artifact": " coordinator policy package  "
-            });
+        arguments["risk_assessment"]["split_candidates"][1]["delivery_boundaries"]["build"] = json!({
+            "evidence_kind": "independent-build",
+            "command": "  build coordinator policy ",
+            "artifact": " coordinator policy package  "
+        });
 
         assert_eq!(
             plan_result_at(&arguments, 3_000)
