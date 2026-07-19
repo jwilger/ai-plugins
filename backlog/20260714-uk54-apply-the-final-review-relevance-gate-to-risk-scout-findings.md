@@ -13,7 +13,7 @@ Make findings from the final-review risk scout pass the same relevance checks as
 
 ## Context / Why
 
-Implementation notes:\n\nA caused MAJOR correctness finding from 20260713-rygd showed that scout findings bypass the normal relevance gate. A shallow scout can label an out-of-scope or generic observation as acceptance_criteria and force follow-up-ticket requirements because scout findings lack matched_context or changed_diff_evidence and are inserted directly. The mandatory scout must not have a weaker evidence contract than the lenses it plans.
+Implementation notes: A caused MAJOR correctness finding from 20260713-rygd showed that scout findings bypass the normal relevance gate. A shallow scout can label an out-of-scope or generic observation as acceptance_criteria and force follow-up-ticket requirements because scout findings lack matched_context or changed_diff_evidence and are inserted directly. The mandatory scout must not have a weaker evidence contract than the lenses it plans.
 
 ## Acceptance criteria
 
