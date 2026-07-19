@@ -143,20 +143,39 @@ of these scope triggers:
 - `new-subsystem`
 - `unusually-broad-diff`
 
-When either applies, the assessment sets `split_required: true`, supplies a
-nonblank `split_rationale`, and returns 2-16 `split_candidates`. Candidate IDs
-must be unique bounded identifiers. Every candidate includes a nonblank title,
-one or more normalized `scope_paths`, one or more acceptance criteria, and a
-nonblank `independently_shippable_reason`; their combined scope paths must cover
-the current `changed_files` inventory. The coordinator validates this structure
-before compiling review lenses and persists a contract-bound
-`scope_split_hold`. Initial planning returns `ticket_split_required`; a delta
-transition returns `advance_kind: scope_split_hold` after preserving the new
-scope, evidence, and findings. Both return no assignments, remain incomplete,
-and reject every later advance. Because the server retains the held session, a
-caller cannot retry the same session with `split_required: false`. The scope
-split hold takes precedence over a review-budget checkpoint that becomes due on
-the same delta transition.
+The initial risk assessment and plan declare `review_lifecycle` as `landed` or
+`unlanded`; the coordinator propagates it through delta reassessment. A child
+split also carries `split_lineage`, binding its root and parent work item IDs,
+generation, and source diff hash. Generation one is the maximum: the
+coordinator rejects every further split from a generation-one child, even if
+its diff changes, instead of returning more candidates.
+
+For unlanded work, either trigger requires `split_required: true`, a nonblank
+`split_rationale`, and 2-16 `split_candidates`. Candidate IDs are unique bounded
+identifiers. Each candidate includes a title, normalized `scope_paths`,
+acceptance criteria, `independently_shippable_reason`, and structured
+`delivery_boundaries` for independent build, test, and shipping evidence. Fully
+overlapping ownership, path aliases, bare paths, and synthetic path-filtered
+scopes are insufficient. Combined ownership must still cover `changed_files`.
+
+The coordinator validates this structure and persists a contract-bound
+`scope_split_hold`. Initial planning and delta reassessment return
+`split_confirmation_required`, no assignments, and an authoritative preview
+with tracker mutation and blocking dependencies disabled. The caller must show
+the preview and obtain explicit user confirmation before calling
+`final_review.confirm_split`. `delivery-tickets` authorizes tickets but forbids
+blocking dependencies. `delivery-tickets-with-blocking-dependencies` also
+requires a bounded causal prerequisite reason. Administrative review ordering
+is never sufficient.
+
+When `review_lifecycle` is `landed`, scope growth produces retrospective review
+batching, not delivery decomposition. The coordinator retains review work and
+does not authorize tracker mutation. Callers must not create a review-only
+branch, synthetic path branch, recursive tickets, or blocking dependencies for
+administrative review. Concrete unresolved defects may still become ordinary
+follow-up tickets. Because the server retains held sessions, callers cannot
+weaken or replay their way around these rules. The scope-split decision takes
+precedence over a simultaneously due review-budget checkpoint.
 
 Every risk-planned session carries a contract-bound, server-timed review budget.
 For a medium-risk session, the checkpoint is exactly 75 minutes after planning

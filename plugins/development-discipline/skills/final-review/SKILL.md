@@ -97,17 +97,40 @@ at least one non-whitespace character.
 The MCP binds imported defenses into the initial contract and gives each one to
 the matching first-iteration lens. Do not rely on conversation context alone.
 
-The risk scout must set `split_required: true` when the ticket has grown into a
-new subsystem or an unusually broad diff. It must name the corresponding
-`scope_growth_triggers` and propose at least two `split_candidates`; every
-candidate needs a stable ID, title, normalized scope paths, independent
-acceptance criteria, and an explanation of why it is independently shippable.
-Together their scope paths must cover the current changed-file inventory.
-`final_review.plan` and delta reassessment persist that assessment as a
-contract-bound `scope_split_hold`, return no deep-review assignments, and reject
-later advances. The same session cannot be replanned with a weakened assessment
-to get past the gate. Split the work into independently shippable tickets and
-start a new review for each resulting diff.
+Tell the initial risk assessment and `final_review.plan` whether the reviewed
+work is `review_lifecycle: landed` or `unlanded`; the coordinator propagates it
+through delta reassessment. When reviewing a child created from a prior split,
+also pass its contract-bound `split_lineage` (root and parent work item IDs,
+generation, and source diff hash). Generation one is the maximum: a
+generation-one child cannot split recursively, even after its diff changes.
+
+For unlanded work, the risk scout must set `split_required: true` when the ticket
+has grown into a new subsystem or an unusually broad diff. It must name the
+corresponding `scope_growth_triggers` and propose 2-16 `split_candidates`.
+Every candidate needs a stable ID, title, normalized scope paths, independent
+acceptance criteria, an independently shippable reason, and structured
+`delivery_boundaries` proving distinct build, test, and shipping mechanisms.
+Paths, path aliases, or synthetic path-filtered diffs are not delivery-boundary
+evidence. Candidate ownership cannot fully overlap, and their combined paths
+must cover the changed-file inventory.
+
+The coordinator persists a contract-bound `scope_split_hold`, returns no deep
+review assignments, and rejects later advances or weakened same-session
+replanning. It returns `split_confirmation_required` with a bounded preview;
+tracker mutation and blocking dependencies remain unauthorized. Show that exact
+preview to the user. Call `final_review.confirm_split` only after explicit user
+confirmation. Use `delivery-tickets` by default, which forbids blocking
+dependencies. Use `delivery-tickets-with-blocking-dependencies` only when the
+user confirms it and supplies a concrete causal prerequisite—not administrative
+review ordering.
+
+For already-landed work, broadness authorizes retrospective review batching
+only. It does not authorize delivery decomposition, tracker tickets, or a
+review-only branch. Never manufacture or push synthetic review-only branches,
+create recursive split tickets, or use Tiber `blocks` relationships for
+administrative review. Review batches stay inside the original work item; only
+a concrete unresolved defect or unfinished independently deliverable change may
+become a follow-up ticket.
 
 ## Default Lenses
 

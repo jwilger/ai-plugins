@@ -234,3 +234,65 @@ NODE
 
   [ "$status" -eq 0 ]
 }
+
+@test "final-review separates review batching from delivery decomposition" {
+  run node - "$ROOT" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.argv[2];
+const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
+const normalize = (value) => value.toLowerCase().replace(/\s+/g, ' ');
+const skill = normalize(read('plugins/development-discipline/skills/final-review/SKILL.md'));
+const protocol = normalize(
+  read('plugins/development-discipline/skills/final-review/references/mcp-protocol.md'),
+);
+const cases = JSON.parse(read('evals/fixtures/behavior/development-discipline/cases.json'));
+const failures = [];
+
+for (const phrase of [
+  'review_lifecycle',
+  'propagates it through delta reassessment',
+  'retrospective review',
+  'delivery_boundaries',
+  'final_review.confirm_split',
+  'explicit user confirmation',
+  'review-only branch',
+  'blocking dependencies',
+  'administrative review',
+  'split_lineage',
+  'generation one is the maximum',
+]) {
+  if (!skill.includes(phrase)) failures.push(`final-review guidance missing: ${phrase}`);
+  if (!protocol.includes(phrase)) failures.push(`MCP protocol missing: ${phrase}`);
+}
+
+const fixture = cases.find(
+  (entry) => entry.case_id === 'final-review-scope-growth-forces-ticket-split',
+);
+if (!fixture) {
+  failures.push('missing scope-growth split behavior fixture');
+} else {
+  const rubric = normalize(String(fixture.semanticRubric || ''));
+  for (const phrase of [
+    'already landed',
+    'retrospective',
+    'build, test, and shipping',
+    'explicit user confirmation',
+    'review-only branches',
+    'blocking dependencies',
+    'recursive',
+    'generation one is the maximum',
+  ]) {
+    if (!rubric.includes(phrase)) failures.push(`scope-growth fixture missing: ${phrase}`);
+  }
+}
+
+if (failures.length > 0) {
+  console.error(failures.join('\n'));
+  process.exit(1);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}

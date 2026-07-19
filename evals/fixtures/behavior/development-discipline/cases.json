@@ -465,8 +465,8 @@
   },
   {
     "case_id": "final-review-scope-growth-forces-ticket-split",
-    "behavior": "Stops initial or delta final-review planning when the scout finds a new subsystem or unusually broad diff without an independently shippable ticket split.",
-    "prompt": "During the risk scout, a ticket that began as a small policy edit now adds a separate deployable subsystem and touches an unusually broad set of paths. What structured split evidence must the scout return, and may final_review.plan or a delta reassessment continue reviewing the combined diff?",
+    "behavior": "Separates retrospective review batching from prospective delivery decomposition and gates every tracker mutation on real delivery boundaries plus explicit confirmation.",
+    "prompt": "During the risk scout, a ticket that began as a small policy edit now touches an unusually broad set of paths. Explain how final review must behave if the work is already landed versus still unlanded, what proves a real split, and whether it may create tickets, blocking dependencies, recursive children, or review-only branches without asking me.",
     "tags": [
       "development-discipline",
       "final-review",
@@ -480,11 +480,11 @@
     },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response sets split_required true, records new-subsystem and/or unusually-broad-diff in scope_growth_triggers, gives a nonblank rationale, and proposes at least two candidates with unique IDs, titles, normalized scope paths that collectively cover the changed inventory, independent acceptance criteria, and independently shippable reasons. It must say initial plan or delta reassessment persists a contract-bound authoritative scope_split_hold, returns no assignments, remains incomplete, and rejects later advances or same-session replanning with split_required cleared; a delta hold preserves replacement scope/evidence/findings and wins over a simultaneously due budget checkpoint. Fail if it merely logs a MINOR architecture finding, allows combined review to continue, returns only a retryable error, omits concrete ticket boundaries, or clears split_required on resubmission.",
+    "semanticRubric": "Pass if the response says already landed broad work receives retrospective review batching under the original work item and does not authorize delivery-ticket decomposition. For unlanded work it must set split_required true for a genuine new subsystem or unusually broad diff, provide nonblank rationale and 2-16 candidates without fully overlapping ownership whose normalized paths cover the inventory, and require independent acceptance criteria plus structured build, test, and shipping boundary evidence rather than paths or synthetic path-filtered diffs. It must describe a contract-bound hold or preview that returns no assignments, remains incomplete, rejects weakened same-session replanning, and requires explicit user confirmation through final_review.confirm_split before tracker mutation. It must forbid review-only branches and blocking dependencies for administrative review; blocking relationships require separately confirmed causal prerequisites. For split lineage, generation one is the maximum and every recursive child split is rejected, even after the diff changes. Fail if broadness or path partitions alone create tickets, branches, or dependencies, if already landed work is retroactively decomposed, or if confirmation can be inferred from standing execution approval.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Return split_required with concrete scope-growth triggers, rationale, and two or more independently shippable candidate tickets covering the changed files. Initial plan and delta reassessment persist an authoritative contract-bound scope-split hold with no assignments; the held session cannot advance or be replanned around the split."
+        "Already-landed broad work stays retrospective. A genuine unlanded split proves independent build, test, and shipping boundaries, returns an authoritative preview with no assignments, and waits for explicit confirmation before tickets; review-only branches, administrative blocking dependencies, and recursive children are forbidden."
       ],
       "fail": [
         "Continue the broad final review and defer the subsystem split as a routine MINOR backlog item after completion."

@@ -786,7 +786,14 @@ cat evals/out/generated/runtime-options.json
 SH
   chmod +x "$fixture_bin/promptfoo"
 
-  run env PROMPTFOO_BIN="$fixture_bin/promptfoo" EVAL_CASE_FILTER=tiber "$RUNNER"
+  run env \
+    PROMPTFOO_BIN="$fixture_bin/promptfoo" \
+    CODEX_EVAL_HOME="$fixture_bin/codex-full" \
+    CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_bin/codex-full" \
+    CODEX_EVAL_HOME_NO_PLUGINS="$fixture_bin/codex-none" \
+    CODEX_EVAL_HOME_TARGETED_PLUGINS="$fixture_bin/codex-targeted" \
+    EVAL_CASE_FILTER=tiber \
+    "$RUNNER"
 
   rm -rf "$fixture_bin"
   rm -f "$ROOT/evals/out/generated/runtime-options.json"
@@ -818,6 +825,10 @@ SH
 
   run env \
     PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    CODEX_EVAL_HOME="$fixture_root/codex-full" \
+    CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_root/codex-full" \
+    CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-none" \
+    CODEX_EVAL_HOME_TARGETED_PLUGINS="$fixture_root/codex-targeted" \
     EVAL_OUT_DIR="$isolated_out" \
     EVAL_CASE_FILTER=tiber \
     EVAL_SAMPLES=2 \
