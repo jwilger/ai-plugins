@@ -8,7 +8,11 @@
   requires **≥1 approval** plus **automated code review/approval**. CI gates:
   formatting, tests, marketplace validation, and Codex cross-harness manifest
   verification.
-- **Conventional Commits.** Commit between BDD steps once `just ci` is green.
+- **Rationale-bearing Conventional Commits.** Commit between BDD steps once
+  `just ci` is green. Every authored commit needs a concise Conventional Commit
+  subject and a non-empty body explaining why the change is necessary, such as
+  the motivation, tradeoff, or failure it prevents. A subject-only message, or
+  a body that merely repeats what changed, is not complete.
 - **One-hour scope check.** As a rough heuristic, if no commit has been pushed
   in the past hour, pause and ask whether the current increment is being
   over-engineered. Prefer a smaller semantic increment when possible; the

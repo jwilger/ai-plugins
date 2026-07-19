@@ -1,6 +1,6 @@
 {
   "name": "development-discipline",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "John's personal development workflow discipline: test-first implementation, scoped verification, debugging, review handling, and skill authoring.",
   "author": {
     "name": "John Wilger",

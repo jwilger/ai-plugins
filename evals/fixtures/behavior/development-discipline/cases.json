@@ -464,6 +464,34 @@
     }
   },
   {
+    "case_id": "development-discipline-rationale-bearing-commit-message",
+    "behavior": "Requires each authored commit to explain why the change is necessary instead of accepting a subject-only message.",
+    "prompt": "You have completed and verified a small implementation increment. A teammate proposes committing it with only `fix(ci): validate workflow status`. Is that commit message ready to use? Give the commit-message rule and a concise compliant example, while preserving this repository's attribution policy.",
+    "tags": [
+      "development-discipline",
+      "tdd",
+      "commit-message",
+      "conventional-commits"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["rationale-commit-messages"],
+    "coverage": {
+      "kinds": ["core-behavior", "workflow", "policy-enforcement"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response rejects or flags the subject-only proposal; requires a concise Conventional Commit subject plus a non-empty body that explains why the change is necessary, including the motivation, tradeoff, or failure being prevented rather than merely restating what changed; gives a compliant subject-and-body example; and preserves the rule against Co-Authored-By or other AI-attribution trailers. Fail if it accepts a subject-only commit, treats a body as optional, supplies a body that only repeats the subject or implementation details, or adds an attribution trailer.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "No. Keep the Conventional Commit subject and add a short body explaining the reason: `fix(ci): validate workflow status` followed by `A failed workflow was previously followed by unrelated changes because its result was not checked. Requiring the status check keeps the next change focused on repairing the failure.` Do not add Co-Authored-By or other AI-attribution trailers."
+      ],
+      "fail": [
+        "Yes. `fix(ci): validate workflow status` is already a valid Conventional Commit, so a body is optional."
+      ]
+    }
+  },
+  {
     "case_id": "final-review-scope-growth-forces-ticket-split",
     "behavior": "Separates retrospective review batching from prospective delivery decomposition and gates every tracker mutation on real delivery boundaries plus explicit confirmation.",
     "prompt": "During the risk scout, a ticket that began as a small policy edit now touches an unusually broad set of paths. Explain how final review must behave if the work is already landed versus still unlanded. List the exact split fields and build, test, and shipping evidence that prove a real split; explain the hold, preview, and final_review.confirm_split mechanics, including whether standing execution approval counts. For tickets, blocking dependencies, recursive children, and review-only branches, distinguish what explicit confirmation can authorize from what is forbidden outright; when can a blocking relationship be valid, and can a child split after its diff changes?",

@@ -42,7 +42,7 @@ starting the next RED test:
 1. Run the fast unit tests and directly relevant quick checks.
 2. Run the lightweight review below. If it causes an edit, repeat the fast tests
    and lightweight review until both are green.
-3. Commit and push the green increment.
+3. Use `rationale-commit-messages`, then commit and push the green increment.
 4. Check the latest pushed build. Continue when CI is running or green. A failed
    build blocks follow-up implementation, review-finding remediation, and a new
    ticket until the failure is understood and repaired.
