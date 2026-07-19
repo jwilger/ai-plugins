@@ -1,4 +1,3 @@
-20260719-m9yb-require-rationale-bearing-commit-messages-in-development-workflows
 20260719-5tzm-block-unrelated-work-after-a-ci-failure-until-its-cause-is-repaired
 20260719-u39g-write-task-tickets-so-product-managers-can-understand-them
 20260719-epi9-update-adm-zip-to-prevent-memory-exhaustion-from-unsafe-zip-files
