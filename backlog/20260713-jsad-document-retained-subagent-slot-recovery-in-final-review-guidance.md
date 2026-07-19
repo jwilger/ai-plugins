@@ -13,7 +13,7 @@ Document how final review can recover when a completed reviewer still occupies a
 
 ## Context / Why
 
-Implementation notes:\n\nObserved during the Ctrl-C eval-runner final review: the collaboration runtime sometimes retained a completed reviewer and rejected the next fresh spawn at the global thread limit. The successful recovery was to trigger a no-work administrative follow-up on the retained completed agent, immediately interrupt that administrative turn, then spawn a brand-new fork_turns=none reviewer. Guidance must stress that the interrupted agent is not reused for review and that the new reviewer remains genuinely fresh. Document bounded retries and safe fallback behavior without fabricating attestations.
+Implementation notes: Observed during the Ctrl-C eval-runner final review: the collaboration runtime sometimes retained a completed reviewer and rejected the next fresh spawn at the global thread limit. The successful recovery was to trigger a no-work administrative follow-up on the retained completed agent, immediately interrupt that administrative turn, then spawn a brand-new fork_turns=none reviewer. Guidance must stress that the interrupted agent is not reused for review and that the new reviewer remains genuinely fresh. Document bounded retries and safe fallback behavior without fabricating attestations.
 
 ## Acceptance criteria
 
