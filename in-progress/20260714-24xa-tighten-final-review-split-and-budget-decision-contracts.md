@@ -25,7 +25,7 @@ Originally tracked overlapping split scopes and budget schema parity. Expanded a
 - [x] Add focused tests for overlapping split scopes and schema/runtime boundary parity.
 - [x] Reject recursive split holds for a child of the same root work item and source diff; return a bounded guardrail/tool-policy result instead of more split candidates.
 - [x] Treat already-landed broad scopes as retrospective review work: broadness may batch review internally but must not authorize delivery-ticket decomposition without concrete unfinished work.
-- [ ] Require split candidates to prove genuine independent build, test, and shipping boundaries; path coverage alone or synthetic path-filtered scopes are insufficient.
+- [x] Require split candidates to prove genuine independent build, test, and shipping boundaries; path coverage alone or synthetic path-filtered scopes are insufficient.
 - [ ] Require an explicit caller confirmation step before a split plan may be represented as tracker tickets or blocking dependencies.
 - [ ] Update the final-review skill guidance to forbid synthetic/pushed review-only branches, recursive split-ticket creation, and use of Tiber blocks for administrative review coordination.
 - [ ] Add focused regression tests for landed scope handling, recursive split lineage, synthetic/path-only candidates, and confirmation gating.
