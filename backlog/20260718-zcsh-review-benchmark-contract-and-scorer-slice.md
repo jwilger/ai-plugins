@@ -1,6 +1,6 @@
 ---
 title: Review benchmark contract and scorer slice
-blocked_by: [20260719-cb43-benchmark-contract-inputs-cases-and-locked-fixture, 20260719-nvz3-runtime-provenance-result-validation-and-secret-safe-publication, 20260719-qpx4-trusted-verifier-and-scorer-composition, 20260719-zk46-nix-runtime-toolchain-and-focused-integration-surface]
+blocked_by: [20260719-nvz3-runtime-provenance-result-validation-and-secret-safe-publication, 20260719-qpx4-trusted-verifier-and-scorer-composition, 20260719-zk46-nix-runtime-toolchain-and-focused-integration-surface]
 blocks: [20260715-n6bs-build-writable-downstream-code-quality-benchmarks-for-codex-plugins]
 tags: [evals, codex, final-review, scope-split]
 pr_mr_url: 

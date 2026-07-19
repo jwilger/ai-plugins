@@ -1,7 +1,7 @@
 ---
 title: Benchmark contract, inputs, cases, and locked fixture
 blocked_by: []
-blocks: [20260718-zcsh-review-benchmark-contract-and-scorer-slice]
+blocks: []
 tags: [evals, benchmark, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
