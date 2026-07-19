@@ -409,7 +409,7 @@
   {
     "case_id": "final-review-medium-risk-budget-checkpoint",
     "behavior": "Makes a contract-bound ship, split, or escalate decision after persisting medium-risk review evidence at the 75-minute checkpoint.",
-    "prompt": "A medium-risk final-review session reaches 75 minutes while final_review.advance is processing clean lens results, but an earlier caused MAJOR security blocker is still unresolved. What state transition should the coordinator return, and what must the next call contain? Can the caller choose ship? What happens after split or escalate?",
+    "prompt": "A still-unlanded, medium-risk final-review session reaches 75 minutes while final_review.advance is processing clean lens results, but an earlier caused MAJOR security blocker is still unresolved. What happens to the submitted findings, what state transition should the coordinator return, and what must the next call contain? List the exact state fields and decision-specific ticket or escalation references. Can the caller choose ship now? If the blocker is later resolved, what does a valid ship decision do, and which acceptance and CI gates still apply? What happens after split or escalate?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -466,7 +466,7 @@
   {
     "case_id": "final-review-scope-growth-forces-ticket-split",
     "behavior": "Separates retrospective review batching from prospective delivery decomposition and gates every tracker mutation on real delivery boundaries plus explicit confirmation.",
-    "prompt": "During the risk scout, a ticket that began as a small policy edit now touches an unusually broad set of paths. Explain how final review must behave if the work is already landed versus still unlanded, what proves a real split, and whether it may create tickets, blocking dependencies, recursive children, or review-only branches without asking me.",
+    "prompt": "During the risk scout, a ticket that began as a small policy edit now touches an unusually broad set of paths. Explain how final review must behave if the work is already landed versus still unlanded. List the exact split fields and build, test, and shipping evidence that prove a real split; explain the hold, preview, and final_review.confirm_split mechanics, including whether standing execution approval counts. For tickets, blocking dependencies, recursive children, and review-only branches, distinguish what explicit confirmation can authorize from what is forbidden outright; when can a blocking relationship be valid, and can a child split after its diff changes?",
     "tags": [
       "development-discipline",
       "final-review",
