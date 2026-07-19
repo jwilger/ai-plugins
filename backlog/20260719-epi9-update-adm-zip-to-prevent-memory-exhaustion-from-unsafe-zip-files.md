@@ -13,6 +13,8 @@ Remove the vulnerable adm-zip version reported by GitHub Dependabot alert 2 whil
 
 ## Context / Why
 
+adm-zip is a transitive development dependency brought in through Promptfoo, Hugging Face Transformers, and onnxruntime-node. Versions below 0.6.0 can allocate roughly 4 GB of memory from a tiny crafted ZIP file and crash the process. This repository does not currently accept untrusted ZIP uploads, so the immediate exposure is limited, but the vulnerable lockfile should still be removed. Prefer upgrading the owning dependency chain; use a package override only if compatibility and maintenance behavior are verified.
+
 ## Acceptance criteria
 
 ## Subtasks
