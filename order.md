@@ -70,3 +70,4 @@
 20260719-cb43-benchmark-contract-inputs-cases-and-locked-fixture
 20260719-qpx4-trusted-verifier-and-scorer-composition
 20260719-nvz3-runtime-provenance-result-validation-and-secret-safe-publication
+20260719-zk46-nix-runtime-toolchain-and-focused-integration-surface
