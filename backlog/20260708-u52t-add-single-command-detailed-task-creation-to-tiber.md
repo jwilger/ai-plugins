@@ -13,7 +13,7 @@ Allow the Tiber command line and integration server to create a fully detailed b
 
 ## Context / Why
 
-The current CLI/MCP create surface accepts only a title, and the new-task skill must then issue update, acceptance, and note calls. Define one detailed payload containing title, summary, context, repeated acceptance criteria, repeated notes, tags, and optional PR/MR fields. Invalid input must create no partial task, and a sync failure must identify the single created ref and a safe recovery path. Implement after the parser migration 20260707-rpmy so new flags are not parsed twice.
+Implementation notes:\n\nThe current CLI/MCP create surface accepts only a title, and the new-task skill must then issue update, acceptance, and note calls. Define one detailed payload containing title, summary, context, repeated acceptance criteria, repeated notes, tags, and optional PR/MR fields. Invalid input must create no partial task, and a sync failure must identify the single created ref and a safe recovery path. Implement after the parser migration 20260707-rpmy so new flags are not parsed twice.
 
 ## Acceptance criteria
 
