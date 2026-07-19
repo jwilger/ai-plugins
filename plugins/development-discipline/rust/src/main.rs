@@ -882,7 +882,7 @@ fn split_lineage_schema() -> Value {
         "properties": {
             "root_work_item_id": { "type": "string", "minLength": 1, "maxLength": MAX_WORK_ITEM_ID_CHARS, "pattern": "^[A-Za-z0-9._:-]+$" },
             "parent_work_item_id": { "type": "string", "minLength": 1, "maxLength": MAX_WORK_ITEM_ID_CHARS, "pattern": "^[A-Za-z0-9._:-]+$" },
-            "generation": { "type": "integer", "minimum": 0, "maximum": 1 },
+            "generation": { "type": "integer", "const": 1 },
             "source_diff_hash": { "type": "string", "minLength": 1, "pattern": "\\S" }
         },
         "required": ["root_work_item_id", "parent_work_item_id", "generation", "source_diff_hash"]
@@ -1492,8 +1492,8 @@ fn normalized_split_lineage(lineage: Option<&Value>) -> Result<Value, String> {
     let generation = object
         .get("generation")
         .and_then(Value::as_u64)
-        .filter(|generation| *generation <= 1)
-        .ok_or_else(|| "split_lineage_generation_invalid max=1".to_string())?;
+        .filter(|generation| *generation == 1)
+        .ok_or_else(|| "split_lineage_generation_invalid expected=1".to_string())?;
     let source_diff_hash = object
         .get("source_diff_hash")
         .and_then(Value::as_str)
@@ -18732,6 +18732,32 @@ pre_filter = "project-pre"
             risk_assessment_result(&arguments)
                 .expect_err("explicit null is outside the public split-lineage schema"),
             "split_lineage_invalid expected=object"
+        );
+    }
+
+    #[test]
+    fn risk_scout_rejects_generation_zero_split_lineage() {
+        let mut arguments = assessed_plan_arguments(
+            "zero-generation-split-lineage",
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+        );
+        arguments["split_lineage"] = json!({
+            "root_work_item_id": "root-ticket",
+            "parent_work_item_id": "split-child-one",
+            "generation": 0,
+            "source_diff_hash": "root-source-diff"
+        });
+        arguments
+            .as_object_mut()
+            .expect("plan arguments")
+            .remove("risk_assessment");
+
+        assert_eq!(
+            risk_assessment_result(&arguments)
+                .expect_err("supplied lineage always describes a generation-one split child"),
+            "split_lineage_generation_invalid expected=1"
         );
     }
 
