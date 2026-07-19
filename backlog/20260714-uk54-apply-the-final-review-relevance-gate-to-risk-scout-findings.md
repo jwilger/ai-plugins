@@ -1,5 +1,5 @@
 ---
-title: Apply the final-review relevance gate to risk-scout findings
+title: Stop irrelevant review findings from creating follow-up work
 blocked_by: []
 blocks: []
 tags: [development-discipline, final-review, risk-scout, relevance, mcp, correctness, major, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Route initial and delta risk-scout findings through the same structured relevance validation and filtering used for normal lens findings before they can affect disposition or backlog work.
+Make findings from the final-review risk scout pass the same relevance checks as other review findings. Unsupported or out-of-scope observations must not block delivery or create unnecessary backlog tickets.
 
 ## Context / Why
 
