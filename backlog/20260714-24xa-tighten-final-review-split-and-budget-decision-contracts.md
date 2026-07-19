@@ -21,6 +21,7 @@ Originally tracked overlapping split scopes and budget schema parity. Expanded a
 - [ ] Make final_review.advance's review_budget_decision JSON Schema accept exactly the payload shapes and bounds accepted by runtime validation.
 - [ ] Add focused tests for overlapping split scopes and schema/runtime boundary parity.
 - [ ] Reject recursive split holds for a child of the same root work item and source diff; return a bounded guardrail/tool-policy result instead of more split candidates.
+- [ ] Treat already-landed broad scopes as retrospective review work: broadness may batch review internally but must not authorize delivery-ticket decomposition without concrete unfinished work.
 
 ## Subtasks
 
