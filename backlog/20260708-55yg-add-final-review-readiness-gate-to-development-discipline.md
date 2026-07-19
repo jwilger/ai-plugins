@@ -13,7 +13,7 @@ Add a readiness check that confirms the ticket’s acceptance evidence and relat
 
 ## Context / Why
 
-Implementation notes:\n\nThe risk-proportionate policy already requires the ticket's actual acceptance criteria to be implemented before final review. This ticket does not redefine, waive, or invent those criteria. Its remaining responsibility is a mechanically represented evidence inventory bound to the exact work item and diff, covering cross-surface obligations that are otherwise discovered late. Accepted defenses and externally tracked blockers continue through the existing prior_defenses and authoritative-state contract.
+Implementation notes: The risk-proportionate policy already requires the ticket's actual acceptance criteria to be implemented before final review. This ticket does not redefine, waive, or invent those criteria. Its remaining responsibility is a mechanically represented evidence inventory bound to the exact work item and diff, covering cross-surface obligations that are otherwise discovered late. Accepted defenses and externally tracked blockers continue through the existing prior_defenses and authoritative-state contract.
 
 ## Acceptance criteria
 
