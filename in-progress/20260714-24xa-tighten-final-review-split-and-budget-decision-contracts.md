@@ -33,3 +33,5 @@ Originally tracked overlapping split scopes and budget schema parity. Expanded a
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-19: Completed in commit 549d338 and pushed directly to main. GitHub Actions run 29703483338 finished green, including the final CI gate. Local just ci passed with 260 development-discipline tests, mutation checks, release checks, and all 578 Bats tests. Focused Codex evaluations for both the budget checkpoint and scope-split scenarios passed 3/3, and a fresh-context final review found no remaining issues. Unrelated canary and suite-runtime issues remain separately tracked rather than expanding this ticket.
