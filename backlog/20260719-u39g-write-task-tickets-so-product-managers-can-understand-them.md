@@ -17,6 +17,8 @@ Implementation notes: Update the relevant ticket-writing skills and templates. K
 
 ## Acceptance criteria
 
+- [ ] Ticket titles state the intended outcome in plain language and avoid unexplained specialist terms.
+
 ## Subtasks
 
 ## Notes / Log
