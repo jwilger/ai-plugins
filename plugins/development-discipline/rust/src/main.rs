@@ -4220,11 +4220,21 @@ fn review_budget_checkpoint_summary(state: &Value, now_epoch_seconds: u64) -> Va
         .pointer("/risk_plan/review_budget/started_at_epoch_seconds")
         .and_then(Value::as_u64)
         .unwrap_or(now_epoch_seconds);
+    let landed = state.pointer("/scope/review_lifecycle").and_then(Value::as_str)
+        == Some("landed");
     json!({
         "checkpoint_minutes": MEDIUM_RISK_REVIEW_BUDGET_MINUTES,
         "elapsed_minutes": now_epoch_seconds.saturating_sub(started_at) / 60,
-        "allowed_decisions": ["ship", "split", "escalate"],
-        "instruction": "Choose ship, split, or escalate explicitly. Ship still requires all acceptance criteria and rejects every unresolved blocking security or human-safety finding."
+        "allowed_decisions": if landed {
+            json!(["ship", "escalate"])
+        } else {
+            json!(["ship", "split", "escalate"])
+        },
+        "instruction": if landed {
+            "Choose ship or escalate explicitly. Already-landed review work may be batched internally, but it cannot create delivery tickets. Ship still requires all acceptance criteria and rejects every unresolved blocking security or human-safety finding."
+        } else {
+            "Choose ship, split, or escalate explicitly. Ship still requires all acceptance criteria and rejects every unresolved blocking security or human-safety finding."
+        }
     })
 }
 
@@ -4368,6 +4378,11 @@ fn review_budget_decision_transition(
         .get("decision")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
+    if kind == "split"
+        && state.pointer("/scope/review_lifecycle").and_then(Value::as_str) == Some("landed")
+    {
+        return Err("review_budget_split_forbidden_for_landed_review=true".to_string());
+    }
     if kind == "ship" && !unresolved_findings(&state).is_empty() {
         return Err("review_budget_ship_blocked_by_unresolved_findings=true".to_string());
     }
@@ -17917,6 +17932,59 @@ pre_filter = "project-pre"
             "ship"
         );
         assert!(review_contract_is_valid(&advanced["state"]));
+    }
+
+    #[test]
+    fn landed_review_budget_checkpoint_forbids_delivery_split_decisions() {
+        let arguments = assessed_plan_arguments_for_diff_at_root_and_lifecycle(
+            "landed-medium-risk-budget",
+            "landed-medium-risk-budget-diff",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            None,
+            Some(("landed", Value::Null)),
+        );
+        let planned: Value = serde_json::from_str(
+            &plan_result_at(&arguments, 1_000).expect("landed medium-risk plan"),
+        )
+        .expect("plan json");
+        let checkpoint: Value = serde_json::from_str(
+            &advance_with_contract_validation_at(
+                &json!({
+                    "state": planned["state"],
+                    "lens_results": clean_lens_results_for(&planned["state"]),
+                    "current_diff_hash": "landed-medium-risk-budget-diff"
+                }),
+                false,
+                5_500,
+            )
+            .expect("landed review reaches its budget checkpoint"),
+        )
+        .expect("checkpoint json");
+
+        assert_eq!(
+            checkpoint["review_budget"]["allowed_decisions"],
+            json!(["ship", "escalate"])
+        );
+        assert_eq!(
+            advance_with_contract_validation_at(
+                &json!({
+                    "state": checkpoint["state"],
+                    "lens_results": [],
+                    "current_diff_hash": "landed-medium-risk-budget-diff",
+                    "review_budget_decision": {
+                        "decision": "split",
+                        "rationale": "Create delivery tickets for the remaining review work.",
+                        "ticket_references": ["ticket-one", "ticket-two"]
+                    }
+                }),
+                false,
+                5_500,
+            )
+            .expect_err("landed review batching cannot create delivery tickets"),
+            "review_budget_split_forbidden_for_landed_review=true"
+        );
     }
 
     #[test]
