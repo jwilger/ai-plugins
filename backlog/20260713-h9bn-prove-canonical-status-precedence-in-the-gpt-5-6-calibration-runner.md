@@ -1,5 +1,5 @@
 ---
-title: Prove canonical status precedence in the GPT-5.6 calibration runner
+title: Preserve the correct failure result from GPT-5.6 calibration runs
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, runner, exit-status, tests, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add a regression that proves the focused calibration wrapper preserves a distinctive ordinary canonical-runner failure status while still invoking and observing the custom artifact checker.
+Add tests proving the focused calibration command reports the original benchmark failure when appropriate, while still running its independent artifact checks. Timeouts and crashes must not be misreported as ordinary missing-result failures.
 
 ## Context / Why
 
