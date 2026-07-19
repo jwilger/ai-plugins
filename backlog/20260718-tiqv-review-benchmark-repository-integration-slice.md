@@ -25,3 +25,5 @@ Split from 20260715-n6bs after formal final review returned scope_split_hold for
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-19: Administratively retired after maintainer review: this ticket represented recursive final-review bookkeeping for code already landed on main, not unfinished independently shippable work. Artificial dependency links and remote review branches were removed. The underlying implementation/evidence remains owned by 20260715-n6bs; guardrails will prevent recursive or synthetic review splits.
