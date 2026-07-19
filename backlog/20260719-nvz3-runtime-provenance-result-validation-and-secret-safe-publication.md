@@ -1,7 +1,7 @@
 ---
 title: Runtime provenance, result validation, and secret-safe publication
 blocked_by: []
-blocks: [20260718-zcsh-review-benchmark-contract-and-scorer-slice]
+blocks: []
 tags: [evals, benchmark, provenance, security, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
