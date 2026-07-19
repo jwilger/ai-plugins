@@ -2,7 +2,7 @@
 title: Update adm-zip to prevent memory exhaustion from unsafe ZIP files
 blocked_by: []
 blocks: []
-tags: []
+tags: [security, dependencies, promptfoo, dependabot]
 pr_mr_url: 
 pr_mr_status: 
 ---
