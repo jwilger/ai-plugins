@@ -580,6 +580,7 @@ fn tools() -> Value {
                     "baseline_commit": baseline_commit_schema(),
                     "scope": { "type": "string", "enum": ["base", "uncommitted"] },
                     "review_lifecycle": { "type": "string", "enum": ["unlanded", "landed"] },
+                    "split_lineage": split_lineage_schema(),
                     "required_clean_iterations": { "type": "integer", "minimum": DEFAULT_CLEAN_ITERATIONS, "maximum": MAX_CLEAN_ITERATIONS },
                     "user_request": { "type": "string" },
                     "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
@@ -797,6 +798,7 @@ fn tools() -> Value {
                     "baseline_commit": baseline_commit_schema(),
                     "scope": { "type": "string", "enum": ["base", "uncommitted"] },
                     "review_lifecycle": { "type": "string", "enum": ["unlanded", "landed"] },
+                    "split_lineage": split_lineage_schema(),
                     "user_request": { "type": "string" },
                     "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
                     "explicit_concerns": { "type": "array", "items": { "type": "string" } },
@@ -840,6 +842,20 @@ fn baseline_commit_schema() -> Value {
         "type": "string",
         "pattern": "^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$",
         "description": "Full commit OID resolved before computing changed_files, diff_hash, and shared_test_evidence."
+    })
+}
+
+fn split_lineage_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "root_work_item_id": { "type": "string", "minLength": 1, "maxLength": MAX_WORK_ITEM_ID_CHARS, "pattern": "^[A-Za-z0-9._:-]+$" },
+            "parent_work_item_id": { "type": "string", "minLength": 1, "maxLength": MAX_WORK_ITEM_ID_CHARS, "pattern": "^[A-Za-z0-9._:-]+$" },
+            "generation": { "type": "integer", "minimum": 0, "maximum": 1 },
+            "source_diff_hash": { "type": "string", "minLength": 1, "pattern": "\\S" }
+        },
+        "required": ["root_work_item_id", "parent_work_item_id", "generation", "source_diff_hash"]
     })
 }
 
@@ -1395,8 +1411,64 @@ fn review_lifecycle(arguments: &Value) -> Result<&str, String> {
     }
 }
 
+fn split_lineage(arguments: &Value) -> Result<Value, String> {
+    if arguments.get("split_lineage").is_some_and(Value::is_null) {
+        return Err("split_lineage_invalid expected=object".to_string());
+    }
+    normalized_split_lineage(arguments.get("split_lineage"))
+}
+
+fn normalized_split_lineage(lineage: Option<&Value>) -> Result<Value, String> {
+    let Some(lineage) = lineage else {
+        return Ok(Value::Null);
+    };
+    if lineage.is_null() {
+        return Ok(Value::Null);
+    }
+    let object = lineage
+        .as_object()
+        .ok_or_else(|| "split_lineage_invalid expected=object".to_string())?;
+    if object.len() != 4 {
+        return Err("split_lineage_fields_invalid=true".to_string());
+    }
+    for field in ["root_work_item_id", "parent_work_item_id"] {
+        let value = object
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|value| {
+                !value.is_empty()
+                    && value.chars().count() <= MAX_WORK_ITEM_ID_CHARS
+                    && value.chars().all(|character| {
+                        character.is_ascii_alphanumeric()
+                            || matches!(character, '-' | '_' | '.' | ':')
+                    })
+            })
+            .ok_or_else(|| format!("split_lineage_{field}_invalid=true"))?;
+        if value.trim().is_empty() {
+            return Err(format!("split_lineage_{field}_invalid=true"));
+        }
+    }
+    let generation = object
+        .get("generation")
+        .and_then(Value::as_u64)
+        .filter(|generation| *generation <= 1)
+        .ok_or_else(|| "split_lineage_generation_invalid max=1".to_string())?;
+    let source_diff_hash = object
+        .get("source_diff_hash")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "split_lineage_source_diff_hash_invalid=true".to_string())?;
+    Ok(json!({
+        "root_work_item_id": object["root_work_item_id"],
+        "parent_work_item_id": object["parent_work_item_id"],
+        "generation": generation,
+        "source_diff_hash": source_diff_hash
+    }))
+}
+
 fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
     let review_lifecycle = review_lifecycle(arguments)?;
+    let split_lineage = split_lineage(arguments)?;
     let scope = match arguments.get("scope") {
         None => "base".to_string(),
         Some(Value::String(scope)) if matches!(scope.as_str(), "base" | "uncommitted") => {
@@ -1474,6 +1546,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         "session_id": session_id,
         "scope": scope,
         "review_lifecycle": review_lifecycle,
+        "split_lineage": split_lineage,
         "base": base,
         "project_root": project_root,
         "diff_hash": diff_hash,
@@ -1534,6 +1607,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         "scope": {
             "kind": scope,
             "review_lifecycle": review_lifecycle,
+            "split_lineage": split_lineage,
             "base": base,
             "project_root": project_root,
             "changed_files": changed_files,
@@ -1613,6 +1687,7 @@ fn delta_risk_arguments(
         "baseline_commit": state.pointer("/scope/baseline_commit").cloned().unwrap_or(Value::Null),
         "scope": state.pointer("/scope/kind").and_then(Value::as_str).unwrap_or("base"),
         "review_lifecycle": state.pointer("/scope/review_lifecycle").and_then(Value::as_str).unwrap_or("unlanded"),
+        "split_lineage": state.pointer("/scope/split_lineage").cloned().unwrap_or(Value::Null),
         "project_root": state.pointer("/scope/project_root").and_then(Value::as_str).unwrap_or("."),
         "changed_files": current_changed_files,
         "diff_hash": current_diff_hash,
@@ -1995,7 +2070,8 @@ fn compile_risk_plan(
         .pointer("/scope/review_lifecycle")
         .and_then(Value::as_str)
         .unwrap_or("unlanded");
-    let scope_split = validated_scope_split_plan(assessment, changed_files, lifecycle)?;
+    let lineage = expected_assignment.pointer("/scope/split_lineage");
+    let scope_split = validated_scope_split_plan(assessment, changed_files, lifecycle, lineage)?;
     let expected_dimensions = expected_assignment
         .get("review_dimensions")
         .and_then(Value::as_array)
@@ -2161,6 +2237,7 @@ fn compile_risk_plan(
         "shared_test_evidence_id": expected_assignment["shared_test_evidence"]["id"],
         "baseline_commit": expected_assignment["scope"]["baseline_commit"],
         "scope_snapshot_commit": expected_assignment["scope"]["snapshot_commit"],
+        "split_lineage": expected_assignment["scope"]["split_lineage"],
         "overall_risk": overall_risk,
         "dimensions": dimensions,
         "findings": findings,
@@ -2188,6 +2265,7 @@ fn validated_scope_split_plan(
     assessment: &serde_json::Map<String, Value>,
     changed_files: &[String],
     review_lifecycle: &str,
+    split_lineage: Option<&Value>,
 ) -> Result<Option<Value>, String> {
     let split_required = assessment
         .get("split_required")
@@ -2213,6 +2291,25 @@ fn validated_scope_split_plan(
             return Err("risk_assessment_split_plan_without_split_required=true".to_string());
         }
         return Ok(None);
+    }
+    if let Some(lineage) = split_lineage.filter(|lineage| lineage.is_object()) {
+        let generation = lineage
+            .get("generation")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if generation >= 1 {
+            return Err(format!(
+                "review_recursive_split_rejected root_work_item_id={} generation={generation} source_diff_hash={}",
+                lineage
+                    .get("root_work_item_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown"),
+                lineage
+                    .get("source_diff_hash")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+            ));
+        }
     }
     if rationale.trim().is_empty() {
         return Err("review_split_rationale_required=true".to_string());
@@ -2785,6 +2882,7 @@ fn plan_result_internal(
         return Err("risk_assessment_required_before_final_review_plan=true".to_string());
     }
     let review_lifecycle = review_lifecycle(arguments)?;
+    let split_lineage = split_lineage(arguments)?;
     let scope = match arguments.get("scope") {
         None => "base".to_string(),
         Some(Value::String(scope)) => scope.clone(),
@@ -2952,6 +3050,7 @@ fn plan_result_internal(
         "scope": {
             "kind": scope,
             "review_lifecycle": review_lifecycle,
+            "split_lineage": split_lineage,
             "base": base,
             "changed_files": changed_files,
             "diff_hash": diff_hash,
@@ -6914,6 +7013,7 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
         .pointer("/scope/review_lifecycle")
         .and_then(Value::as_str)
         .filter(|lifecycle| matches!(*lifecycle, "unlanded" | "landed"))?;
+    let split_lineage = normalized_split_lineage(state.pointer("/scope/split_lineage")).ok()?;
     let base = state.pointer("/scope/base").and_then(Value::as_str)?;
     let project_root = state
         .pointer("/scope/project_root")
@@ -6953,6 +7053,7 @@ fn computed_review_contract_id(state: &Value) -> Option<String> {
     report_binding_id.to_string().hash(&mut hasher);
     scope.hash(&mut hasher);
     review_lifecycle.hash(&mut hasher);
+    split_lineage.to_string().hash(&mut hasher);
     base.hash(&mut hasher);
     project_root.hash(&mut hasher);
     diff_hash.hash(&mut hasher);
@@ -7025,6 +7126,12 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
     let Some(risk_plan) = state.get("risk_plan").and_then(Value::as_object) else {
         return false;
     };
+    let Ok(scope_lineage) = normalized_split_lineage(state.pointer("/scope/split_lineage")) else {
+        return false;
+    };
+    if risk_plan.get("split_lineage") != Some(&scope_lineage) {
+        return false;
+    }
     let overall_risk = risk_plan.get("overall_risk").and_then(Value::as_str);
     if risk_plan
         .get("assessment_id")
@@ -7355,10 +7462,15 @@ fn scope_split_contract_is_valid(
     let Some(assessment) = assessment.as_object() else {
         return false;
     };
-    validated_scope_split_plan(assessment, &changed_files, lifecycle)
-        .ok()
-        .flatten()
-        .is_some_and(|normalized| &normalized == scope_split)
+    validated_scope_split_plan(
+        assessment,
+        &changed_files,
+        lifecycle,
+        state.pointer("/scope/split_lineage"),
+    )
+    .ok()
+    .flatten()
+    .is_some_and(|normalized| &normalized == scope_split)
 }
 
 fn review_budget_contract_is_valid(risk_plan: &serde_json::Map<String, Value>) -> bool {
@@ -9345,6 +9457,7 @@ mod tests {
             findings,
             project_root,
             None,
+            None,
         )
     }
 
@@ -9356,6 +9469,7 @@ mod tests {
         findings: Value,
         project_root: Option<&Path>,
         review_lifecycle: Option<&str>,
+        split_lineage: Option<Value>,
     ) -> Value {
         let mut arguments = json!({
             "session_id": session_id,
@@ -9372,6 +9486,9 @@ mod tests {
         }
         if let Some(review_lifecycle) = review_lifecycle {
             arguments["review_lifecycle"] = json!(review_lifecycle);
+        }
+        if let Some(split_lineage) = split_lineage {
+            arguments["split_lineage"] = split_lineage;
         }
         let resolved_root = resolved_project_root_string(&arguments).expect("test project root");
         arguments["baseline_commit"] = json!(git_text(
@@ -17815,6 +17932,160 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn scope_growth_rejects_a_recursive_child_for_the_same_root_diff() {
+        let mut arguments = assessed_plan_arguments_for_diff_at_root_and_lifecycle(
+            "recursive-scope-split",
+            "root-source-diff",
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+            None,
+            Some("unlanded"),
+            Some(json!({
+                "root_work_item_id": "root-ticket",
+                "parent_work_item_id": "split-child-one",
+                "generation": 1,
+                "source_diff_hash": "root-source-diff"
+            })),
+        );
+        arguments["risk_assessment"]["split_required"] = json!(true);
+        arguments["risk_assessment"]["split_rationale"] =
+            json!("The child still covers the same broad source diff.");
+        arguments["risk_assessment"]["scope_growth_triggers"] = json!(["unusually-broad-diff"]);
+        arguments["risk_assessment"]["split_candidates"] = json!([{
+            "id": "recursive-one",
+            "title": "Split the child again",
+            "scope_paths": ["src/lib.rs"],
+            "acceptance_criteria": ["The first recursive slice is reviewed."],
+            "independently_shippable_reason": "The path can be filtered into a branch."
+        }, {
+            "id": "recursive-two",
+            "title": "Split the child again too",
+            "scope_paths": ["tests/lib_test.rs"],
+            "acceptance_criteria": ["The second recursive slice is reviewed."],
+            "independently_shippable_reason": "The path can be filtered into another branch."
+        }]);
+
+        assert_eq!(
+            plan_result_at(&arguments, 3_000)
+                .expect_err("the same root diff cannot recursively create another split hold"),
+            "review_recursive_split_rejected root_work_item_id=root-ticket generation=1 source_diff_hash=root-source-diff"
+        );
+    }
+
+    #[test]
+    fn risk_scout_rejects_explicit_null_split_lineage() {
+        let mut arguments = assessed_plan_arguments(
+            "null-split-lineage",
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+        );
+        arguments["split_lineage"] = Value::Null;
+        arguments
+            .as_object_mut()
+            .expect("plan arguments")
+            .remove("risk_assessment");
+
+        assert_eq!(
+            risk_assessment_result(&arguments)
+                .expect_err("explicit null is outside the public split-lineage schema"),
+            "split_lineage_invalid expected=object"
+        );
+    }
+
+    #[test]
+    fn delta_risk_arguments_preserve_recursive_split_lineage() {
+        let lineage = json!({
+            "root_work_item_id": "root-ticket",
+            "parent_work_item_id": "split-child-one",
+            "generation": 1,
+            "source_diff_hash": "root-source-diff"
+        });
+        let arguments = assessed_plan_arguments_for_diff_at_root_and_lifecycle(
+            "recursive-delta-lineage",
+            "root-source-diff",
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            json!([]),
+            None,
+            Some("unlanded"),
+            Some(lineage.clone()),
+        );
+        let planned: Value = serde_json::from_str(
+            &plan_result_at(&arguments, 3_000).expect("lineage-bearing review plan"),
+        )
+        .expect("lineage plan json");
+
+        let mut removed_lineage = planned["state"].clone();
+        removed_lineage["scope"]
+            .as_object_mut()
+            .expect("scope object")
+            .remove("split_lineage");
+        removed_lineage["review_contract_id"] =
+            json!(computed_review_contract_id(&removed_lineage).expect("rehashed removed lineage"));
+        assert!(!review_contract_is_valid(&removed_lineage));
+
+        let mut malformed_lineage = planned["state"].clone();
+        malformed_lineage["scope"]["split_lineage"]["generation"] = json!(2);
+        malformed_lineage["review_contract_id"] = json!("malformed-lineage");
+        assert!(!review_contract_is_valid(&malformed_lineage));
+
+        let delta_arguments = delta_risk_arguments(
+            &planned["state"],
+            "replacement-diff",
+            &["src/lib.rs".to_string(), "tests/lib_test.rs".to_string()],
+            &shared_test_evidence_for("replacement-diff"),
+            &json!({"summary": "The child diff changed."}),
+        )
+        .expect("delta risk arguments");
+
+        assert_eq!(delta_arguments["split_lineage"], lineage);
+
+        let (mut compiled_arguments, delta_assignment) = delta_risk_assignment(
+            &planned["state"],
+            "replacement-diff",
+            &["src/lib.rs".to_string(), "tests/lib_test.rs".to_string()],
+            &shared_test_evidence_for("replacement-diff"),
+            &json!({"summary": "The child diff changed."}),
+        )
+        .expect("delta assignment");
+        let mut assessment = delta_risk_assessment_for(
+            &delta_assignment,
+            "medium",
+            &[("architecture-maintainability", "medium")],
+            &["architecture-maintainability"],
+            json!([]),
+        );
+        assessment["split_required"] = json!(true);
+        assessment["split_rationale"] = json!("The child still looks broad after its response.");
+        assessment["scope_growth_triggers"] = json!(["unusually-broad-diff"]);
+        assessment["split_candidates"] = json!([{
+            "id": "recursive-delta-one",
+            "title": "Split the changed child",
+            "scope_paths": ["src/lib.rs"],
+            "acceptance_criteria": ["The first changed-child slice is reviewed."],
+            "independently_shippable_reason": "The path can be filtered into a branch."
+        }, {
+            "id": "recursive-delta-two",
+            "title": "Split the other changed child",
+            "scope_paths": ["tests/lib_test.rs"],
+            "acceptance_criteria": ["The second changed-child slice is reviewed."],
+            "independently_shippable_reason": "The path can be filtered into another branch."
+        }]);
+        compiled_arguments["risk_assessment"] = assessment;
+        assert_eq!(
+            compile_risk_plan(
+                &compiled_arguments,
+                &["src/lib.rs".to_string(), "tests/lib_test.rs".to_string()]
+            )
+            .err()
+            .expect("delta reassessment cannot bypass recursive split lineage"),
+            "review_recursive_split_rejected root_work_item_id=root-ticket generation=1 source_diff_hash=root-source-diff"
+        );
+    }
+
+    #[test]
     fn landed_scope_growth_batches_review_without_a_ticket_split_hold() {
         let mut arguments = assessed_plan_arguments_for_diff_at_root_and_lifecycle(
             "landed-scope-review",
@@ -17824,6 +18095,7 @@ pre_filter = "project-pre"
             json!([]),
             None,
             Some("landed"),
+            None,
         );
         arguments["risk_assessment"]["split_required"] = json!(true);
         arguments["risk_assessment"]["split_rationale"] =
@@ -17961,6 +18233,7 @@ pre_filter = "project-pre"
             json!([]),
             None,
             Some("landed"),
+            None,
         );
         let planned: Value = serde_json::from_str(
             &plan_result_at(&arguments, 1_000).expect("landed medium-risk plan"),
