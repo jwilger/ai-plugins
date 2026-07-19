@@ -19,6 +19,7 @@ Implementation notes: Update the relevant ticket-writing skills and templates. K
 
 - [ ] Ticket titles state the intended outcome in plain language and avoid unexplained specialist terms.
 - [ ] The main description explains the problem, desired outcome, and business or user value for a typical product manager.
+- [ ] Necessary technical terms are explained where they first appear or moved into a clearly labeled Implementation notes section.
 
 ## Subtasks
 
