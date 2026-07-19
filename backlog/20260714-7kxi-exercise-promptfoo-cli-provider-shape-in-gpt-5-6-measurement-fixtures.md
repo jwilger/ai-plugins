@@ -1,5 +1,5 @@
 ---
-title: Exercise Promptfoo CLI provider shape in GPT-5.6 measurement fixtures
+title: Test the result format actually produced by Promptfoo
 blocked_by: []
 blocks: []
 tags: [minor, evals, gpt-5.6, promptfoo, test-fidelity]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make the strict GPT-5.6 measurement gate's positive fixture exercise Promptfoo 0.121.18's actual CLI-emitted grading-provider descriptor shape.
+Make the successful GPT-5.6 measurement test use the grading-provider record shape emitted by the supported Promptfoo command-line version. Keep separate coverage for any other accepted normalized format.
 
 ## Context / Why
 
