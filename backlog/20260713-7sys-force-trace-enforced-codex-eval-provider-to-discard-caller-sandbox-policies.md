@@ -13,7 +13,7 @@ Ensure the GPT-5.6 evaluation wrapper rejects or removes caller settings that co
 
 ## Context / Why
 
-Pre-existing/design MINOR found during 20260709-spx8 isolation review. Promptfoo app-server buildSandboxPolicy prefers config.sandbox_policy over sandbox_mode and sandbox_workspace_write; the wrapper currently retains that caller field while forcing the latter fields. Add a hostile-policy regression and fail closed or overwrite it in a focused follow-up.
+Implementation notes:\n\nPre-existing/design MINOR found during 20260709-spx8 isolation review. Promptfoo app-server buildSandboxPolicy prefers config.sandbox_policy over sandbox_mode and sandbox_workspace_write; the wrapper currently retains that caller field while forcing the latter fields. Add a hostile-policy regression and fail closed or overwrite it in a focused follow-up.
 
 ## Acceptance criteria
 
