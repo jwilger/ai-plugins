@@ -28,3 +28,5 @@ Final-review split from 20260719-cb43 at diff hash b190d81690f3657f5230580fb083b
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-19: Administratively retired after maintainer review: this ticket represented recursive final-review bookkeeping for code already landed on main, not unfinished independently shippable work. Artificial dependency links and remote review branches were removed. The underlying implementation/evidence remains owned by 20260715-n6bs; guardrails will prevent recursive or synthetic review splits.
