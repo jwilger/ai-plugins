@@ -1,6 +1,7 @@
 20260719-m9yb-require-rationale-bearing-commit-messages-in-development-workflows
 20260719-5tzm-block-unrelated-work-after-a-ci-failure-until-its-cause-is-repaired
 20260719-u39g-write-task-tickets-so-product-managers-can-understand-them
+20260719-epi9-update-adm-zip-to-prevent-memory-exhaustion-from-unsafe-zip-files
 20260714-24xa-tighten-final-review-split-and-budget-decision-contracts
 20260715-3bk6-make-delivery-workflows-adapt-to-repository-local-policy
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
@@ -68,4 +69,3 @@
 20260718-n8xa-audit-and-update-hindsight-integration-for-current-coding-harnesses
 20260719-yqyy-let-each-tiber-dashboard-choose-an-available-port
 20260719-pvk7-store-real-line-breaks-in-tiber-ticket-text
-20260719-epi9-update-adm-zip-to-prevent-memory-exhaustion-from-unsafe-zip-files
