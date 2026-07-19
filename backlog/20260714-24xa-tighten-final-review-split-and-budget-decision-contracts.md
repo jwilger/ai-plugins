@@ -20,6 +20,7 @@ Originally tracked overlapping split scopes and budget schema parity. Expanded a
 - [ ] Reject or explicitly model split candidates whose scope ownership is fully overlapping, while preserving collective coverage of the changed-file inventory.
 - [ ] Make final_review.advance's review_budget_decision JSON Schema accept exactly the payload shapes and bounds accepted by runtime validation.
 - [ ] Add focused tests for overlapping split scopes and schema/runtime boundary parity.
+- [ ] Reject recursive split holds for a child of the same root work item and source diff; return a bounded guardrail/tool-policy result instead of more split candidates.
 
 ## Subtasks
 
