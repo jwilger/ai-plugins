@@ -2,18 +2,18 @@
 title: Tighten final-review split and budget decision contracts
 blocked_by: []
 blocks: []
-tags: [development-discipline, final-review, mcp, contracts, minor, backlog]
+tags: [development-discipline, final-review, mcp, contracts, guardrails, major, backlog]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Make final-review split plans meaningfully independent and make the published budget-decision schema match runtime acceptance exactly.
+Prevent final-review split contracts from accepting overlapping, synthetic, recursive, or post-landing delivery decompositions, and align budget-decision schemas with runtime validation.
 
 ## Context / Why
 
-Consolidates two MINOR observations from the risk-proportionate final-review ticket. Split candidates currently need collective changed-file coverage but may fully overlap, weakening the decomposition signal. Budget decision JSON Schema and runtime validation also apply different length/field constraints, so a payload can be accepted by one layer and rejected by the other. Value: clearer reliable coordinator contracts. Risk/impact: low-to-moderate workflow friction rather than release corruption. Likelihood: possible for generated callers and broad split plans. Opportunity cost: lower than current common product/tooling defects.
+Originally tracked overlapping split scopes and budget schema parity. Expanded after a real incident where a broad already-landed diff produced a scope_split_hold, the agent created top-level Tiber review blockers and path-filtered remote branches, and each artificial child recursively split again. Final review must distinguish review batching from delivery decomposition, model landed/unlanded lifecycle and split lineage, require genuine independent build/test/shipping evidence, and stop before mutating a tracker when the proposed split is recursive or administrative.
 
 ## Acceptance criteria
 
