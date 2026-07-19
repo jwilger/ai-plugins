@@ -1,5 +1,5 @@
 ---
-title: Make GPT-5.6 provider locking stable across worktrees and the full run lifecycle
+title: Prevent overlapping GPT-5.6 benchmark runs across worktrees
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, locking, concurrency, worktrees, process-lifecycle, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Hold one canonical provider lock from execution through artifact checking, keep its identity stable across symlinked checkouts and disposable-cache changes, and fail closed when shared lock identity cannot be resolved.
+Use one reliable lock for the entire GPT-5.6 benchmark lifecycle so separate worktrees cannot run the protected provider at the same time. The lock must remain stable despite symbolic links, disposable caches, and post-run checking.
 
 ## Context / Why
 
