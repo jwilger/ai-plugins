@@ -13,7 +13,7 @@ Create immutable final-review scope snapshots without writing objects or refs in
 
 ## Context / Why
 
-A caused MINOR operability finding from 20260713-rygd showed that mandatory scope snapshot creation runs git add, write-tree, and commit-tree against the reviewed repository's object store. Managed workspaces commonly permit working-tree writes while keeping .git metadata read-only, causing final_review.assess_risk to fail before the mandatory scout with no actionable recovery guidance. Use an isolated temporary object database or equivalent immutable snapshot mechanism without weakening scope identity.
+Implementation notes:\n\nA caused MINOR operability finding from 20260713-rygd showed that mandatory scope snapshot creation runs git add, write-tree, and commit-tree against the reviewed repository's object store. Managed workspaces commonly permit working-tree writes while keeping .git metadata read-only, causing final_review.assess_risk to fail before the mandatory scout with no actionable recovery guidance. Use an isolated temporary object database or equivalent immutable snapshot mechanism without weakening scope identity.
 
 ## Acceptance criteria
 
