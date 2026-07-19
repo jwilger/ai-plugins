@@ -1,5 +1,5 @@
 ---
-title: Distinguish Lefthook installer lock errors from active contention
+title: Tell lock contention apart from lock-file errors
 blocked_by: []
 blocks: []
 tags: [bug, worktrees, lefthook, diagnostics, review-follow-up]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Give distinct, actionable diagnostics for active Lefthook installer contention versus failure to open or create the lock file.
+Give users different, actionable messages when the Lefthook installer is genuinely busy and when its lock file cannot be opened or created. Filesystem problems should retain their real cause instead of looking like another active install.
 
 ## Context / Why
 
