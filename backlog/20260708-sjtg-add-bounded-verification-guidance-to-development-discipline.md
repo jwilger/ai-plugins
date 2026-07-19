@@ -1,5 +1,5 @@
 ---
-title: Add bounded verification guidance to development-discipline
+title: Set clear limits for long-running verification
 blocked_by: []
 blocks: []
 tags: [development-discipline, verification, ci, reliability]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add general bounded-verification guidance for long tests, evals, CI, and external checks, including evidence-based waiting, hang diagnosis, cancellation, and fallback-claim rules.
+Add reusable guidance for monitoring long tests, evaluations, CI builds, and external checks. Agents should know when to keep waiting, when to investigate a possible hang, when cancellation is appropriate, and how incomplete verification limits any readiness claim.
 
 ## Context / Why
 
