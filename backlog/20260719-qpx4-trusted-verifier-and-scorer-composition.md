@@ -1,7 +1,7 @@
 ---
 title: Trusted verifier and scorer composition
 blocked_by: []
-blocks: []
+blocks: [20260718-zcsh-review-benchmark-contract-and-scorer-slice]
 tags: [evals, benchmark, scoring, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
