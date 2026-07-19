@@ -1,5 +1,5 @@
 ---
-title: Expand writable code-quality benchmark to bugfix and refactor cases
+title: Add bug-fix and refactoring cases to the writable code-quality benchmark
 blocked_by: []
 blocks: []
 tags: []
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Extend the safe writable Codex benchmark beyond the Rust feature pilot with representative bugfix and refactor scenarios in a second stack.
+Expand the safely contained writable benchmark beyond its first Rust feature case by adding realistic bug-fix and refactoring scenarios in TypeScript or Python. Reuse the existing safety, provenance, verification, and result-reporting controls.
 
 ## Context / Why
 
