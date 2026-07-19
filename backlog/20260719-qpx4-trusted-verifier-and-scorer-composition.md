@@ -20,6 +20,7 @@ Created from final-review session final-review-zcsh-final-20260718 at diff hash 
 - [ ] Rebuild and score candidate code in bounded trusted sandboxes and bind the exact scoring composition and fixture.
 - [ ] Enforce black-box behavior, regression replay, formatting, Clippy, diff-scope, and safety gates; reject unsafe or inconsistent evidence.
 - [ ] Add direct regression coverage proving duplicate raw-result artifacts are rejected.
+- [ ] Complete final review against the isolated slice with current diff-bound verification evidence.
 
 ## Subtasks
 
