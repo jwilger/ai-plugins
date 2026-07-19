@@ -25,6 +25,7 @@ Originally tracked overlapping split scopes and budget schema parity. Expanded a
 - [ ] Require split candidates to prove genuine independent build, test, and shipping boundaries; path coverage alone or synthetic path-filtered scopes are insufficient.
 - [ ] Require an explicit caller confirmation step before a split plan may be represented as tracker tickets or blocking dependencies.
 - [ ] Update the final-review skill guidance to forbid synthetic/pushed review-only branches, recursive split-ticket creation, and use of Tiber blocks for administrative review coordination.
+- [ ] Add focused regression tests for landed scope handling, recursive split lineage, synthetic/path-only candidates, and confirmation gating.
 
 ## Subtasks
 
