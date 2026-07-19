@@ -1,5 +1,5 @@
 ---
-title: Unify GPT-5.6 provider and artifact trace validation
+title: Use one consistent check for GPT-5.6 execution records
 blocked_by: []
 blocks: []
 tags: [minor, evals, architecture, trace, maintainability]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make the GPT-5.6 provider wrapper and post-run isolation checker call one shared complete trace-validation function.
+Replace two separate implementations of GPT-5.6 execution-record validation with one shared check. This reduces the chance that the live provider and the post-run checker disagree about whether an evaluation is valid.
 
 ## Context / Why
 
