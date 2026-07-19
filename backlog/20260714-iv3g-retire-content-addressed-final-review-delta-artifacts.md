@@ -1,5 +1,5 @@
 ---
-title: Retire content-addressed final-review delta artifacts
+title: Clean up old final-review patch artifacts safely
 blocked_by: []
 blocks: []
 tags: [development-discipline, final-review, cleanup, operability, minor]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add bounded lifecycle cleanup for content-addressed final-review delta patch artifacts while preserving stable identity across pending scout resubmissions.
+Add bounded cleanup for stored final-review patch files so they do not accumulate indefinitely. Keep any artifact still needed to identify or resubmit a pending review, and never remove user or repository data.
 
 ## Context / Why
 
