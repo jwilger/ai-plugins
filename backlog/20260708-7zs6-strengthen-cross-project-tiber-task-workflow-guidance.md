@@ -1,5 +1,5 @@
 ---
-title: Enforce concurrent Tiber task isolation and PR/MR lifecycle coverage
+title: Keep concurrent Tiber work isolated and track review status end to end
 blocked_by: []
 blocks: []
 tags: [tiber, workflow, worktrees, pr-mr, evals]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Complete the remaining Tiber workflow guidance and behavior coverage for one-branch-or-worktree-per-active-task isolation and PR/MR status progression.
+Complete Tiber guidance and tests so each concurrently active ticket uses its own branch or worktree, and pull-request or merge-request status is tracked from opening through checks, review, approval, and closure.
 
 ## Context / Why
 
