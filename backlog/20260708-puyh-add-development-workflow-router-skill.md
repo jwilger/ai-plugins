@@ -1,5 +1,5 @@
 ---
-title: Add development workflow router skill
+title: Guide development work to the right specialist workflow
 blocked_by: [20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline]
 blocks: []
 tags: [development-discipline, workflow-router, skills, evals]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add a compact development-workflow router that inspects task and repository state, classifies the current lifecycle phase, and routes to existing specialist skills without copying their instructions.
+Add a lightweight guide that recognizes the current stage of development work and directs the agent to the appropriate existing specialist guidance. This should make the overall workflow easier to follow without copying detailed instructions into another skill.
 
 ## Context / Why
 
