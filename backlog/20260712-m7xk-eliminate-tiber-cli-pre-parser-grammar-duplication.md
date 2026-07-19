@@ -1,5 +1,5 @@
 ---
-title: Eliminate Tiber CLI pre-parser grammar duplication
+title: Use one parser for Tiber command-line rules
 blocked_by: []
 blocks: []
 tags: [tiber, cli, maintainability, minor]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Remove the command-specific pre-validation grammar layered ahead of Clap while preserving legacy-compatible argument behavior and parser-native diagnostics.
+Remove the duplicate hand-written command checks that run before Tiber’s main command-line parser. One parser should own validation, help behavior, and error messages so the two rule sets cannot drift apart.
 
 ## Context / Why
 
