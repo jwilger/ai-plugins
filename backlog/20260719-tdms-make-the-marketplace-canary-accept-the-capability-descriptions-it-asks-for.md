@@ -13,6 +13,8 @@ Align the full-marketplace canary checker with its prompt so an accurate plugin 
 
 ## Context / Why
 
+The canary prompt asks each harness to name every marketplace plugin and provide at least one representative skill or capability. On two consecutive live runs, Codex named all eight plugins and accurately described eval-case-reporter as creating scrubbed, approval-gated eval reports. The checker still failed because it accepts only the literal skill directory name submit-eval-case. This creates false loading failures even when the response proves the plugin is available.
+
 ## Acceptance criteria
 
 ## Subtasks
