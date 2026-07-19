@@ -1,5 +1,5 @@
 ---
-title: Reconcile Codex plugin validation for Tiber new-task model invocation metadata
+title: Make Tiber’s new-task settings valid in both coding tools
 blocked_by: []
 blocks: []
 tags: [tiber, codex, validation, developer-experience, minor-review-finding]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Resolve the pre-existing mismatch between Tiber's new-task skill metadata and the generic Codex plugin validator, which currently rejects disable-model-invocation.
+Resolve a validation mismatch in Tiber’s new-task skill while preserving the intended behavior in both Codex and Claude Code. Each coding tool’s supported setting should be documented and validated without duplicating the skill unnecessarily.
 
 ## Context / Why
 
