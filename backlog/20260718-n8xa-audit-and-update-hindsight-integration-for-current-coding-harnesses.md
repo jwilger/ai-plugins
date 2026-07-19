@@ -1,5 +1,5 @@
 ---
-title: Audit and update Hindsight integration for current coding harnesses
+title: Bring Hindsight memory setup up to date for each coding tool
 blocked_by: []
 blocks: []
 tags: [hindsight, memory, codex, claude-code, plugins, maintenance]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Audit every marketplace plugin and harness-facing integration that configures or documents Hindsight, then update it to the supported Hindsight version's official integration guidance for each current coding harness.
+Review every Hindsight memory integration in the marketplace and update it to the official guidance for the supported version of each coding tool. Verify that memory separation, session hooks, recall, retention, credentials, and failure behavior work as intended.
 
 ## Context / Why
 
