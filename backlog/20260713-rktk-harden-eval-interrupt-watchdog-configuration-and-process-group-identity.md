@@ -1,5 +1,5 @@
 ---
-title: Harden eval interrupt watchdog configuration and process-group identity
+title: Make interrupted evaluation cleanup target only the original run
 blocked_by: []
 blocks: []
 tags: [evals, signals, process-management, hardening, minor]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Validate interrupt-grace configuration and prevent delayed watchdog escalation from targeting a reused numeric process-group ID.
+Validate the grace period used when stopping an evaluation and ensure delayed cleanup signals cannot reach a later, unrelated process that happens to reuse the same numeric process identifier.
 
 ## Context / Why
 
