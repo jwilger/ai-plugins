@@ -13,7 +13,7 @@ Make the focused GPT-5.6 measurement gate reject malformed metadata instead of a
 
 ## Context / Why
 
-Deferred MINOR from the correctness review of 20260709-spx8. scripts/evals/check-thresholds.mjs currently uses Number(minPassRate) === 0, so values such as an empty string or false satisfy the measurement-mode contract. This does not invalidate correctly generated current artifacts, but it weakens malformed-artifact diagnostics and should be tightened outside the active migration ticket.
+Implementation notes:\n\nDeferred MINOR from the correctness review of 20260709-spx8. scripts/evals/check-thresholds.mjs currently uses Number(minPassRate) === 0, so values such as an empty string or false satisfy the measurement-mode contract. This does not invalidate correctly generated current artifacts, but it weakens malformed-artifact diagnostics and should be tightened outside the active migration ticket.
 
 ## Acceptance criteria
 
