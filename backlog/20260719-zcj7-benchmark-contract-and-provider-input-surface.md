@@ -20,6 +20,7 @@ Final-review split from 20260719-cb43 at diff hash b190d81690f3657f5230580fb083b
 - [ ] Define exactly one rust-cli-feature case, three conditions, three canonical samples, and nine expected turns.
 - [ ] Bind each condition to the exact Codex provider settings and the case to the exact rendered task prompt.
 - [ ] Reject malformed, duplicate, incomplete, reordered, or inconsistent contract and provider surfaces.
+- [ ] Complete final review on the isolated diff with current verification evidence.
 
 ## Subtasks
 
