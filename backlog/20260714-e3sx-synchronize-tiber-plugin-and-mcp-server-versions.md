@@ -1,5 +1,5 @@
 ---
-title: Synchronize Tiber plugin and MCP server versions
+title: Keep every published Tiber version number consistent
 blocked_by: []
 blocks: []
 tags: [minor, tiber, release, versioning, mcp]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Keep Tiber's published plugin version, Rust workspace packages, bundled binaries, checksums, and MCP initialize serverInfo.version synchronized.
+Ensure the Tiber plugin, server, packages, bundled programs, and checksums all report the same released version. Users should never install one version while the running server identifies itself as another.
 
 ## Context / Why
 
