@@ -13,6 +13,7 @@ const root = process.argv[2];
 const plugin = 'development-discipline';
 const requiredSkills = [
   'test-driven-development',
+  'rationale-commit-messages',
   'verification-before-completion',
   'systematic-debugging',
   'receiving-code-review',

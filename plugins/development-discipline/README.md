@@ -9,6 +9,8 @@ generality.
 
 - `test-driven-development` - Kent Beck-style TDD: one failing behavior test,
   one smallest implementation step, then refactor only after green.
+- `rationale-commit-messages` - Conventional Commit subjects with a required
+  body that explains why the change is necessary.
 - `verification-before-completion` - evidence-before-claims discipline tied to
   the actual claim scope.
 - `final-review` - fresh-context, multi-lens local review cycles before PR
