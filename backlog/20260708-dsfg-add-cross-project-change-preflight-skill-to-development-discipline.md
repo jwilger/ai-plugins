@@ -1,5 +1,5 @@
 ---
-title: Add cross-project change preflight skill to development-discipline
+title: Identify all parts of a change before implementation starts
 blocked_by: []
 blocks: [20260708-puyh-add-development-workflow-router-skill, 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails]
 tags: [development-discipline, preflight, workflow, evals]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add a cross-project development preflight that classifies the requested change and identifies its secondary obligations before any implementation edit.
+Add a preflight check that identifies which parts of a project a requested change may affect, such as behavior, tests, documentation, configuration, packaging, releases, migrations, and operations. This should catch important follow-up work early instead of during final review.
 
 ## Context / Why
 
