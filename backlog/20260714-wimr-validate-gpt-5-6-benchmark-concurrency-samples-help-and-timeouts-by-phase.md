@@ -13,7 +13,7 @@ Give GPT-5.6 benchmark commands clear rules for parallelism, sample counts, help
 
 ## Context / Why
 
-Split from 20260713-uf3e. Inherited concurrency can exceed the supported maximum, explicitly empty values have no clear contract, ambient invalid concurrency can block help, stale sample overrides can affect the wrong phase, and the fixed timeout does not scale across the supported sample range. This task owns option validation and effective deadline calculation, not provider locking, artifact freshness, canonical exit-status precedence, or sample-expansion and label-matrix test depth.
+Implementation notes:\n\nSplit from 20260713-uf3e. Inherited concurrency can exceed the supported maximum, explicitly empty values have no clear contract, ambient invalid concurrency can block help, stale sample overrides can affect the wrong phase, and the fixed timeout does not scale across the supported sample range. This task owns option validation and effective deadline calculation, not provider locking, artifact freshness, canonical exit-status precedence, or sample-expansion and label-matrix test depth.
 
 ## Acceptance criteria
 
