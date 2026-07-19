@@ -1,3 +1,4 @@
+20260714-24xa-tighten-final-review-split-and-budget-decision-contracts
 20260715-3bk6-make-delivery-workflows-adapt-to-repository-local-policy
 20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260708-puyh-add-development-workflow-router-skill
@@ -54,7 +55,6 @@
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260714-gb9s-bound-final-review-git-pathspec-argv-and-delta-evidence-inventories
 20260714-iv3g-retire-content-addressed-final-review-delta-artifacts
-20260714-24xa-tighten-final-review-split-and-budget-decision-contracts
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260716-irxa-create-or-update-the-writing-style-plugin-from-writing-style-zip
 20260716-v2ji-make-provider-eval-timeouts-safely-resumable-without-matrix-expansion
