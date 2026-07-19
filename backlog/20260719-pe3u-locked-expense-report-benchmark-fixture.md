@@ -18,6 +18,7 @@ Final-review split from 20260719-cb43 at diff hash b190d81690f3657f5230580fb083b
 ## Acceptance criteria
 
 - [ ] Provide a dependency-free locked Rust fixture with a deterministic validate baseline.
+- [ ] Include behavior-focused baseline coverage and repository-local candidate guidance.
 
 ## Subtasks
 
