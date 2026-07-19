@@ -1,5 +1,5 @@
 ---
-title: Add cross-project worktree safety guidance
+title: Help agents avoid feature work in a repository’s coordination checkout
 blocked_by: []
 blocks: []
 tags: [worktrees, guidance, developer-experience, evals]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Extend portable worktree guidance with upstream-equivalent dirty-main diagnosis and no-op edit avoidance, complementing the separate mechanical guard task.
+Extend reusable worktree guidance so agents recognize when a repository reserves its main checkout for coordination, distinguish real local changes from files that already match upstream, and move feature work to the correct linked worktree without disturbing user changes.
 
 ## Context / Why
 
