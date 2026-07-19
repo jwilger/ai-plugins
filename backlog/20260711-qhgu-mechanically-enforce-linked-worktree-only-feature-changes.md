@@ -13,7 +13,7 @@ Add automatic checks that stop ordinary feature edits and integration work from 
 
 ## Context / Why
 
-Implementation notes:\n\nA completed feature branch was fast-forwarded into the main coordination checkout. Existing pre-commit/pre-push hooks act too late to prevent direct edits or local integration. Use the repository's local single-owner threat model: prevent ordinary agent/operator mistakes at supported workflow and Git entrypoints, but do not attempt OS-level prevention of an intentional local-owner bypass or arbitrary external editor. Preserve existing user changes, allow documented coordination operations, and provide a narrow explicit exception rather than a broad disable switch.
+Implementation notes: A completed feature branch was fast-forwarded into the main coordination checkout. Existing pre-commit/pre-push hooks act too late to prevent direct edits or local integration. Use the repository's local single-owner threat model: prevent ordinary agent/operator mistakes at supported workflow and Git entrypoints, but do not attempt OS-level prevention of an intentional local-owner bypass or arbitrary external editor. Preserve existing user changes, allow documented coordination operations, and provide a narrow explicit exception rather than a broad disable switch.
 
 ## Acceptance criteria
 
