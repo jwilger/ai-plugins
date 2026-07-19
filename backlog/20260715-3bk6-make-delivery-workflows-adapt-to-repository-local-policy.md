@@ -1,5 +1,5 @@
 ---
-title: Make delivery workflows adapt to repository-local policy
+title: Follow each repository’s own delivery workflow
 blocked_by: []
 blocks: []
 tags: [codex, workflow, development-discipline, engineering-standards, major, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make development-discipline and engineering-standards follow the active repository's delivery policy instead of universally assuming pull requests or incremental remote pushes.
+Make shared development guidance follow the repository’s stated way of delivering changes—such as direct updates to the main branch, pull requests, or local-only work—while keeping the same safety and verification standards.
 
 ## Context / Why
 
