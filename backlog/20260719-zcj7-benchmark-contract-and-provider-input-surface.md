@@ -1,7 +1,7 @@
 ---
 title: Benchmark contract and provider-input surface
 blocked_by: []
-blocks: [20260719-cb43-benchmark-contract-inputs-cases-and-locked-fixture]
+blocks: []
 tags: [evals, benchmark, contract, final-review, scope-split]
 pr_mr_url: 
 pr_mr_status: 
