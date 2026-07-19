@@ -1,5 +1,5 @@
 ---
-title: Strengthen engineering standards against primitive obsession
+title: Require meaningful domain types instead of renamed basic values
 blocked_by: []
 blocks: [20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types]
 tags: [engineering-standards, semantic-types, guidance, evals]
@@ -7,7 +7,7 @@ tags: [engineering-standards, semantic-types, guidance, evals]
 
 ## Summary
 
-Strengthen the existing zero-primitive-obsession standard with explicit counterexamples and eval coverage so raw primitives or structural aliases are not mistaken for semantic domain types.
+Clarify the engineering standard so a renamed string, number, or similar basic value does not count as a meaningful domain type. Guidance and examples should show how named types can enforce valid business values as data enters the system.
 
 ## Context / Why
 
