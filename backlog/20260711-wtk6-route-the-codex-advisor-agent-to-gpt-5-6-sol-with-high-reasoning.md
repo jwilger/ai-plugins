@@ -1,5 +1,5 @@
 ---
-title: Route the Codex advisor agent to gpt-5.6-sol with high reasoning
+title: Use GPT-5.6 Sol with high reasoning for Codex advisor work
 blocked_by: []
 blocks: []
 tags: [advisor, codex, model-routing, developer-experience]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Configure the intentionally Codex-only advisor agent to use gpt-5.6-sol with high reasoning and add focused evidence that both routing values are selected.
+Configure the Codex advisor to use GPT-5.6 Sol with high reasoning for high-value advisory tasks. Keep configuration, documentation, marketplace metadata, and tests consistent, and fail visibly if that model is unavailable instead of silently using a weaker one.
 
 ## Context / Why
 
