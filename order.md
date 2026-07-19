@@ -68,3 +68,4 @@
 20260718-iksx-review-codex-subscription-auth-runtime-boundary-slice
 20260718-tiqv-review-benchmark-repository-integration-slice
 20260719-cb43-benchmark-contract-inputs-cases-and-locked-fixture
+20260719-qpx4-trusted-verifier-and-scorer-composition
