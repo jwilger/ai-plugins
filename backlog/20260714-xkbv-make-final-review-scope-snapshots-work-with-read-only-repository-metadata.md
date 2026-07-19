@@ -1,5 +1,5 @@
 ---
-title: Make final-review scope snapshots work with read-only repository metadata
+title: Let final review work when Git metadata is read-only
 blocked_by: []
 blocks: []
 tags: [development-discipline, final-review, git, snapshots, permissions, operability, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Create immutable final-review scope snapshots without writing objects or refs into the reviewed repository's Git metadata, while preserving exact diff binding and actionable recovery.
+Allow final review to create an exact, stable snapshot of the proposed change without writing into the repository’s protected Git metadata. Managed workspaces should be reviewable without weakening the link between the review and the code being reviewed.
 
 ## Context / Why
 
