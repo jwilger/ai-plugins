@@ -25,3 +25,5 @@ Split from 20260715-n6bs after formal final review returned scope_split_hold for
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-19: Final-review session final-review-zcsh-final-20260718 entered authoritative scope_split_hold for baseline 351cf031939d460e88b4d6f3e37f297a6bfc01df, diff hash 54ece87326cb708bd8d46f1c25a3bbeeef69884a, and shared evidence zcsh-final-tests (67/67). Blocking split tickets: 20260719-cb43 contract/fixture; 20260719-qpx4 trusted verifier/scorer (including direct duplicate raw-result rejection coverage); 20260719-nvz3 provenance/results/secret-safe publication; 20260719-zk46 Nix runtime integration. No deep-review assignments are permitted on zcsh until these blockers are independently dispositioned.
