@@ -19,6 +19,7 @@ Final-review split from 20260719-cb43 at diff hash b190d81690f3657f5230580fb083b
 
 - [ ] Prepare a fresh clean Git repository for every selected case, sample, and condition.
 - [ ] Reject unowned roots, symlink escapes, duplicate rows, missing rows, extra rows, inconsistent case metadata, and out-of-range samples.
+- [ ] Record exact fixture, baseline, contract, and run bindings for the complete matrix.
 
 ## Subtasks
 
