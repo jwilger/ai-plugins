@@ -13,7 +13,7 @@ Remove the duplicate hand-written command checks that run before Tiber’s main 
 
 ## Context / Why
 
-A final-review architecture lens on 20260707-rpmy found that parse_cli_arguments manually recognizes subtask add and install-bin token layouts before invoking the derived Clap parser. This duplicates part of the grammar and makes help ordering inconsistent: malformed trailing arguments can defeat an earlier --help on those paths. The issue is MINOR and is intentionally deferred under the user’s finding policy. Keep any raw-argv normalization narrowly documented, move value constraints into typed Clap parsers where feasible, and ensure Clap remains the single owner of validation and error construction.
+Implementation notes:\n\nA final-review architecture lens on 20260707-rpmy found that parse_cli_arguments manually recognizes subtask add and install-bin token layouts before invoking the derived Clap parser. This duplicates part of the grammar and makes help ordering inconsistent: malformed trailing arguments can defeat an earlier --help on those paths. The issue is MINOR and is intentionally deferred under the user’s finding policy. Keep any raw-argv normalization narrowly documented, move value constraints into typed Clap parsers where feasible, and ensure Clap remains the single owner of validation and error construction.
 
 ## Acceptance criteria
 
