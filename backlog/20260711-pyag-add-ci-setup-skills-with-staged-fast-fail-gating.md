@@ -1,5 +1,5 @@
 ---
-title: Add staged fast-fail CI gating to engineering-standards scaffold
+title: Run fast CI checks before expensive ones
 blocked_by: []
 blocks: []
 tags: [ci, engineering-standards, scaffold, workflow-design]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Extend the existing engineering-standards scaffold guidance so generated CI uses dependency stages: cheap validation first, parallel independent checks within a stage, and expensive checks only after fast gates pass.
+Update generated CI workflows so inexpensive checks fail quickly, independent checks run in parallel, and costly checks start only after the fast gates pass. Final reporting should still clearly show what failed.
 
 ## Context / Why
 
