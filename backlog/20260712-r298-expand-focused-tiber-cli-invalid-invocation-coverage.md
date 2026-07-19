@@ -1,5 +1,5 @@
 ---
-title: Expand focused Tiber CLI invalid-invocation coverage
+title: Test how Tiber reports invalid command-line requests
 blocked_by: []
 blocks: []
 tags: [tiber, cli, tests, clap, minor-review-finding]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Add a focused public CLI scenario matrix for unknown commands/options and invalid nested invocations, complementing the existing missing-update-field parser test.
+Add public command-line tests for unknown commands, unsupported options, and invalid nested requests. Each case should return the standard parser’s status, usage guidance, and error-channel behavior.
 
 ## Context / Why
 
