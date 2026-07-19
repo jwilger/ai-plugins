@@ -1,5 +1,5 @@
 ---
-title: Cover GPT-5.6 benchmark sample overrides and exact provider-label contracts
+title: Test all GPT-5.6 sample and provider-label combinations
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, tests, benchmarking, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Strengthen the focused GPT-5.6 benchmark loader/config regression coverage for repeated samples and the complete Sol/Terra/Luna provider-label matrix.
+Expand benchmark tests to cover repeated samples, every Sol, Terra, and Luna label in standard and advisor-like modes, and complete missing-result diagnostics. This should catch misleading or incomplete benchmark reports.
 
 ## Context / Why
 
