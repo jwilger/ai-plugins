@@ -1,5 +1,5 @@
 ---
-title: Preserve effective model, latency, and GPT-5.6 cost provenance in eval artifacts
+title: Show the actual model, speed, and cost in evaluation reports
 blocked_by: []
 blocks: []
 tags: [evals, benchmarking, observability, gpt-5.6, codex, dashboard, model-overrides, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make eval artifacts and dashboards report the actual resolved execution model and reasoning effort after overrides, retain latency and grader provenance, and calculate GPT-5.6 token or credit cost accurately.
+Make evaluation results and dashboards show the model and reasoning level that actually ran, including any overrides. Preserve timing and grader details, and calculate GPT-5.6 usage costs accurately so reports support trustworthy comparisons.
 
 ## Context / Why
 
