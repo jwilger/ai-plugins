@@ -13,7 +13,7 @@ Use one reliable lock for the entire GPT-5.6 benchmark lifecycle so separate wor
 
 ## Context / Why
 
-Split from 20260713-uf3e. The focused and canonical runners can disagree on logical versus canonical lock paths, the lock currently lives under disposable .dependencies state, and coverage does not prove retention through post-run checking, dry-run non-creation, or resistance to unlink/recreation splitting. This task owns only shared provider-lock identity and lifecycle.
+Implementation notes:\n\nSplit from 20260713-uf3e. The focused and canonical runners can disagree on logical versus canonical lock paths, the lock currently lives under disposable .dependencies state, and coverage does not prove retention through post-run checking, dry-run non-creation, or resistance to unlink/recreation splitting. This task owns only shared provider-lock identity and lifecycle.
 
 ## Acceptance criteria
 
