@@ -1,5 +1,5 @@
 ---
-title: Retire superseded Lefthook Nix GC roots after successful reinstall
+title: Remove obsolete Lefthook runtime references after a successful reinstall
 blocked_by: []
 blocks: []
 tags: [bug, worktrees, lefthook, nix, review-follow-up]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Retire obsolete installer-owned Lefthook Nix GC roots after a fully successful reinstall without deleting any root still referenced by a surviving old-or-new launcher state.
+After a fully successful Lefthook reinstall, remove only the old repository-owned Nix references that are no longer needed. Interrupted installs and unrelated files must retain everything required to keep existing hook launchers working.
 
 ## Context / Why
 
