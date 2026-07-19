@@ -64,6 +64,5 @@
 20260716-n3zc-expand-writable-code-quality-benchmark-to-bugfix-and-refactor-cases
 20260716-2iud-build-credential-isolated-full-plugin-writable-eval-runtime
 20260718-n8xa-audit-and-update-hindsight-integration-for-current-coding-harnesses
-20260718-zcsh-review-benchmark-contract-and-scorer-slice
 20260718-iksx-review-codex-subscription-auth-runtime-boundary-slice
 20260718-tiqv-review-benchmark-repository-integration-slice
