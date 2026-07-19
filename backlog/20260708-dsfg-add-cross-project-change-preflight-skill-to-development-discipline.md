@@ -13,7 +13,7 @@ Add a preflight check that identifies which parts of a project a requested chang
 
 ## Context / Why
 
-Implementation notes:\n\nObvious documentation, test, schema, configuration, packaging, release, migration, startup, eval, and workflow obligations are currently discovered late during final review. The preflight should produce a concise evidence-backed classification, not a speculative implementation plan, and must honor repository-local instructions over reusable defaults. It applies proportionally: substantive changes get the full surface check, while genuinely narrow documentation or metadata work may mark irrelevant surfaces not applicable with a reason.
+Implementation notes: Obvious documentation, test, schema, configuration, packaging, release, migration, startup, eval, and workflow obligations are currently discovered late during final review. The preflight should produce a concise evidence-backed classification, not a speculative implementation plan, and must honor repository-local instructions over reusable defaults. It applies proportionally: substantive changes get the full surface check, while genuinely narrow documentation or metadata work may mark irrelevant surfaces not applicable with a reason.
 
 ## Acceptance criteria
 
