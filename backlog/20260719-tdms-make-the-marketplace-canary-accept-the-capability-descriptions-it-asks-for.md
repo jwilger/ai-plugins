@@ -17,6 +17,8 @@ The canary prompt asks each harness to name every marketplace plugin and provide
 
 ## Acceptance criteria
 
+- [ ] The canary prompt and checker use the same definition of an acceptable representative skill or capability.
+
 ## Subtasks
 
 ## Notes / Log
