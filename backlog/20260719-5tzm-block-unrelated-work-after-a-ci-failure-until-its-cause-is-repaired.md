@@ -15,6 +15,8 @@ Add development-discipline guardrails that treat GitHub Actions as an authoritat
 
 ## Acceptance criteria
 
+- [ ] A failed pushed CI run blocks unrelated implementation and pushes until its exact failed job and step are diagnosed.
+
 ## Subtasks
 
 ## Notes / Log
