@@ -1,5 +1,5 @@
 ---
-title: Harden isolated Codex credential refresh atomically
+title: Refresh isolated Codex credentials without partial or redirected writes
 blocked_by: []
 blocks: []
 tags: [evals, codex, credentials, hardening, minor]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Make isolated Codex credential refresh atomic and symlink-safe, and cover both supported credential filenames and file modes.
+Update copied Codex credentials as one safe filesystem operation, with private file permissions and protection against symbolic-link redirection. Failures or interruptions must leave either the complete old credentials or the complete new credentials, never a partial file.
 
 ## Context / Why
 
