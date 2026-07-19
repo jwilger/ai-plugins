@@ -16,7 +16,7 @@ Review and independently disposition the benchmark declaration, input/case matri
 
 ## Context / Why
 
-Created from final-review session final-review-zcsh-final-20260718 at diff hash 54ece87326cb708bd8d46f1c25a3bbeeef69884a. Scope: benchmark README, benchmark-inputs.cjs, benchmark.json, cases.cjs, expense-report fixture, promptfooconfig.yaml, prepare-code-quality-workspaces.mjs, and validate-code-quality-contract.mjs. This slice is independently shippable because it defines a deterministic benchmark and prepared workspace matrix without trusted scoring or canonical runtime execution.
+Created from final-review session final-review-zcsh-final-20260718 at diff hash 54ece87326cb708bd8d46f1c25a3bbeeef69884a. Scope: benchmark README, benchmark-inputs.cjs, benchmark.json, cases.cjs, expense-report fixture, promptfooconfig.yaml, prepare-code-quality-workspaces.mjs, validate-code-quality-contract.mjs, and the shared code-quality-tree-hash.mjs dependency required to execute workspace preparation. This slice is independently shippable because it defines a deterministic benchmark and prepared workspace matrix without trusted scoring or canonical runtime execution.
 
 ## Acceptance criteria
 
