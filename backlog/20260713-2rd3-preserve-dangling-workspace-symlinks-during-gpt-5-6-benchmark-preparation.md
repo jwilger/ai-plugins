@@ -1,5 +1,5 @@
 ---
-title: Harden GPT-5.6 benchmark workspace ownership and overlap handling
+title: Protect benchmark workspaces from unsafe replacement or overlap
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, filesystem, safety, symlinks, ownership, tests, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Preserve dangling or unowned symlinks, require the exact ownership marker before recursive recreation, and retain realpath-aware bidirectional overlap protection for benchmark workspaces and credential homes.
+Do not replace symbolic links or workspaces that are not clearly owned by the benchmark runner, and prevent benchmark paths from overlapping protected credential locations. Only an exact ownership marker should authorize recursive workspace recreation.
 
 ## Context / Why
 
