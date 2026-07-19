@@ -13,7 +13,7 @@ Add reusable guidance for monitoring long tests, evaluations, CI builds, and ext
 
 ## Context / Why
 
-Promptfoo now has repository-specific timeouts, but development-discipline still lacks portable policy for long or broken verifiers. Merge the CI-specific task 20260712-i76j here: a normally running gate remains waiting rather than blocked; use a comparable recent successful run as the baseline, and when the current run exceeds it by roughly five minutes without a plausible workload explanation, inspect the active step and logs before deliberately deciding whether to cancel and retry. A timeout or verifier failure never counts as success, and fallback evidence must narrow the completion claim.
+Implementation notes:\n\nPromptfoo now has repository-specific timeouts, but development-discipline still lacks portable policy for long or broken verifiers. Merge the CI-specific task 20260712-i76j here: a normally running gate remains waiting rather than blocked; use a comparable recent successful run as the baseline, and when the current run exceeds it by roughly five minutes without a plausible workload explanation, inspect the active step and logs before deliberately deciding whether to cancel and retry. A timeout or verifier failure never counts as success, and fallback evidence must narrow the completion claim.
 
 ## Acceptance criteria
 
