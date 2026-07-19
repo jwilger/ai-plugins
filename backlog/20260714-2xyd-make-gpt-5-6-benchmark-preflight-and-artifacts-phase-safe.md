@@ -1,5 +1,5 @@
 ---
-title: Make GPT-5.6 benchmark preflight and artifacts phase-safe
+title: Prevent stale or mixed-up GPT-5.6 benchmark results
 blocked_by: []
 blocks: []
 tags: [evals, gpt-5.6, artifacts, process-lifecycle, operability, minor, backlog]
@@ -9,7 +9,7 @@ pr_mr_status:
 
 ## Summary
 
-Resolve benchmark paths once, keep execution and grader-calibration artifacts distinct, and ensure preparation failure or interruption cannot leave stale evidence appearing current.
+Resolve benchmark paths consistently, keep execution and grading results separate, and ensure setup failures or interruptions cannot make old artifacts look like current evidence.
 
 ## Context / Why
 
