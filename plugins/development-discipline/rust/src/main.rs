@@ -2438,6 +2438,8 @@ fn validated_scope_split_plan(
     let mut normalized_candidates: Vec<Value> = Vec::with_capacity(candidates.len());
     let mut candidate_ownership: Vec<(String, HashSet<String>)> =
         Vec::with_capacity(candidates.len());
+    let mut candidate_delivery_boundaries: Vec<(String, serde_json::Map<String, Value>)> =
+        Vec::with_capacity(candidates.len());
     for (index, candidate) in candidates.iter().enumerate() {
         let candidate = candidate
             .as_object()
@@ -2560,6 +2562,19 @@ fn validated_scope_split_plan(
             normalized_delivery_boundaries
                 .insert(boundary.to_string(), Value::Object(normalized_evidence));
         }
+        for boundary in ["build", "test", "shipping"] {
+            if let Some((existing_id, _)) =
+                candidate_delivery_boundaries.iter().find(|(_, existing)| {
+                    existing.get(boundary) == normalized_delivery_boundaries.get(boundary)
+                })
+            {
+                return Err(format!(
+                    "review_split_candidate_delivery_boundary_overlapping ids={existing_id},{id} boundary={boundary}"
+                ));
+            }
+        }
+        candidate_delivery_boundaries
+            .push((id.to_string(), normalized_delivery_boundaries.clone()));
         let criteria = strict_string_array(
             candidate.get("acceptance_criteria"),
             "split_candidate_acceptance_criteria",
@@ -2605,13 +2620,9 @@ fn validated_scope_split_plan(
         }
         normalized_scope_paths.sort();
         normalized_scope_paths.dedup();
-        if let Some((existing_id, _)) = candidate_ownership
-            .iter()
-            .find(|(_, ownership)| {
-                ownership.is_subset(&owned_changed_files)
-                    || owned_changed_files.is_subset(ownership)
-            })
-        {
+        if let Some((existing_id, _)) = candidate_ownership.iter().find(|(_, ownership)| {
+            ownership.is_subset(&owned_changed_files) || owned_changed_files.is_subset(ownership)
+        }) {
             return Err(format!(
                 "review_split_candidate_scope_fully_overlapping ids={existing_id},{id}"
             ));
@@ -18489,6 +18500,26 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn scope_growth_rejects_shared_delivery_boundaries_between_candidates() {
+        for boundary in ["build", "test", "shipping"] {
+            let mut arguments =
+                initial_scope_split_arguments(&format!("scope-split-shared-{boundary}"));
+            arguments["risk_assessment"]["split_candidates"][1]["delivery_boundaries"][boundary] =
+                arguments["risk_assessment"]["split_candidates"][0]["delivery_boundaries"]
+                    [boundary]
+                    .clone();
+
+            assert_eq!(
+                plan_result_at(&arguments, 3_000)
+                    .expect_err("shared delivery evidence does not prove independent delivery"),
+                format!(
+                    "review_split_candidate_delivery_boundary_overlapping ids=coordinator-policy,integration-tests boundary={boundary}"
+                )
+            );
+        }
+    }
+
+    #[test]
     fn scope_growth_rejects_fully_overlapping_split_candidates() {
         let mut arguments = initial_scope_split_arguments("scope-split-overlap");
         arguments["risk_assessment"]["split_candidates"][0]["scope_paths"] =
@@ -18561,10 +18592,9 @@ pre_filter = "project-pre"
             .as_object_mut()
             .expect("scout arguments")
             .remove("risk_assessment");
-        let scout: Value = serde_json::from_str(
-            &risk_assessment_result(&scout_arguments).expect("risk scout"),
-        )
-        .expect("risk scout json");
+        let scout: Value =
+            serde_json::from_str(&risk_assessment_result(&scout_arguments).expect("risk scout"))
+                .expect("risk scout json");
         let assignment = &scout["assignments"][0];
         arguments["risk_assessment"]["assignment_id"] = assignment["assignment_id"].clone();
         arguments["risk_assessment"]["subagent_key"] = assignment["subagent_key"].clone();
