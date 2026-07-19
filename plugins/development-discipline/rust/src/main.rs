@@ -59,8 +59,10 @@ const MAX_BROAD_TEST_RERUN_REASON_BYTES: usize = 2 * 1024;
 const MAX_DELTA_EVIDENCE_BYTES: usize = 128 * 1024;
 const MAX_DELTA_INLINE_PATCH_BYTES: usize = 96 * 1024;
 const MEDIUM_RISK_REVIEW_BUDGET_MINUTES: u64 = 75;
-const MAX_REVIEW_BUDGET_RATIONALE_BYTES: usize = 2 * 1024;
+const MAX_REVIEW_BUDGET_RATIONALE_CHARS: usize = 512;
 const MAX_REVIEW_BUDGET_REFERENCES: usize = 16;
+const MAX_REVIEW_BUDGET_REFERENCE_CHARS: usize = 256;
+const MAX_REVIEW_BUDGET_ESCALATION_REFERENCE_CHARS: usize = 1024;
 const MAX_SPLIT_CANDIDATES: usize = 16;
 const MAX_SPLIT_CANDIDATE_TITLE_BYTES: usize = 256;
 const MAX_SPLIT_CANDIDATE_REASON_BYTES: usize = 2 * 1024;
@@ -889,36 +891,46 @@ fn split_lineage_schema() -> Value {
 
 fn review_budget_decision_schema() -> Value {
     json!({
+        "oneOf": [
+            review_budget_decision_variant_schema("ship", None),
+            review_budget_decision_variant_schema("split", Some("ticket_references")),
+            review_budget_decision_variant_schema("escalate", Some("escalation_reference"))
+        ]
+    })
+}
+
+fn review_budget_decision_variant_schema(kind: &str, extra: Option<&str>) -> Value {
+    let mut properties = serde_json::Map::new();
+    properties.insert("decision".to_string(), json!({ "const": kind }));
+    properties.insert(
+        "rationale".to_string(),
+        json!({
+            "type": "string", "minLength": 1,
+            "maxLength": MAX_REVIEW_BUDGET_RATIONALE_CHARS, "pattern": "\\S"
+        }),
+    );
+    let mut required = vec![json!("decision"), json!("rationale")];
+    if extra == Some("ticket_references") {
+        properties.insert("ticket_references".to_string(), json!({
+            "type": "array", "minItems": 2, "maxItems": MAX_REVIEW_BUDGET_REFERENCES,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": MAX_REVIEW_BUDGET_REFERENCE_CHARS, "pattern": "\\S" }
+        }));
+        required.push(json!("ticket_references"));
+    } else if extra == Some("escalation_reference") {
+        properties.insert(
+            "escalation_reference".to_string(),
+            json!({
+                "type": "string", "minLength": 1,
+                "maxLength": MAX_REVIEW_BUDGET_ESCALATION_REFERENCE_CHARS, "pattern": "\\S"
+            }),
+        );
+        required.push(json!("escalation_reference"));
+    }
+    json!({
         "type": "object",
-        "properties": {
-            "decision": { "type": "string", "enum": ["ship", "split", "escalate"] },
-            "rationale": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": MAX_REVIEW_BUDGET_RATIONALE_BYTES / 4,
-                "pattern": "\\S"
-            },
-            "ticket_references": {
-                "type": "array",
-                "minItems": 2,
-                "maxItems": MAX_REVIEW_BUDGET_REFERENCES,
-                "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" }
-            },
-            "escalation_reference": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 1024,
-                "pattern": "\\S"
-            }
-        },
-        "required": ["decision", "rationale"],
-        "allOf": [{
-            "if": { "properties": { "decision": { "const": "split" } }, "required": ["decision"] },
-            "then": { "required": ["ticket_references"] }
-        }, {
-            "if": { "properties": { "decision": { "const": "escalate" } }, "required": ["decision"] },
-            "then": { "required": ["escalation_reference"] }
-        }],
+        "properties": properties,
+        "required": required,
         "additionalProperties": false
     })
 }
@@ -4214,9 +4226,9 @@ fn validated_review_budget_decision(value: Option<&Value>) -> Result<Value, Stri
         .and_then(Value::as_str)
         .filter(|rationale| !rationale.trim().is_empty())
         .ok_or_else(|| "review_budget_rationale_required=true".to_string())?;
-    if rationale.len() > MAX_REVIEW_BUDGET_RATIONALE_BYTES {
+    if rationale.chars().count() > MAX_REVIEW_BUDGET_RATIONALE_CHARS {
         return Err(format!(
-            "review_budget_rationale_too_large max_bytes={MAX_REVIEW_BUDGET_RATIONALE_BYTES}"
+            "review_budget_rationale_too_long max_chars={MAX_REVIEW_BUDGET_RATIONALE_CHARS}"
         ));
     }
     match kind {
@@ -4236,9 +4248,10 @@ fn validated_review_budget_decision(value: Option<&Value>) -> Result<Value, Stri
             )?
             .unwrap_or_default();
             if !(2..=MAX_REVIEW_BUDGET_REFERENCES).contains(&references.len())
-                || references
-                    .iter()
-                    .any(|reference| reference.trim().is_empty())
+                || references.iter().any(|reference| {
+                    reference.trim().is_empty()
+                        || reference.chars().count() > MAX_REVIEW_BUDGET_REFERENCE_CHARS
+                })
             {
                 return Err(format!(
                     "review_budget_split_ticket_references_invalid min=2 max={MAX_REVIEW_BUDGET_REFERENCES}"
@@ -4263,10 +4276,10 @@ fn validated_review_budget_decision(value: Option<&Value>) -> Result<Value, Stri
                 .and_then(Value::as_str)
                 .filter(|reference| !reference.trim().is_empty())
                 .ok_or_else(|| "review_budget_escalation_reference_required=true".to_string())?;
-            if reference.len() > 1024 {
-                return Err(
-                    "review_budget_escalation_reference_too_large max_bytes=1024".to_string(),
-                );
+            if reference.chars().count() > MAX_REVIEW_BUDGET_ESCALATION_REFERENCE_CHARS {
+                return Err(format!(
+                    "review_budget_escalation_reference_too_long max_chars={MAX_REVIEW_BUDGET_ESCALATION_REFERENCE_CHARS}"
+                ));
             }
             Ok(json!({
                 "decision": kind,
@@ -7830,7 +7843,8 @@ fn review_budget_contract_is_valid(risk_plan: &serde_json::Map<String, Value>) -
         .get("rationale")
         .and_then(Value::as_str)
         .is_some_and(|rationale| {
-            !rationale.trim().is_empty() && rationale.len() <= MAX_REVIEW_BUDGET_RATIONALE_BYTES
+            !rationale.trim().is_empty()
+                && rationale.chars().count() <= MAX_REVIEW_BUDGET_RATIONALE_CHARS
         });
     rationale_valid
         && match kind {
@@ -7843,10 +7857,18 @@ fn review_budget_contract_is_valid(risk_plan: &serde_json::Map<String, Value>) -
                         .is_some_and(|references| {
                             (2..=MAX_REVIEW_BUDGET_REFERENCES).contains(&references.len())
                                 && references.iter().all(|reference| {
-                                    reference
-                                        .as_str()
-                                        .is_some_and(|reference| !reference.trim().is_empty())
+                                    reference.as_str().is_some_and(|reference| {
+                                        !reference.trim().is_empty()
+                                            && reference.chars().count()
+                                                <= MAX_REVIEW_BUDGET_REFERENCE_CHARS
+                                    })
                                 })
+                                && references
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .collect::<HashSet<_>>()
+                                    .len()
+                                    == references.len()
                         })
             }
             Some("escalate") => {
@@ -7854,7 +7876,11 @@ fn review_budget_contract_is_valid(risk_plan: &serde_json::Map<String, Value>) -
                     && decision
                         .get("escalation_reference")
                         .and_then(Value::as_str)
-                        .is_some_and(|reference| !reference.trim().is_empty())
+                        .is_some_and(|reference| {
+                            !reference.trim().is_empty()
+                                && reference.chars().count()
+                                    <= MAX_REVIEW_BUDGET_ESCALATION_REFERENCE_CHARS
+                        })
             }
             _ => false,
         }
@@ -17323,9 +17349,11 @@ pre_filter = "project-pre"
             MAX_FINDINGS_PER_ITERATION
         );
         assert_eq!(
-            tools[2]["inputSchema"]["properties"]["review_budget_decision"]["properties"]
-                ["decision"]["enum"],
-            json!(["ship", "split", "escalate"])
+            tools[2]["inputSchema"]["properties"]["review_budget_decision"]["oneOf"]
+                .as_array()
+                .expect("exact review budget variants")
+                .len(),
+            3
         );
         let scout_schema = risk_assessment_output_schema();
         assert_eq!(
@@ -17658,6 +17686,77 @@ pre_filter = "project-pre"
             false
         );
         assert_eq!(planned["assignments"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn review_budget_schema_and_runtime_share_exact_shapes_and_character_bounds() {
+        let schema = review_budget_decision_schema();
+        let variants = schema["oneOf"].as_array().expect("budget variants");
+        assert_eq!(variants.len(), 3);
+        assert!(variants
+            .iter()
+            .all(|variant| variant["additionalProperties"] == false));
+        assert_eq!(
+            variants[1]["properties"]["ticket_references"]["uniqueItems"],
+            true
+        );
+        assert_eq!(
+            variants[0]["properties"]["rationale"]["maxLength"],
+            MAX_REVIEW_BUDGET_RATIONALE_CHARS
+        );
+
+        validated_review_budget_decision(Some(&json!({
+            "decision": "ship",
+            "rationale": "é".repeat(MAX_REVIEW_BUDGET_RATIONALE_CHARS)
+        })))
+        .expect("exact rationale character limit");
+        assert_eq!(
+            validated_review_budget_decision(Some(&json!({
+                "decision": "ship",
+                "rationale": "é".repeat(MAX_REVIEW_BUDGET_RATIONALE_CHARS + 1)
+            })))
+            .expect_err("rationale beyond schema limit"),
+            "review_budget_rationale_too_long max_chars=512"
+        );
+        validated_review_budget_decision(Some(&json!({
+            "decision": "split",
+            "rationale": "Split confirmed delivery work.",
+            "ticket_references": [
+                "é".repeat(MAX_REVIEW_BUDGET_REFERENCE_CHARS),
+                "ticket-two"
+            ]
+        })))
+        .expect("exact ticket-reference character limit");
+        assert!(validated_review_budget_decision(Some(&json!({
+            "decision": "split",
+            "rationale": "Split confirmed delivery work.",
+            "ticket_references": [
+                "é".repeat(MAX_REVIEW_BUDGET_REFERENCE_CHARS + 1),
+                "ticket-two"
+            ]
+        })))
+        .is_err());
+        validated_review_budget_decision(Some(&json!({
+            "decision": "escalate",
+            "rationale": "Escalate the review.",
+            "escalation_reference": "é".repeat(MAX_REVIEW_BUDGET_ESCALATION_REFERENCE_CHARS)
+        })))
+        .expect("exact escalation-reference character limit");
+        assert!(validated_review_budget_decision(Some(&json!({
+            "decision": "escalate",
+            "rationale": "Escalate the review.",
+            "escalation_reference": "é".repeat(MAX_REVIEW_BUDGET_ESCALATION_REFERENCE_CHARS + 1)
+        })))
+        .is_err());
+        assert_eq!(
+            validated_review_budget_decision(Some(&json!({
+                "decision": "ship",
+                "rationale": "Ship.",
+                "ticket_references": ["one", "two"]
+            })))
+            .expect_err("ship rejects split-only fields just like its schema variant"),
+            "review_budget_ship_fields_invalid=true"
+        );
     }
 
     #[test]
