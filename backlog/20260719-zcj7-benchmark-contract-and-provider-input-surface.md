@@ -17,6 +17,8 @@ Final-review split from 20260719-cb43 at diff hash b190d81690f3657f5230580fb083b
 
 ## Acceptance criteria
 
+- [ ] Define exactly one rust-cli-feature case, three conditions, three canonical samples, and nine expected turns.
+
 ## Subtasks
 
 ## Notes / Log
