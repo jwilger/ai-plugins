@@ -18,6 +18,7 @@ pr_mr_status:
 - [ ] Dry-run output clearly distinguishes files that will change, files already configured, and conflicts that require an explicit choice.
 - [ ] Apply mode refuses to overwrite ambiguous existing integration files without an explicit conflict-resolution choice.
 - [ ] Automated regression coverage uses a repository with a populated `.gitignore` and existing task-closing automation, and proves repeated setup is safe and idempotent.
+- [ ] A behavior fixture based on GitHub issue #53 rejects destructive or duplicate repository setup.
 
 ## Subtasks
 
