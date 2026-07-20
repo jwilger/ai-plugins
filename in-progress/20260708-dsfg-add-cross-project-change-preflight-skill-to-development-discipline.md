@@ -29,3 +29,5 @@ Implementation notes: Obvious documentation, test, schema, configuration, packag
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-20: Failure record: 547b9041f255140c6728be9a5bd78091359ee556; https://github.com/jwilger/ai-plugins/actions/runs/29734168167; Quality gate; Full gate; scripts/tests/evals-full-marketplace.bats test 290 failed at line 222, and the local checker reported "development-discipline:change-preflight missing coverage kinds: natural-trigger, adversarial-safety, baseline-ablation".\nDiagnosis: The new change-preflight behavior fixtures omitted three coverage classifications required for every marketplace skill; classification=caused; the exact coverage checker reproduced the failure locally, and adding those classifications to the existing feature and bug-fix fixtures made the checker and focused Bats test pass.\nNext action: tested causal repair whose pushed commit ae3abb0029ec602f0fad184d846f47a6e6bc3594 explains the diagnosis.\nRelease proof: https://github.com/jwilger/ai-plugins/actions/runs/29735716975; terminal status=pending; running=still blocked.
