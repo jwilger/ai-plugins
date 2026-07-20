@@ -13,6 +13,8 @@ Adding Tiber to an existing repository can currently erase unrelated ignore rule
 
 ## Context / Why
 
+Covers GitHub issues #52 and #53. Issue #53 is also a reusable evaluation case, meaning a saved scenario used to test future agent behavior. Implementation notes: Update tiber scaffold repo so ignore-file changes are additive and safe to repeat. Detect equivalent existing hooks and GitHub Actions workflows rather than relying only on generated filenames. The dry run must describe additions, no-ops, and conflicts accurately, and apply mode must not replace ambiguous existing files without an explicit conflict-resolution choice.
+
 ## Acceptance criteria
 
 - [ ] Existing `.gitignore` content remains unchanged except for adding the missing Tiber task-directory rule once.
