@@ -6,7 +6,8 @@ description: Use when a pushed CI run fails or before later work or pushes; repr
 # CI Failure Follow-up
 
 A failed pushed run creates a hold. Stop unrelated implementation, review
-remediation, ticket work, and pushes until the failure is diagnosed and its
+remediation, ticket work, and all pushes except the one recovery action
+selected below. Keep the hold until the failure is diagnosed and its
 replacement run reaches terminal success.
 
 There are exactly two recovery actions:
@@ -39,6 +40,12 @@ Next action: <tested causal repair whose next pushed commit body explains the
 Release proof: <replacement run ID>; terminal status=<success>;
   queued|pending|running=<still blocked>
 ```
+
+Persist this record in the active ticket's shared notes or the repository's
+shared handoff state before ending a session. At session entry and before later
+work or pushes, inspect the pushed CI runs for the active ticket since its first
+pushed commit. Any failed run without a recorded terminal-success replacement
+recreates the hold, even when a newer run is green or running.
 
 An unrelated or transient classification never releases the hold by itself:
 queued, pending, or running replacement CI is still blocked, and only terminal

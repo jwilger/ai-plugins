@@ -153,6 +153,7 @@ for (const phrase of [
   'causal diagnosis',
   'supporting evidence',
   'unrelated implementation',
+  'all pushes except the one recovery action',
   'next pushed commit',
   'unrelated or transient',
   'no intervening push',
@@ -160,6 +161,10 @@ for (const phrase of [
   'failed rerun becomes the new failure record',
   'transition to action 1 in a separate recovery scope',
   'no unrelated commit is allowed',
+  "active ticket's shared notes",
+  'inspect the pushed ci runs for the active ticket',
+  'failed run without a recorded terminal-success replacement',
+  'even when a newer run is green or running',
   'terminal success',
   'queued|pending|running',
 ]) {
@@ -198,6 +203,9 @@ if (!fixture) {
     'new failure record',
     'diagnosed, tested causal repair',
     'separate recovery scope',
+    'shared ticket or handoff state',
+    'pushed-run history',
+    'newer build mask',
     'terminal success',
   ]) {
     if (!rubric.includes(phrase)) failures.push(`CI failure rubric missing: ${phrase}`);
