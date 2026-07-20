@@ -791,7 +791,14 @@
     "tags": ["development-discipline", "preflight", "feature"],
     "plugins": ["development-discipline"],
     "skills": ["change-preflight"],
-    "coverage": { "kinds": ["core-behavior", "workflow"] },
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "workflow",
+        "baseline-ablation"
+      ]
+    },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.66,
     "semanticRubric": "Pass if, before proposing edits, the response classifies the feature, names applicable behavior, tests, documentation, packaging or generated artifacts, release artifacts, evals, and user workflow surfaces with repository evidence, and gives reasoned not-applicable entries for configuration, migrations, or operational startup when evidence supports that conclusion. Fail if it starts implementation, gives a generic checklist without evidence, or omits surfaces silently.",
@@ -810,7 +817,9 @@
     "tags": ["development-discipline", "preflight", "bugfix"],
     "plugins": ["development-discipline"],
     "skills": ["change-preflight"],
-    "coverage": { "kinds": ["core-behavior", "regression"] },
+    "coverage": {
+      "kinds": ["core-behavior", "regression", "adversarial-safety"]
+    },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.66,
     "semanticRubric": "Pass if the response classifies a bug fix before edits, identifies sorting behavior, a focused regression test, relevant user documentation and the dashboard workflow, evaluates startup configuration from evidence, and explicitly marks packaging, release artifacts, migrations, and evals applicable or not applicable with reasons. Fail if it edits first, treats every surface as automatically applicable, or omits reasoned exclusions.",
