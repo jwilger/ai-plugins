@@ -9,6 +9,8 @@ pr_mr_status:
 
 ## Summary
 
+Make security reviews consistently check relevant, widely recognized security guidance so important risks are less likely to be missed and review findings are easier to justify.
+
 ## Context / Why
 
 ## Acceptance criteria
