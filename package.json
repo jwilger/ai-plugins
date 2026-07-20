@@ -11,6 +11,7 @@
     "yaml": "2.9.0"
   },
   "overrides": {
-    "@openai/codex-sdk": "0.144.5"
+    "@openai/codex-sdk": "0.144.5",
+    "adm-zip": "0.6.0"
   }
 }
