@@ -9,14 +9,19 @@ generality.
 
 - `test-driven-development` - Kent Beck-style TDD: one failing behavior test,
   one smallest implementation step, then refactor only after green.
+- `delivery-workflow` - routes delivery through repository-local instructions,
+  after current user direction, supporting direct-to-trunk, PR/MR, and
+  local-only work without inventing a pull request or letting a specialist skill
+  change the selected mode, cadence, or evidence level.
 - `ci-failure-follow-up` - evidence-based recovery that blocks unrelated
   work after a pushed CI failure until a replacement run succeeds.
 - `rationale-commit-messages` - Conventional Commit subjects with a required
   body that explains why the change is necessary.
 - `verification-before-completion` - evidence-before-claims discipline tied to
   the actual claim scope.
-- `final-review` - fresh-context, multi-lens local review cycles before PR
-  creation, merge, or readiness claims.
+- `final-review` - fresh-context, multi-lens local review cycles before the
+  repository's selected delivery action or a readiness claim, using local
+  evidence when a mode has no pushed build and preserving every failed-run hold.
 - `systematic-debugging` - compact root-cause debugging before fixes.
 - `receiving-code-review` - technical evaluation of review feedback before
   implementing or pushing back.

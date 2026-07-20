@@ -1,6 +1,6 @@
 {
   "name": "development-discipline",
-  "version": "0.12.3",
+  "version": "0.13.0",
   "description": "John's personal development workflow discipline: test-first implementation, scoped verification, debugging, review handling, and skill authoring.",
   "author": {
     "name": "John Wilger",
@@ -13,7 +13,7 @@
   "interface": {
     "displayName": "Development Discipline",
     "shortDescription": "Personal workflow skills for disciplined development work.",
-    "longDescription": "Use Development Discipline when Codex needs John's tuned workflow for test-first implementation, fresh verification, final review before PRs or merges, compact root-cause debugging, technically rigorous code-review handling, or marketplace skill authoring. The skills are local canonical guidance and do not require upstream workflow plugins.",
+    "longDescription": "Use Development Discipline when Codex needs John's tuned workflow for repository-local delivery, test-first implementation, fresh verification, final review, compact root-cause debugging, technically rigorous code-review handling, or marketplace skill authoring. The skills are local canonical guidance and do not require upstream workflow plugins.",
     "developerName": "John Wilger",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],
@@ -23,7 +23,7 @@
     "defaultPrompt": [
       "Use John's test-first development workflow for this change.",
       "Verify this work against the actual claim scope before calling it done.",
-      "Run a final multi-lens review before opening the pull request.",
+      "Follow this repository's delivery workflow and run a final multi-lens review before publishing.",
       "Handle this review feedback with technical rigor."
     ]
   }

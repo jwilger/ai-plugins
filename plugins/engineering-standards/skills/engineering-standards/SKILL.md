@@ -31,13 +31,20 @@ adapt the concrete tooling to the language while keeping the discipline.
 - **BDD, black-box.** Cover all externally-observable behavior (incl. edge cases)
   with executable specifications that exercise only the public surface — never
   internal types. Implement **one Given/When/Then step at a time**: get one step
-  green with all quality gates passing, **commit**, then the next step.
+  green with the repository's proportionate increment gates passing, preserve
+  it at the cadence selected by repository-local policy, then the next step.
 - Tests assert behavior, never source text (no tautological "file contains
   string" tests).
 - **One major change at a time.** Don't start another major task while a PR is
   still waiting on CI, review, approval, merge, or cleanup.
 
-## Quality gates (all must pass before any commit)
+## Default quality gates
+
+Use these defaults when repository-local policy is silent. The selected delivery
+workflow controls commit cadence, and verification remains proportional to risk
+and the claim. Fast relevant gates protect each implementation increment;
+expensive exhaustive or mutation suites may run at the repository's declared CI
+or completion boundary instead of before every commit.
 
 - **Lint as strictly as the toolchain allows, as an allowlist.** Every
   language and tool differs, but the philosophy is universal: turn on every lint
@@ -49,7 +56,8 @@ adapt the concrete tooling to the language while keeping the discipline.
   (e.g. `#[expect(reason = "…")]` or the local equivalent) over a blanket allow,
   and forbid panic-prone constructs on production paths. Only ever ratchet
   stricter; never loosen the baseline.
-- **Mutation testing with a 100% kill rate**, enforced in CI.
+- **Mutation testing with a 100% kill rate** when the repository's risk model and
+  configured completion gate require it, normally enforced in CI.
 - **Effectiveness measured by evals, not vibes** — prompts/skills/tool
   descriptions are validated by evals (triggering + behavior), not opinion.
 - **Minimum-necessary context** — skills, tool schemas, hooks, and injected
@@ -69,10 +77,16 @@ adapt the concrete tooling to the language while keeping the discipline.
 - Keep guardrails **harness-agnostic** (e.g. `AGENTS.md` + `docs/rules/`);
   harness-specific instruction files are thin pointers.
 
-## CI/CD (themes, adapt to the platform)
+## CI/CD (themes, adapt to repository-local policy and platform)
 
-- **PR-based** with at least one required approval and **automated code review**
-  contributing to that approval.
+- When `development-discipline:delivery-workflow` is available, use it to follow
+  repository-local delivery instructions. As a self-contained fallback, apply
+  current user direction first, then repository-local instructions, and select
+  direct-to-trunk, PR/MR, or local-only without inventing a pull request. This
+  specialist skill must not introduce a conflicting mode, commit cadence, or
+  evidence level.
+- When the repository selects PR/MR delivery, require its configured approvals
+  and automated review. Do not invent a pull request for another mode.
 - **Managed, automated releases** (versioning, changelog, publish) — not manual.
 - CI gates mirror the local gates: format, lint, tests, mutation (release-gated),
   dependency audit.

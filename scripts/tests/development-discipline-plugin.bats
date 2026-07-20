@@ -13,6 +13,7 @@ const root = process.argv[2];
 const plugin = 'development-discipline';
 const requiredSkills = [
   'test-driven-development',
+  'delivery-workflow',
   'ci-failure-follow-up',
   'rationale-commit-messages',
   'verification-before-completion',
@@ -40,6 +41,12 @@ const requiredCases = [
   'development-discipline-ci-failure-follow-up',
   'development-discipline-ci-failure-recovery-record',
   'development-discipline-rationale-bearing-commit-message',
+  'development-discipline-delivery-direct-to-trunk',
+  'development-discipline-delivery-pull-request',
+  'development-discipline-delivery-local-only',
+  'development-discipline-delivery-rejects-specialist-conflict',
+  'development-discipline-delivery-current-user-restriction-wins',
+  'development-discipline-delivery-composes-with-final-review',
 ];
 
 function readJson(relativePath) {
@@ -95,6 +102,23 @@ const fixturePaths = [
   'evals/fixtures/behavior/development-discipline/cases.json',
 ];
 const cases = fixturePaths.flatMap(readJson);
+const localOnlyCase = cases.find(
+  (entry) => entry.case_id === 'development-discipline-delivery-local-only',
+);
+const specialistConflictCase = cases.find(
+  (entry) => entry.case_id === 'development-discipline-delivery-rejects-specialist-conflict',
+);
+
+if (!localOnlyCase?.semanticRubric.includes('describes proportionate local tests and review')) {
+  fail('local-only rubric must assess the requested explanation, not claim work was performed');
+}
+if (
+  !specialistConflictCase?.prompt.includes(
+    'current user direction, repository-local instructions, the delivery-workflow router, then downstream specialist skills',
+  )
+) {
+  fail('specialist-conflict prompt must request the exact chain graded by its rubric');
+}
 for (const caseId of requiredCases) {
   const testCase = cases.find((entry) => entry.case_id === caseId);
   if (!testCase) {
@@ -122,6 +146,121 @@ if (failures.length > 0) {
 NODE
 
   [ "$status" -eq 0 ]
+}
+
+@test "development-discipline follows repository-local delivery policy" {
+  run node - "$ROOT" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.argv[2];
+const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
+const normalize = (value) => value.toLowerCase().replace(/\s+/g, ' ');
+const delivery = normalize(read('plugins/development-discipline/skills/delivery-workflow/SKILL.md'));
+const finalReview = normalize(read('plugins/development-discipline/skills/final-review/SKILL.md'));
+const standards = normalize(read('plugins/engineering-standards/skills/engineering-standards/SKILL.md'));
+const workflowRule = normalize(read('docs/rules/workflow-and-commits.md'));
+const developmentReadme = normalize(read('plugins/development-discipline/README.md'));
+const standardsReadme = normalize(read('plugins/engineering-standards/README.md'));
+const failures = [];
+
+for (const phrase of [
+  'repository-local instructions',
+  'delivery-workflow router',
+  'specialist skills',
+  'direct-to-trunk',
+  'pr/mr',
+  'local-only',
+  'do not invent a pull request',
+  'externally visible',
+  'destructive',
+  'exact pushed revision',
+  'current user direction comes first',
+  'narrows standing repository authorization',
+  'when repository policy requires ci',
+  'changes the candidate revision',
+  'rerun the repository-required checks and final review',
+  'final review still applies in local-only mode',
+  'local-only mode does not authorize a commit',
+  'do not commit by default',
+  'preserve repository-required branch or worktree topology',
+  'do not ask again merely because an authorized action is first-time or consequential',
+  'no exception can weaken that hold',
+  "pr/mr's exact current head revision",
+  'switching delivery modes cannot hide or bypass',
+]) {
+  if (!delivery.includes(phrase)) failures.push(`delivery skill missing: ${phrase}`);
+}
+for (const phrase of [
+  'direct-to-trunk review before the first push',
+  'local-only review',
+  'do not require a pushed build',
+  'final review applies even when repository policy forbids publishing',
+]) {
+  if (!finalReview.includes(phrase)) failures.push(`final-review skill missing: ${phrase}`);
+}
+for (const phrase of [
+  'self-contained fallback',
+  'repository-local policy is silent',
+  'proportional to risk',
+]) {
+  if (!standards.includes(phrase)) failures.push(`engineering standards missing: ${phrase}`);
+}
+for (const [name, text] of [
+  ['engineering standards', standards],
+  ['canonical workflow rule', workflowRule],
+  ['development-discipline README', developmentReadme],
+  ['engineering-standards README', standardsReadme],
+]) {
+  if (!text.includes('repository-local')) failures.push(`${name} missing repository-local precedence`);
+  if (!text.includes('delivery-workflow')) failures.push(`${name} missing delivery-workflow delegation`);
+}
+if (standards.includes('**pr-based**')) {
+  failures.push('engineering standards still imposes PR-based delivery universally');
+}
+if (delivery.includes('without creating a feature branch')) {
+  failures.push('direct-to-trunk must not forbid repository-required feature branches');
+}
+const scaffold = normalize(read('plugins/engineering-standards/skills/scaffold/SKILL.md'));
+for (const phrase of [
+  'commit only when the selected delivery policy authorizes or requires it',
+  'use the commit cadence selected by repository-local delivery policy',
+]) {
+  if (!scaffold.includes(phrase)) {
+    failures.push(`scaffold missing delivery-aware commit guidance: ${phrase}`);
+  }
+}
+
+if (failures.length > 0) {
+  console.error(failures.join('\n'));
+  process.exit(1);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
+@test "delivery-workflow benchmark rejects policy-invalid plans" {
+  benchmark="$ROOT/plugins/development-discipline/skills/delivery-workflow/.plugin-eval/benchmark.json"
+  workspace="$ROOT/plugins/development-discipline/skills/delivery-workflow/.plugin-eval/workspace"
+
+  run jq -e '.verifiers.commands == ["node verify-delivery-plan.mjs"]' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/direct-to-trunk-valid.json"
+  [ "$status" -eq 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/local-only-invalid.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/local-only-valid.json"
+  [ "$status" -eq 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/local-only-authorization-invalid.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/direct-to-trunk-invalid.json"
+  [ "$status" -ne 0 ]
 }
 
 @test "development-discipline makes a failed pushed CI run a terminal-success hold" {

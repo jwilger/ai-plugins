@@ -1,6 +1,6 @@
 ---
 name: final-review
-description: Use when preparing local changes, a branch, pull request, merge request, or merge-to-main for final review before publishing, opening a PR, merging, or claiming readiness, including scope growth, proposed work splits, and medium-risk review-budget checkpoints.
+description: Use when completing or claiming readiness for local-only changes, a branch, pull request, merge request, or merge-to-main; final review applies even when repository policy forbids publishing, including scope growth, proposed work splits, and medium-risk review-budget checkpoints.
 ---
 
 # Final Review
@@ -9,12 +9,21 @@ Run a local, fresh-context review cycle before creating a pull request, merging,
 or claiming a change is ready.
 
 This is the ticket-completion gate, not the gate for preserving each green
-implementation increment. Start it only after the ticket's actual acceptance
-criteria are implemented, no prior failed-run hold remains, and the latest
-pushed build is running or green. A failed build invokes
-`ci-failure-follow-up` and blocks final review and follow-up work until that
-skill's terminal-success hold is released; a newer running build does not mask
-an earlier hold.
+implementation increment. Start it after the ticket's actual acceptance
+criteria are implemented, no prior failed-run hold remains, and apply the
+selected delivery mode:
+
+- For direct-to-trunk review before the first push, use current local
+  verification evidence. Do not require a pushed build that cannot exist until
+  this review permits the push.
+- For local-only review, use current local verification evidence. Do not require
+  a pushed build or create a remote action solely to unlock review.
+- For PR/MR work or a direct-to-trunk revision that has already been pushed,
+  require the latest in-scope pushed build to be running or green before review.
+
+A failed pushed build invokes `ci-failure-follow-up` and blocks final review and
+follow-up work until that skill's terminal-success hold is released; a newer
+running build does not mask an earlier hold or disappear in another mode.
 
 Use the plugin's `development-discipline` stdio MCP when available:
 `final_review.plan` assigns reviewers and `final_review.advance` is the canonical
@@ -316,14 +325,16 @@ policy.
    remains.
 
 4. Fix valid findings when remediation was requested; for review-only requests,
-   report without editing. Before addressing a finding, check the latest pushed
-   build again: running or green permits remediation only when no failure hold
-   exists, while a failed build must follow `ci-failure-follow-up` first.
-   Any remediation that changes the diff leaves the current
+   report without editing. When the selected mode has an in-scope pushed build,
+   check it again: running or green permits remediation only when no failure
+   hold exists, while a failed build must follow `ci-failure-follow-up` first.
+   Direct-to-trunk work before its first push and local-only work use fresh local
+   verification instead. Any remediation that changes the diff leaves the current
    full-review pass: run fast unit tests, run a lightweight review, commit and
-   push, confirm the new latest pushed build is running or green, then submit
-   exactly one diff-bound delta risk assessment. Resume only the assignments it
-   returns; do not restart unaffected lenses. On the initial advancing call
+   push only when the selected mode calls for those actions, confirm any
+   resulting latest pushed build is running or green, then submit exactly one
+   diff-bound delta risk assessment. Resume only the assignments it returns; do
+   not restart unaffected lenses. On the initial advancing call
    that records each disposition, send `caller_decisions` in this shape:
 
    ```json

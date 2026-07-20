@@ -1,0 +1,12 @@
+{
+  "scenario": "direct-to-trunk",
+  "selectedMode": "direct-to-trunk",
+  "remoteActions": ["push"],
+  "ci": { "required": true, "status": "terminal-success" },
+  "reviewEvidence": ["some review happened"],
+  "reviewBeforePush": false,
+  "exactRevisionBinding": false,
+  "authorization": "ask-again",
+  "failedRunHold": false,
+  "modes": null
+}

@@ -13,8 +13,9 @@ Two complementary skills:
   pattern, parse-don't-validate semantic types, railway-oriented errors,
   vertical-slice BDD one step at a time, strict linting, 100% mutation testing,
   eval-driven effectiveness, minimum-necessary context, ADRs for every decision,
-  PR-based CI with required approval and managed releases, and no quality
-  shortcuts.
+  repository-local delivery through the `delivery-workflow` router when
+  available plus a self-contained fallback, managed releases where applicable,
+  and no quality shortcuts.
 - **`scaffold`** — the generative companion: detect the stack and machine, then
   set up the repository to enforce those standards. Goal-driven and
   stack-agnostic — for each area it realizes the goal in the detected stack's
@@ -22,8 +23,10 @@ Two complementary skills:
   git-ignored project-local install sandbox when `nix` is present, else the
   nearest equivalent), a pinned toolchain, a strictest-practical lint allowlist,
   mutation testing, a black-box BDD/acceptance harness, an ADR directory plus
-  harness-agnostic guardrail docs, and general PR-based CI/CD with required
-  approval and managed releases. Per-ecosystem recipes and templates live in
+  harness-agnostic guardrail docs, and CI/CD that follows repository-local
+  policy through the `delivery-workflow` router or the same self-contained
+  fallback, with managed releases where applicable. Per-ecosystem recipes and
+  templates live in
   `skills/scaffold/references/playbook.md`, loaded on demand.
 
 LLM and agentic-system guidance intentionally lives in the separate
