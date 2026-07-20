@@ -7,6 +7,8 @@ generality.
 
 ## Skills
 
+- `change-preflight` - classifies a requested change and records every affected
+  project surface from repository evidence before implementation starts.
 - `test-driven-development` - Kent Beck-style TDD: one failing behavior test,
   one smallest implementation step, then refactor only after green.
 - `delivery-workflow` - routes delivery through repository-local instructions,
