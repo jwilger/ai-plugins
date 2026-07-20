@@ -22,7 +22,7 @@ adm-zip is a transitive development dependency brought in through Promptfoo, Hug
 
 - [x] package-lock.json resolves adm-zip to version 0.6.0 or newer.
 - [x] The full repository CI gate and Promptfoo evaluation dry-run pass with the updated dependency tree.
-- [ ] GitHub Dependabot alert 2 is closed by the pushed main-branch change.
+- [x] GitHub Dependabot alert 2 is closed by the pushed main-branch change.
 
 ## Subtasks
 
