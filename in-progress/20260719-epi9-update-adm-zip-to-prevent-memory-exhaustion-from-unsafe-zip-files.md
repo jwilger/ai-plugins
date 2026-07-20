@@ -27,3 +27,5 @@ adm-zip is a transitive development dependency brought in through Promptfoo, Hug
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-20: Completed in signed commit 9e87507 on main. npm resolves the Promptfoo dependency chain to adm-zip 0.6.0; npm audit reports zero vulnerabilities; Promptfoo dry-run and full local just ci passed; formal security review was clean; exact GitHub CI run 29715592024 completed successfully with the CI gate; Dependabot alert 2 reports fixed.
