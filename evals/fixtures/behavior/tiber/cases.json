@@ -65,7 +65,7 @@
   {
     "case_id": "tiber-new-task-plain-language-ticket",
     "behavior": "Writes backlog tickets that a typical product manager can understand while preserving necessary technical detail.",
-    "prompt": "A user asks you to file this backlog item: \"Implement SSE fanout backpressure with an idempotent cursor checkpoint so reconnect storms do not cause OOMs.\" Show the title and main ticket description you would create, including any implementation notes needed for the technical detail.",
+    "prompt": "A user wants to file this backlog item: \"Implement SSE fanout backpressure with an idempotent cursor checkpoint so reconnect storms do not cause OOMs.\" What should the title and main ticket description say, including any implementation notes needed for the technical detail?",
     "tags": ["tiber", "task-capture", "plain-language", "product-manager"],
     "plugins": ["tiber"],
     "skills": ["tiber", "new-task"],

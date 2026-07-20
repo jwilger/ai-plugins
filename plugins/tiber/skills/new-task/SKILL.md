@@ -49,12 +49,36 @@ the same structured MCP operation.
 Write the title and main description for a typical product manager, not only
 for a specialist engineer:
 
+Before calling the create or update tool, you must draft and check the ticket:
+
+1. Translate the request into a plain-language outcome for the title.
+2. Check that the main description clearly covers the problem, desired
+   outcome, and why it matters. Use separate headings when they improve
+   clarity; headings are not required.
+3. Explain necessary engineering detail where it first appears, or move deeper
+   detail under the exact heading `Implementation notes`.
+4. Compare the draft with the request and identify every specialist term,
+   abbreviation, or engineering phrase copied or closely paraphrased from the
+   request. Treat engineering shorthand and metaphors such as `reconnect storm`
+   as specialist language. Remove each one from the title. In the main
+   description, define it in the same sentence or remove it from the
+   product-facing description and keep it in `Implementation notes`.
+5. Read the title and main description as a non-specialist product manager. If
+   the title still contains unexplained technical terms, rewrite it. If the
+   main description does not state the problem, outcome, and value without
+   depending on the implementation notes, revise it before creating the task.
+
 - The title states the intended outcome in plain language. Do not copy a
   jargon-heavy request into the title when simpler wording is accurate.
+  Do not append an unexplained or implementation-only technical label to an
+  otherwise plain-language title; put that detail in `Implementation notes`.
 - The main description explains the problem, the desired outcome, and why it
   matters to users or the business.
 - Keep necessary technical detail, but explain it where it first appears or
   move it into a clearly labeled `Implementation notes` section.
+- Remove or replace specialist terms that would be unexplained in the title.
+  In the main description, either explain a necessary term on first use or keep
+  the term and its associated detail entirely under `Implementation notes`.
 - Spell out an abbreviation the first time it appears unless the audience can
   reasonably be expected to know it.
 
@@ -64,8 +88,10 @@ use the ticket.
 
 ## Workflow
 
-1. If the request does not contain a task title, ask for a concise title and
-   stop.
+1. If the request does not label a task title but its intended outcome is
+   clear, derive a concise plain-language title from the intended outcome. Ask
+   one concise clarifying question only when the intended outcome is ambiguous,
+   and stop until the user answers.
 2. If the repository has no initialized Tiber board, continue only because the
    requested task capture needs Tiber state; the structured Tiber create
    operation may initialize that state as part of creating the task. Do not
