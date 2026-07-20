@@ -108,6 +108,18 @@ expectPattern('product-manager audience', /typical product manager/);
 expectPattern('problem outcome and value', /problem, the desired outcome, and why it\s+matters/);
 expectPattern('explained necessary terms', /explain it where it first appears/);
 expectPattern('implementation notes boundary', /clearly labeled `Implementation notes` section/);
+expectPattern('mandatory plain-language preflight', /Before calling the create or update tool, you must draft and check/);
+expectPattern('product content checklist', /main description clearly covers the problem, desired\s+outcome, and why it matters/);
+expectPattern('optional product headings', /headings are not required/);
+expectPattern('rewrite jargon-heavy drafts', /If\s+the title still contains unexplained technical terms, rewrite it/);
+expectPattern('no unexplained technical title labels', /Do not append an unexplained or implementation-only technical label/);
+expectPattern('remove unexplained title terms', /Remove or replace specialist terms that would be unexplained in the title/);
+expectPattern('explain or move description terms', /either explain a necessary term on first use or keep\s+the term and its associated detail entirely under `Implementation notes`/);
+expectPattern('derive an implicit title', /derive a concise plain-language title from the intended outcome/);
+expectPattern('clarify only ambiguous outcomes', /Ask\s+one concise clarifying question only when the intended outcome is ambiguous/);
+expectPattern('audit copied specialist terms', /identify every specialist term,\s+abbreviation, or engineering phrase copied or closely paraphrased from the\s+request/);
+expectPattern('incident shorthand is jargon', /Treat engineering shorthand and metaphors such as `reconnect storm`\s+as specialist language/);
+expectPattern('same-sentence explanation or move', /define it in the same sentence or remove it from the\s+product-facing description and keep it in `Implementation notes`/);
 for (const forbidden of [
   'Bash(<plugin-root>/bin/tiber init)',
   'Bash(<plugin-root>/bin/tiber validate --fix)',
