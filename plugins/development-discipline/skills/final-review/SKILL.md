@@ -10,8 +10,11 @@ or claiming a change is ready.
 
 This is the ticket-completion gate, not the gate for preserving each green
 implementation increment. Start it only after the ticket's actual acceptance
-criteria are implemented and the latest pushed build is running or green. A
-failed build blocks final review and follow-up work until repaired.
+criteria are implemented, no prior failed-run hold remains, and the latest
+pushed build is running or green. A failed build invokes
+`ci-failure-follow-up` and blocks final review and follow-up work until that
+skill's terminal-success hold is released; a newer running build does not mask
+an earlier hold.
 
 Use the plugin's `development-discipline` stdio MCP when available:
 `final_review.plan` assigns reviewers and `final_review.advance` is the canonical
@@ -314,8 +317,9 @@ policy.
 
 4. Fix valid findings when remediation was requested; for review-only requests,
    report without editing. Before addressing a finding, check the latest pushed
-   build again: running or green permits remediation, while a failed build must
-   be repaired first. Any remediation that changes the diff leaves the current
+   build again: running or green permits remediation only when no failure hold
+   exists, while a failed build must follow `ci-failure-follow-up` first.
+   Any remediation that changes the diff leaves the current
    full-review pass: run fast unit tests, run a lightweight review, commit and
    push, confirm the new latest pushed build is running or green, then submit
    exactly one diff-bound delta risk assessment. Resume only the assignments it

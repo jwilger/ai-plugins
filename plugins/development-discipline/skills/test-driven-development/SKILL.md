@@ -43,9 +43,11 @@ starting the next RED test:
 2. Run the lightweight review below. If it causes an edit, repeat the fast tests
    and lightweight review until both are green.
 3. Use `rationale-commit-messages`, then commit and push the green increment.
-4. Check the latest pushed build. Continue when CI is running or green. A failed
-   build blocks follow-up implementation, review-finding remediation, and a new
-   ticket until the failure is understood and repaired.
+4. Check the latest pushed build. Continue when CI is running or green only
+   when no prior failure hold exists. A failed build invokes
+   `ci-failure-follow-up`; its exact diagnosis, constrained next push, and
+   terminal-success recovery rule blocks follow-up implementation,
+   review-finding remediation, and a new ticket.
 
 Long-running integration, mutation, exhaustive, full-suite, and similarly
 expensive checks belong in CI unless a local run is directly required to

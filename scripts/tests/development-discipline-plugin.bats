@@ -13,6 +13,7 @@ const root = process.argv[2];
 const plugin = 'development-discipline';
 const requiredSkills = [
   'test-driven-development',
+  'ci-failure-follow-up',
   'rationale-commit-messages',
   'verification-before-completion',
   'systematic-debugging',
@@ -36,6 +37,8 @@ const requiredCases = [
   'development-discipline-systematic-debugging-root-cause',
   'development-discipline-final-review-clean-iterations',
   'development-discipline-tdd-lightweight-post-implementation-review',
+  'development-discipline-ci-failure-follow-up',
+  'development-discipline-ci-failure-recovery-record',
   'development-discipline-rationale-bearing-commit-message',
 ];
 
@@ -114,6 +117,95 @@ for (const caseId of requiredCases) {
 
 if (failures.length > 0) {
   console.error(`${fixturePaths.join('\n')}\n${failures.join('\n')}`);
+  process.exit(1);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
+@test "development-discipline makes a failed pushed CI run a terminal-success hold" {
+  run node - "$ROOT" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.argv[2];
+const read = (relativePath) => {
+  const target = path.join(root, relativePath);
+  return fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
+};
+const normalize = (value) => value.toLowerCase().replace(/\s+/g, ' ');
+const skill = normalize(
+  read('plugins/development-discipline/skills/ci-failure-follow-up/SKILL.md'),
+);
+const tdd = normalize(read('plugins/development-discipline/skills/test-driven-development/SKILL.md'));
+const finalReview = normalize(read('plugins/development-discipline/skills/final-review/SKILL.md'));
+const rules = normalize(read('docs/rules/workflow-and-commits.md'));
+const cases = JSON.parse(read('evals/fixtures/behavior/development-discipline/cases.json'));
+const failures = [];
+
+for (const phrase of [
+  'failed commit sha',
+  'run id or url',
+  'exact failed job',
+  'failed step',
+  'relevant log evidence',
+  'causal diagnosis',
+  'supporting evidence',
+  'unrelated implementation',
+  'next pushed commit',
+  'unrelated or transient',
+  'no intervening push',
+  'never fold it into the active ticket',
+  'failed rerun becomes the new failure record',
+  'transition to action 1 in a separate recovery scope',
+  'no unrelated commit is allowed',
+  'terminal success',
+  'queued|pending|running',
+]) {
+  if (!skill.includes(phrase)) failures.push(`CI follow-up skill missing: ${phrase}`);
+}
+for (const [name, text] of [
+  ['TDD guidance', tdd],
+  ['final-review guidance', finalReview],
+  ['canonical workflow rule', rules],
+]) {
+  if (!text.includes('ci-failure-follow-up')) failures.push(`${name} missing skill delegation`);
+}
+for (const phrase of ['push only the diagnosed repair', 'rerun the unchanged revision', 'no intervening push']) {
+  if (!rules.includes(phrase)) failures.push(`canonical workflow rule missing: ${phrase}`);
+}
+for (const phrase of ['no prior failed-run hold remains', 'newer running build does not mask']) {
+  if (!finalReview.includes(phrase)) failures.push(`final-review entry gate missing: ${phrase}`);
+}
+
+const fixture = cases.find(
+  (entry) => entry.case_id === 'development-discipline-ci-failure-follow-up',
+);
+if (!fixture) {
+  failures.push('missing CI failure follow-up behavior fixture');
+} else {
+  if (!fixture.skills?.includes('ci-failure-follow-up')) {
+    failures.push('CI failure follow-up fixture missing dedicated skill mapping');
+  }
+  const rubric = normalize(String(fixture.semanticRubric || ''));
+  for (const phrase of [
+    'exact failed job',
+    'step',
+    'next pushed commit',
+    'unrelated or transient',
+    'unchanged-revision rerun fails',
+    'new failure record',
+    'diagnosed, tested causal repair',
+    'separate recovery scope',
+    'terminal success',
+  ]) {
+    if (!rubric.includes(phrase)) failures.push(`CI failure rubric missing: ${phrase}`);
+  }
+}
+
+if (failures.length > 0) {
+  console.error(failures.join('\n'));
   process.exit(1);
 }
 NODE
