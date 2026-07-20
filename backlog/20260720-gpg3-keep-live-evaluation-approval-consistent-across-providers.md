@@ -22,6 +22,7 @@ The current repository guidance was narrow enough that an approval reviewer inte
 - [ ] Existing protections for secrets, private data, unrelated files, isolated authentication, and untrusted events remain in force.
 - [ ] Automated tests or behavior fixtures fail if future guidance drops either provider or reintroduces unnecessary approval prompts.
 - [ ] All affected plugin versions, marketplace metadata, documentation, and evaluation coverage are updated as required by repository policy.
+- [ ] Authorized live evaluations reuse the existing authenticated Codex and Claude coding-harness sessions when supported; they do not require provider API keys merely because a live evaluation is being run.
 
 ## Subtasks
 
