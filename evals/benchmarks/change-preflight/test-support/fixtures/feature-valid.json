@@ -1,0 +1,61 @@
+{
+  "scenario": "feature",
+  "beforeEditing": true,
+  "classification": "feature",
+  "repositoryPolicyEvidence": ["AGENTS.md"],
+  "surfaces": {
+    "behavior": {
+      "status": "applicable",
+      "evidence": ["feature/src/commands.md"],
+      "effect": "The command surface gains an export command."
+    },
+    "tests": {
+      "status": "applicable",
+      "evidence": ["feature/tests/cli.bats"],
+      "effect": "CLI behavior needs focused regression coverage."
+    },
+    "documentation": {
+      "status": "applicable",
+      "evidence": ["feature/docs/cli.md"],
+      "effect": "CLI documentation must explain the export command."
+    },
+    "configuration": {
+      "status": "not-applicable",
+      "evidence": ["feature/request.md"],
+      "reason": "No runtime configuration or defaults change."
+    },
+    "packaging": {
+      "status": "applicable",
+      "evidence": [
+        "feature/completions/export.txt",
+        "feature/release-binaries.json"
+      ],
+      "effect": "Completion and release binary outputs must include the command."
+    },
+    "releaseArtifacts": {
+      "status": "applicable",
+      "evidence": ["feature/CHANGELOG.md"],
+      "effect": "The changelog must announce the new command."
+    },
+    "migrations": {
+      "status": "not-applicable",
+      "evidence": ["feature/request.md"],
+      "reason": "No persisted schema or data format changes."
+    },
+    "operationalStartup": {
+      "status": "not-applicable",
+      "evidence": ["feature/request.md"],
+      "reason": "No startup or deployment path changes."
+    },
+    "evaluations": {
+      "status": "applicable",
+      "evidence": ["feature/evals/cases.json"],
+      "effect": "Evaluation cases must exercise export behavior."
+    },
+    "userWorkflows": {
+      "status": "applicable",
+      "evidence": ["feature/workflows/export-cli.md"],
+      "effect": "The end-to-end export workflow changes for users."
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "scenario": "docs-config",
+  "beforeEditing": true,
+  "classification": "docs/config",
+  "repositoryPolicyEvidence": ["AGENTS.md"],
+  "surfaces": {
+    "behavior": {
+      "status": "not-applicable",
+      "evidence": ["docs-config/config/example.toml"],
+      "reason": "The application runtime default is unchanged because it does not load the checked-in example."
+    },
+    "tests": {
+      "status": "not-applicable",
+      "evidence": ["docs-config/request.md"],
+      "reason": "No test contract changes."
+    },
+    "documentation": {
+      "status": "applicable",
+      "evidence": ["docs-config/docs/setup.md"],
+      "effect": "Setup guidance must describe the new default."
+    },
+    "configuration": {
+      "status": "applicable",
+      "evidence": ["docs-config/config/example.toml"],
+      "effect": "The checked-in example uses the new default."
+    },
+    "packaging": {
+      "status": "not-applicable",
+      "evidence": ["docs-config/request.md"],
+      "reason": "No generated or packaged files change."
+    },
+    "releaseArtifacts": {
+      "status": "not-applicable",
+      "evidence": ["docs-config/request.md"],
+      "reason": "No release version or catalog changes."
+    },
+    "migrations": {
+      "status": "not-applicable",
+      "evidence": ["docs-config/request.md"],
+      "reason": "No persisted schema or data changes."
+    },
+    "operationalStartup": {
+      "status": "applicable",
+      "evidence": ["docs-config/scripts/start.sh"],
+      "effect": "Users copy the documented value into configuration that startup consumes."
+    },
+    "evaluations": {
+      "status": "not-applicable",
+      "evidence": ["docs-config/request.md"],
+      "reason": "No agent evaluation behavior changes."
+    },
+    "userWorkflows": {
+      "status": "applicable",
+      "evidence": ["docs-config/workflows/setup.md"],
+      "effect": "The setup workflow tells users how to apply the default."
+    }
+  }
+}

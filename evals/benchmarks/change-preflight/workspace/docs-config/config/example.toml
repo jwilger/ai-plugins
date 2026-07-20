@@ -1,0 +1,2 @@
+# The checked-in example is not loaded directly; users copy it into their own startup configuration.
+mode = "safe"

@@ -1,0 +1,64 @@
+{
+  "scenario": "migration",
+  "beforeEditing": true,
+  "classification": "migration",
+  "repositoryPolicyEvidence": ["AGENTS.md"],
+  "surfaces": {
+    "behavior": {
+      "status": "applicable",
+      "evidence": ["migration/src/task-schema.md"],
+      "effect": "Persisted task records gain the new schema version."
+    },
+    "tests": {
+      "status": "applicable",
+      "evidence": ["migration/tests/migration.bats"],
+      "effect": "Migration and recovery paths need regression coverage."
+    },
+    "documentation": {
+      "status": "applicable",
+      "evidence": ["migration/docs/recovery.md"],
+      "effect": "Recovery documentation must cover the schema transition."
+    },
+    "configuration": {
+      "status": "applicable",
+      "evidence": ["migration/config/schema-version.json"],
+      "effect": "The configured schema version advances."
+    },
+    "packaging": {
+      "status": "not-applicable",
+      "evidence": ["migration/request.md"],
+      "reason": "No generated or packaged files change."
+    },
+    "releaseArtifacts": {
+      "status": "applicable",
+      "evidence": ["migration/CHANGELOG.md"],
+      "effect": "Release notes must call out the persisted-data migration."
+    },
+    "migrations": {
+      "status": "applicable",
+      "evidence": ["migration/workflows/migration-upgrade-rollback.md"],
+      "effect": "The upgrade path must preserve a safe reversal and recovery route.",
+      "decisions": {
+        "compatibility": "Readers remain compatible with the prior schema during upgrade.",
+        "rollback": "Operators can restore the prior schema through the rollback workflow.",
+        "recovery": "The documented recovery path restores interrupted migrations.",
+        "backfill": "Each existing repository runs the migration on demand as its backfill."
+      }
+    },
+    "operationalStartup": {
+      "status": "applicable",
+      "evidence": ["migration/scripts/start.sh"],
+      "effect": "Startup must detect and apply the required schema transition."
+    },
+    "evaluations": {
+      "status": "not-applicable",
+      "evidence": ["migration/request.md"],
+      "reason": "No agent evaluation behavior changes."
+    },
+    "userWorkflows": {
+      "status": "applicable",
+      "evidence": ["migration/workflows/upgrade-verify-recover.md"],
+      "effect": "Users need an upgrade, verification, and recovery sequence."
+    }
+  }
+}

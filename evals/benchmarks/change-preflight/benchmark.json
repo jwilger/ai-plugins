@@ -1,0 +1,67 @@
+{
+  "kind": "plugin-eval-benchmark",
+  "schemaVersion": 2,
+  "version": 1,
+  "targetKind": "skill",
+  "targetName": "change-preflight",
+  "runner": {
+    "type": "codex-cli",
+    "model": "gpt-5.6-terra",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
+  },
+  "workspace": {
+    "sourcePath": "evals/benchmarks/change-preflight/workspace",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
+  "verifiers": {
+    "commands": [
+      "node -e \"const fs=require('node:fs'),c=require('node:crypto');const f='verify-change-preflight.mjs',h=c.createHash('sha256').update(fs.readFileSync(f)).digest('hex');if(h!=='b5aaec7d4533451b1536ed0d407f83246bf251419cab91ff1797d08a1ea28d11')process.exit(1);import('./verify-change-preflight.mjs')\""
+    ]
+  },
+  "notes": [
+    "Every scenario writes change-preflight.json before any implementation work.",
+    "The representative target remains unchanged while the preflight record is created.",
+    "The canonical verifier requires all ten surfaces, scenario-grounded repository evidence, concrete effects for applicable surfaces, scenario-specific reasons for exclusions, and complete migration decisions."
+  ],
+  "scenarios": [
+    {
+      "id": "feature",
+      "title": "Classify a cross-surface feature",
+      "purpose": "Verify that a feature identifies code, verification, documentation, packaging, release, evaluation, and workflow obligations before editing.",
+      "userInput": "Use the change-preflight skill before implementing the requested export command. Inspect AGENTS.md and the representative repository under feature, then write change-preflight.json. Set scenario exactly to `feature`. Use top-level scenario, beforeEditing, classification, repositoryPolicyEvidence, and surfaces fields. repositoryPolicyEvidence is an array of repository paths. The surfaces object uses the ten lower-camel-case surface names from the skill; each applicable value has status, a scenario-grounded evidence array of repository paths, and a concrete effect; each not-applicable value has status, a scenario-grounded evidence array, and a concise scenario-specific reason. Determine every value from the repository. Cite only evidence you inspected. Do not edit project/implementation-target.txt and do not add an implementation plan or steps.",
+      "successChecklist": [
+        "The record is emitted before editing and classifies a feature.",
+        "All ten surfaces contain repository-backed decisions.",
+        "Configuration, migrations, and operational startup are reasoned exclusions rather than silent omissions."
+      ]
+    },
+    {
+      "id": "docs-config",
+      "title": "Keep a narrow documentation and configuration preflight proportional",
+      "purpose": "Verify that narrow work still emits a compact preflight without inventing unrelated obligations.",
+      "userInput": "Use the change-preflight skill before updating the documented default. Inspect AGENTS.md and the representative repository under docs-config, then write change-preflight.json. Set scenario exactly to `docs-config`. Use top-level scenario, beforeEditing, classification, repositoryPolicyEvidence, and surfaces fields. repositoryPolicyEvidence is an array of repository paths. The surfaces object uses the ten lower-camel-case surface names from the skill; each applicable value has status, a scenario-grounded evidence array of repository paths, and a concrete effect; each not-applicable value has status, a scenario-grounded evidence array, and a concise scenario-specific reason. Determine every value from the repository. Cite only evidence you inspected. Do not edit project/implementation-target.txt and do not add an implementation plan or steps.",
+      "successChecklist": [
+        "The compact record classifies docs/config before editing.",
+        "Behavior is not applicable because runtime is unchanged; documentation, configuration, startup, and user workflow are applicable.",
+        "Unrelated surfaces are explicitly and proportionally not applicable."
+      ]
+    },
+    {
+      "id": "migration",
+      "title": "Classify a persisted schema migration",
+      "purpose": "Verify that compatibility, rollback, startup, release, and upgrade workflows are found before editing.",
+      "userInput": "Use the change-preflight skill before changing the persisted task schema. Inspect AGENTS.md and the representative repository under migration, then write change-preflight.json. Set scenario exactly to `migration`. Use top-level scenario, beforeEditing, classification, repositoryPolicyEvidence, and surfaces fields. repositoryPolicyEvidence is an array of repository paths. The surfaces object uses the ten lower-camel-case surface names from the skill; each applicable value has status, a scenario-grounded evidence array of repository paths, and a concrete effect; each not-applicable value has status, a scenario-grounded evidence array, and a concise scenario-specific reason. The migrations value also has a decisions object with compatibility, rollback, recovery, and backfill fields. Determine every value from the repository. Cite only evidence you inspected. Do not edit project/implementation-target.txt and do not add an implementation plan or steps.",
+      "successChecklist": [
+        "The record classifies a migration before editing.",
+        "Compatibility, rollback, startup, release, and user upgrade/recovery workflows are applicable.",
+        "Packaging and evaluations are reasoned exclusions."
+      ]
+    }
+  ]
+}
