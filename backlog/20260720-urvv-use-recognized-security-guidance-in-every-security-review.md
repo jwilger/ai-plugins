@@ -24,3 +24,5 @@ Make security reviews consistently check relevant, widely recognized security gu
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-20: Implementation notes: Review the security lens and its supporting prompts, policies, tests, and behavior evaluations. Incorporate applicable resources from the Open Worldwide Application Security Project (OWASP) and the United States National Institute of Standards and Technology (NIST). Candidate references include the OWASP Top 10, Application Security Verification Standard, API Security Top 10, and relevant NIST Cybersecurity Framework or Secure Software Development Framework material. Keep the repository's proportional threat-model rule: choose resources based on actual trust boundaries and deployment, distinguish requirements from informative guidance, and keep citations and version references current.
