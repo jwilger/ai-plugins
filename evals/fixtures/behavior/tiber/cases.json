@@ -63,6 +63,34 @@
     }
   },
   {
+    "case_id": "tiber-new-task-plain-language-ticket",
+    "behavior": "Writes backlog tickets that a typical product manager can understand while preserving necessary technical detail.",
+    "prompt": "A user asks you to file this backlog item: \"Implement SSE fanout backpressure with an idempotent cursor checkpoint so reconnect storms do not cause OOMs.\" Show the title and main ticket description you would create, including any implementation notes needed for the technical detail.",
+    "tags": ["tiber", "task-capture", "plain-language", "product-manager"],
+    "plugins": ["tiber"],
+    "skills": ["tiber", "new-task"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "edge-case",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the proposed title states the user or business outcome in plain language without unexplained specialist terms; the main description separately explains the problem, desired outcome, and why it matters to a typical product manager; and necessary technical terms are either explained where first used or placed under a clearly labeled Implementation notes section. Fail if the title remains jargon-heavy, the main description assumes knowledge of SSE, backpressure, idempotency, cursors, reconnect storms, or OOMs without explanation, the value is missing, or technical detail is discarded instead of explained or moved to Implementation notes.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Title: Keep the live-update service available when many clients reconnect. Main description: The service can run out of memory when many clients reconnect at once. Limit how quickly updates are delivered so clients can reconnect without overwhelming the service or losing their place. This reduces outages during traffic spikes. Implementation notes: Server-Sent Events (SSE) carry one-way updates from a server to a client. Add backpressure, which slows producers when consumers cannot keep up, and save a reconnect position in a way that repeated saves have the same result."
+      ],
+      "fail": [
+        "Title: Implement SSE fanout backpressure with idempotent cursor checkpointing. Description: Prevent reconnect-storm OOMs in the multiplexed event pipeline."
+      ]
+    }
+  },
+  {
     "case_id": "tiber-new-task-partial-sync-recovery",
     "behavior": "Handles tiber:new-task partial create sync failures without duplicate task creation or raw sync-detail leakage.",
     "prompt": "While using the tiber:new-task skill to capture a backlog ticket with acceptance criteria, the structured Tiber MCP create call returns `tiber.create_sync_failed created=20260708-ab12-dashboard-refresh recovery=\"run tiber sync after resolving the sync error\" source=tiber.command_failed program=git args_redacted=true status=exit status: 1 stderr_redacted=true`. What should the agent do next?",

@@ -44,6 +44,24 @@ sync, signing, or push operations, call the structured Tiber MCP sandbox setup
 tool, request only the narrow case-by-case approval it identifies, and retry
 the same structured MCP operation.
 
+## Write for the whole product team
+
+Write the title and main description for a typical product manager, not only
+for a specialist engineer:
+
+- The title states the intended outcome in plain language. Do not copy a
+  jargon-heavy request into the title when simpler wording is accurate.
+- The main description explains the problem, the desired outcome, and why it
+  matters to users or the business.
+- Keep necessary technical detail, but explain it where it first appears or
+  move it into a clearly labeled `Implementation notes` section.
+- Spell out an abbreviation the first time it appears unless the audience can
+  reasonably be expected to know it.
+
+Do not remove detail that implementers need. Separate that detail from the
+plain-language problem and outcome so both product and engineering readers can
+use the ticket.
+
 ## Workflow
 
 1. If the request does not contain a task title, ask for a concise title and

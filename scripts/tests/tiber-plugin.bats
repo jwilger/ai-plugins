@@ -103,6 +103,11 @@ expectPattern('partial sync duplicate-create prohibition', /do not run\s+create 
 expectPattern('structured sync recovery', /run the structured Tiber MCP\s+sync tool/);
 expectPattern('structured sandbox setup recovery', /structured Tiber MCP sandbox setup\s+tool/);
 expectPattern('default backlog status', /Leave the new task in `backlog`/);
+expectPattern('plain-language task titles', /title states the intended outcome in plain language/);
+expectPattern('product-manager audience', /typical product manager/);
+expectPattern('problem outcome and value', /problem, the desired outcome, and why it\s+matters/);
+expectPattern('explained necessary terms', /explain it where it first appears/);
+expectPattern('implementation notes boundary', /clearly labeled `Implementation notes` section/);
 for (const forbidden of [
   'Bash(<plugin-root>/bin/tiber init)',
   'Bash(<plugin-root>/bin/tiber validate --fix)',
@@ -161,6 +166,9 @@ if (!readme.includes('tiber codex-sandbox --dry-run')) {
 }
 if (!cases.some((testCase) => testCase.case_id === 'tiber-new-task-command-backlog-capture')) {
   failures.push('missing tiber new-task behavior eval case');
+}
+if (!cases.some((testCase) => testCase.case_id === 'tiber-new-task-plain-language-ticket')) {
+  failures.push('missing tiber plain-language ticket behavior eval case');
 }
 if (!cases.some((testCase) => testCase.case_id === 'tiber-codex-sandbox-narrow-setup')) {
   failures.push('missing tiber Codex sandbox behavior eval case');
