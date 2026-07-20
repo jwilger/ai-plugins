@@ -16,6 +16,7 @@ pr_mr_status:
 - [ ] Existing `.gitignore` content remains unchanged except for adding the missing Tiber task-directory rule once.
 - [ ] Equivalent existing task-closing hooks or workflows are detected, and Tiber does not create duplicate automation.
 - [ ] Dry-run output clearly distinguishes files that will change, files already configured, and conflicts that require an explicit choice.
+- [ ] Apply mode refuses to overwrite ambiguous existing integration files without an explicit conflict-resolution choice.
 
 ## Subtasks
 
