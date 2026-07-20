@@ -18,7 +18,7 @@ Add development-discipline guardrails that treat GitHub Actions as an authoritat
 
 ## Acceptance criteria
 
-- [ ] A failed pushed CI run blocks unrelated implementation and pushes until its exact failed job and step are diagnosed.
+- [x] A failed pushed CI run blocks unrelated implementation and pushes until its exact failed job and step are diagnosed.
 - [ ] The next pushed commit after a failure must state and address the diagnosed cause, or explicitly document why the failure is unrelated or transient with evidence.
 - [ ] Workflow guidance requires polling the replacement commit to a terminal successful state before claiming the failure repaired.
 
