@@ -463,7 +463,7 @@ NODE
   cp "$test_support/fixtures/feature-valid.json" "$live_workspace/change-preflight.json"
   verifier_command="$(jq -r '.verifiers.commands[0]' "$benchmark")"
   pushd "$live_workspace" >/dev/null
-  run /usr/bin/env zsh -lc "$verifier_command"
+  run /usr/bin/env bash -lc "$verifier_command"
   popd >/dev/null
   [ "$status" -eq 0 ]
 
@@ -473,13 +473,13 @@ NODE
   cp -R "$workspace/." "$cross_case_workspace/"
   cp "$test_support/fixtures/feature-valid.json" "$cross_case_workspace/change-preflight.json"
   pushd "$cross_case_workspace" >/dev/null
-  run /usr/bin/env zsh -lc "$verifier_command"
+  run /usr/bin/env bash -lc "$verifier_command"
   popd >/dev/null
   [ "$status" -ne 0 ]
 
   printf '%s\n' 'implementation started early' >"$live_workspace/project/implementation-target.txt"
   pushd "$live_workspace" >/dev/null
-  run /usr/bin/env zsh -lc "$verifier_command"
+  run /usr/bin/env bash -lc "$verifier_command"
   popd >/dev/null
   [ "$status" -ne 0 ]
 
@@ -489,7 +489,7 @@ NODE
   cp -R "$workspace/." "$live_plan_workspace/"
   jq '.surfaces.behavior.plan = ["edit source"]' "$test_support/fixtures/feature-valid.json" >"$live_plan_workspace/change-preflight.json"
   pushd "$live_plan_workspace" >/dev/null
-  run /usr/bin/env zsh -lc "$verifier_command"
+  run /usr/bin/env bash -lc "$verifier_command"
   popd >/dev/null
   [ "$status" -ne 0 ]
 
@@ -500,7 +500,7 @@ NODE
   cp "$test_support/fixtures/feature-valid.json" "$live_evidence_workspace/change-preflight.json"
   printf '%s\n' 'implementation started early' >>"$live_evidence_workspace/feature/request.md"
   pushd "$live_evidence_workspace" >/dev/null
-  run /usr/bin/env zsh -lc "$verifier_command"
+  run /usr/bin/env bash -lc "$verifier_command"
   popd >/dev/null
   [ "$status" -ne 0 ]
 
@@ -510,7 +510,7 @@ NODE
   cp -R "$workspace/." "$live_reason_workspace/"
   jq '.surfaces.behavior.reason = "Not applicable because behavior is unchanged."' "$test_support/fixtures/feature-valid.json" >"$live_reason_workspace/change-preflight.json"
   pushd "$live_reason_workspace" >/dev/null
-  run /usr/bin/env zsh -lc "$verifier_command"
+  run /usr/bin/env bash -lc "$verifier_command"
   popd >/dev/null
   [ "$status" -ne 0 ]
 
