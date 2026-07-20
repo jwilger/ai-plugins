@@ -2,12 +2,14 @@
 title: Preserve existing repository setup when adding Tiber
 blocked_by: []
 blocks: []
-tags: []
+tags: [tiber, scaffold, safety, eval-case]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
+
+Adding Tiber to an existing repository can currently erase unrelated ignore rules and create a second copy of task-closing automation. Change repository setup so it preserves what is already there, adds only missing Tiber integration, and clearly reports conflicts before making changes. This prevents setup from damaging project configuration or creating competing automation.
 
 ## Context / Why
 
