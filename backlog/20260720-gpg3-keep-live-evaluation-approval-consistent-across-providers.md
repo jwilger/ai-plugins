@@ -27,3 +27,5 @@ The current repository guidance was narrow enough that an approval reviewer inte
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-20: Owner reconfirmed on 2026-07-20 that standing authorization is symmetric: Codex/OpenAI via the existing ChatGPT subscription-authenticated coding harness and Claude/Anthropic via the existing Anthropic subscription-authenticated coding harness. Audit found AGENTS.md's generic standing-authorization section currently names only Codex/ChatGPT/OpenAI and must be corrected. Provider-specific Codex benchmark docs/scripts should remain provider-specific rather than falsely implying Anthropic execution. Audit every actual approval/execution guardrail and add regression coverage that requires both provider pairs.
