@@ -13,6 +13,8 @@ A repository may already have a task board created by another tool. Tiber curren
 
 ## Context / Why
 
+Covers GitHub issue #54. Implementation notes: Add durable commit metadata that identifies Tiber and its version on every commit Tiber writes to the Git tasks branch. Before any read or write, inspect the current tasks-branch head commit. Missing ownership metadata must produce an actionable error and no mutation. An explicit migration may establish ownership by creating a Tiber-stamped head commit; automatic conversion of legacy content is outside this ticket.
+
 ## Acceptance criteria
 
 ## Subtasks
