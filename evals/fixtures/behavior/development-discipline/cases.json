@@ -787,7 +787,7 @@
   {
     "case_id": "development-discipline-preflight-feature",
     "behavior": "Identifies the complete repository surface of a feature before editing.",
-    "prompt": "Before implementing a new command that exports task data, inspect the repository and give the change preflight. The repository has command parsing, Bats tests, CLI docs, a generated completion file, release binaries, and behavior evals.",
+    "prompt": "Use development-discipline:change-preflight. Use any installed skill content already supplied by the harness; do not inspect repository files to read it. Follow the installed skill's exact output record; do not substitute another preflight format. Use the repository facts stated here as evidence; repository inspection is unavailable in this advisory scenario. Before implementing a new command that exports task data, give the change preflight. The repository has command parsing, Bats tests, CLI docs, a generated completion file, release binaries, and behavior evals.",
     "tags": ["development-discipline", "preflight", "feature"],
     "plugins": ["development-discipline"],
     "skills": ["change-preflight"],
@@ -801,11 +801,11 @@
     },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.66,
-    "semanticRubric": "Pass if, before proposing edits, the response classifies the feature, names applicable behavior, tests, documentation, packaging or generated artifacts, release artifacts, evals, and user workflow surfaces with repository evidence, and gives reasoned not-applicable entries for configuration, migrations, or operational startup when evidence supports that conclusion. Fail if it starts implementation, gives a generic checklist without evidence, or omits surfaces silently.",
+    "semanticRubric": "Pass if, before proposing edits, the response classifies the feature, explicitly decides all ten named surfaces, and maps applicable behavior, tests, documentation, packaging or generated artifacts, release artifacts, evals, and user workflow surfaces to the named repository evidence. Configuration may be applicable when command-line flags or arguments are stated in the prompt or identified as a narrow assumption about the new command's proposed public interface; otherwise require a reasoned not-applicable decision. Require reasoned not-applicable entries for migrations and operational startup when the stated evidence supports them. Treat a row as evidence-backed when it directly maps a named repository artifact, workflow, explicit assumption, or explicit absence from the prompt to that surface; do not require a separate evidence section. Fail if it starts implementation, gives a generic checklist without those mappings, invents interface details without identifying an assumption, or omits surfaces silently.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Change classification: feature. Affected surfaces include parser behavior, Bats coverage, CLI docs, generated completions, release binaries, behavior evals, and the export workflow; migrations are not applicable because no persisted schema changes."
+        "Change classification: feature. Affected surfaces: Behavior applicable — new task export command; Tests applicable — Bats coverage; Documentation applicable — CLI docs; Configuration not applicable — no flag or default is stated; Packaging applicable — generated completion; Release artifacts applicable — release binaries; Migrations not applicable — no persisted schema changes; Operational startup not applicable — no startup path changes; Evaluations applicable — behavior evals; User workflows applicable — task export workflow."
       ],
       "fail": ["I will add the command and tests, then see what else fails."]
     }
@@ -813,7 +813,7 @@
   {
     "case_id": "development-discipline-preflight-bugfix",
     "behavior": "Finds regression and downstream surfaces for a bug fix before editing.",
-    "prompt": "A dashboard sometimes sorts active work after backlog items. Before fixing it, provide an evidence-backed preflight. Nearby code, a browser test, user documentation, and startup configuration are present; packaging and data schemas are unchanged.",
+    "prompt": "Use development-discipline:change-preflight. Use any installed skill content already supplied by the harness; do not inspect repository files to read it. Follow the installed skill's exact output record; do not substitute another preflight format. Use the repository facts stated here as evidence; repository inspection is unavailable in this advisory scenario. A dashboard sometimes sorts active work after backlog items. Before fixing it, provide an evidence-backed preflight. Nearby code, a browser test, user documentation, and startup configuration are present; packaging and data schemas are unchanged.",
     "tags": ["development-discipline", "preflight", "bugfix"],
     "plugins": ["development-discipline"],
     "skills": ["change-preflight"],
@@ -834,7 +834,7 @@
   {
     "case_id": "development-discipline-preflight-refactor",
     "behavior": "Distinguishes preserved behavior from structural and verification effects in a refactor.",
-    "prompt": "Before extracting duplicated command validation into one parser, produce a preflight. Public CLI behavior should remain unchanged, but parser tests, error-contract fixtures, contributor docs, and mutation checks may be affected.",
+    "prompt": "Use development-discipline:change-preflight. Use any installed skill content already supplied by the harness; do not inspect repository files to read it. Follow the installed skill's exact output record; do not substitute another preflight format. Use the repository facts stated here as evidence; repository inspection is unavailable in this advisory scenario. Before extracting duplicated command validation into one parser, produce a preflight. Public CLI behavior should remain unchanged, but parser tests, error-contract fixtures, contributor docs, and mutation checks may be affected.",
     "tags": ["development-discipline", "preflight", "refactor"],
     "plugins": ["development-discipline"],
     "skills": ["change-preflight"],
@@ -853,7 +853,7 @@
   {
     "case_id": "development-discipline-preflight-documentation-configuration",
     "behavior": "Uses proportional preflight for a narrow documentation and configuration change.",
-    "prompt": "Update one documented default and its checked-in configuration example. Before editing, provide the proportional preflight. The default is read at startup, but no code, package, schema, or release artifact changes.",
+    "prompt": "Use development-discipline:change-preflight. Use any installed skill content already supplied by the harness; do not inspect repository files to read it. Follow the installed skill's exact output record; do not substitute another preflight format. Use the repository facts stated here as evidence; repository inspection is unavailable in this advisory scenario. Update one documented default and its checked-in configuration example. Before editing, provide the proportional preflight. Users copy the example into their own startup configuration; the application does not load the example, and its runtime default is unchanged. No automated test or agent evaluation consumes the documentation or example. No code, package, schema, or release artifact changes.",
     "tags": [
       "development-discipline",
       "preflight",
@@ -865,11 +865,11 @@
     "coverage": { "kinds": ["scope-boundary", "workflow"] },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.66,
-    "semanticRubric": "Pass if the response classifies docs/config before edits, identifies documentation, configuration, startup interpretation, and the affected user workflow, then explicitly marks behavior tests, packaging, release artifacts, migrations, and evals not applicable with evidence-backed reasons where appropriate. Fail if it skips preflight merely because the edit is narrow or expands every row into implementation work without evidence.",
+    "semanticRubric": "Pass if the response classifies docs/config before edits, identifies documentation, configuration, startup interpretation, and the affected user workflow, then explicitly marks Behavior, Tests, Packaging, Release artifacts, Migrations, and Evaluations not applicable with evidence-backed reasons. Fail if it skips preflight merely because the edit is narrow or expands every row into implementation work without evidence.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Change classification: docs/config. The documented default, checked-in example, startup reading, and setup workflow are applicable. Code behavior, packaging, migrations, and evals are not applicable because the runtime default and shipped artifacts do not change."
+        "Change classification: docs/config. Documentation, the checked-in example, users' copied startup configuration, and the setup workflow are applicable. Behavior and tests are not applicable because the application does not load the example and no automated test consumes it. Packaging, release artifacts, migrations, and evaluations are not applicable because shipped artifacts, stored formats, and eval coverage do not change."
       ],
       "fail": [
         "This is documentation-only, so edit the files without a preflight."
@@ -879,7 +879,7 @@
   {
     "case_id": "development-discipline-preflight-packaging-release",
     "behavior": "Finds synchronized packaging and release obligations before editing.",
-    "prompt": "A plugin skill changes behavior and must ship in two coding harnesses with versioned manifests, marketplace catalogs, built binaries, checksums, README rows, and behavior evals. Give the preflight before editing.",
+    "prompt": "Use development-discipline:change-preflight. Use any installed skill content already supplied by the harness; do not inspect repository files to read it. Follow the installed skill's exact output record; do not substitute another preflight format. Use the repository facts stated here as evidence; repository inspection is unavailable in this advisory scenario. A plugin skill changes behavior and must ship in two coding harnesses with versioned manifests, marketplace catalogs, built binaries, checksums, README rows, and behavior evals. Give the preflight before editing.",
     "tags": ["development-discipline", "preflight", "packaging", "release"],
     "plugins": ["development-discipline"],
     "skills": ["change-preflight"],
@@ -899,19 +899,19 @@
   },
   {
     "case_id": "development-discipline-preflight-migration",
-    "behavior": "Identifies compatibility, rollback, and operational surfaces for a migration.",
-    "prompt": "Before changing a persisted task-file schema, provide a preflight. Existing repositories must keep working, startup reads these files, a migration command exists, docs describe recovery, and release notes announce format changes.",
+    "behavior": "Identifies compatibility, rollback, recovery, backfill, and operational surfaces for a migration.",
+    "prompt": "Use development-discipline:change-preflight. Use any installed skill content already supplied by the harness; do not inspect repository files to read it. Follow the installed skill's exact output record; do not substitute another preflight format. Use the repository facts stated here as evidence; repository inspection is unavailable in this advisory scenario. Before changing a persisted task-file schema, provide a preflight. Existing repositories must keep working, startup reads these files, a migration command exists, docs describe recovery, and release notes announce format changes. Task files are local to each repository and the command migrates them on demand; no central batch backfill exists.",
     "tags": ["development-discipline", "preflight", "migration"],
     "plugins": ["development-discipline"],
     "skills": ["change-preflight"],
     "coverage": { "kinds": ["state-transition", "release-integration"] },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.66,
-    "semanticRubric": "Pass if the response classifies a migration before edits and identifies schema behavior, compatibility and rollback, migration tests, documentation, configuration, packaging or release implications, startup reading, eval relevance, and end-to-end upgrade and recovery workflows with evidence. Fail if it treats a schema edit as isolated, omits rollback or compatibility, or starts implementation before the preflight.",
+    "semanticRubric": "Pass if the response classifies a migration before edits and identifies schema behavior, compatibility, rollback, recovery, and backfill; migration tests; documentation; configuration; packaging or release implications; startup reading; eval relevance; and end-to-end upgrade and recovery workflows with evidence. The stated on-demand migration is the backfill approach for each repository; only a central batch backfill is not applicable. Fail if it treats all backfill as not applicable, treats a schema edit as isolated, omits rollback, recovery, backfill, or compatibility, or starts implementation before the preflight.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Change classification: migration. Cover old/new schema reads, migration and rollback tests, startup compatibility, recovery docs, release notes, and the repository upgrade workflow before changing the format."
+        "Change classification: migration. Cover old/new schema reads, migration and rollback tests, startup compatibility, recovery docs, release notes, on-demand per-repository backfill with no central batch backfill, and the repository upgrade and recovery workflows before changing the format."
       ],
       "fail": [
         "Update the schema and add a migration script; compatibility can be handled afterward."
@@ -921,7 +921,7 @@
   {
     "case_id": "development-discipline-preflight-operational-change",
     "behavior": "Finds startup, recovery, configuration, and operator workflow effects before editing.",
-    "prompt": "Before changing a service health check and retry policy, provide the preflight. The repository has deployment configuration, startup hooks, incident runbooks, integration tests, a packaged service image, and release notes.",
+    "prompt": "Use development-discipline:change-preflight. Use any installed skill content already supplied by the harness; do not inspect repository files to read it. Follow the installed skill's exact output record; do not substitute another preflight format. Use the repository facts stated here as evidence; repository inspection is unavailable in this advisory scenario. Before changing a service health check and retry policy, provide the preflight. The repository has deployment configuration, startup hooks, incident runbooks, integration tests, a packaged service image, and release notes.",
     "tags": ["development-discipline", "preflight", "operations"],
     "plugins": ["development-discipline"],
     "skills": ["change-preflight"],
@@ -932,7 +932,7 @@
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Change classification: operational. Health behavior, retry integration tests, deployment config, startup hooks, runbooks, image packaging, release notes, and deploy/observe/recover workflows are applicable; state whether migration is not applicable because no persistent format changes."
+        "Change classification: operational change. Health behavior, retry integration tests, deployment config, startup hooks, runbooks, image packaging, release notes, and deploy/observe/recover workflows are applicable; state whether migration is not applicable because no persistent format changes."
       ],
       "fail": ["Change the retry constant and run unit tests."]
     }

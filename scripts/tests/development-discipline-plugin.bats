@@ -88,9 +88,56 @@ const preflightSkill = fs.readFileSync(
   'utf8',
 );
 const preflightDescription = preflightSkill.match(/^description:\s*(.+)$/m)?.[1] || '';
+if (!preflightDescription.startsWith('Use when ')) {
+  fail('change-preflight description must begin with Use when');
+}
 for (const trigger of ['documentation', 'configuration', 'packaging', 'release']) {
   if (!preflightDescription.toLowerCase().includes(trigger)) {
     fail(`change-preflight description missing trigger: ${trigger}`);
+  }
+}
+if (!preflightDescription.includes('all ten surfaces')) {
+  fail('change-preflight description must require all ten surfaces');
+}
+if (!preflightSkill.includes('Skip this skill when')) {
+  fail('change-preflight must state an explicit skip condition');
+}
+if (!preflightSkill.includes('operational change | mixed')) {
+  fail('change-preflight must use the canonical operational change classification');
+}
+if (!/Treat\s+those supplied facts as repository evidence/.test(preflightSkill)) {
+  fail('change-preflight must explain evidence handling for advisory scenarios');
+}
+if (!preflightSkill.includes('Write all ten surface names explicitly')) {
+  fail('change-preflight must require an explicit decision for every surface');
+}
+if (!preflightSkill.includes('Never substitute a generic checklist')) {
+  fail('change-preflight must reject generic checklist output');
+}
+if (!/describes\s+runtime behavior does not itself change that behavior/.test(preflightSkill)) {
+  fail('change-preflight must distinguish documentation from runtime behavior');
+}
+if (!preflightSkill.includes('deploy, observe, and recover')) {
+  fail('change-preflight must include operator workflows');
+}
+if (!/compatibility, rollback,\s+recovery, and backfill/.test(preflightSkill)) {
+  fail('change-preflight must require complete migration decisions');
+}
+if (!preflightSkill.includes('on-demand migration performed separately in each existing\nrepository as the backfill strategy')) {
+  fail('change-preflight must treat per-repository on-demand migration as backfill');
+}
+if (!preflightSkill.includes('Do not defer a migration decision')) {
+  fail('change-preflight must resolve migration rows before editing');
+}
+if (!preflightSkill.includes('Tie every row to a stated repository fact')) {
+  fail('change-preflight must require row-level repository evidence');
+}
+if (!/chooses, copies, or applies\s+documented configuration/.test(preflightSkill)) {
+  fail('change-preflight must include documented setup workflows');
+}
+for (const surface of ['Behavior:', 'Tests:', 'Documentation:', 'Configuration:', 'Packaging:', 'Release artifacts:', 'Migrations:', 'Operational startup:', 'Evaluations:', 'User workflows:']) {
+  if (!preflightSkill.includes(surface)) {
+    fail(`change-preflight output skeleton missing ${surface}`);
   }
 }
 for (const skill of forbiddenSkills) {
@@ -152,8 +199,54 @@ for (const caseId of requiredCases) {
   if (typeof testCase.semanticRubric !== 'string' || testCase.semanticRubric.length < 80) {
     fail(`${caseId}: missing semantic rubric`);
   }
+  if (
+    caseId === 'development-discipline-preflight-feature' &&
+    !testCase.semanticRubric.includes('directly maps a named repository artifact')
+  ) {
+    fail(`${caseId}: rubric must recognize row-level repository evidence`);
+  }
+  if (
+    caseId === 'development-discipline-preflight-migration' &&
+    (!testCase.semanticRubric.includes('backfill') ||
+      !testCase.semanticRubric.includes('recovery') ||
+      !testCase.semanticRubric.includes('on-demand migration is the backfill approach'))
+  ) {
+    fail(`${caseId}: rubric must enforce complete migration decisions`);
+  }
+  if (
+    caseId === 'development-discipline-preflight-migration' &&
+    !testCase.prompt.includes('no central batch backfill')
+  ) {
+    fail(`${caseId}: prompt must provide evidence for the backfill decision`);
+  }
   if (!Array.isArray(testCase.calibration?.pass) || !Array.isArray(testCase.calibration?.fail)) {
     fail(`${caseId}: missing pass/fail calibration examples`);
+  }
+  if (
+    (testCase.skills || []).includes('change-preflight') &&
+    !testCase.prompt.includes('Use the repository facts stated here as evidence')
+  ) {
+    fail(`${caseId}: advisory prompt must identify its evidence source`);
+  }
+  if (
+    (testCase.skills || []).includes('change-preflight') &&
+    !testCase.prompt.startsWith('Use development-discipline:change-preflight.')
+  ) {
+    fail(`${caseId}: classification fixture must invoke the skill under test`);
+  }
+  if (
+    (testCase.skills || []).includes('change-preflight') &&
+    !testCase.prompt.includes("Follow the installed skill's exact output record")
+  ) {
+    fail(`${caseId}: classification fixture must require the skill contract`);
+  }
+  if (
+    (testCase.skills || []).includes('change-preflight') &&
+    !testCase.prompt.includes(
+      'Use any installed skill content already supplied by the harness',
+    )
+  ) {
+    fail(`${caseId}: classification fixture must require harness-supplied skill retrieval`);
   }
 }
 
@@ -279,6 +372,280 @@ NODE
 
   run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/direct-to-trunk-invalid.json"
   [ "$status" -ne 0 ]
+}
+
+@test "change-preflight benchmark rejects incomplete or speculative classifications" {
+  benchmark="$ROOT/evals/benchmarks/change-preflight/benchmark.json"
+  workspace="$ROOT/evals/benchmarks/change-preflight/workspace"
+  test_support="$ROOT/evals/benchmarks/change-preflight/test-support"
+
+  run jq -e '.verifiers.commands | length == 1' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run jq -e '.workspace.sourcePath == "evals/benchmarks/change-preflight/workspace"' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run jq -e '(.verifiers.commands[0] | contains("verify-change-preflight.mjs"))' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run jq -e 'any(.notes[]; contains("representative target remains unchanged"))' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run jq -e 'all(.scenarios[].userInput; (contains("Each evidence array") or contains("Their exact reasons")) | not)' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run jq -e 'all(.scenarios[].userInput; contains("surfaces object"))' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run jq -e '(.scenarios[] | select(.id == "feature") | .userInput) | contains("scenario exactly to `feature`")' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run jq -e '(.scenarios[] | select(.id == "docs-config") | .userInput) | contains("scenario exactly to `docs-config`")' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run jq -e 'any(.scenarios[] | select(.id == "docs-config") | .successChecklist[]; contains("Behavior is not applicable because runtime is unchanged"))' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run grep -F "The checked-in example is not loaded directly" "$workspace/docs-config/config/example.toml"
+  [ "$status" -eq 0 ]
+
+  run grep -F "Startup reads the user's copied configuration" "$workspace/docs-config/scripts/start.sh"
+  [ "$status" -eq 0 ]
+
+  run jq -e '(.scenarios[] | select(.id == "migration") | .userInput) | contains("scenario exactly to `migration`")' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  for evidence in \
+    AGENTS.md \
+    feature/src/commands.md \
+    feature/tests/cli.bats \
+    docs-config/config/example.toml \
+    migration/src/task-schema.md; do
+    run test -f "$workspace/$evidence"
+    [ "$status" -eq 0 ]
+  done
+
+  run test -f "$workspace/project/implementation-target.txt"
+  [ "$status" -eq 0 ]
+
+  changed_workspace="$(mktemp -d)"
+  cp -R "$workspace/." "$changed_workspace/"
+  printf '%s\n' 'implementation started early' >"$changed_workspace/project/implementation-target.txt"
+  run node "$workspace/verify-change-preflight.mjs" "$test_support/fixtures/feature-valid.json" "$changed_workspace" feature
+  [ "$status" -ne 0 ]
+
+  changed_evidence_workspace="$(mktemp -d)"
+  cp -R "$workspace/." "$changed_evidence_workspace/"
+  printf '%s\n' 'implementation started early' >>"$changed_evidence_workspace/feature/request.md"
+  run node "$workspace/verify-change-preflight.mjs" "$test_support/fixtures/feature-valid.json" "$changed_evidence_workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"representative repository changed before preflight completed"* ]]
+
+  run node "$workspace/verify-change-preflight.mjs" "$test_support/fixtures/feature-valid.json" "$workspace" feature
+  [ "$status" -eq 0 ]
+
+  wrong_scenario="$(mktemp)"
+  jq '.scenario = "docs-config"' "$test_support/fixtures/feature-valid.json" >"$wrong_scenario"
+  run node "$workspace/verify-change-preflight.mjs" "$wrong_scenario" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"record does not match trusted scenario"* ]]
+
+  run node "$workspace/verify-change-preflight.mjs" "$test_support/fixtures/docs-config-valid.json" "$workspace" docs-config
+  [ "$status" -eq 0 ]
+
+  run node "$workspace/verify-change-preflight.mjs" "$test_support/fixtures/migration-valid.json" "$workspace" migration
+  [ "$status" -eq 0 ]
+
+  live_root="$(mktemp -d -p /tmp plugin-eval-feature-XXXXXXXX)"
+  live_workspace="$live_root/workspace"
+  mkdir "$live_workspace"
+  cp -R "$workspace/." "$live_workspace/"
+  cp "$test_support/fixtures/feature-valid.json" "$live_workspace/change-preflight.json"
+  verifier_command="$(jq -r '.verifiers.commands[0]' "$benchmark")"
+  pushd "$live_workspace" >/dev/null
+  run /usr/bin/env zsh -lc "$verifier_command"
+  popd >/dev/null
+  [ "$status" -eq 0 ]
+
+  cross_case_root="$(mktemp -d -p /tmp plugin-eval-docs-config-XXXXXXXX)"
+  cross_case_workspace="$cross_case_root/workspace"
+  mkdir "$cross_case_workspace"
+  cp -R "$workspace/." "$cross_case_workspace/"
+  cp "$test_support/fixtures/feature-valid.json" "$cross_case_workspace/change-preflight.json"
+  pushd "$cross_case_workspace" >/dev/null
+  run /usr/bin/env zsh -lc "$verifier_command"
+  popd >/dev/null
+  [ "$status" -ne 0 ]
+
+  printf '%s\n' 'implementation started early' >"$live_workspace/project/implementation-target.txt"
+  pushd "$live_workspace" >/dev/null
+  run /usr/bin/env zsh -lc "$verifier_command"
+  popd >/dev/null
+  [ "$status" -ne 0 ]
+
+  live_plan_root="$(mktemp -d -p /tmp plugin-eval-feature-XXXXXXXX)"
+  live_plan_workspace="$live_plan_root/workspace"
+  mkdir "$live_plan_workspace"
+  cp -R "$workspace/." "$live_plan_workspace/"
+  jq '.surfaces.behavior.plan = ["edit source"]' "$test_support/fixtures/feature-valid.json" >"$live_plan_workspace/change-preflight.json"
+  pushd "$live_plan_workspace" >/dev/null
+  run /usr/bin/env zsh -lc "$verifier_command"
+  popd >/dev/null
+  [ "$status" -ne 0 ]
+
+  live_evidence_root="$(mktemp -d -p /tmp plugin-eval-feature-XXXXXXXX)"
+  live_evidence_workspace="$live_evidence_root/workspace"
+  mkdir "$live_evidence_workspace"
+  cp -R "$workspace/." "$live_evidence_workspace/"
+  cp "$test_support/fixtures/feature-valid.json" "$live_evidence_workspace/change-preflight.json"
+  printf '%s\n' 'implementation started early' >>"$live_evidence_workspace/feature/request.md"
+  pushd "$live_evidence_workspace" >/dev/null
+  run /usr/bin/env zsh -lc "$verifier_command"
+  popd >/dev/null
+  [ "$status" -ne 0 ]
+
+  live_reason_root="$(mktemp -d -p /tmp plugin-eval-feature-XXXXXXXX)"
+  live_reason_workspace="$live_reason_root/workspace"
+  mkdir "$live_reason_workspace"
+  cp -R "$workspace/." "$live_reason_workspace/"
+  jq '.surfaces.behavior.reason = "Not applicable because behavior is unchanged."' "$test_support/fixtures/feature-valid.json" >"$live_reason_workspace/change-preflight.json"
+  pushd "$live_reason_workspace" >/dev/null
+  run /usr/bin/env zsh -lc "$verifier_command"
+  popd >/dev/null
+  [ "$status" -ne 0 ]
+
+  valid="$test_support/fixtures/feature-valid.json"
+  invalid="$(mktemp)"
+
+  jq 'del(.surfaces.evaluations)' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"all and only the ten required surfaces"* ]]
+
+  jq '.surfaces.behavior = {status:"not-applicable", evidence:["feature/src/commands.md"], reason:"No behavior changes are requested."}' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior must be applicable for feature"* ]]
+
+  jq '.implementationPlan = ["edit source"]' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unexpected top-level fields: implementationPlan"* ]]
+
+  jq '.surfaces.behavior.evidence = ["nearby code"]' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior evidence is not grounded"* ]]
+
+  jq '.steps = []' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unexpected top-level fields: steps"* ]]
+
+  jq '.surfaces.configuration.evidence = ["feature/src/commands.md"]' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"configuration evidence is not grounded"* ]]
+
+  jq '.surfaces.behavior.plan = ["edit source"]' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior has unexpected fields: plan"* ]]
+
+  jq '.repositoryPolicyEvidence = ["repository policy"]' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repositoryPolicyEvidence must cite repository facts"* ]]
+
+  jq '.repositoryPolicyEvidence = ["README.md"]' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repositoryPolicyEvidence must cite repository facts"* ]]
+
+  jq '.surfaces.behavior.evidence = ["feature/request.md"]' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior evidence is not grounded"* ]]
+
+  jq '.surfaces.configuration.reason = "Not applicable."' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"configuration not-applicable decision needs a scenario-specific reason"* ]]
+
+  jq '.surfaces.behavior.reason = "Not applicable because behavior is unchanged."' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior has unexpected fields: reason"* ]]
+
+  jq '.repositoryPolicyEvidence = ["AGENTS.md", "README.md"]' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repositoryPolicyEvidence must cite repository facts"* ]]
+
+  jq 'del(.surfaces.behavior.effect)' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior applicable decision needs a concrete effect"* ]]
+
+  jq '.surfaces.configuration.reason = "This unrelated sentence is comfortably long enough."' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"scenario-specific reason"* ]]
+
+  jq '.surfaces.behavior.evidence += ["feature/request.md"]' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior evidence is not grounded"* ]]
+
+  jq '.surfaces.behavior.effect = "This sentence is long but says nothing useful."' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior applicable decision needs a concrete effect"* ]]
+
+  jq '.surfaces.behavior.effect = "No command or behavior changes are needed."' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior applicable decision needs a concrete effect"* ]]
+
+  jq '.surfaces.behavior.effect = "Runtime behavior remains unchanged."' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"behavior applicable decision needs a concrete effect"* ]]
+
+  jq '.surfaces.configuration.reason = "Runtime configuration defaults absolutely change."' "$valid" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" feature
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"configuration not-applicable decision needs a scenario-specific reason"* ]]
+
+  jq 'del(.surfaces.migrations.decisions.backfill)' "$test_support/fixtures/migration-valid.json" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" migration
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"compatibility, rollback, recovery, and backfill"* ]]
+
+  jq '.surfaces.migrations.decisions.backfill = "This sentence is long but says nothing useful."' "$test_support/fixtures/migration-valid.json" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" migration
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"compatibility, rollback, recovery, and backfill"* ]]
+
+  jq '.surfaces.migrations.decisions.compatibility = "Compatibility will be broken and old repositories stop working." | .surfaces.migrations.decisions.rollback = "Rollback is impossible and unsupported for operators."' "$test_support/fixtures/migration-valid.json" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" migration
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"compatibility, rollback, recovery, and backfill"* ]]
+
+  jq '.surfaces.migrations.decisions.backfill = "Existing repositories will never receive backfill."' "$test_support/fixtures/migration-valid.json" >"$invalid"
+  run node "$workspace/verify-change-preflight.mjs" "$invalid" "$workspace" migration
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"compatibility, rollback, recovery, and backfill"* ]]
+}
+
+@test "change-preflight keeps populated secrets outside preflight evidence" {
+  skill="$ROOT/plugins/development-discipline/skills/change-preflight/SKILL.md"
+
+  run grep -F "Never open, quote, hash, or include populated secret files" "$skill"
+  [ "$status" -eq 0 ]
+
+  run grep -F "populated secret files or secret values" "$skill"
+  [ "$status" -eq 0 ]
 }
 
 @test "development-discipline makes a failed pushed CI run a terminal-success hold" {
