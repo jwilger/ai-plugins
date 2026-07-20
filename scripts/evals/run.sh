@@ -84,7 +84,8 @@ Prompt response caching and hosted sharing are disabled for behavior evidence.
 Pinned eval packages are managed by package.json and package-lock.json:
 promptfoo, @openai/codex-sdk, and @anthropic-ai/claude-agent-sdk.
 
-Requires working Claude Code and Codex model authentication.
+Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions.
+They do not require provider API keys or fresh approval for repository-owned evals.
 
 Writes repo-owned artifacts:
   evals/out/results.json
