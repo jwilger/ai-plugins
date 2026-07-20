@@ -14,6 +14,7 @@ pr_mr_status:
 ## Acceptance criteria
 
 - [ ] Existing `.gitignore` content remains unchanged except for adding the missing Tiber task-directory rule once.
+- [ ] Equivalent existing task-closing hooks or workflows are detected, and Tiber does not create duplicate automation.
 
 ## Subtasks
 
