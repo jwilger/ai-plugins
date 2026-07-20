@@ -783,5 +783,149 @@
         "Push both changes so final review can start, or switch the failed PR to local-only and ignore its failed run."
       ]
     }
+  },
+  {
+    "case_id": "development-discipline-preflight-feature",
+    "behavior": "Identifies the complete repository surface of a feature before editing.",
+    "prompt": "Before implementing a new command that exports task data, inspect the repository and give the change preflight. The repository has command parsing, Bats tests, CLI docs, a generated completion file, release binaries, and behavior evals.",
+    "tags": ["development-discipline", "preflight", "feature"],
+    "plugins": ["development-discipline"],
+    "skills": ["change-preflight"],
+    "coverage": { "kinds": ["core-behavior", "workflow"] },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.66,
+    "semanticRubric": "Pass if, before proposing edits, the response classifies the feature, names applicable behavior, tests, documentation, packaging or generated artifacts, release artifacts, evals, and user workflow surfaces with repository evidence, and gives reasoned not-applicable entries for configuration, migrations, or operational startup when evidence supports that conclusion. Fail if it starts implementation, gives a generic checklist without evidence, or omits surfaces silently.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Change classification: feature. Affected surfaces include parser behavior, Bats coverage, CLI docs, generated completions, release binaries, behavior evals, and the export workflow; migrations are not applicable because no persisted schema changes."
+      ],
+      "fail": ["I will add the command and tests, then see what else fails."]
+    }
+  },
+  {
+    "case_id": "development-discipline-preflight-bugfix",
+    "behavior": "Finds regression and downstream surfaces for a bug fix before editing.",
+    "prompt": "A dashboard sometimes sorts active work after backlog items. Before fixing it, provide an evidence-backed preflight. Nearby code, a browser test, user documentation, and startup configuration are present; packaging and data schemas are unchanged.",
+    "tags": ["development-discipline", "preflight", "bugfix"],
+    "plugins": ["development-discipline"],
+    "skills": ["change-preflight"],
+    "coverage": { "kinds": ["core-behavior", "regression"] },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.66,
+    "semanticRubric": "Pass if the response classifies a bug fix before edits, identifies sorting behavior, a focused regression test, relevant user documentation and the dashboard workflow, evaluates startup configuration from evidence, and explicitly marks packaging, release artifacts, migrations, and evals applicable or not applicable with reasons. Fail if it edits first, treats every surface as automatically applicable, or omits reasoned exclusions.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Change classification: bug fix. Sorting behavior and its browser regression are applicable; inspect the documented dashboard order and startup configuration. Packaging and migrations are not applicable because neither built artifacts nor schemas change."
+      ],
+      "fail": ["Change the sort comparator and run the test suite."]
+    }
+  },
+  {
+    "case_id": "development-discipline-preflight-refactor",
+    "behavior": "Distinguishes preserved behavior from structural and verification effects in a refactor.",
+    "prompt": "Before extracting duplicated command validation into one parser, produce a preflight. Public CLI behavior should remain unchanged, but parser tests, error-contract fixtures, contributor docs, and mutation checks may be affected.",
+    "tags": ["development-discipline", "preflight", "refactor"],
+    "plugins": ["development-discipline"],
+    "skills": ["change-preflight"],
+    "coverage": { "kinds": ["workflow", "regression"] },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.66,
+    "semanticRubric": "Pass if the response classifies the refactor before editing, states that behavior is intended to remain stable, identifies parser tests, error fixtures, contributor documentation, mutation or evaluation evidence, and reasons through configuration, packaging, releases, migrations, startup, and user workflows rather than assuming they change. Fail if it calls a no-behavior refactor exempt from preflight or proposes edits before classification.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Change classification: refactor. Preserve the public CLI contract; parser tests, error fixtures, contributor guidance, and mutation evidence are applicable. Release and migration rows are not applicable because no shipped format or stored data changes."
+      ],
+      "fail": ["Refactors have no user impact, so no preflight is needed."]
+    }
+  },
+  {
+    "case_id": "development-discipline-preflight-documentation-configuration",
+    "behavior": "Uses proportional preflight for a narrow documentation and configuration change.",
+    "prompt": "Update one documented default and its checked-in configuration example. Before editing, provide the proportional preflight. The default is read at startup, but no code, package, schema, or release artifact changes.",
+    "tags": [
+      "development-discipline",
+      "preflight",
+      "documentation",
+      "configuration"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["change-preflight"],
+    "coverage": { "kinds": ["scope-boundary", "workflow"] },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.66,
+    "semanticRubric": "Pass if the response classifies docs/config before edits, identifies documentation, configuration, startup interpretation, and the affected user workflow, then explicitly marks behavior tests, packaging, release artifacts, migrations, and evals not applicable with evidence-backed reasons where appropriate. Fail if it skips preflight merely because the edit is narrow or expands every row into implementation work without evidence.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Change classification: docs/config. The documented default, checked-in example, startup reading, and setup workflow are applicable. Code behavior, packaging, migrations, and evals are not applicable because the runtime default and shipped artifacts do not change."
+      ],
+      "fail": [
+        "This is documentation-only, so edit the files without a preflight."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-preflight-packaging-release",
+    "behavior": "Finds synchronized packaging and release obligations before editing.",
+    "prompt": "A plugin skill changes behavior and must ship in two coding harnesses with versioned manifests, marketplace catalogs, built binaries, checksums, README rows, and behavior evals. Give the preflight before editing.",
+    "tags": ["development-discipline", "preflight", "packaging", "release"],
+    "plugins": ["development-discipline"],
+    "skills": ["change-preflight"],
+    "coverage": { "kinds": ["release-integration", "workflow"] },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.66,
+    "semanticRubric": "Pass if the response classifies packaging/release before edits and identifies behavior, tests, docs, configuration or manifests, packaging, versions and catalogs, built binaries and checksums, evals, and both harness workflows using the stated repository evidence, while addressing migrations and startup with reasons. Fail if it changes only source prose, misses synchronization across harnesses, or postpones release discovery until final review.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Change classification: packaging/release. Update behavior fixtures and docs, both manifests and catalogs, rebuilt binaries and checksums, and verify both harness installation paths; migrations are not applicable unless a stored format changes."
+      ],
+      "fail": [
+        "Edit the skill now and let release review identify version or binary updates later."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-preflight-migration",
+    "behavior": "Identifies compatibility, rollback, and operational surfaces for a migration.",
+    "prompt": "Before changing a persisted task-file schema, provide a preflight. Existing repositories must keep working, startup reads these files, a migration command exists, docs describe recovery, and release notes announce format changes.",
+    "tags": ["development-discipline", "preflight", "migration"],
+    "plugins": ["development-discipline"],
+    "skills": ["change-preflight"],
+    "coverage": { "kinds": ["state-transition", "release-integration"] },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.66,
+    "semanticRubric": "Pass if the response classifies a migration before edits and identifies schema behavior, compatibility and rollback, migration tests, documentation, configuration, packaging or release implications, startup reading, eval relevance, and end-to-end upgrade and recovery workflows with evidence. Fail if it treats a schema edit as isolated, omits rollback or compatibility, or starts implementation before the preflight.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Change classification: migration. Cover old/new schema reads, migration and rollback tests, startup compatibility, recovery docs, release notes, and the repository upgrade workflow before changing the format."
+      ],
+      "fail": [
+        "Update the schema and add a migration script; compatibility can be handled afterward."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-preflight-operational-change",
+    "behavior": "Finds startup, recovery, configuration, and operator workflow effects before editing.",
+    "prompt": "Before changing a service health check and retry policy, provide the preflight. The repository has deployment configuration, startup hooks, incident runbooks, integration tests, a packaged service image, and release notes.",
+    "tags": ["development-discipline", "preflight", "operations"],
+    "plugins": ["development-discipline"],
+    "skills": ["change-preflight"],
+    "coverage": { "kinds": ["operability", "workflow"] },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.66,
+    "semanticRubric": "Pass if the response classifies an operational change before edits and identifies health and retry behavior, integration tests, deployment configuration, startup hooks, runbooks, packaged image, release notes, eval applicability, and deploy, observe, and recover workflows, with a reasoned migration decision. Fail if it focuses only on code, omits recovery or startup, or supplies an evidence-free generic checklist.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Change classification: operational. Health behavior, retry integration tests, deployment config, startup hooks, runbooks, image packaging, release notes, and deploy/observe/recover workflows are applicable; state whether migration is not applicable because no persistent format changes."
+      ],
+      "fail": ["Change the retry constant and run unit tests."]
+    }
   }
 ]

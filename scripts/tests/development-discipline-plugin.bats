@@ -13,6 +13,7 @@ const root = process.argv[2];
 const plugin = 'development-discipline';
 const requiredSkills = [
   'test-driven-development',
+  'change-preflight',
   'delivery-workflow',
   'ci-failure-follow-up',
   'rationale-commit-messages',
@@ -47,6 +48,13 @@ const requiredCases = [
   'development-discipline-delivery-rejects-specialist-conflict',
   'development-discipline-delivery-current-user-restriction-wins',
   'development-discipline-delivery-composes-with-final-review',
+  'development-discipline-preflight-feature',
+  'development-discipline-preflight-bugfix',
+  'development-discipline-preflight-refactor',
+  'development-discipline-preflight-documentation-configuration',
+  'development-discipline-preflight-packaging-release',
+  'development-discipline-preflight-migration',
+  'development-discipline-preflight-operational-change',
 ];
 
 function readJson(relativePath) {
@@ -73,6 +81,16 @@ if (!fs.existsSync(path.join(pluginRoot, 'README.md'))) {
 for (const skill of requiredSkills) {
   if (!fs.existsSync(path.join(pluginRoot, 'skills', skill, 'SKILL.md'))) {
     fail(`missing required skill ${skill}`);
+  }
+}
+const preflightSkill = fs.readFileSync(
+  path.join(pluginRoot, 'skills', 'change-preflight', 'SKILL.md'),
+  'utf8',
+);
+const preflightDescription = preflightSkill.match(/^description:\s*(.+)$/m)?.[1] || '';
+for (const trigger of ['documentation', 'configuration', 'packaging', 'release']) {
+  if (!preflightDescription.toLowerCase().includes(trigger)) {
+    fail(`change-preflight description missing trigger: ${trigger}`);
   }
 }
 for (const skill of forbiddenSkills) {
