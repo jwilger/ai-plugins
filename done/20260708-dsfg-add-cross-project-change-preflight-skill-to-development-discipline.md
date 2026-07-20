@@ -5,9 +5,6 @@ blocks: [20260708-puyh-add-development-workflow-router-skill, 20260710-jx7i-mine
 tags: [development-discipline, preflight, workflow, evals]
 pr_mr_url: 
 pr_mr_status: 
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary

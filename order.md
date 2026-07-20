@@ -1,4 +1,3 @@
-20260708-dsfg-add-cross-project-change-preflight-skill-to-development-discipline
 20260720-gpg3-keep-live-evaluation-approval-consistent-across-providers
 20260708-puyh-add-development-workflow-router-skill
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
