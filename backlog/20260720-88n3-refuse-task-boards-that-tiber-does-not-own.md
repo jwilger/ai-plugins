@@ -17,6 +17,8 @@ Covers GitHub issue #54. Implementation notes: Add durable commit metadata that 
 
 ## Acceptance criteria
 
+- [ ] Every commit Tiber writes to the task-storage branch includes durable metadata identifying Tiber and the writing version.
+
 ## Subtasks
 
 ## Notes / Log
