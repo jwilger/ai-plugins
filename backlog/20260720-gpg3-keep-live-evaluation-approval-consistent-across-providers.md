@@ -17,6 +17,8 @@ The current repository guidance was narrow enough that an approval reviewer inte
 
 ## Acceptance criteria
 
+- [ ] Repository guidance explicitly says standing approval covers both Codex/OpenAI and Claude/Anthropic live evaluations.
+
 ## Subtasks
 
 ## Notes / Log
