@@ -1443,6 +1443,9 @@ for (const [name, version] of Object.entries(expected)) {
 if (pkg.overrides?.['@openai/codex-sdk'] !== expected['@openai/codex-sdk']) {
   throw new Error('Promptfoo must be forced onto the GPT-5.6-capable Codex SDK');
 }
+if (pkg.overrides?.['adm-zip'] !== '0.6.0') {
+  throw new Error('Promptfoo must use the memory-exhaustion fix from adm-zip 0.6.0');
+}
 
 const resolvedSdkVersions = [...new Set(
   Object.entries(lock.packages || {})
@@ -1451,6 +1454,15 @@ const resolvedSdkVersions = [...new Set(
 )];
 if (JSON.stringify(resolvedSdkVersions) !== JSON.stringify(['0.144.5'])) {
   throw new Error(`stale Codex SDK copies remain in package-lock: ${resolvedSdkVersions.join(', ')}`);
+}
+
+const resolvedAdmZipVersions = [...new Set(
+  Object.entries(lock.packages || {})
+    .filter(([entry]) => entry.endsWith('node_modules/adm-zip'))
+    .map(([, metadata]) => metadata.version),
+)];
+if (JSON.stringify(resolvedAdmZipVersions) !== JSON.stringify(['0.6.0'])) {
+  throw new Error(`unsafe adm-zip copies remain in package-lock: ${resolvedAdmZipVersions.join(', ')}`);
 }
 NODE
 
