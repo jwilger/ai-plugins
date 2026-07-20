@@ -66,3 +66,4 @@
 20260719-tdms-make-the-marketplace-canary-accept-the-capability-descriptions-it-asks-for
 20260720-4x57-preserve-existing-repository-setup-when-adding-tiber
 20260720-88n3-refuse-task-boards-that-tiber-does-not-own
+20260720-gpg3-keep-live-evaluation-approval-consistent-across-providers
