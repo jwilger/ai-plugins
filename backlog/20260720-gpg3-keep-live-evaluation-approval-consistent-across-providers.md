@@ -9,11 +9,11 @@ pr_mr_status:
 
 ## Summary
 
-Make every repository rule agree that the owner has already approved live, repository-owned evaluations through both supported model providers. This prevents authorized quality checks from stopping for unnecessary approval requests while preserving restrictions against sending secrets or unrelated private material.
+Make every repository rule and guardrail agree that the owner has already approved live, repository-owned evaluations through both supported model providers using the owner's existing subscription authentication. This prevents authorized quality checks from stopping for unnecessary approval requests while preserving restrictions against sending secrets or unrelated private material.
 
 ## Context / Why
 
-The current repository guidance was narrow enough that an approval reviewer interpreted standing approval as covering only Codex/OpenAI. The owner clarified that the same standing approval covers Claude/Anthropic through the owner's existing authentication. Review the repository rules, execution policies, skills, documentation, and behavior fixtures that describe live evaluation authorization and make them consistent. Name both providers explicitly while preserving isolated authentication, secret-leak checks, protected-data exclusions, provider-specific credential handling, and restrictions on untrusted events.
+The current repository guidance was narrow enough that an approval reviewer interpreted standing approval as covering only Codex/OpenAI. The owner clarified that standing approval is symmetric: it covers Codex/OpenAI through the existing ChatGPT subscription authentication and Claude/Anthropic through the existing Anthropic subscription authentication. Review every repository rule, execution policy, approval policy, skill, hook, script, documentation page, and behavior fixture that describes or enforces live-evaluation authorization. Make them consistent, name both providers explicitly, and avoid requiring API keys when the supported coding harness can reuse the owner's existing authenticated CLI session. Preserve isolated/disposable evaluation state, leave source logins untouched, run secret-leak checks, exclude protected or unrelated data, handle provider credentials safely, and keep restrictions on untrusted events.
 
 ## Acceptance criteria
 
