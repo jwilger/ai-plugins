@@ -15,6 +15,8 @@ Make security reviews consistently check relevant, widely recognized security gu
 
 ## Acceptance criteria
 
+- [ ] Security review guidance tells reviewers to consider relevant OWASP resources and relevant NIST resources.
+
 ## Subtasks
 
 ## Notes / Log
