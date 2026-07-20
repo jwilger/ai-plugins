@@ -24,7 +24,7 @@ Implementation notes: Obvious documentation, test, schema, configuration, packag
 - [x] Guidance covers at least behavior, tests, docs, config, packaging, release artifacts, migrations, operational startup, evals, and user workflows as possible affected surfaces.
 - [x] The change includes behavior eval cases or equivalent acceptance fixtures proving agents perform the preflight before editing in representative repositories.
 - [x] Before edits, the workflow emits a concise change classification, applicable affected surfaces, supporting repository evidence, and reasoned not-applicable entries.
-- [ ] Trigger and skip rules are explicit, repository-local instructions take precedence, and fixtures cover feature, bugfix, refactor, documentation/configuration, packaging/release, migration, and operational changes.
+- [x] Trigger and skip rules are explicit, repository-local instructions take precedence, and fixtures cover feature, bugfix, refactor, documentation/configuration, packaging/release, migration, and operational changes.
 
 ## Subtasks
 
