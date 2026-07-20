@@ -13,6 +13,8 @@ pr_mr_status:
 
 ## Acceptance criteria
 
+- [ ] Existing `.gitignore` content remains unchanged except for adding the missing Tiber task-directory rule once.
+
 ## Subtasks
 
 ## Notes / Log
