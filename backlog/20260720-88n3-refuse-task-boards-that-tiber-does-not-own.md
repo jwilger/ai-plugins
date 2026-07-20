@@ -19,6 +19,7 @@ Covers GitHub issue #54. Implementation notes: Add durable commit metadata that 
 
 - [ ] Every commit Tiber writes to the task-storage branch includes durable metadata identifying Tiber and the writing version.
 - [ ] Before every task read or write, Tiber checks the current task-storage branch head for valid ownership metadata.
+- [ ] When ownership metadata is missing or invalid, the operation stops with an actionable explanation and does not create, modify, merge, or partially synchronize task data.
 
 ## Subtasks
 
