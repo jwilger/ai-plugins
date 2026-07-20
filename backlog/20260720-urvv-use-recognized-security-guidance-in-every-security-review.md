@@ -17,6 +17,7 @@ Make security reviews consistently check relevant, widely recognized security gu
 
 - [ ] Security review guidance tells reviewers to consider relevant OWASP resources and relevant NIST resources.
 - [ ] Reviews select guidance according to the system's actual deployment model, trust boundaries, and likely impact instead of applying every catalog item as a generic blocker.
+- [ ] Material findings identify the specific recognized guidance that supports them and distinguish mandatory requirements from informative recommendations.
 
 ## Subtasks
 
