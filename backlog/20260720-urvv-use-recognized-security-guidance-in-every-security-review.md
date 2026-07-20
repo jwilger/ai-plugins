@@ -19,6 +19,7 @@ Make security reviews consistently check relevant, widely recognized security gu
 - [ ] Reviews select guidance according to the system's actual deployment model, trust boundaries, and likely impact instead of applying every catalog item as a generic blocker.
 - [ ] Material findings identify the specific recognized guidance that supports them and distinguish mandatory requirements from informative recommendations.
 - [ ] Automated tests or behavior evaluations fail if either OWASP or NIST coverage is removed from the security review lens.
+- [ ] Affected plugin versions, marketplace metadata, documentation, and evaluation coverage are updated as required by repository policy.
 
 ## Subtasks
 
