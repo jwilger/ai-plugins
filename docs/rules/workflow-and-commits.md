@@ -1,5 +1,12 @@
 # Workflow, commits, and delivery
 
+- **Repository-local delivery policy wins.** Route delivery through
+  `development-discipline:delivery-workflow`: current user direction comes
+  first and may narrow standing authorization, then repository-local
+  instructions select direct-to-trunk, PR/MR, or local-only mode before
+  specialist testing, review, CI, or release guidance is applied. A specialist
+  may add proportionate gates within that mode but may not replace its workflow,
+  commit cadence, or evidence level, or invent a pull request.
 - **One major change per worktree at a time.** In PR mode, do not start another
   major task in that worktree while its PR is still waiting on CI, review,
   approval, merge, or local cleanup.

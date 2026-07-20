@@ -1,0 +1,9 @@
+{
+  "scenario": "current-user-local-only",
+  "selectedMode": "pull-request",
+  "remoteActions": ["open PR"],
+  "ci": { "required": true, "status": "terminal-success" },
+  "reviewEvidence": ["local tests passed"],
+  "failedRunHold": false,
+  "modes": null
+}

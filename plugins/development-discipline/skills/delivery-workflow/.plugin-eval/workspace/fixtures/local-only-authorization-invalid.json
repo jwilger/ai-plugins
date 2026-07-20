@@ -1,0 +1,13 @@
+{
+  "scenario": "current-user-local-only",
+  "selectedMode": "local-only",
+  "remoteActions": [],
+  "ci": {
+    "required": false,
+    "status": null
+  },
+  "reviewEvidence": ["local tests and final review passed"],
+  "restrictionNarrowsStandingAuthorization": false,
+  "failedRunHold": false,
+  "modes": null
+}

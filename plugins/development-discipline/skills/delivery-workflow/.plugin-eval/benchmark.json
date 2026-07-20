@@ -1,0 +1,64 @@
+{
+  "kind": "plugin-eval-benchmark",
+  "schemaVersion": 2,
+  "version": 2,
+  "targetKind": "skill",
+  "targetName": "delivery-workflow",
+  "runner": {
+    "type": "codex-cli",
+    "model": "gpt-5.6-terra",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
+  },
+  "workspace": {
+    "sourcePath": "plugins/development-discipline/skills/delivery-workflow/.plugin-eval/workspace",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
+  "verifiers": {
+    "commands": ["node verify-delivery-plan.mjs"]
+  },
+  "notes": [
+    "Each scenario evaluates a real delivery-policy conflict without contacting a remote.",
+    "Each scenario writes delivery-plan.json; the verifier checks the selected mode, allowed remote actions, CI evidence, and failed-run hold instead of accepting any nonempty file."
+  ],
+  "scenarios": [
+    {
+      "id": "direct-to-trunk",
+      "title": "Follow direct-to-trunk policy",
+      "purpose": "Verify that repository-local direct delivery wins over generic pull-request wording.",
+      "userInput": "Use the delivery-workflow skill. Repository instructions require direct pushes to main, require CI to reach terminal success, and authorize ordinary pushes; a specialist says to open a PR. Do not perform remote actions. Write delivery-plan.json with scenario=direct-to-trunk, selectedMode, remoteActions (the planned action names), ci.required, ci.status, a nonempty reviewEvidence array, reviewBeforePush, exactRevisionBinding, authorization, failedRunHold, and modes=null.",
+      "successChecklist": [
+        "delivery-plan.json selects direct-to-trunk and does not invent a PR.",
+        "The plan reviews before the first push and binds CI to the exact pushed revision.",
+        "The plan does not ask again for the already authorized ordinary push."
+      ]
+    },
+    {
+      "id": "current-user-local-only",
+      "title": "Honor a current local-only restriction",
+      "purpose": "Verify that a current user restriction narrows standing repository authorization.",
+      "userInput": "Use the delivery-workflow skill. Repository instructions normally authorize direct pushes to main, but the current user requires this prototype to remain local-only. Do not perform remote actions. Write delivery-plan.json with scenario=current-user-local-only, selectedMode, remoteActions, ci.required, ci.status, a nonempty reviewEvidence array, restrictionNarrowsStandingAuthorization, failedRunHold, and modes=null.",
+      "successChecklist": [
+        "delivery-plan.json selects local-only because current user direction comes first.",
+        "The plan says the restriction narrows standing push authorization.",
+        "The plan forbids pushes, PRs, merges, and remote-CI claims while retaining proportionate local verification."
+      ]
+    },
+    {
+      "id": "final-review-ci-hold",
+      "title": "Compose final review with delivery mode",
+      "purpose": "Verify that unpushed modes use local evidence while a known failed pushed build remains a hold.",
+      "userInput": "Use the delivery-workflow skill. Compare an unpushed direct-to-trunk change, a local-only change, and a PR whose latest pushed CI failed. Do not perform remote actions. Write delivery-plan.json with scenario=final-review-ci-hold, selectedMode=comparison, empty remoteActions, ci.required, ci.status, a nonempty reviewEvidence array, failedRunHold, and modes containing directToTrunk.evidence, localOnly.evidence, and pullRequest.status.",
+      "successChecklist": [
+        "delivery-plan.json uses local evidence for unpushed direct-to-trunk and local-only review without fabricating a push.",
+        "The failed PR remains held under CI failure follow-up until replacement terminal success.",
+        "The plan says changing modes cannot erase a known failed-run hold."
+      ]
+    }
+  ]
+}

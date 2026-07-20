@@ -168,8 +168,12 @@ not hard-code a provider). A provider-agnostic gate, in order:
 5. mutation testing (can be release- or label-gated if slow);
 6. dependency / security audit.
 
-Policy to configure on the forge: PR-based changes, **≥1 required approval**, and
-**automated code review contributing to that approval**. Add a managed release
-flow (automated version bump, changelog, and publish on merge) using whatever
-tooling the forge/registry supports — keep provider, registry, and service names
-out of the requirements; they are deployment details, not standards.
+Read current user direction and the repository-local delivery policy. Route it
+through `development-discipline:delivery-workflow` when available; otherwise
+use that same order as a self-contained fallback. Configure PR/MR approvals and
+automated review only when that mode is selected; do not invent a pull request
+for direct-to-trunk or local-only work. Add a managed release flow (automated
+version bump, changelog, and publish after delivery) where releases apply, using
+whatever tooling the forge/registry supports — keep provider, registry, and
+service names out of the requirements; they are deployment details, not
+standards.

@@ -90,7 +90,8 @@ support it — and record that gap as an ADR.
 - **Realize:** set up the stack's acceptance/BDD tooling (Gherkin-style or plain
   specs that drive the CLI / API / UI from outside). Specs must never touch
   internal modules or private types. Establish the rhythm: get one Given/When/Then
-  step green with **all gates passing**, **commit**, then the next step. For
+  step green with **all gates passing**, then preserve that increment. Commit
+  only when the selected delivery policy authorizes or requires it. For
   cross-target or cross-harness behavior, parametrize examples so parity is part
   of each slice's definition of done.
 
@@ -107,16 +108,21 @@ support it — and record that gap as an ADR.
 
 ### g. CI/CD themes
 
-- **Goal:** changes land via reviewed PRs and ship through managed, automated
-  releases — on whatever forge and runner the project already uses.
+- **Goal:** changes follow the repository-local delivery policy and ship through
+  managed, automated releases where applicable — on whatever forge and runner
+  the project already uses.
 - **Why:** the gate must be enforced off the author's machine, and releases must
   be repeatable.
 - **Realize:** configure CI to **mirror the local gate exactly** (format, lint as
-  errors, tests, mutation, dependency audit). Require PR-based changes with **≥1
-  approval and automated code review contributing to it**. Add managed/automated
-  releases (versioning, changelog, publish). Stay platform-agnostic — detect the
-  forge and runner from the repo; never hard-code one provider, registry, or
-  service as a requirement.
+  errors, tests, mutation, dependency audit). When
+  `development-discipline:delivery-workflow` is available, use it; otherwise
+  apply the same self-contained fallback: current user direction, then
+  repository-local instructions, then direct-to-trunk, PR/MR, or local-only.
+  Do not invent PR-based delivery. When PR/MR mode is selected, configure the
+  stated approvals and automated review. Add managed/automated releases (versioning,
+  changelog, publish) where the project ships releases. Stay platform-agnostic —
+  detect the forge and runner from the repo; never hard-code one provider,
+  registry, or service as a requirement.
 
 ## 3. How to apply
 
@@ -126,8 +132,8 @@ support it — and record that gap as an ADR.
    adapt or skip what the ecosystem can't support and record the gap as an ADR.
 3. Wire **one** local gate command that runs format + lint + tests (+ mutation),
    so the gate is a single command locally and in CI.
-4. Make the first commit establish the harness and a green gate; then build
-   behavior one BDD step at a time, committing between steps.
+4. Establish the harness and a green gate; then build behavior one BDD step at a
+   time. Use the commit cadence selected by repository-local delivery policy.
 5. Validate: the gate command passes, the dev environment builds from a clean
    checkout, and CI mirrors the local gate.
 
