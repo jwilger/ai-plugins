@@ -9,6 +9,8 @@ generality.
 
 - `test-driven-development` - Kent Beck-style TDD: one failing behavior test,
   one smallest implementation step, then refactor only after green.
+- `ci-failure-follow-up` - evidence-based recovery that blocks unrelated
+  work after a pushed CI failure until a replacement run succeeds.
 - `rationale-commit-messages` - Conventional Commit subjects with a required
   body that explains why the change is necessary.
 - `verification-before-completion` - evidence-before-claims discipline tied to

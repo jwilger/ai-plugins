@@ -8,6 +8,13 @@
   requires **≥1 approval** plus **automated code review/approval**. CI gates:
   formatting, tests, marketplace validation, and Codex cross-harness manifest
   verification.
+- **Failed pushed CI holds unrelated work.** Use
+  `development-discipline:ci-failure-follow-up`: inspect the exact failed
+  job, step, and logs; record the causal diagnosis; then either push only the
+  diagnosed repair with its rationale or, for an evidence-backed unrelated or
+  transient classification, rerun the unchanged revision with no intervening
+  push. Wait for that replacement run's terminal success before resuming
+  unrelated implementation.
 - **Rationale-bearing Conventional Commits.** Commit between BDD steps once
   `just ci` is green. Every authored commit needs a concise Conventional Commit
   subject and a non-empty body explaining why the change is necessary, such as

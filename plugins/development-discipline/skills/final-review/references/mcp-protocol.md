@@ -209,7 +209,9 @@ A valid `ship` decision is terminal for final review: it clears remaining
 nonblocking lens work, returns `complete: true`, and schedules no reviewers.
 The calling workflow must still satisfy the ticket's acceptance criteria and
 confirm the latest pushed CI build is running or green before release or new
-work. `split` and `escalate` persist a contract-bound terminal hold, preserve
+work. If that build failed, `ci-failure-follow-up` takes precedence and
+requires exact diagnosis plus terminal success before release or new work.
+`split` and `escalate` persist a contract-bound terminal hold, preserve
 every completion blocker, schedule no reviewers, and reject any later advance
 for that session.
 
