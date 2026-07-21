@@ -71,3 +71,4 @@
 20260721-n2hq-prevent-work-from-being-marked-complete-before-formal-review-finishes
 20260721-y4c9-make-automatic-task-closure-fail-when-it-does-not-close-a-task
 20260721-h4h7-make-restarted-final-reviews-recover-reliably
+20260721-7xvd-verify-benchmark-cancellation-through-its-public-interface
