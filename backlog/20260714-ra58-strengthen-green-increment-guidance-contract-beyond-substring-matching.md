@@ -17,7 +17,6 @@ This matters because tautological checks consume maintenance time and evaluation
 
 ## Acceptance criteria
 
-- [ ] Standing development guidance forbids tests of continuous integration workflow definitions or job structure; executing the workflow in continuous integration is the test.
 - [ ] When an existing test matching either anti-pattern is found in any project, it is removed or replaced with a test of observable application or library behavior.
 - [ ] Agent-guidance changes use semantic behavior evaluations when regression coverage is useful, without adding phrase-presence tests as a fast substitute.
 - [ ] Every new automated test is justified by user- or caller-observable application or library behavior; no test is invented when there is no meaningful behavior to exercise.
