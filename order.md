@@ -69,3 +69,4 @@
 20260721-qtpp-stop-measuring-plugin-lift-when-an-eval-prompt-gives-away-the-answer
 20260721-phfz-use-trusted-security-standards-in-every-security-review
 20260721-7rtt-update-js-yaml-to-avoid-slow-processing-of-specially-shaped-yaml
+20260721-e4ze-update-brace-expansion-to-prevent-extremely-slow-pattern-processing
