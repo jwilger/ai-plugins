@@ -1,4 +1,3 @@
-20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
