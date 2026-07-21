@@ -20,6 +20,7 @@ GitHub issue 57 documents a case where automated checks and a lightweight review
 - [ ] Work cannot be reported complete or ready while a formal review has required checks that are still outstanding.
 - [ ] The authoritative review state distinguishes automated checks, lightweight review, and completed formal review.
 - [ ] Lost, abandoned, interrupted, or out-of-sync formal review state is treated as incomplete rather than clean.
+- [ ] An evaluation reproduces GitHub issue 57 and fails when required reviewers are skipped before a completion claim.
 
 ## Subtasks
 
