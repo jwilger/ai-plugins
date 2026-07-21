@@ -41,6 +41,12 @@ Load `references/scaffold.md`.
 - Reuse existing authenticated harness sessions for local live evals; do not
   require provider API keys or fresh approval merely because a repository-owned
   eval uses Claude/Anthropic or Codex/OpenAI.
+- Send only the repository's purpose-built fixtures and prompts. Do not send
+  secrets, private client data, proprietary unrelated content, or unrelated
+  workspace files.
+- Keep generated authentication state isolated and disposable where the runner
+  supports it, leave source harness logins untouched, and run required
+  secret-leak checks around live execution.
 - Use protected credentials for unattended trusted automation only when it
   cannot reuse an interactive harness session.
 - Upload artifacts on every CI run that executes evals.

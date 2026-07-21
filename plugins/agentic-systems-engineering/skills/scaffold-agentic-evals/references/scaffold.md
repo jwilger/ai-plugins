@@ -34,6 +34,11 @@ without depending on a hosted dashboard.
   evals without demanding provider API keys or repeat approval. When unattended
   trusted automation cannot reuse an interactive session, keep any provider
   credentials protected behind explicit trusted workflow conditions.
+- Limit provider-bound inputs to purpose-built repository fixtures and prompts;
+  exclude secrets, private client data, proprietary unrelated content, and
+  unrelated workspace files. Keep generated authentication state isolated and
+  disposable where supported, leave source harness logins untouched, and run
+  required secret-leak checks around live execution.
 - For coding harnesses, start with native promptfoo providers. Use custom
   providers only when a canary proves the native provider cannot faithfully load
   the system under test.
