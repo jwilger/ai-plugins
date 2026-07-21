@@ -17,6 +17,8 @@ This matters because tautological checks consume maintenance time and evaluation
 
 ## Acceptance criteria
 
+- [ ] Standing development guidance for every project forbids tests that only read committed repository files and check for specific strings.
+
 ## Subtasks
 
 ## Notes / Log
