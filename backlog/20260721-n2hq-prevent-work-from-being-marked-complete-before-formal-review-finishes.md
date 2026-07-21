@@ -2,7 +2,7 @@
 title: Prevent work from being marked complete before formal review finishes
 blocked_by: []
 blocks: []
-tags: []
+tags: [development-discipline, final-review, guardrail, evals, high-priority]
 pr_mr_url: 
 pr_mr_status: 
 ---
