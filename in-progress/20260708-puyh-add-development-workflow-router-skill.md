@@ -5,6 +5,9 @@ blocks: []
 tags: [development-discipline, workflow-router, skills, evals]
 pr_mr_url: 
 pr_mr_status: 
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
