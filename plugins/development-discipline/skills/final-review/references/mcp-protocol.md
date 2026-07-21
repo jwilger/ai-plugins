@@ -135,6 +135,16 @@ evidence fails closed when applicable. The same validation applies to delta
 assessments, which preserve the union of prior and replacement-diff trigger
 evidence in authoritative state.
 
+Risk-scout findings pass through the same deterministic relevance classifier as
+lens findings before they can affect persistence, disposition, blockers,
+verification, follow-up tickets, or discovery resets. Request,
+acceptance-criteria, and explicit-concern claims require exact `matched_context`;
+cross-cutting claims require `changed_diff_evidence` bound to an in-scope changed
+path; prior-defense challenges require the accepted defense ID plus new
+contradictory changed-diff evidence. Missing, mismatched, generic, or out-of-scope
+claims remain report-only in authoritative state. Initial and delta scouts use
+the same contract.
+
 ## Scope-Growth And Review-Budget Gates
 
 The broad risk scout evaluates whether the current ticket has grown into either
