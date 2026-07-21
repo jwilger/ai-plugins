@@ -1053,5 +1053,37 @@
         "Start with change-preflight, edit the configuration under TDD, commit it, and open a pull request."
       ]
     }
+  },
+  {
+    "case_id": "development-workflow-unavailable-specialist-fallback",
+    "behavior": "Uses an honest phase-equivalent fallback when a named specialist is unavailable in the current harness.",
+    "prompt": "You are diagnosing a library integration problem. Repository instructions require current primary documentation, but this harness has no Context7, OpenAI documentation, browser, or dedicated documentation skill. It does provide repository file search, a shell, and an approved web fetch tool. Explain how the development workflow routes this state without pretending unavailable capabilities exist.",
+    "tags": [
+      "development-discipline",
+      "workflow-routing",
+      "capability-fallback"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["development-workflow", "systematic-debugging"],
+    "coverage": {
+      "kinds": [
+        "scope-boundary",
+        "operability",
+        "workflow",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response inspects available harness capabilities, routes the unexpected integration behavior to systematic-debugging, and says it cannot invoke unavailable documentation specialists. It must preserve the specialist's intended outcome by first using repository-pinned or vendored documentation and version evidence, then the available approved web tool for the library's official primary documentation when current external documentation is still required. It must label the fallback and any evidence limitation, apply repository/user precedence, and stop for user direction if no allowed capability can satisfy a required evidence or authorization gate. Fail if it hallucinates Context7/OpenAI/browser access, silently substitutes stale model memory, drops the current-documentation requirement, installs a new tool without authorization, or continues past an unsatisfied required gate.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Route the failure investigation to systematic-debugging. Capability inspection shows the named documentation specialists are absent, so state that explicitly. Use pinned repository documentation and version files first, then the approved web fetch tool against the library's official documentation. Record that this is the phase-equivalent fallback; if those allowed sources cannot supply required current evidence, stop and request direction rather than inventing access or relying on memory."
+      ],
+      "fail": [
+        "Invoke Context7 anyway, or answer from memory because the documentation tool is unavailable."
+      ]
+    }
   }
 ]

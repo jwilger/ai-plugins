@@ -44,3 +44,24 @@ through a PR/MR, and whether exact-revision CI must reach a terminal result.
 
 Each named specialist owns its detailed mechanics, evidence, stop conditions,
 and precedence rules. Do not copy those procedures into this router.
+
+## Capability-aware fallback
+
+Inspect the capabilities actually available in the current harness before
+invoking a specialist. Never claim to call an unavailable skill, agent, MCP
+server, browser, forge integration, or documentation source.
+
+When a named specialist is unavailable, preserve its intended outcome with the
+smallest allowed phase-equivalent fallback:
+
+1. follow current user and repository instructions;
+2. use repository-pinned evidence and available local tools first;
+3. use an available approved primary source or forge interface when current
+   external evidence is required;
+4. state which specialist was unavailable, which fallback supplied the
+   evidence, and any remaining limitation.
+
+Do not install a replacement tool, weaken a required gate, or rely on stale
+model memory merely to keep moving. If no available and authorized capability
+can satisfy a required evidence, approval, security, or external-state gate,
+stop at that gate and request the missing direction or state change.
