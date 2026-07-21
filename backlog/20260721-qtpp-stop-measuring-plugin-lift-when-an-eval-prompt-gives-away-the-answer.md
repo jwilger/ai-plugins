@@ -18,6 +18,7 @@ The existing stochastic-readiness case tells the model that one successful run i
 ## Acceptance criteria
 
 - [ ] Identify behavior cases whose prompts explicitly provide the conclusion they are scored on but still require plugin-versus-baseline lift.
+- [ ] Change only those cases to a correctness or reliability metric that matches their stated purpose.
 
 ## Subtasks
 
