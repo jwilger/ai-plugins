@@ -12,6 +12,7 @@ const path = require('path');
 const root = process.argv[2];
 const plugin = 'development-discipline';
 const requiredSkills = [
+  'development-workflow',
   'test-driven-development',
   'change-preflight',
   'delivery-workflow',
@@ -32,6 +33,7 @@ const forbiddenSkills = [
   'brainstorming',
 ];
 const requiredCases = [
+  'development-workflow-normal-implementation',
   'development-discipline-tdd-one-test-first',
   'development-discipline-verification-claim-scope',
   'development-discipline-review-feedback-skepticism',

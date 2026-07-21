@@ -936,5 +936,33 @@
       ],
       "fail": ["Change the retry constant and run unit tests."]
     }
+  },
+  {
+    "case_id": "development-workflow-normal-implementation",
+    "behavior": "Routes an ordinary implementation request through the smallest applicable development specialists in lifecycle order.",
+    "prompt": "We need to add a small user-visible feature to this repository. Local instructions require a linked worktree, tests before implementation, direct pushes to main, final review, and waiting for the exact pushed CI run. Explain which workflow guidance you use from the request through delivery. Do not implement the feature.",
+    "tags": ["development-discipline", "workflow-routing", "implementation"],
+    "plugins": ["development-discipline"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "workflow",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response first honors the stated repository instructions and inspects current repository/task state, then routes the substantive change to change-preflight before edits and delivery-workflow early enough to select direct-to-main mode and increment cadence before any commit or push. It then uses test-driven-development for one failing behavior at a time, verification-before-completion for claim-scoped evidence, final-review for the completed diff, and rechecks delivery-workflow for final delivery. It must mention rationale-commit-messages before committing and exact-revision CI monitoring after pushing, without copying each specialist's detailed procedure or inventing a pull request. Fail if it selects delivery mode only after an increment would be preserved, skips preflight or test-first work, treats the router as the implementation procedure, ignores the linked-worktree/direct-main policy, invents PR delivery, or claims completion before exact CI reaches the repository-required terminal state.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Read the local instructions and current state first. Use change-preflight, then delivery-workflow to select direct-to-main mode and preservation cadence before the first test-driven-development increment. Use rationale-commit-messages for each authorized commit. After implementation, use verification-before-completion and final-review, recheck delivery-workflow, and monitor the exact pushed revision's CI to the required terminal result. Each specialist owns its mechanics."
+      ],
+      "fail": [
+        "Open a pull request, implement the feature, and run some tests afterward."
+      ]
+    }
   }
 ]
