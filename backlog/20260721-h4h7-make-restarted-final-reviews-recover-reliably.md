@@ -19,6 +19,7 @@ Final review is a required delivery safeguard. When its restart process cannot c
 
 - [ ] A restarted review accepts the assignment returned by its matching risk assessment when the session, reviewed change, and evidence are current.
 - [ ] A stale, consumed, or session-mismatched assignment is rejected with sanitized details that identify the mismatch.
+- [ ] The rejection tells the caller how to restart, resume, or abandon the review safely.
 
 ## Subtasks
 
