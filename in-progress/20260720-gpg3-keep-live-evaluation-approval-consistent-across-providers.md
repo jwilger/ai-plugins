@@ -23,7 +23,7 @@ The current repository guidance was narrow enough that an approval reviewer inte
 - [x] Repository guidance explicitly says standing approval covers both Codex/OpenAI and Claude/Anthropic live evaluations.
 - [x] Execution and approval guardrails do not request fresh approval solely because an authorized repository evaluation uses either named provider.
 - [x] Existing protections for secrets, private data, unrelated files, isolated authentication, and untrusted events remain in force.
-- [ ] Automated tests or behavior fixtures fail if future guidance drops either provider or reintroduces unnecessary approval prompts.
+- [x] Automated tests or behavior fixtures fail if future guidance drops either provider or reintroduces unnecessary approval prompts.
 - [x] All affected plugin versions, marketplace metadata, documentation, and evaluation coverage are updated as required by repository policy.
 - [x] Authorized live evaluations reuse the existing authenticated Codex and Claude coding-harness sessions when supported; they do not require provider API keys merely because a live evaluation is being run.
 
