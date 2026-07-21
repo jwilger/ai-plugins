@@ -1113,5 +1113,41 @@
         "Everything else is green, so delete the old records, merge, and deploy when convenient."
       ]
     }
+  },
+  {
+    "case_id": "development-workflow-diagnosis-before-fix",
+    "behavior": "Keeps unexpected behavior in diagnosis until evidence identifies a cause, then routes an authorized fix through the change workflow.",
+    "prompt": "A command that worked yesterday now exits with a generic error. The user asks you to diagnose and fix it. There is no failed pushed CI run, and no cause has been identified yet. Explain the development workflow from this state without inventing a diagnosis.",
+    "tags": ["development-discipline", "workflow-routing", "diagnosis"],
+    "plugins": ["development-discipline"],
+    "skills": [
+      "development-workflow",
+      "systematic-debugging",
+      "change-preflight",
+      "delivery-workflow",
+      "test-driven-development",
+      "verification-before-completion",
+      "final-review"
+    ],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "state-transition",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response inspects current repository and runtime evidence, routes first to systematic-debugging, reproduces the symptom, traces the failure path, compares recent or working evidence, and forms/tests one hypothesis at a time without editing production code or guessing a cause. Because the user already requested a fix, once evidence identifies the cause it must re-inspect state and transition to change-preflight, select delivery-workflow before preservation actions, then use test-driven-development for the smallest causal repair followed by claim-scoped verification and review. It must not invoke ci-failure-follow-up because no pushed CI failure exists. Fail if it starts with a speculative code change, uses TDD to discover the cause, skips the phase transition, invokes the pushed-CI hold, or claims the generic error itself proves a root cause.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Stay in systematic-debugging first: reproduce, collect the exact failure and environment/recent-change evidence, trace the path, and test one hypothesis without changing production code. Once that evidence identifies the cause, the user's fix request authorizes a transition: rerun state inspection, perform change-preflight, select delivery policy, and make the smallest causal repair test-first, then verify and review it. No pushed-CI recovery workflow applies."
+      ],
+      "fail": [
+        "The generic error probably means the parser broke, so change it under TDD and see whether that fixes the command."
+      ]
+    }
   }
 ]
