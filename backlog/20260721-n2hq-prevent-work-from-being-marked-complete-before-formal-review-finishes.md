@@ -24,3 +24,5 @@ GitHub issue 57 documents a case where automated checks and a lightweight review
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-21: Created while triaging GitHub issue #57: https://github.com/jwilger/ai-plugins/issues/57
