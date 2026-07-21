@@ -29,3 +29,5 @@ Implementation notes: development-discipline final review and lightweight TDD re
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-21: Started in linked worktree .worktrees/hcq6-production-risk-lens on branch feat/hcq6-production-risk-lens. Preflight scope: engineering-standard behavior, proportionate local-tool/shared-service eval fixtures, synchronized version/catalog metadata, and plugin documentation. Delivery mode: direct-to-trunk per repository policy.
