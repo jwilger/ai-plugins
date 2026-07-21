@@ -20,6 +20,7 @@ The existing stochastic-readiness case tells the model that one successful run i
 - [ ] Identify behavior cases whose prompts explicitly provide the conclusion they are scored on but still require plugin-versus-baseline lift.
 - [ ] Change only those cases to a correctness or reliability metric that matches their stated purpose.
 - [ ] Preserve baseline-ablation and plugin-lift gates for cases where the plugin is actually expected to add measurable value beyond the prompt.
+- [ ] Add or update tests so this metric mismatch cannot be reintroduced silently.
 
 ## Subtasks
 
