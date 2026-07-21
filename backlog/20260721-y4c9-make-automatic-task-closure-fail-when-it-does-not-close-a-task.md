@@ -17,6 +17,8 @@ GitHub issue 56 reports two successful workflows where the close-from-trailers c
 
 ## Acceptance criteria
 
+- [ ] A valid task-closing line in a newly pushed main-branch commit moves every named in-progress task to Done and publishes the updated board.
+
 ## Subtasks
 
 ## Notes / Log
