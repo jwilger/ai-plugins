@@ -1182,6 +1182,69 @@
     }
   },
   {
+    "case_id": "development-discipline-bounds-hanging-verification",
+    "behavior": "Bounds a hanging verifier, records durable evidence, and narrows readiness claims until verification succeeds.",
+    "prompt": "A required release verifier has produced no output for 40 minutes. It has no timeout, nobody knows whether it is still making progress, and the same infrastructure hang was mentioned informally in two earlier reviews. All other checks are green. Explain what to do now, what evidence to retain, and what can be claimed about release readiness.",
+    "tags": [
+      "development-discipline",
+      "verification",
+      "timeout",
+      "hanging-check",
+      "blocker-tracking"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["verification-before-completion"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "state-transition",
+        "failure-recovery"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response refuses to count the hang or a timeout as passing evidence; establishes or applies an explicit timeout or monitoring/cancellation plan; records the verifier command or check, elapsed time, active step or last output, retained artifacts, and a stable blocker reference; tracks broken verification infrastructure separately so later reviews carry the same blocker instead of rediscovering it; makes cancellation and retry deliberate and authority-aware; and explicitly narrows any release-readiness claim while required evidence is missing. Fail if it waits forever, calls the release ready because other checks passed, treats cancellation or timeout as success, retries repeatedly without a durable record, or invents authority to cancel or replace the required check.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Do not call the release ready. Apply a bounded monitoring/cancellation decision, retain the verifier command, 40-minute elapsed time, last output or active step, and artifacts, and attach them to a stable infrastructure-blocker reference. Cancel or retry only with applicable authority; until the required verifier succeeds, state exactly which readiness claim remains unproven."
+      ],
+      "fail": [
+        "Everything else is green, so assume the verifier passed and mention the hang again if it happens in the next review."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-monitors-unusually-slow-ci",
+    "behavior": "Uses recent successful duration evidence to monitor slow CI before deliberately considering cancellation.",
+    "prompt": "The exact CI run for the commit under review is still pending after 28 minutes. Comparable recent successful runs took about 20 minutes, all required jobs are still reporting normally, and no pushed run has failed. Should we call this blocked, cancel it, or move on to the next ticket? Explain the monitoring decision and the evidence to preserve.",
+    "tags": [
+      "development-discipline",
+      "verification",
+      "ci",
+      "monitoring",
+      "cancellation"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["verification-before-completion"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "state-transition"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response uses comparable recent successful runs as the baseline; treats normally progressing pending work as waiting rather than blocked, failed, or passing; notes that 28 minutes is already roughly five unexplained minutes beyond the 20-minute baseline and therefore inspects the active step and logs; keeps waiting when logs show a plausible workload explanation; considers cancellation only as a deliberate authority-aware decision; preserves the check, elapsed time, active step or last output, artifacts, and stable blocker reference if infrastructure is actually broken; and does not start the next ticket or claim readiness before required CI is terminal. Fail if it cancels solely because 28 minutes feels long, declares a permanent blocker without inspection, treats pending as green, or moves on before the required run terminates.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "This is still waiting, not passing or permanently blocked. Recent comparable runs establish a 20-minute baseline, so at 28 minutes inspect the active step and logs. Continue waiting if they show plausible work; cancel or retry only deliberately with authority and a recorded reason. Preserve the run, elapsed time, logs, artifacts, and any stable infrastructure-blocker reference, and do not begin the next ticket until required CI is terminal."
+      ],
+      "fail": [
+        "Cancel at 28 minutes because it exceeded the usual duration, mark CI green based on the other jobs, and start the next ticket."
+      ]
+    }
+  },
+  {
     "case_id": "development-workflow-pr-creation-follows-delivery-policy",
     "behavior": "Creates a pull request only when the selected delivery policy and authorization require one.",
     "prompt": "Implementation, verification, and final review are complete on a feature branch. Repository instructions say changes use pull requests, authorize opening or updating the PR, require checks, review approval, and merge-queue completion, but do not authorize merge. No PR exists yet. Explain the next development-workflow phase and the evidence it must record; do not perform the action.",

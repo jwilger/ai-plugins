@@ -29,6 +29,36 @@ verification proves the exact scope being claimed.
 Partial checks prove partial claims only. A focused test can prove a narrow fix;
 it cannot prove the whole repo is green.
 
+## Bound Long-Running Verification
+
+Before starting a long test, evaluation, CI build, or external check, record an
+explicit timeout or monitoring and cancellation plan. A pending or running check
+is waiting: it is neither blocked nor passing evidence.
+
+For CI, use a comparable recent successful run as the duration baseline. When
+the current run exceeds that baseline by roughly five unexplained minutes,
+inspect the active step and logs before deciding whether it is hung. Extra work
+shown in the logs is a reason to keep waiting; elapsed time alone is not a
+reason to cancel.
+
+Cancellation and retry require applicable authority and a recorded reason. A
+timeout, hang, cancellation, or incomplete retry is never passing evidence.
+Retain this record under a stable blocker reference:
+
+```text
+Verification record: <command or check>; elapsed time=<duration>;
+  active step or last output=<evidence>; retained artifacts=<paths or URLs>
+Blocker: <stable blocker reference>; monitoring or timeout=<plan>;
+  cancellation or retry=<decision, authority, and reason>
+Claim limit: <missing evidence and how it narrows the completion or readiness claim>
+```
+
+Track broken verification infrastructure separately and carry the same blocker
+reference into later reviews. Do not rediscover the same failure each cycle or
+replace the missing gate with fallback evidence. Fallback evidence may narrow
+the completion or readiness claim; it cannot prove a claim that requires the
+unfinished check.
+
 ## Red Flags
 
 - "Should pass", "looks good", "probably fixed", or any success wording before
