@@ -67,3 +67,4 @@
 20260720-4x57-preserve-existing-repository-setup-when-adding-tiber
 20260720-88n3-refuse-task-boards-that-tiber-does-not-own
 20260720-urvv-use-recognized-security-guidance-in-every-security-review
+20260721-qtpp-stop-measuring-plugin-lift-when-an-eval-prompt-gives-away-the-answer
