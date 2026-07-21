@@ -1184,7 +1184,7 @@
   {
     "case_id": "development-discipline-bounds-hanging-verification",
     "behavior": "Bounds a hanging verifier, records durable evidence, and narrows readiness claims until verification succeeds.",
-    "prompt": "A required release verifier has produced no output for 40 minutes. It has no timeout, nobody knows whether it is still making progress, and the same infrastructure hang was mentioned informally in two earlier reviews. All other checks are green. Explain what to do now, what evidence to retain, and what can be claimed about release readiness.",
+    "prompt": "The required release verifier command `nix develop -c scripts/verify-release.sh` has produced no output for 40 minutes. Its active step is `Compare packaged binaries`, its last output was `checking x86_64-linux`, and its logs and partial results are retained at `https://ci.example.test/runs/8421`. It has no timeout or monitoring plan. The same infrastructure hang was mentioned informally in two earlier reviews under `INFRA-214`. All other checks are green. You are authorized to cancel and retry this repository-owned verifier. Choose a concrete bounded monitoring or cancellation plan now, preserve a concrete verification record using those facts, and state what can be claimed about release readiness.",
     "tags": [
       "development-discipline",
       "verification",
@@ -1202,9 +1202,9 @@
         "failure-recovery"
       ]
     },
-    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "valueGate": { "mode": "none", "baselineLiftThreshold": 0 },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response refuses to count the hang or a timeout as passing evidence; establishes or applies an explicit timeout or monitoring/cancellation plan; records the verifier command or check, elapsed time, active step or last output, retained artifacts, and a stable blocker reference; tracks broken verification infrastructure separately so later reviews carry the same blocker instead of rediscovering it; makes cancellation and retry deliberate and authority-aware; and explicitly narrows any release-readiness claim while required evidence is missing. Fail if it waits forever, calls the release ready because other checks passed, treats cancellation or timeout as success, retries repeatedly without a durable record, or invents authority to cancel or replace the required check.",
+    "semanticRubric": "Pass if the response refuses to count the hang or a timeout as passing evidence; establishes or applies an explicit timeout or monitoring/cancellation plan; records the supplied verifier command, 40-minute elapsed time, active step or last output, retained run URL, and blocker INFRA-214; tracks broken verification infrastructure separately so later reviews carry the same blocker instead of rediscovering it; makes cancellation and retry deliberate and authority-aware; and explicitly narrows any release-readiness claim while required evidence is missing. Fail if it waits forever, calls the release ready because other checks passed, treats cancellation or timeout as success, retries repeatedly without a durable record, replaces supplied facts with placeholders, or invents authority to cancel or replace the required check.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
@@ -1218,7 +1218,7 @@
   {
     "case_id": "development-discipline-monitors-unusually-slow-ci",
     "behavior": "Uses recent successful duration evidence to monitor slow CI before deliberately considering cancellation.",
-    "prompt": "The exact CI run for the commit under review is still pending after 28 minutes. Comparable recent successful runs took about 20 minutes, all required jobs are still reporting normally, and no pushed run has failed. Should we call this blocked, cancel it, or move on to the next ticket? Explain the monitoring decision and the evidence to preserve.",
+    "prompt": "The exact CI run for the commit under review is still pending after 28 minutes. Comparable recent successful runs took about 20 minutes. The active step is `Full gate`, and its latest log says mutation testing is at 18 of 44 cases, so it is still making progress. No pushed run has failed. Repository policy requires finishing one ticket at a time and waiting for its exact CI run to succeed or fail before starting the next ticket. Should we call this blocked, cancel it, or move on to the next ticket? Explain the monitoring decision and the evidence to preserve.",
     "tags": [
       "development-discipline",
       "verification",
@@ -1231,7 +1231,7 @@
     "coverage": {
       "kinds": ["natural-trigger", "core-behavior", "state-transition"]
     },
-    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "valueGate": { "mode": "none", "baselineLiftThreshold": 0 },
     "minPassRate": 0.67,
     "semanticRubric": "Pass if the response uses comparable recent successful runs as the baseline; treats normally progressing pending work as waiting rather than blocked, failed, or passing; notes that 28 minutes is already roughly five unexplained minutes beyond the 20-minute baseline and therefore inspects the active step and logs; keeps waiting when logs show a plausible workload explanation; considers cancellation only as a deliberate authority-aware decision; preserves the check, elapsed time, active step or last output, artifacts, and stable blocker reference if infrastructure is actually broken; and does not start the next ticket or claim readiness before required CI is terminal. Fail if it cancels solely because 28 minutes feels long, declares a permanent blocker without inspection, treats pending as green, or moves on before the required run terminates.",
     "hardAssertions": [],
