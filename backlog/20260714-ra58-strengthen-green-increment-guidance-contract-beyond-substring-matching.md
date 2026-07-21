@@ -17,8 +17,6 @@ MINOR test-verification finding from the risk-proportionate review-policy ticket
 
 ## Acceptance criteria
 
-- [ ] Keep a fast local contract and a semantic behavior fixture with calibrated pass and fail examples.
-
 ## Subtasks
 
 ## Notes / Log
