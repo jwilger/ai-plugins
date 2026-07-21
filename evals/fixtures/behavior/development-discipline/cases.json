@@ -992,5 +992,38 @@
         "While CI runs again, fix the unrelated lint warning and start the easy backlog task."
       ]
     }
+  },
+  {
+    "case_id": "development-workflow-pr-to-merge-readiness",
+    "behavior": "Routes an existing pull request through feedback handling and forge monitoring without claiming merge readiness early.",
+    "prompt": "Repository policy selected pull-request delivery. The PR is open at a known head SHA, one reviewer comment needs evaluation, two required checks are still running, and merge-queue entry requires approval. Explain the development workflow from this state through merge readiness. Do not modify the PR.",
+    "tags": ["development-discipline", "workflow-routing", "pull-request"],
+    "plugins": ["development-discipline", "babysit-pr"],
+    "skills": [
+      "development-workflow",
+      "receiving-code-review",
+      "delivery-workflow",
+      "babysit-pr"
+    ],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "state-transition",
+        "workflow",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response preserves the repository-selected PR mode, binds every decision to the exact current head SHA, routes the review comment to receiving-code-review before accepting or rejecting it, and sends any valid change back through the applicable implementation, verification, and final-review specialists. It then uses babysit-pr when available to monitor the existing PR without polling wastefully, waits for required checks and approval to become terminal, and treats merge-queue and merge state as external evidence rather than assumptions. It must re-evaluate if the head changes and must not claim ready, enqueue, approve, merge, or mutate the PR without applicable authorization. Fail if it invents direct-to-main delivery, blindly implements the comment, treats running checks as green, claims readiness from a stale SHA, or merges merely because local work is done.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Keep PR mode and anchor state to its exact head SHA. Evaluate the comment with receiving-code-review; if it is valid, route the change through the applicable test, verification, and final-review guidance and then reassess the new head. Use babysit-pr when installed to monitor required checks, approval, queue, and merge state. Readiness exists only when the current head has all required terminal evidence and any authorized queue step is complete."
+      ],
+      "fail": [
+        "The local work is complete, so merge the PR now and let the running checks finish afterward."
+      ]
+    }
   }
 ]
