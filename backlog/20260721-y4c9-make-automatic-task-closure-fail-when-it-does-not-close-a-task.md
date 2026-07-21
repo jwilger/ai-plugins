@@ -2,14 +2,18 @@
 title: Make automatic task closure fail when it does not close a task
 blocked_by: []
 blocks: []
-tags: []
+tags: [tiber, bug, automation, task-state, high-priority]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
+When a main-branch commit says that a Tiber task is closed, automation must either move that task to Done or fail with a useful explanation. A green workflow must never leave completed work incorrectly shown as active.
+
 ## Context / Why
+
+GitHub issue 56 reports two successful workflows where the close-from-trailers command found a task-closing commit message but left the named tasks in progress. This makes the dashboard inaccurate, breaks one-ticket-at-a-time coordination, and causes later task updates to collide with stale state. The repair should report which tasks were closed and return a failure for missing tasks, invalid task data, synchronization conflicts, push failures, or any other condition that prevents a requested closure.
 
 ## Acceptance criteria
 
