@@ -24,7 +24,7 @@ Implementation notes: A caused MAJOR correctness finding from 20260713-rygd show
 - [x] Scout findings claiming acceptance_criteria, user_request, or explicit_user_concern relevance provide exact matched_context; cross-cutting findings provide in-scope changed_diff_evidence; prior-defense findings provide the defense ID and new contradictory changed-diff evidence.
 - [x] A missing, mismatched, generic, or out-of-scope relevance claim is rejected or retained only as a non-actionable report and cannot force a backlog ticket, verifier, blocker, or review reset.
 - [x] Valid scout findings retain their evidence through authoritative state, out-of-scope reports, later assignments, and disposition without bypassing normal policy.
-- [ ] Focused Rust and public JSON-RPC tests cover a shallow scout falsely labeling a generic suggestion as an acceptance criterion, mismatched context, missing changed-diff evidence, valid exact context, and equivalent initial and delta behavior.
+- [x] Focused Rust and public JSON-RPC tests cover a shallow scout falsely labeling a generic suggestion as an acceptance criterion, mismatched context, missing changed-diff evidence, valid exact context, and equivalent initial and delta behavior.
 
 ## Subtasks
 
