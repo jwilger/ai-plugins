@@ -13,6 +13,8 @@ pr_mr_status:
 
 ## Acceptance criteria
 
+- [ ] The existing public runner cancellation coverage is compared with the code-quality benchmark runner's distinct behavior.
+
 ## Subtasks
 
 ## Notes / Log
