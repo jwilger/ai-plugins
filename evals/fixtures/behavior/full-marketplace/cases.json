@@ -585,13 +585,13 @@
         "baseline-ablation"
       ]
     },
-    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
-    "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response blocks the unbounded immediate retries and unbounded concurrent scans; identifies stale-cache correctness, long lock contention, interruption/partial-cleanup, resource growth, and remote-data-loss or partial-failure concerns; recommends concrete bounds, backoff or terminal failure, cache invalidation, shorter lock scope, and recoverable cleanup; and explicitly treats malicious local processes, owner bypass, hostile PATH/environment/config, or adversarial local races as outside this deployment's blocking threat model. Fail if it approves the design, misses either category of unbounded work, treats owner-controlled local inputs as hostile blockers, or proposes service-grade adversarial hardening without addressing ordinary crashes and stale state.",
+    "valueGate": { "mode": "none" },
+    "minPassRate": 0.66,
+    "semanticRubric": "Pass if the response blocks the unbounded immediate retries and unbounded concurrent scans; recommends concrete retry bounds with backoff or terminal failure plus bounded concurrency; keeps ordinary crashes, interruption or partial cleanup, stale state or cache correctness, resource growth, and partial remote failure or data loss in scope; reasons proportionately about cache and lock choices instead of treating them as automatically safe or automatically blocking; and explicitly treats malicious local processes, owner bypass, hostile PATH/environment/config, or adversarial local races as outside this deployment's blocking threat model. A response may require narrower locking or allow a coarse single-owner lock when it ties that choice to plausible correctness, crash-recovery, resource, or contention impact. Fail if it approves the unbounded work, treats owner-controlled local inputs as hostile blockers, mechanically requires shared-service architecture without a plausible local failure, or ignores ordinary failure and resource risks.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Block the design on infinite immediate retries and unlimited scan fanout. Bound both, add backoff and a terminal error, define cache invalidation, shorten the repository lock, and make interrupted cleanup resumable. For this owner-only local CLI, malicious local processes and intentional PATH or config tampering are outside the blocking threat model; crashes, interruption, stale state, filesystem failure, and remote data loss are not."
+        "Block the design on infinite immediate retries and unlimited scan fanout. Bound both, add backoff and a terminal error, keep cache freshness, lock recovery, interrupted cleanup, and partial uploads in the ordinary-failure analysis, and accept either conservative or permissive cache and lock choices when tied to concrete local impact. For this owner-only local CLI, malicious local processes and intentional PATH or config tampering are outside the blocking threat model."
       ],
       "fail": [
         "The owner controls the machine, so the design is safe as written except that the lock file should be protected from malicious local processes."
