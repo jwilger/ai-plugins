@@ -17,7 +17,6 @@ This matters because tautological checks consume maintenance time and evaluation
 
 ## Acceptance criteria
 
-- [ ] Development guidance clearly forbids tests of continuous integration workflow definitions or job structure; successful execution in continuous integration is the test.
 - [ ] Existing development-discipline tests that only check committed text or workflow structure are removed or replaced with tests of observable application or library behavior.
 - [ ] Agent-guidance changes use semantic behavior evaluations when behavior needs regression coverage, without adding phrase-presence tests as a fast substitute.
 - [ ] New tests are justified by a user- or caller-observable behavior of the application or library; when no meaningful behavior exists to exercise, no tautological test is added.
