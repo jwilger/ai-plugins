@@ -29,3 +29,5 @@ This matters because tautological checks consume maintenance time and evaluation
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-21: During the 20260708-sjtg full gate, the existing suite exposed `scripts/tests/ci-workflow.bats`, whose tests inspect CI workflow definitions. Treat those as concrete existing violations to remove or replace under this ticket. Review/eval coverage must exercise both code-generation and code-review decisions so reviewers reliably flag tautological repository-text tests and CI-workflow-definition tests.
