@@ -17,6 +17,8 @@ MINOR test-verification finding from the risk-proportionate review-policy ticket
 
 ## Acceptance criteria
 
+- [ ] Development guidance clearly forbids tests that only read committed repository files and check for specific strings, except when testing a program that creates or edits that file.
+
 ## Subtasks
 
 ## Notes / Log
