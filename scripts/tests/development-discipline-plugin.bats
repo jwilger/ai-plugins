@@ -38,6 +38,7 @@ const requiredCases = [
   'development-workflow-pr-to-merge-readiness',
   'development-workflow-review-only-skips-implementation',
   'development-workflow-unavailable-specialist-fallback',
+  'development-workflow-stops-at-unresolved-gates',
   'development-discipline-tdd-one-test-first',
   'development-discipline-verification-claim-scope',
   'development-discipline-review-feedback-skepticism',
