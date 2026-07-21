@@ -27,7 +27,7 @@ Implementation notes: The router is a lifecycle dispatcher, not a replacement fo
 - [x] The change does not duplicate the full 17-step workflow across every plugin and does not embed project-specific implementation rules that belong in a consuming repo's AGENTS.md.
 - [x] An explicit routing table covers answer/review, diagnosis, implementation, verification, PR creation, CI/review response, and merge-readiness phases with named specialist skills and precedence.
 - [x] The router inspects repository state and local instructions before routing, invokes only available harness capabilities, and gives a safe documented fallback for unavailable specialists.
-- [ ] Negative fixtures prove the router skips irrelevant development workflows and stops at unresolved approval, security, or external-state gates instead of continuing blindly.
+- [x] Negative fixtures prove the router skips irrelevant development workflows and stops at unresolved approval, security, or external-state gates instead of continuing blindly.
 
 ## Subtasks
 
