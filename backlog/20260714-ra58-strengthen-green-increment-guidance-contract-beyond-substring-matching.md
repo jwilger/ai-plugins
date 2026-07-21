@@ -20,6 +20,7 @@ MINOR test-verification finding from the risk-proportionate review-policy ticket
 - [ ] Development guidance clearly forbids tests that only read committed repository files and check for specific strings, except when testing a program that creates or edits that file.
 - [ ] Development guidance clearly forbids tests of continuous integration workflow definitions or job structure; successful execution in continuous integration is the test.
 - [ ] Existing development-discipline tests that only check committed text or workflow structure are removed or replaced with tests of observable application or library behavior.
+- [ ] Agent-guidance changes use semantic behavior evaluations when behavior needs regression coverage, without adding phrase-presence tests as a fast substitute.
 
 ## Subtasks
 
