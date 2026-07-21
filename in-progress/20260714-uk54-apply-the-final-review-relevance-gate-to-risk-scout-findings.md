@@ -5,6 +5,9 @@ blocks: []
 tags: [development-discipline, final-review, risk-scout, relevance, mcp, correctness, major, backlog]
 pr_mr_url: 
 pr_mr_status: 
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
