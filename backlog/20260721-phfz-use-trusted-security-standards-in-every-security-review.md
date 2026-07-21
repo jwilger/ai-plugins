@@ -14,6 +14,7 @@ pr_mr_status:
 ## Acceptance criteria
 
 - [ ] The security-review guidance directs reviewers to consult relevant, current NIST resources.
+- [ ] Review findings identify which standard or guidance supports them in language a product manager can understand.
 
 ## Subtasks
 
