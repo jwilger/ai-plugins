@@ -1,4 +1,3 @@
-20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
 20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
