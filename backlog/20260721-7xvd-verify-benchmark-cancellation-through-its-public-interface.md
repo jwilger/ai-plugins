@@ -14,6 +14,7 @@ pr_mr_status:
 ## Acceptance criteria
 
 - [ ] The existing public runner cancellation coverage is compared with the code-quality benchmark runner's distinct behavior.
+- [ ] If a coverage gap exists, a black-box test invokes the public benchmark command and verifies interrupt handling and cleanup without reading committed source.
 
 ## Subtasks
 
