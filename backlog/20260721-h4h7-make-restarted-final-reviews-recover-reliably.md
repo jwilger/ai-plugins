@@ -25,3 +25,5 @@ Final review is a required delivery safeguard. When its restart process cannot c
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-21: Triaged from GitHub issue #58: https://github.com/jwilger/ai-plugins/issues/58
