@@ -5,6 +5,9 @@ blocks: []
 tags: [development-discipline, verification, ci, reliability]
 pr_mr_url: 
 pr_mr_status: 
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
