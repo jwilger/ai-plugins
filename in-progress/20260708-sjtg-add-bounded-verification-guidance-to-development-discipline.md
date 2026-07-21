@@ -32,3 +32,4 @@ Implementation notes: Promptfoo now has repository-specific timeouts, but develo
 ## Notes / Log
 
 - 2026-07-12: Backlog grooming: canonical task now includes the CI wait/hang policy from abandoned duplicate 20260712-i76j.
+- 2026-07-21: Delivered in commits 2fa6b738080a0b0d194b8cc5007349f050a62267 and f840bfb51da4a175e2451176ef0bcb37464c10e8. Semantic provider-backed evals passed for hanging verification (2/2: Claude and Codex) and unusually slow CI (6/6: three Claude and three Codex compositions). Full local `nix develop -c just ci` passed (586 Bats tests, 0 failures; mutation testing 38 caught, 6 unviable). Final review of the pinned diff bf7ed8a..f840bfb completed clean. Exact pushed GitHub Actions run 29844145210 reached terminal success; Quality gate completed in 22m44s.
