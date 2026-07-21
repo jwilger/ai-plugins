@@ -24,3 +24,5 @@ A final_review.plan call in a separate repository rejected an apparently unchang
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-21: Reproduced during HCQ6 final review. A restarted assess/plan session returned `risk_assessment_assignment_id_mismatch=true` when the plan call's shared-evidence command labels differed from assess; retrying with byte-for-byte contract fields cleared that error. The same valid scout result was then rejected as `risk_assessment_low_profile_too_many_lenses max=1`: the coordinator-required scout assessed all nine assigned dimensions as low, but plan's low-profile validator permitted at most one dimension. Coverage should include both identity binding diagnostics and consistency between scout output requirements and low-risk plan validation.
