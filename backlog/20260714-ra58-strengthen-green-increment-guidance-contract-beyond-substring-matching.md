@@ -19,6 +19,7 @@ This matters because tautological checks consume maintenance time and evaluation
 
 - [ ] Agent-guidance changes use semantic behavior evaluations when behavior needs regression coverage, without adding phrase-presence tests as a fast substitute.
 - [ ] New tests are justified by a user- or caller-observable behavior of the application or library; when no meaningful behavior exists to exercise, no tautological test is added.
+- [ ] Standing development guidance for every project forbids tests that only read committed repository files and check for specific strings, except when testing a program that creates or edits that file.
 
 ## Subtasks
 
