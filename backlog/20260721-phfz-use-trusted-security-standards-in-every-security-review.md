@@ -9,7 +9,11 @@ pr_mr_status:
 
 ## Summary
 
+Security reviews should consistently check recognized industry guidance instead of relying only on an individual reviewer’s memory. Add a review lens that uses resources from the Open Worldwide Application Security Project (OWASP) and the U.S. National Institute of Standards and Technology (NIST) when relevant, so reviews are more complete, repeatable, and understandable.
+
 ## Context / Why
+
+Choose current official OWASP and NIST resources that fit software and AI-system security reviews. Explain how the coding harness should consult them, cite applicable findings, and distinguish required fixes from non-blocking observations. Apply the guidance proportionately to the system’s real deployment and risks rather than treating every checklist item as a blocker.
 
 ## Acceptance criteria
 
