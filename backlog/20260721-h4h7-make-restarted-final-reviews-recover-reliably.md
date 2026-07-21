@@ -2,7 +2,7 @@
 title: Make restarted final reviews recover reliably
 blocked_by: []
 blocks: []
-tags: []
+tags: [bug, development-discipline, high-priority]
 pr_mr_url: 
 pr_mr_status: 
 ---
