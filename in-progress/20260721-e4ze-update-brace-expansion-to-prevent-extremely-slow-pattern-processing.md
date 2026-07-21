@@ -20,6 +20,8 @@ GitHub Dependabot alert 4 reports a high-severity denial-of-service issue in bra
 
 ## Acceptance criteria
 
+- [ ] The affected nested brace-expansion dependency resolves to version 2.1.2 or newer.
+
 ## Subtasks
 
 ## Notes / Log
