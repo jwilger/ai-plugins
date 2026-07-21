@@ -19,6 +19,7 @@ Marketplace metadata can advance without a matching GitHub release and Git tag. 
 
 - [ ] The release workflow can create releases only for commits on the main branch.
 - [ ] All marketplace metadata files that declare the marketplace version must agree before a release can be created.
+- [ ] A metadata version bump creates one matching vMAJOR.MINOR.PATCH Git tag and GitHub release for the exact commit.
 
 ## Subtasks
 
