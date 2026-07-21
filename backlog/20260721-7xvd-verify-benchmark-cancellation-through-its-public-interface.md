@@ -2,12 +2,14 @@
 title: Verify benchmark cancellation through its public interface
 blocked_by: []
 blocks: []
-tags: []
+tags: [tests, test-quality, code-quality-benchmark, low-priority]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
+
+Confirm whether the code-quality benchmark runner needs its own regression test for stopping and cleaning up a live run. If distinct coverage is needed, test the runner through the same public command path a user invokes. This preserves useful cancellation coverage without extracting functions from committed source files.
 
 ## Context / Why
 
