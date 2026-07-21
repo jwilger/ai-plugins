@@ -1,0 +1,22 @@
+{
+  "scenario": "pushed-ci-hold",
+  "activePhase": "ci-failure-follow-up",
+  "inspectState": true,
+  "orderedPhases": [
+    "inspect-state",
+    "ci-failure-follow-up",
+    "test-driven-development",
+    "delivery-workflow"
+  ],
+  "specialists": [
+    "ci-failure-follow-up",
+    "test-driven-development",
+    "delivery-workflow"
+  ],
+  "deliverySelectedBeforePreservation": true,
+  "exactRevisionBinding": true,
+  "ciFailureHold": true,
+  "prohibitedActions": ["unrelated-work", "noncausal-push"],
+  "resumeWhen": "replacement-terminal-success",
+  "mutationsPlanned": false
+}

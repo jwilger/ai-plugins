@@ -1,0 +1,13 @@
+{
+  "scenario": "review-only-boundary",
+  "activePhase": "implementation",
+  "inspectState": true,
+  "orderedPhases": ["inspect-state", "test-driven-development"],
+  "specialists": ["test-driven-development", "delivery-workflow"],
+  "deliverySelectedBeforePreservation": true,
+  "exactRevisionBinding": false,
+  "ciFailureHold": false,
+  "prohibitedActions": [],
+  "resumeWhen": "implementation-complete",
+  "mutationsPlanned": true
+}

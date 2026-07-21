@@ -1,0 +1,30 @@
+{
+  "scenario": "implementation-routing",
+  "activePhase": "implementation",
+  "inspectState": true,
+  "orderedPhases": [
+    "inspect-state",
+    "change-preflight",
+    "delivery-selection",
+    "test-driven-development",
+    "verification-before-completion",
+    "final-review",
+    "pull-request-creation",
+    "final-delivery",
+    "exact-revision-ci"
+  ],
+  "specialists": [
+    "change-preflight",
+    "delivery-workflow",
+    "rationale-commit-messages",
+    "test-driven-development",
+    "verification-before-completion",
+    "final-review"
+  ],
+  "deliverySelectedBeforePreservation": true,
+  "exactRevisionBinding": true,
+  "ciFailureHold": false,
+  "prohibitedActions": ["pull-request", "merge"],
+  "resumeWhen": "terminal-success",
+  "mutationsPlanned": false
+}

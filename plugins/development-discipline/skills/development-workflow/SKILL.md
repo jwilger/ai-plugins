@@ -1,6 +1,6 @@
 ---
 name: development-workflow
-description: Use when a development request needs routing from its current lifecycle phase to the smallest applicable specialist workflow.
+description: Use when a development request needs lifecycle routing for diagnosis, implementation, review feedback, PR or MR creation, readiness, CI failure, verification, or delivery.
 ---
 
 # Development workflow
@@ -18,6 +18,15 @@ establish.
 
 Choose only the smallest set of specialists needed for the current phase. When
 one phase completes, inspect state again before selecting the next one.
+Do not preselect a specialist for a failure or branch that has not occurred;
+route that future phase only if current state activates it.
+
+When the user asks only for a workflow explanation, describe the inspection and
+routing that would occur without claiming to have performed it. For an answer
+or domain-review request that is not a final review of completed development
+work, explicitly skip implementation and delivery specialists unless the user
+separately requests a repository change. A request to review a completed diff
+still routes to `final-review`, even when that review itself is read-only.
 
 ## Routing table
 
@@ -43,14 +52,62 @@ For ordinary implementation, the usual sequence is repository inspection,
 delivery workflow governs whether work is committed, pushed directly, or sent
 through a PR/MR, and whether exact-revision CI must reach a terminal result.
 
+PR/MR creation is conditional: direct-to-main and local-only modes skip PR/MR
+creation. In PR/MR mode, bind review, checks, approval, queue, and merge evidence
+to the exact current head revision, and re-evaluate the entire readiness
+decision whenever that head changes. Valid review-driven edits return through
+the applicable implementation, verification, and final-review specialists.
+
 Each named specialist owns its detailed mechanics, evidence, stop conditions,
 and precedence rules. Do not copy those procedures into this router.
+
+## Required phase boundaries
+
+Keep these boundaries explicit in both action and advisory responses:
+
+- Name every selected specialist and the boundary that activates it. Do not
+  replace a required specialist name with generic wording such as "review it"
+  or "use the normal workflow."
+
+- Start with current user direction, repository instructions, and mutable state
+  before describing any commit or push. For a substantive change, select
+  `delivery-workflow` before the first TDD preservation action. After
+  `final-review`, recheck `delivery-workflow` for final delivery.
+- For answer or domain-review work that is not a completed-diff final review,
+  skip `change-preflight`,
+  `test-driven-development`, `verification-before-completion`, `final-review`,
+  `delivery-workflow`, `babysit-pr`, commits, pushes, PR/MR creation, and ticket
+  creation unless a separate change request activates them.
+- After diagnosis identifies the cause, inspect state again, then route through
+  `change-preflight`, early `delivery-workflow`, `test-driven-development`,
+  `verification-before-completion`, and `final-review` for an authorized fix.
+- Before creating or updating a PR/MR, inspect current repository state again,
+  confirm PR/MR mode and authorization, select an available forge capability,
+  and bind creation plus the recorded URL and state to the exact reviewed head.
+  State this repository-state, delivery-mode, authorization, and
+  forge-capability recheck explicitly.
+- For an existing PR/MR, capture the exact head before evaluating feedback or
+  readiness. Route valid feedback through implementation, verification, and
+  final review; monitor checks, approval, queue, and merge state without
+  wasteful polling; and re-evaluate everything if the head changes. Do not
+  enqueue, enable auto-merge, approve, or merge without current authorization.
+  A review-driven code change is not ready until `final-review` completes for
+  the changed head.
+- After a pushed CI failure, keep `ci-failure-follow-up` as the only active
+  lifecycle specialist. Diagnosis or authorization alone does not release the
+  hold: resume unrelated work only after its causal repair or unchanged-head
+  rerun reaches terminal success for the exact revision.
 
 ## Capability-aware fallback
 
 Inspect the capabilities actually available in the current harness before
 invoking a specialist. Never claim to call an unavailable skill, agent, MCP
 server, browser, forge integration, or documentation source.
+
+Capability fallback does not change the active lifecycle phase. Unexpected
+behavior remains routed to `systematic-debugging`; unavailable documentation or
+tooling specialists change how evidence is obtained, not whether diagnosis is
+required before a fix.
 
 When a named specialist is unavailable, preserve its intended outcome with the
 smallest allowed phase-equivalent fallback:
