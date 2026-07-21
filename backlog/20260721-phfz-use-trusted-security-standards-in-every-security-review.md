@@ -13,6 +13,8 @@ pr_mr_status:
 
 ## Acceptance criteria
 
+- [ ] The security-review guidance directs reviewers to consult relevant, current NIST resources.
+
 ## Subtasks
 
 ## Notes / Log
