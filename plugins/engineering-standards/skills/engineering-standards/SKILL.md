@@ -96,10 +96,17 @@ threat model mechanically to every project.
 - When local or remote data can be copied, replaced, or deleted, require
   integrity checks plus idempotent reconciliation and recovery semantics so a
   partial operation cannot silently become data loss.
-  This standard shapes design before implementation. Use
-  `development-discipline`'s existing production-risk-footguns lens for its
-  lightweight and final review mechanics instead of duplicating that workflow
-  here.
+- For a shared service or untrusted-input processor, include abusive or merely
+  noisy authenticated clients, cross-tenant contention, amplification,
+  aggregate exhaustion, and coordinated bursts in the blocking model. Do not
+  approve N+1 data or dependency calls until they are batched or explicitly
+  capacity-bounded; also require per-tenant and global admission, fairness, and
+  load shedding proportionate to reachable impact.
+
+This standard shapes design before implementation. Use
+`development-discipline`'s existing production-risk-footguns lens for its
+lightweight and final review mechanics instead of duplicating that workflow
+here.
 
 ## Documentation
 
