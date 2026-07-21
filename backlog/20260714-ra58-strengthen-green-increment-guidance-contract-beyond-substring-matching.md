@@ -22,6 +22,7 @@ This matters because tautological checks consume maintenance time and evaluation
 - [ ] Standing development guidance for every project forbids tests that only read committed repository files and check for specific strings, except when testing a program that creates or edits that file.
 - [ ] Standing development guidance forbids tests of continuous integration workflow definitions or job structure; executing the workflow in continuous integration is the test.
 - [ ] When an existing test matching either anti-pattern is found in any project, it is removed or replaced with a test of observable application or library behavior.
+- [ ] Agent-guidance changes use semantic behavior evaluations when regression coverage is useful, without adding phrase-presence tests as a fast substitute.
 
 ## Subtasks
 
