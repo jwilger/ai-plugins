@@ -86,13 +86,30 @@ function validate(candidate) {
     [candidate.agents, "Claude Code using the owner's existing Claude/Anthropic subscription authentication"],
     [candidate.agents, "Codex CLI using the owner's existing ChatGPT/OpenAI subscription authentication"],
     [candidate.agents, "does not require provider API keys or fresh approval"],
+    [candidate.agents, "authentication state isolated and disposable"],
+    [candidate.agents, "leave the source harness logins untouched"],
+    [candidate.agents, "required secret-leak checks"],
+    [candidate.agents, "Never expose those credentials to untrusted pull-request code or events"],
     [candidate.rootReadme, "Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
     [candidate.pluginReadme, "Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
     [candidate.routerSkill, "Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
+    [candidate.routerSkill, "credentials and live execution out of untrusted pull-request code and events"],
     [candidate.stochasticSkill, "Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
+    [candidate.stochasticSkill, "generated authentication state isolated"],
+    [candidate.stochasticSkill, "leave source logins untouched"],
+    [candidate.stochasticSkill, "required secret-leak checks"],
+    [candidate.stochasticSkill, "provider credentials and live eval execution out of untrusted pull-request code and events"],
     [candidate.scaffoldSkill, "eval uses Claude/Anthropic or Codex/OpenAI"],
+    [candidate.scaffoldSkill, "generated authentication state isolated and disposable"],
+    [candidate.scaffoldSkill, "leave source harness logins untouched"],
+    [candidate.scaffoldSkill, "secret-leak checks"],
+    [candidate.scaffoldSkill, "Skip provider-backed live evals on untrusted PRs"],
     [candidate.scaffoldSkill, "protected credentials for unattended trusted automation"],
     [candidate.scaffoldReference, "authenticated Claude Code and Codex subscription sessions"],
+    [candidate.scaffoldReference, "authentication state isolated and disposable"],
+    [candidate.scaffoldReference, "leave source harness logins untouched"],
+    [candidate.scaffoldReference, "secret-leak checks"],
+    [candidate.scaffoldReference, "pull-request checks runnable without provider secrets"],
   ];
 
   for (const [contents, phrase] of required) {
@@ -136,6 +153,36 @@ for (const provider of ["Claude Code/Anthropic", "Codex/ChatGPT"]) {
     } catch (error) {
       if (error.message.startsWith("provider-removal mutant survived")) throw error;
     }
+  }
+}
+
+const boundaryMutants = [
+  ["agents", "authentication state isolated and disposable"],
+  ["agents", "leave the source harness logins untouched"],
+  ["agents", "required secret-leak checks"],
+  ["agents", "Never expose those credentials to untrusted pull-request code or events"],
+  ["routerSkill", "credentials and live execution out of untrusted pull-request code and events"],
+  ["stochasticSkill", "generated authentication state isolated"],
+  ["stochasticSkill", "leave source logins untouched"],
+  ["stochasticSkill", "required secret-leak checks"],
+  ["stochasticSkill", "provider credentials and live eval execution out of untrusted pull-request code and events"],
+  ["scaffoldSkill", "generated authentication state isolated and disposable"],
+  ["scaffoldSkill", "leave source harness logins untouched"],
+  ["scaffoldSkill", "secret-leak checks"],
+  ["scaffoldSkill", "Skip provider-backed live evals on untrusted PRs"],
+  ["scaffoldReference", "authentication state isolated and disposable"],
+  ["scaffoldReference", "leave source harness logins untouched"],
+  ["scaffoldReference", "secret-leak checks"],
+  ["scaffoldReference", "pull-request checks runnable without provider secrets"],
+];
+
+for (const [name, phrase] of boundaryMutants) {
+  const mutant = { ...policy, [name]: policy[name].replace(phrase, "removed-boundary") };
+  try {
+    validate(mutant);
+    throw new Error(`boundary-removal mutant survived: ${name}:${phrase}`);
+  } catch (error) {
+    if (error.message.startsWith("boundary-removal mutant survived")) throw error;
   }
 }
 
