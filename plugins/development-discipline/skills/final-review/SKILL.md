@@ -233,6 +233,17 @@ failure path caused by the current change. Do not fix or backlog out-of-scope
 wishlist items or generic hardening suggestions. A concrete pre-existing defect
 is still backlog evidence even though it is not a current-ticket blocker.
 
+Filtering an out-of-scope finding does not change the risk-selected review plan
+and does not waive any acceptance criterion. Continue the assigned passes and
+separately verify every actual acceptance criterion. Completion still requires
+`final_review.advance` to report completion with no unresolved blocking caused
+or worsened CRITICAL/MAJOR security or human-safety finding.
+
+When explaining an out-of-scope disposition, explicitly state all three
+invariants: preserve the risk-selected review plan, separately verify the
+ticket's actual acceptance criteria, and require `final_review.advance` to
+confirm the completion condition above.
+
 ## Finding Disposition
 
 Disposition is deterministic and separate from acceptance criteria:

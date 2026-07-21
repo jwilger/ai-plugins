@@ -1638,6 +1638,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
             "Classify security_impact and safety_impact independently for every finding, regardless of which review lens discovered it.",
             "Every caused or worsened CRITICAL/MAJOR security or human-safety finding must name the in-scope changed path that would be remediated.",
             "Record canonical semantic failure paths, but do not run tests, invoke a verifier, or request another planner.",
+            "Scout findings use the same relevance evidence contract as lens findings: request, acceptance-criteria, and explicit-concern claims require exact matched_context; cross-cutting claims require changed_diff_evidence bound to an in-scope changed path; prior-defense challenges require the accepted defense ID and new contradictory changed-diff evidence.",
             "Consume the supplied shared_test_evidence as the sole broad test run for this scout."
         ]
     })
@@ -1744,6 +1745,10 @@ fn delta_risk_arguments(
         "conditional_lenses": conditional_lenses,
         "pre_filter_model_role": state.pointer("/model_roles/pre_filter").and_then(Value::as_str).unwrap_or("fast-filter")
     });
+    arguments["prior_defenses_by_lens"] = state
+        .get("prior_defenses_by_lens")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
     if arguments["split_lineage"].is_null() {
         arguments
             .as_object_mut()
@@ -1811,6 +1816,7 @@ fn delta_risk_assignment(
                 "If the replacement diff has grown into a new subsystem or an unusually broad diff, set split_required=true and return at least two independently shippable split_candidates covering the replacement changed-file inventory."
             },
             "Do not remove unresolved blockers or request less coverage; the coordinator enforces a monotonic coverage floor.",
+            "Apply the normal relevance evidence contract to every finding: exact matched_context for request/criteria/concern claims, changed_diff_evidence for cross-cutting claims, and an accepted prior_defense_id plus new contradictory changed-diff evidence for prior-defense challenges.",
             "Consume the supplied shared test evidence. Do not run tests, invoke a verifier, or request another planner."
         ]
     }).to_string());
@@ -1884,6 +1890,25 @@ fn risk_assessment_output_schema(delivery_split_candidates_required: bool) -> Va
                         "scenario": { "type": "string" },
                         "evidence": { "type": "string" },
                         "material_impact": { "type": "string" },
+                        "matched_context": {
+                            "type": "object",
+                            "properties": {
+                                "type": { "type": "string", "enum": ["user_request", "acceptance_criteria", "explicit_user_concern"] },
+                                "value": { "type": "string" }
+                            },
+                            "required": ["type", "value"],
+                            "additionalProperties": false
+                        },
+                        "changed_diff_evidence": {
+                            "type": "object",
+                            "properties": {
+                                "path": { "type": "string" },
+                                "causal_path": { "type": "string" }
+                            },
+                            "required": ["path", "causal_path"],
+                            "additionalProperties": false
+                        },
+                        "prior_defense_id": { "type": "string" },
                         "relevance": {
                             "type": "object",
                             "properties": {
@@ -1894,7 +1919,8 @@ fn risk_assessment_output_schema(delivery_split_candidates_required: bool) -> Va
                                         "user_request",
                                         "acceptance_criteria",
                                         "explicit_user_concern",
-                                        "cross_cutting_risk"
+                                        "cross_cutting_risk",
+                                        "prior_defense"
                                     ]
                                 },
                                 "explanation": { "type": "string" }
@@ -2306,11 +2332,32 @@ fn compile_risk_plan(
     } else {
         lens_passes.clone()
     };
-    let (findings, blocking_findings) = validated_scout_findings(
+    let prior_defenses_by_lens = match arguments.get("prior_defenses_by_lens") {
+        Some(value) => value.clone(),
+        None => parse_prior_defenses(arguments.get("prior_defenses"), &expected_dimensions)?,
+    };
+    let relevance_state = json!({
+        "context": {
+            "user_request": arguments.get("user_request").cloned().unwrap_or_else(|| json!("")),
+            "acceptance_criteria": arguments.get("acceptance_criteria").cloned().unwrap_or_else(|| json!([])),
+            "explicit_concerns": arguments.get("explicit_concerns").cloned().unwrap_or_else(|| json!([]))
+        },
+        "prior_defenses_by_lens": prior_defenses_by_lens
+    });
+    let project_root = arguments
+        .get("project_root")
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
+    let scout_findings = validated_scout_findings(
         assessment.get("findings"),
         &expected_dimensions,
         changed_files,
+        project_root.as_deref(),
+        &relevance_state,
     )?;
+    let findings = scout_findings.actionable;
+    let blocking_findings = scout_findings.blocking;
+    let out_of_scope_findings = scout_findings.out_of_scope;
     if let Some(finding) = findings.iter().find(|finding| {
         matches!(
             finding.get("severity").and_then(Value::as_str),
@@ -2338,6 +2385,7 @@ fn compile_risk_plan(
         "overall_risk": overall_risk,
         "dimensions": dimensions,
         "findings": findings,
+        "out_of_scope_findings": out_of_scope_findings,
         "exceptional_triggers": exceptional_triggers,
         "plan_assumptions": assessment.get("plan_assumptions").cloned().unwrap_or_else(|| json!([])),
         "selected_lenses": selected_lenses,
@@ -2709,11 +2757,19 @@ fn validated_scope_split_plan(
     })))
 }
 
+struct ValidatedScoutFindings {
+    actionable: Vec<Value>,
+    blocking: Vec<Value>,
+    out_of_scope: Vec<Value>,
+}
+
 fn validated_scout_findings(
     value: Option<&Value>,
     expected_dimensions: &[String],
     changed_files: &[String],
-) -> Result<(Vec<Value>, Vec<Value>), String> {
+    project_root: Option<&Path>,
+    relevance_state: &Value,
+) -> Result<ValidatedScoutFindings, String> {
     let findings = value
         .and_then(Value::as_array)
         .ok_or_else(|| "risk_assessment_findings_required=true".to_string())?;
@@ -2725,6 +2781,11 @@ fn validated_scout_findings(
     let mut semantic_keys = HashSet::with_capacity(findings.len());
     let mut validated = Vec::with_capacity(findings.len());
     let mut blocking = Vec::new();
+    let mut out_of_scope = Vec::new();
+    let normalized_changed_files = changed_files
+        .iter()
+        .filter_map(|path| normalize_review_path(path, project_root))
+        .collect::<HashSet<_>>();
     for finding in findings {
         let semantic_key = finding
             .get("semantic_key")
@@ -2792,30 +2853,45 @@ fn validated_scout_findings(
                 )
             })
             .ok_or_else(|| "risk_assessment_finding_causality_invalid=true".to_string())?;
-        if finding
-            .get("message")
-            .and_then(Value::as_str)
-            .is_none_or(|message| message.trim().is_empty())
-        {
-            return Err("risk_assessment_finding_message_required=true".to_string());
-        }
-        let relevance = finding
-            .get("relevance")
-            .and_then(Value::as_object)
-            .ok_or_else(|| "risk_assessment_finding_relevance_required=true".to_string())?;
-        if relevance
-            .get("category")
-            .and_then(Value::as_str)
-            .is_none_or(|category| !allowed_relevance_category(category))
-            || relevance
-                .get("explanation")
-                .and_then(Value::as_str)
-                .is_none_or(|explanation| explanation.trim().is_empty())
-        {
-            return Err("risk_assessment_finding_relevance_invalid=true".to_string());
-        }
         let mut normalized = finding.clone();
         normalized["id"] = json!(semantic_key);
+        let lens = normalized
+            .get("lens")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let category = normalized
+            .pointer("/relevance/category")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let request_context_category = matches!(
+            category,
+            "user_request" | "acceptance_criteria" | "explicit_user_concern"
+        );
+        let classified = if request_context_category
+            && !has_matched_context_evidence(&normalized, relevance_state, category)
+        {
+            let mut value = normalized.clone();
+            value["filter_reason"] = json!(
+                "scout request/criteria/concern relevance requires exact matched context evidence"
+            );
+            ClassifiedFinding {
+                bucket: "out_of_scope".to_string(),
+                value,
+            }
+        } else {
+            classify_finding(
+                lens,
+                &normalized,
+                &normalized_changed_files,
+                project_root,
+                relevance_state,
+            )
+        };
+        if classified.bucket != "actionable" && classified.bucket != "needs_human_decision" {
+            out_of_scope.push(classified.value);
+            continue;
+        }
+        let normalized = classified.value;
         if caused_blocking_security_or_safety_finding(&normalized) {
             let in_scope_path = normalized
                 .get("path")
@@ -2835,7 +2911,11 @@ fn validated_scout_findings(
         }
         validated.push(normalized);
     }
-    Ok((validated, blocking))
+    Ok(ValidatedScoutFindings {
+        actionable: validated,
+        blocking,
+        out_of_scope,
+    })
 }
 
 fn caused_blocking_security_or_safety_finding(finding: &Value) -> bool {
@@ -3292,7 +3372,14 @@ fn plan_result_internal(
         "unrelated_finding_policy": unrelated_finding_policy,
         "finding_disposition_policy": finding_disposition_policy,
         "unrelated_finding_policy_confirmation_required": unrelated_finding_policy_confirmation_required,
-        "out_of_scope_report": [],
+        "out_of_scope_report": risk_plan_state
+            .get("out_of_scope_findings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|finding| json!({ "iteration": 0, "finding": finding, "security_escalation": null }))
+            .collect::<Vec<_>>(),
         "deferred_findings": [],
         "unresolved_findings": initial_unresolved_findings,
         "unresolved_security_escalations": [],
@@ -3323,6 +3410,14 @@ fn plan_result_internal(
         .ok_or_else(|| "report_binding_build_failed=true".to_string())?);
     state["review_contract_id"] = json!(computed_review_contract_id(&state)
         .ok_or_else(|| "review_contract_build_failed=true".to_string())?);
+    ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
+    if state
+        .pointer("/risk_plan/out_of_scope_findings")
+        .and_then(Value::as_array)
+        .is_some_and(|findings| !findings.is_empty())
+    {
+        sync_scout_out_of_scope_report(&mut state)?;
+    }
     ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
 
     let review_base = state
@@ -3474,7 +3569,11 @@ fn filter_findings(arguments: &Value) -> Result<String, String> {
     let mut routed = Vec::new();
     let mut already_tracked = Vec::new();
     let mut defended_or_accepted = Vec::new();
-    let mut out_of_scope = Vec::new();
+    let mut out_of_scope = state
+        .pointer("/risk_plan/out_of_scope_findings")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let mut security_escalations_required = Vec::new();
     let mut follow_up_tickets_required = Vec::new();
     let mut malformed = Vec::new();
@@ -5332,6 +5431,7 @@ fn apply_delta_risk_reassessment(
     }
     state["risk_plan"]["dimensions"] = Value::Array(merged_dimensions);
     state["risk_plan"]["findings"] = Value::Array(merged_findings);
+    state["risk_plan"]["out_of_scope_findings"] = compiled.state["out_of_scope_findings"].clone();
     state["risk_plan"]["selected_lenses"] = json!(selected_lenses);
     state["risk_plan"]["lens_passes"] = Value::Object(lens_passes);
     state["risk_plan"]["active_lenses"] = json!(active_lenses);
@@ -5397,6 +5497,8 @@ fn apply_delta_risk_reassessment(
     state["required_clean_iterations"] = json!(required);
     state["review_contract_id"] = json!(computed_review_contract_id(&state)
         .ok_or_else(|| "review_contract_rebind_failed=true".to_string())?);
+    ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
+    sync_scout_out_of_scope_report(&mut state)?;
     if scope_split_hold {
         ensure_json_size(&state, "state", MAX_STATE_BYTES)?;
         let completion_blockers = unresolved_findings(&state);
@@ -6115,6 +6217,15 @@ fn append_out_of_scope_report(
     Ok(())
 }
 
+fn sync_scout_out_of_scope_report(state: &mut Value) -> Result<(), String> {
+    let out_of_scope = state
+        .pointer("/risk_plan/out_of_scope_findings")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    append_out_of_scope_report(state, &json!({ "out_of_scope": out_of_scope }), None)
+}
+
 fn replace_durable_out_of_scope_report(
     state: &mut Value,
     entries: Vec<Value>,
@@ -6613,7 +6724,10 @@ fn classify_finding(
     let mut value = finding.clone();
     value["lens"] = json!(lens);
 
-    if message.is_none() || category.is_none() || explanation.is_empty() {
+    if message.is_none_or(|message| message.trim().is_empty())
+        || category.is_none()
+        || explanation.is_empty()
+    {
         value["filter_reason"] = json!("missing message or structured relevance");
         return ClassifiedFinding {
             bucket: "malformed".to_string(),
@@ -17439,6 +17553,14 @@ pre_filter = "project-pre"
             3
         );
         let scout_schema = risk_assessment_output_schema(true);
+        let finding_properties = &scout_schema["properties"]["findings"]["items"]["properties"];
+        assert!(finding_properties.get("matched_context").is_some());
+        assert!(finding_properties.get("changed_diff_evidence").is_some());
+        assert!(finding_properties.get("prior_defense_id").is_some());
+        let dimension_properties = &scout_schema["properties"]["dimensions"]["items"]["properties"];
+        assert!(dimension_properties.get("matched_context").is_none());
+        assert!(dimension_properties.get("changed_diff_evidence").is_none());
+        assert!(dimension_properties.get("prior_defense_id").is_none());
         assert_eq!(
             scout_schema["allOf"][0]["then"]["properties"]["exceptional_triggers"]["minItems"],
             1
@@ -19927,6 +20049,97 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn json_rpc_delta_scout_filters_an_irrelevant_acceptance_claim() {
+        let mut coordinator = ReviewCoordinator::default();
+        let first_arguments = assessed_plan_arguments(
+            "json-rpc-delta-scout-relevance",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let first_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": first_arguments }
+            }))
+            .expect("initial plan response");
+        let first_plan: Value = serde_json::from_str(
+            first_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("initial plan text"),
+        )
+        .expect("initial plan json");
+        let replacement_diff_hash = "json-rpc-delta-scout-relevance-v2";
+        let base_arguments = json!({
+            "state": first_plan["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": { "name": "final_review.advance", "arguments": base_arguments }
+            }))
+            .expect("delta assignment response");
+        let required: Value = serde_json::from_str(
+            required_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("delta assignment text"),
+        )
+        .expect("delta assignment json");
+        let assessment = delta_risk_assessment_for(
+            &required["delta_risk_assignments"][0],
+            "medium",
+            &[("correctness-behavior", "medium")],
+            &["correctness-behavior"],
+            json!([{
+                "semantic_key": "delta-generic-suggestion",
+                "lens": "correctness-behavior",
+                "severity": "MINOR",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "likelihood": "possible",
+                "causality": "incidental",
+                "message": "A generic cleanup was suggested after the diff changed.",
+                "relevance": { "category": "acceptance_criteria", "explanation": "Cleanup is generally useful." }
+            }]),
+        );
+        let mut resubmission = base_arguments;
+        resubmission["delta_risk_assessment"] = assessment;
+
+        let advanced_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": { "name": "final_review.advance", "arguments": resubmission }
+            }))
+            .expect("delta reassessment response");
+        let advanced: Value = serde_json::from_str(
+            advanced_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("delta reassessment text"),
+        )
+        .expect("delta reassessment json");
+
+        assert_eq!(advanced["state"]["risk_plan"]["findings"], json!([]));
+        assert_eq!(
+            advanced["state"]["risk_plan"]["out_of_scope_findings"][0]["id"],
+            "delta-generic-suggestion"
+        );
+        assert_eq!(
+            advanced["state"]["out_of_scope_report"][0]["finding"]["id"],
+            "delta-generic-suggestion"
+        );
+    }
+
+    #[test]
     fn json_rpc_delta_reassessment_freezes_resubmission_and_keeps_session_identity() {
         let mut coordinator = ReviewCoordinator::default();
         let first_arguments = assessed_plan_arguments(
@@ -20992,6 +21205,196 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn initial_scout_generic_acceptance_claim_is_non_actionable_without_exact_context() {
+        let arguments = assessed_plan_arguments(
+            "scout-generic-acceptance-claim",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([{
+                "semantic_key": "generic-cleanup-suggestion",
+                "lens": "correctness-behavior",
+                "severity": "MINOR",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "likelihood": "possible",
+                "causality": "incidental",
+                "message": "The surrounding module could be reorganized.",
+                "relevance": {
+                    "category": "acceptance_criteria",
+                    "explanation": "Cleaner organization is generally desirable."
+                }
+            }]),
+        );
+
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        assert_eq!(planned["state"]["risk_plan"]["findings"], json!([]));
+        assert_eq!(
+            planned["state"]["risk_plan"]["out_of_scope_findings"][0]["id"],
+            "generic-cleanup-suggestion"
+        );
+
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": clean_lens_results_for(&planned["state"]),
+                "current_diff_hash": "scout-generic-acceptance-claim-diff"
+            }))
+            .expect("irrelevant scout finding cannot require a follow-up ticket"),
+        )
+        .expect("advance json");
+
+        assert_eq!(
+            advanced["filtered"]["follow_up_tickets_required"],
+            json!([])
+        );
+    }
+
+    #[test]
+    fn initial_scout_mismatched_acceptance_context_is_non_actionable() {
+        let arguments = assessed_plan_arguments(
+            "scout-mismatched-acceptance-context",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([{
+                "semantic_key": "mismatched-criterion",
+                "lens": "correctness-behavior",
+                "severity": "MINOR",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "likelihood": "possible",
+                "causality": "incidental",
+                "message": "An unrelated criterion was claimed.",
+                "matched_context": { "type": "acceptance_criteria", "value": "An unrelated wishlist item" },
+                "relevance": { "category": "acceptance_criteria", "explanation": "The scout claimed this was required." }
+            }]),
+        );
+
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        assert_eq!(planned["state"]["risk_plan"]["findings"], json!([]));
+        assert_eq!(
+            planned["state"]["risk_plan"]["out_of_scope_findings"][0]["id"],
+            "mismatched-criterion"
+        );
+    }
+
+    #[test]
+    fn initial_scout_missing_relevance_is_report_only_instead_of_aborting_planning() {
+        let arguments = assessed_plan_arguments(
+            "scout-missing-relevance",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([{
+                "semantic_key": "missing-relevance",
+                "lens": "correctness-behavior",
+                "severity": "MINOR",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "likelihood": "possible",
+                "causality": "incidental",
+                "message": "A suggestion omitted its relevance evidence."
+            }]),
+        );
+
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        assert_eq!(planned["state"]["risk_plan"]["findings"], json!([]));
+        assert_eq!(
+            planned["state"]["risk_plan"]["out_of_scope_findings"][0]["filter_reason"],
+            "missing message or structured relevance"
+        );
+        assert!(planned["state"]["out_of_scope_report_artifact"]
+            .as_str()
+            .is_some_and(|path| !path.is_empty()));
+    }
+
+    #[test]
+    fn initial_scout_blank_message_is_report_only() {
+        let arguments = assessed_plan_arguments(
+            "scout-blank-message",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([{
+                "semantic_key": "blank-message",
+                "lens": "correctness-behavior",
+                "severity": "MINOR",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "likelihood": "possible",
+                "causality": "incidental",
+                "message": "   ",
+                "path": "src/lib.rs",
+                "relevance": { "category": "diff_changed_file", "explanation": "The changed file is involved." }
+            }]),
+        );
+
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        assert_eq!(planned["state"]["risk_plan"]["findings"], json!([]));
+        assert_eq!(
+            planned["state"]["risk_plan"]["out_of_scope_findings"][0]["filter_reason"],
+            "missing message or structured relevance"
+        );
+    }
+
+    #[test]
+    fn initial_scout_cross_cutting_claim_without_changed_diff_evidence_is_non_actionable() {
+        let arguments = assessed_plan_arguments(
+            "scout-missing-cross-cutting-evidence",
+            "medium",
+            &[("release-integration", "medium")],
+            json!([{
+                "semantic_key": "unbound-release-claim",
+                "lens": "release-integration",
+                "severity": "MINOR",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "likelihood": "possible",
+                "causality": "incidental",
+                "message": "A generic release concern was raised.",
+                "relevance": { "category": "cross_cutting_risk", "explanation": "Releases can be risky." }
+            }]),
+        );
+
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        assert_eq!(planned["state"]["risk_plan"]["findings"], json!([]));
+        assert_eq!(
+            planned["state"]["risk_plan"]["out_of_scope_findings"][0]["filter_reason"],
+            "cross_cutting_risk requires concrete changed-diff evidence"
+        );
+    }
+
+    #[test]
+    fn initial_scout_valid_exact_acceptance_context_is_preserved() {
+        let arguments = assessed_plan_arguments(
+            "scout-valid-acceptance-context",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([{
+                "semantic_key": "risk-depth-regression",
+                "lens": "correctness-behavior",
+                "severity": "MINOR",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "likelihood": "possible",
+                "causality": "caused",
+                "message": "The coordinator could select the wrong review depth.",
+                "matched_context": { "type": "acceptance_criteria", "value": "Select review depth from concrete risk" },
+                "relevance": { "category": "acceptance_criteria", "explanation": "This directly contradicts the named criterion." }
+            }]),
+        );
+
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+
+        assert_eq!(
+            planned["state"]["risk_plan"]["findings"][0]["matched_context"]["value"],
+            "Select review depth from concrete risk"
+        );
+    }
+
+    #[test]
     fn risk_scout_safety_blocker_remains_unresolved_after_clean_confirmation() {
         let arguments = assessed_plan_arguments(
             "safety-blocker-review",
@@ -21110,7 +21513,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn risk_assessment_rejects_a_pathless_blocking_scout_finding() {
+    fn risk_assessment_retains_a_pathless_blocking_scout_finding_as_non_actionable() {
         let arguments = assessed_plan_arguments(
             "pathless-safety-blocker",
             "high",
@@ -21131,12 +21534,12 @@ pre_filter = "project-pre"
             }]),
         );
 
-        let error =
-            plan_result(&arguments).expect_err("blocking scout findings need a changed path");
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
 
+        assert_eq!(planned["state"]["unresolved_findings"], json!([]));
         assert_eq!(
-            error,
-            "risk_assessment_blocking_finding_path_required_or_out_of_scope=unsafe-control-output"
+            planned["state"]["risk_plan"]["out_of_scope_findings"][0]["id"],
+            "unsafe-control-output"
         );
     }
 
