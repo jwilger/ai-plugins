@@ -63,16 +63,20 @@ teardown() {
 @test "repository policy authorizes both local subscription sessions without API keys or repeat approval" {
   run node - "$ROOT/AGENTS.md" "$ROOT/README.md" \
     "$ROOT/plugins/agentic-systems-engineering/README.md" \
+    "$ROOT/plugins/agentic-systems-engineering/skills/agentic-systems-engineering/SKILL.md" \
+    "$ROOT/plugins/agentic-systems-engineering/skills/evaluate-stochastic-systems/SKILL.md" \
     "$ROOT/plugins/agentic-systems-engineering/skills/scaffold-agentic-evals/SKILL.md" \
     "$ROOT/plugins/agentic-systems-engineering/skills/scaffold-agentic-evals/references/scaffold.md" <<'NODE'
 const fs = require("node:fs");
 
-const [agentsPath, rootReadmePath, pluginReadmePath, scaffoldSkillPath, scaffoldReferencePath] = process.argv.slice(2);
+const [agentsPath, rootReadmePath, pluginReadmePath, routerSkillPath, stochasticSkillPath, scaffoldSkillPath, scaffoldReferencePath] = process.argv.slice(2);
 const normalize = (contents) => contents.replace(/\s+/g, " ");
 const policy = {
   agents: normalize(fs.readFileSync(agentsPath, "utf8")),
   rootReadme: normalize(fs.readFileSync(rootReadmePath, "utf8")),
   pluginReadme: normalize(fs.readFileSync(pluginReadmePath, "utf8")),
+  routerSkill: normalize(fs.readFileSync(routerSkillPath, "utf8")),
+  stochasticSkill: normalize(fs.readFileSync(stochasticSkillPath, "utf8")),
   scaffoldSkill: normalize(fs.readFileSync(scaffoldSkillPath, "utf8")),
   scaffoldReference: normalize(fs.readFileSync(scaffoldReferencePath, "utf8")),
 };
@@ -84,6 +88,8 @@ function validate(candidate) {
     [candidate.agents, "does not require provider API keys or fresh approval"],
     [candidate.rootReadme, "Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
     [candidate.pluginReadme, "Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
+    [candidate.routerSkill, "Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
+    [candidate.stochasticSkill, "Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
     [candidate.scaffoldSkill, "eval uses Claude/Anthropic or Codex/OpenAI"],
     [candidate.scaffoldSkill, "protected credentials for unattended trusted automation"],
     [candidate.scaffoldReference, "authenticated Claude Code and Codex subscription sessions"],
@@ -110,12 +116,26 @@ function validate(candidate) {
 validate(policy);
 
 for (const provider of ["Claude/Anthropic", "Codex/OpenAI"]) {
-  const mutant = { ...policy, scaffoldSkill: policy.scaffoldSkill.replace(provider, "removed-provider") };
-  try {
-    validate(mutant);
-    throw new Error(`provider-removal mutant survived: ${provider}`);
-  } catch (error) {
-    if (error.message.startsWith("provider-removal mutant survived")) throw error;
+  for (const name of ["scaffoldSkill"]) {
+    const mutant = { ...policy, [name]: policy[name].replace(provider, "removed-provider") };
+    try {
+      validate(mutant);
+      throw new Error(`provider-removal mutant survived: ${name}:${provider}`);
+    } catch (error) {
+      if (error.message.startsWith("provider-removal mutant survived")) throw error;
+    }
+  }
+}
+
+for (const provider of ["Claude Code/Anthropic", "Codex/ChatGPT"]) {
+  for (const name of ["routerSkill", "stochasticSkill"]) {
+    const mutant = { ...policy, [name]: policy[name].replace(provider, "removed-provider") };
+    try {
+      validate(mutant);
+      throw new Error(`provider-removal mutant survived: ${name}:${provider}`);
+    } catch (error) {
+      if (error.message.startsWith("provider-removal mutant survived")) throw error;
+    }
   }
 }
 

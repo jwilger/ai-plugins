@@ -21,6 +21,8 @@ Load only the references needed for the task:
 - Eval design, stochastic reliability, judges, regression gates, or behavior
   claims: use `evaluate-stochastic-systems` and
   `references/eval-design.md`.
+- Live-eval authentication, standing authorization, or trusted-versus-untrusted
+  execution: use `scaffold-agentic-evals` and its trusted-run guidance.
 - Observability, tracing, auditability, prompt injection, indirect injection,
   sandboxing, or authorization: `references/observability-security.md`.
 - Cost, latency, caching, model routing, provider bake-offs, or fallback
@@ -38,5 +40,9 @@ Load only the references needed for the task:
 - Bound every loop with budgets, termination criteria, and recoverable state.
 - Require eval evidence before reliability claims. A single good run is a demo,
   not proof.
+- Honor explicit repository live-eval authorization through existing
+  Claude Code/Anthropic and Codex/ChatGPT subscription sessions without
+  demanding extra API keys or repeat approval, while keeping provider
+  credentials and live execution out of untrusted pull-request code and events.
 - Prefer the smallest architecture that can be observed, evaluated, and safely
   rolled back.

@@ -88,7 +88,7 @@ generated repo-owned artifacts.
 
 The Codex MCP manifest starts through an absolute `/bin/sh` launcher so Codex
 does not need `bash` on its MCP startup `PATH`. Reinstall or upgrade the plugin
-from marketplace version `0.2.2` or newer if Codex reports `No such file or
+from marketplace version `0.2.3` or newer if Codex reports `No such file or
 directory` while starting the `promptfoo` MCP server.
 
 Promptfoo's `mcp` provider is a different feature: it treats an MCP server as

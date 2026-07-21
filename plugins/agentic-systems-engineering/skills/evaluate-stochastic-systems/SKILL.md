@@ -28,6 +28,20 @@ Load `references/eval-design.md`.
   proof.
 - A single good run is a demo, not proof.
 
+## Live Provider Runs
+
+- Follow the repository's explicit authorization policy. When it grants standing
+  approval for repository-owned evals through existing Claude Code/Anthropic
+  and Codex/ChatGPT subscription sessions, reuse those sessions without
+  demanding provider API keys or fresh approval.
+- Standing approval does not broaden the data boundary: send only the authorized
+  fixtures and prompts, exclude secrets and private or unrelated content, keep
+  generated authentication state isolated where supported, leave source logins
+  untouched, and run required secret-leak checks.
+- Keep provider credentials and live eval execution out of untrusted
+  pull-request code and events. Use protected credentials for unattended trusted
+  automation only when an interactive harness session is unavailable.
+
 ## Output Bar
 
 For any eval recommendation, produce:
