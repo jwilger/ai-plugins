@@ -49,6 +49,8 @@ const requiredCases = [
   'development-discipline-final-review-clean-iterations',
   'development-discipline-tdd-lightweight-post-implementation-review',
   'development-discipline-ci-failure-follow-up',
+  'development-discipline-bounds-hanging-verification',
+  'development-discipline-monitors-unusually-slow-ci',
   'development-discipline-ci-failure-recovery-record',
   'development-discipline-rationale-bearing-commit-message',
   'development-discipline-delivery-direct-to-trunk',
@@ -773,6 +775,67 @@ NODE
   [ "$status" -eq 0 ]
 
   run grep -F "populated secret files or secret values" "$skill"
+  [ "$status" -eq 0 ]
+}
+
+@test "verification guidance bounds long-running checks and preserves incomplete evidence" {
+  run node - "$ROOT" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.argv[2];
+const normalize = (value) => value.toLowerCase().replace(/\s+/g, ' ');
+const skill = normalize(
+  fs.readFileSync(
+    path.join(root, 'plugins/development-discipline/skills/verification-before-completion/SKILL.md'),
+    'utf8',
+  ),
+);
+const cases = JSON.parse(
+  fs.readFileSync(
+    path.join(root, 'evals/fixtures/behavior/development-discipline/cases.json'),
+    'utf8',
+  ),
+);
+const failures = [];
+
+for (const phrase of [
+  'explicit timeout or monitoring and cancellation plan',
+  'comparable recent successful run',
+  'roughly five unexplained minutes',
+  'active step and logs',
+  'command or check',
+  'elapsed time',
+  'last output',
+  'retained artifacts',
+  'stable blocker reference',
+  'applicable authority',
+  'never passing evidence',
+  'narrow the completion or readiness claim',
+]) {
+  if (!skill.includes(phrase)) failures.push(`verification guidance missing: ${phrase}`);
+}
+
+for (const id of [
+  'development-discipline-bounds-hanging-verification',
+  'development-discipline-monitors-unusually-slow-ci',
+]) {
+  const fixture = cases.find((entry) => entry.case_id === id);
+  if (!fixture) {
+    failures.push(`missing behavior fixture: ${id}`);
+    continue;
+  }
+  if (!fixture.skills?.includes('verification-before-completion')) {
+    failures.push(`fixture missing verification skill mapping: ${id}`);
+  }
+}
+
+if (failures.length > 0) {
+  console.error(failures.join('\n'));
+  process.exit(1);
+}
+NODE
+
   [ "$status" -eq 0 ]
 }
 
