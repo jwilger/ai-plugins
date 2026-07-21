@@ -34,6 +34,7 @@ const forbiddenSkills = [
 ];
 const requiredCases = [
   'development-workflow-normal-implementation',
+  'development-workflow-ci-failure-hold',
   'development-discipline-tdd-one-test-first',
   'development-discipline-verification-claim-scope',
   'development-discipline-review-feedback-skepticism',
