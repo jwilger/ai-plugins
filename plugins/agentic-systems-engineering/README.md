@@ -69,7 +69,11 @@ quality, per-input reliability, pass@k capability, pass^k reliability, judge
 variance, or close A/B comparison.
 
 PR CI only dry-runs the eval command to validate configuration. Behavior claims
-require provider-backed runs where the harnesses are authenticated.
+require provider-backed runs where the harnesses are authenticated. Local runs
+reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions;
+provider API keys are not an extra prerequisite. Unattended trusted automation
+may use protected credentials when interactive harness sessions are unavailable,
+but untrusted pull-request code must not receive them.
 
 ## Codex Promptfoo MCP
 
@@ -84,7 +88,7 @@ generated repo-owned artifacts.
 
 The Codex MCP manifest starts through an absolute `/bin/sh` launcher so Codex
 does not need `bash` on its MCP startup `PATH`. Reinstall or upgrade the plugin
-from marketplace version `0.2.1` or newer if Codex reports `No such file or
+from marketplace version `0.2.2` or newer if Codex reports `No such file or
 directory` while starting the `promptfoo` MCP server.
 
 Promptfoo's `mcp` provider is a different feature: it treats an MCP server as

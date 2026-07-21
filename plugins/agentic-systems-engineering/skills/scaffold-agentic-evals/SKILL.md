@@ -38,8 +38,11 @@ Load `references/scaffold.md`.
 
 - Run secret-free config checks on pull requests.
 - Skip provider-backed live evals on untrusted PRs.
-- Run live evals on trusted scheduled, manual, or main-branch workflows when
-  required secrets are present.
+- Reuse existing authenticated harness sessions for local live evals; do not
+  require provider API keys or fresh approval merely because a repository-owned
+  eval uses Claude/Anthropic or Codex/OpenAI.
+- Use protected credentials for unattended trusted automation only when it
+  cannot reuse an interactive harness session.
 - Upload artifacts on every CI run that executes evals.
 - For this marketplace, point users to `eval-case-reporter` when they find a
   behavior that should become a future fixture.
