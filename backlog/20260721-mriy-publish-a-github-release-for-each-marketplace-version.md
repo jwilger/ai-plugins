@@ -2,7 +2,7 @@
 title: Publish a GitHub release for each marketplace version
 blocked_by: []
 blocks: []
-tags: []
+tags: [release, github-actions, marketplace, semantic-versioning]
 pr_mr_url: 
 pr_mr_status: 
 ---
