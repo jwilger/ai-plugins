@@ -23,6 +23,7 @@ Marketplace metadata can advance without a matching GitHub release and Git tag. 
 - [ ] The workflow waits for required CI to succeed for that exact commit before publishing the release.
 - [ ] Rerunning the workflow for an already-correct release succeeds without creating duplicate tags or releases.
 - [ ] Version regressions, conflicting metadata, mismatched tags, and releases pointing at the wrong commit fail with clear diagnostics.
+- [ ] Maintainer documentation explains how marketplace versions, tags, releases, release notes, and recovery from a failed release are handled.
 
 ## Subtasks
 
