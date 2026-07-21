@@ -71,3 +71,4 @@
 20260721-7rtt-update-js-yaml-to-avoid-slow-processing-of-specially-shaped-yaml
 20260721-mriy-publish-a-github-release-for-each-marketplace-version
 20260721-n2hq-prevent-work-from-being-marked-complete-before-formal-review-finishes
+20260721-y4c9-make-automatic-task-closure-fail-when-it-does-not-close-a-task
