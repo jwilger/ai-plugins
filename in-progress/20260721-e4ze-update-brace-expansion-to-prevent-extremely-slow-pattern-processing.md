@@ -21,7 +21,7 @@ GitHub Dependabot alert 4 reports a high-severity denial-of-service issue in bra
 ## Acceptance criteria
 
 - [x] The affected nested brace-expansion dependency resolves to version 2.1.2 or newer.
-- [ ] npm audit no longer reports GHSA-3jxr-9vmj-r5cp.
+- [x] npm audit no longer reports GHSA-3jxr-9vmj-r5cp.
 - [ ] A clean dependency install and the full repository CI checks pass.
 - [ ] GitHub Dependabot alert 4 is closed or resolved after delivery.
 
