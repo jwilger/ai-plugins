@@ -13,6 +13,8 @@ Keep work visibly incomplete until every required formal review check is submitt
 
 ## Context / Why
 
+GitHub issue 57 documents a case where automated checks and a lightweight review passed, but formal review requested more reviewers. Those reviews were never run, yet the work was reported as fully reviewed. Once a formal review session exists, completion should require that session to reach a successful final state. Missing or interrupted review state must count as incomplete, and evaluation coverage should reject skipped assignments followed by completion claims.
+
 ## Acceptance criteria
 
 ## Subtasks
