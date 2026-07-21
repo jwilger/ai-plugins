@@ -28,3 +28,5 @@ GitHub Dependabot alert 4 reports a high-severity denial-of-service issue in bra
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-21: Delivered commit bf7ed8a551f47b105a5673f2f9126fcc71b0df43 to main. The lockfile resolves the affected nested brace-expansion to 2.1.2; npm audit no longer reports GHSA-3jxr-9vmj-r5cp and reports zero high/critical findings. `npm ci` and `nix develop -c just ci` passed, including 586 Bats tests and 44 mutation tests. Final review was clean. GitHub Actions run 29837300426 completed successfully with all four jobs green, and Dependabot alert 4 reports state=fixed.
