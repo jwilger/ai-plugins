@@ -7,6 +7,8 @@ generality.
 
 ## Skills
 
+- `development-workflow` - inspects the current development phase and routes it
+  to the smallest applicable specialist workflow without duplicating mechanics.
 - `change-preflight` - classifies a requested change and records every affected
   project surface from repository evidence before implementation starts.
 - `test-driven-development` - Kent Beck-style TDD: one failing behavior test,
