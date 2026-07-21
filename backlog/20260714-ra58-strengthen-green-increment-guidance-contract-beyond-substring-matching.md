@@ -23,6 +23,7 @@ This matters because tautological checks consume maintenance time and evaluation
 - [ ] Standing development guidance forbids tests of continuous integration workflow definitions or job structure; executing the workflow in continuous integration is the test.
 - [ ] When an existing test matching either anti-pattern is found in any project, it is removed or replaced with a test of observable application or library behavior.
 - [ ] Agent-guidance changes use semantic behavior evaluations when useful, and every new automated test is justified by observable product behavior rather than invented for coverage.
+- [ ] Semantic evaluations cover code-generation decisions: agents reject committed-text and continuous-integration workflow tests, prefer end-user-visible effects, and use exact generated-text assertions only as a last resort.
 
 ## Subtasks
 
