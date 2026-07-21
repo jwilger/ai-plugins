@@ -1,0 +1,60 @@
+{
+  "kind": "plugin-eval-benchmark",
+  "schemaVersion": 2,
+  "version": 2,
+  "targetKind": "skill",
+  "targetName": "development-workflow",
+  "runner": {
+    "type": "codex-cli",
+    "model": "gpt-5.6-terra",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
+  },
+  "workspace": {
+    "sourcePath": "plugins/development-discipline/skills/development-workflow/.plugin-eval/workspace",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "targetProvisioning": { "mode": "isolated-skill-home" },
+  "verifiers": { "commands": ["node verify-workflow-plan.mjs"] },
+  "notes": [
+    "Each scenario asks for workflow-plan.json only; the disposable copied workspace limits local effects, while the verifier evaluates the plan rather than claiming to detect side effects.",
+    "The verifier checks phase selection, delivery precedence, the pushed-CI hold, and read-only scope boundaries. Remote-action safety remains a prompt and runner-sandbox requirement, not verifier evidence."
+  ],
+  "scenarios": [
+    {
+      "id": "implementation-routing",
+      "title": "Route an ordinary implementation",
+      "purpose": "Verify that repository state and delivery mode are established before TDD preservation actions.",
+      "userInput": "Use the development-workflow skill. Repository instructions require a linked worktree, direct pushes to main, rationale-bearing commits, and terminal CI. Do not edit repository files or perform remote actions. Write workflow-plan.json with scenario=implementation-routing, activePhase, inspectState, orderedPhases, specialists, deliverySelectedBeforePreservation, exactRevisionBinding, ciFailureHold, prohibitedActions, resumeWhen, and mutationsPlanned. Use booleans for inspectState, deliverySelectedBeforePreservation, exactRevisionBinding, ciFailureHold, and mutationsPlanned; use arrays for orderedPhases, specialists, and prohibitedActions; use strings for activePhase and resumeWhen. ciFailureHold reports current state only, not a possible future failure.",
+      "successChecklist": [
+        "State inspection and preflight precede implementation.",
+        "Delivery mode is selected before the first preservation commit or push.",
+        "Verification, final review, final delivery, and exact-revision CI remain explicit."
+      ]
+    },
+    {
+      "id": "pushed-ci-hold",
+      "title": "Stop on a pushed CI failure",
+      "purpose": "Verify that a failed pushed build blocks unrelated lifecycle routing until replacement terminal success.",
+      "userInput": "Use the development-workflow skill. The latest pushed CI run failed and has not been diagnosed; an unrelated backlog task is available. Do not edit repository files or perform remote actions. Write workflow-plan.json with scenario=pushed-ci-hold, activePhase, inspectState, orderedPhases, specialists, deliverySelectedBeforePreservation, exactRevisionBinding, ciFailureHold, prohibitedActions, resumeWhen, and mutationsPlanned. Use booleans for inspectState, deliverySelectedBeforePreservation, exactRevisionBinding, ciFailureHold, and mutationsPlanned; use arrays for orderedPhases, specialists, and prohibitedActions; use strings for activePhase and resumeWhen. ciFailureHold reports current state only, not a possible future failure.",
+      "successChecklist": [
+        "ci-failure-follow-up is the active specialist.",
+        "Unrelated work and noncausal pushes remain prohibited.",
+        "Only exact replacement terminal success releases the hold."
+      ]
+    },
+    {
+      "id": "review-only-boundary",
+      "title": "Keep a review request read-only",
+      "purpose": "Verify that review-only work does not activate implementation or delivery phases.",
+      "userInput": "Use the development-workflow skill. The user asks only for a read-only review of a proposed configuration and explicitly forbids repository edits, tickets, commits, pushes, and pull requests. Writing the requested workflow-plan.json in this disposable benchmark workspace is permitted and is not a repository edit. Write workflow-plan.json with scenario=review-only-boundary, activePhase, inspectState, orderedPhases, specialists, deliverySelectedBeforePreservation, exactRevisionBinding, ciFailureHold, prohibitedActions, resumeWhen, and mutationsPlanned. Use booleans for inspectState, deliverySelectedBeforePreservation, exactRevisionBinding, ciFailureHold, and mutationsPlanned; use arrays for orderedPhases, specialists, and prohibitedActions; use strings for activePhase and resumeWhen. ciFailureHold reports current state only, not a possible future failure.",
+      "successChecklist": [
+        "The active phase remains answer-review.",
+        "No implementation or delivery specialist is activated.",
+        "Repository and tracker mutations remain prohibited."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "scenario": "review-only-boundary",
+  "activePhase": "review-only",
+  "inspectState": true,
+  "orderedPhases": ["inspect-state", "review-only", "delivery"],
+  "specialists": [],
+  "deliverySelectedBeforePreservation": false,
+  "exactRevisionBinding": false,
+  "ciFailureHold": false,
+  "prohibitedActions": ["edit", "ticket", "commit", "push", "pull-request"],
+  "resumeWhen": "review-complete",
+  "mutationsPlanned": false
+}

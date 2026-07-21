@@ -1,0 +1,13 @@
+{
+  "scenario": "pushed-ci-hold",
+  "activePhase": "ci-failure-follow-up",
+  "inspectState": true,
+  "orderedPhases": ["inspect-state", "ci-failure-follow-up"],
+  "specialists": ["ci-failure-follow-up"],
+  "deliverySelectedBeforePreservation": true,
+  "exactRevisionBinding": true,
+  "ciFailureHold": true,
+  "prohibitedActions": ["unrelated-work", "noncausal-push"],
+  "resumeWhen": "replacement-terminal-success",
+  "mutationsPlanned": false
+}

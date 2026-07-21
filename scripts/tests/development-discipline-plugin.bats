@@ -384,6 +384,124 @@ NODE
   [ "$status" -ne 0 ]
 }
 
+@test "development-workflow benchmark verifies lifecycle routing and stop boundaries" {
+  benchmark="$ROOT/plugins/development-discipline/skills/development-workflow/.plugin-eval/benchmark.json"
+  workspace="$ROOT/plugins/development-discipline/skills/development-workflow/.plugin-eval/workspace"
+
+  run jq -e '.verifiers.commands == ["node verify-workflow-plan.mjs"]' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run jq -e 'all(.scenarios[].userInput; contains("Use booleans for inspectState, deliverySelectedBeforePreservation, exactRevisionBinding, ciFailureHold, and mutationsPlanned; use arrays for orderedPhases, specialists, and prohibitedActions; use strings for activePhase and resumeWhen."))' "$benchmark"
+  [ "$status" -eq 0 ]
+
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/implementation-valid.json"
+  [ "$status" -eq 0 ]
+
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/implementation-delivery-late.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/implementation-extra-specialist.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/implementation-extra-phase.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/ci-hold-valid.json"
+  [ "$status" -eq 0 ]
+
+  [ -f "$workspace/fixtures/ci-hold-with-unrelated-phases.json" ]
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/ci-hold-with-unrelated-phases.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/review-only-invalid.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/review-only-valid.json"
+  [ "$status" -eq 0 ]
+
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/review-only-hidden-specialists.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/review-only-extra-phase.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "development-workflow advisory fixtures grade described routing rather than performed actions" {
+  run node - "$ROOT" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.argv[2];
+const cases = JSON.parse(
+  fs.readFileSync(
+    path.join(root, 'evals/fixtures/behavior/development-discipline/cases.json'),
+    'utf8',
+  ),
+);
+const fixtures = cases.filter((entry) =>
+  entry.case_id.startsWith('development-workflow-'),
+);
+const skillSource = fs.readFileSync(
+  path.join(
+    root,
+    'plugins/development-discipline/skills/development-workflow/SKILL.md',
+  ),
+  'utf8',
+);
+const description = skillSource.match(/^description:\s*(.+)$/m)?.[1] || '';
+const failures = [];
+
+if (fixtures.length !== 9) {
+  failures.push(`expected 9 development-workflow fixtures, found ${fixtures.length}`);
+}
+if (!description.startsWith('Use when ')) {
+  failures.push('development-workflow description must begin with Use when');
+}
+for (const fixture of fixtures) {
+  const rubric = String(fixture.semanticRubric || '').toLowerCase();
+  if (!/advisory fixture.*describ.*routing.*does not perform/s.test(rubric)) {
+    failures.push(`${fixture.case_id} rubric does not preserve its advisory boundary`);
+  }
+  if (!Array.isArray(fixture.coverage?.kinds) || fixture.coverage.kinds.length === 0) {
+    failures.push(`${fixture.case_id} missing declared coverage`);
+  }
+}
+const reviewOnly = fixtures.find(
+  (fixture) => fixture.case_id === 'development-workflow-review-only-skips-implementation',
+);
+const completedDiffReview = fixtures.find(
+  (fixture) =>
+    fixture.case_id === 'development-workflow-completed-diff-uses-final-review',
+);
+if (!/completed-diff final review/i.test(String(completedDiffReview?.semanticRubric || ''))) {
+  failures.push('completed-diff review fixture does not preserve final-review routing');
+}
+if (
+  /must explicitly skip/i.test(String(reviewOnly?.semanticRubric || ''))
+) {
+  failures.push('review-only rubric still requires exhaustive specialist recitation');
+}
+const prCreation = fixtures.find(
+  (fixture) =>
+    fixture.case_id === 'development-workflow-pr-creation-follows-delivery-policy',
+);
+if (
+  /must say that direct-to-main|must explain other delivery modes/i.test(
+    String(prCreation?.semanticRubric || ''),
+  )
+) {
+  failures.push('PR-creation rubric still requires irrelevant delivery-mode recitation');
+}
+
+if (failures.length > 0) {
+  console.error(failures.join('\n'));
+  process.exit(1);
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "change-preflight benchmark rejects incomplete or speculative classifications" {
   benchmark="$ROOT/evals/benchmarks/change-preflight/benchmark.json"
   workspace="$ROOT/evals/benchmarks/change-preflight/workspace"
