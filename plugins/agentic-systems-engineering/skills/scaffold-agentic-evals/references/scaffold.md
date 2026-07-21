@@ -30,7 +30,10 @@ without depending on a hosted dashboard.
   the explicit goal is offline result review.
 - Keep pull-request checks runnable without provider secrets by validating config
   and dry-run wiring.
-- Put live model/provider evals behind explicit trusted workflow conditions.
+- Reuse authenticated Claude Code and Codex subscription sessions for local live
+  evals without demanding provider API keys or repeat approval. When unattended
+  trusted automation cannot reuse an interactive session, keep any provider
+  credentials protected behind explicit trusted workflow conditions.
 - For coding harnesses, start with native promptfoo providers. Use custom
   providers only when a canary proves the native provider cannot faithfully load
   the system under test.

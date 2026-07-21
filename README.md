@@ -78,7 +78,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                                                        | 0.2.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                       | 0.2.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic engineering regime that follows each repository's delivery policy.                                                        | 0.3.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                      | 0.2.1   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                      | 0.2.2   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                             | 0.1.0   |
 | [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for change preflight, repository-local delivery, TDD, verification, final review, debugging, and review handling. | 0.14.0  |
 | [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow.  | 0.8.0   |
@@ -90,7 +90,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                                                        | 0.2.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                       | 0.2.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic engineering regime that follows each repository's delivery policy.                                                        | 0.3.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                      | 0.2.1   |
+| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                      | 0.2.2   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                             | 0.1.0   |
 | [advisor](plugins/advisor/README.md)                                         | Read-only planning advisor for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                                                    | 0.1.0   |
 | [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for change preflight, repository-local delivery, TDD, verification, final review, debugging, and review handling. | 0.14.0  |
@@ -182,10 +182,12 @@ The repo-owned eval dashboard is generated under `site/evals/` by
 and workflow uploads; the durable record is repo-owned and does not depend on
 promptfoo-hosted sharing.
 
-Provider-backed Claude Code and Codex results require both repository secrets:
-`OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. If either secret is absent, the live
-eval workflow skips provider-backed behavior evals instead of pretending they
-ran.
+Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription
+sessions. They do not require provider API keys or fresh approval for the
+repository-owned evals authorized in [`AGENTS.md`](AGENTS.md). Unattended trusted
+automation may instead use protected provider credentials when interactive
+harness sessions are unavailable; untrusted pull-request checks remain
+secret-free and validate only the eval configuration and dry-run wiring.
 
 The dashboard includes latest-run status, provider/case/sample pass rates,
 threshold status, exact installed provider compositions, and separate

@@ -261,13 +261,23 @@ unless that automation is explicitly requested and secrets are protected.
 ### Standing authorization for repository-owned live evals
 
 The repository owner grants standing approval to run repository-owned
-provider-backed evals and benchmarks through Codex CLI using the owner's
-existing ChatGPT subscription authentication. This authorization includes
-sending this repository's purpose-built benchmark fixtures and prompts to
-OpenAI. It does not authorize sending secrets, private client data, proprietary
-unrelated content, or unrelated workspace files. Keep authentication in
-isolated disposable state, leave the source Codex login untouched, and run the
-repository's required secret-leak checks around every live execution.
+provider-backed evals and benchmarks through both supported coding harnesses:
+
+- Claude Code using the owner's existing Claude/Anthropic subscription authentication.
+- Codex CLI using the owner's existing ChatGPT/OpenAI subscription authentication.
+
+Local execution reuses those authenticated harness sessions and does not
+require provider API keys or fresh approval merely because an authorized
+repository-owned eval uses either provider. This authorization includes sending
+this repository's purpose-built fixtures and prompts to the corresponding
+provider. It does not authorize sending secrets, private client data,
+proprietary unrelated content, or unrelated workspace files. Keep generated
+authentication state isolated and disposable where the runner supports it,
+including the generated Codex homes; leave the source harness logins untouched;
+and run the repository's required secret-leak checks around every live
+execution. Unattended trusted automation may use protected provider credentials
+when it cannot reuse an interactive harness session. Never expose those
+credentials to untrusted pull-request code or events.
 
 This standing authorization covers the canonical downstream code-quality
 benchmark command:
@@ -352,9 +362,6 @@ CI runs on GitHub Actions (`.github/workflows/ci.yml`):
   validation (including the cross-harness manifest sync-validator), Codex
   manifest checks, promptfoo eval dry-run wiring, and a final `CI gate`
   aggregator job so branch protection has a single required check.
-- **`live-evals.yml`** (trusted events): provider-backed Claude Code and Codex
-  promptfoo runs when both `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are
-  available, full-marketplace canaries, and artifact upload.
 
 ## Reference
 

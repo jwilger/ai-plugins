@@ -60,6 +60,79 @@ teardown() {
   [[ "$output" == *"results.junit.xml"* ]]
 }
 
+@test "repository policy authorizes both local subscription sessions without API keys or repeat approval" {
+  run node - "$ROOT/AGENTS.md" "$ROOT/README.md" \
+    "$ROOT/plugins/agentic-systems-engineering/README.md" \
+    "$ROOT/plugins/agentic-systems-engineering/skills/scaffold-agentic-evals/SKILL.md" \
+    "$ROOT/plugins/agentic-systems-engineering/skills/scaffold-agentic-evals/references/scaffold.md" <<'NODE'
+const fs = require("node:fs");
+
+const [agentsPath, rootReadmePath, pluginReadmePath, scaffoldSkillPath, scaffoldReferencePath] = process.argv.slice(2);
+const normalize = (contents) => contents.replace(/\s+/g, " ");
+const policy = {
+  agents: normalize(fs.readFileSync(agentsPath, "utf8")),
+  rootReadme: normalize(fs.readFileSync(rootReadmePath, "utf8")),
+  pluginReadme: normalize(fs.readFileSync(pluginReadmePath, "utf8")),
+  scaffoldSkill: normalize(fs.readFileSync(scaffoldSkillPath, "utf8")),
+  scaffoldReference: normalize(fs.readFileSync(scaffoldReferencePath, "utf8")),
+};
+
+function validate(candidate) {
+  const required = [
+    [candidate.agents, "Claude Code using the owner's existing Claude/Anthropic subscription authentication"],
+    [candidate.agents, "Codex CLI using the owner's existing ChatGPT/OpenAI subscription authentication"],
+    [candidate.agents, "does not require provider API keys or fresh approval"],
+    [candidate.rootReadme, "Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
+    [candidate.pluginReadme, "Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"],
+    [candidate.scaffoldSkill, "eval uses Claude/Anthropic or Codex/OpenAI"],
+    [candidate.scaffoldSkill, "protected credentials for unattended trusted automation"],
+    [candidate.scaffoldReference, "authenticated Claude Code and Codex subscription sessions"],
+  ];
+
+  for (const [contents, phrase] of required) {
+    if (!contents.includes(phrase)) {
+      throw new Error(`missing policy phrase: ${phrase}`);
+    }
+  }
+
+  const contradiction = /\b(?:local (?:runs?|execution)|repository-owned evals?)[^.]{0,180}\b(?<!not )(?:requires?|needs?|must (?:use|provide))\b[^.]{0,100}\b(?:provider )?(?:API keys?|OPENAI_API_KEY|ANTHROPIC_API_KEY|fresh approval|repeat approval)/i;
+  for (const [name, contents] of Object.entries(candidate)) {
+    if (contradiction.test(contents)) {
+      throw new Error(`contradictory local authentication policy in ${name}`);
+    }
+  }
+
+  if (candidate.agents.includes("live-evals.yml") || candidate.rootReadme.includes("live eval workflow")) {
+    throw new Error("documentation advertises a live-evals workflow that does not exist");
+  }
+}
+
+validate(policy);
+
+for (const provider of ["Claude/Anthropic", "Codex/OpenAI"]) {
+  const mutant = { ...policy, scaffoldSkill: policy.scaffoldSkill.replace(provider, "removed-provider") };
+  try {
+    validate(mutant);
+    throw new Error(`provider-removal mutant survived: ${provider}`);
+  } catch (error) {
+    if (error.message.startsWith("provider-removal mutant survived")) throw error;
+  }
+}
+
+for (const name of Object.keys(policy)) {
+  const mutant = { ...policy, [name]: `${policy[name]} Local runs require ANTHROPIC_API_KEY and fresh approval.` };
+  try {
+    validate(mutant);
+    throw new Error(`contradictory-policy mutant survived: ${name}`);
+  } catch (error) {
+    if (error.message.startsWith("contradictory-policy mutant survived")) throw error;
+  }
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "eval runner dry-run uses provider-backed harness config and repo-owned artifacts" {
   run "$RUNNER" --dry-run
 
