@@ -1,15 +1,15 @@
 ---
-title: Test development guidance for meaning, not just matching phrases
+title: Test real behavior instead of repository text
 blocked_by: []
 blocks: []
-tags: [development-discipline, tests, skills, final-review, minor, backlog]
+tags: [development-discipline, tests, test-quality, high-priority, guardrails]
 pr_mr_url: 
 pr_mr_status: 
 ---
 
 ## Summary
 
-Strengthen the fast policy checks so contradictory instructions cannot pass merely because they contain expected words. Tests should verify the intended relationship among small verified commits, CI failures, acceptance evidence, and follow-up review.
+Tests should prove behavior that users or callers can observe. Tests that only open a committed file and check whether it contains a particular phrase are brittle and do not prove that the product works. Tests that inspect continuous integration workflow files have the same problem because running those workflows is already the meaningful test. Establish this as a standing rule for every project, and remove or replace existing tests that violate it when they are found.
 
 ## Context / Why
 
