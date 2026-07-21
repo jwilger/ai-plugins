@@ -18,6 +18,7 @@ GitHub issue 57 documents a case where automated checks and a lightweight review
 ## Acceptance criteria
 
 - [ ] Work cannot be reported complete or ready while a formal review has required checks that are still outstanding.
+- [ ] The authoritative review state distinguishes automated checks, lightweight review, and completed formal review.
 
 ## Subtasks
 
