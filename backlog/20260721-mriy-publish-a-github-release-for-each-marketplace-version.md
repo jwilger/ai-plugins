@@ -17,6 +17,8 @@ Marketplace metadata can advance without a matching GitHub release and Git tag. 
 
 ## Acceptance criteria
 
+- [ ] The release workflow can create releases only for commits on the main branch.
+
 ## Subtasks
 
 ## Notes / Log
