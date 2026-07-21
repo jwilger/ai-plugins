@@ -184,7 +184,17 @@ the matching first-iteration lens. Do not rely on conversation context alone.
 Use repository-agnostic lenses by default:
 
 - `correctness-behavior`: requirements, edge cases, regressions, and observable behavior.
-- `tests-verification`: test quality, missing coverage, stale evidence, and whether verification proves the claim.
+- `tests-verification`: test quality, missing coverage, stale evidence, and
+  whether verification proves the claim. Treat tests that only inspect
+  committed repository text or CI workflow definitions as actionable findings;
+  require removal or replacement with public observable behavior. For files a
+  program creates or edits, prefer the end-user-visible effect and accept exact
+  generated-text assertions only when no behavioral test can prove the
+  requirement. Inspect the surrounding project test scope for existing
+  instances of either anti-pattern and require their removal or replacement too.
+  Reviewing only the lines in the proposed diff is incomplete; perform the
+  surrounding audit and act on what it finds without requiring ritual policy
+  restatement when the findings and disposition already make the action clear.
 - `security-safety`: secrets, injection, permissions, unsafe subprocess/file/network behavior, and trust boundaries.
 - `safety-human-harm`: plausible failures that could harm people or the physical world in the intended deployment.
 - `architecture-maintainability`: fit with local patterns, coupling, complexity, naming, and future change cost.

@@ -256,25 +256,6 @@ teardown() {
   [[ "$output" != *"command not found"* ]]
 }
 
-@test "README documents the Codex-first quality-core workflow" {
-  grep -Fq "## Personal Codex quality core" "$ROOT/README.md"
-  grep -Fq "Codex is this repository's primary target" "$ROOT/README.md"
-  grep -Fq "Claude Code support is secondary" "$ROOT/README.md"
-  grep -Fq "general-user" "$ROOT/README.md"
-  grep -Fq "ergonomics are tertiary" "$ROOT/README.md"
-  grep -Fxq "scripts/codex-quality-core.sh install" "$ROOT/README.md"
-  grep -Fxq -- "scripts/codex-quality-core.sh install --with-agentic" "$ROOT/README.md"
-  grep -Fxq '/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh check "$PWD"' "$ROOT/README.md"
-  grep -Fxq -- '/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh check "$PWD" --with-agentic' "$ROOT/README.md"
-  grep -Fxq "git -C /absolute/path/to/ai-plugins pull --ff-only" "$ROOT/README.md"
-  grep -Fxq "/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh install" "$ROOT/README.md"
-  grep -Fxq -- "/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh install --with-agentic" "$ROOT/README.md"
-  grep -Fq "global to the current CODEX_HOME" "$ROOT/README.md"
-  grep -Fxq "codex plugin remove agentic-systems-engineering@ai-plugins" "$ROOT/README.md"
-  grep -Fq "Validated with Codex CLI 0.144.x (tested with 0.144.4)" "$ROOT/README.md"
-  grep -Fq "start a new Codex thread" "$ROOT/README.md"
-}
-
 @test "agentic systems guidance is an explicit opt-in" {
   run "$RUNNER" install --with-agentic
 

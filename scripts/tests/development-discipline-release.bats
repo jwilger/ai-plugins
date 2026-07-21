@@ -438,25 +438,6 @@ detect_target() {
   done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-discipline/release-binaries.json")
 }
 
-@test "development-discipline release build pins and fingerprints its Rust toolchain" {
-  local toolchain="$ROOT/plugins/development-discipline/rust/rust-toolchain.toml"
-
-  run rg -n '^channel = "[0-9]+\.[0-9]+\.[0-9]+"$' "$toolchain"
-  [ "$status" -eq 0 ]
-
-  run rg -n 'rust-toolchain.toml' "$ROOT/scripts/build-development-discipline-release-all.sh"
-  [ "$status" -eq 0 ]
-
-  run rg -n 'rustup run "\$toolchain" cargo zigbuild' "$ROOT/scripts/build-development-discipline-release-all.sh"
-  [ "$status" -eq 0 ]
-
-  run rg -n 'rust-toolchain.toml' "$ROOT/scripts/check-development-discipline-release-complete.sh"
-  [ "$status" -eq 0 ]
-
-  run rg -n 'rustup run "\$toolchain" cargo build' "$ROOT/scripts/check-development-discipline-release-from-source.sh"
-  [ "$status" -eq 0 ]
-}
-
 @test "development-discipline release artifacts match their declared architectures" {
   local plugin_root="$ROOT/plugins/development-discipline"
 
