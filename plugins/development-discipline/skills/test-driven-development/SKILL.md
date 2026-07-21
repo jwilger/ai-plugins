@@ -13,11 +13,32 @@ the smallest implementation that makes it pass. Refactor only while green.
 - One test at a time.
 - One assertion or observable behavior per test.
 - Prefer public, black-box behavior tests.
+- Never open a committed repository file merely to assert expected text or
+  structure. This includes documentation, fixtures, policies, skills,
+  manifests, and configuration.
+- Never test CI workflow definitions or job structure. Executing the workflow
+  in CI is the test.
 - RED must fail because the behavior is missing, not because of typos, compile
   errors, broken setup, or missing fixtures.
 - GREEN is the smallest change that passes the current test.
 - REFACTOR starts only after the relevant test and existing gate are green.
 - No production code before the failing test has been observed.
+
+When a program creates or edits a file, first test the behavioral effect visible
+to an end user. Assert exact generated text only when no behavioral-effect test
+can prove the requirement, and only against output produced by the program
+under test—not a pre-existing committed file. If there is no meaningful product
+behavior to exercise, do not invent a test for coverage.
+
+Apply this rule in every project. Whenever you encounter an existing
+committed-text or CI-definition test, remove it or replace it with public,
+black-box behavior coverage before treating the test strategy as green.
+
+For every proposed test, state the observable product behavior it proves. If a
+file is involved, say whether it is pre-existing repository content or output
+created by the program, and why a behavioral-effect assertion is or is not
+possible. During implementation and review, inspect the surrounding test scope
+for the same anti-pattern and remove or replace any instances you find.
 
 Gherkin or acceptance specs may define a coherent scenario set up front. Even
 then, implementation proceeds one step or scenario at a time.
@@ -72,6 +93,9 @@ moving to the next RED test or scenario. This is a compact version of
   resource-use patterns that pass lower environments but fail under production
   scale or burst load;
 - ask for findings against the just-completed implementation step and its tests;
+- treat committed-text assertions and CI-workflow-definition tests as
+  actionable test-quality findings; require removal or replacement with
+  observable behavior coverage;
 - fix valid findings, or record a concise defense when not changing the code;
 - continue only after one clean review, or after the next review accepts the
   defense.
@@ -81,14 +105,15 @@ cannot be completed to this standard instead of silently skipping it.
 
 ## Stop Signals
 
-| Signal                                             | Action                                                  |
-| -------------------------------------------------- | ------------------------------------------------------- |
-| Production code exists without a prior RED test    | Revert or discard it, then restart from the test        |
-| Test passes immediately                            | Replace it with a test for missing behavior             |
-| Test checks internals or mocks instead of behavior | Rewrite against the public surface                      |
-| Several cases are bundled into one test            | Split them unless this is the acceptance scenario table |
-| You want to "add tests after"                      | Stop; that is not TDD                                   |
-| Lightweight review is skipped after GREEN          | Run it before starting the next RED cycle               |
+| Signal                                              | Action                                                  |
+| --------------------------------------------------- | ------------------------------------------------------- |
+| Production code exists without a prior RED test     | Revert or discard it, then restart from the test        |
+| Test passes immediately                             | Replace it with a test for missing behavior             |
+| Test checks internals or mocks instead of behavior  | Rewrite against the public surface                      |
+| Test checks committed text or CI workflow structure | Remove it or replace it with observable behavior        |
+| Several cases are bundled into one test             | Split them unless this is the acceptance scenario table |
+| You want to "add tests after"                       | Stop; that is not TDD                                   |
+| Lightweight review is skipped after GREEN           | Run it before starting the next RED cycle               |
 
 ## Completion Check
 

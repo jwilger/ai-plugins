@@ -4,45 +4,6 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 }
 
-@test "behavior fixtures use semantic rubrics and hard guards instead of phrase lists" {
-  run node - "$ROOT/evals/fixtures/agentic-systems-engineering/cases.json" <<'NODE'
-const fs = require('fs');
-const cases = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const failures = [];
-
-for (const testCase of cases) {
-  if (testCase.requiredConcepts) {
-    failures.push(`${testCase.case_id}: still uses requiredConcepts`);
-  }
-  if (typeof testCase.semanticRubric !== 'string' || testCase.semanticRubric.length < 80) {
-    failures.push(`${testCase.case_id}: missing semanticRubric`);
-  }
-  if (!Number.isFinite(testCase.minPassRate) || testCase.minPassRate <= 0 || testCase.minPassRate > 1) {
-    failures.push(`${testCase.case_id}: invalid minPassRate`);
-  }
-  if (!Array.isArray(testCase.hardAssertions)) {
-    failures.push(`${testCase.case_id}: missing hardAssertions array`);
-  }
-  if (!Array.isArray(testCase.plugins) || testCase.plugins.length === 0) {
-    failures.push(`${testCase.case_id}: missing plugins array`);
-  }
-  if (!Array.isArray(testCase.skills) || testCase.skills.length === 0) {
-    failures.push(`${testCase.case_id}: missing skills array`);
-  }
-  if (!Array.isArray(testCase.calibration?.pass) || !Array.isArray(testCase.calibration?.fail)) {
-    failures.push(`${testCase.case_id}: missing calibration pass/fail examples`);
-  }
-}
-
-if (failures.length > 0) {
-  console.error(failures.join('\n'));
-  process.exit(1);
-}
-NODE
-
-  [ "$status" -eq 0 ]
-}
-
 @test "loader emits per-test llm rubric and hard-guard assertions" {
   run node - <<'NODE'
 const generateTests = require('./evals/promptfoo/load-harness-cases.cjs');
@@ -85,52 +46,15 @@ const fs = require('fs');
 delete process.env.EVAL_CASE_FILTER;
 const generateTests = require('./evals/promptfoo/load-harness-cases.cjs');
 const tests = generateTests();
-const tiberCases = JSON.parse(fs.readFileSync('evals/fixtures/behavior/tiber/cases.json', 'utf8'));
-const expectedCount = tiberCases.length;
-if (tests.length !== expectedCount) {
-  throw new Error(`expected ${expectedCount} tiber tests, got ${tests.length}`);
+if (tests.length === 0) {
+  throw new Error('runtime filter returned no tests');
 }
-if (!tests.every((testCase) => testCase.description.includes('tiber'))) {
+if (!tests.every((testCase) => testCase.vars?.plugins?.includes('tiber'))) {
   throw new Error(`runtime filter returned non-tiber tests: ${tests.map((testCase) => testCase.description).join(', ')}`);
-}
-if (!tests.some((testCase) => testCase.vars?.case_id === 'tiber-new-task-command-backlog-capture')) {
-  throw new Error('runtime filter did not include the tiber new-task case');
 }
 NODE
 
   rm -f "$ROOT/evals/out/generated/runtime-options.json"
-  [ "$status" -eq 0 ]
-}
-
-@test "tiber behavior fixtures ask for decisions instead of live repository mutation" {
-  run node - <<'NODE'
-const fs = require('fs');
-const cases = JSON.parse(fs.readFileSync('evals/fixtures/behavior/tiber/cases.json', 'utf8'));
-const failures = [];
-const imperativePatterns = [
-  /\bset up the workflow\b/i,
-  /\bcreate a task\b/i,
-  /^add a task\b/i,
-  /\binstall tiber and set up repo integration files\b/i,
-];
-
-for (const testCase of cases) {
-  for (const pattern of imperativePatterns) {
-    if (pattern.test(testCase.prompt)) {
-      failures.push(`${testCase.case_id}: prompt asks the provider to mutate live tiber state`);
-    }
-  }
-  if (!/\b(what should|safe sequence|safe setup sequence|how should|should you|can you say)\b/i.test(testCase.prompt)) {
-    failures.push(`${testCase.case_id}: prompt should be phrased as an advisory behavior scenario`);
-  }
-}
-
-if (failures.length > 0) {
-  console.error(failures.join('\n'));
-  process.exit(1);
-}
-NODE
-
   [ "$status" -eq 0 ]
 }
 
