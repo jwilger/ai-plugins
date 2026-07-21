@@ -1149,5 +1149,37 @@
         "The generic error probably means the parser broke, so change it under TDD and see whether that fixes the command."
       ]
     }
+  },
+  {
+    "case_id": "development-workflow-pr-creation-follows-delivery-policy",
+    "behavior": "Creates a pull request only when the selected delivery policy and authorization require one.",
+    "prompt": "Implementation, verification, and final review are complete on a feature branch. Repository instructions say changes use pull requests, authorize opening or updating the PR, require checks, review approval, and merge-queue completion, but do not authorize merge. No PR exists yet. Explain the next development-workflow phase and the evidence it must record; do not perform the action.",
+    "tags": [
+      "development-discipline",
+      "workflow-routing",
+      "pull-request-creation"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["development-workflow", "delivery-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "state-transition",
+        "authorization",
+        "workflow"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response rechecks current repository state, routes to delivery-workflow to confirm that PR mode and PR creation/update authorization still apply, then selects an available forge capability to create the PR at the exact reviewed head. It must record the PR URL and exact head revision, describe the required checks/review/approval/queue evidence that remains, and explicitly withhold merge because it is not authorized and readiness is not yet proven. It must say that direct-to-main or local-only policy would skip PR creation rather than treating a PR as universal. Fail if it opens a PR in every delivery mode, treats completed local review as merge authority, merges or enables auto-merge, omits exact-head binding, or asks again for permission already granted by repository instructions.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Reinspect state and use delivery-workflow to confirm the repository-selected PR mode and standing authorization to open or update it. Use the available forge interface to create the PR for the exact reviewed head, then record its URL and head SHA. Required checks, review, approval, and queue state remain outstanding; do not merge because merge is not authorized. A direct-to-main or local-only repository would not create a PR."
+      ],
+      "fail": [
+        "Final review passed, so create and merge the PR, or always open a PR regardless of repository policy."
+      ]
+    }
   }
 ]

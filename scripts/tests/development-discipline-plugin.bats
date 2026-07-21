@@ -40,6 +40,7 @@ const requiredCases = [
   'development-workflow-unavailable-specialist-fallback',
   'development-workflow-stops-at-unresolved-gates',
   'development-workflow-diagnosis-before-fix',
+  'development-workflow-pr-creation-follows-delivery-policy',
   'development-discipline-tdd-one-test-first',
   'development-discipline-verification-claim-scope',
   'development-discipline-review-feedback-skepticism',
