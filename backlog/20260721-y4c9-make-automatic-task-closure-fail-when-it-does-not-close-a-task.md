@@ -21,6 +21,7 @@ GitHub issue 56 reports two successful workflows where the close-from-trailers c
 - [ ] The command prints the task identifiers that it successfully closed.
 - [ ] The command exits with a failure and a specific explanation when any requested task cannot be closed.
 - [ ] A successful workflow guarantees that every task named for closure is no longer in progress.
+- [ ] Regression tests cover both reproductions documented in GitHub issue 56 and the later synchronization-conflict symptom.
 
 ## Subtasks
 
