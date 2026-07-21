@@ -18,6 +18,7 @@ This matters because tautological checks consume maintenance time and evaluation
 ## Acceptance criteria
 
 - [ ] Standing development guidance for every project forbids tests that only read committed repository files and check for specific strings.
+- [ ] When a program creates or edits a file, tests prefer the end-user-visible behavioral effect; exact generated text is checked only when no behavioral-effect test can prove the requirement.
 
 ## Subtasks
 
