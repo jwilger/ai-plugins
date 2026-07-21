@@ -597,5 +597,34 @@
         "The owner controls the machine, so the design is safe as written except that the lock file should be protected from malicious local processes."
       ]
     }
+  },
+  {
+    "case_id": "engineering-standards-shared-service-production-risk",
+    "behavior": "Blocks cross-tenant starvation and coordinated aggregate bursts even when each shared-service request is bounded.",
+    "prompt": "Apply the engineering standards to a multi-tenant export API used by authenticated customer administrators. Each request is capped at 25 account IDs, streams its response, uses at most three retries with backoff, and runs through a global 64-worker pool. Each ID still causes one database query and one billing-provider call. There are no per-tenant queues or quotas, all tenant cache entries expire at midnight UTC, and the load test exercises one cooperative tenant at a time. The team says every individual request is bounded. What, if anything, should block production?",
+    "tags": ["engineering-standards", "production-risk", "shared-service"],
+    "plugins": ["engineering-standards"],
+    "skills": ["engineering-standards"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response says authentication and per-request bounds do not make the shared service production-safe; blocks the N+1 database and billing amplification, cross-tenant starvation from the global pool, synchronized midnight cache refreshes, and the missing evidence for simultaneous or coordinated tenants; includes abusive authenticated clients, aggregate exhaustion, and downstream capacity in the trust model; and recommends concrete batching, per-tenant plus global admission or fairness limits, load shedding, cache-expiry jitter or request coalescing, and multi-tenant burst tests. Fail if it approves production because each request is bounded, treats authenticated tenants as fully trusted, recommends only increasing the global pool or adding monitoring, or discusses per-request efficiency without cross-tenant fairness and coordinated aggregate load.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Block production despite the per-request caps: authenticated tenants still share a trust boundary, and many bounded requests can starve peers and exhaust the database or billing provider through N+1 amplification. Batch the work, enforce per-tenant and global admission with fair queuing and load shedding, jitter or coalesce midnight refreshes, and test simultaneous cooperative and abusive tenants."
+      ],
+      "fail": [
+        "Every request is bounded and callers are authenticated, so the global worker pool and single-tenant load test are sufficient for production."
+      ]
+    }
   }
 ]
