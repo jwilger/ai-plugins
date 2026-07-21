@@ -24,7 +24,7 @@ Implementation notes: Promptfoo now has repository-specific timeouts, but develo
 - [x] The change includes eval cases covering a hanging verifier and the expected bounded-timeout or tracked-blocker response.
 - [x] Every long-running check has an explicit timeout or monitoring/cancellation plan; an unbounded hang or timeout never counts as passing evidence.
 - [x] CI waiting uses a comparable recent successful duration as its baseline, treats ordinary pending work as waiting, and inspects the active step/logs after roughly five unexplained minutes beyond that baseline before considering cancellation.
-- [ ] Timeout and hang records include the command or check, elapsed time, active step or last output, retained artifacts, and a stable blocker reference so the same infrastructure failure is carried forward.
+- [x] Timeout and hang records include the command or check, elapsed time, active step or last output, retained artifacts, and a stable blocker reference so the same infrastructure failure is carried forward.
 - [ ] Cancellation and retry are deliberate actions with clear authority, and fallback evidence explicitly limits any completion or readiness claim.
 
 ## Subtasks
