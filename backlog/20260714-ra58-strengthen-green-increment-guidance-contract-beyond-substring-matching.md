@@ -17,8 +17,6 @@ This matters because tautological checks consume maintenance time and evaluation
 
 ## Acceptance criteria
 
-- [ ] Every new automated test is justified by user- or caller-observable application or library behavior; no test is invented when there is no meaningful behavior to exercise.
-
 ## Subtasks
 
 ## Notes / Log
