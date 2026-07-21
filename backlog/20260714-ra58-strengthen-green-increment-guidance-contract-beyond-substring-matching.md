@@ -17,7 +17,6 @@ This matters because tautological checks consume maintenance time and evaluation
 
 ## Acceptance criteria
 
-- [ ] New tests are justified by a user- or caller-observable behavior of the application or library; when no meaningful behavior exists to exercise, no tautological test is added.
 - [ ] Standing development guidance for every project forbids tests that only read committed repository files and check for specific strings, except when testing a program that creates or edits that file.
 - [ ] Standing development guidance forbids tests of continuous integration workflow definitions or job structure; executing the workflow in continuous integration is the test.
 - [ ] When an existing test matching either anti-pattern is found in any project, it is removed or replaced with a test of observable application or library behavior.
