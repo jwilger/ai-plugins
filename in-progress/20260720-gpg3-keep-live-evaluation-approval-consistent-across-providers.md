@@ -20,7 +20,7 @@ The current repository guidance was narrow enough that an approval reviewer inte
 
 ## Acceptance criteria
 
-- [ ] Repository guidance explicitly says standing approval covers both Codex/OpenAI and Claude/Anthropic live evaluations.
+- [x] Repository guidance explicitly says standing approval covers both Codex/OpenAI and Claude/Anthropic live evaluations.
 - [ ] Execution and approval guardrails do not request fresh approval solely because an authorized repository evaluation uses either named provider.
 - [ ] Existing protections for secrets, private data, unrelated files, isolated authentication, and untrusted events remain in force.
 - [ ] Automated tests or behavior fixtures fail if future guidance drops either provider or reintroduces unnecessary approval prompts.
