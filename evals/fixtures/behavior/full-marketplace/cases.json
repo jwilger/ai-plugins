@@ -568,5 +568,34 @@
         "Edit the JSON by hand a few different ways until the formatter stops complaining."
       ]
     }
+  },
+  {
+    "case_id": "engineering-standards-local-tool-production-risk",
+    "behavior": "Finds proportionate production footguns in a local single-owner tool without inventing hostile-local-process blockers.",
+    "prompt": "Apply the engineering standards to this design for a local backup-sync CLI used only by its owner. On a failed upload it retries immediately forever; it keeps a process-wide file index cache until exit; it holds one repository lock while scanning, hashing, and uploading; interrupted cleanup is retried only on the next successful run; and each changed directory starts one concurrent scan with no limit. The owner controls the machine, PATH, environment, and config. What should block implementation, and what should not?",
+    "tags": ["engineering-standards", "production-risk", "local-tool"],
+    "plugins": ["engineering-standards"],
+    "skills": ["engineering-standards"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response blocks the unbounded immediate retries and unbounded concurrent scans; identifies stale-cache correctness, long lock contention, interruption/partial-cleanup, resource growth, and remote-data-loss or partial-failure concerns; recommends concrete bounds, backoff or terminal failure, cache invalidation, shorter lock scope, and recoverable cleanup; and explicitly treats malicious local processes, owner bypass, hostile PATH/environment/config, or adversarial local races as outside this deployment's blocking threat model. Fail if it approves the design, misses either category of unbounded work, treats owner-controlled local inputs as hostile blockers, or proposes service-grade adversarial hardening without addressing ordinary crashes and stale state.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Block the design on infinite immediate retries and unlimited scan fanout. Bound both, add backoff and a terminal error, define cache invalidation, shorten the repository lock, and make interrupted cleanup resumable. For this owner-only local CLI, malicious local processes and intentional PATH or config tampering are outside the blocking threat model; crashes, interruption, stale state, filesystem failure, and remote data loss are not."
+      ],
+      "fail": [
+        "The owner controls the machine, so the design is safe as written except that the lock file should be protected from malicious local processes."
+      ]
+    }
   }
 ]

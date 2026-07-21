@@ -12,7 +12,8 @@ Two complementary skills:
   agent should apply by default. Functional-core/imperative-shell with an effect
   pattern, parse-don't-validate semantic types, railway-oriented errors,
   vertical-slice BDD one step at a time, strict linting, 100% mutation testing,
-  eval-driven effectiveness, minimum-necessary context, ADRs for every decision,
+  eval-driven effectiveness, minimum-necessary context, proportionate
+  production-risk and hidden-footgun analysis, ADRs for every decision,
   repository-local delivery through the `delivery-workflow` router when
   available plus a self-contained fallback, managed releases where applicable,
   and no quality shortcuts.

@@ -70,6 +70,37 @@ or completion boundary instead of before every commit.
 - Pin the toolchain; manage dependencies through the package-manager CLI so
   versions and feature flags are checked at the time of change.
 
+## Production risk and hidden footguns
+
+Before implementation, review the design for behavior that looks safe in
+development but fails under real use. Derive blocking findings from the intended
+deployment, trust boundary, and credible impact; do not apply a shared-service
+threat model mechanically to every project.
+
+- Find unsafe defaults and partial-failure states. Make retries and loops bounded
+  by explicit termination, backoff, cancellation, and recoverable failure; keep
+  lock scope narrow enough to avoid contention and define crash recovery.
+- Define cache invalidation and stale-state behavior. Make cleanup idempotent,
+  interruption-safe, and observable so abandoned state or resources do not grow
+  silently.
+- Test whether data access, N+1 work, fanout, concurrency, and memory, file,
+  network, or other I/O growth remain bounded at production-sized inputs and
+  during DOS-like bursts. Prevent synchronized retries, cache misses, or startup
+  work from producing thundering herds.
+- For a local single-owner tool, trust the owner, machine, installed toolchain,
+  PATH, environment, and configuration by default. Keep ordinary mistakes,
+  crashes, interruption, stale state, filesystem failure, partial remote
+  operations, and remote data loss in scope; do not block on malicious local
+  processes, intentional self-bypass, or adversarial local races unless the
+  project declares a stronger boundary.
+- When local or remote data can be copied, replaced, or deleted, require
+  integrity checks plus idempotent reconciliation and recovery semantics so a
+  partial operation cannot silently become data loss.
+  This standard shapes design before implementation. Use
+  `development-discipline`'s existing production-risk-footguns lens for its
+  lightweight and final review mechanics instead of duplicating that workflow
+  here.
+
 ## Documentation
 
 - **An ADR for every architectural decision** (context, decision, consequences,
