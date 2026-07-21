@@ -13,6 +13,8 @@ A restarted final review can reject the exact review assignment it just created,
 
 ## Context / Why
 
+Final review is a required delivery safeguard. When its restart process cannot continue, legitimate work stops even when the documented steps were followed. A fresh review should accept its own current assignment when the reviewed change and evidence match. Genuine stale or mismatched state should produce sanitized, actionable recovery instructions. Implementation notes: cover final_review.assess_risk and final_review.plan session binding, assignment consumption, caller-carried state, and abandoned-session recovery. Source: GitHub issue #58.
+
 ## Acceptance criteria
 
 ## Subtasks
