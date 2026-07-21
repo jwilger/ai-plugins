@@ -39,6 +39,7 @@ const requiredCases = [
   'development-workflow-review-only-skips-implementation',
   'development-workflow-unavailable-specialist-fallback',
   'development-workflow-stops-at-unresolved-gates',
+  'development-workflow-diagnosis-before-fix',
   'development-discipline-tdd-one-test-first',
   'development-discipline-verification-claim-scope',
   'development-discipline-review-feedback-skepticism',
@@ -229,26 +230,27 @@ for (const caseId of requiredCases) {
   if (!Array.isArray(testCase.calibration?.pass) || !Array.isArray(testCase.calibration?.fail)) {
     fail(`${caseId}: missing pass/fail calibration examples`);
   }
+  const isPreflightFixture = caseId.startsWith('development-discipline-preflight-');
   if (
-    (testCase.skills || []).includes('change-preflight') &&
+    isPreflightFixture &&
     !testCase.prompt.includes('Use the repository facts stated here as evidence')
   ) {
     fail(`${caseId}: advisory prompt must identify its evidence source`);
   }
   if (
-    (testCase.skills || []).includes('change-preflight') &&
+    isPreflightFixture &&
     !testCase.prompt.startsWith('Use development-discipline:change-preflight.')
   ) {
     fail(`${caseId}: classification fixture must invoke the skill under test`);
   }
   if (
-    (testCase.skills || []).includes('change-preflight') &&
+    isPreflightFixture &&
     !testCase.prompt.includes("Follow the installed skill's exact output record")
   ) {
     fail(`${caseId}: classification fixture must require the skill contract`);
   }
   if (
-    (testCase.skills || []).includes('change-preflight') &&
+    isPreflightFixture &&
     !testCase.prompt.includes(
       'Use any installed skill content already supplied by the harness',
     )
