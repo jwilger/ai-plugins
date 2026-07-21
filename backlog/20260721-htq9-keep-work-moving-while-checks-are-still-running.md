@@ -17,6 +17,8 @@ The test-driven-development skill already says to continue when continuous integ
 
 ## Acceptance criteria
 
+- [ ] When the latest pushed build is queued or in progress and no earlier failure hold exists, the agent continues the next safe test-driven increment instead of waiting.
+
 ## Subtasks
 
 ## Notes / Log
