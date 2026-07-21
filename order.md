@@ -1,4 +1,5 @@
 20260708-sjtg-add-bounded-verification-guidance-to-development-discipline
+20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260714-uk54-apply-the-final-review-relevance-gate-to-risk-scout-findings
 20260708-hcq6-add-production-risk-and-footgun-lenses-to-engineering-standards
 20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
@@ -51,7 +52,6 @@
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260714-gb9s-bound-final-review-git-pathspec-argv-and-delta-evidence-inventories
 20260714-iv3g-retire-content-addressed-final-review-delta-artifacts
-20260714-ra58-strengthen-green-increment-guidance-contract-beyond-substring-matching
 20260716-irxa-create-or-update-the-writing-style-plugin-from-writing-style-zip
 20260716-v2ji-make-provider-eval-timeouts-safely-resumable-without-matrix-expansion
 20260716-ya64-make-eval-hard-guards-distinguish-refusals-from-forbidden-intent
