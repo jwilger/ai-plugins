@@ -25,3 +25,5 @@ A final review can produce a detailed risk assessment and then reject that same 
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: Observed again in the lanyard-ssh-agent 1.0.0 production-readiness final review: final_review.plan rejected the current detailed risk assessment with `risk_assessment_assignment_id_mismatch=true` (received assignment `risk-dda91c9e49f36832`). Treat this as a cross-project delivery-blocking regression case and preserve it in automated coverage.
