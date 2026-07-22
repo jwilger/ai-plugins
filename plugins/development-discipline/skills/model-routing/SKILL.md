@@ -38,7 +38,8 @@ authorized operation.
 ## Availability is part of the route
 
 Confirm that the current harness can select the requested model before invoking
-the helper. State both outcomes in the routing decision:
+the helper. Every routing recommendation, including a decision that only
+rejects an ineligible route, must state both outcomes explicitly:
 
 - when selection succeeds, name the requested route;
 - when it is unavailable, inherited, or replaced, report that route failure
