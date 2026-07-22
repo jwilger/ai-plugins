@@ -26,3 +26,4 @@ Backlog-only capture, explicit transition before active work, and basic PR/MR UR
 ## Notes / Log
 
 - 2026-07-14: Backlog grooming 2026-07-14: Removed already-delivered implementation scope for backlog capture, transition, and basic PR fields. Those remain regression expectations; this ticket now owns concurrent isolation and lifecycle coverage.
+- 2026-07-22: 2026-07-22 curation rejection: Real Tiber enhancement or edge case, but lower pain, severity, frequency, or leverage than closure correctness and non-destructive setup. The reserved product slot covers backlog-limit enforcement; this item is rejected with no hidden queue.
