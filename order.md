@@ -1,7 +1,6 @@
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
-20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260713-u2md-remove-stale-live-evals-workflow-documentation
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
