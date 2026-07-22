@@ -5,7 +5,6 @@
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
-20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
