@@ -276,10 +276,16 @@ post_filter = "cheap-fast-filter"
 verifier = "cheap-fast-verifier"
 
 [final_review.models.codex]
-pre_filter = "gpt-5.6-luna"
+pre_filter = "gpt-5.6-sol"
 lens_review = "gpt-5.6-terra"
 post_filter = "gpt-5.6-luna"
 verifier = "gpt-5.6-sol"
+
+[final_review.models.claude]
+pre_filter = "opus"
+lens_review = "sonnet"
+post_filter = "haiku"
+verifier = "opus"
 ```
 
 Top-level phase values are harness-neutral. Optional `codex` or `claude`
@@ -316,8 +322,10 @@ arguments and TOML values.
 
 Model roles do not imply one model call per phase:
 
-- `pre_filter` is optional model assistance for a large or noisy scope. It may
-  focus context but must never skip a review lens.
+- `pre_filter` owns the mandatory all-dimension broad risk scout and any
+  optional assistance for a large or noisy scope. Because the scout assesses
+  security and human-safety risk, this role uses the strong-responsibility
+  route. It may focus context but must never skip a review lens.
 - `lens_review` is one MCP-assigned caller subagent for every lens and
   iteration.
 - `post_filter` is the deterministic `final_review.filter_findings` path by

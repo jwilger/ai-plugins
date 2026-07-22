@@ -9744,7 +9744,7 @@ fn harness_model_defaults(harness: &str) -> toml::value::Table {
         "codex" => {
             defaults.insert(
                 "pre_filter".to_string(),
-                toml::Value::String("gpt-5.6-luna".to_string()),
+                toml::Value::String("gpt-5.6-sol".to_string()),
             );
             defaults.insert(
                 "lens_review".to_string(),
@@ -9762,19 +9762,19 @@ fn harness_model_defaults(harness: &str) -> toml::value::Table {
         "claude" => {
             defaults.insert(
                 "pre_filter".to_string(),
-                toml::Value::String("claude-fast-filter".to_string()),
+                toml::Value::String("opus".to_string()),
             );
             defaults.insert(
                 "lens_review".to_string(),
-                toml::Value::String("claude-strong-reviewer".to_string()),
+                toml::Value::String("sonnet".to_string()),
             );
             defaults.insert(
                 "post_filter".to_string(),
-                toml::Value::String("claude-fast-filter".to_string()),
+                toml::Value::String("haiku".to_string()),
             );
             defaults.insert(
                 "verifier".to_string(),
-                toml::Value::String("claude-fast-verifier".to_string()),
+                toml::Value::String("opus".to_string()),
             );
         }
         _ => {}
@@ -11697,7 +11697,7 @@ verifier = "config-verify"
             "harness": "codex"
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
-        assert_eq!(parsed["model_roles"]["pre_filter"], "gpt-5.6-luna");
+        assert_eq!(parsed["model_roles"]["pre_filter"], "gpt-5.6-sol");
         assert_eq!(parsed["model_roles"]["lens_review"], "gpt-5.6-terra");
         assert_eq!(parsed["model_roles"]["post_filter"], "gpt-5.6-luna");
         assert_eq!(parsed["model_roles"]["verifier"], "gpt-5.6-sol");
@@ -11785,10 +11785,10 @@ lens_review = "gpt-5.6-sol"
         assert_eq!(
             parsed["model_roles"],
             json!({
-                "pre_filter": "claude-fast-filter",
-                "lens_review": "claude-strong-reviewer",
-                "post_filter": "claude-fast-filter",
-                "verifier": "claude-fast-verifier"
+                "pre_filter": "opus",
+                "lens_review": "sonnet",
+                "post_filter": "haiku",
+                "verifier": "opus"
             })
         );
         assert!(parsed["model_role_sources"]

@@ -110,7 +110,7 @@ jq -s -e '
   and (response(11).error.code == -32602
     and response(11).error.message == "review_session_complete=true")
   and (response(12).result.content[0].text | fromjson
-    | .model_roles.pre_filter == "gpt-5.6-luna"
+    | .model_roles.pre_filter == "gpt-5.6-sol"
       and .model_roles.lens_review == "gpt-5.6-terra"
       and .model_roles.post_filter == "gpt-5.6-luna"
       and .model_roles.verifier == "gpt-5.6-sol")
