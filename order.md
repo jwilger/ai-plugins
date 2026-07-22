@@ -13,7 +13,6 @@
 20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
 20260713-u2md-remove-stale-live-evals-workflow-documentation
 20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
-20260713-qa3n-make-the-eval-launch-race-regression-prove-pre-publication-signal-handling
 20260713-g56q-distinguish-eval-setup-interruption-diagnostics-from-promptfoo-interruption
 20260714-7kxi-exercise-promptfoo-cli-provider-shape-in-gpt-5-6-measurement-fixtures
 20260713-hkrf-cover-gpt-5-6-benchmark-sample-overrides-and-exact-provider-label-contracts
