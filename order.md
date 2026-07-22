@@ -17,7 +17,6 @@
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260716-irxa-create-or-update-the-writing-style-plugin-from-writing-style-zip
-20260716-v2ji-make-provider-eval-timeouts-safely-resumable-without-matrix-expansion
 20260716-ya64-make-eval-hard-guards-distinguish-refusals-from-forbidden-intent
 20260716-wfbx-turn-the-autonomous-resume-work-heartbeat-into-an-invokable-skill
 20260716-n3zc-expand-writable-code-quality-benchmark-to-bugfix-and-refactor-cases
