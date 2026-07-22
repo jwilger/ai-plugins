@@ -9,13 +9,20 @@ Choose a model for each delegated task, not as a global session default. A
 cheaper route is valid only when the work and its independent verification are
 both explicit.
 
+Answer routing-classification questions directly; do not delegate the answer or
+wait for another agent. Make every recommendation self-contained by naming the
+task-local Codex identifier and corresponding Claude alias, the eligibility and
+exclusion rule, the capability or accountability boundary, the escalation and
+unavailable-route behavior, and that the global session default remains
+unchanged.
+
 ## Routing matrix
 
-| Route           | Eligible work                                                                                                                                                               | Required boundary                                                                                                                                                    |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gpt-5.6-luna`  | Bounded inventory, extraction, classification, or mechanical transformation                                                                                                 | Keep the helper read-only or make its change easily reversible; define the expected result before delegation; independently verify every result before relying on it |
-| `gpt-5.6-terra` | Normal substantive implementation and ordinary review with clear scope and ordinary risk                                                                                    | Keep final verification and every completion or readiness claim with the parent; escalate the affected task if stronger reasoning becomes necessary                  |
-| `gpt-5.6-sol`   | Advisor work; ambiguous debugging; architecture, security, or human-safety analysis; destructive changes; blocking or disputed verification; completion or readiness claims | Keep required authorization and evidence gates separate from model choice; a confirmed Sol assignment must produce the strong-responsibility conclusion              |
+| Route           | Eligible work                                                                                                                                                                                     | Required boundary                                                                                                                                                    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gpt-5.6-luna`  | Bounded inventory, extraction, classification, or mechanical transformation                                                                                                                       | Keep the helper read-only or make its change easily reversible; define the expected result before delegation; independently verify every result before relying on it |
+| `gpt-5.6-terra` | Normal substantive implementation and ordinary review with clear scope and ordinary risk                                                                                                          | Return the substantive result to the accountable parent; route analysis behind final verification and every completion or readiness claim to confirmed Sol           |
+| `gpt-5.6-sol`   | Advisor work; ambiguous debugging; architecture, security, or human-safety analysis; separately authorized destructive changes; blocking or disputed verification; completion or readiness claims | Keep required authorization and evidence gates separate from model choice; a confirmed Sol assignment must produce the strong-responsibility result                  |
 
 Do not use Luna for substantive implementation, completion claims, ambiguous
 work, or any task whose result cannot be independently checked. Do not treat a
@@ -32,12 +39,30 @@ disputed verification enters the task.
 
 Sol is the strong responsibility route. Use it for every listed responsibility,
 including the analysis and recommendation behind final verification,
-completion, or readiness. The accountable parent retains the evidence gate,
-authorization boundary, and user-facing decision: it may accept or reject a
-confirmed Sol result after every independent gate passes, but it must not claim
-that its own inherited model ran Sol. Selecting Sol supplies stronger reasoning;
-it never supplies approval for a destructive action, a release, a merge, or any
-other separately authorized operation.
+completion, or readiness. A cheaper parent may coordinate evidence but may not
+substitute its own reasoning for that confirmed Sol result. A deterministic
+coordinator may apply evidence and policy gates to produce the terminal review
+status; this is not a model-routing assignment. The accountable parent retains
+the authorization boundary and user-facing communication and may convey or
+reject that status, but it must not make a contrary readiness claim from cheaper
+inherited reasoning. Selecting Sol supplies stronger reasoning; it never
+supplies approval for a destructive action, a release, a merge, or any other
+separately authorized operation.
+
+Match capability to the Sol responsibility: use the read-only `strong-reviewer`
+for analysis, verification, approval recommendations, and readiness
+recommendations.
+An assignment to decide whether a destructive operation should be approved is
+analysis, so it stays with `strong-reviewer`. Use the writable `strong-worker`
+for implementation that must itself remain on the Sol route, including
+non-destructive implementation with activated architecture, security,
+human-safety, or ambiguity stakes. Destructive implementation additionally
+requires its separate authorization gate to pass; non-destructive strong work
+does not gain that gate merely from model selection. A review result does not
+execute a mutation, and a Terra parent does not implicitly resume a strong
+responsibility. Whenever a routing answer discusses a destructive operation,
+name both sides of this boundary even if the immediate assignment covers only
+approval or only execution.
 
 ## Availability is part of the route
 
@@ -62,8 +87,9 @@ readiness claim.
 Never silently substitute another model or claim that a different model
 satisfied the requested route.
 
-`/fast` changes service speed and cost for a selected model. It does not select
-a lower-cost model and is not a model-routing substitute.
+`/fast` changes execution speed for the selected model and may affect service
+pricing. It does not select a lower-cost model, reduce the model-compute route,
+or satisfy cost routing.
 
 ## Current harness routes
 

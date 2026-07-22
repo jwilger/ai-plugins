@@ -49,9 +49,11 @@ write_valid_routes() {
   write_codex_agent bounded-helper gpt-5.6-luna low read-only
   write_codex_agent substantive-worker gpt-5.6-terra medium workspace-write
   write_codex_agent strong-reviewer gpt-5.6-sol high read-only
+  write_codex_agent strong-worker gpt-5.6-sol high workspace-write
   write_claude_agent bounded-helper haiku Read,Grep,Glob
   write_claude_agent substantive-worker sonnet Read,Grep,Glob,Bash,Write,Edit
-  write_claude_agent strong-reviewer opus Read,Grep,Glob
+  write_claude_agent strong-reviewer opus Read,Grep,Glob,Bash
+  write_claude_agent strong-worker opus Read,Grep,Glob,Bash,Write,Edit
 }
 
 @test "model routing config reports exact task-local routes for both harnesses" {
@@ -60,7 +62,7 @@ write_valid_routes() {
   run "$CHECK" "$PLUGIN"
 
   [ "$status" -eq 0 ]
-  [ "$(jq -c . <<<"$output")" = '{"codex":{"bounded-helper":{"model":"gpt-5.6-luna","reasoning":"low","sandbox":"read-only"},"substantive-worker":{"model":"gpt-5.6-terra","reasoning":"medium","sandbox":"workspace-write"},"strong-reviewer":{"model":"gpt-5.6-sol","reasoning":"high","sandbox":"read-only"}},"claude":{"bounded-helper":{"model":"haiku","tools":"Read,Grep,Glob"},"substantive-worker":{"model":"sonnet","tools":"Read,Grep,Glob,Bash,Write,Edit"},"strong-reviewer":{"model":"opus","tools":"Read,Grep,Glob"}}}' ]
+  [ "$(jq -c . <<<"$output")" = '{"codex":{"bounded-helper":{"model":"gpt-5.6-luna","reasoning":"low","sandbox":"read-only"},"substantive-worker":{"model":"gpt-5.6-terra","reasoning":"medium","sandbox":"workspace-write"},"strong-reviewer":{"model":"gpt-5.6-sol","reasoning":"high","sandbox":"read-only"},"strong-worker":{"model":"gpt-5.6-sol","reasoning":"high","sandbox":"workspace-write"}},"claude":{"bounded-helper":{"model":"haiku","tools":"Read,Grep,Glob"},"substantive-worker":{"model":"sonnet","tools":"Read,Grep,Glob,Bash,Write,Edit"},"strong-reviewer":{"model":"opus","tools":"Read,Grep,Glob,Bash"},"strong-worker":{"model":"opus","tools":"Read,Grep,Glob,Bash,Write,Edit"}}}' ]
 }
 
 @test "model routing config ignores Claude route fields outside frontmatter" {

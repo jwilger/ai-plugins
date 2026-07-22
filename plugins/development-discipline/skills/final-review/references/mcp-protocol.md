@@ -322,13 +322,23 @@ arguments and TOML values.
 
 Model roles do not imply one model call per phase:
 
+The existing `verifier` configuration key is intentionally the canonical
+strong-review role for this workflow, not a verification-only role. It governs
+both conditional batched verification and the architecture, security, and
+human-safety lens assignments that require the strong route. Projects that
+override `verifier` therefore change all of those strong responsibilities
+together; the current schema does not expose an independently configurable
+strong-lens model. This keeps one source of truth for the Sol route and avoids
+an apparently independent setting that could silently drift.
+
 - `pre_filter` owns the mandatory all-dimension broad risk scout and any
   optional assistance for a large or noisy scope. Because the scout assesses
   security and human-safety risk, this role uses the strong-responsibility
   route. The scout selects lenses from concrete risk. Optional assistance may
   focus context but must never omit a lens selected by that bound risk plan.
-- `lens_review` is one MCP-assigned caller subagent for every lens and
-  iteration.
+- `lens_review` is one MCP-assigned caller subagent for every ordinary lens and
+  iteration. Architecture, security, and human-safety lenses use the canonical
+  strong `verifier` role described above.
 - `post_filter` is the deterministic `final_review.filter_findings` path by
   default, so its model label is normally not invoked.
 - `verifier` is one conditional batched caller subagent when post-filtering
