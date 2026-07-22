@@ -9,6 +9,8 @@ pr_mr_status:
 
 ## Summary
 
+Prevent final review from rejecting a valid risk assessment because its assignment identity is lost or compared against the wrong review.
+
 ## Context / Why
 
 ## Acceptance criteria
