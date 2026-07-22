@@ -26,7 +26,7 @@ Implementation notes: Use gpt-5.6-luna for bounded read-only or easily reversibl
 - [x] Existing development workflow skills cross-reference model routing where delegation decisions naturally arise without duplicating the full matrix.
 - [x] Behavior fixtures cover accepted Luna delegation, Terra default work, required Sol escalation, ambiguous or high-risk work that cannot use Luna, and refusal to silently downgrade.
 - [x] Marketplace documentation, manifests, metadata, and the required semver bump remain synchronized.
-- [ ] Validation includes JSON and formatting checks, focused static and config coverage, eval dry-run, and focused provider-backed evidence only when credentials and the current eval policy permit it.
+- [x] Validation includes JSON and formatting checks, focused static and config coverage, eval dry-run, and focused provider-backed evidence only when credentials and the current eval policy permit it.
 
 ## Subtasks
 
