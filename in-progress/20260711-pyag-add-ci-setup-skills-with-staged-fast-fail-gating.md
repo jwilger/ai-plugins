@@ -32,3 +32,4 @@ Implementation notes: engineering-standards:scaffold already owns generic CI gen
 ## Notes / Log
 
 - 2026-07-22: Delivered commit 672dd2f to main. Audit found `engineering-standards:scaffold` and its playbook already own generic CI generation, so no duplicate CI skill or platform-specific reference was added. TDD RED provider run passed only 1/6 and failed plugin modes; GREEN thresholds passed with all four plugin-enabled Claude/Codex rows green and both no-plugin baselines red (`evals/out/pyag-green/results.json`). Exact commit passed full local `nix develop -c just ci` and rebuilt final-review 0.15.4 reached terminal complete after one clean correctness lens. GitHub Actions run 29888468906 is still in progress with manifest and eval-config jobs green.
+- 2026-07-22: GitHub Actions run 29888468906 reached terminal success for exact SHA 672dd2f: manifests, eval dry-run, Quality gate, and required CI gate all passed.
