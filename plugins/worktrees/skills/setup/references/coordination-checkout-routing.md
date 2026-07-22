@@ -7,7 +7,9 @@ When answering a checkout-state or remediation question, give a self-contained
 sequence even if the prompt supplies observations. Name the advertising policy,
 both checkout-identity commands, the fetch before classification, the effective
 worktree comparison against fetched upstream, the resulting state, and the exact
-remediation or no-op.
+remediation or no-op. When supplied facts already establish a difference from
+the fetched tree, classify it as genuine local work rather than reopening an
+upstream-equivalent possibility.
 
 ## Identify and refresh
 
