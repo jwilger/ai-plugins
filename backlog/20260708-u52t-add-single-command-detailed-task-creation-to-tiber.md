@@ -30,3 +30,4 @@ Implementation notes: The current CLI/MCP create surface accepts only a title, a
 ## Notes / Log
 
 - 2026-07-14: Backlog grooming 2026-07-14: Removed the completed 20260707-rpmy parser-migration prerequisite. The detailed atomic-create task is now unblocked; all existing requirements remain unchanged.
+- 2026-07-22: 2026-07-22 curation rejection: Real Tiber enhancement or edge case, but lower pain, severity, frequency, or leverage than closure correctness and non-destructive setup. The reserved product slot covers backlog-limit enforcement; this item is rejected with no hidden queue.
