@@ -19,6 +19,7 @@ Prompt guidance cannot prevent every caller or simultaneous write from overfilli
 
 - [ ] Projects can configure a maximum queued-ticket count, with documented migration and default behavior when the setting is absent.
 - [ ] The configuration clearly defines which ticket statuses count toward the limit.
+- [ ] Creating, reopening, or moving a ticket into any counted status refuses admission when it would exceed the configured limit.
 
 ## Subtasks
 
