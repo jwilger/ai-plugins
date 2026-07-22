@@ -24,3 +24,4 @@ Implementation notes: Verified MINOR release finding from 20260709-spx8: plugin 
 ## Notes / Log
 
 - 2026-07-14: 2026-07-14 formal final-review pass 1 for 20260709-spx8 reconfirmed that Tiber plugin 0.9.0 packages an MCP runtime reporting 0.8.0. Deferred as MINOR; covered by this ticket's existing runtime/package synchronization criterion.
+- 2026-07-22: 2026-07-22 curation rejection: Real Tiber enhancement or edge case, but lower pain, severity, frequency, or leverage than closure correctness and non-destructive setup. The reserved product slot covers backlog-limit enforcement; this item is rejected with no hidden queue.
