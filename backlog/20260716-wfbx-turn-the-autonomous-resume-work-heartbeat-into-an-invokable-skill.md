@@ -28,3 +28,4 @@ The current session proved that a persistent timer can emit a custom wake event 
 ## Notes / Log
 
 - 2026-07-16: Claude Code has a native recurring primitive: the skill should invoke `/loop 15m INSTRUCTION` (substituting the configured interval/instruction) for Claude Code instead of emulating Codex's wake/yield timer. Select the implementation by detected harness capability and document how the native loop is stopped or replaced.
+- 2026-07-22: 2026-07-22 curation rejection: Broad or expensive initiative with weaker near-term value-to-cost than the retained concrete defects and security work. Discovery does not obligate retention, and no hidden queue is kept.
