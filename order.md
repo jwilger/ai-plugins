@@ -3,7 +3,6 @@
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
-20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
 20260714-g89d-make-gpt-5-6-provider-locking-stable-across-worktrees-and-the-full-run-lifecycle
