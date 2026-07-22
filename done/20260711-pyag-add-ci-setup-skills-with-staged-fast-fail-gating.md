@@ -5,9 +5,6 @@ blocks: []
 tags: [ci, engineering-standards, scaffold, workflow-design]
 pr_mr_url: 
 pr_mr_status: 
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
