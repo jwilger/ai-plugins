@@ -5,6 +5,9 @@ blocks: []
 tags: [development-discipline, model-routing, gpt-5.6, codex, claude-code, evals]
 pr_mr_url: 
 pr_mr_status: 
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
