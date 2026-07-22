@@ -25,3 +25,4 @@ Implementation notes:\n\nCaused MINOR deferred from 20260709-spx8. The current f
 ## Notes / Log
 
 - 2026-07-14: Scope boundary from 20260713-uf3e split: this ticket owns canonical status precedence and terminal 124/128+ classification; 20260714-2xyd owns artifact freshness and preparation lifecycle.
+- 2026-07-22: 2026-07-22 curation rejection: Part of a large symptom-level GPT-5.6/evaluation lifecycle and artifact-quality cluster. Its present pain, confidence, or value-to-cost does not outrank the five retained root-cause items; rediscover only from a current recurring eval failure, with no shadow queue.
