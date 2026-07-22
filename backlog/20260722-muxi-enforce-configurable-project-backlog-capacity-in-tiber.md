@@ -24,6 +24,7 @@ Prompt guidance cannot prevent every caller or simultaneous write from overfilli
 - [ ] CLI, MCP, dashboard, and every other ticket mutation surface share the same enforcement behavior.
 - [ ] Admission enforcement is concurrency-safe so simultaneous successful mutations cannot exceed the configured limit.
 - [ ] Automated tests cover configuration, counted statuses, every admission path, refusals, defaults or migration, and simultaneous admissions.
+- [ ] User and operator documentation explains configuration, counted statuses, refusals, migration/default behavior, and recovery.
 
 ## Subtasks
 
