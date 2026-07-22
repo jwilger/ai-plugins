@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "development-discipline-mcp"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "rusqlite",
  "serde_json",
