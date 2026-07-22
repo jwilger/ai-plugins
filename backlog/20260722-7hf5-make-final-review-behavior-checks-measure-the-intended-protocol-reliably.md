@@ -20,6 +20,7 @@ Observed while delivering MVJ4. The cases final-review-uses-mcp-for-enforced-rev
 - [ ] Provider-enabled answers pass when they demonstrate the intended core final-review safeguards without requiring exhaustive unrelated coordinator internals.
 - [ ] The no-plugin baseline and value gate remain meaningful and prove useful plugin lift.
 - [ ] Fixtures distinguish executable coordinator regressions from documentation-recall completeness while retaining hard protocol guards.
+- [ ] Repeated provider runs demonstrate stable thresholds for the revised cases.
 
 ## Subtasks
 
