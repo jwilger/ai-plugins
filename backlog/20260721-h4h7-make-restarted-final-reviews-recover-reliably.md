@@ -27,3 +27,4 @@ Final review is a required delivery safeguard. When its restart process cannot c
 ## Notes / Log
 
 - 2026-07-21: Triaged from GitHub issue #58: https://github.com/jwilger/ai-plugins/issues/58
+- 2026-07-22: 2026-07-22 curation: Combined K9C6 because both describe the same cross-project delivery-blocking root cause: final-review assignment identity can be lost or mismatched across restart, assess_risk, and plan. Preserve K9C6 reproduction risk_assessment_assignment_id_mismatch=true plus sanitized expected-versus-received diagnostics.
