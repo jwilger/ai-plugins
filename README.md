@@ -92,7 +92,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic engineering regime that follows each repository's delivery policy.                                                       | 0.6.0   |
 | [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.2.3   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                            | 0.1.0   |
-| [advisor](plugins/advisor/README.md)                                         | Read-only planning advisor for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                                                   | 0.1.0   |
+| [advisor](plugins/advisor/README.md)                                         | Read-only GPT-5.6 Sol advisor with high reasoning for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                            | 0.3.0   |
 | [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for lifecycle routing, change preflight, repository-local delivery, TDD, verification, review, and debugging.    | 0.15.4  |
 | [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.8.0   |
 
@@ -149,7 +149,7 @@ Useful Codex entry points:
 - `engineering-standards`: apply the repository's broader engineering regime,
   including the no-force-push rule.
 - `advisor`: delegate fuzzy planning, tradeoff analysis, scope/spec shaping,
-  and ticket planning to a read-only advisor subagent.
+  and ticket planning to a read-only GPT-5.6 Sol advisor at high reasoning.
 - `tiber`: manage repository-local task boards through a Git-backed
   `tasks` branch, the `tiber` CLI, and stdio MCP.
 

@@ -145,9 +145,10 @@ teardown() {
   [ "$targeted_plugins" = $'advisor\ndevelopment-discipline\nengineering-standards' ]
 
   advisor_reference="skills/advisor/references/playbook.md"
+  advisor_version="$(jq -er '.version' "$ROOT/plugins/advisor/.codex-plugin/plugin.json")"
   cmp -s \
     "$ROOT/plugins/advisor/$advisor_reference" \
-    "$targeted_home/plugins/cache/ai-plugins/advisor/0.2.0/$advisor_reference"
+    "$targeted_home/plugins/cache/ai-plugins/advisor/$advisor_version/$advisor_reference"
   cmp -s \
     "$ROOT/plugins/advisor/$advisor_reference" \
     "$targeted_home/marketplace/plugins/advisor/$advisor_reference"
