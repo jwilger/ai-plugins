@@ -19,7 +19,7 @@
       "name": "engineering-standards",
       "source": "./plugins/engineering-standards",
       "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "category": "Developer Tools",
       "keywords": ["standards", "tdd", "bdd", "architecture", "quality"]
     },

@@ -282,6 +282,29 @@
     }
   },
   {
+    "case_id": "engineering-scaffold-staged-fast-fail-ci",
+    "behavior": "Scaffolds dependency-staged CI that fails cheaply, preserves useful parallelism, and always reports an actionable aggregate result.",
+    "prompt": "Our generated CI currently launches formatting, lint, type checks, unit tests, browser tests, mutation testing, and packaging together. A lint failure still burns twenty minutes of mutation and browser capacity, while serializing everything would make healthy runs much slower. Update the scaffold design so cheap failures stop expensive work, independent checks still run in parallel, and the final required status clearly reports failures. What dependency stages, aggregation, and cancellation behavior should the generated workflow use?",
+    "tags": ["scaffold", "engineering-standards", "ci", "fast-fail"],
+    "plugins": ["engineering-standards"],
+    "skills": ["scaffold"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "scope-boundary"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response models CI as dependency stages; places cheap deterministic checks in a fast stage; runs independent checks within the same stage in parallel; starts browser, mutation, packaging, or other expensive work only after every prerequisite fast job succeeds; uses an always-run final aggregator or reporting job that inspects prerequisite outcomes and emits one actionable required status even when dependencies fail or are cancelled; and states deliberate cancellation semantics, including whether superseded runs are cancelled while preserving failure reporting and artifacts from the current run. Fail if all jobs launch together, the whole pipeline is serialized, expensive jobs can run after a failed fast prerequisite, the aggregate job is skipped when a dependency fails, cancellation can hide the current run's failure, or the answer hard-codes one CI provider without first detecting the repository's platform.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Create a fast dependency stage whose independent format, lint, type, and unit jobs run in parallel. Gate browser, mutation, and packaging jobs on success of all required fast jobs. Add one always-run aggregate job that inspects every prerequisite outcome and reports actionable failures even when a dependency failed or was cancelled. Detect the forge before translating this graph into platform syntax, and cancel only superseded runs deliberately without erasing current-run evidence."
+      ],
+      "fail": [
+        "Run every check at once for maximum parallelism, then rely on the first red job in the UI."
+      ]
+    }
+  },
+  {
     "case_id": "agentic-scaffold-evals-natural-trigger",
     "behavior": "Scaffolds realistic agentic evals before optimizing prompts or agents.",
     "prompt": "We need a starter eval harness for a tool-using LLM workflow. It should catch regressions and support provider comparisons. What should the scaffold include?",

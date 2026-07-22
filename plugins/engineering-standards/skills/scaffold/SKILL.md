@@ -123,6 +123,18 @@ support it — and record that gap as an ADR.
   changelog, publish) where the project ships releases. Stay platform-agnostic —
   detect the forge and runner from the repo; never hard-code one provider,
   registry, or service as a requirement.
+- Model CI as a dependency graph with explicit cost stages, not one undifferentiated
+  job list. Put cheap deterministic checks in the fast stage and run independent
+  jobs within a stage in parallel. Start browser, mutation, packaging, deployment,
+  or other expensive work only after every required fast prerequisite succeeds.
+- End with one always-run aggregate/reporting job that inspects every required
+  prerequisite outcome, reports actionable failures and cancellations, and is the
+  required status. A failed dependency must skip its expensive dependents without
+  skipping this aggregator.
+- Choose cancellation semantics deliberately. It is usually useful to cancel an
+  older run superseded by a newer revision, but never let cancellation erase the
+  current run's failure evidence, retained artifacts, or final aggregate result.
+  Detect the CI platform before translating these semantics into its syntax.
 
 ## 3. How to apply
 
