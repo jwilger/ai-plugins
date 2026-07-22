@@ -2,7 +2,6 @@
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
-20260713-nm8h-preserve-effective-model-latency-and-gpt-5-6-cost-provenance-in-eval-artifacts
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
 20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
