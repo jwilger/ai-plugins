@@ -19,11 +19,13 @@ generality.
 - `delivery-workflow` - routes delivery through repository-local instructions,
   after current user direction, supporting direct-to-trunk, PR/MR, and
   local-only work without inventing a pull request or letting a specialist skill
-  change the selected mode, cadence, or evidence level.
+  change the selected mode, cadence, or evidence level; repairs default to new
+  additive commits, and amends require explicit case-by-case authorization.
 - `ci-failure-follow-up` - evidence-based recovery that blocks unrelated
   work after a pushed CI failure until a replacement run succeeds.
 - `rationale-commit-messages` - Conventional Commit subjects with a required
-  body that explains why the change is necessary.
+  body that explains why the change is necessary, without treating message
+  authoring as authorization to amend an existing commit.
 - `verification-before-completion` - evidence-before-claims discipline tied to
   the actual claim scope.
 - `final-review` - fresh-context, multi-lens local review cycles before the
@@ -31,7 +33,8 @@ generality.
   evidence when a mode has no pushed build and preserving every failed-run hold.
 - `systematic-debugging` - compact root-cause debugging before fixes.
 - `receiving-code-review` - technical evaluation of review feedback before
-  implementing or pushing back.
+  implementing or pushing back, followed by additive repair unless a specific
+  amend is explicitly authorized.
 - `writing-skills` - concise skill authoring for this marketplace, with behavior
   fixtures where they are useful.
 
