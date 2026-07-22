@@ -134,4 +134,5 @@ validate-marketplace:
     find plugins -name plugin.json -exec jq empty {} \;
     bash scripts/validate-manifests.sh
     bash scripts/check-advisor-agent-config.sh
+    bash scripts/check-model-routing-config.sh
     prettier --check "**/*.{json,md}"

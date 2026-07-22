@@ -49,9 +49,9 @@ write_valid_routes() {
   write_codex_agent bounded-helper gpt-5.6-luna low read-only
   write_codex_agent substantive-worker gpt-5.6-terra medium workspace-write
   write_codex_agent strong-reviewer gpt-5.6-sol high read-only
-  write_claude_agent bounded-helper haiku Read,Grep,Glob,Bash
+  write_claude_agent bounded-helper haiku Read,Grep,Glob
   write_claude_agent substantive-worker sonnet Read,Grep,Glob,Bash,Write,Edit
-  write_claude_agent strong-reviewer opus Read,Grep,Glob,Bash
+  write_claude_agent strong-reviewer opus Read,Grep,Glob
 }
 
 @test "model routing config reports exact task-local routes for both harnesses" {
@@ -60,7 +60,7 @@ write_valid_routes() {
   run "$CHECK" "$PLUGIN"
 
   [ "$status" -eq 0 ]
-  [ "$(jq -c . <<<"$output")" = '{"codex":{"bounded-helper":{"model":"gpt-5.6-luna","reasoning":"low","sandbox":"read-only"},"substantive-worker":{"model":"gpt-5.6-terra","reasoning":"medium","sandbox":"workspace-write"},"strong-reviewer":{"model":"gpt-5.6-sol","reasoning":"high","sandbox":"read-only"}},"claude":{"bounded-helper":{"model":"haiku","tools":"Read,Grep,Glob,Bash"},"substantive-worker":{"model":"sonnet","tools":"Read,Grep,Glob,Bash,Write,Edit"},"strong-reviewer":{"model":"opus","tools":"Read,Grep,Glob,Bash"}}}' ]
+  [ "$(jq -c . <<<"$output")" = '{"codex":{"bounded-helper":{"model":"gpt-5.6-luna","reasoning":"low","sandbox":"read-only"},"substantive-worker":{"model":"gpt-5.6-terra","reasoning":"medium","sandbox":"workspace-write"},"strong-reviewer":{"model":"gpt-5.6-sol","reasoning":"high","sandbox":"read-only"}},"claude":{"bounded-helper":{"model":"haiku","tools":"Read,Grep,Glob"},"substantive-worker":{"model":"sonnet","tools":"Read,Grep,Glob,Bash,Write,Edit"},"strong-reviewer":{"model":"opus","tools":"Read,Grep,Glob"}}}' ]
 }
 
 @test "model routing config ignores Claude route fields outside frontmatter" {
@@ -81,7 +81,7 @@ This body has no frontmatter.
 
 ---
 model: haiku
-tools: Read,Grep,Glob,Bash
+tools: Read,Grep,Glob
 ---
 EOF
 
@@ -98,7 +98,7 @@ EOF
 name: model-routing-bounded-helper
 description: Fixture route.
 model: haiku
-tools: Read,Grep,Glob,Bash
+tools: Read,Grep,Glob
 EOF
 
   run "$CHECK" "$PLUGIN"
@@ -115,7 +115,7 @@ EOF
     'bounded-helper.toml|model_reasoning_effort = "low"|model_reasoning_effort = "high"' \
     'bounded-helper.toml|sandbox_mode = "read-only"|sandbox_mode = "workspace-write"' \
     'bounded-helper.md|model: haiku|model: sonnet' \
-    'bounded-helper.md|tools: Read,Grep,Glob,Bash|tools: Read,Grep,Glob,Bash,Write'; do
+    'bounded-helper.md|tools: Read,Grep,Glob|tools: Read,Grep,Glob,Write'; do
     write_valid_routes
     IFS='|' read -r file expected replacement <<<"$mutation"
     sed -i "s|$expected|$replacement|" "$PLUGIN/agents/$file"
@@ -136,7 +136,7 @@ EOF
     'bounded-helper.toml|model_reasoning_effort = "low"' \
     'bounded-helper.toml|sandbox_mode = "read-only"' \
     'bounded-helper.md|model: haiku' \
-    'bounded-helper.md|tools: Read,Grep,Glob,Bash'; do
+    'bounded-helper.md|tools: Read,Grep,Glob'; do
     write_valid_routes
     IFS='|' read -r file line <<<"$mutation"
     sed -i "/^$line\$/d" "$PLUGIN/agents/$file"
@@ -157,7 +157,7 @@ EOF
     'bounded-helper.toml|model_reasoning_effort = "low"' \
     'bounded-helper.toml|sandbox_mode = "read-only"' \
     'bounded-helper.md|model: haiku' \
-    'bounded-helper.md|tools: Read,Grep,Glob,Bash'; do
+    'bounded-helper.md|tools: Read,Grep,Glob'; do
     write_valid_routes
     IFS='|' read -r file line <<<"$mutation"
     sed -i "/^$line\$/a\\$line" "$PLUGIN/agents/$file"
