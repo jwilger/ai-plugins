@@ -26,3 +26,5 @@ Choose current official OWASP and NIST resources that fit software and AI-system
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: 2026-07-22 curation rejection after duplicate review: These two tickets are the same proportional OWASP/NIST security-review guidance work. The concept ranks below the concrete locked-dependency alert and current blockers, so both are rejected rather than preserving a hidden combined item.
