@@ -6,7 +6,6 @@
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
-20260714-wimr-validate-gpt-5-6-benchmark-concurrency-samples-help-and-timeouts-by-phase
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
