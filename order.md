@@ -37,7 +37,6 @@
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
-20260714-gb9s-bound-final-review-git-pathspec-argv-and-delta-evidence-inventories
 20260714-iv3g-retire-content-addressed-final-review-delta-artifacts
 20260716-irxa-create-or-update-the-writing-style-plugin-from-writing-style-zip
 20260716-v2ji-make-provider-eval-timeouts-safely-resumable-without-matrix-expansion
