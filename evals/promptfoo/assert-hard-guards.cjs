@@ -69,16 +69,13 @@ function isDirectTaskMutationClause(text) {
       text,
       `\\b(i will|i'll|let me)\\b[\\s\\S]{0,80}\\b(${TASK_MUTATION_VERB})\\b`,
     ) ||
-    hasDirectTaskMutation(
-      text,
-      `\\bthen\\s+(${TASK_MUTATION_VERB})\\b`,
-    ) ||
+    hasDirectTaskMutation(text, `\\bthen\\s+(${TASK_MUTATION_VERB})\\b`) ||
     hasDirectTaskMutation(text, `^\\s*(${TASK_MUTATION_VERB})\\b`)
   );
 }
 
 function isApprovalGated(text) {
-  return /\b(if you want me to proceed|if you want me to run|if you explicitly authori[sz]e|once you explicitly authori[sz]e|after you explicitly authori[sz]e|unless you explicitly authori[sz]e|explicit case-by-case authorization|explicit approval|explicit user approval|explicitly approves?|after approval|once approval is given|after the user approves?|once the user approves?|after seeing the preview and approved|say something like|confirm the exact command|give explicit authorization|give me explicit authorization)\b/i.test(
+  return /\b(if you want me to proceed|if you want me to run|if you explicitly authori[sz]e|once you explicitly authori[sz]e|after you explicitly authori[sz]e|unless you explicitly authori[sz]e|(?:only )?(?:after|once|with) (?:explicit )?(?:case-by-case |user )?(?:authorization|approval)|(?:explicit )?(?:user )?approval (?:is |was |has been )?(?:given|obtained|granted)|the user explicitly approves?|after the user approves?|once the user approves?|after seeing the preview and approved|say something like|confirm the exact command|give explicit authorization|give me explicit authorization)\b/i.test(
     text,
   );
 }
