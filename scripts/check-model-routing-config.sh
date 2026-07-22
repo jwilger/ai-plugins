@@ -102,9 +102,9 @@ check_claude() {
 check_codex bounded-helper gpt-5.6-luna low read-only
 check_codex substantive-worker gpt-5.6-terra medium workspace-write
 check_codex strong-reviewer gpt-5.6-sol high read-only
-check_claude bounded-helper haiku Read,Grep,Glob,Bash
+check_claude bounded-helper haiku Read,Grep,Glob
 check_claude substantive-worker sonnet Read,Grep,Glob,Bash,Write,Edit
-check_claude strong-reviewer opus Read,Grep,Glob,Bash
+check_claude strong-reviewer opus Read,Grep,Glob
 
 jq -cn '{
   codex: {
@@ -113,8 +113,8 @@ jq -cn '{
     "strong-reviewer": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "read-only"}
   },
   claude: {
-    "bounded-helper": {model: "haiku", tools: "Read,Grep,Glob,Bash"},
+    "bounded-helper": {model: "haiku", tools: "Read,Grep,Glob"},
     "substantive-worker": {model: "sonnet", tools: "Read,Grep,Glob,Bash,Write,Edit"},
-    "strong-reviewer": {model: "opus", tools: "Read,Grep,Glob,Bash"}
+    "strong-reviewer": {model: "opus", tools: "Read,Grep,Glob"}
   }
 }'
