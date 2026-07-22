@@ -1,7 +1,7 @@
 {
   "name": "engineering-standards",
   "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": {
     "name": "John Wilger",
     "email": "john@johnwilger.com"
