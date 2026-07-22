@@ -24,3 +24,4 @@ Implementation notes:\n\nVerified MINOR production footgun from 20260709-spx8: e
 ## Notes / Log
 
 - 2026-07-14: Scope boundary from 20260713-uf3e split: this ticket exclusively owns cleanup of runner-owned default workspaces on success, failure, timeout, and interruption. The replacement split tickets do not duplicate cleanup.
+- 2026-07-22: 2026-07-22 curation rejection: Part of a large symptom-level GPT-5.6/evaluation lifecycle and artifact-quality cluster. Its present pain, confidence, or value-to-cost does not outrank the five retained root-cause items; rediscover only from a current recurring eval failure, with no shadow queue.
