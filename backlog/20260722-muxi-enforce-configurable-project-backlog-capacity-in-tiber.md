@@ -2,7 +2,7 @@
 title: Enforce configurable project backlog capacity in Tiber
 blocked_by: []
 blocks: []
-tags: []
+tags: [tiber, backlog, capacity, concurrency, configuration]
 pr_mr_url: 
 pr_mr_status: 
 ---
