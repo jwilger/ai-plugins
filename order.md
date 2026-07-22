@@ -31,5 +31,4 @@
 20260721-mriy-publish-a-github-release-for-each-marketplace-version
 20260721-y4c9-make-automatic-task-closure-fail-when-it-does-not-close-a-task
 20260721-h4h7-make-restarted-final-reviews-recover-reliably
-20260721-7xvd-verify-benchmark-cancellation-through-its-public-interface
 20260721-htq9-keep-work-moving-while-checks-are-still-running
