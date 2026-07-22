@@ -5,6 +5,9 @@ blocks: []
 tags: [advisor, codex, model-routing, developer-experience]
 pr_mr_url: 
 pr_mr_status: 
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
