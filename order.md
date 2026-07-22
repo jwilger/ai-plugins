@@ -13,7 +13,6 @@
 20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
 20260713-u2md-remove-stale-live-evals-workflow-documentation
 20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
-20260713-ffpt-avoid-initializing-the-gpt-5-6-trace-provider-during-unused-cleanup
 20260708-7zs6-strengthen-cross-project-tiber-task-workflow-guidance
 20260712-r298-expand-focused-tiber-cli-invalid-invocation-coverage
 20260711-95gy-retire-superseded-lefthook-nix-gc-roots-after-successful-reinstall
