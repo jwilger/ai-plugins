@@ -8,7 +8,6 @@
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
-20260713-h9bn-prove-canonical-status-precedence-in-the-gpt-5-6-calibration-runner
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
