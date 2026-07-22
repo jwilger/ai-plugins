@@ -11,10 +11,11 @@ both explicit.
 
 ## Routing matrix
 
-| Route           | Eligible work                                                                            | Required boundary                                                                                                                                                    |
-| --------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gpt-5.6-luna`  | Bounded inventory, extraction, classification, or mechanical transformation              | Keep the helper read-only or make its change easily reversible; define the expected result before delegation; independently verify every result before relying on it |
-| `gpt-5.6-terra` | Normal substantive implementation and ordinary review with clear scope and ordinary risk | Keep final verification and every completion or readiness claim with the parent; escalate the affected task if stronger reasoning becomes necessary                  |
+| Route           | Eligible work                                                                                                                                                               | Required boundary                                                                                                                                                    |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gpt-5.6-luna`  | Bounded inventory, extraction, classification, or mechanical transformation                                                                                                 | Keep the helper read-only or make its change easily reversible; define the expected result before delegation; independently verify every result before relying on it |
+| `gpt-5.6-terra` | Normal substantive implementation and ordinary review with clear scope and ordinary risk                                                                                    | Keep final verification and every completion or readiness claim with the parent; escalate the affected task if stronger reasoning becomes necessary                  |
+| `gpt-5.6-sol`   | Advisor work; ambiguous debugging; architecture, security, or human-safety analysis; destructive changes; blocking or disputed verification; completion or readiness claims | Keep required authorization and evidence gates separate from model choice; the accountable parent must itself use Sol when it owns one of these decisions            |
 
 Do not use Luna for substantive implementation, completion claims, ambiguous
 work, or any task whose result cannot be independently checked. Do not treat a
@@ -27,6 +28,12 @@ not escalate routine substantive work beyond Terra without an activated reason.
 Escalate the affected task specifically to `gpt-5.6-sol` when ambiguity,
 destructive impact, architecture, security, human-safety, or blocking or
 disputed verification enters the task.
+
+Sol is the strong responsibility route. Use it for every listed responsibility,
+including when a parent retains the final verification, completion, or readiness
+decision. Selecting Sol supplies stronger reasoning; it never supplies approval
+for a destructive action, a release, a merge, or any other separately
+authorized operation.
 
 ## Availability is part of the route
 
