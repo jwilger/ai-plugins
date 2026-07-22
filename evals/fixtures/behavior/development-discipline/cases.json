@@ -1331,5 +1331,33 @@
         "Final review passed, so create and merge the PR, or always open a PR regardless of repository policy."
       ]
     }
+  },
+  {
+    "case_id": "model-routing-luna-bounded-helper",
+    "behavior": "Routes only bounded, read-only, independently verifiable helper work to GPT-5.6 Luna.",
+    "prompt": "You need an independent helper to inventory every Markdown file under `docs/` that links to `/legacy/`. The helper must not edit files, and you will verify its returned paths with a deterministic `rg` command before using the result. Which model route should the development workflow select, and what constraints and follow-up apply?",
+    "tags": [
+      "development-discipline",
+      "model-routing",
+      "delegation",
+      "gpt-5.6-luna"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["model-routing"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "cost-routing"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response selects the task-local gpt-5.6-luna route because the inventory is bounded and read-only, preserves a read-only tool/sandbox boundary, requires independent deterministic verification of every returned path before relying on it, and says an unavailable Luna route must be reported visibly rather than silently replaced or inherited. Fail if it uses Luna for implementation, treats the helper output as self-verifying, changes a global default, silently substitutes another model, or claims /fast selects a cheaper model.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Use the task-local gpt-5.6-luna bounded-helper route in read-only mode. Verify its complete path list with the specified rg command before relying on it. If Luna cannot actually be selected, report that route failure and escalate or keep the work in the parent; do not silently inherit or downgrade, change the global default, or use /fast as model routing."
+      ],
+      "fail": [
+        "Use whichever fast/default agent is available and trust its inventory; /fast provides the cheaper route."
+      ]
+    }
   }
 ]
