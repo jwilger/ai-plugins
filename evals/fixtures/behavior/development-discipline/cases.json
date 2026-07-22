@@ -152,7 +152,7 @@
   {
     "case_id": "final-review-codex-gpt-5-6-cost-routing",
     "behavior": "Routes Codex final-review phases across GPT-5.6 models to balance repeated-review quality against token cost.",
-    "prompt": "We can route Codex review subagents to gpt-5.6-sol, gpt-5.6-terra, or gpt-5.6-luna. Configure risk-proportionate final review for high quality without paying Sol prices for every possible lens. The MCP must still stay model-agnostic for other projects and must not spawn agents itself. What routing and phase behavior should we encode?",
+    "prompt": "We can route Codex review subagents to gpt-5.6-sol, gpt-5.6-terra, or gpt-5.6-luna. Configure risk-proportionate final review for high quality without paying Sol prices for every possible lens. The MCP must still stay model-agnostic for other projects and must not spawn agents itself. What routing and phase behavior should we encode? Include how the scout selects lenses and what happens to findings when verifier evidence fails or remains uncertain.",
     "tags": [
       "development-discipline",
       "final-review",
