@@ -25,6 +25,7 @@ Prompt guidance cannot prevent every caller or simultaneous write from overfilli
 - [ ] Admission enforcement is concurrency-safe so simultaneous successful mutations cannot exceed the configured limit.
 - [ ] Automated tests cover configuration, counted statuses, every admission path, refusals, defaults or migration, and simultaneous admissions.
 - [ ] User and operator documentation explains configuration, counted statuses, refusals, migration/default behavior, and recovery.
+- [ ] The design explicitly decides whether the replenishment threshold belongs in Tiber configuration or remains SOP-only, with rationale.
 
 ## Subtasks
 
