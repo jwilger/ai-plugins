@@ -1,6 +1,5 @@
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
-20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
