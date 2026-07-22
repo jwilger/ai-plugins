@@ -27,3 +27,5 @@ A full 276-case behavior eval hit the runner's 90-minute GNU timeout. The TERM/K
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: 2026-07-22 curation rejection: Part of a large symptom-level GPT-5.6/evaluation lifecycle and artifact-quality cluster. Its present pain, confidence, or value-to-cost does not outrank the five retained root-cause items; rediscover only from a current recurring eval failure, with no shadow queue.
