@@ -8,7 +8,6 @@
 20260714-xkbv-make-final-review-scope-snapshots-work-with-read-only-repository-metadata
 20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
-20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
 20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
 20260714-g89d-make-gpt-5-6-provider-locking-stable-across-worktrees-and-the-full-run-lifecycle
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
