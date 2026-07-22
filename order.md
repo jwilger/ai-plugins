@@ -1,5 +1,4 @@
 20260710-dhse-require-explicit-user-approval-before-amending-commits
-20260716-wfbx-turn-the-autonomous-resume-work-heartbeat-into-an-invokable-skill
 20260718-n8xa-audit-and-update-hindsight-integration-for-current-coding-harnesses
 20260720-4x57-preserve-existing-repository-setup-when-adding-tiber
 20260720-urvv-use-recognized-security-guidance-in-every-security-review
