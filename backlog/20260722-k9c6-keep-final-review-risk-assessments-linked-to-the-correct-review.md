@@ -14,6 +14,7 @@ pr_mr_status:
 ## Acceptance criteria
 
 - [ ] Identity-mismatch errors report enough sanitized expected-versus-received information to diagnose the failure.
+- [ ] An assessment from a different or stale final-review assignment remains rejected.
 
 ## Subtasks
 
