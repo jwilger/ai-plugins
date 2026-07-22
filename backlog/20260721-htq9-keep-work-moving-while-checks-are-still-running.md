@@ -24,3 +24,5 @@ The test-driven-development skill already says to continue when continuous integ
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: 2026-07-22 curation rejection: Useful CI throughput optimization, but a running build is not a correctness defect and this ranks below the retained delivery blockers, data-safety work, and concrete dependency alert. No shadow queue is retained.
