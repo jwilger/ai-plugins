@@ -22,3 +22,5 @@ The canary prompt asks each harness to name every marketplace plugin and provide
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: C2BU reproduced the false negative twice on 2026-07-22. Codex named all eight marketplace plugins and accurately described `development-discipline` (preflight/TDD/debugging/final review/verification/delivery) and `eval-case-reporter` (scrubbed approval-gated eval reports), yet the checker reported both as missing representative skills. Artifacts: `evals/out/c2bu-canary-retry/results.json` and `evals/out/c2bu-canary-retry-2/results.json`. Claude passed both runs. This is checker/prompt contract evidence, not a plugin-loading failure.
