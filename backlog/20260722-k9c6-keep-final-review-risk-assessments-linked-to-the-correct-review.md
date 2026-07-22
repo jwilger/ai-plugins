@@ -13,6 +13,8 @@ pr_mr_status:
 
 ## Acceptance criteria
 
+- [ ] Identity-mismatch errors report enough sanitized expected-versus-received information to diagnose the failure.
+
 ## Subtasks
 
 ## Notes / Log
