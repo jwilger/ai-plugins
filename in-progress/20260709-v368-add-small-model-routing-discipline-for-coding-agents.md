@@ -21,7 +21,7 @@ Implementation notes: Use gpt-5.6-luna for bounded read-only or easily reversibl
 ## Acceptance criteria
 
 - [x] The routing matrix names gpt-5.6-luna for bounded helpers, gpt-5.6-terra for normal substantive work, and gpt-5.6-sol for strong or escalated work, with explicit eligibility and exclusion rules.
-- [ ] Implementation verifies the exact current harness model identifiers and availability; an unavailable requested route fails visibly or escalates rather than silently downgrading.
+- [x] Implementation verifies the exact current harness model identifiers and availability; an unavailable requested route fails visibly or escalates rather than silently downgrading.
 - [ ] Claude Code receives an equivalent current-harness helper and escalation policy where supported, or the implementation documents the missing capability; Claude /fast is never presented as a cost-routing substitute.
 - [ ] Existing development workflow skills cross-reference model routing where delegation decisions naturally arise without duplicating the full matrix.
 - [ ] Behavior fixtures cover accepted Luna delegation, Terra default work, required Sol escalation, ambiguous or high-risk work that cannot use Luna, and refusal to silently downgrade.
