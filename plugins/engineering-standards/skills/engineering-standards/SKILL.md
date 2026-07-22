@@ -18,8 +18,11 @@ adapt the concrete tooling to the language while keeping the discipline.
   language allows, isolate the core so its purity is compiler/tooling-enforced.
 - **Parse, don't validate. Zero primitive-obsession.** Only semantic types flow
   through the domain; primitives and structural types appear only at I/O
-  boundaries. Parse external input into semantic types immediately; never
-  re-validate downstream.
+  boundaries. Renaming a string, number, boolean, UUID, built-in, or structural
+  record with a type alias does not make it semantic. Parse external input
+  immediately into named wrappers whose private construction proves their
+  invariants, and model mutually exclusive alternatives with closed sum types.
+  Domain functions accept those parsed values without re-validating them.
 - **Railway-oriented errors.** Errors are values; functions return results and
   propagate failures explicitly. Error messages are machine-readable identifiers.
   Never discard an error's source chain.

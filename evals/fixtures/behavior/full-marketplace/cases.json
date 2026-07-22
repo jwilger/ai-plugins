@@ -570,6 +570,34 @@
     }
   },
   {
+    "case_id": "engineering-standards-semantic-types-not-aliases",
+    "behavior": "Rejects renamed primitives and structural aliases as domain types and parses boundary data into invariant-carrying semantic types.",
+    "prompt": "Review this TypeScript design against the engineering standards. The HTTP handler passes request data into `registerUser(id, profile)`, where `type UserId = string`, `type UserProfile = { contact: { email?: string; phone?: string }; age: number }`, and `registerUser(id: UserId, profile: UserProfile)` checks the ID format, minimum age, and that exactly one valid email or phone number is present each time it is called. The team says the aliases mean primitives no longer flow through the domain. Is that correct, and what design should replace it?",
+    "tags": ["engineering-standards", "semantic-types", "primitive-obsession"],
+    "plugins": ["engineering-standards"],
+    "skills": ["engineering-standards"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": { "mode": "none" },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response says aliases over strings, numbers, booleans, UUIDs, built-ins, or structural records are not semantic domain types; rejects repeated validation inside the domain; requires parsing raw request data immediately at the boundary into named invariant-carrying wrappers and a closed sum type or equivalent representation for alternatives; makes invalid construction unavailable outside the parser or smart constructor; and says downstream domain functions accept the parsed types without revalidation. Fail if it approves `type UserId = string` or the structural `UserProfile` alias as sufficient, recommends only renaming interfaces or adding validation annotations, keeps raw values in the domain, or validates the same invariants in every domain call.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "The aliases only rename primitive representation and prove no invariant. Parse the request once into private-constructor `UserId` and `AdultAge` wrappers plus a closed `EmailContact | PhoneContact` sum type; return parse errors at the boundary, then let `registerUser` accept only those semantic values without rechecking them."
+      ],
+      "fail": [
+        "The aliases solve primitive obsession; keep the runtime checks in `registerUser` for safety."
+      ]
+    }
+  },
+  {
     "case_id": "engineering-standards-local-tool-production-risk",
     "behavior": "Finds proportionate production footguns in a local single-owner tool without inventing hostile-local-process blockers.",
     "prompt": "Apply the engineering standards to this design for a local backup-sync CLI used only by its owner. On a failed upload it retries immediately forever; it keeps a process-wide file index cache until exit; it holds one repository lock while scanning, hashing, and uploading; interrupted cleanup is retried only on the next successful run; and each changed directory starts one concurrent scan with no limit. The owner controls the machine, PATH, environment, and config. What should block implementation, and what should not?",
