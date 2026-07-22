@@ -23,7 +23,7 @@ Implementation notes: development-discipline final review and lightweight TDD re
 - [x] engineering-standards guidance explicitly reviews for hidden footguns, unsafe defaults, partial failure states, unbounded retries, unbounded loops, lock contention, cache staleness, and cleanup hazards.
 - [x] Guidance explicitly asks whether data access patterns, N+1 work, fanout, memory/IO growth, and thundering-herd behavior will survive production-sized use or DOS-like bursts.
 - [x] The change includes eval cases where an agent must flag dev/test-safe but production-risky implementation choices.
-- [ ] Guidance derives risk from the intended deployment and trust boundary, with separate fixtures showing proportionate analysis for a local single-owner tool and for a shared service handling untrusted input.
+- [x] Guidance derives risk from the intended deployment and trust boundary, with separate fixtures showing proportionate analysis for a local single-owner tool and for a shared service handling untrusted input.
 - [ ] The engineering standard cross-references the existing development-discipline production-risk lens and does not duplicate that workflow's review mechanics.
 
 ## Subtasks
