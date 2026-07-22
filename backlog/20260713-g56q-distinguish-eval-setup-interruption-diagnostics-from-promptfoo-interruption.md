@@ -26,3 +26,4 @@ Implementation notes:\n\nFinal review found a MINOR operability issue in the new
 ## Notes / Log
 
 - 2026-07-14: Scope boundary from 20260713-uf3e split: this ticket owns setup-versus-provider interruption wording only; 20260714-2xyd owns preparation lifecycle and stale-evidence handling.
+- 2026-07-22: 2026-07-22 curation rejection: Part of a large symptom-level GPT-5.6/evaluation lifecycle and artifact-quality cluster. Its present pain, confidence, or value-to-cost does not outrank the five retained root-cause items; rediscover only from a current recurring eval failure, with no shadow queue.
