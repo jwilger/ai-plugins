@@ -1,5 +1,4 @@
 20260710-dhse-require-explicit-user-approval-before-amending-commits
-20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260716-irxa-create-or-update-the-writing-style-plugin-from-writing-style-zip
 20260716-wfbx-turn-the-autonomous-resume-work-heartbeat-into-an-invokable-skill
 20260718-n8xa-audit-and-update-hindsight-integration-for-current-coding-harnesses
