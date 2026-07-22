@@ -71,6 +71,16 @@ gate.
 
 - Treat a user request or standing repository authorization as permission only
   for the externally visible operations it actually covers.
+- Use additive commits for repairs, review follow-ups, and later corrections by
+  default, then use the mode's normal push. A request to fix feedback, keep a
+  PR tidy, or perform routine delivery does not authorize rewriting history.
+- Require explicit case-by-case user authorization before amending any existing
+  commit, whether or not it has been pushed. If the amended commit would also
+  require a forced push, authorize that forced push separately; approval for
+  one operation does not imply approval for the other.
+- Never amend shared or default-branch history as a routine repair. Preserve it
+  with a new corrective commit and a normal push. On any other branch, amend
+  only when the user explicitly authorizes that specific amend.
 - Require explicit case-by-case approval for destructive or irreversible
   operations, including forced pushes, even when routine delivery is authorized.
 - Keep testing, review, and CI evidence proportional to the change's risk and to
