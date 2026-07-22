@@ -3,6 +3,9 @@ title: Require meaningful domain types instead of renamed basic values
 blocked_by: []
 blocks: [20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types]
 tags: [engineering-standards, semantic-types, guidance, evals]
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
