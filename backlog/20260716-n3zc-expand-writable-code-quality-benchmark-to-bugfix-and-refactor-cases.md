@@ -25,3 +25,5 @@ Deferred from ticket 20260715-n6bs so the first evidence can focus on a safely c
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: 2026-07-22 curation rejection: Part of a large symptom-level GPT-5.6/evaluation lifecycle and artifact-quality cluster. Its present pain, confidence, or value-to-cost does not outrank the five retained root-cause items; rediscover only from a current recurring eval failure, with no shadow queue.
