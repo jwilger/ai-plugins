@@ -36,6 +36,7 @@
               ripgrep
               fd
               nodejs_22
+              python312
               nix
               cargo
               cargo-mutants
