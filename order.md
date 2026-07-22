@@ -1,4 +1,3 @@
-20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession
 20260711-pyag-add-ci-setup-skills-with-staged-fast-fail-gating
 20260711-wtk6-route-the-codex-advisor-agent-to-gpt-5-6-sol-with-high-reasoning
 20260709-v368-add-small-model-routing-discipline-for-coding-agents
