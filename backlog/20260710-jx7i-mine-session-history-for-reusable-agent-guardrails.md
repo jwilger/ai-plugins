@@ -30,3 +30,5 @@ Implement this as plugins/development-discipline/skills/mine-session-guardrails 
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: 2026-07-22 curation rejection: Broad or expensive initiative with weaker near-term value-to-cost than the retained concrete defects and security work. Discovery does not obligate retention, and no hidden queue is kept.
