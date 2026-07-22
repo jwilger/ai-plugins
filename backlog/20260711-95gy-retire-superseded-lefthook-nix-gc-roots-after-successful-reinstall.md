@@ -25,3 +25,5 @@ The installer names indirect roots by Lefthook store-path basename and currently
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: 2026-07-22 curation rejection: Lower-frequency local-owner worktree/Lefthook operability or diagnostics. Existing guards provide the baseline protection, so this does not outrank current cross-project blockers, data-safety work, or the concrete dependency alert; no shadow queue.
