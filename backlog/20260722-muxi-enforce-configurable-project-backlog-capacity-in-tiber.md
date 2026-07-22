@@ -13,6 +13,8 @@ Add a project-configurable maximum for queued tickets and enforce it atomically 
 
 ## Context / Why
 
+Prompt guidance cannot prevent every caller or simultaneous write from overfilling a project backlog. Define the counted statuses and enforce the project limit when creating, reopening, or moving tickets into them across CLI, MCP, dashboard, and other mutation paths. Refusals must tell users to replace, combine, or reject work. Preserve compatible defaults for projects without the setting, document migration, and decide whether the replenishment threshold belongs in Tiber configuration or remains repository SOP.
+
 ## Acceptance criteria
 
 ## Subtasks
