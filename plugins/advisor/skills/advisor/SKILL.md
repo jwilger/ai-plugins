@@ -12,11 +12,8 @@ If you are already running as a subagent, do the advisor work directly from the 
 ## Parent-Agent Protocol
 
 1. Spawn an advisor subagent. Do not run the full advisor loop in the main thread.
-   - Use the custom `advisor` agent when available. It is configured as read-only and uses `model_reasoning_effort: high`.
-   - If the custom agent is unavailable, use `agent_type: default` so the advisor can read code, docs, and current web sources when needed.
-   - Use `reasoning_effort: high` by default when manually choosing effort.
-   - Use `reasoning_effort: xhigh` only for high-blast-radius, hard-to-reverse, deeply ambiguous, or explicitly deep-strategy requests.
-   - Use `reasoning_effort: medium` for lightweight sanity checks where latency matters more than exhaustive reasoning.
+   - Use the custom `advisor` agent when available. Its agent file is the single routing source and pins read-only `gpt-5.6-sol` with `model_reasoning_effort: high`.
+   - If the custom agent is unavailable, stop and report the unavailable advisor agent. Do not silently substitute a different agent or model.
    - Do not use `agent_type: worker` for advisor work.
 2. Pass a compact brief: the user's request, the current repo/path if relevant, known constraints, and the exact artifact needed (`none`, `spec`, or `ticket plan`). Do not pass your conclusions.
 3. Give the subagent a read-only contract: read/search only; no file edits, no commits, no package installs, no service mutations, and no commands whose purpose is to change persistent state.
@@ -48,7 +45,7 @@ Return:
 3. scope to cut or defer
 4. risks/prereqs to verify
 5. final artifact outline, if requested
-6. footer: `effort=<medium|high|xhigh|unknown>; playbook=<yes|no>; context=<repo/docs/web/none checked>`. Report the parent-requested reasoning effort exactly; use `unknown` only when the parent did not specify it. For context, report only sources actually inspected; if you did not inspect repo files, docs, or web sources, use `none checked`.
+6. footer: `effort=high; playbook=<yes|no>; context=<repo/docs/web/none checked>`. `high` is the effort pinned by the custom agent file. For context, report only sources actually inspected; if you did not inspect repo files, docs, or web sources, use `none checked`.
 ```
 
 ## Subagent Protocol

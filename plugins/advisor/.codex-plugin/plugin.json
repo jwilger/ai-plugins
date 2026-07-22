@@ -1,6 +1,6 @@
 {
   "name": "advisor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Read-only planning advisor for fuzzy product, design, engineering, scope, spec, and ticket-shaping work.",
   "author": {
     "name": "John Wilger",
