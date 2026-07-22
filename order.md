@@ -18,7 +18,6 @@
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
 20260716-irxa-create-or-update-the-writing-style-plugin-from-writing-style-zip
 20260716-wfbx-turn-the-autonomous-resume-work-heartbeat-into-an-invokable-skill
-20260716-2iud-build-credential-isolated-full-plugin-writable-eval-runtime
 20260718-n8xa-audit-and-update-hindsight-integration-for-current-coding-harnesses
 20260719-yqyy-let-each-tiber-dashboard-choose-an-available-port
 20260719-pvk7-store-real-line-breaks-in-tiber-ticket-text
