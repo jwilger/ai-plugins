@@ -102,19 +102,23 @@ check_claude() {
 check_codex bounded-helper gpt-5.6-luna low read-only
 check_codex substantive-worker gpt-5.6-terra medium workspace-write
 check_codex strong-reviewer gpt-5.6-sol high read-only
+check_codex strong-worker gpt-5.6-sol high workspace-write
 check_claude bounded-helper haiku Read,Grep,Glob
 check_claude substantive-worker sonnet Read,Grep,Glob,Bash,Write,Edit
-check_claude strong-reviewer opus Read,Grep,Glob
+check_claude strong-reviewer opus Read,Grep,Glob,Bash
+check_claude strong-worker opus Read,Grep,Glob,Bash,Write,Edit
 
 jq -cn '{
   codex: {
     "bounded-helper": {model: "gpt-5.6-luna", reasoning: "low", sandbox: "read-only"},
     "substantive-worker": {model: "gpt-5.6-terra", reasoning: "medium", sandbox: "workspace-write"},
-    "strong-reviewer": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "read-only"}
+    "strong-reviewer": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "read-only"},
+    "strong-worker": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "workspace-write"}
   },
   claude: {
     "bounded-helper": {model: "haiku", tools: "Read,Grep,Glob"},
     "substantive-worker": {model: "sonnet", tools: "Read,Grep,Glob,Bash,Write,Edit"},
-    "strong-reviewer": {model: "opus", tools: "Read,Grep,Glob"}
+    "strong-reviewer": {model: "opus", tools: "Read,Grep,Glob,Bash"},
+    "strong-worker": {model: "opus", tools: "Read,Grep,Glob,Bash,Write,Edit"}
   }
 }'

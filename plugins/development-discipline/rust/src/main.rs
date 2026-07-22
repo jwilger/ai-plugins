@@ -7057,7 +7057,6 @@ fn model_role_for_lens<'a>(model_roles: &'a Value, lens: &str) -> Result<&'a str
     model_roles
         .get(phase)
         .and_then(Value::as_str)
-        .or_else(|| model_roles.get("lens_review").and_then(Value::as_str))
         .ok_or_else(|| format!("lens_model_role_missing lens={lens} phase={phase}"))
 }
 
@@ -8242,10 +8241,18 @@ fn relevance_policy() -> Value {
 fn phase_execution_policy() -> Value {
     json!({
         "pre_filter": {
-            "mode": "conditional_model_assist",
-            "trigger": "large_or_noisy_review_scope",
+            "mode": "mandatory_risk_scout",
+            "trigger": "before_review_plan",
             "may_skip_lenses": false,
-            "model_invocation": "caller_decides_from_scope"
+            "model_invocation": "caller_required",
+            "runtime_guarantee": "caller_attested",
+            "caller_requirements": [
+                "actual_subagent_invocation",
+                "fresh_context",
+                "assigned_model_role",
+                "close_after_result",
+                "all_dimension_assessment"
+            ]
         },
         "lens_review": {
             "mode": "mcp_assigned_caller_subagent_per_lens",
@@ -10309,6 +10316,20 @@ mod tests {
     }
 
     #[test]
+    fn strong_responsibility_lenses_fail_when_the_strong_model_role_is_missing() {
+        let model_roles = json!({ "lens_review": "ordinary-review" });
+
+        assert_eq!(
+            model_role_for_lens(&model_roles, "security-safety"),
+            Err("lens_model_role_missing lens=security-safety phase=verifier".to_owned())
+        );
+        assert_eq!(
+            model_role_for_lens(&model_roles, "correctness-behavior"),
+            Ok("ordinary-review")
+        );
+    }
+
+    #[test]
     fn plan_binds_an_optional_work_item_to_the_review_contract() {
         let first: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
@@ -11917,7 +11938,19 @@ verifier = "claude-verify"
 
         assert_eq!(
             parsed["phase_execution"]["pre_filter"]["mode"],
-            "conditional_model_assist"
+            "mandatory_risk_scout"
+        );
+        assert_eq!(
+            parsed["phase_execution"]["pre_filter"]["trigger"],
+            "before_review_plan"
+        );
+        assert_eq!(
+            parsed["phase_execution"]["pre_filter"]["model_invocation"],
+            "caller_required"
+        );
+        assert_eq!(
+            parsed["phase_execution"]["pre_filter"]["runtime_guarantee"],
+            "caller_attested"
         );
         assert_eq!(
             parsed["phase_execution"]["pre_filter"]["may_skip_lenses"],
@@ -17190,7 +17223,10 @@ pre_filter = "project-pre"
                 "acceptance_criteria": [],
                 "explicit_concerns": []
             },
-            "model_roles": { "lens_review": "review-model" },
+            "model_roles": {
+                "lens_review": "review-model",
+                "verifier": "strong-review-model"
+            },
             "lenses": ["correctness-behavior", "security-safety"],
             "iteration_index": 1,
             "required_clean_iterations": 3,

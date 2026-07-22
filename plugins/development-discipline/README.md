@@ -43,8 +43,9 @@ conflict with or duplicate existing local practice.
 ## Harnesses
 
 Claude Code and Codex consume the same canonical routing policy from `skills/`.
-The plugin also packages three task-local agents for each harness:
-`bounded-helper`, `substantive-worker`, and `strong-reviewer`. Codex agents pin
+The plugin also packages four task-local agents for each harness:
+`bounded-helper`, `substantive-worker`, `strong-reviewer`, and `strong-worker`.
+Codex agents pin
 the exact GPT-5.6 model identifiers and sandbox modes. Claude agents use the
 current Haiku, Sonnet, and Opus aliases with route-appropriate tool allowlists.
 If a harness cannot honor the requested route, the agent reports that failure
