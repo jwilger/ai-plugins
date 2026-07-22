@@ -228,6 +228,34 @@
     }
   },
   {
+    "case_id": "worktrees-coordination-clean-route",
+    "behavior": "Diagnoses a clean policy-declared coordination checkout after fetching and starts feature work from the fetched upstream tip in a linked worktree.",
+    "prompt": "This repository's AGENTS.md explicitly reserves its main checkout for coordination and requires feature edits in linked worktrees. We are in that main checkout. Its configured upstream has advanced beyond stale local HEAD, and after fetching that upstream, `git status --short` is empty. Start a new feature without editing the coordination checkout. What exact diagnosis and remediation should the agent use before editing?",
+    "tags": [
+      "worktrees",
+      "coordination-checkout",
+      "clean-state",
+      "fetched-upstream"
+    ],
+    "plugins": ["worktrees"],
+    "skills": ["setup"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "failure-recovery"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0 },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response applies the workflow because repository policy advertises it; proves main-checkout identity by comparing the absolute paths from `git rev-parse --git-dir` and `git rev-parse --git-common-dir`; resolves and fetches the configured upstream before classifying status; explicitly diagnoses the empty post-fetch status as Clean; verifies the repo-local `.worktrees/` path is ignored; creates the new feature branch and linked worktree from the fetched upstream tip rather than stale local HEAD; and runs setup plus baseline tests in that linked worktree before editing. Fail if it classifies before fetching, treats stale local HEAD as the branch base, edits the coordination checkout, skips the identity or ignore-safety checks, nests a worktree, or edits before entering and validating the linked worktree.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Because AGENTS.md advertises the policy, compare the absolute git-dir and common-dir paths to prove this is the main checkout, resolve and fetch its configured upstream, then classify the empty post-fetch status as Clean. Verify .worktrees is ignored, create the feature branch and linked worktree from the fetched upstream tip rather than stale local HEAD, and run setup and baseline tests there before editing."
+      ],
+      "fail": [
+        "The checkout is clean, so branch from local HEAD and edit it directly; fetch can happen later."
+      ]
+    }
+  },
+  {
     "case_id": "worktrees-coordination-upstream-equivalent-no-op",
     "behavior": "Recognizes upstream-equivalent apparent changes in a policy-declared coordination checkout and moves feature work to a linked worktree without compounding them.",
     "prompt": "This repository's AGENTS.md explicitly reserves its main checkout for coordination and requires feature edits in linked worktrees. We are in the main checkout, whose real index still matches stale local HEAD, and `core.filemode` is false. After fetching the configured upstream, `git status --short` still shows a modified tracked file plus a local-untracked executable that was actually added by that newer upstream commit. The effective local bytes, path types, and executable modes all match the fetched upstream tip exactly; the local main branch is merely behind. Start a new feature without losing or compounding any user work. What exact diagnosis and remediation should the agent use before editing?",
