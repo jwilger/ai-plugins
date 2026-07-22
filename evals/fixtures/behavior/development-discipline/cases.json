@@ -1359,5 +1359,33 @@
         "Use whichever fast/default agent is available and trust its inventory; /fast provides the cheaper route."
       ]
     }
+  },
+  {
+    "case_id": "model-routing-terra-substantive-default",
+    "behavior": "Routes normal substantive implementation and ordinary review to GPT-5.6 Terra.",
+    "prompt": "A well-specified ticket adds one validated CLI option, its black-box tests, and documentation. The trust boundary is unchanged, the edits are reversible in Git, no destructive operation is involved, and there is no ambiguity or disputed evidence. You want to delegate the implementation while retaining final verification and the completion decision in the parent. Which task-local model route applies, and when must it be escalated?",
+    "tags": [
+      "development-discipline",
+      "model-routing",
+      "delegation",
+      "gpt-5.6-terra"
+    ],
+    "plugins": ["development-discipline"],
+    "skills": ["model-routing"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "default-route"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response selects task-local gpt-5.6-terra as the default for normal substantive implementation and ordinary review, keeps final verification and the completion claim with the parent, and requires escalation to Sol if ambiguity, destructive impact, architecture/security/human-safety stakes, or blocking/disputed verification emerges. It must require visible failure rather than silent substitution if Terra is unavailable. Fail if it selects Luna, treats Terra as a global default, lets the helper make the completion claim, silently substitutes a model, or escalates this routine bounded implementation to Sol without an activated reason.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Use task-local gpt-5.6-terra for this ordinary substantive implementation. The parent independently runs the required verification and owns the completion decision. Escalate the affected task to Sol if ambiguity, destructive impact, architecture/security/human-safety analysis, or blocking/disputed evidence appears. Report an unavailable Terra route visibly instead of substituting another model."
+      ],
+      "fail": [
+        "Use Luna because the ticket is well specified, and let that helper report completion after its own tests pass."
+      ]
+    }
   }
 ]

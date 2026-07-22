@@ -11,13 +11,22 @@ both explicit.
 
 ## Routing matrix
 
-| Route          | Eligible work                                                               | Required boundary                                                                                                                                                    |
-| -------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gpt-5.6-luna` | Bounded inventory, extraction, classification, or mechanical transformation | Keep the helper read-only or make its change easily reversible; define the expected result before delegation; independently verify every result before relying on it |
+| Route           | Eligible work                                                                            | Required boundary                                                                                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gpt-5.6-luna`  | Bounded inventory, extraction, classification, or mechanical transformation              | Keep the helper read-only or make its change easily reversible; define the expected result before delegation; independently verify every result before relying on it |
+| `gpt-5.6-terra` | Normal substantive implementation and ordinary review with clear scope and ordinary risk | Keep final verification and every completion or readiness claim with the parent; escalate the affected task if stronger reasoning becomes necessary                  |
 
 Do not use Luna for substantive implementation, completion claims, ambiguous
 work, or any task whose result cannot be independently checked. Do not treat a
 helper's own explanation as independent verification.
+
+Use Terra instead of Luna for ordinary code, test, configuration, and
+documentation changes even when their specification is clear; ordinary review
+also stays on Terra. State both responsibilities when selecting this route. Do
+not escalate routine substantive work beyond Terra without an activated reason.
+Escalate the affected task specifically to `gpt-5.6-sol` when ambiguity,
+destructive impact, architecture, security, human-safety, or blocking or
+disputed verification enters the task.
 
 ## Availability is part of the route
 
