@@ -23,7 +23,8 @@ helper's own explanation as independent verification.
 
 Use Terra instead of Luna for ordinary code, test, configuration, and
 documentation changes even when their specification is clear; ordinary review
-also stays on Terra. State both responsibilities when selecting this route. Do
+also stays on Terra. Every Terra recommendation must name both ordinary
+substantive implementation and ordinary review as Terra responsibilities. Do
 not escalate routine substantive work beyond Terra without an activated reason.
 Escalate the affected task specifically to `gpt-5.6-sol` when ambiguity,
 destructive impact, architecture, security, human-safety, or blocking or
@@ -50,3 +51,12 @@ satisfied the requested route.
 
 `/fast` changes service speed and cost for a selected model. It does not select
 a lower-cost model and is not a model-routing substitute.
+
+## Current harness routes
+
+Use the exact `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` identifiers in
+Codex. Claude Code exposes the corresponding current plugin-agent routes as
+`haiku`, `sonnet`, and `opus`. Apply the same bounded, normal-substantive, and
+strong-responsibility boundaries to those Claude aliases. Do not pass Codex
+model identifiers to Claude Code or present inherited parent execution as the
+requested Claude route.
