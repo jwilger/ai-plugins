@@ -28,3 +28,4 @@ Implementation notes:\n\nSplit from 20260713-uf3e. Inherited concurrency can exc
 ## Notes / Log
 
 - 2026-07-14: Split from 20260713-uf3e. This ticket exclusively owns concurrency, sample, help, and effective-timeout validation.
+- 2026-07-22: 2026-07-22 curation rejection: Part of a large symptom-level GPT-5.6/evaluation lifecycle and artifact-quality cluster. Its present pain, confidence, or value-to-cost does not outrank the five retained root-cause items; rediscover only from a current recurring eval failure, with no shadow queue.
