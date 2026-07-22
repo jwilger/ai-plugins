@@ -22,6 +22,7 @@ Final review is a required delivery safeguard. When its restart process cannot c
 - [ ] The rejection tells the caller how to restart, resume, or abandon the review safely.
 - [ ] Automated tests reproduce GitHub issue #58 and prove both the successful restart and each supported recovery path.
 - [ ] A current risk assessment reproducing risk_assessment_assignment_id_mismatch=true is accepted through planning, including coordinator restart or recovery.
+- [ ] Identity mismatch errors report sanitized expected-versus-received assignment information.
 
 ## Subtasks
 
