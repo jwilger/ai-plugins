@@ -5,7 +5,6 @@
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260713-u2md-remove-stale-live-evals-workflow-documentation
-20260711-95gy-retire-superseded-lefthook-nix-gc-roots-after-successful-reinstall
 20260711-tcs3-migrate-ci-off-nix-devshell-tooling
 20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types
 20260710-jx7i-mine-session-history-for-reusable-agent-guardrails
