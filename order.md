@@ -25,7 +25,6 @@
 20260720-4x57-preserve-existing-repository-setup-when-adding-tiber
 20260720-88n3-refuse-task-boards-that-tiber-does-not-own
 20260720-urvv-use-recognized-security-guidance-in-every-security-review
-20260721-qtpp-stop-measuring-plugin-lift-when-an-eval-prompt-gives-away-the-answer
 20260721-phfz-use-trusted-security-standards-in-every-security-review
 20260721-7rtt-update-js-yaml-to-avoid-slow-processing-of-specially-shaped-yaml
 20260721-mriy-publish-a-github-release-for-each-marketplace-version
