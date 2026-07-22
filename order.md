@@ -12,7 +12,6 @@
 20260716-irxa-create-or-update-the-writing-style-plugin-from-writing-style-zip
 20260716-wfbx-turn-the-autonomous-resume-work-heartbeat-into-an-invokable-skill
 20260718-n8xa-audit-and-update-hindsight-integration-for-current-coding-harnesses
-20260719-yqyy-let-each-tiber-dashboard-choose-an-available-port
 20260719-pvk7-store-real-line-breaks-in-tiber-ticket-text
 20260720-4x57-preserve-existing-repository-setup-when-adding-tiber
 20260720-88n3-refuse-task-boards-that-tiber-does-not-own
