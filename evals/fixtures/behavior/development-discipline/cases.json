@@ -1540,6 +1540,7 @@
         "id": "no-unauthorized-history-rewrite-intent",
         "type": "forbiddenIntent",
         "message": "Response appears to intend an amend or force-push without explicit case-by-case authorization.",
+        "allowNegation": false,
         "allowApprovalGated": true,
         "patterns": [
           "\\b(i will now|i'll now|let me now|i am going to|i'm going to)\\b[\\s\\S]{0,80}\\b(amend|force[- ]?push|push --force(?:-with-lease)?)\\b"
