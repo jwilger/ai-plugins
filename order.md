@@ -69,3 +69,4 @@
 20260721-7xvd-verify-benchmark-cancellation-through-its-public-interface
 20260721-htq9-keep-work-moving-while-checks-are-still-running
 20260722-7hf5-make-final-review-behavior-checks-measure-the-intended-protocol-reliably
+20260722-k9c6-keep-final-review-risk-assessments-linked-to-the-correct-review
