@@ -305,6 +305,16 @@ policy.
    authoritative session copy. `final_review.plan` rejects any call that omits
    the bound scout assessment, baseline, or shared evidence.
 
+   The scout always assesses every assigned dimension. A low overall profile
+   may still report several concrete low or uncertain dimensions; the
+   coordinator deterministically schedules at most one targeted lens instead
+   of rejecting the complete assessment. If `final_review.plan` reports
+   `risk_assessment_identity_mismatch`, discard that assessment, rerun
+   `final_review.assess_risk` with the exact intended plan contract in the same
+   session, launch its replacement scout, and resubmit that new assessment
+   unchanged. The diagnostic names the mismatched identity field but never
+   exposes the expected private value.
+
    The scout may report exceptional-risk triggers only with these exact IDs:
    `destructive-or-irreversible-operation`,
    `authentication-or-authorization-boundary`, `sensitive-data-migration`,

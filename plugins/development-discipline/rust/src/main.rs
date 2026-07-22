@@ -2160,7 +2160,7 @@ fn compile_risk_plan(
         if assessment.get(field).and_then(Value::as_str)
             != expected_assignment.get(field).and_then(Value::as_str)
         {
-            return Err(format!("risk_assessment_{field}_mismatch=true"));
+            return Err(risk_assessment_identity_mismatch(field));
         }
     }
     if assessment
@@ -2170,19 +2170,9 @@ fn compile_risk_plan(
             .pointer("/shared_test_evidence/id")
             .and_then(Value::as_str)
     {
-        return Err("risk_assessment_shared_test_evidence_id_mismatch=true".to_string());
+        return Err(risk_assessment_identity_mismatch("shared_test_evidence_id"));
     }
-    validate_caller_attestation(
-        assessment.get("caller_attestation"),
-        expected_assignment
-            .get("model_role")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown"),
-        expected_assignment
-            .get("subagent_key")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown"),
-    )?;
+    validate_risk_assessment_caller_attestation(assessment, expected_assignment)?;
     let overall_risk = assessment
         .get("overall_risk")
         .and_then(Value::as_str)
@@ -2277,7 +2267,7 @@ fn compile_risk_plan(
         ));
     }
 
-    let selected_lenses = expected_dimensions
+    let elevated_lenses = expected_dimensions
         .iter()
         .filter(|lens| {
             let dimension = &by_lens[*lens];
@@ -2286,10 +2276,12 @@ fn compile_risk_plan(
         })
         .cloned()
         .collect::<Vec<_>>();
+    let selected_lenses = if overall_risk == "low" {
+        elevated_lenses.into_iter().take(1).collect::<Vec<_>>()
+    } else {
+        elevated_lenses
+    };
     match overall_risk {
-        "low" if selected_lenses.len() > 1 => {
-            return Err("risk_assessment_low_profile_too_many_lenses max=1".to_string())
-        }
         "medium" | "high" | "exceptional" if selected_lenses.is_empty() => {
             return Err(format!(
                 "risk_assessment_{overall_risk}_profile_requires_lens=true"
@@ -2404,6 +2396,48 @@ fn compile_risk_plan(
         required_clean_iterations,
         blocking_findings,
     }))
+}
+
+fn risk_assessment_identity_mismatch(field: &str) -> String {
+    format!(
+        "risk_assessment_identity_mismatch field={field} recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
+    )
+}
+
+fn validate_risk_assessment_caller_attestation(
+    assessment: &serde_json::Map<String, Value>,
+    expected_assignment: &Value,
+) -> Result<(), String> {
+    let Some(attestation) = assessment
+        .get("caller_attestation")
+        .and_then(Value::as_object)
+    else {
+        return Err(risk_assessment_identity_mismatch("caller_attestation"));
+    };
+    if attestation.get("model_role").and_then(Value::as_str)
+        != expected_assignment
+            .get("model_role")
+            .and_then(Value::as_str)
+    {
+        return Err(risk_assessment_identity_mismatch(
+            "caller_attestation.model_role",
+        ));
+    }
+    if attestation.get("fresh_context").and_then(Value::as_bool) != Some(true) {
+        return Err(risk_assessment_identity_mismatch(
+            "caller_attestation.fresh_context",
+        ));
+    }
+    if attestation
+        .get("closed_after_result")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err(risk_assessment_identity_mismatch(
+            "caller_attestation.closed_after_result",
+        ));
+    }
+    Ok(())
 }
 
 fn validated_scope_split_plan(
@@ -17871,6 +17905,105 @@ pre_filter = "project-pre"
         assert_eq!(advanced["complete"], true);
         assert_eq!(advanced["state"]["clean_streak"], 1);
         assert_eq!(advanced["next_assignments"], json!([]));
+    }
+
+    #[test]
+    fn json_rpc_plan_accepts_a_complete_low_risk_scout_and_targets_one_lens() {
+        let arguments = assessed_plan_arguments(
+            "complete-low-risk-review",
+            "low",
+            &[
+                ("correctness-behavior", "low"),
+                ("tests-verification", "low"),
+                ("architecture-maintainability", "low"),
+            ],
+            json!([]),
+        );
+
+        let planned: Value = serde_json::from_str(
+            &plan_result(&arguments)
+                .expect("the complete same-session low-risk scout must be accepted"),
+        )
+        .expect("plan json");
+
+        assert_eq!(planned["state"]["risk_plan"]["overall_risk"], "low");
+        assert_eq!(planned["state"]["lenses"], json!(["correctness-behavior"]));
+        assert_eq!(planned["assignments"].as_array().unwrap().len(), 1);
+        assert!(review_contract_is_valid(&planned["state"]));
+    }
+
+    #[test]
+    fn risk_assessment_identity_failures_explain_same_session_recovery() {
+        let current = assessed_plan_arguments(
+            "identity-current-session",
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let cross_session = assessed_plan_arguments(
+            "identity-other-session",
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let expected = "risk_assessment_identity_mismatch field=assignment_id recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment";
+
+        let mut altered = current.clone();
+        altered["risk_assessment"]["assignment_id"] = json!("risk-altered");
+        assert_eq!(
+            plan_result(&altered).expect_err("an altered assignment must remain rejected"),
+            expected
+        );
+
+        let mut stale = current.clone();
+        stale["risk_assessment"] = cross_session["risk_assessment"].clone();
+        assert_eq!(
+            plan_result(&stale).expect_err("a cross-session assessment must remain rejected"),
+            expected
+        );
+
+        let mut altered_subagent = current.clone();
+        altered_subagent["risk_assessment"]["subagent_key"] = json!("altered:risk-scout");
+        assert_eq!(
+            plan_result(&altered_subagent)
+                .expect_err("an altered subagent key must remain rejected"),
+            "risk_assessment_identity_mismatch field=subagent_key recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
+        );
+
+        let mut altered_evidence = current.clone();
+        altered_evidence["risk_assessment"]["shared_test_evidence_id"] = json!("altered-evidence");
+        assert_eq!(
+            plan_result(&altered_evidence)
+                .expect_err("altered shared evidence identity must remain rejected"),
+            "risk_assessment_identity_mismatch field=shared_test_evidence_id recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
+        );
+
+        let mut missing_attestation = current.clone();
+        missing_attestation["risk_assessment"]
+            .as_object_mut()
+            .unwrap()
+            .remove("caller_attestation");
+        assert_eq!(
+            plan_result(&missing_attestation)
+                .expect_err("a missing caller attestation must remain rejected"),
+            "risk_assessment_identity_mismatch field=caller_attestation recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
+        );
+
+        for (field, value) in [
+            ("model_role", json!("altered-role")),
+            ("fresh_context", json!(false)),
+            ("closed_after_result", json!(false)),
+        ] {
+            let mut altered_attestation = current.clone();
+            altered_attestation["risk_assessment"]["caller_attestation"][field] = value;
+            assert_eq!(
+                plan_result(&altered_attestation)
+                    .expect_err("an altered caller attestation must remain rejected"),
+                format!(
+                    "risk_assessment_identity_mismatch field=caller_attestation.{field} recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
+                )
+            );
+        }
     }
 
     #[test]
