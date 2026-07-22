@@ -10,6 +10,12 @@ Make a repository support isolated, parallel worktree development. This is
 do not copy a fixed bootstrap. The reference scripts in this plugin are starting
 points to tailor, not drop-in solutions.
 
+Before creating any worktree, regardless of coordination policy: compare the
+absolute Git directory and common directory; if they differ, stay in the
+existing linked worktree and never nest another one. If they are equal, verify
+`.worktrees/` is ignored before creating there. Run repository setup and
+baseline tests inside the selected linked worktree before feature edits.
+
 ## Isolation goals (realize the ones that apply; skip the rest)
 
 1. **Filesystem** — each worktree is its own checkout (inherent to git
@@ -52,20 +58,26 @@ is not an exception to advertised policy.
 
 ## How to apply
 
-1. Detect the stack: language, package manager, containers, dev server.
-2. Decide which goals apply and how (which caches, which services, which ports).
-3. Use `./.worktrees/<name>` as the default checkout path in generated examples
+1. Resolve `git rev-parse --path-format=absolute --git-dir` and
+   `git rev-parse --path-format=absolute --git-common-dir` before creating a
+   worktree. Equal paths identify the primary checkout; different paths mean
+   the current checkout is already linked, so do not create a nested worktree.
+2. Detect the stack: language, package manager, containers, dev server.
+3. Decide which goals apply and how (which caches, which services, which ports).
+4. Use `./.worktrees/<name>` as the default checkout path in generated examples
    and helper scripts. Ensure `.worktrees/` is ignored before relying on it.
-4. Generate a project-specific bootstrap (adapt `templates/bootstrap-worktree.sh`)
+5. Generate a project-specific bootstrap (adapt `templates/bootstrap-worktree.sh`)
    wired into the project's hook manager, and a teardown (adapt
    `templates/worktree-teardown.sh`).
-5. Detect the project command surface before adding workflow shortcuts:
+6. Detect the project command surface before adding workflow shortcuts:
    `justfile`, `Makefile`, `package.json` scripts, project-specific task runners,
    or no wrapper at all. Do not assume `just`, npm, make, or any other runner is
    present across projects.
-6. Present the detected command surface and confirm the selected wrapper with
+7. Present the detected command surface and confirm the selected wrapper with
    the user before editing it. If no wrapper is confirmed, document direct shell
    usage only.
-7. Generate `bats` tests for the generated scripts and any confirmed wrapper.
-8. Install the enforcement guard as the `pre-commit` and `pre-push` hooks.
-9. Document the resulting workflow in the project's `AGENTS.md`.
+8. Generate `bats` tests for the generated scripts and any confirmed wrapper.
+9. Install the enforcement guard as the `pre-commit` and `pre-push` hooks.
+10. Document the resulting workflow in the project's `AGENTS.md`.
+11. Run the repository's setup and baseline tests inside the linked worktree
+    before feature edits.
