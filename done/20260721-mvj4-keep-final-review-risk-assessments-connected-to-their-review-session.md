@@ -5,9 +5,6 @@ blocks: [20260707-c2bu-strengthen-engineering-standards-against-primitive-obsess
 tags: [development-discipline, final-review, bug]
 pr_mr_url: 
 pr_mr_status: 
-claim:
-  host: unknown
-  session: unknown
 ---
 
 ## Summary
