@@ -1,7 +1,7 @@
 {
   "name": "worktrees",
-  "version": "0.2.0",
-  "description": "Make a repository worktree-ready: per-worktree isolation plus an enforcement guard that protects the main checkout.",
+  "version": "0.3.0",
+  "description": "Make a repository worktree-ready and safely route feature edits when policy reserves a coordination checkout.",
   "author": {
     "name": "John Wilger",
     "email": "john@johnwilger.com"
@@ -11,8 +11,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Worktrees",
-    "shortDescription": "Worktree isolation and a main-checkout enforcement guard.",
-    "longDescription": "Use Worktrees when Codex needs to make a repository safe for isolated worktree-based development. The setup skill guides project-specific filesystem, secret, cache, port, service, lifecycle, and enforcement choices, while the bundled scripts provide reusable guard and port-allocation building blocks.",
+    "shortDescription": "Worktree isolation, checkout routing, and enforcement.",
+    "longDescription": "Use Worktrees when Codex needs to make a repository safe for isolated worktree-based development or follow a repository policy that reserves its primary checkout for coordination. The setup skill guides project-specific isolation and classifies clean, genuinely dirty, and upstream-equivalent checkout state without rewriting user work.",
     "developerName": "John Wilger",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],
@@ -21,7 +21,8 @@
     "termsOfServiceURL": "https://github.com/jwilger/ai-plugins/blob/main/README.md",
     "defaultPrompt": [
       "Make this repository worktree-ready and install the main-checkout guard.",
-      "Design per-worktree isolation for this project and generate the bootstrap plan."
+      "Design per-worktree isolation for this project and generate the bootstrap plan.",
+      "Check the repository's worktree policy and route this feature safely before editing."
     ]
   }
 }

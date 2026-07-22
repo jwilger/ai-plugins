@@ -75,7 +75,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 
 | Plugin                                                                       | Description                                                                                                                               | Version |
 | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                                                       | 0.2.0   |
+| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup, policy-gated checkout routing, and a main-checkout guard.                                                     | 0.3.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                      | 0.2.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic engineering regime that follows each repository's delivery policy.                                                       | 0.6.0   |
 | [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.2.3   |
@@ -87,7 +87,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 
 | Plugin                                                                       | Description                                                                                                                               | Version |
 | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup plus a guard that blocks commits from the main checkout.                                                       | 0.2.0   |
+| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup, policy-gated checkout routing, and a main-checkout guard.                                                     | 0.3.0   |
 | [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                      | 0.2.0   |
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic engineering regime that follows each repository's delivery policy.                                                       | 0.6.0   |
 | [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.2.3   |

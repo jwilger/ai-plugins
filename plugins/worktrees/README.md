@@ -1,6 +1,7 @@
 # worktrees
 
-Make a repository worktree-ready, and protect the main checkout.
+Make a repository worktree-ready, protect its main checkout, and route feature
+work safely when repository policy reserves that checkout for coordination.
 
 By default, generated workflows place linked worktrees under the repo-local,
 git-ignored `./.worktrees/` directory. The scripts do not require `just`, Make,
@@ -34,6 +35,16 @@ project-specific bootstrap. Reusable building blocks: `scripts/worktree-ports.sh
 (slot-based, idempotent port allocator) and the `templates/` bootstrap/teardown
 starting points. Generated convenience commands must adapt to the target repo's
 existing command surface rather than assuming this marketplace repo's tooling.
+
+When repository-local instructions explicitly declare the primary checkout
+coordination-only, the skill also checks whether the current checkout is primary
+or linked before feature edits. It fetches the configured upstream before
+classifying the primary checkout as clean, genuinely locally dirty, or merely
+upstream-equivalent. The comparison preserves the real index and every user path;
+upstream-equivalent changes are a no-op, while unrelated feature work starts in
+an ignored linked worktree from the fetched upstream tip. This routing is
+policy-gated: prior worktree use or plugin installation alone never invents a
+coordination-checkout restriction.
 
 ## Harnesses
 

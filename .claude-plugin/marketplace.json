@@ -10,8 +10,8 @@
     {
       "name": "worktrees",
       "source": "./plugins/worktrees",
-      "description": "Make a repository worktree-ready: per-worktree isolation plus an enforcement guard that protects the main checkout.",
-      "version": "0.2.0",
+      "description": "Make a repository worktree-ready and safely route feature edits when policy reserves a coordination checkout.",
+      "version": "0.3.0",
       "category": "Productivity",
       "keywords": ["worktree", "git", "enforcement"]
     },

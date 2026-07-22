@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Use when making a repository worktree-ready for parallel development — per-worktree isolation (ports, containers, caches, secrets), lifecycle hooks, and the main-checkout enforcement guard.
+description: Use when making a repository worktree-ready for parallel development, or when repository policy reserves a coordination checkout and feature work must be diagnosed or routed before editing.
 ---
 
 # Worktree-ready setup
@@ -40,108 +40,15 @@ points to tailor, not drop-in solutions.
 Apply this checkout-routing workflow only when repository-local instructions
 explicitly reserve a primary checkout for coordination. Do not impose a
 coordination-checkout policy merely because the repository uses Git worktrees or
-this plugin is installed.
+this plugin is installed. Without advertised policy, follow the repository's
+actual instructions and preserve existing user changes. Current user direction
+changes routing only where repository policy permits the named exception.
 
-When answering a checkout-state or remediation question, do not skip directly
-to the inferred state even when the prompt supplies the observations. Give a
-self-contained sequence that names the advertising repository policy, both
-checkout-identity commands, the fetch before classification, the effective
-worktree content and mode comparison against the fetched upstream tree, the
-resulting state, and the exact remediation or no-op.
-
-Before editing, resolve both paths rather than inferring checkout identity from
-the branch name or directory name:
-
-```shell
-git rev-parse --path-format=absolute --git-dir
-git rev-parse --path-format=absolute --git-common-dir
-```
-
-Equal resolved paths identify the primary checkout. Different paths identify a
-linked worktree. If already in a linked worktree, do not create a nested one.
-If repository policy names the primary checkout as coordination-only, inspect
-its state without changing it. Resolve its configured upstream, fetch that
-remote, and only then read status and classify against the fetched upstream tip
-rather than a stale local branch:
-
-```shell
-git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}'
-git fetch --prune <upstream-remote>
-git status --porcelain=v1 --untracked-files=all
-```
-
-Derive `<upstream-remote>` from that configured upstream; do not assume it is
-named `origin`. Fetch it before running or interpreting status. In an advisory
-answer, keep the fetch command before the status command and state that no
-clean/dirty/upstream-equivalent label is valid until the fetch completes.
-Use `git merge-base --is-ancestor HEAD <fetched-upstream-ref>` to prove that a
-dirty-looking primary checkout is merely behind. Compare the effective
-worktree to that fetched tree through a disposable alternate index; never
-replace, refresh, or otherwise mutate the checkout's real index:
-
-```shell
-comparison_dir=$(mktemp -d)
-comparison_index="$comparison_dir/index"
-trap 'rm -f -- "$comparison_index"; rmdir -- "$comparison_dir"' EXIT
-GIT_INDEX_FILE="$comparison_index" git read-tree <fetched-upstream-ref>
-GIT_INDEX_FILE="$comparison_index" git -c core.filemode=true update-index --refresh
-GIT_INDEX_FILE="$comparison_index" git -c core.filemode=true diff-files --quiet --
-GIT_INDEX_FILE="$comparison_index" git ls-files --others --exclude-standard -z
-```
-
-The refresh populates stat data in the disposable index; an exit status of 1
-because paths need update is a comparison result to examine with `diff-files`,
-while a fatal error aborts classification. `diff-files` must be empty after the
-refresh, and the NUL-delimited `ls-files` result must contain no paths. Process
-that result as NUL-delimited data rather than splitting filenames on whitespace.
-Because the alternate index contains the fetched upstream tree, this single
-comparison handles tracked files, deletions, symlinks, type changes, and paths
-that are untracked only relative to stale local `HEAD` but were added upstream.
-Forcing `core.filemode=true` makes Git executable-bit differences material even
-when the repository configuration would normally ignore them.
-
-Inspect the real index state separately, but do not require `git diff --cached
-<fetched-upstream-ref>` to be empty: in the ordinary upstream-equivalent case,
-the untouched index still matches stale local `HEAD` and therefore differs from
-upstream. State the alternate-index checks explicitly in advisory answers; a
-nonempty status alone cannot distinguish genuine local work from an
-upstream-equivalent tree.
-
-Distinguish these states:
-
-- **Clean:** status is empty. Create the feature branch and linked worktree from
-  the fetched upstream tip.
-- **Genuinely locally dirty:** at least one effective tracked content, mode,
-  type, deletion, or extra-path result from the alternate-index comparison
-  differs from the fetched upstream tree. Preserve every
-  existing path exactly. Do not stage, stash, reset, clean, revert, rewrite, or
-  include it in the feature. Create the new linked worktree directly from the
-  fetched upstream tip so the coordination checkout remains untouched.
-- **Upstream-equivalent dirty:** status is nonempty relative to the stale local
-  `HEAD`, `HEAD` is an ancestor of the fetched upstream, and the effective
-  tracked worktree matches the fetched upstream tree. The index may still match
-  stale `HEAD`; preserve it without treating that expected difference as local
-  feature work. Paths that are untracked only because local `HEAD` predates
-  their upstream addition are tracked by the alternate upstream index, which
-  compares their blob bytes, type, and executable mode without special-casing
-  filenames.
-  Treat the apparent changes as a no-op: do not rewrite, stage, stash, reset,
-  clean, revert, or commit them. If the requested change is already present
-  upstream, report that no work is needed. Otherwise create the new feature
-  worktree from the fetched upstream tip.
-
-After confirming that `.worktrees/` is ignored, the exact remediation is:
-
-```shell
-git worktree add .worktrees/<branch-name> -b <branch-name> <fetched-upstream-ref>
-```
-
-Perform setup, baseline checks, and all feature edits inside that linked
-worktree. A general request to start or continue a feature is not an exception.
-Edit the coordination checkout only when current user direction explicitly asks
-for that checkout itself to be changed and repository policy permits the named
-exception; otherwise stop before editing if no safe linked-worktree route is
-available.
+When that policy applies, read
+[references/coordination-checkout-routing.md](references/coordination-checkout-routing.md)
+before editing or advising. Follow its fetch-first, real-index-preserving
+classification and exact linked-worktree remediation. A general feature request
+is not an exception to advertised policy.
 
 ## How to apply
 
