@@ -22,7 +22,7 @@ A final_review.plan call in a separate repository rejected an apparently unchang
 
 - [x] A risk assessment returned and attested through the supported final-review workflow is accepted by `final_review.plan` when reused unchanged in the same review session.
 - [x] Stale, altered, or cross-session risk assessments remain rejected, with a diagnostic that distinguishes the identity problem and identifies the required recovery action without exposing sensitive internal state.
-- [ ] Automated behavior or integration coverage reproduces the assess/attest/plan call shape, including assignment ID, subagent key, and caller attestation, and prevents this mismatch regression.
+- [x] Automated behavior or integration coverage reproduces the assess/attest/plan call shape, including assignment ID, subagent key, and caller attestation, and prevents this mismatch regression.
 
 ## Subtasks
 
