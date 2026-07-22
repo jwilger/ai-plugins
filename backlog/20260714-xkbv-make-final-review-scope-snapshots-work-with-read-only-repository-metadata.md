@@ -28,3 +28,4 @@ Implementation notes: A caused MINOR operability finding from 20260713-rygd show
 ## Notes / Log
 
 - 2026-07-14: Consolidation check for 20260713-rygd found no duplicate. Priority evidence: high workflow value, medium-to-high impact, observed likelihood in managed workspaces, and moderate implementation cost.
+- 2026-07-22: 2026-07-22 curation rejection: Lower value relative to cost than the retained cross-project final-review identity/restart blocker. This is readiness, fixture, scale, cleanup, or protocol-quality follow-up rather than the repeated root-cause delivery failure; no shadow ticket is retained.
