@@ -27,3 +27,4 @@ Implementation notes: Discovered while migrating canonical Codex eval defaults t
 ## Notes / Log
 
 - 2026-07-14: Backlog grooming 2026-07-14: Consolidated 20260713-j3x4 here because effective override labeling is a strict subset of this ticket's model/provenance contract. Its Sol/Luna override regression is now explicit.
+- 2026-07-22: 2026-07-22 curation rejection: Part of a large symptom-level GPT-5.6/evaluation lifecycle and artifact-quality cluster. Its present pain, confidence, or value-to-cost does not outrank the five retained root-cause items; rediscover only from a current recurring eval failure, with no shadow queue.
