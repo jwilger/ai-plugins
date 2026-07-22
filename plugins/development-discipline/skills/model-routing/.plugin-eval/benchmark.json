@@ -45,7 +45,7 @@
       "userInput": "Choose the task-local route for a clear, ordinary implementation that changes code, tests, and documentation. State the route for ordinary review, who owns final verification and readiness, the escalation triggers, and what happens if the requested route is unavailable.",
       "successChecklist": [
         "Selects task-local gpt-5.6-terra for implementation and ordinary review.",
-        "Keeps final verification and readiness with a Sol parent.",
+        "Keeps evidence and authorization accountability with the parent while requiring confirmed Sol analysis for readiness.",
         "Escalates ambiguity or high-stakes responsibility and forbids silent substitution."
       ]
     },
@@ -58,6 +58,17 @@
         "Rejects Luna and selects task-local gpt-5.6-sol.",
         "Treats the scanner as supporting evidence rather than proof of the trust boundary.",
         "Requires visible failure or retained work instead of silent downgrade."
+      ]
+    },
+    {
+      "id": "unswitchable-parent-readiness",
+      "title": "Readiness when the parent cannot switch",
+      "purpose": "Measure whether the route remains actionable without moving authorization or silently downgrading.",
+      "userInput": "A gpt-5.6-terra parent reaches readiness but cannot change its own model. State the exact protocol when a task-local gpt-5.6-sol assignment is available and when no confirmed Sol route exists. Preserve accountability and separate authorization from model selection.",
+      "successChecklist": [
+        "Uses a confirmed task-local gpt-5.6-sol assignment for readiness analysis while the parent retains evidence, authorization, and user communication.",
+        "Does not claim the inherited parent model changed or treat the Sol recommendation as authorization.",
+        "Returns a bounded blocked result with the failed route, affected responsibility, preserved evidence, and a concrete transfer or restart action when Sol is unavailable."
       ]
     }
   ]
