@@ -27,3 +27,4 @@ GitHub issue 57 documents a case where automated checks and a lightweight review
 ## Notes / Log
 
 - 2026-07-21: Created while triaging GitHub issue #57: https://github.com/jwilger/ai-plugins/issues/57
+- 2026-07-22: 2026-07-22 curation rejection: Lower value relative to cost than the retained cross-project final-review identity/restart blocker. This is readiness, fixture, scale, cleanup, or protocol-quality follow-up rather than the repeated root-cause delivery failure; no shadow ticket is retained.
