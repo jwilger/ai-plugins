@@ -9,6 +9,9 @@ generality.
 
 - `development-workflow` - inspects the current development phase and routes it
   to the smallest applicable specialist workflow without duplicating mechanics.
+- `model-routing` - selects an explicit task-local model for bounded,
+  substantive, and strong-responsibility work, with visible failure instead of
+  silent fallback.
 - `change-preflight` - classifies a requested change and records every affected
   project surface from repository evidence before implementation starts.
 - `test-driven-development` - Kent Beck-style TDD: one failing behavior test,
@@ -39,8 +42,13 @@ conflict with or duplicate existing local practice.
 
 ## Harnesses
 
-Harness-agnostic. Claude Code and Codex both consume the same `skills/`
-contents, with separate marketplace manifests only for harness metadata.
+Claude Code and Codex consume the same canonical routing policy from `skills/`.
+The plugin also packages three task-local agents for each harness:
+`bounded-helper`, `substantive-worker`, and `strong-reviewer`. Codex agents pin
+the exact GPT-5.6 model identifiers and sandbox modes. Claude agents use the
+current Haiku, Sonnet, and Opus aliases with route-appropriate tool allowlists.
+If a harness cannot honor the requested route, the agent reports that failure
+instead of treating inheritance or substitution as success.
 
 The final-review coordinator ships static stdio MCP binaries for x86_64 and
 aarch64 Linux plus both macOS architectures. Its launcher selects the local

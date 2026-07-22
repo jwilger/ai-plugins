@@ -21,6 +21,11 @@ one phase completes, inspect state again before selecting the next one.
 Do not preselect a specialist for a failure or branch that has not occurred;
 route that future phase only if current state activates it.
 
+When delegating any selected specialist, apply the canonical `model-routing`
+matrix to that task. Lifecycle routing selects what work is needed;
+`model-routing` independently selects the eligible task-local model and its
+verification boundary.
+
 When the user asks only for a workflow explanation, describe the inspection and
 routing that would occur without claiming to have performed it. For an answer
 or domain-review request that is not a final review of completed development

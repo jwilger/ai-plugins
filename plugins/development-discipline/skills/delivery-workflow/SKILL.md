@@ -5,6 +5,10 @@ description: Use when choosing whether and how verified work should be committed
 
 # Delivery workflow
 
+Apply `model-routing` whenever this workflow delegates delivery work. Keep
+release, merge-readiness, and other completion decisions on the strong route
+defined by that canonical matrix; model choice never supplies authorization.
+
 Choose the delivery path from the repository's actual policy instead of assuming
 that every change needs a pull request.
 

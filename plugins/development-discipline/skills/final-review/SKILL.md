@@ -5,6 +5,12 @@ description: Use when completing or claiming readiness for local-only changes, a
 
 # Final Review
 
+Apply `model-routing` to every review assignment. Ordinary lens review uses the
+substantive route; activated architecture, security, human-safety, ambiguity,
+or disputed-verification work and the accountable readiness decision use the
+strong route defined by that canonical matrix. An unavailable or inherited
+route is a visible failure, never an implicit downgrade.
+
 Run a local, fresh-context review cycle before creating a pull request, merging,
 or claiming a change is ready.
 
