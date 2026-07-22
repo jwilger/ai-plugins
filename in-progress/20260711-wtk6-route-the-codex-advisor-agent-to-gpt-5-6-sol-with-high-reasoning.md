@@ -29,3 +29,5 @@ plugins/advisor/agents/advisor.toml currently selects gpt-5.5 with high reasonin
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: Delivered commit f6ed568361992542a5297dd189260e6affdcbd77 directly to main. Advisor 0.3.0 now pins the Codex custom advisor agent to gpt-5.6-sol with high reasoning and read-only sandboxing, removes silent fallback and caller effort overrides, reports unavailability visibly, and binds the reviewed skill contract in marketplace validation. Exact local evidence: 8 focused Advisor regressions; full just ci green with 269 development-discipline tests, 44 mutation cases (38 caught, 6 unviable), and 560 Bats tests. Independent correctness and integration re-reviews were clean. GitHub CI run 29898186314 completed successfully, including the aggregate CI gate. The formal-review coordinator's repeated current-assignment mismatch is separately tracked by 20260722-k9c6-keep-final-review-risk-assessments-linked-to-the-correct-review.
