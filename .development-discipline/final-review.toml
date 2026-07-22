@@ -1,10 +1,9 @@
 [final_review.models.codex]
-# Filtering is optional or deterministic on the normal path, so use Luna when
-# the caller needs model assistance around the review pass.
-pre_filter = "gpt-5.6-luna"
+# The pre-filter role owns the all-dimension risk scout, so it requires Sol.
+pre_filter = "gpt-5.6-sol"
 post_filter = "gpt-5.6-luna"
 
-# Terra handles the repeated lens passes; Sol is reserved for the conditional
-# verifier path when an iteration raises findings.
+# Terra handles ordinary repeated lens passes; Sol also handles the conditional
+# verifier path when an iteration raises disputed or materially uncertain findings.
 lens_review = "gpt-5.6-terra"
 verifier = "gpt-5.6-sol"
