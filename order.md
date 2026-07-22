@@ -7,7 +7,6 @@
 20260714-yevb-unify-gpt-5-6-provider-and-artifact-trace-validation
 20260714-xkbv-make-final-review-scope-snapshots-work-with-read-only-repository-metadata
 20260714-2xyd-make-gpt-5-6-benchmark-preflight-and-artifacts-phase-safe
-20260708-55yg-add-final-review-readiness-gate-to-development-discipline
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260713-jsad-document-retained-subagent-slot-recovery-in-final-review-guidance
 20260714-hmwe-make-final-review-release-fixture-ignore-ambient-git-signing-and-hooks
