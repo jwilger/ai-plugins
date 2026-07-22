@@ -16,6 +16,7 @@ pr_mr_status:
 - [ ] Identity-mismatch errors report enough sanitized expected-versus-received information to diagnose the failure.
 - [ ] An assessment from a different or stale final-review assignment remains rejected.
 - [ ] Automated regression tests cover the reported planning failure and coordinator restart or recovery paths that can change assignment state.
+- [ ] A risk assessment produced and submitted for the current final-review assignment is accepted by the planning step.
 
 ## Subtasks
 
