@@ -1,4 +1,3 @@
-20260709-v368-add-small-model-routing-discipline-for-coding-agents
 20260708-n3sh-add-cross-project-worktree-safety-guidance
 20260710-dhse-require-explicit-user-approval-before-amending-commits
 20260709-ywvn-make-plugin-eval-available-on-the-devshell-path-for-this-repo
