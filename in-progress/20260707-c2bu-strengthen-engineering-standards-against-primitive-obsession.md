@@ -3,6 +3,9 @@ title: Require meaningful domain types instead of renamed basic values
 blocked_by: [20260721-mvj4-keep-final-review-risk-assessments-connected-to-their-review-session]
 blocks: [20260707-2awr-review-repository-code-for-primitive-obsession-and-replace-with-semantic-types]
 tags: [engineering-standards, semantic-types, guidance, evals]
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
