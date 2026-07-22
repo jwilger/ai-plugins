@@ -1,7 +1,7 @@
 ---
 title: Keep final-review risk assessments connected to their review session
 blocked_by: []
-blocks: []
+blocks: [20260707-c2bu-strengthen-engineering-standards-against-primitive-obsession]
 tags: [development-discipline, final-review, bug]
 pr_mr_url: 
 pr_mr_status: 
