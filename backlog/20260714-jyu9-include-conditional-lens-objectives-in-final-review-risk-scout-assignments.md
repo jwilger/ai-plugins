@@ -24,3 +24,4 @@ Include the purpose of every custom review check in the risk scout’s assignmen
 ## Notes / Log
 
 - 2026-07-14: 2026-07-14: Consolidated from a lightweight review of active policy ticket 20260713-rygd. The scout currently receives custom lens IDs but not their descriptions; classified MINOR and deferred under the global backlog policy.
+- 2026-07-22: 2026-07-22 curation rejection: Lower value relative to cost than the retained cross-project final-review identity/restart blocker. This is readiness, fixture, scale, cleanup, or protocol-quality follow-up rather than the repeated root-cause delivery failure; no shadow ticket is retained.
