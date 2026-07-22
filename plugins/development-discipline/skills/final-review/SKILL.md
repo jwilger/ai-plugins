@@ -8,8 +8,11 @@ description: Use when completing or claiming readiness for local-only changes, a
 Apply `model-routing` to every review assignment. Ordinary lens review uses the
 substantive route; activated architecture, security, human-safety, ambiguity,
 or disputed-verification work and the accountable readiness decision use the
-strong route defined by that canonical matrix. An unavailable or inherited
-route is a visible failure, never an implicit downgrade.
+strong route defined by that canonical matrix. The coordinator assigns
+architecture, security, and human-safety lenses through the resolved strong
+model role used for verification while ordinary lenses use the substantive
+review role. An unavailable or inherited route follows the canonical bounded
+handoff or blocked-result protocol, never an implicit downgrade.
 
 Run a local, fresh-context review cycle before creating a pull request, merging,
 or claiming a change is ready.

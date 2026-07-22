@@ -88,7 +88,7 @@
         "source": "local",
         "path": "./plugins/development-discipline"
       },
-      "version": "0.16.6",
+      "version": "0.17.0",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
