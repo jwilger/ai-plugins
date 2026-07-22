@@ -159,14 +159,34 @@ Nothing canonical should live under a single harness's directory.
 ## g. CI/CD themes
 
 Mirror the local gate in CI on whatever runner the project uses (detect it; do
-not hard-code a provider). A provider-agnostic gate, in order:
+not hard-code a provider). Express the workflow as a provider-agnostic dependency
+graph, then translate it into the detected platform's syntax:
 
-1. restore the pinned environment (the same one-command setup as local);
-2. format check;
-3. lint with warnings-as-errors;
-4. tests, including the BDD/acceptance suite;
-5. mutation testing (can be release- or label-gated if slow);
-6. dependency / security audit.
+1. **Setup / fast stage:** restore the pinned environment, then run independent
+   cheap deterministic jobs such as format, lint-as-errors, type/compile checks,
+   focused unit tests, and quick dependency-policy checks in parallel.
+2. **Thorough stage:** after every required fast prerequisite succeeds, run
+   independent integration, BDD, browser, compatibility, or broader audit jobs
+   in parallel. A fast failure skips this stage.
+3. **Expensive stage:** after its declared fast and thorough prerequisites
+   succeed, run mutation, exhaustive analysis, packaging, publishing, deployment,
+   or other high-cost work. Gate each job on only the prerequisites it actually
+   needs; do not serialize unrelated work.
+4. **Aggregate / report:** always run one final job after all required branches,
+   even when a prerequisite failed, was skipped, or was cancelled. Inspect every
+   required outcome, name actionable failures or cancellations, and fail unless
+   the dependency contract was satisfied. Make this single aggregate result the
+   required status so skipped expensive jobs cannot hide the original fast
+   failure.
+
+Define concurrency and cancellation deliberately. Prefer cancelling an older
+run superseded by a newer revision when doing so saves capacity, but do not use
+fail-fast cancellation within the current run when it would suppress useful
+independent fast diagnostics. Preserve current-run logs and artifacts needed to
+explain the failure, and ensure the always-run aggregator records cancellation
+rather than treating it as success. Add a platform-specific reference only when
+the detected forge cannot express one of these semantics clearly without its
+own syntax or capability notes.
 
 Read current user direction and the repository-local delivery policy. Route it
 through `development-discipline:delivery-workflow` when available; otherwise
