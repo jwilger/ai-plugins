@@ -203,7 +203,7 @@
   {
     "case_id": "worktrees-setup-natural-trigger",
     "behavior": "Creates or verifies an isolated linked worktree before feature work.",
-    "prompt": "Start a feature that edits this repository. We are currently in the main checkout. What worktree setup should happen before implementation?",
+    "prompt": "Start a feature that edits this repository. We appear to be in the main checkout, but do not rely on that claim. Give the complete worktree preflight before implementation, including how to detect and handle an already-linked checkout.",
     "tags": ["worktrees", "isolation", "setup"],
     "plugins": ["worktrees"],
     "skills": ["setup"],
@@ -286,7 +286,7 @@
   {
     "case_id": "worktrees-coordination-policy-boundary",
     "behavior": "Does not invent a coordination-checkout restriction when repository-local policy does not advertise one.",
-    "prompt": "Consider a hypothetical repository outside the current evaluation workspace. It has used linked worktrees before, but its applicable AGENTS.md and other repository-local instructions do not reserve the primary checkout for coordination or require feature worktrees. A user asks for a small documentation edit while in that repository's primary checkout. Should the agent refuse to edit there and create `.worktrees/...` solely because worktrees exist? Explain the boundary and what evidence could change the answer.",
+    "prompt": "Consider a hypothetical repository outside the current evaluation workspace. It has used linked worktrees before, but its applicable AGENTS.md and other repository-local instructions do not reserve the primary checkout for coordination or require feature worktrees. A user asks for a small documentation edit while in that repository's primary checkout. Should the agent refuse to edit there and create `.worktrees/...` solely because worktrees exist? Explain the boundary, how existing user changes must be handled, and what repository evidence or policy-defined user exception could change the routing decision.",
     "tags": ["worktrees", "coordination-checkout", "policy-boundary"],
     "plugins": ["worktrees"],
     "skills": ["setup"],
