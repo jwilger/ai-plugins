@@ -8393,7 +8393,7 @@ fn verifier_assignment(state: &Value, findings: &[Value]) -> Result<Value, Strin
     let model_role = state
         .pointer("/model_roles/verifier")
         .and_then(Value::as_str)
-        .unwrap_or("cheap-fast-verifier");
+        .unwrap_or("strong-reviewer");
     let subagent_key = format!("{session_id}:{iteration}:verifier");
     let scope = state
         .pointer("/scope/kind")
@@ -9154,7 +9154,7 @@ fn resolve_model_roles(
             &harness_defaults,
             &["pre_filter_model_role", "fast_model_role"],
             "pre_filter",
-            "cheap-fast-filter",
+            "strong-reviewer",
         )?,
     )?;
     let lens_review = validate_resolved_model_role(
@@ -9165,7 +9165,7 @@ fn resolve_model_roles(
             &harness_defaults,
             &["lens_review_model_role", "review_model_role"],
             "lens_review",
-            "strong-reviewer",
+            "substantive-worker",
         )?,
     )?;
     let post_filter = validate_resolved_model_role(
@@ -9176,7 +9176,7 @@ fn resolve_model_roles(
             &harness_defaults,
             &["post_filter_model_role", "fast_model_role"],
             "post_filter",
-            "cheap-fast-filter",
+            "bounded-helper",
         )?,
     )?;
     let verifier = validate_resolved_model_role(
@@ -9187,7 +9187,7 @@ fn resolve_model_roles(
             &harness_defaults,
             &["verifier_model_role", "verify_model_role"],
             "verifier",
-            "cheap-fast-verifier",
+            "strong-reviewer",
         )?,
     )?;
 
@@ -11761,10 +11761,10 @@ verifier = "config-verify"
             "harness": "unknown"
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
-        assert_eq!(parsed["model_roles"]["pre_filter"], "cheap-fast-filter");
-        assert_eq!(parsed["model_roles"]["lens_review"], "strong-reviewer");
-        assert_eq!(parsed["model_roles"]["post_filter"], "cheap-fast-filter");
-        assert_eq!(parsed["model_roles"]["verifier"], "cheap-fast-verifier");
+        assert_eq!(parsed["model_roles"]["pre_filter"], "strong-reviewer");
+        assert_eq!(parsed["model_roles"]["lens_review"], "substantive-worker");
+        assert_eq!(parsed["model_roles"]["post_filter"], "bounded-helper");
+        assert_eq!(parsed["model_roles"]["verifier"], "strong-reviewer");
         assert_eq!(
             parsed["model_role_sources"]["pre_filter"],
             "generic_abstract_role"

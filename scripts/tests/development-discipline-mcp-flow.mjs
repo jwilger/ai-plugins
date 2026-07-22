@@ -201,12 +201,19 @@ await request({
 });
 function cleanLensResults(reviewState) {
   return reviewState.lenses.map((lens) => {
+    const usesStrongRoute = [
+      "architecture-maintainability",
+      "security-safety",
+      "safety-human-harm",
+    ].includes(lens);
     const result = {
       lens,
       subagent_key: `${reviewState.session_id}:${reviewState.iteration_index}:${lens}`,
       status: "clean",
       caller_attestation: {
-        model_role: reviewState.model_roles.lens_review,
+        model_role: usesStrongRoute
+          ? reviewState.model_roles.verifier
+          : reviewState.model_roles.lens_review,
         fresh_context: true,
         closed_after_result: true,
       },
