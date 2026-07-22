@@ -88,6 +88,11 @@ After each implementation step, run one fresh-context review subagent before
 moving to the next RED test or scenario. This is a compact version of
 `final-review`:
 
+Apply `model-routing` to the review assignment. Ordinary lightweight review is
+substantive work; activated ambiguity, security, human-safety, disputed
+verification, or readiness responsibility must use the stronger route defined
+there.
+
 - combine the repository-agnostic final-review lenses into one reviewer prompt;
 - include production-risk and footgun checks, especially data-access or
   resource-use patterns that pass lower environments but fail under production

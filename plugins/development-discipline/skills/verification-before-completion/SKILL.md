@@ -8,6 +8,10 @@ description: Use when claiming work is done, fixed, passing, ready, reviewed, co
 Evidence comes before claims. A completion statement is only valid when fresh
 verification proves the exact scope being claimed.
 
+Apply `model-routing` to delegated evidence gathering and review. A helper may
+collect bounded evidence, but the accountable completion or readiness decision
+must remain on the strong route defined by that canonical matrix.
+
 ## Gate
 
 1. State the claim precisely.

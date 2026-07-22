@@ -8,6 +8,10 @@ description: Use when a bug, failing test, broken command, unexpected output, or
 Find the root cause before changing code. Keep the loop compact: read,
 reproduce, hypothesize, test, then fix.
 
+Apply `model-routing` to each delegated debugging task. A bounded helper may
+collect independently verifiable evidence, but ambiguous diagnosis and any
+stronger responsibility use the route defined by that canonical matrix.
+
 ## Loop
 
 1. Read the exact error, stack trace, command, exit code, and recent output.
