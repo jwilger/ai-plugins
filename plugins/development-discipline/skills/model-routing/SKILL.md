@@ -15,7 +15,7 @@ both explicit.
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `gpt-5.6-luna`  | Bounded inventory, extraction, classification, or mechanical transformation                                                                                                 | Keep the helper read-only or make its change easily reversible; define the expected result before delegation; independently verify every result before relying on it |
 | `gpt-5.6-terra` | Normal substantive implementation and ordinary review with clear scope and ordinary risk                                                                                    | Keep final verification and every completion or readiness claim with the parent; escalate the affected task if stronger reasoning becomes necessary                  |
-| `gpt-5.6-sol`   | Advisor work; ambiguous debugging; architecture, security, or human-safety analysis; destructive changes; blocking or disputed verification; completion or readiness claims | Keep required authorization and evidence gates separate from model choice; the accountable parent must itself use Sol when it owns one of these decisions            |
+| `gpt-5.6-sol`   | Advisor work; ambiguous debugging; architecture, security, or human-safety analysis; destructive changes; blocking or disputed verification; completion or readiness claims | Keep required authorization and evidence gates separate from model choice; a confirmed Sol assignment must produce the strong-responsibility conclusion              |
 
 Do not use Luna for substantive implementation, completion claims, ambiguous
 work, or any task whose result cannot be independently checked. Do not treat a
@@ -31,10 +31,13 @@ destructive impact, architecture, security, human-safety, or blocking or
 disputed verification enters the task.
 
 Sol is the strong responsibility route. Use it for every listed responsibility,
-including when a parent retains the final verification, completion, or readiness
-decision. Selecting Sol supplies stronger reasoning; it never supplies approval
-for a destructive action, a release, a merge, or any other separately
-authorized operation.
+including the analysis and recommendation behind final verification,
+completion, or readiness. The accountable parent retains the evidence gate,
+authorization boundary, and user-facing decision: it may accept or reject a
+confirmed Sol result after every independent gate passes, but it must not claim
+that its own inherited model ran Sol. Selecting Sol supplies stronger reasoning;
+it never supplies approval for a destructive action, a release, a merge, or any
+other separately authorized operation.
 
 ## Availability is part of the route
 
@@ -44,7 +47,17 @@ rejects an ineligible route, must state both outcomes explicitly:
 
 - when selection succeeds, name the requested route;
 - when it is unavailable, inherited, or replaced, report that route failure
-  visibly and keep the work in the parent or escalate it.
+  visibly. Keep the work in the parent only when the parent's confirmed route is
+  eligible; otherwise transfer or restart the affected responsibility in a
+  confirmed supported route.
+
+If a parent cannot switch to the required route, it remains accountable for the
+evidence and user communication while a confirmed eligible assignment produces
+the required analysis or recommendation. If the harness cannot create or resume
+such an assignment, return a bounded blocked result that names the failed route,
+the affected responsibility, the evidence already gathered, and the concrete
+enable, transfer, or restart action. Do not make the blocked completion or
+readiness claim.
 
 Never silently substitute another model or claim that a different model
 satisfied the requested route.

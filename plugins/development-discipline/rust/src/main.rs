@@ -3341,7 +3341,6 @@ fn plan_result_internal(
     let (model_roles, finding_disposition_policy) =
         resolve_model_roles(arguments, &configured_lenses)?;
     let fast_model_role = model_roles.pre_filter.clone();
-    let review_model_role = model_roles.lens_review.clone();
     let resolved_model_roles = json!({
         "pre_filter": model_roles.pre_filter,
         "lens_review": model_roles.lens_review,
@@ -3468,7 +3467,7 @@ fn plan_result_internal(
                 .unwrap_or("final-review-unknown"),
             &lenses,
             &state["lens_objectives"],
-            &review_model_role,
+            &state["model_roles"],
             "start_fresh",
             &scope,
             review_base,
@@ -4964,10 +4963,6 @@ fn advance_with_contract_validation_at(
             string_array(state.pointer("/context/acceptance_criteria")).unwrap_or_default();
         let explicit_concerns =
             string_array(state.pointer("/context/explicit_concerns")).unwrap_or_default();
-        let review_model_role = state
-            .pointer("/model_roles/lens_review")
-            .and_then(Value::as_str)
-            .unwrap_or("strong-reviewer");
         let prior_defenses_by_lens = state
             .get("prior_defenses_by_lens")
             .cloned()
@@ -4981,7 +4976,7 @@ fn advance_with_contract_validation_at(
             session_id,
             &lenses,
             &lens_objectives,
-            review_model_role,
+            &state["model_roles"],
             "start_fresh",
             scope,
             base,
@@ -5599,10 +5594,7 @@ fn review_assignments_for_state(state: &Value, iteration: u64) -> Result<Vec<Val
             .unwrap_or("final-review-unknown"),
         &lenses,
         state.get("lens_objectives").unwrap_or(&Value::Null),
-        state
-            .pointer("/model_roles/lens_review")
-            .and_then(Value::as_str)
-            .unwrap_or("strong-reviewer"),
+        state.get("model_roles").unwrap_or(&Value::Null),
         "start_fresh",
         state
             .pointer("/scope/kind")
@@ -6988,7 +6980,7 @@ fn assignments(
     session_id: &str,
     lenses: &[String],
     lens_objectives: &Value,
-    model_role: &str,
+    model_roles: &Value,
     lifecycle_action: &str,
     scope: &str,
     base: &str,
@@ -7007,6 +6999,7 @@ fn assignments(
     lenses
         .iter()
         .map(|lens| {
+            let model_role = model_role_for_lens(model_roles, lens)?;
             let prior_defenses = prior_defense_prompt(prior_defenses_by_lens, lens);
             let known_deferred_findings = deferred_findings_for_lens(deferred_findings, lens);
             let subagent_key = format!("{session_id}:{iteration}:{lens}");
@@ -7046,6 +7039,26 @@ fn assignments(
             }))
         })
         .collect()
+}
+
+fn lens_uses_strong_route(lens: &str) -> bool {
+    matches!(
+        lens,
+        "architecture-maintainability" | "security-safety" | "safety-human-harm"
+    )
+}
+
+fn model_role_for_lens<'a>(model_roles: &'a Value, lens: &str) -> Result<&'a str, String> {
+    let phase = if lens_uses_strong_route(lens) {
+        "verifier"
+    } else {
+        "lens_review"
+    };
+    model_roles
+        .get(phase)
+        .and_then(Value::as_str)
+        .or_else(|| model_roles.get("lens_review").and_then(Value::as_str))
+        .ok_or_else(|| format!("lens_model_role_missing lens={lens} phase={phase}"))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8136,10 +8149,9 @@ fn validate_lens_caller_attestations(state: &Value, lens_results: &Value) -> Res
     if !caller_attestation_required(state) {
         return Ok(());
     }
-    let expected_model_role = state
-        .pointer("/model_roles/lens_review")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "lens_review_model_role_missing=true".to_string())?;
+    let model_roles = state
+        .get("model_roles")
+        .ok_or_else(|| "model_roles_missing=true".to_string())?;
     let results = lens_results
         .as_array()
         .ok_or_else(|| "lens_results array is required".to_string())?;
@@ -8148,6 +8160,11 @@ fn validate_lens_caller_attestations(state: &Value, lens_results: &Value) -> Res
             .get("subagent_key")
             .and_then(Value::as_str)
             .unwrap_or("unknown");
+        let lens = result
+            .get("lens")
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("lens_result_lens_missing subagent_key={key}"))?;
+        let expected_model_role = model_role_for_lens(model_roles, lens)?;
         validate_caller_attestation(result.get("caller_attestation"), expected_model_role, key)?;
     }
     Ok(())
@@ -10259,6 +10276,36 @@ mod tests {
             parsed["state"]["caller_attestation_policy"]["required"],
             true
         );
+    }
+
+    #[test]
+    fn plan_routes_strong_responsibility_lenses_to_the_strong_model_role() {
+        let output = plan(&json!({
+            "base": "origin/main",
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "abc",
+            "review_model_role": "ordinary-review",
+            "verifier_model_role": "strong-review",
+            "conditional_lenses": [{
+                "id": "safety-human-harm",
+                "description": "Review human-safety consequences."
+            }]
+        }));
+        let parsed: Value = serde_json::from_str(&output).expect("json");
+        let assignments = parsed["assignments"].as_array().expect("assignments");
+        let role_for = |lens: &str| {
+            assignments
+                .iter()
+                .find(|assignment| assignment["lens"] == lens)
+                .and_then(|assignment| assignment["model_role"].as_str())
+                .expect("lens assignment model role")
+        };
+
+        assert_eq!(role_for("correctness-behavior"), "ordinary-review");
+        assert_eq!(role_for("tests-verification"), "ordinary-review");
+        assert_eq!(role_for("security-safety"), "strong-review");
+        assert_eq!(role_for("safety-human-harm"), "strong-review");
+        assert_eq!(role_for("architecture-maintainability"), "strong-review");
     }
 
     #[test]
@@ -15988,7 +16035,7 @@ pre_filter = "project-pre"
                 "relevance": { "category": "diff_changed_file", "explanation": "The changed path exposes the existing branch." }
             }],
             "caller_attestation": {
-                "model_role": state["model_roles"]["lens_review"],
+                "model_role": state["model_roles"]["verifier"],
                 "fresh_context": true,
                 "closed_after_result": true
             }
@@ -16102,7 +16149,7 @@ pre_filter = "project-pre"
                     "relevance": { "category": "diff_changed_file", "explanation": "The changed path exposes the existing branch." }
                 }],
                 "caller_attestation": {
-                    "model_role": state["model_roles"]["lens_review"],
+                    "model_role": state["model_roles"]["verifier"],
                     "fresh_context": true,
                     "closed_after_result": true
                 }
@@ -16213,7 +16260,7 @@ pre_filter = "project-pre"
                 "relevance": { "category": "diff_changed_file", "explanation": "The reviewer inspected nearby legacy code." }
             }],
             "caller_attestation": {
-                "model_role": state["model_roles"]["lens_review"],
+                "model_role": state["model_roles"]["verifier"],
                 "fresh_context": true,
                 "closed_after_result": true
             }
@@ -17418,8 +17465,10 @@ pre_filter = "project-pre"
                         "status": "clean"
                     });
                     if caller_attestation_required(state) {
+                        let model_role = model_role_for_lens(&state["model_roles"], lens)
+                            .unwrap_or("strong-reviewer");
                         result["caller_attestation"] = json!({
-                            "model_role": state.pointer("/model_roles/lens_review").and_then(Value::as_str).unwrap_or("strong-reviewer"),
+                            "model_role": model_role,
                             "fresh_context": true,
                             "closed_after_result": true
                         });
@@ -17456,6 +17505,8 @@ pre_filter = "project-pre"
         if lens == "security-safety" {
             finding["suspected_pii"] = json!(false);
         }
+        let model_role =
+            model_role_for_lens(&state["model_roles"], lens).unwrap_or("strong-reviewer");
         json!({
             "lens": lens,
             "subagent_key": subagent_key(state, lens),
@@ -17464,7 +17515,7 @@ pre_filter = "project-pre"
             "status": "findings",
             "findings": [finding],
             "caller_attestation": {
-                "model_role": state["model_roles"]["lens_review"],
+                "model_role": model_role,
                 "fresh_context": true,
                 "closed_after_result": true
             }
@@ -21107,7 +21158,7 @@ pre_filter = "project-pre"
                 "relevance": { "category": "diff_changed_file", "explanation": "Changed authorization branch." }
             }],
             "caller_attestation": {
-                "model_role": state["model_roles"]["lens_review"],
+                "model_role": state["model_roles"]["verifier"],
                 "fresh_context": true,
                 "closed_after_result": true
             }
