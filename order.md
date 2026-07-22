@@ -14,7 +14,6 @@
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
 20260714-wimr-validate-gpt-5-6-benchmark-concurrency-samples-help-and-timeouts-by-phase
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
-20260714-jyu9-include-conditional-lens-objectives-in-final-review-risk-scout-assignments
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
 20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
 20260714-ucd7-clean-up-auto-created-gpt-5-6-benchmark-workspaces
