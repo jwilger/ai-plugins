@@ -3,7 +3,6 @@
 20260714-e3sx-synchronize-tiber-plugin-and-mcp-server-versions
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
-20260708-u52t-add-single-command-detailed-task-creation-to-tiber
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
