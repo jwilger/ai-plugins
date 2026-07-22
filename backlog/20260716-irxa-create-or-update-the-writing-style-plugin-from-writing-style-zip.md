@@ -28,3 +28,4 @@ Source material is now at the main checkout's repository root as writing-style.z
 ## Notes / Log
 
 - 2026-07-16: User moved the source archive into the repository root as writing-style.zip on 2026-07-15; future work should copy or otherwise make it available to the linked feature worktree without committing the archive unless intentional.
+- 2026-07-22: 2026-07-22 curation rejection: Broad or expensive initiative with weaker near-term value-to-cost than the retained concrete defects and security work. Discovery does not obligate retention, and no hidden queue is kept.
