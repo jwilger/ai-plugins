@@ -4,7 +4,6 @@
 20260713-dcww-keep-readme-plugin-catalog-versions-synchronized-with-manifests
 20260711-qhgu-mechanically-enforce-linked-worktree-only-feature-changes
 20260708-u52t-add-single-command-detailed-task-creation-to-tiber
-20260713-7sys-force-trace-enforced-codex-eval-provider-to-discard-caller-sandbox-policies
 20260714-g89d-make-gpt-5-6-provider-locking-stable-across-worktrees-and-the-full-run-lifecycle
 20260712-2cqc-show-in-progress-before-backlog-on-single-column-tiber-boards
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
