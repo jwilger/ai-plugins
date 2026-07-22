@@ -17,6 +17,8 @@ Observed while delivering MVJ4. The cases final-review-uses-mcp-for-enforced-rev
 
 ## Acceptance criteria
 
+- [ ] Provider-enabled answers pass when they demonstrate the intended core final-review safeguards without requiring exhaustive unrelated coordinator internals.
+
 ## Subtasks
 
 ## Notes / Log
