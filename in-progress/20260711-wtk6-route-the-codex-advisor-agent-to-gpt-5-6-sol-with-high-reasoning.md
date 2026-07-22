@@ -22,7 +22,7 @@ plugins/advisor/agents/advisor.toml currently selects gpt-5.5 with high reasonin
 
 - [x] Codex advisor-agent invocations select gpt-5.6-sol.
 - [x] Codex advisor-agent invocations use high reasoning effort, with focused tests or eval evidence.
-- [ ] The advisor agent source config, README, Codex marketplace metadata, and semver bump consistently describe the selected model and reasoning level without adding Claude support.
+- [x] The advisor agent source config, README, Codex marketplace metadata, and semver bump consistently describe the selected model and reasoning level without adding Claude support.
 - [ ] Focused source/config validation proves the exact model and effort values, with an observable runtime selection check where the Codex harness exposes one.
 - [ ] gpt-5.6-sol/high is the single source-configured route; no custom runtime fallback or override layer is added, and model unavailability fails visibly instead of silently downgrading advisor work.
 
