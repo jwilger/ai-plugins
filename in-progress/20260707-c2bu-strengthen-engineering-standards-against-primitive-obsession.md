@@ -18,7 +18,7 @@ Implementation notes: The current rule already says primitives, built-ins, and s
 
 ## Acceptance criteria
 
-- [ ] Canonical rules explicitly state that raw strings, numbers, booleans, UUIDs, built-ins, structural records, and type aliases over them are not semantic domain types.
+- [x] Canonical rules explicitly state that raw strings, numbers, booleans, UUIDs, built-ins, structural records, and type aliases over them are not semantic domain types.
 - [ ] Guidance demonstrates named wrappers and sum types with invariant-safe construction, immediate boundary parsing, and no downstream revalidation.
 - [ ] docs/rules/semantic-types.md, the engineering-standards skill, related documentation/metadata, and the required plugin version remain consistent.
 - [ ] Behavior fixtures reject raw String/domain APIs and structural aliases such as type UserId = string, then recommend a named parsed semantic type.
