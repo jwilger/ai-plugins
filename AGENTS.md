@@ -157,6 +157,40 @@ Port allocation is stable per worktree and recorded under Git's common
 directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
 `WORKTREE_PORT_BASE_PG`, and `WORKTREE_PORT_STRIDE` before bootstrap if needed.
 
+## Backlog capacity management
+
+Use Tiber as the repository task board and manage queued work as a deliberately
+bounded backlog.
+
+- The active ticket (`in-progress`) does not count toward backlog capacity. A
+  queued ticket is a ticket in `backlog` status.
+- Keep at most five queued tickets. Do not maintain an overflow, icebox, shadow
+  backlog, or other hidden queue.
+- Discovery identifies a candidate; it does not create an obligation to admit
+  or retain a ticket.
+- Compare candidates by user pain and frequency, severity, blocking impact,
+  future leverage, confidence, value relative to cost, and overlap with existing
+  root causes.
+- Keep queued tickets in one strict priority order with no ties. Re-rank the
+  complete queue whenever a ticket is admitted, combined, displaced, completed,
+  reopened, or materially re-scoped; do not use creation order as priority.
+- When fewer than five tickets are queued, admit a worthwhile candidate
+  normally. At capacity, evaluate a candidate before creating a ticket and
+  choose exactly one explicit outcome: replace a lower-value queued ticket;
+  combine genuinely overlapping tickets; or reject the candidate without
+  creating a ticket. Record a concise reason for every combination,
+  displacement, or rejection.
+- When the backlog falls to two or fewer queued tickets, perform a replenishment
+  review. Inspect durable memories, recent usage friction, eval failures, and
+  recurring workarounds for worthwhile candidates. It is valid to add nothing.
+- Blocking defects and in-model security issues required to complete the active
+  ticket remain causal work within that ticket. Do not create separate backlog
+  tickets merely to evade the cap.
+- Work on one ticket at a time. Before starting a queued ticket, move it to
+  `in-progress`; after completing it, select the highest-priority queued ticket
+  whose prerequisites are satisfied. If the highest-priority ticket is blocked,
+  keep its priority explicit and start the highest-priority unblocked ticket.
+
 ## Adding a plugin
 
 1. Create `plugins/<plugin-name>/` (kebab-case, no spaces — the name is
