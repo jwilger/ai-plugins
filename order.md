@@ -8,7 +8,6 @@
 20260713-rktk-harden-eval-interrupt-watchdog-configuration-and-process-group-identity
 20260712-5w5n-harden-isolated-codex-credential-refresh-atomically
 20260712-m7xk-eliminate-tiber-cli-pre-parser-grammar-duplication
-20260713-2rd3-preserve-dangling-workspace-symlinks-during-gpt-5-6-benchmark-preparation
 20260714-ucd7-clean-up-auto-created-gpt-5-6-benchmark-workspaces
 20260713-h9bn-prove-canonical-status-precedence-in-the-gpt-5-6-calibration-runner
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
