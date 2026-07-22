@@ -80,7 +80,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic engineering regime that follows each repository's delivery policy.                                                       | 0.6.0   |
 | [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.2.3   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                            | 0.1.0   |
-| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for lifecycle routing, task-local model selection, change preflight, delivery, TDD, verification, and review.    | 0.16.4  |
+| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for lifecycle routing, task-local model selection, change preflight, delivery, TDD, verification, and review.    | 0.16.5  |
 | [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.8.0   |
 
 ### Codex
@@ -93,7 +93,7 @@ promptfoo evals exercise the relevant marketplace surface for each harness.
 | [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                     | 0.2.3   |
 | [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                            | 0.1.0   |
 | [advisor](plugins/advisor/README.md)                                         | Read-only GPT-5.6 Sol advisor with high reasoning for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                            | 0.3.0   |
-| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for lifecycle routing, task-local model selection, change preflight, delivery, TDD, verification, and review.    | 0.16.4  |
+| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for lifecycle routing, task-local model selection, change preflight, delivery, TDD, verification, and review.    | 0.16.5  |
 | [tiber](plugins/tiber/README.md)                                             | Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and read-only dashboard workflow. | 0.8.0   |
 
 > When a plugin is added under [`plugins/`](plugins/), add catalog rows only for

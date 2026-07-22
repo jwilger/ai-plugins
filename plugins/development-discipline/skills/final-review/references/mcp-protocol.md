@@ -325,7 +325,8 @@ Model roles do not imply one model call per phase:
 - `pre_filter` owns the mandatory all-dimension broad risk scout and any
   optional assistance for a large or noisy scope. Because the scout assesses
   security and human-safety risk, this role uses the strong-responsibility
-  route. It may focus context but must never skip a review lens.
+  route. The scout selects lenses from concrete risk. Optional assistance may
+  focus context but must never omit a lens selected by that bound risk plan.
 - `lens_review` is one MCP-assigned caller subagent for every lens and
   iteration.
 - `post_filter` is the deterministic `final_review.filter_findings` path by
@@ -334,7 +335,8 @@ Model roles do not imply one model call per phase:
   leaves actionable or needs-human-decision candidates, or when a new
   `MAJOR`/`CRITICAL` security or human-safety finding has material impact but
   uncertain causality. A missing verifier result blocks the transition. A
-  failed verifier retains every candidate.
+  failed verifier retains every candidate, and an uncertain result keeps every
+  blocking or materially uncertain security or human-safety candidate open.
 
 When `final_review.advance` returns `transition_status: verifier_required`, run
 the returned assignment with its exact `subagent_key` and `model_role`, close
