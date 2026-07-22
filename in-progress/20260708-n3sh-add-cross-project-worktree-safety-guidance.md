@@ -20,7 +20,7 @@ The repo-local agent checkout guard already detects coordination checkouts and u
 
 ## Acceptance criteria
 
-- [ ] worktrees guidance tells agents to check whether the current checkout is a coordination checkout or feature worktree before making edits when a repo advertises a worktree policy.
+- [x] worktrees guidance tells agents to check whether the current checkout is a coordination checkout or feature worktree before making edits when a repo advertises a worktree policy.
 - [ ] Guidance covers detecting dirty working trees that match upstream after fetch and avoiding redundant no-op changes in the main checkout.
 - [ ] The change includes eval cases where an agent chooses a linked worktree for implementation and explains upstream-equivalent dirty state without compounding it.
 - [ ] Guidance applies only when repository policy advertises a coordination checkout, preserves existing user changes, and documents any explicit exception boundary.
