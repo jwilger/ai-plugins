@@ -15,6 +15,12 @@ Reject a subject-only message. Also reject a body that merely repeats what the
 subject or diff already says. Do not add `Co-Authored-By` or other
 AI-attribution trailers.
 
+Write a new additive commit by default. Using this skill to prepare a message
+does not authorize amending an existing commit: require explicit case-by-case
+user authorization for that specific amend, and separately for any forced push
+it would require. Never amend shared or default-branch history as routine
+repair.
+
 Example:
 
 ```text
