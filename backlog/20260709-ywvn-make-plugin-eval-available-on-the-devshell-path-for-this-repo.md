@@ -25,3 +25,5 @@ flake.nix does not currently provide plugin-eval, and AGENTS documents a fallbac
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-22: 2026-07-22 curation rejection: Release, tooling, or maintenance convenience with lower current blocking impact and value-to-cost than the retained defects and security update. Rejected without an overflow or shadow backlog.
