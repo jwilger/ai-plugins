@@ -27,3 +27,4 @@ Implementation notes: Verified MINOR architecture finding from 20260709-spx8: bo
 ## Notes / Log
 
 - 2026-07-14: 2026-07-14 formal final-review pass 1 for 20260709-spx8 reconfirmed missing provider/checker parity cases for retryable errors before/after the active turn, mismatched thread/turn identifiers, and duplicate turn/started. These are covered by the existing comprehensive lifecycle parity criterion; deferred as MINOR without changing the frozen diff.
+- 2026-07-22: 2026-07-22 curation rejection: Part of a large symptom-level GPT-5.6/evaluation lifecycle and artifact-quality cluster. Its present pain, confidence, or value-to-cost does not outrank the five retained root-cause items; rediscover only from a current recurring eval failure, with no shadow queue.
