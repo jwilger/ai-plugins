@@ -270,10 +270,10 @@ Project TOML shape:
 
 ```toml
 [final_review.models]
-pre_filter = "cheap-fast-filter"
-lens_review = "strong-reviewer"
-post_filter = "cheap-fast-filter"
-verifier = "cheap-fast-verifier"
+pre_filter = "strong-reviewer"
+lens_review = "substantive-worker"
+post_filter = "bounded-helper"
+verifier = "strong-reviewer"
 
 [final_review.models.codex]
 pre_filter = "gpt-5.6-sol"
