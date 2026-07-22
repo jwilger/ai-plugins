@@ -24,3 +24,4 @@ Implementation notes:\n\nCaused MINOR deferred from 20260709-spx8. The decision/
 ## Notes / Log
 
 - 2026-07-13: Final-review iteration 1 reconfirmed the deferred MINOR: the README says phase output directories are freshly recreated, but stable directories retain auxiliary files and a preparation failure can occur before standard result files are cleared. Preserve the distinction between directory freshness and checker-verified current artifacts.
+- 2026-07-22: 2026-07-22 curation rejection: Part of a large symptom-level GPT-5.6/evaluation lifecycle and artifact-quality cluster. Its present pain, confidence, or value-to-cost does not outrank the five retained root-cause items; rediscover only from a current recurring eval failure, with no shadow queue.
