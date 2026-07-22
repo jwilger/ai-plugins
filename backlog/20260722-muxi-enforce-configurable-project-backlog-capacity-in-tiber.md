@@ -17,6 +17,8 @@ Prompt guidance cannot prevent every caller or simultaneous write from overfilli
 
 ## Acceptance criteria
 
+- [ ] Projects can configure a maximum queued-ticket count, with documented migration and default behavior when the setting is absent.
+
 ## Subtasks
 
 ## Notes / Log
