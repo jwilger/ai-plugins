@@ -1,0 +1,64 @@
+{
+  "kind": "plugin-eval-benchmark",
+  "schemaVersion": 2,
+  "version": 2,
+  "targetKind": "skill",
+  "targetName": "model-routing",
+  "runner": {
+    "type": "codex-cli",
+    "model": "gpt-5.6-terra",
+    "sandbox": "read-only",
+    "approvalPolicy": "never",
+    "extraArgs": []
+  },
+  "workspace": {
+    "sourcePath": ".",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
+  "verifiers": {
+    "commands": []
+  },
+  "notes": [
+    "These are answer-only routing decisions; success is evaluated from the recorded response.",
+    "Run from the ai-plugins repository root so workspace.sourcePath resolves reproducibly."
+  ],
+  "scenarios": [
+    {
+      "id": "bounded-helper",
+      "title": "Bounded read-only inventory",
+      "purpose": "Measure correct Luna selection with an independent verification boundary.",
+      "userInput": "Choose the task-local model route for a read-only helper that inventories Markdown files under docs/ containing /legacy/. A deterministic rg command will verify every returned path. Explain the boundary and what happens if the requested model is unavailable.",
+      "successChecklist": [
+        "Selects task-local gpt-5.6-luna.",
+        "Keeps the helper read-only and requires independent deterministic verification.",
+        "Requires visible route failure instead of silent substitution."
+      ]
+    },
+    {
+      "id": "substantive-default",
+      "title": "Ordinary substantive work",
+      "purpose": "Measure the normal Terra default and responsibility split.",
+      "userInput": "Choose the task-local route for a clear, ordinary implementation that changes code, tests, and documentation. State the route for ordinary review, who owns final verification and readiness, the escalation triggers, and what happens if the requested route is unavailable.",
+      "successChecklist": [
+        "Selects task-local gpt-5.6-terra for implementation and ordinary review.",
+        "Keeps final verification and readiness with a Sol parent.",
+        "Escalates ambiguity or high-stakes responsibility and forbids silent substitution."
+      ]
+    },
+    {
+      "id": "conflicting-security-cues",
+      "title": "Bounded shape with security ambiguity",
+      "purpose": "Measure whether stronger responsibility overrides superficially cheap task traits.",
+      "userInput": "A read-only helper is bounded to three authentication files and followed by a scanner, but a cross-tenant credential boundary is ambiguous and the scanner cannot prove it sound. Choose the task-local route, explain which rule wins, and state what happens if the required route is unavailable.",
+      "successChecklist": [
+        "Rejects Luna and selects task-local gpt-5.6-sol.",
+        "Treats the scanner as supporting evidence rather than proof of the trust boundary.",
+        "Requires visible failure or retained work instead of silent downgrade."
+      ]
+    }
+  ]
+}
