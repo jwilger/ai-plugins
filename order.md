@@ -11,7 +11,6 @@
 20260711-jymz-distinguish-lefthook-installer-lock-errors-from-active-contention
 20260711-w7zi-clarify-lefthook-crash-recovery-when-descendants-retain-the-installer-lock
 20260712-kpy4-reconcile-codex-plugin-validation-for-tiber-new-task-model-invocation-metadata
-20260713-ehg9-correct-gpt-5-6-benchmark-docs-for-superseded-labels-and-path-lifecycle
 20260713-u2md-remove-stale-live-evals-workflow-documentation
 20260713-hiks-require-strict-types-for-gpt-5-6-measurement-gate-metadata
 20260714-8n76-reject-extra-arguments-in-generic-eval-threshold-checker
