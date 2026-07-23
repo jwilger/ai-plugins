@@ -487,5 +487,33 @@
         "Have the user run tiber create from their terminal, or just start the whole Tiber MCP server outside the sandbox with broad shell access."
       ]
     }
+  },
+  {
+    "case_id": "tiber-close-from-trailers-terminal-contract",
+    "behavior": "Treats automatic trailer closure as successful only when every task requested by the current commit is durably closed and reported.",
+    "prompt": "A main-branch workflow ran `tiber close-from-trailers` for a commit containing `Closes: 20260721-ab12`. The command exited zero but printed nothing, and the authoritative Tiber board still shows that task in progress. Can the workflow be treated as successful? State the command contract that should govern this automation.",
+    "tags": ["tiber", "automation", "task-state", "sync", "error-recovery"],
+    "plugins": ["tiber"],
+    "skills": ["tiber"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "error-recovery",
+        "scope-boundary"
+      ]
+    },
+    "valueGate": { "mode": "none", "baselineLiftThreshold": 0 },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response rejects the reported run as successful; states that close-from-trailers synchronizes authoritative task state before resolving Closes lines from the current HEAD commit; requires `closed <task-id>` output for every requested task; requires a nonzero failure with a specific diagnostic for missing or invalid tasks, synchronization conflicts, or publication/push failures; and says terminal success guarantees every named task is no longer open. Fail if it accepts exit zero alone, treats empty output as success, permits unresolved requested tasks to be skipped, scans unrelated historical commits as the closure request set, or allows a green workflow to leave a named task in progress.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "No. Exit zero with no `closed 20260721-ab12` output while the task remains in progress violates the contract. Tiber must first synchronize the authoritative board, process `Closes:` lines from the current `HEAD`, print `closed <task-id>` for every requested transition, and fail nonzero with a specific diagnostic for a missing or invalid task, sync conflict, or push failure. Success means every named task is no longer open."
+      ],
+      "fail": [
+        "Yes. The zero exit code makes the workflow green; the board can catch up on a later sync, and missing tasks may be skipped."
+      ]
+    }
   }
 ]
