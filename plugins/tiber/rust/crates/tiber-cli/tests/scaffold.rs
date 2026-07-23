@@ -377,4 +377,11 @@ fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
         fs::read_to_string(repo.path().join("justfile")).expect("read justfile"),
         "test:\n  cargo test\n\nshow-tasks:\n  tiber list\n"
     );
+
+    let repeated_preview = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&repeated_preview);
+    let stdout = String::from_utf8(repeated_preview.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("already configured justfile"));
+    assert!(!stdout.contains("would write justfile"));
 }

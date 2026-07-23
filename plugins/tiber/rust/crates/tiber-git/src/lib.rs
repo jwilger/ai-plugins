@@ -1265,10 +1265,15 @@ impl GitRepository {
                 true,
             ));
         }
-        if let Some(justfile) = self.show_tasks_justfile()? {
-            files.push(("justfile", justfile, false));
+        let justfile_exists = self.root.join("justfile").exists();
+        let planned_justfile = self.show_tasks_justfile()?;
+        if let Some(justfile) = planned_justfile.as_ref() {
+            files.push(("justfile", justfile.clone(), false));
         }
         let mut messages = Vec::new();
+        if justfile_exists && planned_justfile.is_none() {
+            messages.push("already configured justfile".to_string());
+        }
         let mut pending_files = Vec::new();
         let mut conflicts = Vec::new();
         for (path, contents, conflict_on_difference) in files {
