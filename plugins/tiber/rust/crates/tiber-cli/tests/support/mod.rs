@@ -101,6 +101,19 @@ impl TempRepo {
     }
 
     #[allow(dead_code)]
+    pub fn tiber_at<I, S>(&self, directory: &Path, args: I) -> Output
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        Command::new(env!("CARGO_BIN_EXE_tiber"))
+            .args(args)
+            .current_dir(directory)
+            .output()
+            .expect("run tiber")
+    }
+
+    #[allow(dead_code)]
     pub fn tiber_with_env<I, S, E, K, V>(&self, args: I, envs: E) -> Output
     where
         I: IntoIterator<Item = S>,
