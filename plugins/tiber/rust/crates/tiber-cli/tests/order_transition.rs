@@ -122,6 +122,24 @@ fn transition_refuses_moving_active_work_into_a_full_backlog() {
 }
 
 #[test]
+fn over_capacity_projects_can_move_work_out_of_the_backlog() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "First queued work"]));
+    assert_success(repo.tiber(["create", "Second queued work"]));
+    fs::write(
+        repo.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 1\n",
+    )
+    .expect("write tiber config");
+
+    assert_success(repo.tiber(["transition", "first-queued-work", "in-progress"]));
+
+    task_stem(&repo, "in-progress", "first-queued-work");
+    task_stem(&repo, "backlog", "second-queued-work");
+}
+
+#[test]
 fn next_skips_tasks_blocked_by_open_dependencies() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
