@@ -20,7 +20,7 @@ Users and maintainers should be able to rely on a clean dependency audit without
 
 ## Acceptance criteria
 
-- [ ] The dependency audit no longer reports the supported fast-uri, sharp/libvips, fast-xml-parser, or @hono/node-server advisories.
+- [x] The dependency audit no longer reports the supported fast-uri, sharp/libvips, fast-xml-parser, or @hono/node-server advisories.
 - [ ] Repository checks and provider-backed evaluation behavior pass with the resolved dependency graph.
 
 ## Subtasks
