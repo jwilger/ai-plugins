@@ -1,5 +1,6 @@
 mod support;
 
+use std::fs;
 use support::{assert_success, assert_success_ref, task_stem, TempRepo};
 
 #[test]
@@ -65,6 +66,59 @@ fn transition_releases_claim_when_leaving_in_progress() {
     let done = repo.task_file("done", &task);
     assert!(!done.contains("claim:"));
     assert!(!done.contains("test-session"));
+}
+
+#[test]
+fn transition_refuses_reopening_into_a_full_backlog() {
+    let repo = TempRepo::initialized();
+    fs::write(
+        repo.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 1\n",
+    )
+    .expect("write tiber config");
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Completed work"]));
+    assert_success(repo.tiber(["transition", "completed-work", "done"]));
+    assert_success(repo.tiber(["create", "Queued work"]));
+
+    let reopen = repo.tiber(["transition", "completed-work", "backlog"]);
+
+    assert!(!reopen.status.success(), "reopen should refuse overflow");
+    let stderr = String::from_utf8(reopen.stderr).expect("stderr should be utf8");
+    assert!(
+        stderr.contains("backlog_capacity_exceeded")
+            && stderr.contains("queued=1")
+            && stderr.contains("max_queued=1"),
+        "stderr should explain the full backlog: {stderr}"
+    );
+    task_stem(&repo, "done", "completed-work");
+}
+
+#[test]
+fn transition_refuses_moving_active_work_into_a_full_backlog() {
+    let repo = TempRepo::initialized();
+    fs::write(
+        repo.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 1\n",
+    )
+    .expect("write tiber config");
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Active work"]));
+    assert_success(repo.tiber(["transition", "active-work", "in-progress"]));
+    assert_success(repo.tiber(["create", "Queued work"]));
+
+    let move_back = repo.tiber(["transition", "active-work", "backlog"]);
+
+    assert!(
+        !move_back.status.success(),
+        "move into backlog should refuse overflow"
+    );
+    let stderr = String::from_utf8(move_back.stderr).expect("stderr should be utf8");
+    assert!(
+        stderr.contains("backlog_capacity_exceeded"),
+        "stderr should explain the full backlog: {stderr}"
+    );
+    task_stem(&repo, "in-progress", "active-work");
 }
 
 #[test]
