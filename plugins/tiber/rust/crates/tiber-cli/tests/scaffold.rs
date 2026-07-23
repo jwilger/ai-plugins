@@ -642,6 +642,51 @@ fn scaffold_repo_reports_conflicts_and_refuses_ambiguous_overwrites_atomically()
 }
 
 #[test]
+fn scaffold_repo_preserves_existing_files_when_a_destination_cannot_be_prepared() {
+    use std::os::unix::fs::symlink;
+
+    let repo = TempRepo::initialized();
+    let existing_gitignore = "target/\n";
+    fs::write(repo.path().join(".gitignore"), existing_gitignore).expect("write gitignore");
+    symlink(
+        repo.path().join("missing-github-directory"),
+        repo.path().join(".github"),
+    )
+    .expect("write dangling github symlink");
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert!(!apply.status.success());
+    assert_eq!(
+        fs::read_to_string(repo.path().join(".gitignore")).expect("read unchanged gitignore"),
+        existing_gitignore
+    );
+}
+
+#[test]
+fn scaffold_repo_preserves_existing_files_when_a_destination_is_a_dangling_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let repo = TempRepo::initialized();
+    let existing_gitignore = "target/\n";
+    fs::write(repo.path().join(".gitignore"), existing_gitignore).expect("write gitignore");
+    fs::create_dir(repo.path().join(".githooks")).expect("create hooks directory");
+    symlink(
+        repo.path().join("missing-hook-target"),
+        repo.path().join(".githooks").join("post-commit.tiber"),
+    )
+    .expect("write dangling hook symlink");
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert!(!apply.status.success());
+    assert_eq!(
+        fs::read_to_string(repo.path().join(".gitignore")).expect("read unchanged gitignore"),
+        existing_gitignore
+    );
+}
+
+#[test]
 fn scaffold_repo_replaces_ambiguous_targets_only_with_an_explicit_choice() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join(".gitignore"), "target/\n").expect("write existing gitignore");
