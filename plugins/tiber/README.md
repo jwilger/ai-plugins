@@ -221,7 +221,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.11.1` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.12.0` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -260,14 +260,28 @@ discovered through MCP before retrying a failed write.
 The dashboard is a browser view with count-neutral backlog priority reordering:
 
 ```shell
-tiber dashboard serve
+tiber dashboard serve --open
 ```
 
-Open `http://127.0.0.1:7417/` to inspect the board, reorder backlog priority,
-view task files, and browse repository docs. The dashboard exposes a read-only
-`/events` SSE stream for live refreshes and a count-neutral priority mutation,
-but intentionally has no create, status-transition, general task-write, or
-`/mcp` route. Admission changes go through the CLI or stdio MCP tools.
+The command selects an available localhost port, prints the complete URL, and
+opens it in the platform browser. A repeated launch from the same project
+reports and reuses the healthy existing URL without starting another server or
+opening another browser window. Different repositories keep independent
+dashboard instances.
+
+Use `tiber dashboard serve` when you only want the URL. Request a stable port
+with `--port <port>` or the backwards-compatible `TIBER_DASHBOARD_PORT`
+environment variable; the CLI flag takes precedence. An unavailable requested
+port fails clearly, and requesting a different port while that project's
+dashboard is already running reports the conflict instead of starting a second
+server. If the browser opener is unavailable, `--open` warns but leaves the
+dashboard running at the printed URL.
+
+The dashboard lets you inspect the board, reorder backlog priority, view task
+files, and browse repository docs. It exposes a read-only `/events` SSE stream
+for live refreshes and a count-neutral priority mutation, but intentionally has
+no create, status-transition, general task-write, or `/mcp` route. Admission
+changes go through the CLI or stdio MCP tools.
 
 ## Scaffold Workflow
 

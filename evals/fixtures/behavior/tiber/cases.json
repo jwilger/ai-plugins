@@ -588,5 +588,39 @@
         "I will retry tiber.create and keep the candidate in an overflow backlog until a slot opens."
       ]
     }
+  },
+  {
+    "case_id": "tiber-dashboard-reuses-project-instance",
+    "behavior": "Starts or reuses one browser dashboard for the current project without assuming a fixed port.",
+    "prompt": "The user asks, \"Open the Tiber dashboard in my browser.\" This project may already have a dashboard from an earlier compacted agent session, and other repositories may also be serving dashboards. What should the agent run and what reuse behavior should it expect?",
+    "tags": ["tiber", "dashboard", "browser", "ports", "session-recovery"],
+    "plugins": ["tiber"],
+    "skills": ["tiber"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "error-recovery",
+        "scope-boundary"
+      ]
+    },
+    "valueGate": { "mode": "none", "baselineLiftThreshold": 0 },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response runs `tiber dashboard serve --open` for the current repository, expects a new launch to select an available localhost port and print its complete URL, and expects a repeated launch for the same project to reuse the healthy existing instance without opening another browser window. It should distinguish other repositories' instances and use `--port <port>` only when a fixed port is requested. Fail if it assumes port 7417, starts an arbitrary second server after a repeated request, reuses another repository's dashboard, or opens another browser window for the reused instance.",
+    "hardAssertions": [
+      {
+        "id": "dashboard-launch-command",
+        "type": "contains",
+        "value": "tiber dashboard serve --open"
+      }
+    ],
+    "calibration": {
+      "pass": [
+        "Run `tiber dashboard serve --open` from this repository. A new launch selects an available localhost port, prints the full URL, and opens it. If this project's healthy dashboard already exists, Tiber reuses that URL without starting another process or opening another window; dashboards for other repositories remain separate. Use `--port <port>` only when you need a fixed port."
+      ],
+      "fail": [
+        "Start `tiber dashboard serve` on port 7417 every time and open http://127.0.0.1:7417, even if another dashboard process already exists."
+      ]
+    }
   }
 ]
