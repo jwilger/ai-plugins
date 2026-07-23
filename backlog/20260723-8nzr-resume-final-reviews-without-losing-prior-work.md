@@ -18,6 +18,7 @@ Final review is a required delivery gate, and repeating it wastes time while inc
 ## Acceptance criteria
 
 - [ ] A session can retrieve compact final-review state after truncation or compaction and continue with the correct next transition without restarting the review.
+- [ ] Recovered state preserves review identity, lifecycle, evidence references, assigned lenses, findings, and completed transitions without storing an oversized duplicate payload.
 
 ## Subtasks
 
