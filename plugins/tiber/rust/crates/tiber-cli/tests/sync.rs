@@ -557,6 +557,127 @@ fn create_revalidates_capacity_across_multiple_concurrent_remote_admissions() {
 }
 
 #[test]
+fn create_capacity_rejection_preserves_preexisting_local_only_tasks() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let remote = clone_repo(&origin);
+    assert_success(remote.tiber(["init"]));
+    assert_success(remote.tiber(["create", "Remote capacity winner"]));
+
+    let candidate = clone_repo(&origin);
+    candidate.git(["remote", "remove", "origin"]);
+    assert_success(candidate.tiber(["init"]));
+    assert_success(candidate.tiber(["create", "Preserved local task"]));
+    let preserved_stem = task_stem(&candidate, "backlog", "preserved-local-task");
+    candidate.git([
+        "remote",
+        "add",
+        "origin",
+        origin.path().to_str().expect("origin path utf8"),
+    ]);
+    fs::write(
+        candidate.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 2\n",
+    )
+    .expect("write tiber config");
+
+    let create = candidate.tiber(["create", "Rejected local admission"]);
+
+    assert!(
+        !create.status.success(),
+        "remote winner should fill capacity during admission"
+    );
+    let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("backlog_capacity_exceeded"), "{stderr}");
+    let candidate_tree = candidate.git_output(["ls-tree", "-r", "--name-only", "tasks", "backlog"]);
+    assert_success_ref(&candidate_tree);
+    let candidate_tree =
+        String::from_utf8(candidate_tree.stdout).expect("candidate tree should be utf8");
+    assert!(
+        candidate_tree.contains(&format!("backlog/{preserved_stem}.md")),
+        "capacity rollback must preserve unrelated local-only task state: {candidate_tree}"
+    );
+    assert!(
+        !candidate_tree.contains("rejected-local-admission"),
+        "capacity rollback must remove only the rejected admission: {candidate_tree}"
+    );
+}
+
+#[test]
+fn transition_capacity_rejection_restores_the_preexisting_local_status() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let remote = clone_repo(&origin);
+    assert_success(remote.tiber(["init"]));
+    assert_success(remote.tiber(["create", "Remote capacity winner"]));
+
+    let candidate = clone_repo(&origin);
+    candidate.git(["remote", "remove", "origin"]);
+    assert_success(candidate.tiber(["init"]));
+    assert_success(candidate.tiber(["create", "Preserved completed task"]));
+    let preserved_stem = task_stem(&candidate, "backlog", "preserved-completed-task");
+    assert_success(candidate.tiber(["transition", &preserved_stem, "done"]));
+    candidate.git([
+        "remote",
+        "add",
+        "origin",
+        origin.path().to_str().expect("origin path utf8"),
+    ]);
+    fs::write(
+        candidate.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 1\n",
+    )
+    .expect("write tiber config");
+
+    let transition = candidate.tiber(["transition", &preserved_stem, "backlog"]);
+
+    assert!(
+        !transition.status.success(),
+        "remote winner should fill capacity during transition"
+    );
+    let stderr = String::from_utf8(transition.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("backlog_capacity_exceeded"), "{stderr}");
+    let completed =
+        candidate.git_output(["cat-file", "-e", &format!("tasks:done/{preserved_stem}.md")]);
+    assert_success_ref(&completed);
+    let reopened = candidate.git_output([
+        "cat-file",
+        "-e",
+        &format!("tasks:backlog/{preserved_stem}.md"),
+    ]);
+    assert!(
+        !reopened.status.success(),
+        "capacity rollback must restore the pre-admission status"
+    );
+}
+
+#[test]
 fn create_rolls_back_local_admission_when_concurrent_retry_budget_is_exhausted() {
     let origin = TempRepo::new();
     origin.git(["init", "--bare"]);

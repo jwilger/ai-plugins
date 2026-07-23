@@ -542,14 +542,18 @@ impl GitRepository {
             None
         };
         for attempt in 1..=MAX_SYNC_ATTEMPTS {
-            match self.sync_repository_once(&worktree_name, admits_to_backlog) {
+            match self.sync_repository_once(
+                &worktree_name,
+                admits_to_backlog,
+                admission_baseline.as_deref(),
+            ) {
                 Ok(()) => return Ok(()),
                 Err(error) if is_retryable_push_failure(&error) => {
                     if attempt < MAX_SYNC_ATTEMPTS {
                         continue;
                     }
                     if let Some(baseline) = admission_baseline.as_deref() {
-                        self.rollback_exhausted_admission(baseline)?;
+                        self.rollback_admission(baseline)?;
                     }
                     return Err(error);
                 }
@@ -559,15 +563,12 @@ impl GitRepository {
         unreachable!("sync attempts loop always returns")
     }
 
-    fn rollback_exhausted_admission(&self, baseline: &str) -> Result<(), Error> {
+    fn rollback_admission(&self, baseline: &str) -> Result<(), Error> {
         let current = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
-        let target = self
-            .fetch_origin_tasks()?
-            .unwrap_or_else(|| baseline.to_string());
         self.git([
             "update-ref",
             "refs/heads/tasks",
-            target.trim(),
+            baseline.trim(),
             current.trim(),
         ])?;
         Ok(())
@@ -577,6 +578,7 @@ impl GitRepository {
         &self,
         worktree_name: &str,
         admits_to_backlog: bool,
+        admission_baseline: Option<&str>,
     ) -> Result<(), Error> {
         let local_parent = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
         let remote_parent = self.fetch_origin_tasks()?;
@@ -588,13 +590,8 @@ impl GitRepository {
         }
         if admits_to_backlog {
             if let Err(error) = self.ensure_backlog_not_over_capacity() {
-                if let Some(remote_parent) = remote_parent.as_deref() {
-                    self.git([
-                        "update-ref",
-                        "refs/heads/tasks",
-                        remote_parent.trim(),
-                        local_parent.trim(),
-                    ])?;
+                if let Some(baseline) = admission_baseline {
+                    self.rollback_admission(baseline)?;
                 }
                 return Err(error);
             }
