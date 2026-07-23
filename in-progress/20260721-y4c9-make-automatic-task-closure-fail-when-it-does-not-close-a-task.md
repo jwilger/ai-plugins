@@ -22,7 +22,7 @@ GitHub issue 56 reports two successful workflows where the close-from-trailers c
 
 - [x] A valid task-closing line in a newly pushed main-branch commit moves every named in-progress task to Done and publishes the updated board.
 - [x] The command prints the task identifiers that it successfully closed.
-- [ ] The command exits with a failure and a specific explanation when any requested task cannot be closed.
+- [x] The command exits with a failure and a specific explanation when any requested task cannot be closed.
 - [x] A successful workflow guarantees that every task named for closure is no longer in progress.
 - [ ] Regression tests cover both reproductions documented in GitHub issue 56 and the later synchronization-conflict symptom.
 
