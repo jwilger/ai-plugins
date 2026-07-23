@@ -245,6 +245,43 @@ fn scaffold_repo_resolves_hooks_from_a_linked_worktree() {
 }
 
 #[test]
+fn scaffold_repo_reports_repeated_setup_as_already_configured() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["scaffold", "repo", "--apply"]));
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("already configured .gitignore"));
+    assert!(stdout.contains("already configured .githooks/post-commit.tiber"));
+    assert!(stdout.contains("already configured .github/workflows/tiber-close-from-trailers.yml"));
+    assert!(!stdout.contains("would write"));
+    assert!(!stdout.contains("conflict"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for path in [
+            ".gitignore",
+            ".githooks/post-commit.tiber",
+            ".github/workflows/tiber-close-from-trailers.yml",
+        ] {
+            fs::set_permissions(repo.path().join(path), fs::Permissions::from_mode(0o444))
+                .expect("make generated file read-only");
+        }
+    }
+    let second_apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert_success_ref(&second_apply);
+    let stdout = String::from_utf8(second_apply.stdout).expect("apply output should be utf8");
+    assert!(stdout.contains("already configured .gitignore"));
+    assert!(stdout.contains("already configured .githooks/post-commit.tiber"));
+    assert!(stdout.contains("already configured .github/workflows/tiber-close-from-trailers.yml"));
+    assert!(!stdout.contains("wrote"));
+}
+
+#[test]
 fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join("justfile"), "test:\n  cargo test\n")

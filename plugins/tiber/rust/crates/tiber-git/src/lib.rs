@@ -1267,8 +1267,22 @@ impl GitRepository {
             files.push(("justfile", justfile));
         }
         let mut messages = Vec::new();
+        let mut pending_files = Vec::new();
+        for (path, contents) in files {
+            let destination = self.root.join(path);
+            match fs::read_to_string(&destination) {
+                Ok(existing) if existing == contents => {
+                    messages.push(format!("already configured {path}"));
+                }
+                Ok(_) => pending_files.push((path, contents)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    pending_files.push((path, contents));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
         if apply {
-            for (path, contents) in &files {
+            for (path, contents) in &pending_files {
                 let destination = self.root.join(path);
                 if let Some(parent) = destination.parent() {
                     fs::create_dir_all(parent)?;
@@ -1278,7 +1292,7 @@ impl GitRepository {
             }
         } else {
             messages.extend(
-                files
+                pending_files
                     .iter()
                     .map(|(path, _contents)| format!("would write {path}")),
             );
