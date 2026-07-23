@@ -38,6 +38,13 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - The dashboard can reorder backlog priority, which does not change capacity.
   It has no create or status-transition route. Admission writes go through CLI
   or stdio MCP tools and share the same capacity enforcement.
+- Start a dashboard with `tiber dashboard serve --open` when the user wants it
+  opened in a browser. An unconfigured launch selects an available localhost
+  port and prints the complete URL. Repeated launches for the same project
+  reuse its healthy server without opening another browser window. Use
+  `--port <port>` only when the user requests a fixed port; a conflicting
+  running instance or occupied requested port must be reported, not bypassed
+  with a second project server.
 - Invoke the `tiber:new-task` skill for quick backlog capture when the user
   wants a new task recorded from chat. That skill writes only through structured
   Tiber MCP tools and leaves the task in `backlog` unless the user explicitly
@@ -107,5 +114,5 @@ tiber note add <task-ref> "Progress note"
 tiber validate --fix
 tiber close-from-trailers
 tiber mcp stdio
-tiber dashboard serve
+tiber dashboard serve [--open] [--port <port>]
 ```
