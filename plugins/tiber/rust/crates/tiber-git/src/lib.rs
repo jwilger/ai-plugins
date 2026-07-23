@@ -1233,11 +1233,23 @@ impl GitRepository {
         } else {
             None
         };
+        let gitignore_path = self.root.join(".gitignore");
+        let mut gitignore = match fs::read_to_string(&gitignore_path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(error.into()),
+        };
+        if !gitignore.lines().any(|line| line.trim() == ".tasks") {
+            if !gitignore.ends_with('\n') && !gitignore.is_empty() {
+                gitignore.push('\n');
+            }
+            if !gitignore.is_empty() {
+                gitignore.push('\n');
+            }
+            gitignore.push_str("# tiber local working copy\n.tasks\n");
+        }
         let mut files = vec![
-            (
-                ".gitignore",
-                "# tiber local working copy\n.tasks\n".to_string(),
-            ),
+            (".gitignore", gitignore),
             (
                 ".githooks/post-commit.tiber",
                 "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n"

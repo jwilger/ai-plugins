@@ -46,6 +46,42 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
 }
 
 #[test]
+fn scaffold_repo_preserves_existing_gitignore_entries() {
+    let repo = TempRepo::initialized();
+    let existing = "target/\n.env\ncoverage/\n";
+    fs::write(repo.path().join(".gitignore"), existing).expect("write existing gitignore");
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert_success(apply);
+    let gitignore =
+        fs::read_to_string(repo.path().join(".gitignore")).expect("read updated gitignore");
+    assert!(gitignore.starts_with(existing));
+    assert_eq!(
+        gitignore
+            .lines()
+            .filter(|line| line.trim() == ".tasks")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn scaffold_repo_does_not_replace_non_utf8_gitignore() {
+    let repo = TempRepo::initialized();
+    let existing = b"target/\n\xff\n";
+    fs::write(repo.path().join(".gitignore"), existing).expect("write non-utf8 gitignore");
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert!(!apply.status.success());
+    assert_eq!(
+        fs::read(repo.path().join(".gitignore")).expect("read unchanged gitignore"),
+        existing
+    );
+}
+
+#[test]
 fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join("justfile"), "test:\n  cargo test\n")
