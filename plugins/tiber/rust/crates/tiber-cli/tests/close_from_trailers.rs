@@ -48,14 +48,17 @@ fn close_from_trailers_fetches_remote_tasks_before_resolving_closures() {
     origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
     assert_success(seed.tiber(["init"]));
     assert_success(seed.tiber(["create", "Publish architecture records"]));
-    let task = task_stem(&seed, "backlog", "publish-architecture-records");
-    assert_success(seed.tiber(["transition", &task, "in-progress"]));
+    let architecture = task_stem(&seed, "backlog", "publish-architecture-records");
+    assert_success(seed.tiber(["create", "Publish release notes"]));
+    let release_notes = task_stem(&seed, "backlog", "publish-release-notes");
+    assert_success(seed.tiber(["transition", &architecture, "in-progress"]));
+    assert_success(seed.tiber(["transition", &release_notes, "in-progress"]));
     fs::write(seed.path().join("architecture.md"), "published\n").expect("write completed work");
     seed.git(["add", "architecture.md"]);
     seed.git([
         "commit",
         "-m",
-        &format!("Publish architecture records\n\nCloses: {task}"),
+        &format!("Publish architecture records\n\nCloses: {architecture}\nCloses: {release_notes}"),
     ]);
     seed.git(["push", "origin", "main"]);
 
@@ -73,17 +76,38 @@ fn close_from_trailers_fetches_remote_tasks_before_resolving_closures() {
 
     let close = automation.tiber(["close-from-trailers"]);
 
-    assert_success(close);
+    assert_success_ref(&close);
+    let mut expected_closed = [architecture.as_str(), release_notes.as_str()];
+    expected_closed.sort();
+    assert_eq!(
+        String::from_utf8(close.stdout).expect("stdout should be utf8"),
+        expected_closed
+            .into_iter()
+            .map(|task| format!("closed {task}\n"))
+            .collect::<String>()
+    );
     assert_success_ref(&automation.git_output([
         "fetch",
         "origin",
         "tasks:refs/remotes/origin/tasks",
     ]));
-    assert_success_ref(&automation.git_output([
-        "cat-file",
-        "-e",
-        &format!("origin/tasks:done/{task}.md"),
-    ]));
+    for task in [architecture, release_notes] {
+        assert_success_ref(&automation.git_output([
+            "cat-file",
+            "-e",
+            &format!("origin/tasks:done/{task}.md"),
+        ]));
+        for status in ["backlog", "in-progress"] {
+            assert!(!automation
+                .git_output([
+                    "cat-file",
+                    "-e",
+                    &format!("origin/tasks:{status}/{task}.md"),
+                ])
+                .status
+                .success());
+        }
+    }
 }
 
 #[test]
