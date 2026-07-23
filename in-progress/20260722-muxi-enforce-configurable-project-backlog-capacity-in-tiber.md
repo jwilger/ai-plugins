@@ -5,6 +5,9 @@ blocks: []
 tags: [tiber, backlog, capacity, concurrency, configuration]
 pr_mr_url: 
 pr_mr_status: 
+claim:
+  host: unknown
+  session: unknown
 ---
 
 ## Summary
