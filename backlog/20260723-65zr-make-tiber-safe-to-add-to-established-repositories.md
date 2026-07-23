@@ -13,6 +13,8 @@ Established repositories can already have task data, hooks, workflow conventions
 
 ## Context / Why
 
+GitHub issue 60 reports that initialization can create a new tasks branch even when a root .tasks directory already represents an existing task system. Scaffolding can also emit a post-commit hook without proving that the active hook manager will dispatch it, and generate a task-closing workflow without pinning the intended revision, declaring explicit permissions, or supporting repositories that require signed publication. The desired outcome is setup that detects these conflicts before mutation, explains safe integration choices, and generates only operational automation that respects existing task, hook, workflow, permission, and signing policies. Implementation notes: preserve dry-run and conflict safety; distinguish source-tree .tasks from Git-object-backed Tiber state; verify active hooksPath or hook-manager dispatch; pin generated workflow revisions; declare least-required permissions; and support or clearly refuse signed-publication requirements.
+
 ## Acceptance criteria
 
 - [ ] Initialization refuses to create Tiber task state when an existing root `.tasks` system would create a parallel board, and reports actionable integration guidance without mutation.
