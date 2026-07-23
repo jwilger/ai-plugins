@@ -57,14 +57,17 @@ printf '%s\n' \
   'verifier = "config-verify"' \
   >"$project_root/.development-discipline/final-review.toml"
 
+parity_state_root="$project_root/.development-discipline-state-parity"
 run_flow() {
   local binary="$1" output="$2"
   FINAL_REVIEW_TEST_PROJECT_ROOT="$project_root" \
     FINAL_REVIEW_ROUTING_PROJECT_ROOT="$root" \
+    FINAL_REVIEW_TEST_STATE_ROOT="$parity_state_root" \
     node "$flow_script" "$binary" >"$output"
 }
 
 run_flow "$source_binary" "$source_output"
+rm -rf "$parity_state_root"
 run_flow "$dist_binary" "$dist_output"
 if ! node "$parity_normalizer" "$source_output" >"$source_normalized"; then
   echo "development-discipline-release-parity-normalization-failed=true side=source" >&2
@@ -91,7 +94,9 @@ jq -s -e '
       and .model_roles.lens_review == "config-review"
       and .model_role_sources.lens_review == "project_toml_config")
   and (response(4).error.code == -32602
-    and response(4).error.message == "review_state_out_of_sync=true")
+    and (response(4).error.message | startswith("review_state_out_of_sync=true expected_state_fingerprint="))
+    and (response(4).error.message | contains(" received_state_fingerprint="))
+    and (response(4).error.message | endswith(" recovery=resume_latest_state_or_abandon_stale_review")))
   and (response(5).result.content[0].text | fromjson
     | (.actionable | map(.id)) == ["launcher-real"]
       and (.out_of_scope | map(.id)) == ["launcher-stale"])

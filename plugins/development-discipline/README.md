@@ -61,7 +61,9 @@ fallback remains available for source-tree development. Release checks validate
 each artifact's target format, checksum, and embedded source/toolchain
 fingerprint.
 
-The caller carries final-review state between requests, while one persistent MCP
-process keeps the authoritative session copy. Mutated or stale state and
-post-completion transitions fail closed; active sessions and retained review
-history are bounded.
+The caller carries final-review state between requests, while the MCP persists
+the authoritative session copy in project-scoped local state. A restarted MCP
+automatically resumes exact state and pending assignments. Mutated, stale, or
+concurrently superseded state and post-completion transitions fail closed with
+sanitized recovery diagnostics; active sessions and retained review history are
+bounded.

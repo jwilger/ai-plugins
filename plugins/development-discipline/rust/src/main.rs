@@ -359,12 +359,12 @@ impl ReviewCoordinator {
                 }
             }
         }
-        let matches_authoritative = self.sessions.get(session_id).ok_or_else(|| {
+        let authoritative_state = self.sessions.get(session_id).ok_or_else(|| {
             "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
                 .to_string()
-        })? == state;
-        if !matches_authoritative {
-            return Err("review_state_out_of_sync=true".to_string());
+        })?;
+        if authoritative_state != state {
+            return Err(state_out_of_sync_error(authoritative_state, state));
         }
         if tool_name == "final_review.advance" && scope_split_hold_active(state) {
             return Err("review_scope_split_hold_active=true".to_string());
@@ -557,6 +557,20 @@ impl ReviewCoordinator {
         self.session_lru.retain(|existing| existing != session_id);
         self.session_lru.push_back(session_id.to_string());
     }
+}
+
+fn state_out_of_sync_error(expected: &Value, received: &Value) -> String {
+    let expected = stable_storage_digest(&[
+        "final-review-state-v1",
+        &serde_json::to_string(expected).unwrap_or_else(|_| "invalid".to_string()),
+    ]);
+    let received = stable_storage_digest(&[
+        "final-review-state-v1",
+        &serde_json::to_string(received).unwrap_or_else(|_| "invalid".to_string()),
+    ]);
+    format!(
+        "review_state_out_of_sync=true expected_state_fingerprint={expected} received_state_fingerprint={received} recovery=resume_latest_state_or_abandon_stale_review"
+    )
 }
 
 fn pending_verifier_core_arguments(arguments: &Value) -> Result<Value, String> {
@@ -2217,7 +2231,11 @@ fn compile_risk_plan(
         if assessment.get(field).and_then(Value::as_str)
             != expected_assignment.get(field).and_then(Value::as_str)
         {
-            return Err(risk_assessment_identity_mismatch(field));
+            return Err(risk_assessment_identity_mismatch(
+                field,
+                assessment,
+                expected_assignment,
+            ));
         }
     }
     if assessment
@@ -2227,7 +2245,11 @@ fn compile_risk_plan(
             .pointer("/shared_test_evidence/id")
             .and_then(Value::as_str)
     {
-        return Err(risk_assessment_identity_mismatch("shared_test_evidence_id"));
+        return Err(risk_assessment_identity_mismatch(
+            "shared_test_evidence_id",
+            assessment,
+            expected_assignment,
+        ));
     }
     validate_risk_assessment_caller_attestation(assessment, expected_assignment)?;
     let overall_risk = assessment
@@ -2455,9 +2477,23 @@ fn compile_risk_plan(
     }))
 }
 
-fn risk_assessment_identity_mismatch(field: &str) -> String {
+fn risk_assessment_identity_mismatch(
+    field: &str,
+    assessment: &serde_json::Map<String, Value>,
+    expected_assignment: &Value,
+) -> String {
+    let expected = expected_assignment
+        .get("assignment_id")
+        .and_then(Value::as_str)
+        .unwrap_or("missing");
+    let received = assessment
+        .get("assignment_id")
+        .and_then(Value::as_str)
+        .unwrap_or("missing");
     format!(
-        "risk_assessment_identity_mismatch field={field} recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
+        "risk_assessment_identity_mismatch field={field} expected_assignment_fingerprint={} received_assignment_fingerprint={} recovery=resume_matching_assessment_or_rerun_final_review.assess_risk_or_abandon_stale_assessment",
+        fingerprint(expected),
+        fingerprint(received)
     )
 }
 
@@ -2469,7 +2505,11 @@ fn validate_risk_assessment_caller_attestation(
         .get("caller_attestation")
         .and_then(Value::as_object)
     else {
-        return Err(risk_assessment_identity_mismatch("caller_attestation"));
+        return Err(risk_assessment_identity_mismatch(
+            "caller_attestation",
+            assessment,
+            expected_assignment,
+        ));
     };
     if attestation.get("model_role").and_then(Value::as_str)
         != expected_assignment
@@ -2478,11 +2518,15 @@ fn validate_risk_assessment_caller_attestation(
     {
         return Err(risk_assessment_identity_mismatch(
             "caller_attestation.model_role",
+            assessment,
+            expected_assignment,
         ));
     }
     if attestation.get("fresh_context").and_then(Value::as_bool) != Some(true) {
         return Err(risk_assessment_identity_mismatch(
             "caller_attestation.fresh_context",
+            assessment,
+            expected_assignment,
         ));
     }
     if attestation
@@ -2492,6 +2536,8 @@ fn validate_risk_assessment_caller_attestation(
     {
         return Err(risk_assessment_identity_mismatch(
             "caller_attestation.closed_after_result",
+            assessment,
+            expected_assignment,
         ));
     }
     Ok(())
@@ -18319,36 +18365,42 @@ pre_filter = "project-pre"
             &[("correctness-behavior", "low")],
             json!([]),
         );
-        let expected = "risk_assessment_identity_mismatch field=assignment_id recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment";
-
+        let assert_identity_error = |error: &str, field: &str| {
+            assert!(error.contains(&format!("risk_assessment_identity_mismatch field={field}")));
+            assert!(error.contains("expected_assignment_fingerprint="));
+            assert!(error.contains("received_assignment_fingerprint="));
+            assert!(error.contains(
+                "recovery=resume_matching_assessment_or_rerun_final_review.assess_risk_or_abandon_stale_assessment"
+            ));
+        };
         let mut altered = current.clone();
         altered["risk_assessment"]["assignment_id"] = json!("risk-altered");
-        assert_eq!(
-            plan_result(&altered).expect_err("an altered assignment must remain rejected"),
-            expected
-        );
+        let altered_error =
+            plan_result(&altered).expect_err("an altered assignment must remain rejected");
+        assert_identity_error(&altered_error, "assignment_id");
+        assert!(!altered_error.contains("risk-altered"));
 
         let mut stale = current.clone();
         stale["risk_assessment"] = cross_session["risk_assessment"].clone();
-        assert_eq!(
-            plan_result(&stale).expect_err("a cross-session assessment must remain rejected"),
-            expected
+        assert_identity_error(
+            &plan_result(&stale).expect_err("a cross-session assessment must remain rejected"),
+            "assignment_id",
         );
 
         let mut altered_subagent = current.clone();
         altered_subagent["risk_assessment"]["subagent_key"] = json!("altered:risk-scout");
-        assert_eq!(
-            plan_result(&altered_subagent)
+        assert_identity_error(
+            &plan_result(&altered_subagent)
                 .expect_err("an altered subagent key must remain rejected"),
-            "risk_assessment_identity_mismatch field=subagent_key recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
+            "subagent_key",
         );
 
         let mut altered_evidence = current.clone();
         altered_evidence["risk_assessment"]["shared_test_evidence_id"] = json!("altered-evidence");
-        assert_eq!(
-            plan_result(&altered_evidence)
+        assert_identity_error(
+            &plan_result(&altered_evidence)
                 .expect_err("altered shared evidence identity must remain rejected"),
-            "risk_assessment_identity_mismatch field=shared_test_evidence_id recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
+            "shared_test_evidence_id",
         );
 
         let mut missing_attestation = current.clone();
@@ -18356,10 +18408,10 @@ pre_filter = "project-pre"
             .as_object_mut()
             .unwrap()
             .remove("caller_attestation");
-        assert_eq!(
-            plan_result(&missing_attestation)
+        assert_identity_error(
+            &plan_result(&missing_attestation)
                 .expect_err("a missing caller attestation must remain rejected"),
-            "risk_assessment_identity_mismatch field=caller_attestation recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
+            "caller_attestation",
         );
 
         for (field, value) in [
@@ -18369,12 +18421,10 @@ pre_filter = "project-pre"
         ] {
             let mut altered_attestation = current.clone();
             altered_attestation["risk_assessment"]["caller_attestation"][field] = value;
-            assert_eq!(
-                plan_result(&altered_attestation)
+            assert_identity_error(
+                &plan_result(&altered_attestation)
                     .expect_err("an altered caller attestation must remain rejected"),
-                format!(
-                    "risk_assessment_identity_mismatch field=caller_attestation.{field} recovery=rerun_final_review.assess_risk_and_resubmit_unchanged_same_session_assessment"
-                )
+                &format!("caller_attestation.{field}"),
             );
         }
     }
@@ -22390,6 +22440,7 @@ pre_filter = "project-pre"
         .expect("pending json");
         assert_eq!(pending["transition_status"], "verifier_required");
         let assignment = &pending["verifier_assignment"];
+        let mut coordinator = ReviewCoordinator::default();
 
         let bypass_response = coordinator
             .handle_json_rpc(&json!({
@@ -22785,10 +22836,13 @@ pre_filter = "project-pre"
             }))
             .expect("advance response");
 
-        assert_eq!(
-            response["error"]["message"],
-            "review_state_out_of_sync=true"
-        );
+        let message = response["error"]["message"]
+            .as_str()
+            .expect("sanitized state mismatch diagnostic");
+        assert!(message.contains("review_state_out_of_sync=true"));
+        assert!(message.contains("expected_state_fingerprint="));
+        assert!(message.contains("received_state_fingerprint="));
+        assert!(message.contains("recovery=resume_latest_state_or_abandon_stale_review"));
     }
 
     #[test]
