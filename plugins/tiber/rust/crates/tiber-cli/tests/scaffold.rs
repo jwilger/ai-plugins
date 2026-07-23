@@ -687,6 +687,42 @@ fn scaffold_repo_preserves_existing_files_when_a_destination_is_a_dangling_symli
 }
 
 #[test]
+fn scaffold_repo_preserves_an_existing_file_when_its_replacement_write_fails() {
+    let repo = TempRepo::initialized();
+    let existing_gitignore = "target/\n".repeat(512);
+    fs::write(repo.path().join(".gitignore"), &existing_gitignore).expect("write gitignore");
+
+    let apply = repo.command(
+        "bash",
+        [
+            "-c",
+            "ulimit -f 1; exec \"$1\" scaffold repo --apply",
+            "_",
+            env!("CARGO_BIN_EXE_tiber"),
+        ],
+    );
+
+    assert!(!apply.status.success());
+    assert_eq!(
+        fs::read_to_string(repo.path().join(".gitignore")).expect("read unchanged gitignore"),
+        existing_gitignore
+    );
+}
+
+#[test]
+fn scaffold_repo_removes_a_stale_atomic_replacement_file() {
+    let repo = TempRepo::initialized();
+    fs::write(repo.path().join(".gitignore"), "target/\n").expect("write gitignore");
+    let stale = repo.path().join(".tiber-tmp-.gitignore-interrupted");
+    fs::write(&stale, "partial replacement").expect("write stale replacement");
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert_success(apply);
+    assert!(!stale.exists());
+}
+
+#[test]
 fn scaffold_repo_replaces_ambiguous_targets_only_with_an_explicit_choice() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join(".gitignore"), "target/\n").expect("write existing gitignore");
