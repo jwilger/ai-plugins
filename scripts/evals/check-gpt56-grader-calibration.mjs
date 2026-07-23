@@ -115,10 +115,10 @@ function resolvedConfiguredProvider(provider) {
   const config = structuredClone(provider.config);
   config.working_dir =
     process.env.GPT56_BENCHMARK_WORKSPACE ||
-    path.join(root, ".dependencies/evals/agent-workspace");
+    path.join(root, ".evals/agent-workspace");
   config.cli_env.CODEX_HOME =
     process.env.CODEX_EVAL_HOME_NO_PLUGINS ||
-    path.join(root, ".dependencies/evals/codex-home-no-plugins");
+    path.join(root, ".evals/codex-home-no-plugins");
   return {
     id: provider.id,
     label: provider.label,

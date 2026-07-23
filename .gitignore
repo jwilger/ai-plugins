@@ -22,6 +22,7 @@
 
 # Generated eval artifacts and static dashboard output. CI uploads/publishes
 # these from each run; source configs and fixtures stay tracked.
+/.evals/
 /evals/out/
 /site/evals/*
 !/site/evals/.gitkeep

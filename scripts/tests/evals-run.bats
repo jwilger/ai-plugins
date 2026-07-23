@@ -77,6 +77,13 @@ teardown() {
   [[ "$output" == *"evals/out/results.junit.xml"* ]]
 }
 
+@test "eval runner defaults generated Codex homes to dedicated eval runtime state" {
+  run "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$ROOT/.evals/codex-home-full-marketplace"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
+}
+
 @test "eval runner rejects concurrency above the canonical cap before printing a Promptfoo launch" {
   run env PROMPTFOO_MAX_CONCURRENCY=3 "$RUNNER" --dry-run
 
@@ -208,7 +215,7 @@ teardown() {
 
 @test "eval runner serializes live provider runs and accepts only its exact inherited lock" {
   temp_root="$(mktemp -d)"
-  lock_path="$MAIN_CHECKOUT/.dependencies/evals/provider-eval.lock"
+  lock_path="$MAIN_CHECKOUT/.evals/provider-eval.lock"
   config="$temp_root/promptfooconfig.yaml"
   fake_promptfoo="$temp_root/promptfoo"
   provider_marker="$temp_root/provider-invoked"
@@ -300,7 +307,7 @@ SH
     >"$fake_bin/node"
   chmod +x "$fake_bin/node"
 
-  lock_path="$fixture_main/.dependencies/evals/provider-eval.lock"
+  lock_path="$fixture_main/.evals/provider-eval.lock"
   mkdir -p "$(dirname "$lock_path")"
   exec 8>>"$lock_path"
   flock --nonblock 8

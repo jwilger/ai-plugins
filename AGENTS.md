@@ -133,8 +133,10 @@ independent of Lefthook job selection while avoiding duplicate work.
 
 For each linked worktree, the bootstrap:
 
-- copies warm local caches from the main checkout when present:
-  `.dependencies/` and `.direnv/`;
+- copies warm local dependency and devshell caches from the main checkout when
+  present: `.dependencies/` and `.direnv/`; legacy `.dependencies/evals/`
+  state is excluded, while current disposable eval state lives per worktree
+  under the git-ignored `.evals/` directory;
 - creates a local `.envrc` with `use flake` if the worktree does not already
   have one;
 - writes `.env.worktree` with stable, slot-based `PORT`, `PG_PORT`,

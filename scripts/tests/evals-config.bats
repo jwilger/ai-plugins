@@ -111,12 +111,19 @@ MD
   [[ "$output" == *"Treat each scenario as stateless"* ]]
   [[ "$output" == *"sandbox_mode: read-only"* ]]
   [[ "$output" == *"skip_git_repo_check: true"* ]]
-  [[ "$output" == *"working_dir: \"$ROOT/.dependencies/evals/agent-workspace\""* ]]
+  [[ "$output" == *"working_dir: \"$ROOT/.evals/agent-workspace\""* ]]
   [[ "$output" == *"skills: all"* ]]
   [[ "$output" == *"setting_sources: []"* ]]
   [[ "$output" == *"persist_session: false"* ]]
   [[ "$output" == *"disallowed_tools:"*$'\n'"        - Bash"* ]]
   [[ "$output" == *"load-harness-cases.cjs"* ]]
+}
+
+@test "generated behavior config keeps all eval runtime state outside dependencies" {
+  run node "$GENERATOR" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$ROOT/.evals/codex-home-full-marketplace"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
 }
 
 @test "generated config uses local Claude Code and Codex auth for providers and graders" {

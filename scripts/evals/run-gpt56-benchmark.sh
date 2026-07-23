@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 benchmark_dir="$root/evals/benchmarks/gpt-5.6-model-family"
-provider_eval_lock_file="$root/.dependencies/evals/provider-eval.lock"
+provider_eval_lock_file="$root/.evals/provider-eval.lock"
 if git_common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
   git_common_dir="$(cd "$git_common_dir" && pwd -P)"
   if [ "$(basename "$git_common_dir")" != ".git" ]; then
@@ -11,7 +11,7 @@ if git_common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-commo
     exit 2
   fi
   coordination_checkout="$(cd "$git_common_dir/.." && pwd -P)"
-  provider_eval_lock_file="$coordination_checkout/.dependencies/evals/provider-eval.lock"
+  provider_eval_lock_file="$coordination_checkout/.evals/provider-eval.lock"
 fi
 phase="execution"
 dry_run=0
@@ -78,8 +78,8 @@ if [[ ! "$max_concurrency" =~ ^[12]$ ]]; then
   exit 2
 fi
 
-skills_home="${CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-skills-only-marketplace}}"
-no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
+skills_home="${CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-skills-only-marketplace}}"
+no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
 skills_home="$(realpath -m -- "$skills_home")"
 no_plugins_home="$(realpath -m -- "$no_plugins_home")"
 default_workspace="${TMPDIR:-/tmp}/ai-plugins-gpt56-workspace-${UID}-$$"
