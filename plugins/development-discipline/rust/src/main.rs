@@ -6297,7 +6297,6 @@ fn append_out_of_scope_report(
         .get("iteration_index")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let mut durable_entries = Vec::new();
     if let Some(report) = state["out_of_scope_report"].as_array_mut() {
         for finding in filtered
             .get("out_of_scope")
@@ -6329,7 +6328,6 @@ fn append_out_of_scope_report(
                 "finding": finding,
                 "security_escalation": disposition.cloned()
             });
-            durable_entries.push(entry.clone());
             report.push(entry);
         }
         if report.len() > MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES {
@@ -6343,7 +6341,7 @@ fn append_out_of_scope_report(
         }
     }
     if review_contract_is_valid(state) {
-        replace_durable_out_of_scope_report(state, durable_entries)?;
+        prepare_durable_out_of_scope_report(state)?;
     }
     Ok(())
 }
@@ -6357,15 +6355,12 @@ fn sync_scout_out_of_scope_report(state: &mut Value) -> Result<(), String> {
     append_out_of_scope_report(state, &json!({ "out_of_scope": out_of_scope }), None)
 }
 
-fn replace_durable_out_of_scope_report(
-    state: &mut Value,
-    entries: Vec<Value>,
-) -> Result<(), String> {
+fn prepare_durable_out_of_scope_report(state: &mut Value) -> Result<(), String> {
     let project_root = state
         .pointer("/scope/project_root")
         .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_project_root_required=true".to_string())?;
-    let report_binding_id = state
+    let _report_binding_id = state
         .get("report_binding_id")
         .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
@@ -6395,21 +6390,27 @@ fn replace_durable_out_of_scope_report(
             ));
         }
     }
-    let mut connection = Connection::open_with_flags(
-        &path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(|error| format!("durable_report_open_failed source={error}"))?;
-    initialize_durable_report_schema(&connection)?;
+    state["out_of_scope_report_artifact"] = json!(path.to_string_lossy());
+    Ok(())
+}
+
+fn replace_durable_out_of_scope_report(
+    transaction: &rusqlite::Transaction<'_>,
+    state: &Value,
+) -> Result<(), String> {
+    let entries = state
+        .get("out_of_scope_report")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let report_binding_id = state
+        .get("report_binding_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
     let iteration = state
         .get("iteration_index")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let transaction = connection
-        .transaction()
-        .map_err(|error| format!("durable_report_transaction_failed source={error}"))?;
     transaction
         .execute(
             "DELETE FROM final_review_lens_snapshot WHERE report_binding_id = ?1",
@@ -6444,10 +6445,34 @@ fn replace_durable_out_of_scope_report(
             )
             .map_err(|error| format!("durable_report_insert_failed source={error}"))?;
     }
+    Ok(())
+}
+
+#[cfg(test)]
+fn persist_prepared_out_of_scope_report(state: &Value) -> Result<(), String> {
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "durable_report_project_root_required=true".to_string())?;
+    let path = durable_report_database_path(
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
+    let mut connection = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|error| format!("durable_report_open_failed source={error}"))?;
+    initialize_durable_report_schema(&connection)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("durable_report_transaction_failed source={error}"))?;
+    replace_durable_out_of_scope_report(&transaction, state)?;
     transaction
         .commit()
         .map_err(|error| format!("durable_report_commit_failed source={error}"))?;
-    state["out_of_scope_report_artifact"] = json!(path.to_string_lossy());
     Ok(())
 }
 
@@ -6705,6 +6730,7 @@ fn persist_authoritative_session(
                 .to_string()
         });
     }
+    replace_durable_out_of_scope_report(&transaction, state)?;
     transaction
         .execute(
             "DELETE FROM final_review_session WHERE session_id <> ?1 AND session_id NOT IN (SELECT session_id FROM final_review_session WHERE session_id <> ?1 ORDER BY updated_at DESC, revision DESC, session_id DESC LIMIT ?2)",
@@ -13732,6 +13758,7 @@ pre_filter = "project-pre"
         }))
         .expect("advance");
         let advanced: Value = serde_json::from_str(&advanced).expect("json");
+        persist_prepared_out_of_scope_report(&advanced["state"]).expect("persist report");
         let connection = Connection::open(
             advanced["state"]["out_of_scope_report_artifact"]
                 .as_str()
@@ -13774,6 +13801,7 @@ pre_filter = "project-pre"
             None,
         )
         .expect("second durable report");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
         assert_eq!(
             state["out_of_scope_report"].as_array().map(Vec::len),
             Some(1)
@@ -13815,6 +13843,7 @@ pre_filter = "project-pre"
         state["iteration_index"] = json!(2);
         append_out_of_scope_report(&mut state, &json!({ "out_of_scope": [] }), None)
             .expect("clean durable report");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
         let connection = Connection::open(
             state["out_of_scope_report_artifact"]
                 .as_str()
@@ -13858,6 +13887,7 @@ pre_filter = "project-pre"
             None,
         )
         .expect("second durable report");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
         let connection = Connection::open(
             state["out_of_scope_report_artifact"]
                 .as_str()
@@ -13927,6 +13957,7 @@ pre_filter = "project-pre"
         let mut second_state = second["state"].clone();
         append_out_of_scope_report(&mut second_state, &json!({ "out_of_scope": [] }), None)
             .expect("second durable report");
+        persist_prepared_out_of_scope_report(&second_state).expect("persist report");
         let connection = Connection::open(
             second_state["out_of_scope_report_artifact"]
                 .as_str()
@@ -13993,6 +14024,7 @@ pre_filter = "project-pre"
             None,
         )
         .expect("durable report");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
         let connection = Connection::open(
             state["out_of_scope_report_artifact"]
                 .as_str()
@@ -14031,6 +14063,7 @@ pre_filter = "project-pre"
             None,
         )
         .expect("durable report");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
         assert_eq!(
             state["out_of_scope_report"][0]["finding"]["message"],
             "alice@example.test"
@@ -14067,6 +14100,7 @@ pre_filter = "project-pre"
             ])),
         )
         .expect("durable report");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
         let report: Value =
             serde_json::from_str(&out_of_scope_report(&json!({ "state": state })).expect("report"))
                 .expect("report json");
@@ -22908,11 +22942,13 @@ pre_filter = "project-pre"
 
     #[test]
     fn json_rpc_allows_only_one_concurrent_transition_after_restart() {
+        let root = test_project_root("concurrent-restarted-review");
         let plan_arguments = add_test_risk_assessment(
             json!({
                 "session_id": "concurrent-restarted-review",
                 "changed_files": ["src/new.rs"],
-                "diff_hash": "same"
+                "diff_hash": "same",
+                "project_root": root
             }),
             "low",
             &[("correctness-behavior", "low")],
@@ -22934,7 +22970,24 @@ pre_filter = "project-pre"
         )
         .expect("plan json");
         let state = payload["state"].clone();
-        let advance = |id| {
+        let advance = |id, finding_id: &str| {
+            let mut lens_results = clean_lens_results_for(&state);
+            lens_results[0]["status"] = json!("findings");
+            lens_results[0]["findings"] = json!([{
+                "id": finding_id,
+                "severity": "MINOR",
+                "causality": "pre-existing",
+                "causality_evidence": "The transition records this pre-existing report snapshot.",
+                "likelihood": "possible",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "path": "src/unchanged.rs",
+                "message": format!("{finding_id} report snapshot"),
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The path is intentionally outside the changed scope."
+                }
+            }]);
             json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -22943,8 +22996,13 @@ pre_filter = "project-pre"
                     "name": "final_review.advance",
                     "arguments": {
                         "state": state,
-                        "lens_results": clean_lens_results_for(&state),
-                        "current_diff_hash": "same"
+                        "lens_results": lens_results,
+                        "current_diff_hash": "same",
+                        "unrelated_follow_ups": [{
+                            "finding_id": finding_id,
+                            "lens": "correctness-behavior",
+                            "ticket_reference": format!("TEST-{finding_id}")
+                        }]
                     }
                 }
             })
@@ -22968,18 +23026,35 @@ pre_filter = "project-pre"
             .get("result")
             .is_some());
 
-        assert!(first
-            .handle_json_rpc(&advance(3))
-            .expect("winning transition")
-            .get("result")
-            .is_some());
+        let winning = first
+            .handle_json_rpc(&advance(3, "winning-report"))
+            .expect("winning transition");
+        assert!(
+            winning.get("result").is_some(),
+            "winning transition failed: {winning}"
+        );
+        let winning_payload: Value = serde_json::from_str(
+            winning["result"]["content"][0]["text"]
+                .as_str()
+                .expect("winning transition text"),
+        )
+        .expect("winning transition json");
         let losing = second
-            .handle_json_rpc(&advance(4))
+            .handle_json_rpc(&advance(4, "losing-report"))
             .expect("losing transition response");
 
         assert!(losing["error"]["message"]
             .as_str()
             .is_some_and(|message| message.contains("review_state_out_of_sync=true")));
+        let report: Value = serde_json::from_str(
+            &out_of_scope_report(&json!({ "state": winning_payload["state"] }))
+                .expect("durable report"),
+        )
+        .expect("durable report json");
+        assert_eq!(
+            report["findings"][0]["id"], "winning-report",
+            "the losing transition must not overwrite the durable report"
+        );
     }
 
     #[test]
