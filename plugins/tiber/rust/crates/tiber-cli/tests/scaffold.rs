@@ -124,6 +124,78 @@ fn scaffold_repo_detects_an_equivalent_existing_workflow() {
 }
 
 #[test]
+fn scaffold_repo_does_not_treat_a_manual_workflow_as_equivalent() {
+    let repo = TempRepo::initialized();
+    let workflow_path = repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("manual-close.yaml");
+    fs::create_dir_all(workflow_path.parent().expect("workflow parent"))
+        .expect("create workflow directory");
+    fs::write(
+        workflow_path,
+        "name: manual close\non: workflow_dispatch\njobs:\n  close:\n    steps:\n      - run: tiber close-from-trailers\n",
+    )
+    .expect("write manual workflow");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
+    assert!(!stdout.contains("already configured .github/workflows/manual-close.yaml"));
+}
+
+#[test]
+fn scaffold_repo_bounds_block_event_detection_to_the_on_mapping() {
+    let repo = TempRepo::initialized();
+    let workflow_path = repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("manual-close.yaml");
+    fs::create_dir_all(workflow_path.parent().expect("workflow parent"))
+        .expect("create workflow directory");
+    fs::write(
+        workflow_path,
+        "name: manual close\non:\n  workflow_dispatch:\njobs:\n  close:\n    env:\n      push: enabled\n    steps:\n      - run: tiber close-from-trailers\n",
+    )
+    .expect("write manual workflow");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
+    assert!(!stdout.contains("already configured .github/workflows/manual-close.yaml"));
+}
+
+#[test]
+fn scaffold_repo_detects_push_in_a_block_event_sequence() {
+    let repo = TempRepo::initialized();
+    let workflow_path = repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("close-tasks.yaml");
+    fs::create_dir_all(workflow_path.parent().expect("workflow parent"))
+        .expect("create workflow directory");
+    fs::write(
+        &workflow_path,
+        "name: close tasks\non:\n  - push\n  - pull_request\njobs:\n  close:\n    steps:\n      - run: tiber close-from-trailers\n",
+    )
+    .expect("write existing workflow");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("already configured .github/workflows/close-tasks.yaml"));
+    assert!(!stdout.contains(".github/workflows/tiber-close-from-trailers.yml"));
+}
+
+#[test]
 fn scaffold_repo_detects_equivalent_workflow_with_inline_comments() {
     let repo = TempRepo::initialized();
     let workflow_path = repo

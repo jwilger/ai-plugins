@@ -2082,6 +2082,9 @@ fn is_course_task_path(path: &str) -> bool {
 }
 
 fn workflow_invokes_task_closer(contents: &str) -> bool {
+    if !workflow_has_push_trigger(contents) {
+        return false;
+    }
     let lines = contents.lines().collect::<Vec<_>>();
     for (jobs_index, line) in lines.iter().enumerate() {
         let jobs_trimmed = line.trim_start();
@@ -2105,6 +2108,49 @@ fn workflow_invokes_task_closer(contents: &str) -> bool {
                 return true;
             }
         }
+    }
+    false
+}
+
+fn workflow_has_push_trigger(contents: &str) -> bool {
+    let lines = contents.lines().collect::<Vec<_>>();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        if line.len() != trimmed.len() {
+            continue;
+        }
+        let Some(value) = trim_unquoted_comment(trimmed).strip_prefix("on:") else {
+            continue;
+        };
+        let value = value.trim();
+        if value == "push"
+            || value
+                .strip_prefix('[')
+                .and_then(|value| value.strip_suffix(']'))
+                .is_some_and(|events| events.split(',').any(|event| event.trim() == "push"))
+        {
+            return true;
+        }
+        if !value.is_empty() {
+            return false;
+        }
+        for event_line in &lines[index + 1..] {
+            let event = event_line.trim_start();
+            let indentation = event_line.len() - event.len();
+            if event.is_empty() || event.starts_with('#') {
+                continue;
+            }
+            if indentation == 0 {
+                return false;
+            }
+            let event = trim_unquoted_comment(event).trim();
+            if event.starts_with("push:")
+                || event.strip_prefix("- ").is_some_and(|item| item == "push")
+            {
+                return true;
+            }
+        }
+        return false;
     }
     false
 }
