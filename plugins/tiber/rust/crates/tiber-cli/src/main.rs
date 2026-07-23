@@ -168,6 +168,9 @@ struct DashboardServeArgs {
     /// Bind a specific localhost port instead of selecting an available one.
     #[arg(long)]
     port: Option<u16>,
+    /// Open a browser for a newly started dashboard.
+    #[arg(long)]
+    open: bool,
 }
 
 #[derive(Args)]
@@ -580,7 +583,7 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             Ok(())
         }
         Command::Dashboard(DashboardArgs {
-            command: DashboardCommand::Serve(DashboardServeArgs { port }),
+            command: DashboardCommand::Serve(DashboardServeArgs { port, open }),
         }) => {
             let requested_port = port
                 .or_else(|| {
@@ -639,7 +642,15 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
                 fs::create_dir_all(&runtime_dir)?;
                 fs::write(&state_path, format!("{addr}\n{}\n", state.token))?;
                 drop(startup_lock);
-                println!("tiber dashboard listening on http://{addr}");
+                let url = format!("http://{addr}");
+                if open {
+                    if let Err(error) = open_dashboard(&url) {
+                        eprintln!(
+                            "tiber.dashboard_browser_open_failed dashboard_continues=true {error}"
+                        );
+                    }
+                }
+                println!("tiber dashboard listening on {url}");
                 server.await.map_err(|error| {
                     tiber_git::Error::Parse(format!("dashboard_server_join source={error}"))
                 })?
@@ -871,4 +882,27 @@ fn dashboard_token() -> String {
         .unwrap_or_default()
         .as_nanos();
     format!("{}-{timestamp}", process::id())
+}
+
+fn open_dashboard(url: &str) -> Result<(), tiber_git::Error> {
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let mut child = process::Command::new(program)
+        .arg(url)
+        .stdin(process::Stdio::null())
+        .stdout(process::Stdio::null())
+        .stderr(process::Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            tiber_git::Error::Parse(format!(
+                "dashboard_browser_open_failed program={program} source={error}"
+            ))
+        })?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
