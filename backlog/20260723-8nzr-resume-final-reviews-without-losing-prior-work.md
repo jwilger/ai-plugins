@@ -17,6 +17,8 @@ Final review is a required delivery gate, and repeating it wastes time while inc
 
 ## Acceptance criteria
 
+- [ ] A session can retrieve compact final-review state after truncation or compaction and continue with the correct next transition without restarting the review.
+
 ## Subtasks
 
 ## Notes / Log
