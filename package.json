@@ -12,6 +12,18 @@
   },
   "overrides": {
     "@openai/codex-sdk": "0.144.5",
-    "adm-zip": "0.6.0"
+    "adm-zip": "0.6.0",
+    "@modelcontextprotocol/sdk": {
+      "@hono/node-server": "2.0.11"
+    },
+    "ajv": {
+      "fast-uri": "4.1.1"
+    },
+    "@huggingface/transformers": {
+      "sharp": "0.35.3"
+    },
+    "promptfoo": {
+      "sharp": "0.35.3"
+    }
   }
 }
