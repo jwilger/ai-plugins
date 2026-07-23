@@ -2224,12 +2224,110 @@ fn run_field_invokes_task_closer(
 }
 
 fn shell_line_invokes_task_closer(line: &str) -> bool {
-    let line = trim_unquoted_comment(line.trim())
+    let line = trim_shell_comment(line.trim())
         .trim()
         .trim_matches(|character| matches!(character, '"' | '\''));
+    shell_command_segments(line)
+        .into_iter()
+        .any(shell_command_invokes_task_closer)
+}
+
+fn trim_shell_comment(value: &str) -> &str {
+    let mut quote = None;
+    let mut escaped = false;
+    let mut at_word_start = true;
+    for (index, character) in value.char_indices() {
+        if escaped {
+            escaped = false;
+            at_word_start = false;
+            continue;
+        }
+        if quote != Some('\'') && character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if matches!(character, '"' | '\'') {
+            quote = if quote == Some(character) {
+                None
+            } else if quote.is_none() {
+                Some(character)
+            } else {
+                quote
+            };
+            at_word_start = false;
+            continue;
+        }
+        if character == '#' && quote.is_none() && at_word_start {
+            return value[..index].trim_end();
+        }
+        at_word_start = quote.is_none()
+            && (character.is_whitespace()
+                || matches!(character, '|' | '&' | ';' | '(' | ')' | '<' | '>'));
+    }
+    value
+}
+
+fn shell_command_segments(line: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0;
+    let mut quote = None;
+    let mut escaped = false;
+    let bytes = line.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let character = bytes[index] as char;
+        if escaped {
+            escaped = false;
+            index += 1;
+            continue;
+        }
+        if quote != Some('\'') && character == '\\' {
+            escaped = true;
+            index += 1;
+            continue;
+        }
+        if matches!(character, '"' | '\'') {
+            quote = if quote == Some(character) {
+                None
+            } else if quote.is_none() {
+                Some(character)
+            } else {
+                quote
+            };
+            index += 1;
+            continue;
+        }
+        let operator_length = if quote.is_none() && character == ';' {
+            1
+        } else if quote.is_none()
+            && index + 1 < bytes.len()
+            && matches!(&bytes[index..index + 2], b"&&" | b"||")
+        {
+            2
+        } else {
+            index += 1;
+            continue;
+        };
+        segments.push(&line[start..index]);
+        index += operator_length;
+        start = index;
+    }
+    segments.push(&line[start..]);
+    segments
+}
+
+fn shell_command_invokes_task_closer(line: &str) -> bool {
+    let line = line.trim();
     let line = line.strip_prefix("exec ").unwrap_or(line);
     let line = line.strip_prefix("nix develop -c ").unwrap_or(line);
-    line == "tiber close-from-trailers"
+    let Some(remainder) = line.strip_prefix("tiber close-from-trailers") else {
+        return false;
+    };
+    let remainder = remainder.trim_start();
+    remainder.is_empty()
+        || [">", "1>", "2>"]
+            .iter()
+            .any(|operator| remainder.starts_with(operator))
 }
 
 fn trim_unquoted_comment(value: &str) -> &str {
