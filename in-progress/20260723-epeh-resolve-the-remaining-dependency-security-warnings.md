@@ -26,3 +26,5 @@ Users and maintainers should be able to rely on a clean dependency audit without
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-23: Delivered 8b4ee20d6649dad032391de3e3bcd24756476f7e to main. Owner-scoped overrides resolve @hono/node-server 2.0.11, fast-uri 4.1.1, and sharp 0.35.3; fast-xml-parser resolves in-range at 5.10.1. npm audit reports zero vulnerabilities. Full local gate passed (274 development-discipline Rust tests, 44 Tiber mutants, 574 Bats), focused Claude+Codex eval eval-Pqe passed 2/2, final review completed clean, and GitHub CI run 30033583731 reached terminal success.
