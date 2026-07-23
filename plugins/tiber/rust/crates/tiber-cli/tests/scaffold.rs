@@ -664,6 +664,30 @@ fn scaffold_repo_preserves_existing_files_when_a_destination_cannot_be_prepared(
 }
 
 #[test]
+fn scaffold_repo_preserves_existing_files_when_a_destination_parent_is_a_live_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let repo = TempRepo::initialized();
+    let external = TempRepo::new();
+    let existing_gitignore = "target/\n";
+    fs::write(repo.path().join(".gitignore"), existing_gitignore).expect("write gitignore");
+    symlink(external.path(), repo.path().join(".github")).expect("write live github symlink");
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert!(!apply.status.success());
+    assert_eq!(
+        fs::read_to_string(repo.path().join(".gitignore")).expect("read unchanged gitignore"),
+        existing_gitignore
+    );
+    assert!(!external
+        .path()
+        .join("workflows")
+        .join("tiber-close-from-trailers.yml")
+        .exists());
+}
+
+#[test]
 fn scaffold_repo_preserves_existing_files_when_a_destination_is_a_dangling_symlink() {
     use std::os::unix::fs::symlink;
 
@@ -710,16 +734,19 @@ fn scaffold_repo_preserves_an_existing_file_when_its_replacement_write_fails() {
 }
 
 #[test]
-fn scaffold_repo_removes_a_stale_atomic_replacement_file() {
+fn scaffold_repo_preserves_an_unowned_atomic_replacement_file() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join(".gitignore"), "target/\n").expect("write gitignore");
-    let stale = repo.path().join(".tiber-tmp-.gitignore-interrupted");
-    fs::write(&stale, "partial replacement").expect("write stale replacement");
+    let unowned = repo.path().join(".tiber-tmp-.gitignore-interrupted");
+    fs::write(&unowned, "unrelated user content").expect("write unowned file");
 
     let apply = repo.tiber(["scaffold", "repo", "--apply"]);
 
     assert_success(apply);
-    assert!(!stale.exists());
+    assert_eq!(
+        fs::read_to_string(unowned).expect("read unowned file"),
+        "unrelated user content"
+    );
 }
 
 #[test]
