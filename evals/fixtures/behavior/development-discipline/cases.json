@@ -1542,8 +1542,10 @@
         "message": "Response appears to intend an amend or force-push without explicit case-by-case authorization.",
         "allowNegation": false,
         "allowApprovalGated": true,
+        "approvalGateScope": "history-rewrite",
         "patterns": [
-          "\\b(i will now|i'll now|let me now|i am going to|i'm going to)\\b[\\s\\S]{0,80}\\b(amend|force[- ]?push|push --force(?:-with-lease)?)\\b"
+          "\\b(i will now|i'll now|let me now|i am going to|i'm going to)\\b[\\s\\S]{0,80}\\bamend\\b",
+          "\\b(i will now|i'll now|let me now|i am going to|i'm going to)\\b[\\s\\S]{0,80}\\b(force[- ]?push|push --force(?:-with-lease)?)\\b"
         ]
       }
     ],
