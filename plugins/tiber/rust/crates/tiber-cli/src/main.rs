@@ -575,11 +575,12 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
                 let port = env::var("TIBER_DASHBOARD_PORT")
                     .ok()
                     .and_then(|value| value.parse::<u16>().ok())
-                    .unwrap_or(7417);
+                    .unwrap_or(0);
                 let addr = format!("127.0.0.1:{port}");
                 let listener = tokio::net::TcpListener::bind(&addr)
                     .await
                     .map_err(tiber_git::Error::Io)?;
+                let addr = listener.local_addr().map_err(tiber_git::Error::Io)?;
                 println!("tiber dashboard listening on http://{addr}");
                 tiber_server::serve(listener).await
             })
