@@ -1307,6 +1307,7 @@ impl GitRepository {
         if apply {
             for (path, _contents) in &pending_files {
                 let destination = self.root.join(path);
+                reject_symlinked_ancestors(&self.root, &destination)?;
                 match fs::symlink_metadata(&destination) {
                     Ok(metadata) if metadata.file_type().is_symlink() => {
                         return Err(Error::Parse(format!(
@@ -2106,16 +2107,6 @@ fn atomic_write(destination: &Path, contents: &[u8]) -> Result<(), Error> {
         .ok_or_else(|| Error::Parse("scaffold_destination_name_missing".to_string()))?
         .to_string_lossy();
     let temporary_prefix = format!(".tiber-tmp-{file_name}-");
-    for entry in fs::read_dir(parent)? {
-        let entry = entry?;
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(&temporary_prefix)
-        {
-            fs::remove_file(entry.path())?;
-        }
-    }
     let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let temporary = parent.join(format!(
         "{temporary_prefix}{}-{sequence}",
@@ -2139,6 +2130,28 @@ fn atomic_write(destination: &Path, contents: &[u8]) -> Result<(), Error> {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+fn reject_symlinked_ancestors(root: &Path, destination: &Path) -> Result<(), Error> {
+    let relative = destination
+        .strip_prefix(root)
+        .map_err(|_| Error::Parse("scaffold_destination_outside_repository".to_string()))?;
+    let mut ancestor = root.to_path_buf();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        ancestor.push(component);
+        match fs::symlink_metadata(&ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let path = ancestor.strip_prefix(root).unwrap_or(&ancestor).display();
+                return Err(Error::Parse(format!(
+                    "scaffold_destination_ancestor_symlink path={path}"
+                )));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 fn workflow_invokes_task_closer(contents: &str) -> bool {
