@@ -19,6 +19,7 @@ Multiple projects need dashboards on one machine, while repeated launch instruct
 
 - [ ] Starting a dashboard without a fixed port selects an available local port and prints the complete URL.
 - [ ] Repeating the launch for the same project, including after an agent session compacts or resumes, reuses the healthy existing instance instead of starting another dashboard.
+- [ ] Dashboard discovery distinguishes projects so different repositories can run simultaneously without sharing an instance or conflicting on a port.
 
 ## Subtasks
 
