@@ -17,6 +17,8 @@ Multiple projects need dashboards on one machine, while repeated launch instruct
 
 ## Acceptance criteria
 
+- [ ] Starting a dashboard without a fixed port selects an available local port and prints the complete URL.
+
 ## Subtasks
 
 ## Notes / Log
