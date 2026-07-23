@@ -1436,11 +1436,16 @@ impl GitRepository {
             if !entry.file_type()?.is_file() || !supported_extension {
                 continue;
             }
-            if workflow_invokes_task_closer(&fs::read_to_string(&path)?) {
-                let relative = path
-                    .strip_prefix(&self.root)
-                    .map_err(|_| Error::Parse("scaffold_path_outside_repository".to_string()))?;
-                return Ok(Some(path_to_entry(relative)?));
+            let relative = path
+                .strip_prefix(&self.root)
+                .map_err(|_| Error::Parse("scaffold_path_outside_repository".to_string()))?;
+            let relative = path_to_entry(relative)?;
+            let contents = fs::read(&path)?;
+            let contents = std::str::from_utf8(&contents).map_err(|_| {
+                Error::Parse(format!("scaffold_workflow_invalid_utf8 path={relative}"))
+            })?;
+            if workflow_invokes_task_closer(contents) {
+                return Ok(Some(relative));
             }
         }
         Ok(None)
@@ -2080,7 +2085,7 @@ fn workflow_invokes_task_closer(contents: &str) -> bool {
     let lines = contents.lines().collect::<Vec<_>>();
     for (jobs_index, line) in lines.iter().enumerate() {
         let jobs_trimmed = line.trim_start();
-        if jobs_trimmed != "jobs:" {
+        if trim_unquoted_comment(jobs_trimmed) != "jobs:" {
             continue;
         }
         let jobs_indentation = line.len() - jobs_trimmed.len();
@@ -2093,7 +2098,7 @@ fn workflow_invokes_task_closer(contents: &str) -> bool {
             if steps_indentation <= jobs_indentation {
                 break;
             }
-            if steps_trimmed != "steps:" {
+            if trim_unquoted_comment(steps_trimmed) != "steps:" {
                 continue;
             }
             if steps_invoke_task_closer(&lines, steps_index + 1, steps_indentation) {
@@ -2151,7 +2156,7 @@ fn run_field_invokes_task_closer(
     let Some(value) = field.strip_prefix("run:") else {
         return false;
     };
-    let value = value.trim();
+    let value = trim_unquoted_comment(value.trim());
     if value.starts_with('|') || value.starts_with('>') {
         for block_line in &lines[index + 1..] {
             let block_trimmed = block_line.trim_start();
@@ -2173,11 +2178,46 @@ fn run_field_invokes_task_closer(
 }
 
 fn shell_line_invokes_task_closer(line: &str) -> bool {
-    let line = line
+    let line = trim_unquoted_comment(line.trim())
         .trim()
         .trim_matches(|character| matches!(character, '"' | '\''));
     let line = line.strip_prefix("exec ").unwrap_or(line);
     line == "tiber close-from-trailers"
+}
+
+fn trim_unquoted_comment(value: &str) -> &str {
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in value.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quote == Some('"') && character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if matches!(character, '"' | '\'') {
+            quote = if quote == Some(character) {
+                None
+            } else if quote.is_none() {
+                Some(character)
+            } else {
+                quote
+            };
+            continue;
+        }
+        if character == '#'
+            && quote.is_none()
+            && value[..index]
+                .chars()
+                .next_back()
+                .is_none_or(char::is_whitespace)
+        {
+            return value[..index].trim_end();
+        }
+    }
+    value
 }
 
 fn stem_parts(stem: &str) -> Option<(&str, &str)> {

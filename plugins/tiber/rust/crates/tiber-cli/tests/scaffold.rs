@@ -101,6 +101,7 @@ fn scaffold_repo_detects_an_equivalent_existing_workflow() {
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
     assert!(stdout.contains("already configured .github/workflows/close-tasks.yaml"));
     assert!(!stdout.contains(".github/workflows/tiber-close-from-trailers.yml"));
+    assert!(stdout.contains("would write .githooks/post-commit.tiber"));
 
     let apply = repo.tiber(["scaffold", "repo", "--apply"]);
 
@@ -115,6 +116,55 @@ fn scaffold_repo_detects_an_equivalent_existing_workflow() {
         .join("workflows")
         .join("tiber-close-from-trailers.yml")
         .exists());
+    assert!(repo
+        .path()
+        .join(".githooks")
+        .join("post-commit.tiber")
+        .exists());
+}
+
+#[test]
+fn scaffold_repo_detects_equivalent_workflow_with_inline_comments() {
+    let repo = TempRepo::initialized();
+    let workflow_path = repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("close-tasks.yaml");
+    fs::create_dir_all(workflow_path.parent().expect("workflow parent"))
+        .expect("create workflow directory");
+    fs::write(
+        &workflow_path,
+        "name: close tasks\non: push\njobs: # task automation\n  close:\n    steps: # close tasks\n      - run: tiber close-from-trailers # reconcile trailers\n",
+    )
+    .expect("write existing workflow");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("already configured .github/workflows/close-tasks.yaml"));
+    assert!(!stdout.contains(".github/workflows/tiber-close-from-trailers.yml"));
+    assert!(stdout.contains("would write .githooks/post-commit.tiber"));
+}
+
+#[test]
+fn scaffold_repo_reports_the_path_of_a_non_utf8_workflow() {
+    let repo = TempRepo::initialized();
+    let workflow_path = repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("generated.yml");
+    fs::create_dir_all(workflow_path.parent().expect("workflow parent"))
+        .expect("create workflow directory");
+    fs::write(&workflow_path, b"jobs:\n\xff\n").expect("write non-utf8 workflow");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert!(!dry_run.status.success());
+    let stderr = String::from_utf8(dry_run.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains(".github/workflows/generated.yml"));
 }
 
 #[test]
@@ -186,6 +236,7 @@ fn scaffold_repo_detects_an_equivalent_existing_hook() {
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
     assert!(stdout.contains("already configured .githooks/post-commit"));
     assert!(!stdout.contains(".githooks/post-commit.tiber"));
+    assert!(stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
 
     let apply = repo.tiber(["scaffold", "repo", "--apply"]);
 
@@ -199,6 +250,39 @@ fn scaffold_repo_detects_an_equivalent_existing_hook() {
         .join(".githooks")
         .join("post-commit.tiber")
         .exists());
+    assert!(repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("tiber-close-from-trailers.yml")
+        .exists());
+}
+
+#[test]
+fn scaffold_repo_detects_equivalent_hook_with_an_inline_comment() {
+    let repo = TempRepo::initialized();
+    repo.git(["config", "core.hooksPath", ".githooks"]);
+    let hook_path = repo.path().join(".githooks").join("post-commit");
+    fs::create_dir_all(hook_path.parent().expect("hook parent")).expect("create hook directory");
+    fs::write(
+        &hook_path,
+        "#!/usr/bin/env bash\ntiber close-from-trailers # reconcile trailers\n",
+    )
+    .expect("write existing hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))
+            .expect("make hook executable");
+    }
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("already configured .githooks/post-commit"));
+    assert!(!stdout.contains(".githooks/post-commit.tiber"));
+    assert!(stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
 }
 
 #[test]
