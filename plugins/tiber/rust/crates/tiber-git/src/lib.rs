@@ -1304,11 +1304,24 @@ impl GitRepository {
             pending_files.extend(conflicts.iter().cloned());
         }
         if apply {
-            for (path, contents) in &pending_files {
+            for (path, _contents) in &pending_files {
                 let destination = self.root.join(path);
+                match fs::symlink_metadata(&destination) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        return Err(Error::Parse(format!(
+                            "scaffold_destination_symlink path={path}"
+                        )));
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
                 if let Some(parent) = destination.parent() {
                     fs::create_dir_all(parent)?;
                 }
+            }
+            for (path, contents) in &pending_files {
+                let destination = self.root.join(path);
                 fs::write(destination, contents)?;
                 messages.push(format!("wrote {path}"));
             }
