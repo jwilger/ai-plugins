@@ -12,6 +12,9 @@ if (!command) {
 
 const projectRoot = process.env.FINAL_REVIEW_TEST_PROJECT_ROOT;
 const routingRoot = process.env.FINAL_REVIEW_ROUTING_PROJECT_ROOT;
+const stateRoot =
+  process.env.FINAL_REVIEW_TEST_STATE_ROOT ??
+  `${projectRoot}/.development-discipline-state`;
 if (!projectRoot || !routingRoot) {
   throw new Error("final-review test project roots are required");
 }
@@ -29,7 +32,7 @@ const routingBaselineCommit = execFileSync(
 const child = spawn(command, args, {
   env: {
     ...process.env,
-    XDG_STATE_HOME: `${projectRoot}/.development-discipline-state`,
+    XDG_STATE_HOME: stateRoot,
   },
   stdio: ["pipe", "pipe", "inherit"],
 });

@@ -47,11 +47,16 @@ differs from the stored hash, provide `current_changed_files` so the next review
 iteration sees the current diff.
 Session identifiers are bounded to 128 characters, and requested clean
 iterations are bounded to 3-10 to cap assignment fanout.
-The caller carries returned state between calls, but the stdio MCP process owns
-the authoritative copy. Keep one process alive for the full review. Unknown,
-evicted, stale, or mutated session state fails closed; advancing a completed
-session also fails. The coordinator retains at most 32 active sessions with LRU
-eviction.
+The caller carries returned state between calls, while the coordinator stores a
+project-scoped authoritative copy in its local SQLite state database. A new
+stdio MCP process automatically resumes an exact caller-carried state, including
+pending verifier and delta-risk assignments. Creation is insert-only and every
+transition uses a durable revision compare-and-swap, so concurrent processes
+cannot admit duplicate sessions or overwrite each other's progress. Unknown,
+evicted, stale, or mutated state fails closed with sanitized expected/received
+fingerprints and a restart, resume, or abandon recovery action; advancing a
+completed session also fails. Each process retains at most 32 active sessions,
+and durable storage is bounded independently.
 When an advance returns `verifier_required`, the server retains the pending
 assignment ID and exact core pre-verifier arguments. Until the caller resubmits
 the same lens, scope, and caller-decision arguments plus the matching

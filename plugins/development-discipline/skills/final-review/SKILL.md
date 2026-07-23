@@ -332,20 +332,24 @@ policy.
    and call `final_review.assess_risk` with the full `baseline_commit`. Launch
    and close its one scout, append the required caller attestation, then submit
    that assessment to `final_review.plan` with the identical baseline, scope,
-   inventory, hash, and evidence. Keep that stdio MCP process alive for the
-   entire cycle; later calls carry state that the server checks against its
-   authoritative session copy. `final_review.plan` rejects any call that omits
+   inventory, hash, and evidence. Later calls carry state that the server checks
+   against its durable authoritative session copy. Keep the stdio MCP process
+   alive when practical; after an ordinary process restart, resubmit the latest
+   unchanged state and the coordinator resumes it automatically.
+   `final_review.plan` rejects any call that omits
    the bound scout assessment, baseline, or shared evidence.
 
    The scout always assesses every assigned dimension. A low overall profile
    may still report several concrete low or uncertain dimensions; the
    coordinator deterministically schedules at most one targeted lens instead
    of rejecting the complete assessment. If `final_review.plan` reports
-   `risk_assessment_identity_mismatch`, discard that assessment, rerun
-   `final_review.assess_risk` with the exact intended plan contract in the same
-   session, launch its replacement scout, and resubmit that new assessment
-   unchanged. The diagnostic names the mismatched identity field but never
-   exposes the expected private value.
+   `risk_assessment_identity_mismatch`, compare its sanitized expected and
+   received assignment fingerprints. Resume the matching assessment when it is
+   still available; otherwise rerun `final_review.assess_risk` with the exact
+   intended plan contract, launch its replacement scout, and resubmit that new
+   assessment unchanged. Abandon a stale assessment instead of editing its
+   identity fields. The diagnostic names the mismatched field and fingerprints
+   but never exposes either raw identity.
 
    The scout may report exceptional-risk triggers only with these exact IDs:
    `destructive-or-irreversible-operation`,
@@ -430,9 +434,9 @@ policy.
    already-known, and report-only observations do not reset progress when the
    reviewed diff is unchanged.
 
-This skill requires a harness that can launch fresh-context subagents and keep
-one MCP process alive through the review. If either capability is unavailable,
-stop and report that final-review cannot be completed to this standard. The MCP
+This skill requires a harness that can launch fresh-context subagents. If that
+capability is unavailable, stop and report that final-review cannot be
+completed to this standard. The MCP
 rejects stale or mutated caller-carried state, enforces result keys/sets,
 verifier gates, and terminal completion, validates the caller's explicit
 model/fresh-context/shutdown attestations, and binds model routing into the

@@ -117,6 +117,16 @@ function normalizeReviewState(payload) {
 }
 
 function normalizeResponse(response) {
+  if (typeof response?.error?.message === "string") {
+    const normalizedMessage = response.error.message.replaceAll(
+      /((?:expected|received)_(?:state|assignment)_fingerprint=)[0-9a-f]{16}/g,
+      "$1<opaque-fingerprint>",
+    );
+    if (normalizedMessage !== response.error.message) {
+      response.error.message = normalizedMessage;
+      return true;
+    }
+  }
   const content = response?.result?.content;
   if (!Array.isArray(content)) {
     return false;
