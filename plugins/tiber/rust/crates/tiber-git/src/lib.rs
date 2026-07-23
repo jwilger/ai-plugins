@@ -3,7 +3,7 @@ use std::fmt;
 use std::fs;
 use std::fs::OpenOptions;
 #[cfg(unix)]
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1248,13 +1248,14 @@ impl GitRepository {
             }
             gitignore.push_str("# tiber local working copy\n.tasks\n");
         }
-        let mut files = vec![
-            (".gitignore", gitignore),
-            (
+        let mut files = vec![(".gitignore", gitignore)];
+        let equivalent_hook = self.equivalent_task_closing_hook()?;
+        if equivalent_hook.is_none() {
+            files.push((
                 ".githooks/post-commit.tiber",
                 "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n".to_string(),
-            ),
-        ];
+            ));
+        }
         let equivalent_workflow = self.equivalent_task_closing_workflow()?;
         if equivalent_workflow.is_none() {
             files.push((
@@ -1282,7 +1283,7 @@ impl GitRepository {
                     .map(|(path, _contents)| format!("would write {path}")),
             );
         }
-        if let Some(path) = equivalent_workflow {
+        for path in [equivalent_hook, equivalent_workflow].into_iter().flatten() {
             messages.push(format!("already configured {path}"));
         }
         Ok(messages)
@@ -1402,6 +1403,29 @@ impl GitRepository {
                     .map_err(|_| Error::Parse("scaffold_path_outside_repository".to_string()))?;
                 return Ok(Some(path_to_entry(relative)?));
             }
+        }
+        Ok(None)
+    }
+
+    fn equivalent_task_closing_hook(&self) -> Result<Option<String>, Error> {
+        let hooks = PathBuf::from(
+            self.git(["rev-parse", "--path-format=absolute", "--git-path", "hooks"])?
+                .trim(),
+        );
+        let hook = hooks.join("post-commit");
+        if !hook.is_file() || !is_executable(&hook)? {
+            return Ok(None);
+        }
+        let contents = fs::read(&hook)?;
+        let Ok(contents) = std::str::from_utf8(&contents) else {
+            return Ok(None);
+        };
+        if contents.lines().any(shell_line_invokes_task_closer) {
+            let path = match hook.strip_prefix(&self.root) {
+                Ok(relative) => path_to_entry(relative)?,
+                Err(_) => hook.display().to_string(),
+            };
+            return Ok(Some(path));
         }
         Ok(None)
     }
@@ -2809,6 +2833,16 @@ fn install_launcher(launcher: &Path, installed: &Path) -> Result<(), Error> {
 fn create_symlink(target: &Path, link: &Path) -> Result<(), Error> {
     symlink(target, link)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> Result<bool, Error> {
+    Ok(fs::metadata(path)?.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &Path) -> Result<bool, Error> {
+    Ok(path.is_file())
 }
 
 fn git_status<I, S>(args: I, cwd: Option<&Path>) -> Result<(), Error>

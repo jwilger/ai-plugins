@@ -166,6 +166,85 @@ fn scaffold_repo_does_not_treat_action_inputs_as_automation() {
 }
 
 #[test]
+fn scaffold_repo_detects_an_equivalent_existing_hook() {
+    let repo = TempRepo::initialized();
+    repo.git(["config", "core.hooksPath", ".githooks"]);
+    let hook_path = repo.path().join(".githooks").join("post-commit");
+    fs::create_dir_all(hook_path.parent().expect("hook parent")).expect("create hook directory");
+    let hook = "#!/usr/bin/env bash\nset -euo pipefail\ntiber close-from-trailers\n";
+    fs::write(&hook_path, hook).expect("write existing hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))
+            .expect("make hook executable");
+    }
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("already configured .githooks/post-commit"));
+    assert!(!stdout.contains(".githooks/post-commit.tiber"));
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert_success(apply);
+    assert_eq!(
+        fs::read_to_string(&hook_path).expect("read existing hook"),
+        hook
+    );
+    assert!(!repo
+        .path()
+        .join(".githooks")
+        .join("post-commit.tiber")
+        .exists());
+}
+
+#[test]
+fn scaffold_repo_does_not_treat_an_inactive_hook_file_as_automation() {
+    let repo = TempRepo::initialized();
+    repo.git(["config", "core.hooksPath", ".githooks"]);
+    let hook_path = repo.path().join(".githooks").join("post-commit");
+    fs::create_dir_all(hook_path.parent().expect("hook parent")).expect("create hook directory");
+    fs::write(
+        hook_path,
+        "#!/usr/bin/env bash\ntiber close-from-trailers\n",
+    )
+    .expect("write non-executable hook");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("would write .githooks/post-commit.tiber"));
+    assert!(!stdout.contains("already configured .githooks/post-commit"));
+}
+
+#[test]
+fn scaffold_repo_resolves_hooks_from_a_linked_worktree() {
+    let repo = TempRepo::initialized();
+    let hook_path = repo.path().join(".git").join("hooks").join("post-commit");
+    let hook = "#!/usr/bin/env bash\ntiber close-from-trailers\n";
+    fs::write(&hook_path, hook).expect("write common hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))
+            .expect("make hook executable");
+    }
+    let linked = repo.path().join(".worktrees").join("feature");
+    repo.git(["worktree", "add", ".worktrees/feature", "-b", "feature"]);
+
+    let dry_run = repo.tiber_at(&linked, ["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("already configured"));
+    assert!(!stdout.contains(".githooks/post-commit.tiber"));
+}
+
+#[test]
 fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join("justfile"), "test:\n  cargo test\n")
