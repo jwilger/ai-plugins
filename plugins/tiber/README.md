@@ -200,6 +200,11 @@ blindly. Preserve both sides, resolve the conflict deliberately, then rerun:
 tiber sync
 ```
 
+Repository writes are serialized across concurrent clients. During upgrades,
+current clients also hold the legacy `tiber.lock` sentinel while using their
+advisory sidecar lock, so an older installed Tiber and the current version
+cannot mutate the board at the same time.
+
 `close-from-trailers` synchronizes the authoritative board before resolving
 `Closes:` lines from the current `HEAD` commit. It prints `closed <task-id>` for
 each published transition and exits nonzero when a requested task is missing,
@@ -221,7 +226,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.12.0` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.12.1` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -272,10 +277,10 @@ dashboard instances.
 Use `tiber dashboard serve` when you only want the URL. Request a stable port
 with `--port <port>` or the backwards-compatible `TIBER_DASHBOARD_PORT`
 environment variable; the CLI flag takes precedence. An unavailable requested
-port fails clearly, and requesting a different port while that project's
+port or invalid environment value fails clearly, and requesting a different port while that project's
 dashboard is already running reports the conflict instead of starting a second
-server. If the browser opener is unavailable, `--open` warns but leaves the
-dashboard running at the printed URL.
+server. If the browser opener is unavailable or exits unsuccessfully, `--open`
+warns but leaves the dashboard running at the printed URL.
 
 The dashboard lets you inspect the board, reorder backlog priority, view task
 files, and browse repository docs. It exposes a read-only `/events` SSE stream

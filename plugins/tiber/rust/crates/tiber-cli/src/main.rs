@@ -585,13 +585,25 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
         Command::Dashboard(DashboardArgs {
             command: DashboardCommand::Serve(DashboardServeArgs { port, open }),
         }) => {
-            let requested_port = port
-                .or_else(|| {
-                    env::var("TIBER_DASHBOARD_PORT")
-                        .ok()
-                        .and_then(|value| value.parse::<u16>().ok())
-                })
-                .filter(|port| *port != 0);
+            let requested_port = match port {
+                Some(0) => None,
+                Some(port) => Some(port),
+                None => match env::var("TIBER_DASHBOARD_PORT") {
+                    Ok(value) => Some(value.parse::<u16>().map_err(|_| {
+                        tiber_git::Error::Parse(format!(
+                            "dashboard_port_invalid source=TIBER_DASHBOARD_PORT value={value}"
+                        ))
+                    })?)
+                    .filter(|port| *port != 0),
+                    Err(env::VarError::NotPresent) => None,
+                    Err(env::VarError::NotUnicode(_)) => {
+                        return Err(tiber_git::Error::Parse(
+                            "dashboard_port_invalid source=TIBER_DASHBOARD_PORT value=non-unicode"
+                                .to_string(),
+                        ));
+                    }
+                },
+            };
             let startup_lock = tiber_git::acquire_dashboard_startup_lock()?;
             let runtime_dir = tiber_git::dashboard_runtime_dir()?;
             let state_path = runtime_dir.join("dashboard");
@@ -614,7 +626,15 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
                 let addr = format!("127.0.0.1:{port}");
                 let listener = tokio::net::TcpListener::bind(&addr)
                     .await
-                    .map_err(tiber_git::Error::Io)?;
+                    .map_err(|error| {
+                        if let Some(requested) = requested_port {
+                            tiber_git::Error::Parse(format!(
+                                "dashboard_port_unavailable requested={requested} source={error}"
+                            ))
+                        } else {
+                            tiber_git::Error::Io(error)
+                        }
+                    })?;
                 let addr = listener.local_addr().map_err(tiber_git::Error::Io)?;
                 let token = dashboard_token();
                 let state = DashboardState {
@@ -902,7 +922,15 @@ fn open_dashboard(url: &str) -> Result<(), tiber_git::Error> {
             ))
         })?;
     std::thread::spawn(move || {
-        let _ = child.wait();
+        match child.wait() {
+            Ok(status) if status.success() => {}
+            Ok(status) => eprintln!(
+                "tiber.dashboard_browser_open_failed dashboard_continues=true program={program} status={status}"
+            ),
+            Err(error) => eprintln!(
+                "tiber.dashboard_browser_open_failed dashboard_continues=true program={program} source={error}"
+            ),
+        }
     });
     Ok(())
 }
