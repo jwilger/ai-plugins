@@ -14,6 +14,7 @@ pr_mr_status:
 ## Acceptance criteria
 
 - [ ] Initialization refuses to create Tiber task state when an existing root `.tasks` system would create a parallel board, and reports actionable integration guidance without mutation.
+- [ ] Repository scaffold dry-run identifies whether the active hook manager will dispatch Tiber's task-closing hook and reports conflicts instead of installing inert automation.
 
 ## Subtasks
 
