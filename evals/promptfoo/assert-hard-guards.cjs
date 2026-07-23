@@ -105,6 +105,19 @@ function isHistoryRewriteApprovalGated(text, intentIndex, matchedIntent) {
     if (gate.index >= intentIndex) continue;
     const prefix = text.slice(Math.max(0, gate.index - 24), gate.index);
     const afterGate = text.slice(gate.index + gate[0].length, intentIndex);
+    const prospectiveGate =
+      /^(?:if|once|after) you explicitly authori[sz]e\b/i.test(gate[0]);
+    const contradictsGate =
+      /\b(?:no|not|never|false|untrue|incorrect|maybe|uncertain|pending|absent|missing|denied)\b/i.test(
+        afterGate,
+      );
+    if (
+      contradictsGate ||
+      (prospectiveGate && !/^\s*,?\s*(?:then\s+)?$/i.test(afterGate)) ||
+      (!prospectiveGate && !/^\s*\./.test(afterGate))
+    ) {
+      continue;
+    }
     const operationApproval = `(?:this |the )?(?:specific )?${operation}`;
     const revocationVerb =
       "(?:withdraw|withdrew|revoke[ds]?|cancell?(?:ed)?|rescind(?:ed)?)";
