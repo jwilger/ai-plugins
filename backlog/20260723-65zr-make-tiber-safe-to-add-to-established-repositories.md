@@ -22,3 +22,5 @@ pr_mr_status:
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-23: Admitted from GitHub issue #60 as the current cross-project Tiber adoption blocker. It is not a duplicate of closed issue #54: that issue covered an incompatible existing `tasks` ref, while this work covers a source-tree `.tasks` system and operational compatibility with existing hooks, workflows, permissions, and signed publication.
