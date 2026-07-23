@@ -70,8 +70,43 @@ Backlog tasks are unclaimed work, not informal reservations.
   need to pass `.tasks` paths, status directories, or Markdown section names.
 
 This keeps task state versioned, syncable, and separate from the source branch.
-Inspect it through `tiber show`, `tiber list`, the read-only dashboard, or normal
-Git commands such as `git show tasks:order.md`.
+Inspect it through `tiber show`, `tiber list`, the dashboard, or normal Git
+commands such as `git show tasks:order.md`.
+
+## Backlog Capacity
+
+Projects may set a maximum queued backlog in the repository-owned
+`.tiber.toml`:
+
+```toml
+[backlog]
+max_queued = 5
+```
+
+Only tasks in `backlog` count. The active `in-progress` task and tasks in
+`done` or `abandoned` do not. Tiber enforces the limit when creating a task,
+reopening completed or abandoned work into `backlog`, or moving active work
+back into `backlog`. CLI and stdio MCP calls use the same enforcement. The
+dashboard exposes no admission route; backlog priority reordering is
+count-neutral.
+
+When the queue is full, Tiber refuses before persisting the admission and
+reports the current count and limit. Choose one explicit outcome: replace a
+lower-value queued task, combine genuinely overlapping work, or reject the
+candidate. Do not retry unchanged, raise the limit merely to fit work, or keep
+an overflow, icebox, shadow, or hidden backlog.
+
+Existing projects require no migration: a missing `.tiber.toml` or omitted
+`max_queued` setting means unlimited capacity. Adding a limit to an already
+over-capacity project does not block moves out of `backlog`; reduce the queue
+before admitting more work. Invalid configuration fails closed for admission
+operations. Fix or remove `.tiber.toml` to recover; removing the setting rolls
+back to unlimited capacity.
+
+The replenishment review threshold remains an operating-procedure concern,
+not Tiber configuration. It triggers judgment about whether to look for
+candidates and does not define a storage invariant, so Tiber mechanically
+enforces only the maximum queued count.
 
 ## New Task Skill
 
@@ -173,7 +208,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.10.4` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.11.0` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -209,16 +244,17 @@ discovered through MCP before retrying a failed write.
 
 ## Dashboard
 
-The dashboard is a read-only browser view:
+The dashboard is a browser view with count-neutral backlog priority reordering:
 
 ```shell
 tiber dashboard serve
 ```
 
-Open `http://127.0.0.1:7417/` to inspect the board, task files, and repository
-docs. The dashboard exposes a read-only `/events` SSE stream for live refreshes,
-but intentionally does not expose write routes or `/mcp`. Task changes go
-through the CLI or stdio MCP tools.
+Open `http://127.0.0.1:7417/` to inspect the board, reorder backlog priority,
+view task files, and browse repository docs. The dashboard exposes a read-only
+`/events` SSE stream for live refreshes and a count-neutral priority mutation,
+but intentionally has no create, status-transition, general task-write, or
+`/mcp` route. Admission changes go through the CLI or stdio MCP tools.
 
 ## Scaffold Workflow
 

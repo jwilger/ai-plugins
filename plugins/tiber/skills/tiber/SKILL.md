@@ -35,7 +35,9 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - Run `tiber init` only for explicit setup or when a requested task operation
   needs an initialized board.
 - Use CLI/MCP writes, not direct edits to `.tasks` files or `order.md`.
-- Dashboard mode is read-only; all writes go through CLI or stdio MCP tools.
+- The dashboard can reorder backlog priority, which does not change capacity.
+  It has no create or status-transition route. Admission writes go through CLI
+  or stdio MCP tools and share the same capacity enforcement.
 - Invoke the `tiber:new-task` skill for quick backlog capture when the user
   wants a new task recorded from chat. That skill writes only through structured
   Tiber MCP tools and leaves the task in `backlog` unless the user explicitly
@@ -49,6 +51,13 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - Before actively working on an existing Tiber task, move it to `in-progress`
   with `tiber transition <ref> in-progress`; do not leave active work in the
   backlog as an informal reservation.
+- When `.tiber.toml` sets `[backlog].max_queued`, only `backlog` tasks count.
+  The active `in-progress` task does not count. Creating, reopening, or moving
+  work into `backlog` refuses once the limit is full across CLI and MCP.
+- Treat `tiber.backlog_capacity_exceeded` as an admission decision, not a
+  retryable sync failure. Do not create overflow, icebox, shadow, or hidden
+  work. Require the user to replace a lower-value queued task, combine
+  genuinely overlapping work, or reject the candidate.
 - Treat write-sync conflicts as hard failures: do not force push, choose local,
   or silently overwrite `tasks`. Preserve both sides, resolve deliberately, then
   rerun `tiber sync`.
