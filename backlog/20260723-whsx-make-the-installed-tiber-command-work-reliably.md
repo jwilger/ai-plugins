@@ -17,6 +17,8 @@ A broken installed command undermines the normal setup and upgrade experience an
 
 ## Acceptance criteria
 
+- [ ] An installation applied to a supported target directory produces a Tiber command that launches successfully.
+
 ## Subtasks
 
 ## Notes / Log
