@@ -17,6 +17,7 @@ pr_mr_status:
 - [ ] Repository scaffold dry-run identifies whether the active hook manager will dispatch Tiber's task-closing hook and reports conflicts instead of installing inert automation.
 - [ ] Generated task-closing workflow uses a pinned intended revision, declares least-required explicit permissions, and supports or clearly refuses repositories whose publication policy requires signed commits.
 - [ ] Existing dry-run, conflict, existing-target, and atomic preservation guarantees remain covered by tests.
+- [ ] Documentation explains how established repositories can safely adopt Tiber without replacing or bypassing their current task, hook, workflow, permission, or signing policies.
 
 ## Subtasks
 
