@@ -3,6 +3,7 @@ mod support;
 use std::io::ErrorKind;
 use std::io::{BufRead, BufReader};
 use std::net::TcpListener;
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -262,6 +263,170 @@ fn dashboard_port_zero_reuses_the_automatically_selected_port() {
             && String::from_utf8(second.stdout).expect("dashboard output should be utf8")
                 == format!("tiber dashboard already running on {url}\n"),
         "port zero should retain automatic-port reuse semantics"
+    );
+}
+
+#[test]
+fn dashboard_opens_the_browser_only_for_a_genuinely_new_launch() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let browser_bin = repo.path().join("browser-bin");
+    std::fs::create_dir(&browser_bin).expect("create fake browser bin");
+    let opener = if cfg!(target_os = "macos") {
+        browser_bin.join("open")
+    } else {
+        browser_bin.join("xdg-open")
+    };
+    std::fs::write(
+        &opener,
+        "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$TIBER_BROWSER_CAPTURE\"\n",
+    )
+    .expect("write fake browser opener");
+    std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755))
+        .expect("make fake browser opener executable");
+    let capture = repo.path().join("browser-calls");
+    let path = format!(
+        "{}:{}",
+        browser_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let mut first = dashboard_command_with_args(&repo, ["dashboard", "serve", "--open"])
+        .env("PATH", &path)
+        .env("TIBER_BROWSER_CAPTURE", &capture)
+        .spawn()
+        .expect("start and open dashboard");
+    let stdout = first.stdout.take().expect("dashboard stdout");
+    let first_line = BufReader::new(stdout)
+        .lines()
+        .next()
+        .transpose()
+        .expect("read dashboard output")
+        .expect("new dashboard should print URL");
+    let second = dashboard_command_with_args(&repo, ["dashboard", "serve", "--open"])
+        .env("PATH", path)
+        .env("TIBER_BROWSER_CAPTURE", &capture)
+        .output()
+        .expect("repeat dashboard open");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !capture.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    stop_dashboard(&mut first);
+
+    let url = first_line
+        .strip_prefix("tiber dashboard listening on ")
+        .expect("first launch should print URL");
+    assert!(
+        second.status.success()
+            && std::fs::read_to_string(capture).expect("read browser calls") == format!("{url}\n"),
+        "the browser opener must run exactly once for the new dashboard"
+    );
+}
+
+#[test]
+fn dashboard_keeps_serving_when_the_browser_opener_is_unavailable() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let empty_path = repo.path().join("empty-path");
+    std::fs::create_dir(&empty_path).expect("create empty executable path");
+    let git = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|directory| directory.join("git"))
+        .find(|candidate| candidate.is_file())
+        .expect("find git executable");
+    std::os::unix::fs::symlink(git, empty_path.join("git"))
+        .expect("retain git without a browser opener");
+
+    let mut child = dashboard_command_with_args(&repo, ["dashboard", "serve", "--open"])
+        .env("PATH", empty_path)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start dashboard without browser opener");
+    let stdout = child.stdout.take().expect("dashboard stdout");
+    let stderr = child.stderr.take().expect("dashboard stderr");
+    let line = BufReader::new(stdout)
+        .lines()
+        .next()
+        .transpose()
+        .expect("read dashboard output");
+    let still_running = child.try_wait().expect("read dashboard status").is_none();
+    let warning = BufReader::new(stderr)
+        .lines()
+        .next()
+        .transpose()
+        .expect("read browser warning")
+        .expect("browser failure should print a warning");
+    stop_dashboard(&mut child);
+
+    assert!(
+        still_running
+            && line.is_some_and(|line| {
+                line.starts_with("tiber dashboard listening on http://127.0.0.1:")
+            })
+            && warning.contains("dashboard_continues=true")
+            && !warning.contains("http://"),
+        "browser opener failure must not stop the dashboard"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn dashboard_reaps_the_browser_opener_process() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let browser_bin = repo.path().join("browser-bin");
+    std::fs::create_dir(&browser_bin).expect("create fake browser bin");
+    let opener = browser_bin.join("xdg-open");
+    std::fs::write(
+        &opener,
+        "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$TIBER_BROWSER_PID_CAPTURE\"\n",
+    )
+    .expect("write fake browser opener");
+    std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755))
+        .expect("make fake browser opener executable");
+    let capture = repo.path().join("browser-pid");
+    let path = format!(
+        "{}:{}",
+        browser_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let mut dashboard = dashboard_command_with_args(&repo, ["dashboard", "serve", "--open"])
+        .env("PATH", path)
+        .env("TIBER_BROWSER_PID_CAPTURE", &capture)
+        .spawn()
+        .expect("start dashboard");
+    let stdout = dashboard.stdout.take().expect("dashboard stdout");
+    let _line = BufReader::new(stdout)
+        .lines()
+        .next()
+        .transpose()
+        .expect("read dashboard output")
+        .expect("dashboard should print URL");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !capture.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let opener_pid = std::fs::read_to_string(capture)
+        .expect("read browser opener pid")
+        .trim()
+        .to_string();
+    let process_path = std::path::PathBuf::from(format!("/proc/{opener_pid}"));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while process_path.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let reaped = !process_path.exists();
+    let dashboard_still_running = dashboard
+        .try_wait()
+        .expect("read dashboard status")
+        .is_none();
+    stop_dashboard(&mut dashboard);
+
+    assert!(
+        reaped && dashboard_still_running,
+        "dashboard must reap the browser opener without exiting"
     );
 }
 
