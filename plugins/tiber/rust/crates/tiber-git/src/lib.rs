@@ -5,7 +5,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 #[cfg(unix)]
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -3258,21 +3258,32 @@ fn tiber_launcher_path() -> Result<PathBuf, Error> {
     Ok(source_plugin_root.join("bin").join("tiber"))
 }
 
-#[cfg(unix)]
 fn install_launcher(launcher: &Path, installed: &Path) -> Result<(), Error> {
-    create_symlink(launcher, installed)
-}
+    static INSTALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(not(unix))]
-fn install_launcher(launcher: &Path, installed: &Path) -> Result<(), Error> {
-    fs::copy(launcher, installed)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn create_symlink(target: &Path, link: &Path) -> Result<(), Error> {
-    symlink(target, link)?;
-    Ok(())
+    let launcher = fs::canonicalize(launcher)?;
+    let launcher = path_to_entry(&launcher)?;
+    let launcher = launcher.replace('\'', "'\"'\"'");
+    let parent = installed
+        .parent()
+        .ok_or_else(|| Error::Parse("install_target_parent_missing=true".to_string()))?;
+    let sequence = INSTALL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let staged = parent.join(format!(".tiber-install-{}-{sequence}", std::process::id()));
+    let result = (|| -> Result<(), Error> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)?;
+        write!(file, "#!/usr/bin/env bash\nexec '{launcher}' \"$@\"\n")?;
+        #[cfg(unix)]
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
+        file.sync_all()?;
+        fs::hard_link(&staged, installed)?;
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&staged);
+    result
 }
 
 #[cfg(unix)]
