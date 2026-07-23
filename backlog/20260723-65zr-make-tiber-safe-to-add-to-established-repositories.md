@@ -9,6 +9,8 @@ pr_mr_status:
 
 ## Summary
 
+Established repositories can already have task data, hooks, workflow conventions, permissions, and signing requirements. Tiber setup must recognize and preserve those systems instead of creating a parallel board or scaffold that appears installed but cannot operate safely.
+
 ## Context / Why
 
 ## Acceptance criteria
