@@ -34,3 +34,5 @@ Prompt guidance cannot prevent every caller or simultaneous write from overfilli
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-23: Delivered Tiber 0.11.0 backlog capacity enforcement through main at 9070292f. Added repository-owned max_queued configuration, backlog-only counting, CLI/MCP admission refusal for create and backlog transitions, cross-clone CAS revalidation with bounded retries, and rollback that preserves unrelated local-only tasks and prior transition status. Documented replace/combine/reject handling, migration/recovery, dashboard count-neutral priority behavior, and SOP-only replenishment threshold. Verification: full serialized just ci passed (44 mutation classifications and 574 Bats tests), final targeted Claude+Codex behavior eval eval-3Uo-2026-07-23T16:24:32 passed 2/2, release artifacts/checksums rebuilt, final review clean with bounded retry-load risk accepted as proportionate, and GitHub CI run 30025775123 reached terminal success for 9070292f.
