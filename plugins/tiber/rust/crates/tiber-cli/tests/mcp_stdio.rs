@@ -329,7 +329,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let scaffold = read_message(&mut stdout);
     assert!(scaffold.contains(r#""id":20"#));
-    assert!(scaffold.contains("would write .gitignore"));
+    assert!(scaffold.contains("already configured .gitignore"));
 
     write_message(&mut stdin, r#"{"jsonrpc":"2.0","id":21}"#);
     let missing_method = read_json_message(&mut stdout);
