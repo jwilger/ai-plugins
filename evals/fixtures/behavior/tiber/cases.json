@@ -606,7 +606,7 @@
     },
     "valueGate": { "mode": "none", "baselineLiftThreshold": 0 },
     "minPassRate": 1,
-    "semanticRubric": "Pass if the response runs `tiber dashboard serve --open` for the current repository, expects a new launch to select an available localhost port and print its complete URL, and expects a repeated launch for the same project to reuse the healthy existing instance without opening another browser window. It should distinguish other repositories' instances and use `--port <port>` only when a fixed port is requested. Fail if it assumes port 7417, starts an arbitrary second server after a repeated request, reuses another repository's dashboard, or opens another browser window for the reused instance.",
+    "semanticRubric": "Pass if the response states that the agent should run `tiber dashboard serve --open` for the current repository, expects a new launch to select an available localhost port and print its complete URL, and expects a repeated launch for the same project to reuse the healthy existing instance without opening another browser window. It should distinguish other repositories' instances and use `--port <port>` only when a fixed port is requested. Fail if it assumes port 7417, starts an arbitrary second server after a repeated request, reuses another repository's dashboard, or opens another browser window for the reused instance.",
     "hardAssertions": [
       {
         "id": "dashboard-launch-command",
