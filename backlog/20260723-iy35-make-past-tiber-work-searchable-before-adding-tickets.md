@@ -18,6 +18,7 @@ Without historical discovery, agents must know an old ticket identifier in advan
 ## Acceptance criteria
 
 - [ ] CLI and model-context-protocol users can list tickets by backlog, in-progress, done, or abandoned status without inspecting the tasks Git branch directly.
+- [ ] Users can search historical ticket titles and product-facing descriptions with stable structured results that include task identity and status.
 
 ## Subtasks
 
