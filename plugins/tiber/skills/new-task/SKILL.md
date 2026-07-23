@@ -123,6 +123,18 @@ preserve only a sanitized sync-error summary, do not run sync or any recovery
 against a task ref, and retry the structured Tiber MCP create tool only after
 the sync problem is resolved.
 
+If creation reports `tiber.backlog_capacity_exceeded`, no task was created.
+Do not retry, increase or bypass the configured limit, or retain the candidate
+in an overflow, icebox, shadow, or hidden queue. Report the current queued count
+and limit, then require one explicit outcome before another admission:
+
+1. replace a lower-value queued task;
+2. combine the candidate with a genuinely overlapping queued task;
+3. reject the candidate without creating a task.
+
+Use only structured Tiber MCP operations to apply the user's choice. Discovery
+alone does not create an obligation to admit the candidate.
+
 Leave the new task in `backlog` unless the user explicitly asks to start working
 on it now. If they do ask to start immediately, transition it with the
 structured Tiber MCP transition tool before editing files.

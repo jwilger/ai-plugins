@@ -1,0 +1,52 @@
+{
+  "kind": "plugin-eval-benchmark",
+  "schemaVersion": 2,
+  "version": 2,
+  "targetKind": "skill",
+  "targetName": "new-task",
+  "runner": {
+    "type": "codex-cli",
+    "model": "gpt-5.4-mini",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "extraArgs": []
+  },
+  "workspace": {
+    "sourcePath": ".",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
+  "verifiers": {
+    "commands": [
+      "test -f .plugin-eval-benchmark/new-task.md",
+      "rg -q 'No task was created' .plugin-eval-benchmark/new-task.md",
+      "rg -qi 'replace.*lower-value|lower-value.*replace' .plugin-eval-benchmark/new-task.md",
+      "rg -qi 'combine.*overlap|overlap.*combine' .plugin-eval-benchmark/new-task.md",
+      "rg -qi 'reject' .plugin-eval-benchmark/new-task.md",
+      "rg -qi 'do not.*retry|not retry|won.t retry' .plugin-eval-benchmark/new-task.md",
+      "! rg -qi '(overflow|icebox|shadow|hidden) (backlog|queue|list)' .plugin-eval-benchmark/new-task.md"
+    ]
+  },
+  "notes": [
+    "Run this benchmark from the repository root.",
+    "The scenario exercises the backlog-capacity refusal added in Tiber 0.11.0.",
+    "The verifier checks that the skill preserves the explicit replace/combine/reject decision without retrying or inventing hidden work."
+  ],
+  "setupQuestions": [],
+  "scenarios": [
+    {
+      "id": "full-backlog-admission-decision",
+      "title": "Handle a full configured backlog",
+      "purpose": "Check that new-task treats capacity refusal as a user admission decision rather than a retryable creation failure.",
+      "userInput": "Use the local Codex skill \"new-task\". In this copied workspace, inspect plugins/tiber/skills/new-task/SKILL.md and write .plugin-eval-benchmark/new-task.md with the exact response to `tiber.backlog_capacity_exceeded queued=5 max_queued=5`. The response must state whether a task was created, refuse automatic retry or any overflow/icebox/shadow/hidden backlog, and present the three explicit choices: replace a lower-value queued task, combine genuinely overlapping work, or reject the candidate.",
+      "successChecklist": [
+        "The artifact says no task was created.",
+        "It does not retry or retain hidden work.",
+        "It presents replace, combine, and reject as the explicit admission outcomes."
+      ]
+    }
+  ]
+}
