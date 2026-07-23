@@ -969,12 +969,17 @@ impl GitRepository {
     fn transition_task_unlocked(&self, task_ref: &str, status: &str) -> Result<TaskPath, Error> {
         let task_ref = self.resolve_task_ref(task_ref)?;
         let status = parse_status(status)?;
+        let tasks_dir = self.tasks_dir();
+        if status == "backlog" && !task_ref.starts_with("backlog") {
+            let backlog_dir = tasks_dir.join("backlog");
+            fs::create_dir_all(&backlog_dir)?;
+            self.ensure_backlog_capacity(&backlog_dir)?;
+        }
         let file_name = task_ref
             .file_name()
             .ok_or_else(|| Error::Parse("task_ref_filename_missing=true".to_string()))?;
         let new_ref = PathBuf::from(status).join(file_name);
 
-        let tasks_dir = self.tasks_dir();
         let from = tasks_dir.join(&task_ref);
         let to = tasks_dir.join(&new_ref);
         if let Some(parent) = to.parent() {
