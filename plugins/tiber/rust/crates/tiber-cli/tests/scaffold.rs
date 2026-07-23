@@ -82,6 +82,90 @@ fn scaffold_repo_does_not_replace_non_utf8_gitignore() {
 }
 
 #[test]
+fn scaffold_repo_detects_an_equivalent_existing_workflow() {
+    let repo = TempRepo::initialized();
+    let workflow_path = repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("close-tasks.yaml");
+    fs::create_dir_all(workflow_path.parent().expect("workflow parent"))
+        .expect("create workflow directory");
+    let workflow =
+        "name: close tasks\non: push\njobs:\n  close:\n    steps:\n      - run: tiber close-from-trailers\n";
+    fs::write(&workflow_path, workflow).expect("write existing workflow");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("already configured .github/workflows/close-tasks.yaml"));
+    assert!(!stdout.contains(".github/workflows/tiber-close-from-trailers.yml"));
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert_success(apply);
+    assert_eq!(
+        fs::read_to_string(&workflow_path).expect("read existing workflow"),
+        workflow
+    );
+    assert!(!repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("tiber-close-from-trailers.yml")
+        .exists());
+}
+
+#[test]
+fn scaffold_repo_does_not_treat_workflow_comments_as_automation() {
+    let repo = TempRepo::initialized();
+    let workflow_path = repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("build.yml");
+    fs::create_dir_all(workflow_path.parent().expect("workflow parent"))
+        .expect("create workflow directory");
+    fs::write(
+        workflow_path,
+        "name: build\n# tiber close-from-trailers\njobs:\n  build:\n    steps:\n      - run: echo build\n",
+    )
+    .expect("write unrelated workflow");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
+    assert!(!stdout.contains("already configured .github/workflows/build.yml"));
+}
+
+#[test]
+fn scaffold_repo_does_not_treat_action_inputs_as_automation() {
+    let repo = TempRepo::initialized();
+    let workflow_path = repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("action-input.yml");
+    fs::create_dir_all(workflow_path.parent().expect("workflow parent"))
+        .expect("create workflow directory");
+    fs::write(
+        workflow_path,
+        "name: action input\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: example/action@v1\n        with:\n          run: tiber close-from-trailers\n",
+    )
+    .expect("write unrelated workflow");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
+    assert!(!stdout.contains("already configured .github/workflows/action-input.yml"));
+}
+
+#[test]
 fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join("justfile"), "test:\n  cargo test\n")
