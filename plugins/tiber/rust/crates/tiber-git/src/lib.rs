@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
@@ -20,6 +21,7 @@ const TASK_ID_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
 const TASK_ID_GENERATION_ATTEMPTS: usize = 32;
 const DEFAULT_LOCK_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
 const DEFAULT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+const CONFIG_FILE: &str = ".tiber.toml";
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -280,6 +282,10 @@ pub enum Error {
     TaskCreateSyncFailed {
         source: Box<Error>,
     },
+    BacklogCapacityExceeded {
+        queued: usize,
+        max_queued: usize,
+    },
     Io(std::io::Error),
     Parse(String),
     Core(tiber_core::CoreError),
@@ -310,6 +316,13 @@ impl fmt::Display for Error {
                 "tiber.create_sync_failed recovery=\"resolve the sync error before retrying create\" source={}",
                 source.sanitized_sync_source()
             ),
+            Self::BacklogCapacityExceeded {
+                queued,
+                max_queued,
+            } => write!(
+                formatter,
+                "tiber.backlog_capacity_exceeded queued={queued} max_queued={max_queued} action=\"replace a lower-value queued ticket, combine genuinely overlapping tickets, or reject the candidate\""
+            ),
             Self::Io(error) => write!(formatter, "tiber.io_error source={error}"),
             Self::Parse(message) => write!(formatter, "tiber.parse_error {message}"),
             Self::Core(error) => write!(formatter, "{error}"),
@@ -335,6 +348,12 @@ impl Error {
             Self::TaskCreatedSyncFailed { .. } | Self::TaskCreateSyncFailed { .. } => {
                 "tiber.create_sync_failed nested=true".to_string()
             }
+            Self::BacklogCapacityExceeded {
+                queued,
+                max_queued,
+            } => format!(
+                "tiber.backlog_capacity_exceeded queued={queued} max_queued={max_queued} action=\"replace a lower-value queued ticket, combine genuinely overlapping tickets, or reject the candidate\""
+            ),
             Self::Io(_) => "tiber.io_error source_redacted=true".to_string(),
             Self::Parse(message) if message.starts_with("sync_conflict ") => {
                 format!("tiber.parse_error {message}")
@@ -361,6 +380,19 @@ impl From<tiber_core::CoreError> for Error {
 struct GitRepository {
     root: PathBuf,
     tasks_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectConfig {
+    #[serde(default)]
+    backlog: BacklogConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BacklogConfig {
+    max_queued: Option<usize>,
 }
 
 impl GitRepository {
@@ -720,6 +752,7 @@ impl GitRepository {
         let tasks_dir = self.tasks_dir();
         let backlog_dir = tasks_dir.join("backlog");
         fs::create_dir_all(&backlog_dir)?;
+        self.ensure_backlog_capacity(&backlog_dir)?;
 
         let nickname = self.unique_nickname(&title.file_stem())?;
         let id = new_task_id();
@@ -741,6 +774,37 @@ impl GitRepository {
         }
 
         Ok(TaskPath { path: stem })
+    }
+
+    fn ensure_backlog_capacity(&self, backlog_dir: &Path) -> Result<(), Error> {
+        let Some(max_queued) = self.project_config()?.backlog.max_queued else {
+            return Ok(());
+        };
+        let mut queued = 0;
+        for entry in fs::read_dir(backlog_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() && entry.path().extension() == Some(OsStr::new("md")) {
+                queued += 1;
+            }
+        }
+        if queued >= max_queued {
+            return Err(Error::BacklogCapacityExceeded { queued, max_queued });
+        }
+        Ok(())
+    }
+
+    fn project_config(&self) -> Result<ProjectConfig, Error> {
+        let path = self.root.join(CONFIG_FILE);
+        let contents = match fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ProjectConfig::default());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        toml::from_str(&contents).map_err(|error| {
+            Error::Parse(format!("config_invalid file={CONFIG_FILE} source={error}"))
+        })
     }
 
     fn unique_nickname(&self, base: &str) -> Result<String, Error> {

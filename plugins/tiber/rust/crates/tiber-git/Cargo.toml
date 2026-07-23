@@ -5,7 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 tiber-core = { path = "../tiber-core" }
+toml = "0.8"
 
 [lib]
 path = "src/lib.rs"

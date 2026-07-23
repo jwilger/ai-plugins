@@ -54,6 +54,43 @@ fn create_stores_course_shaped_task_in_backlog_and_list_prints_ordered_summary()
 }
 
 #[test]
+fn create_refuses_when_configured_backlog_capacity_is_full() {
+    let repo = TempRepo::initialized();
+    fs::write(
+        repo.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 1\n",
+    )
+    .expect("write tiber config");
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Keep this work"]));
+
+    let create = repo.tiber(["create", "Overflow work"]);
+
+    assert!(!create.status.success(), "create should refuse overflow");
+    let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
+    assert!(
+        stderr.contains("backlog_capacity_exceeded"),
+        "stderr should identify the refusal: {stderr}"
+    );
+    assert!(
+        stderr.contains("queued=1") && stderr.contains("max_queued=1"),
+        "stderr should report the current count and limit: {stderr}"
+    );
+    assert!(
+        stderr.contains("replace") && stderr.contains("combine") && stderr.contains("reject"),
+        "stderr should explain the available admission decisions: {stderr}"
+    );
+    assert!(
+        !repo
+            .git_output(["ls-tree", "-r", "--name-only", "tasks"])
+            .stdout
+            .windows(b"overflow-work".len())
+            .any(|window| window == b"overflow-work"),
+        "refused work should not be stored"
+    );
+}
+
+#[test]
 fn create_failure_after_local_task_creation_reports_created_ref_for_recovery() {
     let (origin, hook_path) = TempRepo::bare_with_rejecting_hook();
     let repo = TempRepo::initialized();
