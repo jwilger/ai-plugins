@@ -102,7 +102,7 @@
         "path": "./plugins/tiber"
       },
       "description": "Git-backed shared task tracking for agents across worktrees with tiber CLI, stdio MCP, validation, dry-run-first scaffold previews, and read-only dashboard workflows.",
-      "version": "0.10.1",
+      "version": "0.10.2",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
