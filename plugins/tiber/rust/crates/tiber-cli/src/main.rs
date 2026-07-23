@@ -1,8 +1,13 @@
 use std::convert::Infallible;
 use std::env;
 use std::ffi::OsString;
-use std::process::ExitCode;
+use std::fs;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::path::Path;
+use std::process::{self, ExitCode};
 use std::str::FromStr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{error::ErrorKind, ArgGroup, Args, CommandFactory, Parser, Subcommand};
 
@@ -570,6 +575,15 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
         Command::Dashboard(DashboardArgs {
             command: DashboardCommand::Serve,
         }) => {
+            let startup_lock = tiber_git::acquire_dashboard_startup_lock()?;
+            let runtime_dir = tiber_git::dashboard_runtime_dir()?;
+            let state_path = runtime_dir.join("dashboard");
+            if let Some(state) = read_dashboard_state(&state_path) {
+                if dashboard_is_healthy(&state) {
+                    println!("tiber dashboard already running on http://{}", state.addr);
+                    return Ok(());
+                }
+            }
             let runtime = tokio::runtime::Runtime::new().map_err(tiber_git::Error::Io)?;
             runtime.block_on(async {
                 let port = env::var("TIBER_DASHBOARD_PORT")
@@ -581,8 +595,36 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
                     .await
                     .map_err(tiber_git::Error::Io)?;
                 let addr = listener.local_addr().map_err(tiber_git::Error::Io)?;
+                let token = dashboard_token();
+                let state = DashboardState {
+                    addr,
+                    token: token.clone(),
+                };
+                let server =
+                    tokio::spawn(
+                        async move { tiber_server::serve_with_token(listener, token).await },
+                    );
+                let ready = (0..30).any(|_| {
+                    if dashboard_is_healthy(&state) {
+                        true
+                    } else {
+                        std::thread::sleep(Duration::from_millis(10));
+                        false
+                    }
+                });
+                if !ready {
+                    server.abort();
+                    return Err(tiber_git::Error::Parse(
+                        "dashboard_startup_health_timeout=true".to_string(),
+                    ));
+                }
+                fs::create_dir_all(&runtime_dir)?;
+                fs::write(&state_path, format!("{addr}\n{}\n", state.token))?;
+                drop(startup_lock);
                 println!("tiber dashboard listening on http://{addr}");
-                tiber_server::serve(listener).await
+                server.await.map_err(|error| {
+                    tiber_git::Error::Parse(format!("dashboard_server_join source={error}"))
+                })?
             })
         }
         Command::Mcp(McpArgs {
@@ -760,4 +802,55 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             Ok(())
         }
     }
+}
+
+struct DashboardState {
+    addr: SocketAddr,
+    token: String,
+}
+
+fn read_dashboard_state(path: &Path) -> Option<DashboardState> {
+    let contents = fs::read_to_string(path).ok()?;
+    let mut lines = contents.lines();
+    let addr = lines.next()?.parse().ok()?;
+    let token = lines.next()?.to_string();
+    if token.is_empty() || lines.next().is_some() {
+        return None;
+    }
+    Some(DashboardState { addr, token })
+}
+
+fn dashboard_is_healthy(state: &DashboardState) -> bool {
+    let Ok(mut stream) = TcpStream::connect_timeout(&state.addr, Duration::from_millis(300)) else {
+        return false;
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_millis(300)))
+        .ok();
+    stream
+        .set_write_timeout(Some(Duration::from_millis(300)))
+        .ok();
+    if write!(
+        stream,
+        "GET /health HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        state.addr
+    )
+    .is_err()
+    {
+        return false;
+    }
+    let mut response = String::new();
+    stream.read_to_string(&mut response).is_ok()
+        && response.starts_with("HTTP/1.1 200")
+        && response
+            .split_once("\r\n\r\n")
+            .is_some_and(|(_, body)| body == state.token)
+}
+
+fn dashboard_token() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{}-{timestamp}", process::id())
 }

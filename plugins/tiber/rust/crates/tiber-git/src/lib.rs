@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
-use std::fs::OpenOptions;
+use std::fs::{OpenOptions, TryLockError};
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -27,6 +27,22 @@ const MAX_SYNC_ATTEMPTS: usize = 8;
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
     repo.init_repository()
+}
+
+pub fn dashboard_runtime_dir() -> Result<PathBuf, Error> {
+    let repo = GitRepository::discover()?;
+    Ok(repo.git_common_dir()?.join("tiber"))
+}
+
+pub fn acquire_dashboard_startup_lock() -> Result<DashboardStartupLock, Error> {
+    let repo = GitRepository::discover()?;
+    Ok(DashboardStartupLock {
+        _lock: repo.acquire_named_lock("dashboard-startup.lock")?,
+    })
+}
+
+pub struct DashboardStartupLock {
+    _lock: TiberLock,
 }
 
 pub fn init_repository_at(root: impl Into<PathBuf>) -> Result<(), Error> {
@@ -1910,6 +1926,10 @@ impl GitRepository {
     }
 
     fn acquire_lock(&self) -> Result<TiberLock, Error> {
+        self.acquire_named_lock("tiber.lock")
+    }
+
+    fn acquire_named_lock(&self, filename: &str) -> Result<TiberLock, Error> {
         let timeout =
             lock_retry_duration("TIBER_LOCK_RETRY_TIMEOUT_MS", DEFAULT_LOCK_RETRY_TIMEOUT);
         let interval =
@@ -1921,7 +1941,7 @@ impl GitRepository {
         };
         let started_at = Instant::now();
         loop {
-            match self.try_acquire_lock_once() {
+            match self.try_acquire_named_lock_once(filename) {
                 Ok(lock) => return Ok(lock),
                 Err(error)
                     if is_tiber_lock_busy(&error) && lock_retry_remaining(started_at, timeout) =>
@@ -1933,32 +1953,28 @@ impl GitRepository {
         }
     }
 
-    fn try_acquire_lock_once(&self) -> Result<TiberLock, Error> {
+    fn try_acquire_named_lock_once(&self, filename: &str) -> Result<TiberLock, Error> {
         let lock_dir = self.git_common_dir()?.join("tiber");
         fs::create_dir_all(&lock_dir)?;
-        let lock_path = lock_dir.join("tiber.lock");
-        if let Some(stale_contents) = stale_lock_contents(&lock_path)? {
-            if fs::read_to_string(&lock_path)
-                .ok()
-                .as_deref()
-                .is_some_and(|current_contents| current_contents == stale_contents)
-            {
-                let _ = fs::remove_file(&lock_path);
-            }
-        }
-        match OpenOptions::new()
+        let lock_path = lock_dir.join(filename);
+        let mut file = OpenOptions::new()
+            .read(true)
             .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(_) => {
-                fs::write(&lock_path, lock_metadata())?;
-                Ok(TiberLock { path: lock_path })
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)?;
+        match file.try_lock() {
+            Ok(()) => {
+                file.set_len(0)?;
+                file.write_all(lock_metadata().as_bytes())?;
+                file.sync_data()?;
+                Ok(TiberLock { _file: file })
             }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(Error::Parse(
-                format!("tiber_lock_busy path={}", path_to_entry(&lock_path)?),
-            )),
-            Err(error) => Err(Error::Io(error)),
+            Err(TryLockError::WouldBlock) => Err(Error::Parse(format!(
+                "tiber_lock_busy path={}",
+                path_to_entry(&lock_path)?
+            ))),
+            Err(TryLockError::Error(error)) => Err(Error::Io(error)),
         }
     }
 
@@ -2020,13 +2036,7 @@ impl GitRepository {
 }
 
 struct TiberLock {
-    path: PathBuf,
-}
-
-impl Drop for TiberLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
+    _file: fs::File,
 }
 
 struct TaskWorkspace {
@@ -3394,39 +3404,6 @@ fn is_tiber_lock_busy(error: &Error) -> bool {
     matches!(error, Error::Parse(message) if message.starts_with("tiber_lock_busy "))
 }
 
-fn stale_lock_contents(path: &Path) -> Result<Option<String>, Error> {
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(Error::Io(error)),
-    };
-    if lock_contents_are_stale(&contents) {
-        Ok(Some(contents))
-    } else {
-        Ok(None)
-    }
-}
-
-fn lock_contents_are_stale(contents: &str) -> bool {
-    let pid = contents
-        .lines()
-        .find_map(|line| line.strip_prefix("pid="))
-        .and_then(|pid| pid.parse::<u32>().ok());
-    if pid.is_some_and(process_is_gone) {
-        return true;
-    }
-    let timestamp = contents
-        .lines()
-        .find_map(|line| line.strip_prefix("timestamp="))
-        .and_then(|timestamp| timestamp.parse::<u64>().ok());
-    timestamp.is_some_and(|timestamp| {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH + Duration::from_secs(timestamp))
-            .unwrap_or_default()
-            > Duration::from_secs(60 * 60)
-    })
-}
-
 fn order_conflicts(remote_order: &[String], local_order: &[String]) -> bool {
     let local_common = local_order
         .iter()
@@ -3437,19 +3414,6 @@ fn order_conflicts(remote_order: &[String], local_order: &[String]) -> bool {
         .filter(|entry| local_order.contains(entry))
         .collect::<Vec<_>>();
     local_common != remote_common
-}
-
-#[cfg(unix)]
-fn process_is_gone(pid: u32) -> bool {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .is_ok_and(|status| !status.success())
-}
-
-#[cfg(not(unix))]
-fn process_is_gone(_pid: u32) -> bool {
-    false
 }
 
 fn command_output(

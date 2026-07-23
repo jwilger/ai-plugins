@@ -16,8 +16,13 @@ pub fn router() -> Router {
 }
 
 pub fn router_at(root: PathBuf) -> Router {
+    router_at_with_token(root, String::new())
+}
+
+pub fn router_at_with_token(root: PathBuf, dashboard_token: String) -> Router {
     Router::new()
         .route("/", get(board))
+        .route("/health", get(health))
         .route("/tasks/{task_ref}", get(task))
         .route(
             "/tasks/{task_ref}/prioritize-before/{before_ref}",
@@ -26,11 +31,22 @@ pub fn router_at(root: PathBuf) -> Router {
         .route("/events", get(events))
         .route("/docs", get(docs))
         .route("/docs/{*path}", get(doc))
-        .with_state(AppState { root })
+        .with_state(AppState {
+            root,
+            dashboard_token,
+        })
 }
 
 pub async fn serve(listener: TcpListener) -> Result<(), tiber_git::Error> {
-    axum::serve(listener, router())
+    serve_with_token(listener, String::new()).await
+}
+
+pub async fn serve_with_token(
+    listener: TcpListener,
+    dashboard_token: String,
+) -> Result<(), tiber_git::Error> {
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    axum::serve(listener, router_at_with_token(root, dashboard_token))
         .await
         .map_err(|error| tiber_git::Error::Parse(format!("dashboard_serve source={error}")))
 }
@@ -38,6 +54,11 @@ pub async fn serve(listener: TcpListener) -> Result<(), tiber_git::Error> {
 #[derive(Clone)]
 struct AppState {
     root: PathBuf,
+    dashboard_token: String,
+}
+
+async fn health(State(state): State<AppState>) -> String {
+    state.dashboard_token
 }
 
 async fn board(State(state): State<AppState>) -> Response {
