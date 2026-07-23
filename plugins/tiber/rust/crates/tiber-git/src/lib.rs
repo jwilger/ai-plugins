@@ -2228,6 +2228,7 @@ fn shell_line_invokes_task_closer(line: &str) -> bool {
         .trim()
         .trim_matches(|character| matches!(character, '"' | '\''));
     let line = line.strip_prefix("exec ").unwrap_or(line);
+    let line = line.strip_prefix("nix develop -c ").unwrap_or(line);
     line == "tiber close-from-trailers"
 }
 

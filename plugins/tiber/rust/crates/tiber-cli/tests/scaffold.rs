@@ -196,6 +196,30 @@ fn scaffold_repo_detects_push_in_a_block_event_sequence() {
 }
 
 #[test]
+fn scaffold_repo_detects_a_task_closer_behind_a_nix_wrapper() {
+    let repo = TempRepo::initialized();
+    let workflow_path = repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("close-tasks.yaml");
+    fs::create_dir_all(workflow_path.parent().expect("workflow parent"))
+        .expect("create workflow directory");
+    fs::write(
+        &workflow_path,
+        "name: close tasks\non: push\njobs:\n  close:\n    steps:\n      - run: nix develop -c tiber close-from-trailers\n",
+    )
+    .expect("write existing workflow");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("already configured .github/workflows/close-tasks.yaml"));
+    assert!(!stdout.contains(".github/workflows/tiber-close-from-trailers.yml"));
+}
+
+#[test]
 fn scaffold_repo_detects_equivalent_workflow_with_inline_comments() {
     let repo = TempRepo::initialized();
     let workflow_path = repo
