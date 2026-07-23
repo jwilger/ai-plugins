@@ -1,6 +1,7 @@
 mod support;
 
 use std::fs;
+use std::fs::OpenOptions;
 use std::thread;
 use std::time::Duration;
 
@@ -16,7 +17,14 @@ fn write_commands_fail_when_tiber_lock_is_held() {
         String::from_utf8(git_common_dir.stdout).expect("git common dir should be utf8");
     let lock_dir = repo.path().join(git_common_dir.trim()).join("tiber");
     fs::create_dir_all(&lock_dir).expect("create tiber lock dir");
-    fs::write(lock_dir.join("tiber.lock"), "held by test\n").expect("write lock file");
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_dir.join("tiber.lock"))
+        .expect("open lock file");
+    lock_file.lock().expect("hold lock file");
 
     let create = repo.tiber_with_env(
         ["create", "Blocked by lock"],
@@ -31,6 +39,7 @@ fn write_commands_fail_when_tiber_lock_is_held() {
     assert!(!String::from_utf8(tree.stdout)
         .expect("tree output should be utf8")
         .contains("blocked-by-lock"));
+    drop(lock_file);
 }
 
 #[test]
@@ -44,13 +53,19 @@ fn write_commands_retry_when_tiber_lock_is_released() {
     let lock_dir = repo.path().join(git_common_dir.trim()).join("tiber");
     fs::create_dir_all(&lock_dir).expect("create tiber lock dir");
     let lock_path = lock_dir.join("tiber.lock");
-    fs::write(&lock_path, "held by test\n").expect("write lock file");
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .expect("open lock file");
+    lock_file.lock().expect("hold lock file");
 
     let releaser = {
-        let lock_path = lock_path.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(100));
-            fs::remove_file(lock_path).expect("release lock");
+            drop(lock_file);
         })
     };
 
