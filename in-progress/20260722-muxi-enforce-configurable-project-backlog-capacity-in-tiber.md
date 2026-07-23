@@ -22,7 +22,7 @@ Prompt guidance cannot prevent every caller or simultaneous write from overfilli
 
 - [x] Projects can configure a maximum queued-ticket count, with documented migration and default behavior when the setting is absent.
 - [x] The configuration clearly defines which ticket statuses count toward the limit.
-- [ ] Creating, reopening, or moving a ticket into any counted status refuses admission when it would exceed the configured limit.
+- [x] Creating, reopening, or moving a ticket into any counted status refuses admission when it would exceed the configured limit.
 - [ ] A refusal is actionable and tells the user to replace a lower-value ticket, combine overlapping work, or reject the candidate.
 - [ ] CLI, MCP, dashboard, and every other ticket mutation surface share the same enforcement behavior.
 - [ ] Admission enforcement is concurrency-safe so simultaneous successful mutations cannot exceed the configured limit.
