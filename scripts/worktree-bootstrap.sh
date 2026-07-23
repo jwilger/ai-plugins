@@ -16,12 +16,22 @@ marker="$git_dir/.ai-plugins-worktree-bootstrapped"
 worktree="$(git rev-parse --show-toplevel)"
 main="$(cd "$common_dir/.." && pwd -P)"
 
-for cache_dir in .dependencies .direnv; do
-  if [ -d "$main/$cache_dir" ] && [ ! -e "$worktree/$cache_dir" ]; then
-    mkdir -p "$worktree/$cache_dir"
-    cp -a "$main/$cache_dir/." "$worktree/$cache_dir/"
-  fi
-done
+if [ -d "$main/.dependencies" ] && [ ! -e "$worktree/.dependencies" ]; then
+  mkdir -p "$worktree/.dependencies"
+  for cache_entry in \
+    "$main/.dependencies"/* \
+    "$main/.dependencies"/.[!.]* \
+    "$main/.dependencies"/..?*; do
+    [ -e "$cache_entry" ] || [ -L "$cache_entry" ] || continue
+    [ "${cache_entry##*/}" != evals ] || continue
+    cp -a "$cache_entry" "$worktree/.dependencies/"
+  done
+fi
+
+if [ -d "$main/.direnv" ] && [ ! -e "$worktree/.direnv" ]; then
+  mkdir -p "$worktree/.direnv"
+  cp -a "$main/.direnv/." "$worktree/.direnv/"
+fi
 
 if [ ! -e "$worktree/.envrc" ]; then
   printf 'use flake\n' >"$worktree/.envrc"

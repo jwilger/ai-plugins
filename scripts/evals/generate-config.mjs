@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const { selectedBehaviorPluginNames } = require(
   path.join(root, "evals/promptfoo/fixtures.cjs"),
 );
-const evalWorkspace = path.join(root, ".dependencies/evals/agent-workspace");
+const evalWorkspace = path.join(root, ".evals/agent-workspace");
 const advisoryPromptPrefix =
   "Answer the scenario as an advisory behavior question. Treat each scenario as stateless: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Use installed marketplace plugin and skill guidance when it is relevant, naming the relevant plugin or skill in the answer. You may read installed skill instruction files through the harness. When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording. Apply plugin-specific safety gates and documented commands exactly instead of replacing them with generic setup or validation advice. Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands.";
 
@@ -176,7 +176,7 @@ function codexProvider(variant, pluginMode) {
       deep_tracing: false
       skip_git_repo_check: true
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.dependencies/evals/codex-home-${homeSuffix}`)}') }}"`;
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.evals/codex-home-${homeSuffix}`)}') }}"`;
 }
 
 function providerFor(variant, pluginMode, plugins) {
@@ -379,7 +379,7 @@ defaultTest:
           deep_tracing: false
           skip_git_repo_check: true
           cli_env:
-            CODEX_HOME: "{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME) | default('${path.join(root, ".dependencies/evals/codex-home-full-marketplace")}') }}"
+            CODEX_HOME: "{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME) | default('${path.join(root, ".evals/codex-home-full-marketplace")}') }}"
 
 tracing:
   enabled: false

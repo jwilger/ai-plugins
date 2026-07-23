@@ -37,7 +37,7 @@ eval_watchdog_pid=""
 eval_launching=0
 interrupted_status=0
 interrupted_signal=""
-provider_eval_lock_file="$root/.dependencies/evals/provider-eval.lock"
+provider_eval_lock_file="$root/.evals/provider-eval.lock"
 if git_common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
   git_common_dir="$(cd "$git_common_dir" && pwd -P)"
   if [ "$(basename "$git_common_dir")" != ".git" ]; then
@@ -45,7 +45,7 @@ if git_common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-commo
     exit 2
   fi
   coordination_checkout="$(cd "$git_common_dir/.." && pwd -P)"
-  provider_eval_lock_file="$coordination_checkout/.dependencies/evals/provider-eval.lock"
+  provider_eval_lock_file="$coordination_checkout/.evals/provider-eval.lock"
 fi
 
 usage() {
@@ -455,9 +455,9 @@ cd "$root"
 
 if [ "$dry_run" -eq 1 ]; then
   prepare_eval_output_dir check
-  dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-full-marketplace}}"
-  dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
-  dry_targeted_home="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.dependencies/evals/codex-home-targeted-plugins}"
+  dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-full-marketplace}}"
+  dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
+  dry_targeted_home="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.evals/codex-home-targeted-plugins}"
   printf '%q ' "$root/scripts/evals/ensure-node-deps.sh"
   printf '\n'
   if [ "$generated_config" -eq 1 ]; then
@@ -489,7 +489,7 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 prepare_eval_output_dir
-mkdir -p "$out_dir" "$root/.dependencies/evals/agent-workspace"
+mkdir -p "$out_dir" "$root/.evals/agent-workspace"
 rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml" "$out_dir/status.json"
 trap 'forward_eval_signal INT 130' INT
 trap 'forward_eval_signal TERM 143' TERM
@@ -502,10 +502,10 @@ export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
 export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$root/.dependencies/promptfoo}"
 export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.dependencies/promptfoo-cache}"
 export PROMPTFOO_CACHE_TTL="${PROMPTFOO_CACHE_TTL:-86400}"
-export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.dependencies/evals/codex-home-full-marketplace}"
+export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.evals/codex-home-full-marketplace}"
 export CODEX_EVAL_HOME_FULL_MARKETPLACE="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-$CODEX_EVAL_HOME}"
-export CODEX_EVAL_HOME_NO_PLUGINS="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.dependencies/evals/codex-home-no-plugins}"
-export CODEX_EVAL_HOME_TARGETED_PLUGINS="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.dependencies/evals/codex-home-targeted-plugins}"
+export CODEX_EVAL_HOME_NO_PLUGINS="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
+export CODEX_EVAL_HOME_TARGETED_PLUGINS="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.evals/codex-home-targeted-plugins}"
 mkdir -p "$PROMPTFOO_CONFIG_DIR"
 
 if [ "$generated_config" -eq 1 ]; then

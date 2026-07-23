@@ -48,6 +48,17 @@ teardown() {
   [ -f "$REPO/.worktrees/cache/.dependencies/npm/bin/example-tool" ]
 }
 
+@test "does not copy disposable eval state into linked worktrees" {
+  mkdir -p "$REPO/.dependencies/evals/codex-home-full-marketplace"
+  touch "$REPO/.dependencies/evals/codex-home-full-marketplace/auth.json"
+  git -C "$REPO" worktree add -q "$REPO/.worktrees/evals" -b evals
+
+  run bash -c "cd '$REPO/.worktrees/evals' && scripts/worktree-bootstrap.sh"
+
+  [ "$status" -eq 0 ]
+  [ ! -e "$REPO/.worktrees/evals/.dependencies/evals" ]
+}
+
 @test "does not mark bootstrap complete when cache warmup fails" {
   git -C "$REPO" worktree add -q "$REPO/.worktrees/cp-fails" -b cp-fails
   mkdir -p "$REPO/.worktrees/cp-fails/fake-bin"

@@ -21,8 +21,8 @@ teardown() {
 write_calibration_artifact() {
   local artifact="$1"
   local mutation="$2"
-  local workspace="${3:-$ROOT/.dependencies/evals/agent-workspace}"
-  local no_plugins_home="${4:-$ROOT/.dependencies/evals/codex-home-no-plugins}"
+  local workspace="${3:-$ROOT/.evals/agent-workspace}"
+  local no_plugins_home="${4:-$ROOT/.evals/codex-home-no-plugins}"
 
   node - "$ROOT" "$artifact" "$mutation" "$workspace" "$no_plugins_home" <<'NODE'
 const fs = require('node:fs');
@@ -690,7 +690,7 @@ NODE
 
 @test "GPT-5.6 benchmark runner rejects a concurrent live run before preparation while dry-run bypasses the lock" {
   temp_root="$(mktemp -d)"
-  lock_path="$MAIN_CHECKOUT/.dependencies/evals/provider-eval.lock"
+  lock_path="$MAIN_CHECKOUT/.evals/provider-eval.lock"
   preparation_marker="$temp_root/preparation-invoked"
   provider_marker="$temp_root/provider-invoked"
   fake_bin="$temp_root/bin"
@@ -774,7 +774,7 @@ NODE
     >"$fake_bin/node"
   chmod +x "$fake_bin/node"
 
-  lock_path="$fixture_main/.dependencies/evals/provider-eval.lock"
+  lock_path="$fixture_main/.evals/provider-eval.lock"
   mkdir -p "$(dirname "$lock_path")"
   exec 8>>"$lock_path"
   flock --nonblock 8
@@ -830,7 +830,7 @@ NODE
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"prepare-gpt56-workspace.mjs $temp_root/ai-plugins-gpt56-workspace-"* ]]
-  [[ "$output" != *"$ROOT/.dependencies/evals/agent-workspace"* ]]
+  [[ "$output" != *"$ROOT/.evals/agent-workspace"* ]]
   [ ! -e "$temp_root"/ai-plugins-gpt56-workspace-* ]
 
   rm -rf "$temp_root"
@@ -845,7 +845,7 @@ NODE
 
   for protected_kind in repository skills-home no-plugins-home output auth-home; do
     case "$protected_kind" in
-      repository) workspace="$ROOT/.dependencies/evals/overlap-fixture-$$" ;;
+      repository) workspace="$ROOT/.evals/overlap-fixture-$$" ;;
       skills-home) workspace="$skills_home" ;;
       no-plugins-home) workspace="$no_plugins_home" ;;
       output) workspace="$out_root" ;;
@@ -868,7 +868,7 @@ NODE
     fi
   done
 
-  [ ! -e "$ROOT/.dependencies/evals/overlap-fixture-$$" ]
+  [ ! -e "$ROOT/.evals/overlap-fixture-$$" ]
   [ ! -e "$skills_home" ]
   [ ! -e "$no_plugins_home" ]
   [ ! -e "$out_root" ]
