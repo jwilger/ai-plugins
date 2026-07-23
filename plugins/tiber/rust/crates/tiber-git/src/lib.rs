@@ -2033,7 +2033,7 @@ impl GitRepository {
             }
         }
         let metadata = lock_metadata();
-        let mut legacy_file = match OpenOptions::new()
+        let legacy_file = match OpenOptions::new()
             .read(true)
             .write(true)
             .create_new(true)
@@ -2048,16 +2048,18 @@ impl GitRepository {
             }
             Err(error) => return Err(Error::Io(error)),
         };
-        legacy_file.write_all(metadata.as_bytes())?;
-        legacy_file.sync_data()?;
+        let mut legacy_sentinel = LegacySentinel {
+            file: legacy_file,
+            path: legacy_path,
+            metadata: None,
+        };
+        legacy_sentinel.file.write_all(metadata.as_bytes())?;
+        legacy_sentinel.file.sync_data()?;
+        legacy_sentinel.metadata = Some(metadata);
 
         Ok(TiberLock {
             _file: advisory_file,
-            _legacy_sentinel: Some(LegacySentinel {
-                _file: legacy_file,
-                path: legacy_path,
-                metadata,
-            }),
+            _legacy_sentinel: Some(legacy_sentinel),
         })
     }
 
@@ -2124,18 +2126,20 @@ struct TiberLock {
 }
 
 struct LegacySentinel {
-    _file: fs::File,
+    file: fs::File,
     path: PathBuf,
-    metadata: String,
+    metadata: Option<String>,
 }
 
 impl Drop for LegacySentinel {
     fn drop(&mut self) {
-        if fs::read_to_string(&self.path)
-            .ok()
-            .as_deref()
-            .is_some_and(|contents| contents == self.metadata)
-        {
+        let still_owned = self.metadata.as_ref().is_none_or(|metadata| {
+            fs::read_to_string(&self.path)
+                .ok()
+                .as_deref()
+                .is_some_and(|contents| contents == metadata)
+        });
+        if still_owned {
             let _ = fs::remove_file(&self.path);
         }
     }
@@ -3583,4 +3587,78 @@ fn command_output(
         status: output.status.to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     })
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    fn temporary_repository(label: &str) -> PathBuf {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "tiber-git-{label}-{}-{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&path).expect("create temporary repository");
+        let output = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&path)
+            .output()
+            .expect("initialize temporary repository");
+        assert!(output.status.success(), "git init should succeed");
+        path
+    }
+
+    #[test]
+    fn current_task_lock_excludes_a_legacy_sentinel_client_for_its_lifetime() {
+        let root = temporary_repository("legacy-exclusion");
+        let repository = GitRepository::at(&root);
+        let lock = repository
+            .acquire_lock()
+            .expect("acquire current task lock");
+        let legacy_path = repository
+            .git_common_dir()
+            .expect("resolve common directory")
+            .join("tiber/tiber.lock");
+
+        let legacy_attempt = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&legacy_path);
+        assert_eq!(
+            legacy_attempt
+                .expect_err("legacy client must remain excluded")
+                .kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+
+        drop(lock);
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&legacy_path)
+            .expect("legacy client may acquire after current lock release");
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn unfinished_legacy_sentinel_is_removed_on_initialization_failure() {
+        let root = temporary_repository("sentinel-rollback");
+        let path = root.join("tiber.lock");
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .expect("create unfinished sentinel");
+
+        drop(LegacySentinel {
+            file,
+            path: path.clone(),
+            metadata: None,
+        });
+
+        assert!(!path.exists(), "unfinished sentinel must roll back");
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
 }

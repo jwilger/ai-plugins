@@ -70,6 +70,30 @@ fn dashboard_reuses_the_healthy_instance_for_the_same_repository() {
 }
 
 #[test]
+fn dashboard_replaces_stale_state_after_the_previous_server_stops() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let (mut first, first_line) = start_dashboard(&repo);
+    stop_dashboard(&mut first);
+
+    let (mut replacement, replacement_line) = start_dashboard(&repo);
+    let repeated = repo.tiber(["dashboard", "serve"]);
+    stop_dashboard(&mut replacement);
+
+    assert!(
+        first_line.starts_with("tiber dashboard listening on ")
+            && String::from_utf8(repeated.stdout).expect("repeated launch output should be utf8")
+                == format!(
+                    "tiber dashboard already running on {}\n",
+                    replacement_line
+                        .strip_prefix("tiber dashboard listening on ")
+                        .expect("replacement should print URL")
+                ),
+        "a dead recorded instance must be replaced by a reusable healthy server"
+    );
+}
+
+#[test]
 fn dashboard_waits_for_another_same_project_startup_owner() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);
