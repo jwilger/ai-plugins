@@ -28,3 +28,5 @@ A prior PR repair amended a published commit and created avoidable recovery work
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-23: Delivered direct-to-main through additive commits ending at 62cdd03217dced57b172c608e5b41e53d51542fd. Fast verification passes (5 Bats fixture tests, 24-skill coverage, applicable formatting, diff hygiene); exact focused provider eval eval-9pe-2026-07-23T01:41:25 passed all plugin-enabled variants and configured thresholds, with only the intended Claude no-plugin ablation failing; secret scan clean; structured final review completed with one clean iteration on diff f0d6f375cb685b6ad8b982b7b1de129b84a151c4. Awaiting terminal green CI run 29972260638 before closure.
