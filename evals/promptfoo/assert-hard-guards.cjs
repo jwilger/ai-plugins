@@ -339,6 +339,14 @@ module.exports = function assertHardGuards(output, context) {
       continue;
     }
 
+    if (assertion.type === "contains") {
+      const required = String(assertion.value || "");
+      if (!required || !String(output || "").includes(required)) {
+        failures.push(assertion.message || `Missing required content: ${required}`);
+      }
+      continue;
+    }
+
     failures.push(`Unsupported hard assertion type: ${assertion.type}`);
   }
 
