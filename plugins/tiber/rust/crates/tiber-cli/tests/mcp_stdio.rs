@@ -7,6 +7,57 @@ use std::process::{Command, Stdio};
 use support::{assert_success, assert_success_ref, task_stem, TempRepo};
 
 #[test]
+fn mcp_admissions_return_the_shared_backlog_capacity_refusal() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Completed work"]));
+    assert_success(repo.tiber(["transition", "completed-work", "done"]));
+    fs::write(
+        repo.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 1\n",
+    )
+    .expect("write tiber config");
+    assert_success(repo.tiber(["create", "Queued work"]));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tiber mcp stdio");
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.create","arguments":{"title":"Overflow through MCP"}}}"#,
+    );
+    let create = read_message(&mut stdout);
+
+    assert!(create.contains(r#""id":1"#));
+    assert!(create.contains("backlog_capacity_exceeded"));
+    assert!(create.contains("queued=1"));
+    assert!(create.contains("max_queued=1"));
+    assert!(create.contains("replace"));
+    assert!(create.contains("combine"));
+    assert!(create.contains("reject"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tiber.transition","arguments":{"ref":"completed-work","status":"backlog"}}}"#,
+    );
+    let reopen = read_message(&mut stdout);
+    assert!(reopen.contains(r#""id":2"#));
+    assert!(reopen.contains("backlog_capacity_exceeded"));
+    task_stem(&repo, "done", "completed-work");
+
+    drop(stdin);
+    assert!(child.wait().expect("wait for mcp server").success());
+}
+
+#[test]
 fn mcp_stdio_exposes_tools_and_task_resources() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

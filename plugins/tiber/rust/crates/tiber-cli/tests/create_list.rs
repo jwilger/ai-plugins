@@ -91,6 +91,73 @@ fn create_refuses_when_configured_backlog_capacity_is_full() {
 }
 
 #[test]
+fn backlog_capacity_is_unlimited_when_project_config_is_absent() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+
+    for title in ["First work", "Second work", "Third work"] {
+        assert_success(repo.tiber(["create", title]));
+    }
+
+    let listing = repo.git_output(["ls-tree", "-r", "--name-only", "tasks", "backlog"]);
+    assert_success_ref(&listing);
+    assert_eq!(
+        String::from_utf8(listing.stdout)
+            .expect("task listing should be utf8")
+            .lines()
+            .filter(|path| path.ends_with(".md"))
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn active_ticket_does_not_count_toward_backlog_capacity() {
+    let repo = TempRepo::initialized();
+    fs::write(
+        repo.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 1\n",
+    )
+    .expect("write tiber config");
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Active work"]));
+    assert_success(repo.tiber(["transition", "active-work", "in-progress"]));
+
+    assert_success(repo.tiber(["create", "Queued work"]));
+
+    task_stem(&repo, "in-progress", "active-work");
+    task_stem(&repo, "backlog", "queued-work");
+}
+
+#[test]
+fn malformed_project_config_fails_closed_before_task_creation() {
+    let repo = TempRepo::initialized();
+    fs::write(
+        repo.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = \"many\"\n",
+    )
+    .expect("write malformed tiber config");
+    assert_success(repo.tiber(["init"]));
+
+    let create = repo.tiber(["create", "Unsafe admission"]);
+
+    assert!(!create.status.success(), "malformed config should refuse");
+    let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
+    assert!(
+        stderr.contains("config_invalid") && stderr.contains(".tiber.toml"),
+        "error should identify the configuration recovery surface: {stderr}"
+    );
+    let listing = repo.git_output(["ls-tree", "-r", "--name-only", "tasks", "backlog"]);
+    assert_success_ref(&listing);
+    assert!(
+        !String::from_utf8(listing.stdout)
+            .expect("task listing should be utf8")
+            .contains("unsafe-admission"),
+        "invalid configuration must not admit work"
+    );
+}
+
+#[test]
 fn create_failure_after_local_task_creation_reports_created_ref_for_recovery() {
     let (origin, hook_path) = TempRepo::bare_with_rejecting_hook();
     let repo = TempRepo::initialized();
