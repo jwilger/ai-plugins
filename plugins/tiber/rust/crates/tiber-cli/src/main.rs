@@ -160,7 +160,14 @@ struct DashboardArgs {
 #[derive(Subcommand)]
 enum DashboardCommand {
     /// Serve the dashboard on localhost.
-    Serve,
+    Serve(DashboardServeArgs),
+}
+
+#[derive(Args)]
+struct DashboardServeArgs {
+    /// Bind a specific localhost port instead of selecting an available one.
+    #[arg(long)]
+    port: Option<u16>,
 }
 
 #[derive(Args)]
@@ -573,23 +580,34 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             Ok(())
         }
         Command::Dashboard(DashboardArgs {
-            command: DashboardCommand::Serve,
+            command: DashboardCommand::Serve(DashboardServeArgs { port }),
         }) => {
+            let requested_port = port
+                .or_else(|| {
+                    env::var("TIBER_DASHBOARD_PORT")
+                        .ok()
+                        .and_then(|value| value.parse::<u16>().ok())
+                })
+                .filter(|port| *port != 0);
             let startup_lock = tiber_git::acquire_dashboard_startup_lock()?;
             let runtime_dir = tiber_git::dashboard_runtime_dir()?;
             let state_path = runtime_dir.join("dashboard");
             if let Some(state) = read_dashboard_state(&state_path) {
                 if dashboard_is_healthy(&state) {
+                    if requested_port.is_some_and(|port| port != state.addr.port()) {
+                        return Err(tiber_git::Error::Parse(format!(
+                            "dashboard_port_conflict requested={} running={}",
+                            requested_port.expect("requested port was checked"),
+                            state.addr.port()
+                        )));
+                    }
                     println!("tiber dashboard already running on http://{}", state.addr);
                     return Ok(());
                 }
             }
             let runtime = tokio::runtime::Runtime::new().map_err(tiber_git::Error::Io)?;
             runtime.block_on(async {
-                let port = env::var("TIBER_DASHBOARD_PORT")
-                    .ok()
-                    .and_then(|value| value.parse::<u16>().ok())
-                    .unwrap_or(0);
+                let port = requested_port.unwrap_or(0);
                 let addr = format!("127.0.0.1:{port}");
                 let listener = tokio::net::TcpListener::bind(&addr)
                     .await

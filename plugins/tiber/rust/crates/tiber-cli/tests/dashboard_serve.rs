@@ -144,10 +144,147 @@ fn dashboard_recovers_a_malformed_startup_lock() {
     );
 }
 
+#[test]
+fn dashboard_uses_an_explicitly_requested_available_port() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let port = TcpListener::bind("127.0.0.1:0")
+        .expect("reserve available dashboard port")
+        .local_addr()
+        .expect("read reserved port")
+        .port();
+    let port_value = port.to_string();
+
+    let mut child =
+        dashboard_command_with_args(&repo, ["dashboard", "serve", "--port", &port_value])
+            .spawn()
+            .expect("start dashboard");
+    let stdout = child.stdout.take().expect("dashboard stdout");
+    let line = BufReader::new(stdout)
+        .lines()
+        .next()
+        .transpose()
+        .expect("read dashboard output");
+    stop_dashboard(&mut child);
+
+    assert_eq!(
+        line,
+        Some(format!(
+            "tiber dashboard listening on http://127.0.0.1:{port}"
+        ))
+    );
+}
+
+#[test]
+fn dashboard_refuses_a_different_explicit_port_when_the_project_is_already_running() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let first_port = available_port();
+    let first_port_value = first_port.to_string();
+    let (mut first, _) =
+        start_dashboard_with_args(&repo, ["dashboard", "serve", "--port", &first_port_value]);
+    let requested_port = available_port();
+    let requested_port_value = requested_port.to_string();
+
+    let second = dashboard_command_with_args(
+        &repo,
+        ["dashboard", "serve", "--port", &requested_port_value],
+    )
+    .output()
+    .expect("repeat dashboard with different explicit port");
+    stop_dashboard(&mut first);
+
+    assert!(
+        !second.status.success()
+            && String::from_utf8(second.stderr)
+                .expect("dashboard error should be utf8")
+                .contains(&format!(
+                    "dashboard_port_conflict requested={requested_port} running={first_port}"
+                )),
+        "a different explicit port must not be silently ignored"
+    );
+}
+
+#[test]
+fn dashboard_cli_port_overrides_the_environment_port() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let requested_port = available_port();
+    let requested_port_value = requested_port.to_string();
+    let occupied_environment_port =
+        TcpListener::bind("127.0.0.1:0").expect("occupy environment dashboard port");
+    let environment_port = occupied_environment_port
+        .local_addr()
+        .expect("read environment dashboard port")
+        .port()
+        .to_string();
+
+    let mut child = dashboard_command_with_args(
+        &repo,
+        ["dashboard", "serve", "--port", &requested_port_value],
+    )
+    .env("TIBER_DASHBOARD_PORT", environment_port)
+    .spawn()
+    .expect("start dashboard");
+    let stdout = child.stdout.take().expect("dashboard stdout");
+    let line = BufReader::new(stdout)
+        .lines()
+        .next()
+        .transpose()
+        .expect("read dashboard output");
+    stop_dashboard(&mut child);
+
+    assert_eq!(
+        line,
+        Some(format!(
+            "tiber dashboard listening on http://127.0.0.1:{requested_port}"
+        ))
+    );
+}
+
+#[test]
+fn dashboard_port_zero_reuses_the_automatically_selected_port() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let (mut first, first_line) =
+        start_dashboard_with_args(&repo, ["dashboard", "serve", "--port", "0"]);
+
+    let second = dashboard_command_with_args(&repo, ["dashboard", "serve", "--port", "0"])
+        .output()
+        .expect("repeat automatic dashboard launch");
+    stop_dashboard(&mut first);
+
+    let url = first_line
+        .strip_prefix("tiber dashboard listening on ")
+        .expect("first launch should print URL");
+    assert!(
+        second.status.success()
+            && String::from_utf8(second.stdout).expect("dashboard output should be utf8")
+                == format!("tiber dashboard already running on {url}\n"),
+        "port zero should retain automatic-port reuse semantics"
+    );
+}
+
+fn available_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .expect("reserve available dashboard port")
+        .local_addr()
+        .expect("read reserved port")
+        .port()
+}
+
 fn dashboard_command(repo: &TempRepo) -> Command {
+    dashboard_command_with_args(repo, ["dashboard", "serve"])
+}
+
+fn dashboard_command_with_args<I, S>(repo: &TempRepo, args: I) -> Command
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
     let mut command = Command::new(env!("CARGO_BIN_EXE_tiber"));
     command
-        .args(["dashboard", "serve"])
+        .args(args)
         .env_remove("TIBER_DASHBOARD_PORT")
         .current_dir(repo.path())
         .stdout(Stdio::piped());
@@ -155,7 +292,17 @@ fn dashboard_command(repo: &TempRepo) -> Command {
 }
 
 fn start_dashboard(repo: &TempRepo) -> (std::process::Child, String) {
-    let mut child = dashboard_command(repo).spawn().expect("start dashboard");
+    start_dashboard_with_args(repo, ["dashboard", "serve"])
+}
+
+fn start_dashboard_with_args<I, S>(repo: &TempRepo, args: I) -> (std::process::Child, String)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let mut child = dashboard_command_with_args(repo, args)
+        .spawn()
+        .expect("start dashboard");
     let stdout = child.stdout.take().expect("dashboard stdout");
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
