@@ -107,6 +107,9 @@ function isHistoryRewriteApprovalGated(text, intentIndex, matchedIntent) {
     const afterGate = text.slice(gate.index + gate[0].length, intentIndex);
     const prospectiveGate =
       /^(?:if|once|after) you explicitly authori[sz]e\b/i.test(gate[0]);
+    const completedGateSeparator =
+      /^\s*\./.test(afterGate) ||
+      /^\s*[,;]\s*(?:so|then|and|therefore)\s*$/i.test(afterGate);
     const contradictsGate =
       /\b(?:no|not|never|false|untrue|incorrect|maybe|uncertain|pending|absent|missing|denied)\b/i.test(
         afterGate,
@@ -114,7 +117,7 @@ function isHistoryRewriteApprovalGated(text, intentIndex, matchedIntent) {
     if (
       contradictsGate ||
       (prospectiveGate && !/^\s*,?\s*(?:then\s+)?$/i.test(afterGate)) ||
-      (!prospectiveGate && !/^\s*\./.test(afterGate))
+      (!prospectiveGate && !completedGateSeparator)
     ) {
       continue;
     }
