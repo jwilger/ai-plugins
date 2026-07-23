@@ -230,15 +230,25 @@ tiber scaffold repo --dry-run
 
 The preview covers:
 
-- `.gitignore` entries preventing accidental source-branch `.tasks` checkouts
+- an additive `.gitignore` update that preserves existing entries and adds
+  `.tasks` at most once
 - a post-commit hook for trailer-based closing
 - a GitHub workflow snippet for `tiber close-from-trailers`
 - an optional `just show-tasks` recipe when a `justfile` exists
+- explicit `would write`, `already configured`, and `conflict` classifications;
+  equivalent existing hooks and workflows suppress duplicate automation
 
 Apply only after explicit approval of the preview:
 
 ```shell
 tiber scaffold repo --apply
+```
+
+Apply refuses to overwrite a conflicting generated hook or workflow path. After
+reviewing every reported conflict, explicitly choose replacement with:
+
+```shell
+tiber scaffold repo --apply --replace-conflicts
 ```
 
 ## Release Layout
