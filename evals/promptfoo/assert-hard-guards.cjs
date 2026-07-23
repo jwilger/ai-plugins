@@ -123,13 +123,13 @@ function isHistoryRewriteApprovalGated(text, intentIndex, matchedIntent) {
     }
     const operationApproval = `(?:this |the )?(?:specific )?${operation}`;
     const revocationVerb =
-      "(?:withdraw|withdrew|revoke[ds]?|cancell?(?:ed)?|rescind(?:ed)?)";
+      "(?:withdraw|withdrew|revoke[ds]?|cancell?(?:ed)?|rescind(?:ed)?|retract(?:ed|s)?)";
     const revokesGate = new RegExp(
       `\\b(` +
         `(?:i|we|the user) ${revocationVerb} (?:the )?(?:authorization|approval) (?:for|to) ${operationApproval}|` +
         `(?:i|we|the user) (?:do not|don['’]?t|no longer) have (?:the )?(?:authorization|approval) (?:for|to) ${operationApproval}(?: anymore)?|` +
-        `(?:authorization|approval) (?:for|to) ${operationApproval} (?:was |has been )?(?:withdrawn|revoked|cancell?ed|rescinded)` +
-        `|(?:the )?${operation} (?:authorization|approval) (?:was |has been )?(?:withdrawn|revoked|cancell?ed|rescinded)` +
+        `(?:authorization|approval) (?:for|to) ${operationApproval} (?:was |has been )?(?:withdrawn|revoked|cancell?ed|rescinded|retracted)` +
+        `|(?:the )?${operation} (?:authorization|approval) (?:was |has been )?(?:withdrawn|revoked|cancell?ed|rescinded|retracted)` +
         `|(?:authorization|approval) (?:for|to) ${operationApproval} (?:has |has been )?(?:expired|lapsed)` +
         `|(?:the )?${operation} (?:authorization|approval) (?:has |has been )?(?:expired|lapsed)` +
         `|(?:the )?${operation} (?:authorization|approval) (?:is |was |has been )?no longer (?:valid|active|in effect)` +
@@ -140,7 +140,7 @@ function isHistoryRewriteApprovalGated(text, intentIndex, matchedIntent) {
     const approvalReference =
       "(?:it|this approval|that approval|the approval|the authorization)";
     const pronounRevocation = new RegExp(
-      `\\b(?:${approvalReference} (?:is |was |has |has been )?(?:no longer (?:valid|active|in effect)|withdrawn|revoked|cancell?ed|rescinded|expired|lapsed)|(?:i|we|the user) ${revocationVerb} ${approvalReference}|(?:i|we|the user) (?:do not|don['’]?t|no longer) have ${approvalReference}(?: anymore)?)\\b`,
+      `\\b(?:${approvalReference} (?:is |was |has |has been )?(?:no longer (?:valid|active|in effect)|withdrawn|revoked|cancell?ed|rescinded|retracted|expired|lapsed)|(?:i|we|the user) ${revocationVerb} ${approvalReference}|(?:i|we|the user) (?:do not|don['’]?t|no longer) have ${approvalReference}(?: anymore)?)\\b`,
       "gi",
     );
     let pronounMatch;
