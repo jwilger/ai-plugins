@@ -282,6 +282,70 @@ fn scaffold_repo_reports_repeated_setup_as_already_configured() {
 }
 
 #[test]
+fn scaffold_repo_reports_conflicts_and_refuses_ambiguous_overwrites_atomically() {
+    let repo = TempRepo::initialized();
+    let gitignore = "target/\n.env\n";
+    fs::write(repo.path().join(".gitignore"), gitignore).expect("write existing gitignore");
+    let hook_path = repo.path().join(".githooks").join("post-commit.tiber");
+    fs::create_dir_all(hook_path.parent().expect("hook parent")).expect("create hook directory");
+    let hook = "#!/usr/bin/env bash\necho existing behavior\n";
+    fs::write(&hook_path, hook).expect("write ambiguous hook");
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("would write .gitignore"));
+    assert!(stdout.contains("conflict .githooks/post-commit.tiber resolution=--replace-conflicts"));
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+
+    assert!(!apply.status.success());
+    assert_eq!(
+        fs::read_to_string(repo.path().join(".gitignore")).expect("read unchanged gitignore"),
+        gitignore
+    );
+    assert_eq!(
+        fs::read_to_string(&hook_path).expect("read unchanged hook"),
+        hook
+    );
+    assert!(!repo
+        .path()
+        .join(".github")
+        .join("workflows")
+        .join("tiber-close-from-trailers.yml")
+        .exists());
+}
+
+#[test]
+fn scaffold_repo_replaces_ambiguous_targets_only_with_an_explicit_choice() {
+    let repo = TempRepo::initialized();
+    fs::write(repo.path().join(".gitignore"), "target/\n").expect("write existing gitignore");
+    let hook_path = repo.path().join(".githooks").join("post-commit.tiber");
+    fs::create_dir_all(hook_path.parent().expect("hook parent")).expect("create hook directory");
+    fs::write(&hook_path, "#!/usr/bin/env bash\necho existing behavior\n")
+        .expect("write ambiguous hook");
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply", "--replace-conflicts"]);
+
+    assert_success_ref(&apply);
+    assert_eq!(
+        fs::read_to_string(&hook_path).expect("read replaced hook"),
+        "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n"
+    );
+    let gitignore =
+        fs::read_to_string(repo.path().join(".gitignore")).expect("read updated gitignore");
+    assert!(gitignore.starts_with("target/\n"));
+    assert_eq!(
+        gitignore
+            .lines()
+            .filter(|line| line.trim() == ".tasks")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join("justfile"), "test:\n  cargo test\n")

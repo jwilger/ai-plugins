@@ -188,9 +188,9 @@ pub fn close_from_trailers() -> Result<Vec<String>, Error> {
     repo.with_task_workspace(|repo| repo.close_from_trailers())
 }
 
-pub fn scaffold_repo(apply: bool) -> Result<Vec<String>, Error> {
+pub fn scaffold_repo(apply: bool, replace_conflicts: bool) -> Result<Vec<String>, Error> {
     let repo = GitRepository::discover()?;
-    repo.scaffold_repo(apply)
+    repo.scaffold_repo(apply, replace_conflicts)
 }
 
 pub fn install_bin(target_dir: &str, apply: bool) -> Result<String, Error> {
@@ -1227,7 +1227,7 @@ impl GitRepository {
         Ok(closed)
     }
 
-    fn scaffold_repo(&self, apply: bool) -> Result<Vec<String>, Error> {
+    fn scaffold_repo(&self, apply: bool, replace_conflicts: bool) -> Result<Vec<String>, Error> {
         let _lock = if apply {
             Some(self.acquire_lock()?)
         } else {
@@ -1248,12 +1248,13 @@ impl GitRepository {
             }
             gitignore.push_str("# tiber local working copy\n.tasks\n");
         }
-        let mut files = vec![(".gitignore", gitignore)];
+        let mut files = vec![(".gitignore", gitignore, false)];
         let equivalent_hook = self.equivalent_task_closing_hook()?;
         if equivalent_hook.is_none() {
             files.push((
                 ".githooks/post-commit.tiber",
                 "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n".to_string(),
+                true,
             ));
         }
         let equivalent_workflow = self.equivalent_task_closing_workflow()?;
@@ -1261,25 +1262,41 @@ impl GitRepository {
             files.push((
                 ".github/workflows/tiber-close-from-trailers.yml",
                 "name: tiber close from trailers\n\non:\n  push:\n    branches: [main]\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Install Tiber\n        run: |\n          git clone --depth 1 https://github.com/jwilger/ai-plugins.git .tiber-src\n          cargo install --path .tiber-src/plugins/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n".to_string(),
+                true,
             ));
         }
         if let Some(justfile) = self.show_tasks_justfile()? {
-            files.push(("justfile", justfile));
+            files.push(("justfile", justfile, false));
         }
         let mut messages = Vec::new();
         let mut pending_files = Vec::new();
-        for (path, contents) in files {
+        let mut conflicts = Vec::new();
+        for (path, contents, conflict_on_difference) in files {
             let destination = self.root.join(path);
             match fs::read_to_string(&destination) {
                 Ok(existing) if existing == contents => {
                     messages.push(format!("already configured {path}"));
                 }
+                Ok(_) if conflict_on_difference => conflicts.push((path, contents)),
                 Ok(_) => pending_files.push((path, contents)),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     pending_files.push((path, contents));
                 }
                 Err(error) => return Err(error.into()),
             }
+        }
+        if apply && !replace_conflicts && !conflicts.is_empty() {
+            return Err(Error::Parse(format!(
+                "scaffold_conflicts paths={} resolution=--replace-conflicts",
+                conflicts
+                    .iter()
+                    .map(|(path, _contents)| *path)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )));
+        }
+        if replace_conflicts {
+            pending_files.extend(conflicts.iter().cloned());
         }
         if apply {
             for (path, contents) in &pending_files {
@@ -1296,6 +1313,9 @@ impl GitRepository {
                     .iter()
                     .map(|(path, _contents)| format!("would write {path}")),
             );
+            messages.extend(conflicts.iter().map(|(path, _contents)| {
+                format!("conflict {path} resolution=--replace-conflicts")
+            }));
         }
         for path in [equivalent_hook, equivalent_workflow].into_iter().flatten() {
             messages.push(format!("already configured {path}"));
