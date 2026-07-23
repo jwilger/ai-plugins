@@ -21,7 +21,7 @@ A broken installed command undermines the normal setup and upgrade experience an
 ## Acceptance criteria
 
 - [x] An installation applied to a supported target directory produces a Tiber command that launches successfully.
-- [ ] Dry-run output, existing-target refusal, documentation, and automated tests cover the repaired installation workflow.
+- [x] Dry-run output, existing-target refusal, documentation, and automated tests cover the repaired installation workflow.
 
 ## Subtasks
 
