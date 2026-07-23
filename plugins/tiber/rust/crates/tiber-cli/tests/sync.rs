@@ -477,6 +477,145 @@ fn sync_retries_once_when_remote_advances_during_push() {
 }
 
 #[test]
+fn create_revalidates_capacity_across_multiple_concurrent_remote_admissions() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let racer = clone_repo(&origin);
+    racer.git(["remote", "remove", "origin"]);
+    assert_success(racer.tiber(["init"]));
+    assert_success(racer.tiber(["create", "First concurrent admission"]));
+    racer.git(["branch", "capacity-racer-one", "tasks"]);
+    assert_success(racer.tiber(["create", "Second concurrent admission"]));
+    racer.git([
+        "remote",
+        "add",
+        "origin",
+        origin.path().to_str().expect("origin path utf8"),
+    ]);
+    racer.git([
+        "push",
+        "origin",
+        "capacity-racer-one:refs/heads/capacity-racer-one",
+    ]);
+    racer.git(["push", "origin", "tasks:refs/heads/capacity-racer-two"]);
+
+    let candidate = clone_repo(&origin);
+    fs::write(
+        candidate.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 2\n",
+    )
+    .expect("write tiber config");
+    assert_success(candidate.tiber(["init"]));
+    install_remote_admission_race(&origin);
+
+    let create = candidate.tiber(["create", "Losing admission"]);
+
+    assert!(
+        !create.status.success(),
+        "candidate should lose the concurrent admission race"
+    );
+    let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
+    assert!(
+        stderr.contains("backlog_capacity_exceeded"),
+        "retries should return an actionable capacity refusal: {stderr}"
+    );
+    assert!(
+        !stderr.contains("created="),
+        "a rejected admission must not be reported as locally created: {stderr}"
+    );
+    let candidate_tree = candidate.git_output(["ls-tree", "-r", "--name-only", "tasks", "backlog"]);
+    assert_success_ref(&candidate_tree);
+    assert!(
+        !String::from_utf8(candidate_tree.stdout)
+            .expect("candidate tree output should be utf8")
+            .contains("losing-admission"),
+        "rejected admission must be rolled back from the local tasks ref"
+    );
+    assert_success(candidate.tiber(["sync"]));
+    let verification = clone_repo(&origin);
+    let tree = verification.git_output(["ls-tree", "-r", "--name-only", "origin/tasks", "backlog"]);
+    assert_success_ref(&tree);
+    let tree = String::from_utf8(tree.stdout).expect("tree output should be utf8");
+    assert_eq!(
+        tree.lines().filter(|path| path.ends_with(".md")).count(),
+        2,
+        "remote backlog must retain only the two winning admissions: {tree}"
+    );
+}
+
+#[test]
+fn create_rolls_back_local_admission_when_concurrent_retry_budget_is_exhausted() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let candidate = clone_repo(&origin);
+    fs::write(
+        candidate.path().join(".tiber.toml"),
+        "[backlog]\nmax_queued = 1\n",
+    )
+    .expect("write tiber config");
+    assert_success(candidate.tiber(["init"]));
+    install_always_racing_hook(&origin);
+
+    let create = candidate.tiber(["create", "Exhausted admission"]);
+
+    assert!(
+        !create.status.success(),
+        "create should stop after the retry budget"
+    );
+    let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
+    assert!(
+        !stderr.contains("created="),
+        "exhausted admission must not be reported as locally created: {stderr}"
+    );
+    let candidate_tree = candidate.git_output(["ls-tree", "-r", "--name-only", "tasks", "backlog"]);
+    assert_success_ref(&candidate_tree);
+    assert!(
+        !String::from_utf8(candidate_tree.stdout)
+            .expect("candidate tree output should be utf8")
+            .contains("exhausted-admission"),
+        "exhausted admission must be rolled back from the local tasks ref"
+    );
+
+    fs::remove_file(origin.path().join("hooks").join("pre-receive")).expect("remove racing hook");
+    assert_success(candidate.tiber(["sync"]));
+    let remote_tree =
+        candidate.git_output(["ls-tree", "-r", "--name-only", "origin/tasks", "backlog"]);
+    assert_success_ref(&remote_tree);
+    assert!(
+        !String::from_utf8(remote_tree.stdout)
+            .expect("remote tree output should be utf8")
+            .contains("exhausted-admission"),
+        "later sync must not propagate the rejected admission"
+    );
+}
+
+#[test]
 fn read_commands_sync_remote_tasks_without_explicit_sync() {
     let origin = TempRepo::new();
     origin.git(["init", "--bare"]);
@@ -610,5 +749,42 @@ fn install_failing_pre_push_hook(repo: &TempRepo) {
         let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&hook, permissions).expect("make hook executable");
+    }
+}
+
+fn install_remote_admission_race(origin: &TempRepo) {
+    let hook = origin.path().join("hooks").join("pre-receive");
+    let counter = origin.path().join("capacity-race-count");
+    fs::write(
+        &hook,
+        format!(
+            "#!/usr/bin/env bash\nset -euo pipefail\ncount=0\nif [[ -e '{}' ]]; then\n  count=$(< '{}')\nfi\nif [[ \"$count\" -eq 0 ]]; then\n  echo 1 > '{}'\n  env -u GIT_QUARANTINE_PATH git update-ref refs/heads/tasks refs/heads/capacity-racer-one\n  echo 'non-fast-forward first concurrent admission' >&2\n  exit 1\nfi\nif [[ \"$count\" -eq 1 ]]; then\n  echo 2 > '{}'\n  env -u GIT_QUARANTINE_PATH git update-ref refs/heads/tasks refs/heads/capacity-racer-two\n  echo 'non-fast-forward second concurrent admission' >&2\n  exit 1\nfi\n",
+            counter.display(),
+            counter.display(),
+            counter.display(),
+            counter.display()
+        ),
+    )
+    .expect("write remote admission race hook");
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&hook, permissions).expect("make race hook executable");
+    }
+}
+
+fn install_always_racing_hook(origin: &TempRepo) {
+    let hook = origin.path().join("hooks").join("pre-receive");
+    fs::write(
+        &hook,
+        "#!/usr/bin/env bash\nset -euo pipefail\necho 'non-fast-forward concurrent admission' >&2\nexit 1\n",
+    )
+    .expect("write persistent race hook");
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&hook, permissions).expect("make race hook executable");
     }
 }

@@ -22,6 +22,7 @@ const TASK_ID_GENERATION_ATTEMPTS: usize = 32;
 const DEFAULT_LOCK_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
 const DEFAULT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const CONFIG_FILE: &str = ".tiber.toml";
+const MAX_SYNC_ATTEMPTS: usize = 8;
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -527,17 +528,56 @@ impl GitRepository {
     }
 
     fn sync_repository_unlocked(&self) -> Result<(), Error> {
-        let worktree_name = self.current_branch()?;
-        match self.sync_repository_once(&worktree_name) {
-            Ok(()) => Ok(()),
-            Err(error) if is_retryable_push_failure(&error) => {
-                self.sync_repository_once(&worktree_name)
-            }
-            Err(error) => Err(error),
-        }
+        self.sync_repository_with_admission_unlocked(false)
     }
 
-    fn sync_repository_once(&self, worktree_name: &str) -> Result<(), Error> {
+    fn sync_repository_with_admission_unlocked(
+        &self,
+        admits_to_backlog: bool,
+    ) -> Result<(), Error> {
+        let worktree_name = self.current_branch()?;
+        let admission_baseline = if admits_to_backlog {
+            Some(self.git(["rev-parse", "--verify", "refs/heads/tasks"])?)
+        } else {
+            None
+        };
+        for attempt in 1..=MAX_SYNC_ATTEMPTS {
+            match self.sync_repository_once(&worktree_name, admits_to_backlog) {
+                Ok(()) => return Ok(()),
+                Err(error) if is_retryable_push_failure(&error) => {
+                    if attempt < MAX_SYNC_ATTEMPTS {
+                        continue;
+                    }
+                    if let Some(baseline) = admission_baseline.as_deref() {
+                        self.rollback_exhausted_admission(baseline)?;
+                    }
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("sync attempts loop always returns")
+    }
+
+    fn rollback_exhausted_admission(&self, baseline: &str) -> Result<(), Error> {
+        let current = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
+        let target = self
+            .fetch_origin_tasks()?
+            .unwrap_or_else(|| baseline.to_string());
+        self.git([
+            "update-ref",
+            "refs/heads/tasks",
+            target.trim(),
+            current.trim(),
+        ])?;
+        Ok(())
+    }
+
+    fn sync_repository_once(
+        &self,
+        worktree_name: &str,
+        admits_to_backlog: bool,
+    ) -> Result<(), Error> {
         let local_parent = self.git(["rev-parse", "--verify", "refs/heads/tasks"])?;
         let remote_parent = self.fetch_origin_tasks()?;
         if remote_parent
@@ -545,6 +585,19 @@ impl GitRepository {
             .is_some_and(|parent| parent.trim() != local_parent.trim())
         {
             self.merge_remote_tasks(worktree_name)?;
+        }
+        if admits_to_backlog {
+            if let Err(error) = self.ensure_backlog_not_over_capacity() {
+                if let Some(remote_parent) = remote_parent.as_deref() {
+                    self.git([
+                        "update-ref",
+                        "refs/heads/tasks",
+                        remote_parent.trim(),
+                        local_parent.trim(),
+                    ])?;
+                }
+                return Err(error);
+            }
         }
         let tasks_tree = self.write_directory_tree(&self.tasks_dir())?;
         let root_tree = tasks_tree;
@@ -718,7 +771,10 @@ impl GitRepository {
 
     fn create_task(&self, title: TaskTitle) -> Result<TaskPath, Error> {
         let task_path = self.create_task_unlocked(title)?;
-        if let Err(error) = self.sync_repository_unlocked() {
+        if let Err(error) = self.sync_repository_with_admission_unlocked(true) {
+            if matches!(error, Error::BacklogCapacityExceeded { .. }) {
+                return Err(error);
+            }
             let committed = self.task_committed_to_tasks_ref(&task_path).unwrap_or(true);
             if !committed {
                 return Err(Error::TaskCreateSyncFailed {
@@ -780,6 +836,25 @@ impl GitRepository {
         let Some(max_queued) = self.project_config()?.backlog.max_queued else {
             return Ok(());
         };
+        let queued = Self::backlog_count(backlog_dir)?;
+        if queued >= max_queued {
+            return Err(Error::BacklogCapacityExceeded { queued, max_queued });
+        }
+        Ok(())
+    }
+
+    fn ensure_backlog_not_over_capacity(&self) -> Result<(), Error> {
+        let Some(max_queued) = self.project_config()?.backlog.max_queued else {
+            return Ok(());
+        };
+        let queued = Self::backlog_count(&self.tasks_dir().join("backlog"))?;
+        if queued > max_queued {
+            return Err(Error::BacklogCapacityExceeded { queued, max_queued });
+        }
+        Ok(())
+    }
+
+    fn backlog_count(backlog_dir: &Path) -> Result<usize, Error> {
         let mut queued = 0;
         for entry in fs::read_dir(backlog_dir)? {
             let entry = entry?;
@@ -787,10 +862,7 @@ impl GitRepository {
                 queued += 1;
             }
         }
-        if queued >= max_queued {
-            return Err(Error::BacklogCapacityExceeded { queued, max_queued });
-        }
-        Ok(())
+        Ok(queued)
     }
 
     fn project_config(&self) -> Result<ProjectConfig, Error> {
@@ -961,16 +1033,21 @@ impl GitRepository {
     }
 
     fn transition_task(&self, task_ref: &str, status: &str) -> Result<TaskPath, Error> {
-        let task_path = self.transition_task_unlocked(task_ref, status)?;
-        self.sync_repository_unlocked()?;
+        let (task_path, admits_to_backlog) = self.transition_task_unlocked(task_ref, status)?;
+        self.sync_repository_with_admission_unlocked(admits_to_backlog)?;
         Ok(task_path)
     }
 
-    fn transition_task_unlocked(&self, task_ref: &str, status: &str) -> Result<TaskPath, Error> {
+    fn transition_task_unlocked(
+        &self,
+        task_ref: &str,
+        status: &str,
+    ) -> Result<(TaskPath, bool), Error> {
         let task_ref = self.resolve_task_ref(task_ref)?;
         let status = parse_status(status)?;
         let tasks_dir = self.tasks_dir();
-        if status == "backlog" && !task_ref.starts_with("backlog") {
+        let admits_to_backlog = status == "backlog" && !task_ref.starts_with("backlog");
+        if admits_to_backlog {
             let backlog_dir = tasks_dir.join("backlog");
             fs::create_dir_all(&backlog_dir)?;
             self.ensure_backlog_capacity(&backlog_dir)?;
@@ -1013,7 +1090,7 @@ impl GitRepository {
             order.retain(|entry| entry != &old_entry && entry != &new_entry);
         }
         self.write_order(&order)?;
-        Ok(TaskPath { path: new_entry })
+        Ok((TaskPath { path: new_entry }, admits_to_backlog))
     }
 
     fn prioritize_before(&self, task_ref: &str, before_ref: &str) -> Result<(), Error> {
@@ -1288,7 +1365,7 @@ impl GitRepository {
         let mut closed = Vec::new();
         for task_ref in requested {
             let resolved = task_stem(&self.resolve_task_ref(&task_ref)?)?;
-            let done = self.transition_task_unlocked(&resolved, "done")?;
+            let (done, _) = self.transition_task_unlocked(&resolved, "done")?;
             closed.push(done.path);
         }
         closed.sort();
