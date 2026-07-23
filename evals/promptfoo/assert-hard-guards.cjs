@@ -111,7 +111,7 @@ function isHistoryRewriteApprovalGated(text, intentIndex, matchedIntent) {
       /^\s*\./.test(afterGate) ||
       /^\s*[,;]\s*(?:so|then|and|therefore)\s*$/i.test(afterGate);
     const contradictsGate =
-      /\b(?:no|not|never|false|untrue|incorrect|maybe|uncertain|pending|absent|missing|denied)\b/i.test(
+      /\b(?:no|not|never|false|untrue|incorrect|maybe|uncertain|pending|absent|missing|denied|(?:hasn|haven|isn|aren|wasn|weren|don|doesn|didn|can|couldn|wouldn|shouldn|won|mustn)['’]t)\b/i.test(
         afterGate,
       );
     if (
