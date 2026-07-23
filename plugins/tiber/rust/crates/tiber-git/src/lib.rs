@@ -1926,7 +1926,27 @@ impl GitRepository {
     }
 
     fn acquire_lock(&self) -> Result<TiberLock, Error> {
-        self.acquire_named_lock("tiber.lock")
+        let timeout =
+            lock_retry_duration("TIBER_LOCK_RETRY_TIMEOUT_MS", DEFAULT_LOCK_RETRY_TIMEOUT);
+        let interval =
+            lock_retry_duration("TIBER_LOCK_RETRY_INTERVAL_MS", DEFAULT_LOCK_RETRY_INTERVAL);
+        let interval = if interval.is_zero() {
+            DEFAULT_LOCK_RETRY_INTERVAL
+        } else {
+            interval
+        };
+        let started_at = Instant::now();
+        loop {
+            match self.try_acquire_task_lock_once() {
+                Ok(lock) => return Ok(lock),
+                Err(error)
+                    if is_tiber_lock_busy(&error) && lock_retry_remaining(started_at, timeout) =>
+                {
+                    thread::sleep(interval);
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     fn acquire_named_lock(&self, filename: &str) -> Result<TiberLock, Error> {
@@ -1968,7 +1988,10 @@ impl GitRepository {
                 file.set_len(0)?;
                 file.write_all(lock_metadata().as_bytes())?;
                 file.sync_data()?;
-                Ok(TiberLock { _file: file })
+                Ok(TiberLock {
+                    _file: file,
+                    _legacy_sentinel: None,
+                })
             }
             Err(TryLockError::WouldBlock) => Err(Error::Parse(format!(
                 "tiber_lock_busy path={}",
@@ -1976,6 +1999,66 @@ impl GitRepository {
             ))),
             Err(TryLockError::Error(error)) => Err(Error::Io(error)),
         }
+    }
+
+    fn try_acquire_task_lock_once(&self) -> Result<TiberLock, Error> {
+        let lock_dir = self.git_common_dir()?.join("tiber");
+        fs::create_dir_all(&lock_dir)?;
+        let legacy_path = lock_dir.join("tiber.lock");
+        let advisory_path = lock_dir.join("tiber.advisory.lock");
+        let advisory_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&advisory_path)?;
+        match advisory_file.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => {
+                return Err(Error::Parse(format!(
+                    "tiber_lock_busy path={}",
+                    path_to_entry(&legacy_path)?
+                )));
+            }
+            Err(TryLockError::Error(error)) => return Err(Error::Io(error)),
+        }
+
+        if let Some(stale_contents) = stale_lock_contents(&legacy_path)? {
+            if fs::read_to_string(&legacy_path)
+                .ok()
+                .as_deref()
+                .is_some_and(|contents| contents == stale_contents)
+            {
+                let _ = fs::remove_file(&legacy_path);
+            }
+        }
+        let metadata = lock_metadata();
+        let mut legacy_file = match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&legacy_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(Error::Parse(format!(
+                    "tiber_lock_busy path={}",
+                    path_to_entry(&legacy_path)?
+                )));
+            }
+            Err(error) => return Err(Error::Io(error)),
+        };
+        legacy_file.write_all(metadata.as_bytes())?;
+        legacy_file.sync_data()?;
+
+        Ok(TiberLock {
+            _file: advisory_file,
+            _legacy_sentinel: Some(LegacySentinel {
+                _file: legacy_file,
+                path: legacy_path,
+                metadata,
+            }),
+        })
     }
 
     fn git<I, S>(&self, args: I) -> Result<String, Error>
@@ -2037,6 +2120,25 @@ impl GitRepository {
 
 struct TiberLock {
     _file: fs::File,
+    _legacy_sentinel: Option<LegacySentinel>,
+}
+
+struct LegacySentinel {
+    _file: fs::File,
+    path: PathBuf,
+    metadata: String,
+}
+
+impl Drop for LegacySentinel {
+    fn drop(&mut self) {
+        if fs::read_to_string(&self.path)
+            .ok()
+            .as_deref()
+            .is_some_and(|contents| contents == self.metadata)
+        {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 struct TaskWorkspace {
@@ -3402,6 +3504,52 @@ fn lock_retry_remaining(started_at: Instant, timeout: Duration) -> bool {
 
 fn is_tiber_lock_busy(error: &Error) -> bool {
     matches!(error, Error::Parse(message) if message.starts_with("tiber_lock_busy "))
+}
+
+fn stale_lock_contents(path: &Path) -> Result<Option<String>, Error> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(Error::Io(error)),
+    };
+    if lock_contents_are_stale(&contents) {
+        Ok(Some(contents))
+    } else {
+        Ok(None)
+    }
+}
+
+fn lock_contents_are_stale(contents: &str) -> bool {
+    let pid = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("pid="))
+        .and_then(|pid| pid.parse::<u32>().ok());
+    if pid.is_some_and(process_is_gone) {
+        return true;
+    }
+    let timestamp = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("timestamp="))
+        .and_then(|timestamp| timestamp.parse::<u64>().ok());
+    timestamp.is_some_and(|timestamp| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH + Duration::from_secs(timestamp))
+            .unwrap_or_default()
+            > Duration::from_secs(60 * 60)
+    })
+}
+
+#[cfg(unix)]
+fn process_is_gone(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .is_ok_and(|status| !status.success())
+}
+
+#[cfg(not(unix))]
+fn process_is_gone(_pid: u32) -> bool {
+    false
 }
 
 fn order_conflicts(remote_order: &[String], local_order: &[String]) -> bool {

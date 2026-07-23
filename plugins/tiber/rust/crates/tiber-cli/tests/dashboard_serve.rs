@@ -244,6 +244,100 @@ fn dashboard_cli_port_overrides_the_environment_port() {
 }
 
 #[test]
+fn dashboard_rejects_an_invalid_environment_port() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let mut child = dashboard_command(&repo)
+        .env("TIBER_DASHBOARD_PORT", "not-a-port")
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("reject invalid dashboard environment port");
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let exited = loop {
+        if child.try_wait().expect("read dashboard status").is_some() {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    if !exited {
+        child.kill().ok();
+    }
+    let output = child
+        .wait_with_output()
+        .expect("read invalid dashboard port result");
+
+    assert!(
+        exited
+            && !output.status.success()
+            && String::from_utf8(output.stderr)
+                .expect("dashboard error should be utf8")
+                .contains("dashboard_port_invalid source=TIBER_DASHBOARD_PORT"),
+        "an invalid fixed-port request must not silently select a random port"
+    );
+}
+
+#[test]
+fn dashboard_rejects_an_occupied_explicit_port_clearly() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let occupied = TcpListener::bind("127.0.0.1:0").expect("occupy dashboard port");
+    let port = occupied
+        .local_addr()
+        .expect("read occupied dashboard port")
+        .port();
+    let port_value = port.to_string();
+
+    let output = dashboard_command_with_args(&repo, ["dashboard", "serve", "--port", &port_value])
+        .output()
+        .expect("reject occupied dashboard port");
+
+    assert!(
+        !output.status.success()
+            && String::from_utf8(output.stderr)
+                .expect("dashboard error should be utf8")
+                .contains(&format!("dashboard_port_unavailable requested={port}")),
+        "an occupied explicit port must produce an actionable stable diagnostic"
+    );
+}
+
+#[test]
+fn dashboards_for_distinct_repositories_remain_independent() {
+    let first_repo = TempRepo::initialized();
+    first_repo.tiber(["init"]);
+    let second_repo = TempRepo::initialized();
+    second_repo.tiber(["init"]);
+    let (mut first, first_line) = start_dashboard(&first_repo);
+    let (mut second, second_line) = start_dashboard(&second_repo);
+
+    let first_repeat = dashboard_command(&first_repo)
+        .output()
+        .expect("repeat first dashboard");
+    let second_repeat = dashboard_command(&second_repo)
+        .output()
+        .expect("repeat second dashboard");
+    stop_dashboard(&mut first);
+    stop_dashboard(&mut second);
+
+    let first_url = first_line
+        .strip_prefix("tiber dashboard listening on ")
+        .expect("first dashboard URL");
+    let second_url = second_line
+        .strip_prefix("tiber dashboard listening on ")
+        .expect("second dashboard URL");
+    assert!(
+        first_url != second_url
+            && String::from_utf8(first_repeat.stdout).expect("first reuse output")
+                == format!("tiber dashboard already running on {first_url}\n")
+            && String::from_utf8(second_repeat.stdout).expect("second reuse output")
+                == format!("tiber dashboard already running on {second_url}\n"),
+        "each repository must reuse only its own live dashboard"
+    );
+}
+
+#[test]
 fn dashboard_port_zero_reuses_the_automatically_selected_port() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);
@@ -367,6 +461,59 @@ fn dashboard_keeps_serving_when_the_browser_opener_is_unavailable() {
             && warning.contains("dashboard_continues=true")
             && !warning.contains("http://"),
         "browser opener failure must not stop the dashboard"
+    );
+}
+
+#[test]
+fn dashboard_warns_when_the_browser_opener_exits_unsuccessfully() {
+    let repo = TempRepo::initialized();
+    repo.tiber(["init"]);
+    let browser_bin = repo.path().join("browser-bin");
+    std::fs::create_dir(&browser_bin).expect("create fake browser bin");
+    let opener = if cfg!(target_os = "macos") {
+        browser_bin.join("open")
+    } else {
+        browser_bin.join("xdg-open")
+    };
+    std::fs::write(&opener, "#!/bin/sh\nexit 23\n").expect("write failing browser opener");
+    std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755))
+        .expect("make fake browser opener executable");
+    let path = format!(
+        "{}:{}",
+        browser_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let mut child = dashboard_command_with_args(&repo, ["dashboard", "serve", "--open"])
+        .env("PATH", path)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start dashboard with failing browser opener");
+    let stdout = child.stdout.take().expect("dashboard stdout");
+    let stderr = child.stderr.take().expect("dashboard stderr");
+    let _line = BufReader::new(stdout)
+        .lines()
+        .next()
+        .transpose()
+        .expect("read dashboard output")
+        .expect("dashboard should print URL");
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut lines = BufReader::new(stderr).lines();
+        sender.send(lines.next().transpose()).ok();
+    });
+    let warning = receiver.recv_timeout(Duration::from_secs(3));
+    let still_running = child.try_wait().expect("read dashboard status").is_none();
+    stop_dashboard(&mut child);
+
+    assert!(
+        still_running
+            && warning
+                .ok()
+                .and_then(Result::ok)
+                .flatten()
+                .is_some_and(|line| line.contains("dashboard_continues=true")),
+        "a nonzero opener exit must warn without stopping the dashboard"
     );
 }
 
