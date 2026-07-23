@@ -31,6 +31,28 @@ fn close_from_trailers_moves_closed_tasks_to_done() {
 }
 
 #[test]
+fn close_from_trailers_is_a_noop_without_current_head_closures() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    let tasks_before = repo.git_output(["rev-parse", "tasks"]).stdout;
+    fs::write(repo.path().join("ordinary.txt"), "ordinary\n").expect("write ordinary change");
+    repo.git(["add", "ordinary.txt"]);
+    repo.git(["commit", "-m", "Ordinary main change"]);
+
+    let close = repo.tiber_with_env(
+        ["close-from-trailers"],
+        [
+            ("GIT_AUTHOR_DATE", "2001-01-01T00:00:00Z"),
+            ("GIT_COMMITTER_DATE", "2001-01-01T00:00:00Z"),
+        ],
+    );
+
+    assert_success_ref(&close);
+    assert!(close.stdout.is_empty());
+    assert_eq!(repo.git_output(["rev-parse", "tasks"]).stdout, tasks_before);
+}
+
+#[test]
 fn close_from_trailers_fetches_remote_tasks_before_resolving_closures() {
     let origin = TempRepo::new();
     origin.git(["init", "--bare"]);
