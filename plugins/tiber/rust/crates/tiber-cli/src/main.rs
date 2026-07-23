@@ -376,6 +376,9 @@ struct ScaffoldRepoArgs {
     /// Apply scaffold changes.
     #[arg(long)]
     apply: bool,
+    /// Replace integration files reported as conflicts.
+    #[arg(long, requires = "apply")]
+    replace_conflicts: bool,
 }
 
 fn main() -> ExitCode {
@@ -743,9 +746,14 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             Ok(())
         }
         Command::Scaffold(ScaffoldArgs {
-            command: ScaffoldCommand::Repo(ScaffoldRepoArgs { apply, .. }),
+            command:
+                ScaffoldCommand::Repo(ScaffoldRepoArgs {
+                    apply,
+                    replace_conflicts,
+                    ..
+                }),
         }) => {
-            for message in tiber_git::scaffold_repo(apply)? {
+            for message in tiber_git::scaffold_repo(apply, replace_conflicts)? {
                 println!("{message}");
             }
             Ok(())

@@ -285,17 +285,23 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
                 .collect::<String>(),
         )),
         "tiber.scaffold_repo_dry_run" => Ok(text_content(
-            tiber_git::scaffold_repo(false)?
+            tiber_git::scaffold_repo(false, false)?
                 .into_iter()
                 .map(|message| format!("{message}\n"))
                 .collect::<String>(),
         )),
-        "tiber.scaffold_repo_apply" => Ok(text_content(
-            tiber_git::scaffold_repo(true)?
-                .into_iter()
-                .map(|message| format!("{message}\n"))
-                .collect::<String>(),
-        )),
+        "tiber.scaffold_repo_apply" => {
+            let replace_conflicts = arguments
+                .get("replace_conflicts")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            Ok(text_content(
+                tiber_git::scaffold_repo(true, replace_conflicts)?
+                    .into_iter()
+                    .map(|message| format!("{message}\n"))
+                    .collect::<String>(),
+            ))
+        }
         "tiber.install_bin" => {
             let target_dir = required_string(arguments, "target_dir")?;
             let apply = arguments
@@ -538,7 +544,7 @@ fn tools() -> Vec<Value> {
             "tiber.scaffold_repo_apply",
             "Apply repository scaffold",
             "Write repository files tiber scaffolds.",
-            json!({}),
+            json!({ "replace_conflicts": { "type": "boolean" } }),
             vec![],
         ),
         tool(
