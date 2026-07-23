@@ -40,6 +40,7 @@ const MAX_LENS_DESCRIPTION_CHARS: usize = 512;
 const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_WORK_ITEM_ID_CHARS: usize = 256;
 const MAX_ACTIVE_REVIEW_SESSIONS: usize = 32;
+const MAX_DURABLE_REVIEW_SESSIONS: usize = 1024;
 const MAX_RETAINED_HISTORY_ENTRIES: usize = 64;
 const MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES: usize = 128;
 const MAX_RETAINED_DEFERRED_FINDINGS: usize = MAX_FINDINGS_PER_ITERATION;
@@ -177,6 +178,7 @@ fn write_json_rpc_response(output: &mut impl Write, response: Value) -> io::Resu
 
 struct ReviewCoordinator {
     sessions: HashMap<String, Value>,
+    session_revisions: HashMap<String, u64>,
     pending_verifiers: HashMap<String, PendingVerifier>,
     pending_delta_risks: HashMap<String, PendingVerifier>,
     session_lru: VecDeque<String>,
@@ -187,6 +189,7 @@ impl Default for ReviewCoordinator {
     fn default() -> Self {
         Self {
             sessions: HashMap::new(),
+            session_revisions: HashMap::new(),
             pending_verifiers: HashMap::new(),
             pending_delta_risks: HashMap::new(),
             session_lru: VecDeque::new(),
@@ -302,9 +305,12 @@ impl ReviewCoordinator {
                             };
                             return Ok(error_response(id, -32602, &error));
                         }
-                        if let Err(error) =
-                            self.capture_authoritative_state(name, &result, &arguments)
-                        {
+                        if let Err(error) = self.capture_authoritative_state(
+                            name,
+                            &result,
+                            &arguments,
+                            now_epoch_seconds,
+                        ) {
                             return Ok(error_response(id, tool_error_code(&error), &error));
                         }
                         return Ok(response);
@@ -338,11 +344,25 @@ impl ReviewCoordinator {
             .get("session_id")
             .and_then(Value::as_str)
             .ok_or_else(|| "review_session_id_required=true".to_string())?;
-        let matches_authoritative = self
-            .sessions
-            .get(session_id)
-            .ok_or_else(|| "review_session_not_found=true".to_string())?
-            == state;
+        if !self.sessions.contains_key(session_id) {
+            if let Some(restored) = load_authoritative_session(state, session_id)? {
+                self.session_revisions
+                    .insert(session_id.to_string(), restored.revision);
+                self.sessions.insert(session_id.to_string(), restored.state);
+                if let Some(pending) = restored.pending_verifier {
+                    self.pending_verifiers
+                        .insert(session_id.to_string(), pending);
+                }
+                if let Some(pending) = restored.pending_delta_risk {
+                    self.pending_delta_risks
+                        .insert(session_id.to_string(), pending);
+                }
+            }
+        }
+        let matches_authoritative = self.sessions.get(session_id).ok_or_else(|| {
+            "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
+                .to_string()
+        })? == state;
         if !matches_authoritative {
             return Err("review_state_out_of_sync=true".to_string());
         }
@@ -398,6 +418,7 @@ impl ReviewCoordinator {
         tool_name: &str,
         result: &Value,
         arguments: &Value,
+        now_epoch_seconds: u64,
     ) -> Result<(), String> {
         if !matches!(
             tool_name,
@@ -442,13 +463,21 @@ impl ReviewCoordinator {
                 .to_string();
             let expected_arguments = pending_verifier_core_arguments(arguments)
                 .map_err(|_| "internal verifier arguments object missing".to_string())?;
-            self.pending_verifiers.insert(
-                session_id.clone(),
-                PendingVerifier {
-                    assignment_id,
-                    arguments: expected_arguments,
-                },
-            );
+            let pending = PendingVerifier {
+                assignment_id,
+                arguments: expected_arguments,
+            };
+            let authoritative_state = arguments.get("state").unwrap_or(&state);
+            let revision = persist_authoritative_session(
+                authoritative_state,
+                Some(&pending),
+                self.pending_delta_risks.get(&session_id),
+                now_epoch_seconds,
+                Some(authoritative_state),
+                self.session_revisions.get(&session_id).copied(),
+            )?;
+            self.session_revisions.insert(session_id.clone(), revision);
+            self.pending_verifiers.insert(session_id.clone(), pending);
             self.touch_session(&session_id);
             return Ok(());
         }
@@ -463,13 +492,21 @@ impl ReviewCoordinator {
                 .to_string();
             let expected_arguments = pending_delta_risk_core_arguments(arguments)
                 .map_err(|_| "internal delta risk arguments object missing".to_string())?;
-            self.pending_delta_risks.insert(
-                session_id.clone(),
-                PendingVerifier {
-                    assignment_id,
-                    arguments: expected_arguments,
-                },
-            );
+            let pending = PendingVerifier {
+                assignment_id,
+                arguments: expected_arguments,
+            };
+            let authoritative_state = arguments.get("state").unwrap_or(&state);
+            let revision = persist_authoritative_session(
+                authoritative_state,
+                self.pending_verifiers.get(&session_id),
+                Some(&pending),
+                now_epoch_seconds,
+                Some(authoritative_state),
+                self.session_revisions.get(&session_id).copied(),
+            )?;
+            self.session_revisions.insert(session_id.clone(), revision);
+            self.pending_delta_risks.insert(session_id.clone(), pending);
             self.touch_session(&session_id);
             return Ok(());
         }
@@ -481,7 +518,21 @@ impl ReviewCoordinator {
         {
             return Ok(());
         }
-        self.sessions.insert(session_id.clone(), state);
+        let expected_prior = if tool_name == "final_review.plan" {
+            None
+        } else {
+            arguments.get("state")
+        };
+        let revision = persist_authoritative_session(
+            &state,
+            None,
+            None,
+            now_epoch_seconds,
+            expected_prior,
+            self.session_revisions.get(&session_id).copied(),
+        )?;
+        self.session_revisions.insert(session_id.clone(), revision);
+        self.sessions.insert(session_id.clone(), state.clone());
         self.pending_verifiers.remove(&session_id);
         self.pending_delta_risks.remove(&session_id);
         self.touch_session(&session_id);
@@ -489,7 +540,13 @@ impl ReviewCoordinator {
             let Some(evicted) = self.session_lru.pop_front() else {
                 break;
             };
-            self.sessions.remove(&evicted);
+            let evicted_revision = self.session_revisions.remove(&evicted);
+            if let Some(evicted_state) = self.sessions.remove(&evicted) {
+                if let Some(evicted_revision) = evicted_revision {
+                    let _ =
+                        delete_authoritative_session(&evicted_state, &evicted, evicted_revision);
+                }
+            }
             self.pending_verifiers.remove(&evicted);
             self.pending_delta_risks.remove(&evicted);
         }
@@ -6358,10 +6415,16 @@ fn durable_report_database_path(
             .filter(|value| !value.is_empty())
             .map(PathBuf::from),
     )?;
+    let test_process_scope = if cfg!(test) {
+        std::process::id().to_string()
+    } else {
+        String::new()
+    };
     let storage_key = stable_storage_digest(&[
         "development-discipline-final-review-report-v1",
         project_root,
         work_item_id.unwrap_or(""),
+        &test_process_scope,
     ]);
     Ok(state_root
         .join("development-discipline/final-review-reports")
@@ -6438,8 +6501,20 @@ fn initialize_durable_report_schema(connection: &Connection) -> Result<(), Strin
             PRIMARY KEY (report_binding_id, lens, finding_id)
         );
     ";
+    const SESSION_TABLE: &str = "
+        CREATE TABLE IF NOT EXISTS final_review_session (
+            session_id TEXT PRIMARY KEY,
+            state_json TEXT NOT NULL,
+            pending_verifier_json TEXT,
+            pending_delta_risk_json TEXT,
+            updated_at INTEGER NOT NULL
+            , revision INTEGER NOT NULL DEFAULT 1
+        );
+    ";
     connection
-        .execute_batch(&format!("PRAGMA journal_mode = WAL; {SNAPSHOT_TABLE}"))
+        .execute_batch(&format!(
+            "PRAGMA journal_mode = WAL; {SNAPSHOT_TABLE} {SESSION_TABLE}"
+        ))
         .map_err(|error| format!("durable_report_schema_failed source={error}"))?;
     let has_complete_schema = connection
         .query_row(
@@ -6457,7 +6532,218 @@ fn initialize_durable_report_schema(connection: &Connection) -> Result<(), Strin
             ))
             .map_err(|error| format!("durable_report_schema_migrate_failed source={error}"))?;
     }
+    let has_session_revision = connection
+        .query_row(
+            "SELECT 1 FROM pragma_table_info('final_review_session') WHERE name = 'revision'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| format!("review_session_schema_inspect_failed source={error}"))?
+        .is_some();
+    if !has_session_revision {
+        connection
+            .execute_batch(
+                "ALTER TABLE final_review_session ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;",
+            )
+            .map_err(|error| format!("review_session_schema_migrate_failed source={error}"))?;
+    }
     Ok(())
+}
+
+struct RestoredReviewSession {
+    state: Value,
+    revision: u64,
+    pending_verifier: Option<PendingVerifier>,
+    pending_delta_risk: Option<PendingVerifier>,
+}
+
+fn encoded_pending_assignment(pending: Option<&PendingVerifier>) -> Result<Option<String>, String> {
+    pending
+        .map(|pending| {
+            serde_json::to_string(&json!({
+                "assignment_id": pending.assignment_id,
+                "arguments": pending.arguments
+            }))
+            .map_err(|error| format!("review_session_pending_encode_failed source={error}"))
+        })
+        .transpose()
+}
+
+fn decoded_pending_assignment(encoded: Option<String>) -> Result<Option<PendingVerifier>, String> {
+    encoded
+        .map(|encoded| {
+            let value: Value = serde_json::from_str(&encoded)
+                .map_err(|error| format!("review_session_pending_parse_failed source={error}"))?;
+            Ok(PendingVerifier {
+                assignment_id: value
+                    .get("assignment_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "review_session_pending_assignment_id_missing=true".to_string())?
+                    .to_string(),
+                arguments: value
+                    .get("arguments")
+                    .cloned()
+                    .ok_or_else(|| "review_session_pending_arguments_missing=true".to_string())?,
+            })
+        })
+        .transpose()
+}
+
+fn persist_authoritative_session(
+    state: &Value,
+    pending_verifier: Option<&PendingVerifier>,
+    pending_delta_risk: Option<&PendingVerifier>,
+    updated_at: u64,
+    expected_prior_state: Option<&Value>,
+    expected_revision: Option<u64>,
+) -> Result<u64, String> {
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
+    let session_id = state
+        .get("session_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_session_id_required=true".to_string())?;
+    let path = durable_report_database_path(
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
+    let directory = path
+        .parent()
+        .ok_or_else(|| "review_session_directory_missing=true".to_string())?;
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("review_session_directory_create_failed source={error}"))?;
+    let mut connection = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|error| format!("review_session_open_failed source={error}"))?;
+    initialize_durable_report_schema(&connection)?;
+    let state_json = serde_json::to_string(state)
+        .map_err(|error| format!("review_session_encode_failed source={error}"))?;
+    let pending_verifier_json = encoded_pending_assignment(pending_verifier)?;
+    let pending_delta_risk_json = encoded_pending_assignment(pending_delta_risk)?;
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| format!("review_session_transaction_failed source={error}"))?;
+    let next_revision = expected_revision.unwrap_or(0).saturating_add(1);
+    let changed = if let Some(expected_prior_state) = expected_prior_state {
+        let expected_json = serde_json::to_string(expected_prior_state)
+            .map_err(|error| format!("review_session_encode_failed source={error}"))?;
+        transaction
+            .execute(
+                "UPDATE final_review_session SET state_json = ?2, pending_verifier_json = ?3, pending_delta_risk_json = ?4, updated_at = ?5, revision = ?7 WHERE session_id = ?1 AND state_json = ?6 AND revision = ?8",
+                params![session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, expected_json, next_revision, expected_revision],
+            )
+            .map_err(|error| format!("review_session_write_failed source={error}"))?
+    } else {
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, next_revision],
+            )
+            .map_err(|error| format!("review_session_write_failed source={error}"))?
+    };
+    if changed == 0 {
+        return Err(if expected_prior_state.is_some() {
+            "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
+                .to_string()
+        } else {
+            "review_session_exists=true recovery=resume_existing_review_or_abandon_it_before_restarting"
+                .to_string()
+        });
+    }
+    transaction
+        .execute(
+            "DELETE FROM final_review_session WHERE session_id <> ?1 AND session_id NOT IN (SELECT session_id FROM final_review_session WHERE session_id <> ?1 ORDER BY updated_at DESC, revision DESC, session_id DESC LIMIT ?2)",
+            params![session_id, MAX_DURABLE_REVIEW_SESSIONS.saturating_sub(1)],
+        )
+        .map_err(|error| format!("review_session_prune_failed source={error}"))?;
+    transaction
+        .commit()
+        .map_err(|error| format!("review_session_commit_failed source={error}"))?;
+    Ok(next_revision)
+}
+
+fn delete_authoritative_session(
+    state: &Value,
+    session_id: &str,
+    expected_revision: u64,
+) -> Result<(), String> {
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
+    let path = durable_report_database_path(
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let connection = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|error| format!("review_session_open_failed source={error}"))?;
+    connection
+        .execute(
+            "DELETE FROM final_review_session WHERE session_id = ?1 AND revision = ?2",
+            params![session_id, expected_revision],
+        )
+        .map_err(|error| format!("review_session_delete_failed source={error}"))?;
+    Ok(())
+}
+
+fn load_authoritative_session(
+    caller_state: &Value,
+    session_id: &str,
+) -> Result<Option<RestoredReviewSession>, String> {
+    let project_root = caller_state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
+    let path = durable_report_database_path(
+        project_root,
+        caller_state.get("work_item_id").and_then(Value::as_str),
+    )?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let connection = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|error| format!("review_session_open_failed source={error}"))?;
+    connection
+        .query_row(
+            "SELECT state_json, pending_verifier_json, pending_delta_risk_json, revision FROM final_review_session WHERE session_id = ?1",
+            params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, u64>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("review_session_read_failed source={error}"))?
+        .map(|(state, verifier, delta, revision)| {
+            Ok(RestoredReviewSession {
+                state: serde_json::from_str(&state)
+                    .map_err(|error| format!("review_session_state_parse_failed source={error}"))?,
+                pending_verifier: decoded_pending_assignment(verifier)?,
+                pending_delta_risk: decoded_pending_assignment(delta)?,
+                revision,
+            })
+        })
+        .transpose()
 }
 
 fn retain_latest(values: &mut Vec<Value>, maximum: usize) {
@@ -11110,7 +11396,7 @@ mod tests {
         let advanced: Value = serde_json::from_str(
             response["result"]["content"][0]["text"]
                 .as_str()
-                .expect("advance text"),
+                .unwrap_or_else(|| panic!("advance text missing from response: {response}")),
         )
         .expect("advance json");
         assert_eq!(advanced["transition_status"], "advanced");
@@ -22506,6 +22792,171 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn json_rpc_recovers_an_authoritative_review_after_coordinator_restart() {
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "restarted-review",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let mut original = ReviewCoordinator::default();
+        let plan_response = original
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.plan",
+                    "arguments": plan_arguments
+                }
+            }))
+            .expect("plan response");
+        let plan: Value = serde_json::from_str(
+            plan_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+
+        let mut restarted = ReviewCoordinator::default();
+        let response = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.clean_status",
+                    "arguments": { "state": plan["state"] }
+                }
+            }))
+            .expect("restart recovery response");
+
+        assert!(
+            response.get("result").is_some(),
+            "a matching caller-carried state must recover after restart: {response}"
+        );
+    }
+
+    #[test]
+    fn json_rpc_rejects_a_duplicate_plan_after_coordinator_restart() {
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "restarted-duplicate-review",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "final_review.plan",
+                "arguments": plan_arguments
+            }
+        });
+        let mut original = ReviewCoordinator::default();
+        assert!(original
+            .handle_json_rpc(&request)
+            .expect("first plan response")
+            .get("result")
+            .is_some());
+
+        let mut restarted = ReviewCoordinator::default();
+        let duplicate = restarted
+            .handle_json_rpc(&request)
+            .expect("duplicate plan response");
+
+        assert_eq!(duplicate["error"]["code"], -32602);
+        assert!(duplicate["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("review_session_exists=true")));
+    }
+
+    #[test]
+    fn json_rpc_allows_only_one_concurrent_transition_after_restart() {
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "concurrent-restarted-review",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let mut original = ReviewCoordinator::default();
+        let planned = original
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": plan_arguments }
+            }))
+            .expect("plan response");
+        let payload: Value = serde_json::from_str(
+            planned["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+        let state = payload["state"].clone();
+        let advance = |id| {
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state": state,
+                        "lens_results": clean_lens_results_for(&state),
+                        "current_diff_hash": "same"
+                    }
+                }
+            })
+        };
+        let status = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": { "name": "final_review.clean_status", "arguments": { "state": state } }
+        });
+        let mut first = ReviewCoordinator::default();
+        let mut second = ReviewCoordinator::default();
+        assert!(first
+            .handle_json_rpc(&status)
+            .expect("first resume")
+            .get("result")
+            .is_some());
+        assert!(second
+            .handle_json_rpc(&status)
+            .expect("second resume")
+            .get("result")
+            .is_some());
+
+        assert!(first
+            .handle_json_rpc(&advance(3))
+            .expect("winning transition")
+            .get("result")
+            .is_some());
+        let losing = second
+            .handle_json_rpc(&advance(4))
+            .expect("losing transition response");
+
+        assert!(losing["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("review_state_out_of_sync=true")));
+    }
+
+    #[test]
     fn json_rpc_rejects_duplicate_plan_session_id() {
         let mut coordinator = ReviewCoordinator::default();
         let plan_arguments = add_test_risk_assessment(
@@ -22593,7 +23044,9 @@ pre_filter = "project-pre"
             .expect("newest status response");
 
         assert!(
-            oldest["error"]["message"] == "review_session_not_found=true"
+            oldest["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.starts_with("review_session_not_found=true"))
                 && newest["result"]["content"][0]["text"].is_string()
         );
     }
