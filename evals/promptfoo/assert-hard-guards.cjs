@@ -90,7 +90,7 @@ function isHistoryRewriteApprovalGated(text, intentIndex, matchedIntent) {
   const target = `(?:this |the )?(?:specific )?${operation}`;
   const gatePattern = new RegExp(
     `\\b(` +
-      `(?:if|once|after|unless) you explicitly authori[sz]e ${target}\\b|` +
+      `(?:if|once|after) you explicitly authori[sz]e ${target}\\b|` +
       `(?:only )?(?:after|once|with) explicit (?:case-by-case |user )?(?:authorization|approval) (?:for|to) ${target}\\b|` +
       `(?:i|we) have explicit (?:case-by-case |user )?(?:authorization|approval) (?:for|to) ${target}\\b|` +
       `(?:explicit )?(?:case-by-case |user )?(?:authorization|approval) (?:is |was |has been )?(?:given|obtained|granted) (?:for|to) ${target}\\b|` +
