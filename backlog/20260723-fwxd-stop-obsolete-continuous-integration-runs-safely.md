@@ -18,6 +18,7 @@ Reducing redundant validation shortens feedback time and avoids wasting hosted r
 ## Acceptance criteria
 
 - [ ] A newer push safely cancels obsolete runs for the same delivery stream while the latest revision continues to a terminal result.
+- [ ] Pull-request, merge-queue, and main-branch required checks retain correct isolation and cannot report success from a canceled older revision.
 
 ## Subtasks
 
