@@ -27,7 +27,7 @@ Prompt guidance cannot prevent every caller or simultaneous write from overfilli
 - [x] CLI, MCP, dashboard, and every other ticket mutation surface share the same enforcement behavior.
 - [x] Admission enforcement is concurrency-safe so simultaneous successful mutations cannot exceed the configured limit.
 - [x] Automated tests cover configuration, counted statuses, every admission path, refusals, defaults or migration, and simultaneous admissions.
-- [ ] User and operator documentation explains configuration, counted statuses, refusals, migration/default behavior, and recovery.
+- [x] User and operator documentation explains configuration, counted statuses, refusals, migration/default behavior, and recovery.
 - [ ] The design explicitly decides whether the replenishment threshold belongs in Tiber configuration or remains SOP-only, with rationale.
 - [ ] Before admitting a candidate, guidance requires checking completed, abandoned, and current tickets for the same root outcome; reworded duplicates are combined or rejected instead of consuming backlog capacity.
 
