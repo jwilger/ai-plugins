@@ -1,16 +1,29 @@
 mod support;
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::process::Command;
 
 use support::{assert_success, assert_success_ref, TempRepo};
 
 #[test]
-fn install_bin_dry_run_previews_without_writing_and_apply_installs_launcher() {
+fn install_bin_dry_run_previews_without_writing_and_apply_installs_working_command() {
     let repo = TempRepo::initialized();
     let target_dir = repo.path().join("bin");
     let launcher = repo.path().join("plugin/bin/tiber");
+    let helper = repo.path().join("plugin/scripts/helper.sh");
     fs::create_dir_all(launcher.parent().expect("launcher parent")).expect("create launcher dir");
-    fs::write(&launcher, "#!/usr/bin/env bash\n").expect("write fake launcher");
+    fs::create_dir_all(helper.parent().expect("helper parent")).expect("create helper dir");
+    fs::write(
+        &launcher,
+        "#!/usr/bin/env bash\nset -euo pipefail\nplugin_root=\"$(cd -- \"$(dirname -- \"${BASH_SOURCE[0]}\")/..\" && pwd -P)\"\nsource \"$plugin_root/scripts/helper.sh\"\n",
+    )
+    .expect("write fake launcher");
+    fs::write(&helper, "printf 'installed tiber works\\n'\n").expect("write helper");
+    #[cfg(unix)]
+    fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755))
+        .expect("make launcher executable");
 
     let dry_run = repo.tiber_with_env(
         [
@@ -50,8 +63,14 @@ fn install_bin_dry_run_previews_without_writing_and_apply_installs_launcher() {
     );
 
     assert_success(apply);
+
+    let installed = Command::new(target_dir.join("tiber"))
+        .current_dir(repo.path())
+        .output()
+        .expect("run installed tiber");
+    assert_success_ref(&installed);
     assert_eq!(
-        fs::read_link(target_dir.join("tiber")).expect("installed tiber should be symlink"),
-        launcher
+        String::from_utf8(installed.stdout).expect("installed output should be utf8"),
+        "installed tiber works\n"
     );
 }
