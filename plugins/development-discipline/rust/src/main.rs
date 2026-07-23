@@ -357,6 +357,8 @@ impl ReviewCoordinator {
                     self.pending_delta_risks
                         .insert(session_id.to_string(), pending);
                 }
+                self.touch_session(session_id);
+                self.enforce_active_session_limit();
             }
         }
         let authoritative_state = self.sessions.get(session_id).ok_or_else(|| {
@@ -410,6 +412,7 @@ impl ReviewCoordinator {
             }
         }
         self.touch_session(session_id);
+        self.enforce_active_session_limit();
         Ok(())
     }
 
@@ -536,21 +539,20 @@ impl ReviewCoordinator {
         self.pending_verifiers.remove(&session_id);
         self.pending_delta_risks.remove(&session_id);
         self.touch_session(&session_id);
+        self.enforce_active_session_limit();
+        Ok(())
+    }
+
+    fn enforce_active_session_limit(&mut self) {
         while self.sessions.len() > MAX_ACTIVE_REVIEW_SESSIONS {
             let Some(evicted) = self.session_lru.pop_front() else {
                 break;
             };
-            let evicted_revision = self.session_revisions.remove(&evicted);
-            if let Some(evicted_state) = self.sessions.remove(&evicted) {
-                if let Some(evicted_revision) = evicted_revision {
-                    let _ =
-                        delete_authoritative_session(&evicted_state, &evicted, evicted_revision);
-                }
-            }
+            self.session_revisions.remove(&evicted);
+            self.sessions.remove(&evicted);
             self.pending_verifiers.remove(&evicted);
             self.pending_delta_risks.remove(&evicted);
         }
-        Ok(())
     }
 
     fn touch_session(&mut self, session_id: &str) {
@@ -6713,36 +6715,6 @@ fn persist_authoritative_session(
         .commit()
         .map_err(|error| format!("review_session_commit_failed source={error}"))?;
     Ok(next_revision)
-}
-
-fn delete_authoritative_session(
-    state: &Value,
-    session_id: &str,
-    expected_revision: u64,
-) -> Result<(), String> {
-    let project_root = state
-        .pointer("/scope/project_root")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
-    let path = durable_report_database_path(
-        project_root,
-        state.get("work_item_id").and_then(Value::as_str),
-    )?;
-    if !path.exists() {
-        return Ok(());
-    }
-    let connection = Connection::open_with_flags(
-        &path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(|error| format!("review_session_open_failed source={error}"))?;
-    connection
-        .execute(
-            "DELETE FROM final_review_session WHERE session_id = ?1 AND revision = ?2",
-            params![session_id, expected_revision],
-        )
-        .map_err(|error| format!("review_session_delete_failed source={error}"))?;
-    Ok(())
 }
 
 fn load_authoritative_session(
@@ -23046,7 +23018,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn json_rpc_bounds_server_owned_sessions_with_lru_eviction() {
+    fn json_rpc_evicts_only_memory_while_retaining_durable_sessions() {
         let mut coordinator = ReviewCoordinator::default();
         let mut states = Vec::new();
         for index in 0..=MAX_ACTIVE_REVIEW_SESSIONS {
@@ -23093,16 +23065,21 @@ pre_filter = "project-pre"
         let oldest = coordinator
             .handle_json_rpc(&status_request(100, &states[0]))
             .expect("oldest status response");
+        assert_eq!(coordinator.sessions.len(), MAX_ACTIVE_REVIEW_SESSIONS);
+        let mut stale = states[1].clone();
+        stale["diff_hash"] = json!("stale");
+        let stale_response = coordinator
+            .handle_json_rpc(&status_request(101, &stale))
+            .expect("stale status response");
+        assert_eq!(stale_response["error"]["code"], -32602);
+        assert_eq!(coordinator.sessions.len(), MAX_ACTIVE_REVIEW_SESSIONS);
         let newest = coordinator
-            .handle_json_rpc(&status_request(101, states.last().expect("newest state")))
+            .handle_json_rpc(&status_request(102, states.last().expect("newest state")))
             .expect("newest status response");
+        assert_eq!(coordinator.sessions.len(), MAX_ACTIVE_REVIEW_SESSIONS);
 
-        assert!(
-            oldest["error"]["message"]
-                .as_str()
-                .is_some_and(|message| message.starts_with("review_session_not_found=true"))
-                && newest["result"]["content"][0]["text"].is_string()
-        );
+        assert!(oldest["result"]["content"][0]["text"].is_string());
+        assert!(newest["result"]["content"][0]["text"].is_string());
     }
 
     #[test]
