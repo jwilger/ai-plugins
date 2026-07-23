@@ -26,3 +26,5 @@ A broken installed command undermines the normal setup and upgrade experience an
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-23: Delivered by 5dc0735fa6dbdf80fe456887949fc85f899a2988; exact-SHA GitHub Actions run 30036919485 reached terminal success. Full repository checks and release artifact verification passed; full-marketplace canary passed 2/2 on unchanged rerun.
