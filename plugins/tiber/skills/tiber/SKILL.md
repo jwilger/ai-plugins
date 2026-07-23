@@ -52,10 +52,13 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - Treat write-sync conflicts as hard failures: do not force push, choose local,
   or silently overwrite `tasks`. Preserve both sides, resolve deliberately, then
   rerun `tiber sync`.
-- Treat `close-from-trailers` success as authoritative only when it prints every
-  requested task identifier. The command synchronizes first, processes
-  `Closes:` lines from `HEAD`, and fails on missing or invalid tasks, sync
-  conflicts, or publication failures.
+- Treat `close-from-trailers` as successful only when it synchronizes the
+  authoritative board, resolves every `Closes:` line from the current `HEAD`
+  commit, prints `closed <task-id>` for every requested task, and leaves every
+  named task no longer open. A missing or invalid task, synchronization
+  conflict, or publication/push failure must produce a specific diagnostic and
+  a nonzero exit; never accept exit zero or empty output alone as closure
+  evidence.
 - Before any task-board health claim, run and name `tiber validate --fix`.
   Safe autofixes are misplaced claims, missing reciprocal links, and `order.md`
   reconciliation. Dangling refs and dependency cycles are report-and-resolve.
