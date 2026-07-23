@@ -152,6 +152,12 @@ blindly. Preserve both sides, resolve the conflict deliberately, then rerun:
 tiber sync
 ```
 
+`close-from-trailers` synchronizes the authoritative board before resolving
+`Closes:` lines from the current `HEAD` commit. It prints `closed <task-id>` for
+each published transition and exits nonzero when a requested task is missing,
+invalid, conflicted, or cannot be pushed. A successful run therefore guarantees
+that every task it names is no longer open.
+
 Read commands sync before returning task data. If Tiber can merge remote task
 state automatically, the read continues with the merged board. If the sync cannot
 be resolved automatically, the read fails instead of returning stale or locally
@@ -167,7 +173,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.6.1` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.10.1` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
