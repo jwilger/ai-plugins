@@ -287,13 +287,13 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
         "tiber.scaffold_repo_dry_run" => Ok(text_content(
             tiber_git::scaffold_repo(false)?
                 .into_iter()
-                .map(|planned| format!("would write {planned}\n"))
+                .map(|message| format!("{message}\n"))
                 .collect::<String>(),
         )),
         "tiber.scaffold_repo_apply" => Ok(text_content(
             tiber_git::scaffold_repo(true)?
                 .into_iter()
-                .map(|written| format!("wrote {written}\n"))
+                .map(|message| format!("{message}\n"))
                 .collect::<String>(),
         )),
         "tiber.install_bin" => {

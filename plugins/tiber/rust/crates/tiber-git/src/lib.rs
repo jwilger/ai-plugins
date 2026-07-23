@@ -1252,17 +1252,20 @@ impl GitRepository {
             (".gitignore", gitignore),
             (
                 ".githooks/post-commit.tiber",
-                "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n"
-                    .to_string(),
-            ),
-            (
-                ".github/workflows/tiber-close-from-trailers.yml",
-                "name: tiber close from trailers\n\non:\n  push:\n    branches: [main]\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Install Tiber\n        run: |\n          git clone --depth 1 https://github.com/jwilger/ai-plugins.git .tiber-src\n          cargo install --path .tiber-src/plugins/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n".to_string(),
+                "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n".to_string(),
             ),
         ];
+        let equivalent_workflow = self.equivalent_task_closing_workflow()?;
+        if equivalent_workflow.is_none() {
+            files.push((
+                ".github/workflows/tiber-close-from-trailers.yml",
+                "name: tiber close from trailers\n\non:\n  push:\n    branches: [main]\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Install Tiber\n        run: |\n          git clone --depth 1 https://github.com/jwilger/ai-plugins.git .tiber-src\n          cargo install --path .tiber-src/plugins/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n".to_string(),
+            ));
+        }
         if let Some(justfile) = self.show_tasks_justfile()? {
             files.push(("justfile", justfile));
         }
+        let mut messages = Vec::new();
         if apply {
             for (path, contents) in &files {
                 let destination = self.root.join(path);
@@ -1270,12 +1273,19 @@ impl GitRepository {
                     fs::create_dir_all(parent)?;
                 }
                 fs::write(destination, contents)?;
+                messages.push(format!("wrote {path}"));
             }
+        } else {
+            messages.extend(
+                files
+                    .iter()
+                    .map(|(path, _contents)| format!("would write {path}")),
+            );
         }
-        Ok(files
-            .into_iter()
-            .map(|(path, _contents)| path.to_string())
-            .collect())
+        if let Some(path) = equivalent_workflow {
+            messages.push(format!("already configured {path}"));
+        }
+        Ok(messages)
     }
 
     fn repair_legacy_task_ids(&self, messages: &mut Vec<ValidationMessage>) -> Result<(), Error> {
@@ -1366,6 +1376,34 @@ impl GitRepository {
         }
         contents.push_str("\nshow-tasks:\n  tiber list\n");
         Ok(Some(contents))
+    }
+
+    fn equivalent_task_closing_workflow(&self) -> Result<Option<String>, Error> {
+        let workflows = self.root.join(".github").join("workflows");
+        let entries = match fs::read_dir(&workflows) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let mut entries = entries.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let supported_extension = path
+                .extension()
+                .and_then(OsStr::to_str)
+                .is_some_and(|extension| matches!(extension, "yml" | "yaml"));
+            if !entry.file_type()?.is_file() || !supported_extension {
+                continue;
+            }
+            if workflow_invokes_task_closer(&fs::read_to_string(&path)?) {
+                let relative = path
+                    .strip_prefix(&self.root)
+                    .map_err(|_| Error::Parse("scaffold_path_outside_repository".to_string()))?;
+                return Ok(Some(path_to_entry(relative)?));
+            }
+        }
+        Ok(None)
     }
 
     fn report_schema_errors(
@@ -1973,6 +2011,110 @@ fn is_course_task_path(path: &str) -> bool {
         && components.next().is_some()
         && components.next().is_none()
         && path.extension().is_some_and(|extension| extension == "md")
+}
+
+fn workflow_invokes_task_closer(contents: &str) -> bool {
+    let lines = contents.lines().collect::<Vec<_>>();
+    for (jobs_index, line) in lines.iter().enumerate() {
+        let jobs_trimmed = line.trim_start();
+        if jobs_trimmed != "jobs:" {
+            continue;
+        }
+        let jobs_indentation = line.len() - jobs_trimmed.len();
+        for (steps_index, steps_line) in lines.iter().enumerate().skip(jobs_index + 1) {
+            let steps_trimmed = steps_line.trim_start();
+            if steps_trimmed.is_empty() || steps_trimmed.starts_with('#') {
+                continue;
+            }
+            let steps_indentation = steps_line.len() - steps_trimmed.len();
+            if steps_indentation <= jobs_indentation {
+                break;
+            }
+            if steps_trimmed != "steps:" {
+                continue;
+            }
+            if steps_invoke_task_closer(&lines, steps_index + 1, steps_indentation) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn steps_invoke_task_closer(lines: &[&str], start: usize, steps_indentation: usize) -> bool {
+    let mut step_indentation = None;
+    let mut property_indentation = None;
+    for (index, line) in lines.iter().enumerate().skip(start) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indentation = line.len() - trimmed.len();
+        if indentation <= steps_indentation {
+            break;
+        }
+        if let Some(field) = trimmed.strip_prefix("- ") {
+            step_indentation = Some(indentation);
+            property_indentation = None;
+            if run_field_invokes_task_closer(lines, index, indentation, field) {
+                return true;
+            }
+            continue;
+        }
+        let Some(current_step_indentation) = step_indentation else {
+            continue;
+        };
+        if indentation <= current_step_indentation {
+            step_indentation = None;
+            property_indentation = None;
+            continue;
+        }
+        let current_property_indentation = *property_indentation.get_or_insert(indentation);
+        if indentation == current_property_indentation
+            && run_field_invokes_task_closer(lines, index, indentation, trimmed)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn run_field_invokes_task_closer(
+    lines: &[&str],
+    index: usize,
+    indentation: usize,
+    field: &str,
+) -> bool {
+    let Some(value) = field.strip_prefix("run:") else {
+        return false;
+    };
+    let value = value.trim();
+    if value.starts_with('|') || value.starts_with('>') {
+        for block_line in &lines[index + 1..] {
+            let block_trimmed = block_line.trim_start();
+            if block_trimmed.is_empty() {
+                continue;
+            }
+            let block_indentation = block_line.len() - block_trimmed.len();
+            if block_indentation <= indentation {
+                break;
+            }
+            if shell_line_invokes_task_closer(block_trimmed) {
+                return true;
+            }
+        }
+        false
+    } else {
+        shell_line_invokes_task_closer(value)
+    }
+}
+
+fn shell_line_invokes_task_closer(line: &str) -> bool {
+    let line = line
+        .trim()
+        .trim_matches(|character| matches!(character, '"' | '\''));
+    let line = line.strip_prefix("exec ").unwrap_or(line);
+    line == "tiber close-from-trailers"
 }
 
 fn stem_parts(stem: &str) -> Option<(&str, &str)> {

@@ -745,12 +745,8 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
         Command::Scaffold(ScaffoldArgs {
             command: ScaffoldCommand::Repo(ScaffoldRepoArgs { apply, .. }),
         }) => {
-            for planned in tiber_git::scaffold_repo(apply)? {
-                if apply {
-                    println!("wrote {planned}");
-                } else {
-                    println!("would write {planned}");
-                }
+            for message in tiber_git::scaffold_repo(apply)? {
+                println!("{message}");
             }
             Ok(())
         }
