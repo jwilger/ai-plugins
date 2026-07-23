@@ -59,7 +59,7 @@
       "name": "tiber",
       "source": "./plugins/tiber",
       "description": "Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and dashboard priority workflow.",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "category": "Developer Tools",
       "keywords": ["tasks", "git", "mcp", "dashboard", "planning"]
     }

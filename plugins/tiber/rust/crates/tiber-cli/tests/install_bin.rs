@@ -74,3 +74,39 @@ fn install_bin_dry_run_previews_without_writing_and_apply_installs_working_comma
         "installed tiber works\n"
     );
 }
+
+#[test]
+fn install_bin_apply_refuses_to_replace_an_existing_target() {
+    let repo = TempRepo::initialized();
+    let target_dir = repo.path().join("bin");
+    let installed = target_dir.join("tiber");
+    let launcher = repo.path().join("plugin/bin/tiber");
+    fs::create_dir_all(&target_dir).expect("create target dir");
+    fs::create_dir_all(launcher.parent().expect("launcher parent")).expect("create launcher dir");
+    fs::write(&installed, "keep this command\n").expect("write existing command");
+    fs::write(&launcher, "#!/usr/bin/env bash\n").expect("write fake launcher");
+
+    let apply = repo.tiber_with_env(
+        [
+            "install-bin",
+            "--target-dir",
+            target_dir.to_str().expect("target dir utf8"),
+            "--apply",
+        ],
+        [(
+            "TIBER_LAUNCHER_PATH",
+            launcher.to_str().expect("launcher path utf8"),
+        )],
+    );
+
+    assert!(!apply.status.success(), "occupied target should be refused");
+    assert!(
+        String::from_utf8_lossy(&apply.stderr).contains("install_target_exists"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(installed).expect("read existing command"),
+        "keep this command\n"
+    );
+}

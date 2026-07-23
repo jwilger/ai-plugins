@@ -171,6 +171,19 @@ tiber scaffold repo --dry-run
 tiber scaffold repo --apply
 ```
 
+`install-bin` is dry-run-first. The dry run reports the target command and
+bundled launcher without writing either path. Re-run it with `--apply` to
+install an executable forwarder that invokes the bundled Tiber launcher from
+any working directory:
+
+```shell
+tiber install-bin --target-dir ~/.local/bin --apply
+tiber --help
+```
+
+The apply step never replaces an existing `tiber` file or symlink. Remove or
+relocate an existing target deliberately before reinstalling or upgrading.
+
 `validate --fix` only performs safe mechanical repairs: misplaced claims,
 missing reciprocal links, and `order.md` reconciliation. Dangling references and
 dependency cycles are reported for deliberate resolution.
@@ -208,7 +221,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.11.0` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.11.1` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
