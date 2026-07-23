@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
 use std::fs::OpenOptions;
+use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -1322,7 +1323,7 @@ impl GitRepository {
             }
             for (path, contents) in &pending_files {
                 let destination = self.root.join(path);
-                fs::write(destination, contents)?;
+                atomic_write(&destination, contents.as_bytes())?;
                 messages.push(format!("wrote {path}"));
             }
         } else {
@@ -2092,6 +2093,52 @@ fn is_course_task_path(path: &str) -> bool {
         && components.next().is_some()
         && components.next().is_none()
         && path.extension().is_some_and(|extension| extension == "md")
+}
+
+fn atomic_write(destination: &Path, contents: &[u8]) -> Result<(), Error> {
+    static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    let parent = destination
+        .parent()
+        .ok_or_else(|| Error::Parse("scaffold_destination_parent_missing".to_string()))?;
+    let file_name = destination
+        .file_name()
+        .ok_or_else(|| Error::Parse("scaffold_destination_name_missing".to_string()))?
+        .to_string_lossy();
+    let temporary_prefix = format!(".tiber-tmp-{file_name}-");
+    for entry in fs::read_dir(parent)? {
+        let entry = entry?;
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(&temporary_prefix)
+        {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(
+        "{temporary_prefix}{}-{sequence}",
+        std::process::id()
+    ));
+    let result = (|| -> Result<(), Error> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(contents)?;
+        if let Ok(metadata) = fs::metadata(destination) {
+            fs::set_permissions(&temporary, metadata.permissions())?;
+        }
+        file.sync_all()?;
+        fs::rename(&temporary, destination)?;
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn workflow_invokes_task_closer(contents: &str) -> bool {
