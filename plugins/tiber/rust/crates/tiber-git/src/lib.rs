@@ -1209,13 +1209,11 @@ impl GitRepository {
     }
 
     fn close_from_trailers(&self) -> Result<Vec<String>, Error> {
-        let log = self.git(["log", "--format=%B%x00"])?;
+        self.sync_repository_unlocked()?;
+        let log = self.git(["log", "-1", "--format=%B"])?;
         let mut closed = Vec::new();
         for task_ref in closes_trailers(&log) {
-            let resolved = match self.resolve_task_ref(&task_ref) {
-                Ok(resolved) => task_stem(&resolved)?,
-                Err(_) => continue,
-            };
+            let resolved = task_stem(&self.resolve_task_ref(&task_ref)?)?;
             let done = self.transition_task_unlocked(&resolved, "done")?;
             closed.push(done.path);
         }
