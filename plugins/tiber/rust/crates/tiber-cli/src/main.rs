@@ -95,7 +95,7 @@ enum Command {
     Sync,
     /// Show Codex sandbox approval guidance.
     CodexSandbox(CodexSandboxArgs),
-    /// Run the read-only dashboard.
+    /// Run the dashboard with count-neutral backlog priority reordering.
     Dashboard(DashboardArgs),
     /// Run the MCP server.
     Mcp(McpArgs),

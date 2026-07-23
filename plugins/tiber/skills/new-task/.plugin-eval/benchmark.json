@@ -27,7 +27,7 @@
       "rg -qi 'combine.*overlap|overlap.*combine' .plugin-eval-benchmark/new-task.md",
       "rg -qi 'reject' .plugin-eval-benchmark/new-task.md",
       "rg -qi 'do not.*retry|not retry|won.t retry' .plugin-eval-benchmark/new-task.md",
-      "! rg -qi '(overflow|icebox|shadow|hidden) (backlog|queue|list)' .plugin-eval-benchmark/new-task.md"
+      "rg -qi '(do not|not|won.t|refus(e|es|ed|ing)).*(overflow|icebox|shadow|hidden) (backlog|queue|list)' .plugin-eval-benchmark/new-task.md"
     ]
   },
   "notes": [
