@@ -66,8 +66,15 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   reservations; use `tiber transition <ref> in-progress`.
 - For repo integration, run only `tiber scaffold repo --dry-run`, show the
   planned `.gitignore`, hook/workflow, trailer workflow, and optional
-  `justfile` changes, then stop until explicit approval. "No follow-up
-  questions" is not approval to apply.
+  `justfile` additions, already-configured integrations, and conflicts, then
+  stop until explicit approval. Scaffold preserves existing `.gitignore`
+  entries and adds `.tasks` at most once. Evaluate hooks and workflows
+  independently: an equivalent existing workflow suppresses only the generated
+  workflow, and an equivalent existing hook suppresses only the generated hook.
+  Preview any distinct missing integration. Apply
+  refuses ambiguous integration-file replacements; use `--replace-conflicts`
+  only after the user explicitly chooses to replace every reported conflict.
+  "No follow-up questions" is not approval to apply.
 
 ## Commands
 
