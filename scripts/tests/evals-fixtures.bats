@@ -35,6 +35,30 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "tiber dashboard hard guard requires the browser-opening launch command" {
+  run node - <<'NODE'
+const assertHardGuards = require('./evals/promptfoo/assert-hard-guards.cjs');
+
+const complete = assertHardGuards(
+  'Run `tiber dashboard serve --open`; a repeated launch reuses the project dashboard.',
+  { vars: { case_id: 'tiber-dashboard-reuses-project-instance' } },
+);
+const missingOpen = assertHardGuards(
+  'Run `tiber dashboard serve`; a repeated launch reuses the project dashboard.',
+  { vars: { case_id: 'tiber-dashboard-reuses-project-instance' } },
+);
+
+if (complete.pass !== true) {
+  throw new Error(`complete dashboard command should pass: ${complete.reason}`);
+}
+if (missingOpen.pass !== false) {
+  throw new Error('dashboard command without --open should fail');
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "loader honors generated runtime case filter options" {
   mkdir -p "$ROOT/evals/out/generated"
   cat >"$ROOT/evals/out/generated/runtime-options.json" <<'JSON'
