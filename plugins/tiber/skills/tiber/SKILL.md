@@ -133,3 +133,9 @@ tiber close-from-trailers
 tiber mcp stdio
 tiber dashboard serve [--open] [--port <port>]
 ```
+
+Pass multiline summary and context values directly through the structured CLI
+or MCP update surface. Preserve actual line breaks and literal backslashes; do
+not flatten text, substitute literal `\n` sequences, or edit task files
+directly as a workaround. If Tiber rejects an embedded heading reserved by the
+task schema, follow its recovery guidance to demote or rename that heading.
