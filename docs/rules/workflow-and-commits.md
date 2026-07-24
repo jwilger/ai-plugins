@@ -14,7 +14,10 @@
   to the default branch run the full gate. PR mode also uses merge-queue CI and
   requires **≥1 approval** plus **automated code review/approval**. CI gates:
   formatting, tests, marketplace validation, and Codex cross-harness manifest
-  verification.
+  verification. A newer revision cancels obsolete CI only within the same
+  workflow, event type, and Git ref, keeping direct pushes, pull requests, and
+  merge-queue validation isolated. Delivery evidence still binds to the exact
+  latest pushed revision and waits for its terminal result.
 - **Failed pushed CI holds unrelated work.** Use
   `development-discipline:ci-failure-follow-up`: inspect the exact failed
   job, step, and logs; record the causal diagnosis; then either push only the
