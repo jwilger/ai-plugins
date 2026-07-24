@@ -58,6 +58,11 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   wants a new task recorded from chat. That skill writes only through structured
   Tiber MCP tools and leaves the task in `backlog` unless the user explicitly
   asks to start work immediately.
+- Before admitting a candidate, use `tiber.search` (CLI:
+  `tiber search "<outcome terms>"`) across all statuses, including `done` and
+  `abandoned`. Compare historical matches with the candidate. Combine genuinely
+  overlapping work or reject a duplicate; create only when the candidate is
+  materially distinct. Discovery alone does not create an obligation.
 - When you open or discover a PR/MR for an in-progress task, update the task
   with `tiber update <ref> --pr-mr-url <url> --pr-mr-status <status>`, and keep
   `pr_mr_status` current as checks/review/merge state changes. Use stable
@@ -116,6 +121,8 @@ tiber init
 tiber codex-sandbox --dry-run
 tiber create "Task title"
 tiber list
+tiber list --status done
+tiber search "outcome terms"
 tiber show <task-ref>
 tiber metadata <task-ref>
 tiber next

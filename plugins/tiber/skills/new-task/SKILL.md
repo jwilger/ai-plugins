@@ -96,15 +96,21 @@ use the ticket.
    requested task capture needs Tiber state; the structured Tiber create
    operation may initialize that state as part of creating the task. Do not
    initialize merely because the plugin is installed or the session started.
-3. Create the task with the structured Tiber MCP create tool.
-4. If the request includes obvious summary, context, acceptance criteria, or
+3. Before creation, search Tiber history with the structured `tiber.search`
+   tool using the candidate's outcome and problem terms. Search covers
+   `backlog`, `in-progress`, `done`, and `abandoned`; compare completed and
+   rejected matches as well as open work. Combine genuinely overlapping work
+   into an existing ticket or reject a duplicate. Discovery alone does not
+   create an obligation; create only when the candidate is materially distinct.
+4. Create the task with the structured Tiber MCP create tool.
+5. If the request includes obvious summary, context, acceptance criteria, or
    notes, add them with the structured Tiber MCP update, acceptance, or note
    tools.
-5. Run the structured Tiber MCP validation tool before claiming the board is
+6. Run the structured Tiber MCP validation tool before claiming the board is
    updated.
-6. Use the structured Tiber MCP list or show tools only as needed to identify
+7. Use the structured Tiber MCP list or show tools only as needed to identify
    the created task.
-7. Report the new task id, title, and backlog status.
+8. Report the new task id, title, and backlog status.
 
 If creation reports `tiber.create_sync_failed created=<task-ref>`, do not run
 create again. Treat `<task-ref>` as the created local task, tell the user that

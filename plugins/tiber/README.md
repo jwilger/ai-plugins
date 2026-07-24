@@ -24,6 +24,8 @@ creating the top-level tasks for the rename/merge work.
 tiber init
 tiber create "Document release checklist"
 tiber list
+tiber list --status done
+tiber search "release checklist"
 tiber show document-release-checklist
 tiber validate --fix
 tiber sync
@@ -72,6 +74,13 @@ Backlog tasks are unclaimed work, not informal reservations.
 This keeps task state versioned, syncable, and separate from the source branch.
 Inspect it through `tiber show`, `tiber list`, the dashboard, or normal Git
 commands such as `git show tasks:order.md`.
+
+Bare `tiber list` preserves board-order output for open work. Use
+`tiber list --status <backlog|in-progress|done|abandoned>` to inspect one
+lifecycle state. Use `tiber search "<query>"` to search titles, summaries, and
+context across every state; it returns deterministic JSON containing each
+matching task's `id`, `status`, `title`, `summary`, and `context`. The
+`tiber.search` MCP tool exposes the same results as structured content.
 
 ## Backlog Capacity
 
@@ -232,7 +241,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.13.1` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.14.0` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -258,7 +267,7 @@ from any checkout. Reinstall or upgrade the plugin from marketplace version
 `tiber.mcp_*` startup sentinel errors while starting the `tiber` MCP server.
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,
-`tiber.list`, `tiber.transition`, `tiber.update`, `tiber.acceptance.add`,
+`tiber.list`, `tiber.search`, `tiber.transition`, `tiber.update`, `tiber.acceptance.add`,
 `tiber.note.add`, `tiber.codex_sandbox_setup`, `tiber.install_bin`, and
 `tiber.validate_fix`.
 
