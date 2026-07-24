@@ -325,7 +325,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":181,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp","summary":"MCP summary","context":"MCP context","tags":["mcp","structured"]}}}"#,
+        r#"{"jsonrpc":"2.0","id":181,"method":"tools/call","params":{"name":"tiber.update","arguments":{"ref":"created-through-mcp","summary":"MCP summary line one\nline two with literal \\\\n text","context":"MCP context line one\ncontext line two","tags":["mcp","structured"]}}}"#,
     );
     let update = read_message(&mut stdout);
     assert!(update.contains(r#""id":181"#));
@@ -361,7 +361,8 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let structured_show = read_message(&mut stdout);
     assert!(structured_show.contains(r#""id":185"#));
-    assert!(structured_show.contains("MCP summary"));
+    assert!(structured_show.contains("MCP summary line one\\nline two with literal \\\\\\\\n text"));
+    assert!(structured_show.contains("MCP context line one\\ncontext line two"));
     assert!(structured_show.contains("tags: [mcp, structured]"));
     assert!(structured_show.contains("- [x] MCP criterion"));
     assert!(structured_show.contains("- [ ] (s2) Wire dependency — after: s1"));

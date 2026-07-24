@@ -160,6 +160,12 @@ tiber acceptance check <task-ref> 1
 tiber note add <task-ref> "Progress note"
 ```
 
+Summary and context values may contain actual line breaks. Tiber preserves those
+line breaks and literal backslashes exactly across CLI and MCP updates; callers
+do not need to flatten multiline text or replace it with literal `\n` sequences.
+Unsupported control characters and embedded headings reserved by Tiber's task
+schema fail with actionable diagnostics before the ticket or board is changed.
+
 Validation and integration:
 
 ```shell
@@ -226,7 +232,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.13.0` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.13.1` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another

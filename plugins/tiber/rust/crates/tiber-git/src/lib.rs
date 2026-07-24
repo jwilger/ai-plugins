@@ -3090,7 +3090,13 @@ fn replace_markdown_section_body(
     heading: &str,
     body: &str,
 ) -> Result<String, Error> {
-    let body = parse_nonempty_text(body, "section")?;
+    let body = parse_multiline_nonempty_text(body, "section")?;
+    if body.lines().any(is_task_section_heading) {
+        return Err(Error::Parse(
+            "section_reserved_heading=true recovery=\"demote or rename the embedded heading\""
+                .to_string(),
+        ));
+    }
     let heading_line = format!("## {heading}");
     let (mut before, _section, mut after, found) = split_markdown_section(document, heading);
     if !found {
@@ -3269,7 +3275,7 @@ fn split_markdown_section(
                 split = SectionSplit::Section;
             }
             SectionSplit::Before => before.push(line.to_string()),
-            SectionSplit::Section if line.starts_with("## ") => {
+            SectionSplit::Section if is_task_section_heading(line) => {
                 split = SectionSplit::After;
                 after.push(line.to_string());
             }
@@ -3279,6 +3285,17 @@ fn split_markdown_section(
     }
 
     (before, section, after, found)
+}
+
+fn is_task_section_heading(line: &str) -> bool {
+    matches!(
+        line,
+        "## Summary"
+            | "## Context / Why"
+            | "## Acceptance criteria"
+            | "## Subtasks"
+            | "## Notes / Log"
+    )
 }
 
 fn closes_trailers(log: &str) -> Vec<String> {
@@ -3395,6 +3412,22 @@ fn parse_nonempty_text<'a>(input: &'a str, kind: &str) -> Result<&'a str, Error>
     }
     if text.chars().any(char::is_control) {
         return Err(Error::Parse(format!("{kind}_invalid=true")));
+    }
+    Ok(text)
+}
+
+fn parse_multiline_nonempty_text<'a>(input: &'a str, kind: &str) -> Result<&'a str, Error> {
+    let text = input.trim();
+    if text.is_empty() {
+        return Err(Error::Parse(format!("{kind}_empty=true")));
+    }
+    if text
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
+    {
+        return Err(Error::Parse(format!(
+            "{kind}_invalid=true recovery=\"remove control characters other than newline or tab\""
+        )));
     }
     Ok(text)
 }
