@@ -24,3 +24,5 @@ GitHub issue #61 reproduces this in Tiber 0.12.0: tiber update with a multiline 
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-24: Admitted from GitHub issue #61 as the highest-priority queued item because it blocks a lossless migration in another project. It is related to abandoned candidate 20260719-pvk7 but distinct: that candidate concerned literal backslash-n rendering, while this ticket covers a supported update operation rejecting actual multiline values.
