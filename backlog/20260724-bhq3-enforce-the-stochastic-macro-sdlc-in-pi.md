@@ -21,6 +21,7 @@ Prompt guidance alone cannot prevent an agent from skipping definition, review, 
 - [ ] Human approval milestones cannot be completed through an LLM-callable tool.
 - [ ] Commit and push attempts are blocked until their configured review and delivery milestones are attained.
 - [ ] State corruption, stale revisions, concurrent writes, or a missing runtime fail visibly without weakening the guard.
+- [ ] Existing Claude Code and Codex marketplace behavior remains valid and the Pi local-install workflow is documented and tested.
 
 ## Subtasks
 
