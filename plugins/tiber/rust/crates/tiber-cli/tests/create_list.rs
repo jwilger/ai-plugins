@@ -58,11 +58,7 @@ fn list_filters_completed_tasks_by_status() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Finished historical work"]));
-    assert_success(repo.tiber([
-        "transition",
-        "finished-historical-work",
-        "done",
-    ]));
+    assert_success(repo.tiber(["transition", "finished-historical-work", "done"]));
     assert_success(repo.tiber(["create", "Still queued work"]));
     let stem = task_stem(&repo, "done", "finished-historical-work");
     task_stem(&repo, "backlog", "still-queued-work");
