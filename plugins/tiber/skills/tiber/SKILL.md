@@ -33,7 +33,15 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 
 - Never mutate a repo merely because the plugin is installed or a session starts.
 - Run `tiber init` only for explicit setup or when a requested task operation
-  needs an initialized board.
+  needs an initialized board, and only after confirming the source checkout has
+  no root `.tasks` path. A root `.tasks` path is an existing task system, never
+  Tiber's internal state: refuse initialization before mutation and require
+  migration or an explicit integration design.
+- Established-repository scaffold is a safety preflight, not file generation:
+  verify the active executable hook-manager dispatcher, require pinned workflow
+  and Tiber revisions with only `contents: write`, and refuse generated
+  publication when repository policy requires signing but no repository-owned
+  automation supplies the key.
 - Use CLI/MCP writes, not direct edits to `.tasks` files or `order.md`.
 - The dashboard can reorder backlog priority, which does not change capacity.
   It has no create or status-transition route. Admission writes go through CLI
