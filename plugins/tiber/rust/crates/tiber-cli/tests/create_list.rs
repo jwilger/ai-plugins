@@ -73,6 +73,106 @@ fn list_filters_completed_tasks_by_status() {
 }
 
 #[test]
+fn search_finds_historical_titles_and_descriptions_as_structured_results() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Retire legacy admission path"]));
+    assert_success(repo.tiber([
+        "update",
+        "retire-legacy-admission-path",
+        "--summary",
+        "Prevent duplicate backlog candidates",
+        "--context",
+        "Operators need durable history before admitting work",
+    ]));
+    assert_success(repo.tiber(["transition", "retire-legacy-admission-path", "done"]));
+    let completed = task_stem(&repo, "done", "retire-legacy-admission-path");
+    for (title, task_ref, status) in [
+        (
+            "Queued duplicate history",
+            "queued-duplicate-history",
+            "backlog",
+        ),
+        (
+            "Active duplicate history",
+            "active-duplicate-history",
+            "in-progress",
+        ),
+        (
+            "Rejected duplicate history",
+            "rejected-duplicate-history",
+            "abandoned",
+        ),
+    ] {
+        assert_success(repo.tiber(["create", title]));
+        assert_success(repo.tiber([
+            "update",
+            task_ref,
+            "--summary",
+            "Prevent duplicate backlog candidates",
+        ]));
+        if status != "backlog" {
+            assert_success(repo.tiber(["transition", task_ref, status]));
+        }
+    }
+    let queued = task_stem(&repo, "backlog", "queued-duplicate-history");
+    let active = task_stem(&repo, "in-progress", "active-duplicate-history");
+    let rejected = task_stem(&repo, "abandoned", "rejected-duplicate-history");
+    assert_success(repo.tiber(["create", "Unrelated queued work"]));
+
+    let title_search = repo.tiber(["search", "legacy admission"]);
+    assert_success_ref(&title_search);
+    let title_results: serde_json::Value =
+        serde_json::from_slice(&title_search.stdout).expect("search output should be JSON");
+    assert_eq!(
+        title_results,
+        serde_json::json!([{
+            "id": completed,
+            "status": "done",
+            "title": "Retire legacy admission path",
+            "summary": "Prevent duplicate backlog candidates",
+            "context": "Operators need durable history before admitting work"
+        }])
+    );
+
+    let description_search = repo.tiber(["search", "durable HISTORY"]);
+    assert_success_ref(&description_search);
+    let description_results: serde_json::Value =
+        serde_json::from_slice(&description_search.stdout).expect("search output should be JSON");
+    assert_eq!(description_results, title_results);
+
+    let summary_search = repo.tiber(["search", "DUPLICATE backlog"]);
+    assert_success_ref(&summary_search);
+    let summary_results: serde_json::Value =
+        serde_json::from_slice(&summary_search.stdout).expect("search output should be JSON");
+    let summary_results = summary_results
+        .as_array()
+        .expect("search output should be an array");
+    assert_eq!(
+        summary_results
+            .iter()
+            .map(|result| {
+                (
+                    result["id"].as_str().expect("result id"),
+                    result["status"].as_str().expect("result status"),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            (rejected.as_str(), "abandoned"),
+            (queued.as_str(), "backlog"),
+            (completed.as_str(), "done"),
+            (active.as_str(), "in-progress"),
+        ]
+    );
+    assert!(summary_results.iter().all(|result| {
+        result["summary"] == "Prevent duplicate backlog candidates"
+            && result["title"].is_string()
+            && result["context"].is_string()
+    }));
+}
+
+#[test]
 fn create_refuses_when_configured_backlog_capacity_is_full() {
     let repo = TempRepo::initialized();
     fs::write(
