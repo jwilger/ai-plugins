@@ -57,7 +57,7 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
 #[test]
 fn scaffold_repo_targets_the_repository_publication_branch() {
     let repo = TempRepo::initialized();
-    repo.git(["branch", "-m", "trunk"]);
+    repo.git(["branch", "-m", "release,canary"]);
 
     assert_success(repo.tiber(["scaffold", "repo", "--apply"]));
 
@@ -66,7 +66,7 @@ fn scaffold_repo_targets_the_repository_publication_branch() {
             .join(".github/workflows/tiber-close-from-trailers.yml"),
     )
     .expect("read generated workflow");
-    assert!(workflow.contains("branches: [trunk]"));
+    assert!(workflow.contains("branches: ['release,canary']"));
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn scaffold_repo_rejects_inert_mentions_of_the_tiber_snippet() {
     fs::create_dir_all(repo.path().join(".githooks")).expect("create hooks directory");
     fs::write(
         repo.path().join(".githooks/post-commit"),
-        "#!/usr/bin/env bash\n# TODO: invoke .githooks/post-commit.tiber\necho .githooks/post-commit.tiber\n",
+        "#!/usr/bin/env bash\n# TODO: invoke .githooks/post-commit.tiber\necho .githooks/post-commit.tiber\nexit 0; .githooks/post-commit.tiber\nfalse && .githooks/post-commit.tiber\nif false; then\n  .githooks/post-commit.tiber\nfi\n",
     )
     .expect("write inert hook");
     #[cfg(unix)]
