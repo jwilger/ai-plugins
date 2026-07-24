@@ -118,6 +118,11 @@ enum Command {
     Metadata(TaskRefArgs),
     /// List open tasks or tasks in one status.
     List(ListArgs),
+    /// Search task titles and descriptions across all statuses.
+    Search {
+        /// Case-insensitive text to find.
+        query: String,
+    },
     /// Print the next available task.
     Next,
     /// Move a task to a status.
@@ -731,6 +736,12 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             for task in tasks {
                 println!("{}\t{}", task.path, task.title);
             }
+            Ok(())
+        }
+        Command::Search { query } => {
+            let output = serde_json::to_string(&tiber_git::search_tasks(&query)?)
+                .map_err(|error| tiber_git::Error::Parse(format!("search_json_invalid {error}")))?;
+            println!("{output}");
             Ok(())
         }
         Command::Next => {

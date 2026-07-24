@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
@@ -68,6 +68,14 @@ pub fn list_tasks_by_status_at(
     repo.with_task_workspace(|repo| repo.list_tasks_by_status(status))
 }
 
+pub fn search_tasks_at(
+    root: impl Into<PathBuf>,
+    query: &str,
+) -> Result<Vec<TaskSearchResult>, Error> {
+    let repo = GitRepository::at(root);
+    repo.with_task_workspace(|repo| repo.search_tasks(query))
+}
+
 pub fn show_task_at(root: impl Into<PathBuf>, task_ref: &str) -> Result<String, Error> {
     let repo = GitRepository::at(root);
     repo.with_task_workspace(|repo| repo.show_task(task_ref))
@@ -135,6 +143,11 @@ pub fn list_tasks() -> Result<Vec<TaskSummary>, Error> {
 pub fn list_tasks_by_status(status: &str) -> Result<Vec<TaskSummary>, Error> {
     let repo = GitRepository::discover()?;
     repo.with_task_workspace(|repo| repo.list_tasks_by_status(status))
+}
+
+pub fn search_tasks(query: &str) -> Result<Vec<TaskSearchResult>, Error> {
+    let repo = GitRepository::discover()?;
+    repo.with_task_workspace(|repo| repo.search_tasks(query))
 }
 
 pub fn show_task(task_ref: &str) -> Result<String, Error> {
@@ -258,6 +271,15 @@ pub struct TaskPath {
 pub struct TaskSummary {
     pub path: String,
     pub title: String,
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+pub struct TaskSearchResult {
+    pub id: String,
+    pub status: String,
+    pub title: String,
+    pub summary: String,
+    pub context: String,
 }
 
 impl From<&TaskSnapshot> for TaskSummary {
@@ -949,6 +971,29 @@ impl GitRepository {
                 })
             })
             .collect()
+    }
+
+    fn search_tasks(&self, query: &str) -> Result<Vec<TaskSearchResult>, Error> {
+        let query = query.to_lowercase();
+        let mut results = Vec::new();
+        for task in self.task_documents_snapshot()? {
+            let title = parse_title(&task.contents)?;
+            let summary = markdown_section_body(&task.contents, "Summary");
+            let context = markdown_section_body(&task.contents, "Context / Why");
+            if [title.as_str(), summary.as_str(), context.as_str()]
+                .iter()
+                .any(|field| field.to_lowercase().contains(&query))
+            {
+                results.push(TaskSearchResult {
+                    id: task.stem,
+                    status: task.status,
+                    title,
+                    summary,
+                    context,
+                });
+            }
+        }
+        Ok(results)
     }
 
     fn board_snapshot(&self) -> Result<BoardSnapshot, Error> {
@@ -3312,6 +3357,15 @@ fn split_markdown_section(
     }
 
     (before, section, after, found)
+}
+
+fn markdown_section_body(document: &str, heading: &str) -> String {
+    let (_, section, _, found) = split_markdown_section(document, heading);
+    if found {
+        section.join("\n").trim().to_string()
+    } else {
+        String::new()
+    }
 }
 
 fn is_task_section_heading(line: &str) -> bool {
