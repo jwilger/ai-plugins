@@ -17,6 +17,8 @@ Prompt guidance alone cannot prevent an agent from skipping definition, review, 
 
 ## Acceptance criteria
 
+- [ ] Pi exposes deterministic SDLC status and evidence-backed milestone advancement for the complete diagram dependency graph.
+
 ## Subtasks
 
 ## Notes / Log
