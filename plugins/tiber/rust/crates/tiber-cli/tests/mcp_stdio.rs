@@ -64,6 +64,12 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert_success(repo.tiber(["create", "Expose MCP task"]));
     let expose_mcp_task = task_stem(&repo, "backlog", "expose-mcp-task");
     assert_success(repo.tiber(["create", "Completed MCP history"]));
+    assert_success(repo.tiber([
+        "update",
+        "completed-mcp-history",
+        "--summary",
+        "Detect duplicate agent requests",
+    ]));
     assert_success(repo.tiber(["transition", "completed-mcp-history", "done"]));
     let completed_mcp_history = task_stem(&repo, "done", "completed-mcp-history");
     let install_target_dir = repo.path().join("bin");
@@ -128,6 +134,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         "tiber.codex_sandbox_setup",
         "tiber.create",
         "tiber.list",
+        "tiber.search",
         "tiber.show",
         "tiber.metadata",
         "tiber.next",
@@ -160,6 +167,19 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         serde_json::json!(["backlog", "in-progress", "done", "abandoned"])
     );
     assert_eq!(list_tool["inputSchema"]["required"], serde_json::json!([]));
+    let search_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.search")
+        .expect("tiber.search should be advertised");
+    assert_eq!(
+        search_tool["inputSchema"]["required"],
+        serde_json::json!(["query"])
+    );
+    assert_eq!(
+        search_tool["outputSchema"]["properties"]["results"]["items"]["properties"]["status"]
+            ["enum"],
+        serde_json::json!(["backlog", "in-progress", "done", "abandoned"])
+    );
 
     write_message(
         &mut stdin,
@@ -220,6 +240,49 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let malformed_status = read_message(&mut stdout);
     assert!(malformed_status.contains("mcp_argument_invalid name=status"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":62,"method":"tools/call","params":{"name":"tiber.search","arguments":{"query":"duplicate AGENT"}}}"#,
+    );
+    let search = read_json_message(&mut stdout);
+    assert_eq!(
+        search["result"]["structuredContent"],
+        serde_json::json!({
+            "results": [{
+                "id": completed_mcp_history,
+                "status": "done",
+                "title": "Completed MCP history",
+                "summary": "Detect duplicate agent requests",
+                "context": ""
+            }]
+        })
+    );
+    assert_eq!(search["result"]["content"][0]["type"], "text");
+    let search_text: serde_json::Value = serde_json::from_str(
+        search["result"]["content"][0]["text"]
+            .as_str()
+            .expect("search text should be JSON"),
+    )
+    .expect("search text should parse");
+    assert_eq!(
+        search_text,
+        search["result"]["structuredContent"]["results"]
+    );
+
+    for (id, arguments, expected_error) in [
+        (63, "{}", "mcp_argument_missing name=query"),
+        (64, r#"{"query":1}"#, "mcp_argument_invalid name=query"),
+    ] {
+        write_message(
+            &mut stdin,
+            &format!(
+                r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"tiber.search","arguments":{arguments}}}}}"#
+            ),
+        );
+        let invalid_search = read_message(&mut stdout);
+        assert!(invalid_search.contains(expected_error));
+    }
 
     write_message(
         &mut stdin,
