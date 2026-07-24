@@ -48,7 +48,7 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
     assert!(workflow.contains("actions/checkout@"));
     assert!(!workflow.contains("actions/checkout@v4"));
     assert!(
-        workflow.contains("git -C .tiber-src checkout 7256c46ca1dca09a84ce4bfe6895804d9e7efe54")
+        workflow.contains("git -C .tiber-src checkout bce89f58a2ea23e38bf508cb3800d17efba3e28e")
     );
 }
 
