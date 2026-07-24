@@ -20,6 +20,7 @@ Prompt guidance alone cannot prevent an agent from skipping definition, review, 
 - [ ] Pi exposes deterministic SDLC status and evidence-backed milestone advancement for the complete diagram dependency graph.
 - [ ] Human approval milestones cannot be completed through an LLM-callable tool.
 - [ ] Commit and push attempts are blocked until their configured review and delivery milestones are attained.
+- [ ] State corruption, stale revisions, concurrent writes, or a missing runtime fail visibly without weakening the guard.
 
 ## Subtasks
 
