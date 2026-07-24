@@ -24,7 +24,7 @@ GitHub issue 60 reports that initialization can create a new tasks branch even w
 - [x] Repository scaffold dry-run identifies whether the active hook manager will dispatch Tiber's task-closing hook and reports conflicts instead of installing inert automation.
 - [x] Generated task-closing workflow uses a pinned intended revision, declares least-required explicit permissions, and supports or clearly refuses repositories whose publication policy requires signed commits.
 - [x] Existing dry-run, conflict, existing-target, and atomic preservation guarantees remain covered by tests.
-- [ ] Documentation explains how established repositories can safely adopt Tiber without replacing or bypassing their current task, hook, workflow, permission, or signing policies.
+- [x] Documentation explains how established repositories can safely adopt Tiber without replacing or bypassing their current task, hook, workflow, permission, or signing policies.
 
 ## Subtasks
 
