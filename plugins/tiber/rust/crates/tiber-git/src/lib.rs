@@ -60,6 +60,14 @@ pub fn list_tasks_at(root: impl Into<PathBuf>) -> Result<Vec<TaskSummary>, Error
     repo.with_task_workspace(|repo| repo.list_tasks())
 }
 
+pub fn list_tasks_by_status_at(
+    root: impl Into<PathBuf>,
+    status: &str,
+) -> Result<Vec<TaskSummary>, Error> {
+    let repo = GitRepository::at(root);
+    repo.with_task_workspace(|repo| repo.list_tasks_by_status(status))
+}
+
 pub fn show_task_at(root: impl Into<PathBuf>, task_ref: &str) -> Result<String, Error> {
     let repo = GitRepository::at(root);
     repo.with_task_workspace(|repo| repo.show_task(task_ref))
@@ -122,6 +130,11 @@ pub fn create_task(title: &str) -> Result<TaskPath, Error> {
 pub fn list_tasks() -> Result<Vec<TaskSummary>, Error> {
     let repo = GitRepository::discover()?;
     repo.with_task_workspace(|repo| repo.list_tasks())
+}
+
+pub fn list_tasks_by_status(status: &str) -> Result<Vec<TaskSummary>, Error> {
+    let repo = GitRepository::discover()?;
+    repo.with_task_workspace(|repo| repo.list_tasks_by_status(status))
 }
 
 pub fn show_task(task_ref: &str) -> Result<String, Error> {
@@ -922,6 +935,20 @@ impl GitRepository {
             .iter()
             .map(TaskSummary::from)
             .collect())
+    }
+
+    fn list_tasks_by_status(&self, status: &str) -> Result<Vec<TaskSummary>, Error> {
+        let status = parse_status(status)?;
+        self.task_documents_snapshot()?
+            .into_iter()
+            .filter(|task| task.status == status)
+            .map(|task| {
+                Ok(TaskSummary {
+                    path: task.stem,
+                    title: parse_title(&task.contents)?,
+                })
+            })
+            .collect()
     }
 
     fn board_snapshot(&self) -> Result<BoardSnapshot, Error> {
