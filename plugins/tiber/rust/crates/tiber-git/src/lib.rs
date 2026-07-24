@@ -1743,8 +1743,7 @@ impl GitRepository {
             return Ok(false);
         }
         let contents = fs::read(hook)?;
-        Ok(std::str::from_utf8(&contents)
-            .is_ok_and(|contents| contents.lines().any(shell_line_invokes_tiber_snippet)))
+        Ok(std::str::from_utf8(&contents).is_ok_and(hook_contents_dispatch_tiber_snippet))
     }
 
     fn report_schema_errors(
@@ -2766,6 +2765,24 @@ fn shell_line_invokes_tiber_snippet(line: &str) -> bool {
         return false;
     }
     shell_command_invokes_tiber_snippet(trim_shell_comment(line.trim()).trim())
+}
+
+fn hook_contents_dispatch_tiber_snippet(contents: &str) -> bool {
+    let mut meaningful = contents.lines().filter_map(|line| {
+        let line = trim_shell_comment(line).trim_end();
+        (!line.trim().is_empty()).then_some(line)
+    });
+    let mut dispatched = false;
+    for line in meaningful.by_ref() {
+        if line.starts_with("#!") || (!dispatched && line.starts_with("set ")) {
+            continue;
+        }
+        if dispatched || !shell_line_invokes_tiber_snippet(line) {
+            return false;
+        }
+        dispatched = true;
+    }
+    dispatched
 }
 
 fn shell_command_invokes_tiber_snippet(command: &str) -> bool {
