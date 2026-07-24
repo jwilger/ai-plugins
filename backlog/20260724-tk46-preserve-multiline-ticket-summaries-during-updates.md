@@ -17,6 +17,8 @@ GitHub issue #61 reproduces this in Tiber 0.12.0: tiber update with a multiline 
 
 ## Acceptance criteria
 
+- [ ] Updating a ticket summary through every supported structured interface accepts and preserves embedded line breaks without returning section_invalid.
+
 ## Subtasks
 
 ## Notes / Log
