@@ -27,3 +27,5 @@ Without historical discovery, agents must know an old ticket identifier in advan
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-24: CI recovery: failed SHA 42503a87 run 30066235406 Quality gate Full gate at cargo fmt check; caused by unapplied rustfmt. Repair SHA 4ba47ed3 applied rustfmt only and focused tests passed. Replacement run 30066398123 completed successfully.
