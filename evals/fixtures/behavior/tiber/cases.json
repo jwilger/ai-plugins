@@ -657,5 +657,34 @@
         "Start `tiber dashboard serve` on port 7417 every time and open http://127.0.0.1:7417, even if another dashboard process already exists."
       ]
     }
+  },
+  {
+    "case_id": "tiber-new-task-searches-history-before-admission",
+    "behavior": "Searches completed and rejected Tiber history before admitting a candidate so duplicate work is combined or rejected instead of recreated.",
+    "prompt": "I want a new Tiber ticket to make release notes searchable. We may have completed or rejected similar work before. What should the agent do before creating it?",
+    "tags": ["tiber", "new-task", "search", "duplicate-prevention", "backlog"],
+    "plugins": ["tiber"],
+    "skills": ["new-task", "tiber"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "scope-boundary"]
+    },
+    "valueGate": { "mode": "none", "baselineLiftThreshold": 0 },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response requires searching Tiber history through the structured tiber.search MCP tool before creation, explicitly includes completed/done and rejected/abandoned work, compares any match with the candidate, and combines genuinely overlapping work or rejects a duplicate rather than blindly creating it. It may create only after the search shows materially distinct work. Fail if it creates first, searches only the open backlog, reads the raw tasks branch, or treats discovery as an obligation to create.",
+    "hardAssertions": [
+      {
+        "id": "historical-search-command",
+        "type": "contains",
+        "value": "tiber.search"
+      }
+    ],
+    "calibration": {
+      "pass": [
+        "Before creation, call the structured tiber.search MCP tool with the key outcome terms. Search covers backlog, in-progress, done, and abandoned work, so compare completed or rejected matches with the candidate. Combine genuinely overlapping work or reject a duplicate; create only if the candidate is materially distinct."
+      ],
+      "fail": [
+        "Create the ticket now, then inspect the open backlog afterward for duplicates."
+      ]
+    }
   }
 ]
