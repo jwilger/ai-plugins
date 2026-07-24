@@ -63,6 +63,13 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Expose MCP task"]));
     let expose_mcp_task = task_stem(&repo, "backlog", "expose-mcp-task");
+    assert_success(repo.tiber(["create", "Completed MCP history"]));
+    assert_success(repo.tiber([
+        "transition",
+        "completed-mcp-history",
+        "done",
+    ]));
+    let completed_mcp_history = task_stem(&repo, "done", "completed-mcp-history");
     let install_target_dir = repo.path().join("bin");
     let launcher = repo.path().join("plugin/bin/tiber");
     std::fs::create_dir_all(launcher.parent().expect("launcher parent"))
@@ -116,31 +123,50 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         &mut stdin,
         r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
     );
-    let tools = read_message(&mut stdout);
-    assert!(tools.contains(r#""id":2"#));
-    assert!(tools.contains(r#""name":"tiber.codex_sandbox_setup""#));
-    assert!(tools.contains(r#""name":"tiber.create""#));
-    assert!(tools.contains(r#""name":"tiber.list""#));
-    assert!(tools.contains(r#""name":"tiber.show""#));
-    assert!(tools.contains(r#""name":"tiber.metadata""#));
-    assert!(tools.contains(r#""name":"tiber.next""#));
-    assert!(tools.contains(r#""name":"tiber.transition""#));
-    assert!(tools.contains(r#""name":"tiber.prioritize""#));
-    assert!(tools.contains(r#""name":"tiber.link""#));
-    assert!(tools.contains(r#""name":"tiber.unlink""#));
-    assert!(tools.contains(r#""name":"tiber.subtask.add""#));
-    assert!(tools.contains(r#""name":"tiber.subtask.check""#));
-    assert!(tools.contains(r#""name":"tiber.subtask.uncheck""#));
-    assert!(tools.contains(r#""name":"tiber.update""#));
-    assert!(tools.contains(r#""name":"tiber.acceptance.add""#));
-    assert!(tools.contains(r#""name":"tiber.acceptance.check""#));
-    assert!(tools.contains(r#""name":"tiber.acceptance.uncheck""#));
-    assert!(tools.contains(r#""name":"tiber.acceptance.remove""#));
-    assert!(tools.contains(r#""name":"tiber.note.add""#));
-    assert!(tools.contains(r#""name":"tiber.validate_fix""#));
-    assert!(tools.contains(r#""name":"tiber.close_from_trailers""#));
-    assert!(tools.contains(r#""name":"tiber.scaffold_repo_dry_run""#));
-    assert!(tools.contains(r#""name":"tiber.install_bin""#));
+    let tools = read_json_message(&mut stdout);
+    assert_eq!(tools["id"], 2);
+    let listed_tools = tools["result"]["tools"]
+        .as_array()
+        .expect("tools/list should return an array");
+    for name in [
+        "tiber.codex_sandbox_setup",
+        "tiber.create",
+        "tiber.list",
+        "tiber.show",
+        "tiber.metadata",
+        "tiber.next",
+        "tiber.transition",
+        "tiber.prioritize",
+        "tiber.link",
+        "tiber.unlink",
+        "tiber.subtask.add",
+        "tiber.subtask.check",
+        "tiber.subtask.uncheck",
+        "tiber.update",
+        "tiber.acceptance.add",
+        "tiber.acceptance.check",
+        "tiber.acceptance.uncheck",
+        "tiber.acceptance.remove",
+        "tiber.note.add",
+        "tiber.validate_fix",
+        "tiber.close_from_trailers",
+        "tiber.scaffold_repo_dry_run",
+        "tiber.install_bin",
+    ] {
+        assert!(listed_tools.iter().any(|tool| tool["name"] == name));
+    }
+    let list_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.list")
+        .expect("tiber.list should be advertised");
+    assert_eq!(
+        list_tool["inputSchema"]["properties"]["status"]["enum"],
+        serde_json::json!(["backlog", "in-progress", "done", "abandoned"])
+    );
+    assert_eq!(
+        list_tool["inputSchema"]["required"],
+        serde_json::json!([])
+    );
 
     write_message(
         &mut stdin,
@@ -181,6 +207,26 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(list.contains(r#""id":6"#));
     assert!(list.contains(&expose_mcp_task));
     assert!(list.contains(&created_through_mcp));
+    assert!(!list.contains(&completed_mcp_history));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":60,"method":"tools/call","params":{"name":"tiber.list","arguments":{"status":"done"}}}"#,
+    );
+    let completed = read_json_message(&mut stdout);
+    let completed_text = completed["result"]["content"][0]["text"]
+        .as_str()
+        .expect("completed task listing should be text");
+    assert!(completed_text.contains(&completed_mcp_history));
+    assert!(!completed_text.contains(&expose_mcp_task));
+    assert!(!completed_text.contains(&created_through_mcp));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":61,"method":"tools/call","params":{"name":"tiber.list","arguments":{"status":1}}}"#,
+    );
+    let malformed_status = read_message(&mut stdout);
+    assert!(malformed_status.contains("mcp_argument_invalid name=status"));
 
     write_message(
         &mut stdin,

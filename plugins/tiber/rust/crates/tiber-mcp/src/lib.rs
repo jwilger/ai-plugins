@@ -157,12 +157,18 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
             let created = tiber_git::create_task(title)?;
             Ok(text_content(format!("created {}", created.path)))
         }
-        "tiber.list" => Ok(text_content(
-            tiber_git::list_tasks()?
+        "tiber.list" => {
+            let tasks = match optional_string_checked(arguments, "status")? {
+                Some(status) => tiber_git::list_tasks_by_status(status)?,
+                None => tiber_git::list_tasks()?,
+            };
+            Ok(text_content(
+                tasks
                 .into_iter()
                 .map(|task| format!("{}\t{}\n", task.path, task.title))
                 .collect::<String>(),
-        )),
+            ))
+        }
         "tiber.show" => Ok(text_content(tiber_git::show_task(required_string(
             arguments, "ref",
         )?)?)),
@@ -332,6 +338,18 @@ fn optional_string<'a>(arguments: &'a Value, name: &str) -> Option<&'a str> {
     arguments.get(name).and_then(Value::as_str)
 }
 
+fn optional_string_checked<'a>(
+    arguments: &'a Value,
+    name: &str,
+) -> Result<Option<&'a str>, tiber_git::Error> {
+    match arguments.get(name) {
+        Some(value) => value.as_str().map(Some).ok_or_else(|| {
+            tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}"))
+        }),
+        None => Ok(None),
+    }
+}
+
 fn optional_tags(arguments: &Value) -> Result<Option<Vec<String>>, tiber_git::Error> {
     optional_string_array(arguments, "tags")
 }
@@ -391,8 +409,13 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.list",
             "List tasks",
-            "List tiber tasks in board order.",
-            json!({}),
+            "List open tiber tasks in board order or tasks in one status.",
+            json!({
+                "status": {
+                    "type": "string",
+                    "enum": ["backlog", "in-progress", "done", "abandoned"]
+                }
+            }),
             vec![],
         ),
         tool(
