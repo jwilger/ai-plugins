@@ -169,6 +169,15 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
                     .collect::<String>(),
             ))
         }
+        "tiber.search" => {
+            let results = serde_json::to_value(tiber_git::search_tasks(required_string(
+                arguments, "query",
+            )?)?)
+            .map_err(|error| {
+                tiber_git::Error::Parse(format!("search_json_invalid source={error}"))
+            })?;
+            Ok(search_content(results))
+        }
         "tiber.show" => Ok(text_content(tiber_git::show_task(required_string(
             arguments, "ref",
         )?)?)),
@@ -330,8 +339,9 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
 fn required_string<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, tiber_git::Error> {
     arguments
         .get(name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_missing name={name}")))
+        .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_missing name={name}")))?
+        .as_str()
+        .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}")))
 }
 
 fn optional_string<'a>(arguments: &'a Value, name: &str) -> Option<&'a str> {
@@ -419,6 +429,7 @@ fn tools() -> Vec<Value> {
             }),
             vec![],
         ),
+        search_tool(),
         tool(
             "tiber.show",
             "Show task",
@@ -599,6 +610,56 @@ fn tool(
             "type": "object",
             "properties": properties,
             "required": required
+        }
+    })
+}
+
+fn search_tool() -> Value {
+    json!({
+        "name": "tiber.search",
+        "title": "Search task history",
+        "description": "Search task titles, summaries, and context across every status.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": { "type": "string" }
+            },
+            "required": ["query"]
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string" },
+                            "status": {
+                                "type": "string",
+                                "enum": ["backlog", "in-progress", "done", "abandoned"]
+                            },
+                            "title": { "type": "string" },
+                            "summary": { "type": "string" },
+                            "context": { "type": "string" }
+                        },
+                        "required": ["id", "status", "title", "summary", "context"]
+                    }
+                }
+            },
+            "required": ["results"]
+        }
+    })
+}
+
+fn search_content(results: Value) -> Value {
+    json!({
+        "content": [{
+            "type": "text",
+            "text": results.to_string()
+        }],
+        "structuredContent": {
+            "results": results
         }
     })
 }
