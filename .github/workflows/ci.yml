@@ -15,6 +15,13 @@ on:
 permissions:
   contents: read
 
+# Cancel only an older revision of the same delivery stream. Event type keeps
+# main pushes, pull requests, and merge-queue validation isolated; ref keeps
+# separate pull requests and merge groups from canceling one another.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     name: Quality gate
