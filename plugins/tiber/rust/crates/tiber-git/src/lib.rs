@@ -96,6 +96,12 @@ pub fn read_doc_at(root: impl Into<PathBuf>, doc_ref: &str) -> Result<String, Er
 
 impl GitRepository {
     fn init_repository(&self) -> Result<(), Error> {
+        if fs::symlink_metadata(self.root.join(".tasks")).is_ok() {
+            return Err(Error::Parse(
+                "existing_tasks_system path=.tasks mutation=false resolution=move, migrate, or explicitly integrate the existing root .tasks system before running tiber init"
+                    .to_string(),
+            ));
+        }
         let _lock = self.acquire_lock()?;
         self.ensure_tasks_branch()?;
         self.ignore_local_tasks_in_source_gitignore()?;
@@ -1409,28 +1415,57 @@ impl GitRepository {
             gitignore.push_str("# tiber local working copy\n.tasks\n");
         }
         let mut files = vec![(".gitignore", gitignore, false)];
+        let mut integration_conflicts = Vec::new();
+        let mut integration_messages = Vec::new();
         let equivalent_hook = self.equivalent_task_closing_hook()?;
         if equivalent_hook.is_none() {
-            files.push((
-                ".githooks/post-commit.tiber",
-                "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n".to_string(),
-                true,
-            ));
+            let active_hook = self.active_post_commit_hook()?;
+            if self.hook_dispatches_tiber_snippet(&active_hook)? {
+                files.push((
+                    ".githooks/post-commit.tiber",
+                    "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n"
+                        .to_string(),
+                    true,
+                ));
+            } else if self.explicit_hooks_path()?.is_some() {
+                integration_conflicts.push(format!(
+                    "hook-dispatch active={} resolution=the active hook must invoke .githooks/post-commit.tiber",
+                    active_hook.display()
+                ));
+            } else {
+                integration_messages.push(format!(
+                    "skipped hook-dispatch active={} resolution=configure an active post-commit dispatcher before adding .githooks/post-commit.tiber",
+                    active_hook.display()
+                ));
+            }
         }
         let equivalent_workflow = self.equivalent_task_closing_workflow()?;
         if equivalent_workflow.is_none() {
-            files.push((
-                ".github/workflows/tiber-close-from-trailers.yml",
-                "name: tiber close from trailers\n\non:\n  push:\n    branches: [main]\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Install Tiber\n        run: |\n          git clone --depth 1 https://github.com/jwilger/ai-plugins.git .tiber-src\n          cargo install --path .tiber-src/plugins/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n".to_string(),
-                true,
-            ));
+            if self.commit_signing_enabled()? {
+                integration_conflicts.push(
+                    "signed-publication generated GitHub workflow cannot access a signing key resolution=provide repository-owned signed tasks-branch automation and rerun scaffold"
+                        .to_string(),
+                );
+            } else {
+                files.push((
+                    ".github/workflows/tiber-close-from-trailers.yml",
+                    "name: tiber close from trailers\n\non:\n  push:\n    branches: [main]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 7256c46ca1dca09a84ce4bfe6895804d9e7efe54\n          cargo install --path .tiber-src/plugins/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        .to_string(),
+                    true,
+                ));
+            }
         }
         let justfile_exists = self.root.join("justfile").exists();
         let planned_justfile = self.show_tasks_justfile()?;
         if let Some(justfile) = planned_justfile.as_ref() {
             files.push(("justfile", justfile.clone(), false));
         }
-        let mut messages = Vec::new();
+        let mut messages = integration_messages;
+        messages.extend(
+            integration_conflicts
+                .iter()
+                .map(|conflict| format!("conflict {conflict}")),
+        );
         if justfile_exists && planned_justfile.is_none() {
             messages.push("already configured justfile".to_string());
         }
@@ -1450,7 +1485,15 @@ impl GitRepository {
                 Err(error) => return Err(error.into()),
             }
         }
-        if apply && !replace_conflicts && !conflicts.is_empty() {
+        if apply
+            && (!integration_conflicts.is_empty() || (!replace_conflicts && !conflicts.is_empty()))
+        {
+            if !integration_conflicts.is_empty() {
+                return Err(Error::Parse(format!(
+                    "scaffold_integration_conflicts {}",
+                    integration_conflicts.join(";")
+                )));
+            }
             return Err(Error::Parse(format!(
                 "scaffold_conflicts paths={} resolution=--replace-conflicts",
                 conflicts
@@ -1646,6 +1689,42 @@ impl GitRepository {
             return Ok(Some(path));
         }
         Ok(None)
+    }
+
+    fn explicit_hooks_path(&self) -> Result<Option<PathBuf>, Error> {
+        match self.git(["config", "--path", "core.hooksPath"]) {
+            Ok(path) => {
+                let path = PathBuf::from(path.trim());
+                Ok(Some(if path.is_absolute() {
+                    path
+                } else {
+                    self.root.join(path)
+                }))
+            }
+            Err(Error::CommandFailed { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn active_post_commit_hook(&self) -> Result<PathBuf, Error> {
+        Ok(PathBuf::from(
+            self.git([
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "hooks/post-commit",
+            ])?
+            .trim(),
+        ))
+    }
+
+    fn hook_dispatches_tiber_snippet(&self, hook: &Path) -> Result<bool, Error> {
+        if !hook.is_file() || !is_executable(hook)? {
+            return Ok(false);
+        }
+        let contents = fs::read(hook)?;
+        Ok(std::str::from_utf8(&contents)
+            .is_ok_and(|contents| contents.contains("post-commit.tiber")))
     }
 
     fn report_schema_errors(
