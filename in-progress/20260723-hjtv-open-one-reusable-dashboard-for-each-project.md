@@ -29,3 +29,5 @@ Multiple projects need dashboards on one machine, while repeated launch instruct
 ## Subtasks
 
 ## Notes / Log
+
+- 2026-07-24: Delivered to main at 7256c46ca1dca09a84ce4bfe6895804d9e7efe54. Exact local `nix develop -c just ci` passed (44 mutants: 38 caught, 6 unviable; 575 Bats), focused provider-backed dashboard eval passed, final review findings were repaired and rechecked, and GitHub Actions run 30053696485 completed successfully with the terminal CI gate green.
