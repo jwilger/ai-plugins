@@ -164,9 +164,9 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
             };
             Ok(text_content(
                 tasks
-                .into_iter()
-                .map(|task| format!("{}\t{}\n", task.path, task.title))
-                .collect::<String>(),
+                    .into_iter()
+                    .map(|task| format!("{}\t{}\n", task.path, task.title))
+                    .collect::<String>(),
             ))
         }
         "tiber.show" => Ok(text_content(tiber_git::show_task(required_string(
@@ -343,9 +343,10 @@ fn optional_string_checked<'a>(
     name: &str,
 ) -> Result<Option<&'a str>, tiber_git::Error> {
     match arguments.get(name) {
-        Some(value) => value.as_str().map(Some).ok_or_else(|| {
-            tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}"))
-        }),
+        Some(value) => value
+            .as_str()
+            .map(Some)
+            .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}"))),
         None => Ok(None),
     }
 }

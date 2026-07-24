@@ -64,11 +64,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert_success(repo.tiber(["create", "Expose MCP task"]));
     let expose_mcp_task = task_stem(&repo, "backlog", "expose-mcp-task");
     assert_success(repo.tiber(["create", "Completed MCP history"]));
-    assert_success(repo.tiber([
-        "transition",
-        "completed-mcp-history",
-        "done",
-    ]));
+    assert_success(repo.tiber(["transition", "completed-mcp-history", "done"]));
     let completed_mcp_history = task_stem(&repo, "done", "completed-mcp-history");
     let install_target_dir = repo.path().join("bin");
     let launcher = repo.path().join("plugin/bin/tiber");
@@ -163,10 +159,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         list_tool["inputSchema"]["properties"]["status"]["enum"],
         serde_json::json!(["backlog", "in-progress", "done", "abandoned"])
     );
-    assert_eq!(
-        list_tool["inputSchema"]["required"],
-        serde_json::json!([])
-    );
+    assert_eq!(list_tool["inputSchema"]["required"], serde_json::json!([]));
 
     write_message(
         &mut stdin,
