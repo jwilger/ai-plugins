@@ -39,9 +39,10 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   migration or an explicit integration design.
 - Established-repository scaffold is a safety preflight, not file generation:
   verify the active executable hook-manager dispatcher, require pinned workflow
-  and Tiber revisions with only `contents: write`, and refuse generated
-  publication when repository policy requires signing but no repository-owned
-  automation supplies the key.
+  and Tiber revisions with locked dependencies and only `contents: write`,
+  target the repository's publication branch, and refuse generated publication
+  when repository policy requires signing but no repository-owned automation
+  supplies the key.
 - Use CLI/MCP writes, not direct edits to `.tasks` files or `order.md`.
 - The dashboard can reorder backlog priority, which does not change capacity.
   It has no create or status-transition route. Admission writes go through CLI
@@ -100,7 +101,8 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   parallel board. Verify that Git's active executable `post-commit` hook
   dispatches the proposed Tiber snippet; a file that the active hook manager
   never invokes is not installed automation. Generated GitHub automation must
-  pin both checkout and Tiber source revisions, declare only `contents: write`,
+  pin both checkout and Tiber source revisions, install locked dependencies,
+  target the repository's publication branch, declare only `contents: write`,
   and refuse signed-publication policy unless repository-owned automation
   supplies a signing key. Apply
   refuses ambiguous integration-file replacements; use `--replace-conflicts`
