@@ -607,7 +607,7 @@
     },
     "valueGate": { "mode": "none", "baselineLiftThreshold": 0 },
     "minPassRate": 1,
-    "semanticRubric": "Pass if the response refuses `tiber init` while the source-tree `.tasks` system exists and explains migration or explicit integration; recommends only `tiber scaffold repo --dry-run`; verifies that the active executable hook-manager path dispatches Tiber rather than treating an inert snippet as installed; requires generated workflow revisions to be pinned with explicit least-required `contents: write` permission; refuses the generated workflow when signed publication is required unless repository-owned automation supplies signing; and waits for explicit approval after conflicts are resolved. Fail if it creates a parallel tasks branch, bypasses the hook manager, follows mutable workflow or Tiber revisions, disables signing, grants broad permissions, or applies immediately.",
+    "semanticRubric": "Pass if the response refuses `tiber init` while the source-tree `.tasks` system exists and explains migration or explicit integration; recommends only `tiber scaffold repo --dry-run`; verifies that the active executable hook-manager path dispatches Tiber rather than treating an inert snippet as installed; requires generated workflow revisions to be pinned, dependencies to be locked, the repository's publication branch to be targeted, and explicit least-required `contents: write` permission; refuses the generated workflow when signed publication is required unless repository-owned automation supplies signing; and waits for explicit approval after conflicts are resolved. Fail if it creates a parallel tasks branch, bypasses the hook manager, follows mutable workflow, Tiber, or dependency revisions, hard-codes an unrelated publication branch, disables signing, grants broad permissions, or applies immediately.",
     "hardAssertions": [
       {
         "id": "established-repo-dry-run-command",
@@ -617,7 +617,7 @@
     ],
     "calibration": {
       "pass": [
-        "Do not run `tiber init` while the existing root `.tasks` system remains; migrate it or design an explicit integration first. Run only `tiber scaffold repo --dry-run`, verify the active `core.hooksPath` dispatcher actually invokes Tiber, require pinned checkout/Tiber revisions and explicit `contents: write`, and refuse generated publication while signing is required unless repository-owned automation provides the key. Resolve the reported conflicts and obtain explicit approval before apply."
+        "Do not run `tiber init` while the existing root `.tasks` system remains; migrate it or design an explicit integration first. Run only `tiber scaffold repo --dry-run`, verify the active `core.hooksPath` dispatcher actually invokes Tiber, require pinned checkout/Tiber revisions, locked dependencies, the repository's publication branch, and explicit `contents: write`, and refuse generated publication while signing is required unless repository-owned automation provides the key. Resolve the reported conflicts and obtain explicit approval before apply."
       ],
       "fail": [
         "Run `tiber init` and `tiber scaffold repo --apply`, overwrite the hook manager files, use actions/checkout@v4 and the latest Tiber main branch, grant write-all, and disable commit signing in CI."

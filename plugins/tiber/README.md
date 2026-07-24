@@ -339,11 +339,14 @@ untouched and suppress only their matching generated integration.
 
 The generated GitHub workflow publishes the `tasks` branch with explicit
 `contents: write` permission. It pins `actions/checkout` and the Tiber source
-commit rather than following mutable tags or branches. If local repository
-policy enables `commit.gpgsign`, scaffold refuses that generated workflow
-before writing anything because an unattended GitHub runner has no repository
-signing key. Provide repository-owned signed publication automation and rerun
-the preview; do not disable signing merely to admit the generated workflow.
+commit rather than following mutable tags or branches, installs with the
+committed Cargo lockfile, and targets the remote default branch when available
+(falling back to the current branch in a repository without that remote
+metadata). If local repository policy enables `commit.gpgsign`, scaffold
+refuses that generated workflow before writing anything because an unattended
+GitHub runner has no repository signing key. Provide repository-owned signed
+publication automation and rerun the preview; do not disable signing merely to
+admit the generated workflow.
 
 ## Release Layout
 

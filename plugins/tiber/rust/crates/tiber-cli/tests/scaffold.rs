@@ -45,11 +45,28 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
     )
     .expect("read generated workflow");
     assert!(workflow.contains("permissions:\n  contents: write\n"));
+    assert!(!workflow.contains("write-all"));
     assert!(workflow.contains("actions/checkout@"));
     assert!(!workflow.contains("actions/checkout@v4"));
     assert!(
         workflow.contains("git -C .tiber-src checkout bce89f58a2ea23e38bf508cb3800d17efba3e28e")
     );
+    assert!(workflow.contains("cargo install --locked --path"));
+}
+
+#[test]
+fn scaffold_repo_targets_the_repository_publication_branch() {
+    let repo = TempRepo::initialized();
+    repo.git(["branch", "-m", "trunk"]);
+
+    assert_success(repo.tiber(["scaffold", "repo", "--apply"]));
+
+    let workflow = fs::read_to_string(
+        repo.path()
+            .join(".github/workflows/tiber-close-from-trailers.yml"),
+    )
+    .expect("read generated workflow");
+    assert!(workflow.contains("branches: [trunk]"));
 }
 
 #[test]
@@ -100,6 +117,37 @@ fn scaffold_repo_accepts_an_active_hook_that_dispatches_the_tiber_snippet() {
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
     assert!(stdout.contains("would write .githooks/post-commit.tiber"));
     assert!(!stdout.contains("conflict hook-dispatch"));
+}
+
+#[test]
+fn scaffold_repo_rejects_inert_mentions_of_the_tiber_snippet() {
+    let repo = TempRepo::initialized();
+    repo.git(["config", "core.hooksPath", ".githooks"]);
+    fs::create_dir_all(repo.path().join(".githooks")).expect("create hooks directory");
+    fs::write(
+        repo.path().join(".githooks/post-commit"),
+        "#!/usr/bin/env bash\n# TODO: invoke .githooks/post-commit.tiber\necho .githooks/post-commit.tiber\n",
+    )
+    .expect("write inert hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            repo.path().join(".githooks/post-commit"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .expect("make hook executable");
+    }
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("conflict hook-dispatch"));
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+    assert!(!apply.status.success());
+    assert!(!repo.path().join(".githooks/post-commit.tiber").exists());
+    assert!(!repo.path().join(".gitignore").exists());
 }
 
 #[test]

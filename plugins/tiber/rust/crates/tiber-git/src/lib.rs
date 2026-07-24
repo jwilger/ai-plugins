@@ -1447,10 +1447,12 @@ impl GitRepository {
                         .to_string(),
                 );
             } else {
+                let publication_branch = self.publication_branch()?;
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
-                    "name: tiber close from trailers\n\non:\n  push:\n    branches: [main]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout bce89f58a2ea23e38bf508cb3800d17efba3e28e\n          cargo install --path .tiber-src/plugins/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
-                        .to_string(),
+                    format!(
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout bce89f58a2ea23e38bf508cb3800d17efba3e28e\n          cargo install --locked --path .tiber-src/plugins/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                    ),
                     true,
                 ));
             }
@@ -1718,13 +1720,31 @@ impl GitRepository {
         ))
     }
 
+    fn publication_branch(&self) -> Result<String, Error> {
+        match self.git([
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ]) {
+            Ok(reference) => reference
+                .trim()
+                .strip_prefix("origin/")
+                .filter(|branch| !branch.is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| Error::Parse("origin_default_branch_invalid=true".to_string())),
+            Err(Error::CommandFailed { .. }) => self.current_branch(),
+            Err(error) => Err(error),
+        }
+    }
+
     fn hook_dispatches_tiber_snippet(&self, hook: &Path) -> Result<bool, Error> {
         if !hook.is_file() || !is_executable(hook)? {
             return Ok(false);
         }
         let contents = fs::read(hook)?;
         Ok(std::str::from_utf8(&contents)
-            .is_ok_and(|contents| contents.contains("post-commit.tiber")))
+            .is_ok_and(|contents| contents.lines().any(shell_line_invokes_tiber_snippet)))
     }
 
     fn report_schema_errors(
@@ -2739,6 +2759,31 @@ fn shell_command_invokes_task_closer(line: &str) -> bool {
         || [">", "1>", "2>"]
             .iter()
             .any(|operator| remainder.starts_with(operator))
+}
+
+fn shell_line_invokes_tiber_snippet(line: &str) -> bool {
+    let line = trim_shell_comment(line.trim()).trim();
+    shell_command_segments(line)
+        .into_iter()
+        .any(shell_command_invokes_tiber_snippet)
+}
+
+fn shell_command_invokes_tiber_snippet(command: &str) -> bool {
+    let command = command.trim();
+    let command = command.strip_prefix("exec ").unwrap_or(command);
+    let command = ["source ", ". ", "bash ", "sh "]
+        .iter()
+        .find_map(|prefix| command.strip_prefix(prefix))
+        .unwrap_or(command)
+        .trim_start();
+    let Some(token) = command.split_whitespace().next() else {
+        return false;
+    };
+    let token = token.trim_matches(|character| matches!(character, '"' | '\''));
+    matches!(
+        token,
+        ".githooks/post-commit.tiber" | "./.githooks/post-commit.tiber"
+    ) || token.ends_with("/.githooks/post-commit.tiber")
 }
 
 fn trim_unquoted_comment(value: &str) -> &str {
