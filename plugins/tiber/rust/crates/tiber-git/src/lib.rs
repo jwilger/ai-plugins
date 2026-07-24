@@ -1447,7 +1447,7 @@ impl GitRepository {
                         .to_string(),
                 );
             } else {
-                let publication_branch = self.publication_branch()?;
+                let publication_branch = yaml_single_quoted(&self.publication_branch()?);
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
@@ -2762,10 +2762,10 @@ fn shell_command_invokes_task_closer(line: &str) -> bool {
 }
 
 fn shell_line_invokes_tiber_snippet(line: &str) -> bool {
-    let line = trim_shell_comment(line.trim()).trim();
-    shell_command_segments(line)
-        .into_iter()
-        .any(shell_command_invokes_tiber_snippet)
+    if line != line.trim_start() {
+        return false;
+    }
+    shell_command_invokes_tiber_snippet(trim_shell_comment(line.trim()).trim())
 }
 
 fn shell_command_invokes_tiber_snippet(command: &str) -> bool {
@@ -2784,6 +2784,10 @@ fn shell_command_invokes_tiber_snippet(command: &str) -> bool {
         token,
         ".githooks/post-commit.tiber" | "./.githooks/post-commit.tiber"
     ) || token.ends_with("/.githooks/post-commit.tiber")
+}
+
+fn yaml_single_quoted(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 fn trim_unquoted_comment(value: &str) -> &str {
