@@ -151,6 +151,33 @@ fn scaffold_repo_rejects_inert_mentions_of_the_tiber_snippet() {
 }
 
 #[test]
+fn scaffold_repo_rejects_a_dispatch_after_an_earlier_exit() {
+    let repo = TempRepo::initialized();
+    repo.git(["config", "core.hooksPath", ".githooks"]);
+    fs::create_dir_all(repo.path().join(".githooks")).expect("create hooks directory");
+    fs::write(
+        repo.path().join(".githooks/post-commit"),
+        "#!/usr/bin/env bash\nexit 0\n.githooks/post-commit.tiber\n",
+    )
+    .expect("write unreachable dispatcher");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            repo.path().join(".githooks/post-commit"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .expect("make hook executable");
+    }
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("conflict hook-dispatch"));
+}
+
+#[test]
 fn scaffold_repo_refuses_unsigned_workflow_for_signed_publication_policy() {
     let repo = TempRepo::initialized();
     repo.git(["config", "commit.gpgsign", "true"]);
