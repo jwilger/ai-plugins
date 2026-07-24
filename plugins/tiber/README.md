@@ -226,7 +226,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.12.1` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.13.0` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -300,8 +300,10 @@ The preview covers:
 
 - an additive `.gitignore` update that preserves existing entries and adds
   `.tasks` at most once
-- a post-commit hook for trailer-based closing
-- a GitHub workflow snippet for `tiber close-from-trailers`
+- a post-commit hook snippet only when the active executable hook verifiably
+  dispatches it; otherwise the preview reports the missing integration
+- a GitHub workflow for `tiber close-from-trailers` with pinned checkout and
+  Tiber source revisions plus explicit `contents: write` permission
 - an optional `just show-tasks` recipe when a `justfile` exists
 - explicit `would write`, `already configured`, and `conflict` classifications;
   equivalent existing hooks and workflows suppress duplicate automation
@@ -318,6 +320,30 @@ reviewing every reported conflict, explicitly choose replacement with:
 ```shell
 tiber scaffold repo --apply --replace-conflicts
 ```
+
+### Established repositories
+
+`tiber init` refuses before mutation when the source checkout already contains
+a root `.tasks` path. Move or migrate that task system, or design an explicit
+integration, before creating Tiber's separate Git-object-backed `tasks` branch.
+Tiber never treats a source-tree `.tasks` directory as its temporary internal
+working copy.
+
+Scaffold resolves Git's active hooks directory. With no configured hook
+dispatcher, it reports that local automation was skipped instead of writing an
+inert snippet. When `core.hooksPath` selects a manager-owned directory, a
+missing executable dispatcher is a blocking integration conflict; wire that
+manager's active `post-commit` hook to `.githooks/post-commit.tiber`, then
+preview again. Existing active task-closing hooks and push workflows remain
+untouched and suppress only their matching generated integration.
+
+The generated GitHub workflow publishes the `tasks` branch with explicit
+`contents: write` permission. It pins `actions/checkout` and the Tiber source
+commit rather than following mutable tags or branches. If local repository
+policy enables `commit.gpgsign`, scaffold refuses that generated workflow
+before writing anything because an unattended GitHub runner has no repository
+signing key. Provide repository-owned signed publication automation and rerun
+the preview; do not disable signing merely to admit the generated workflow.
 
 ## Release Layout
 

@@ -37,6 +37,40 @@ fn init_creates_tasks_branch_and_ignores_accidental_tasks_checkout() {
 }
 
 #[test]
+fn init_refuses_an_existing_source_tree_tasks_system_without_mutation() {
+    let repo = TempRepo::initialized();
+    fs::create_dir_all(repo.path().join(".tasks/backlog")).expect("create existing task system");
+    fs::write(
+        repo.path().join(".tasks/backlog/existing.md"),
+        "# Existing task\n",
+    )
+    .expect("write existing task");
+    let before = repo.git_output(["status", "--short"]);
+    assert_success_ref(&before);
+
+    let output = repo.tiber(["init"]);
+
+    assert!(
+        !output.status.success(),
+        "parallel task board must be refused"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("existing_tasks_system"));
+    assert!(stderr.contains("move, migrate, or explicitly integrate"));
+    let task_ref = repo.git_output(["show-ref", "--verify", "refs/heads/tasks"]);
+    assert!(
+        !task_ref.status.success(),
+        "tasks branch must not be created"
+    );
+    let after = repo.git_output(["status", "--short"]);
+    assert_success_ref(&after);
+    assert_eq!(
+        after.stdout, before.stdout,
+        "init refusal must not mutate files"
+    );
+}
+
+#[test]
 fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
     let repo = TempRepo::initialized();
 

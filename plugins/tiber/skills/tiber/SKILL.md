@@ -87,7 +87,14 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   entries and adds `.tasks` at most once. Evaluate hooks and workflows
   independently: an equivalent existing workflow suppresses only the generated
   workflow, and an equivalent existing hook suppresses only the generated hook.
-  Preview any distinct missing integration. Apply
+  Preview any distinct missing integration. Treat a root source-tree `.tasks`
+  path as an existing task system, not as Tiber state, and do not initialize a
+  parallel board. Verify that Git's active executable `post-commit` hook
+  dispatches the proposed Tiber snippet; a file that the active hook manager
+  never invokes is not installed automation. Generated GitHub automation must
+  pin both checkout and Tiber source revisions, declare only `contents: write`,
+  and refuse signed-publication policy unless repository-owned automation
+  supplies a signing key. Apply
   refuses ambiguous integration-file replacements; use `--replace-conflicts`
   only after the user explicitly chooses to replace every reported conflict.
   "No follow-up questions" is not approval to apply.

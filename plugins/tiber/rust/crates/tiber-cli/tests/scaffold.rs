@@ -11,10 +11,10 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
     let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
 
     assert_success_ref(&dry_run);
-    assert_eq!(
-        String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8"),
-        "would write .gitignore\nwould write .githooks/post-commit.tiber\nwould write .github/workflows/tiber-close-from-trailers.yml\n"
-    );
+    let dry_run_stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(dry_run_stdout.contains("would write .gitignore"));
+    assert!(dry_run_stdout.contains("skipped hook-dispatch"));
+    assert!(dry_run_stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
     assert!(!repo.path().join(".gitignore").exists());
     assert!(!repo
         .path()
@@ -32,17 +32,92 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
 
     assert_success(apply);
     assert!(repo.path().join(".gitignore").exists());
-    assert_eq!(
-        fs::read_to_string(repo.path().join(".githooks").join("post-commit.tiber"))
-            .expect("read hook snippet"),
-        "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n"
-    );
+    assert!(!repo.path().join(".githooks/post-commit.tiber").exists());
     assert!(repo
         .path()
         .join(".github")
         .join("workflows")
         .join("tiber-close-from-trailers.yml")
         .exists());
+    let workflow = fs::read_to_string(
+        repo.path()
+            .join(".github/workflows/tiber-close-from-trailers.yml"),
+    )
+    .expect("read generated workflow");
+    assert!(workflow.contains("permissions:\n  contents: write\n"));
+    assert!(workflow.contains("actions/checkout@"));
+    assert!(!workflow.contains("actions/checkout@v4"));
+    assert!(
+        workflow.contains("git -C .tiber-src checkout 7256c46ca1dca09a84ce4bfe6895804d9e7efe54")
+    );
+}
+
+#[test]
+fn scaffold_repo_reports_that_an_undispatched_hook_snippet_is_inert() {
+    let repo = TempRepo::initialized();
+    repo.git(["config", "core.hooksPath", ".githooks"]);
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("conflict hook-dispatch"));
+    assert!(stdout.contains(".githooks/post-commit"));
+    assert!(stdout.contains("must invoke .githooks/post-commit.tiber"));
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+    assert!(
+        !apply.status.success(),
+        "inert automation must not be installed"
+    );
+    assert!(!repo.path().join(".githooks/post-commit.tiber").exists());
+    assert!(!repo.path().join(".gitignore").exists());
+}
+
+#[test]
+fn scaffold_repo_accepts_an_active_hook_that_dispatches_the_tiber_snippet() {
+    let repo = TempRepo::initialized();
+    repo.git(["config", "core.hooksPath", ".githooks"]);
+    fs::create_dir_all(repo.path().join(".githooks")).expect("create hooks directory");
+    fs::write(
+        repo.path().join(".githooks/post-commit"),
+        "#!/usr/bin/env bash\n.githooks/post-commit.tiber\n",
+    )
+    .expect("write dispatcher");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            repo.path().join(".githooks/post-commit"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .expect("make dispatcher executable");
+    }
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("would write .githooks/post-commit.tiber"));
+    assert!(!stdout.contains("conflict hook-dispatch"));
+}
+
+#[test]
+fn scaffold_repo_refuses_unsigned_workflow_for_signed_publication_policy() {
+    let repo = TempRepo::initialized();
+    repo.git(["config", "commit.gpgsign", "true"]);
+
+    let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
+
+    assert_success_ref(&dry_run);
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("conflict signed-publication"));
+    assert!(stdout.contains("generated GitHub workflow cannot access a signing key"));
+    assert!(!stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
+
+    let apply = repo.tiber(["scaffold", "repo", "--apply"]);
+    assert!(!apply.status.success());
+    assert!(!repo.path().join(".gitignore").exists());
 }
 
 #[test]
@@ -101,7 +176,7 @@ fn scaffold_repo_detects_an_equivalent_existing_workflow() {
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
     assert!(stdout.contains("already configured .github/workflows/close-tasks.yaml"));
     assert!(!stdout.contains(".github/workflows/tiber-close-from-trailers.yml"));
-    assert!(stdout.contains("would write .githooks/post-commit.tiber"));
+    assert!(stdout.contains("skipped hook-dispatch"));
 
     let apply = repo.tiber(["scaffold", "repo", "--apply"]);
 
@@ -116,7 +191,7 @@ fn scaffold_repo_detects_an_equivalent_existing_workflow() {
         .join("workflows")
         .join("tiber-close-from-trailers.yml")
         .exists());
-    assert!(repo
+    assert!(!repo
         .path()
         .join(".githooks")
         .join("post-commit.tiber")
@@ -385,7 +460,7 @@ fn scaffold_repo_detects_equivalent_workflow_with_inline_comments() {
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
     assert!(stdout.contains("already configured .github/workflows/close-tasks.yaml"));
     assert!(!stdout.contains(".github/workflows/tiber-close-from-trailers.yml"));
-    assert!(stdout.contains("would write .githooks/post-commit.tiber"));
+    assert!(stdout.contains("skipped hook-dispatch"));
 }
 
 #[test]
@@ -541,7 +616,7 @@ fn scaffold_repo_does_not_treat_an_inactive_hook_file_as_automation() {
 
     assert_success_ref(&dry_run);
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
-    assert!(stdout.contains("would write .githooks/post-commit.tiber"));
+    assert!(stdout.contains("conflict hook-dispatch"));
     assert!(!stdout.contains("already configured .githooks/post-commit"));
 }
 
@@ -578,7 +653,7 @@ fn scaffold_repo_reports_repeated_setup_as_already_configured() {
     assert_success_ref(&dry_run);
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
     assert!(stdout.contains("already configured .gitignore"));
-    assert!(stdout.contains("already configured .githooks/post-commit.tiber"));
+    assert!(stdout.contains("skipped hook-dispatch"));
     assert!(stdout.contains("already configured .github/workflows/tiber-close-from-trailers.yml"));
     assert!(!stdout.contains("would write"));
     assert!(!stdout.contains("conflict"));
@@ -588,7 +663,6 @@ fn scaffold_repo_reports_repeated_setup_as_already_configured() {
         use std::os::unix::fs::PermissionsExt;
         for path in [
             ".gitignore",
-            ".githooks/post-commit.tiber",
             ".github/workflows/tiber-close-from-trailers.yml",
         ] {
             fs::set_permissions(repo.path().join(path), fs::Permissions::from_mode(0o444))
@@ -600,7 +674,7 @@ fn scaffold_repo_reports_repeated_setup_as_already_configured() {
     assert_success_ref(&second_apply);
     let stdout = String::from_utf8(second_apply.stdout).expect("apply output should be utf8");
     assert!(stdout.contains("already configured .gitignore"));
-    assert!(stdout.contains("already configured .githooks/post-commit.tiber"));
+    assert!(stdout.contains("skipped hook-dispatch"));
     assert!(stdout.contains("already configured .github/workflows/tiber-close-from-trailers.yml"));
     assert!(!stdout.contains("wrote"));
 }
@@ -608,6 +682,7 @@ fn scaffold_repo_reports_repeated_setup_as_already_configured() {
 #[test]
 fn scaffold_repo_reports_conflicts_and_refuses_ambiguous_overwrites_atomically() {
     let repo = TempRepo::initialized();
+    configure_default_hook_dispatcher(&repo);
     let gitignore = "target/\n.env\n";
     fs::write(repo.path().join(".gitignore"), gitignore).expect("write existing gitignore");
     let hook_path = repo.path().join(".githooks").join("post-commit.tiber");
@@ -692,6 +767,7 @@ fn scaffold_repo_preserves_existing_files_when_a_destination_is_a_dangling_symli
     use std::os::unix::fs::symlink;
 
     let repo = TempRepo::initialized();
+    configure_default_hook_dispatcher(&repo);
     let existing_gitignore = "target/\n";
     fs::write(repo.path().join(".gitignore"), existing_gitignore).expect("write gitignore");
     fs::create_dir(repo.path().join(".githooks")).expect("create hooks directory");
@@ -752,6 +828,7 @@ fn scaffold_repo_preserves_an_unowned_atomic_replacement_file() {
 #[test]
 fn scaffold_repo_replaces_ambiguous_targets_only_with_an_explicit_choice() {
     let repo = TempRepo::initialized();
+    configure_default_hook_dispatcher(&repo);
     fs::write(repo.path().join(".gitignore"), "target/\n").expect("write existing gitignore");
     let hook_path = repo.path().join(".githooks").join("post-commit.tiber");
     fs::create_dir_all(hook_path.parent().expect("hook parent")).expect("create hook directory");
@@ -786,10 +863,11 @@ fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     let dry_run = repo.tiber(["scaffold", "repo", "--dry-run"]);
 
     assert_success_ref(&dry_run);
-    assert_eq!(
-        String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8"),
-        "would write .gitignore\nwould write .githooks/post-commit.tiber\nwould write .github/workflows/tiber-close-from-trailers.yml\nwould write justfile\n"
-    );
+    let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
+    assert!(stdout.contains("skipped hook-dispatch"));
+    assert!(stdout.contains("would write .gitignore"));
+    assert!(stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
+    assert!(stdout.contains("would write justfile"));
     assert_eq!(
         fs::read_to_string(repo.path().join("justfile")).expect("read justfile"),
         "test:\n  cargo test\n"
@@ -816,4 +894,19 @@ fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     let stdout = String::from_utf8(repeated_preview.stdout).expect("dry-run output should be utf8");
     assert!(stdout.contains("already configured justfile"));
     assert!(!stdout.contains("would write justfile"));
+}
+
+fn configure_default_hook_dispatcher(repo: &TempRepo) {
+    let hook = repo.path().join(".git/hooks/post-commit");
+    fs::write(
+        &hook,
+        "#!/usr/bin/env bash\n\"$PWD/.githooks/post-commit.tiber\"\n",
+    )
+    .expect("write default hook dispatcher");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755))
+            .expect("make default hook dispatcher executable");
+    }
 }
