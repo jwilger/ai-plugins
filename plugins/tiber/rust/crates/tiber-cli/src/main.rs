@@ -116,8 +116,8 @@ enum Command {
     Show(TaskRefArgs),
     /// Show task metadata.
     Metadata(TaskRefArgs),
-    /// List open tasks.
-    List,
+    /// List open tasks or tasks in one status.
+    List(ListArgs),
     /// Print the next available task.
     Next,
     /// Move a task to a status.
@@ -203,6 +203,13 @@ struct InstallBinArgs {
 struct TaskRefArgs {
     /// Task id, nickname, or full stem.
     task_ref: String,
+}
+
+#[derive(Args)]
+struct ListArgs {
+    /// Limit results to backlog, in-progress, done, or abandoned.
+    #[arg(long)]
+    status: Option<String>,
 }
 
 #[derive(Args)]
@@ -716,8 +723,12 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             );
             Ok(())
         }
-        Command::List => {
-            for task in tiber_git::list_tasks()? {
+        Command::List(ListArgs { status }) => {
+            let tasks = match status {
+                Some(status) => tiber_git::list_tasks_by_status(&status)?,
+                None => tiber_git::list_tasks()?,
+            };
+            for task in tasks {
                 println!("{}\t{}", task.path, task.title);
             }
             Ok(())

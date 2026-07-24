@@ -54,6 +54,29 @@ fn create_stores_course_shaped_task_in_backlog_and_list_prints_ordered_summary()
 }
 
 #[test]
+fn list_filters_completed_tasks_by_status() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Finished historical work"]));
+    assert_success(repo.tiber([
+        "transition",
+        "finished-historical-work",
+        "done",
+    ]));
+    assert_success(repo.tiber(["create", "Still queued work"]));
+    let stem = task_stem(&repo, "done", "finished-historical-work");
+    task_stem(&repo, "backlog", "still-queued-work");
+
+    let list = repo.tiber(["list", "--status", "done"]);
+
+    assert_success_ref(&list);
+    assert_eq!(
+        String::from_utf8(list.stdout).expect("list output should be utf8"),
+        format!("{stem}\tFinished historical work\n")
+    );
+}
+
+#[test]
 fn create_refuses_when_configured_backlog_capacity_is_full() {
     let repo = TempRepo::initialized();
     fs::write(
