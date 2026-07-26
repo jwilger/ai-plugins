@@ -772,6 +772,90 @@ fn read_commands_sync_remote_tasks_without_explicit_sync() {
 }
 
 #[test]
+fn search_syncs_remote_tasks_without_explicit_sync() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let writer = clone_repo(&origin);
+    let reader = clone_repo(&origin);
+    assert_success(writer.tiber(["init"]));
+    assert_success(reader.tiber(["init"]));
+    assert_success(writer.tiber(["create", "Remote searchable task"]));
+
+    let search = reader.tiber(["search", "searchable"]);
+
+    assert_success_ref(&search);
+    assert!(
+        String::from_utf8(search.stdout)
+            .expect("search output should be utf8")
+            .contains("Remote searchable task"),
+        "search should include tasks published after the reader initialized"
+    );
+}
+
+#[test]
+fn filtered_list_syncs_remote_tasks_without_explicit_sync() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let writer = clone_repo(&origin);
+    let reader = clone_repo(&origin);
+    assert_success(writer.tiber(["init"]));
+    assert_success(reader.tiber(["init"]));
+    assert_success(writer.tiber(["create", "Remote filtered task"]));
+
+    let list = reader.tiber(["list", "--status", "backlog"]);
+
+    assert_success_ref(&list);
+    assert!(
+        String::from_utf8(list.stdout)
+            .expect("filtered list output should be utf8")
+            .contains("Remote filtered task"),
+        "filtered list should include tasks published after the reader initialized"
+    );
+}
+
+#[test]
+fn filtered_list_rejects_invalid_status_before_remote_sync() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    repo.git(["remote", "add", "origin", "/missing/tiber-origin"]);
+
+    let list = repo.tiber(["list", "--status", "invalid"]);
+
+    assert!(
+        !list.status.success(),
+        "invalid status should fail before remote sync"
+    );
+    let stderr = String::from_utf8(list.stderr).expect("list stderr should be utf8");
+    assert!(stderr.contains("invalid_status status=invalid"), "{stderr}");
+}
+
+#[test]
 fn read_commands_fail_when_remote_tasks_cannot_merge() {
     let origin = TempRepo::new();
     origin.git(["init", "--bare"]);

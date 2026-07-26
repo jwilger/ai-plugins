@@ -2304,6 +2304,7 @@ impl GitRepository {
 
     fn list_tasks_by_status(&self, status: &str) -> Result<Vec<TaskSummary>, Error> {
         let status = parse_status(status)?;
+        self.read_sync()?;
         self.task_documents_snapshot()?
             .into_iter()
             .filter(|task| task.status == status)
@@ -2317,6 +2318,7 @@ impl GitRepository {
     }
 
     fn search_tasks(&self, query: &str) -> Result<Vec<TaskSearchResult>, Error> {
+        self.read_sync()?;
         let query = query.to_lowercase();
         let mut results = Vec::new();
         for task in self.task_documents_snapshot()? {
