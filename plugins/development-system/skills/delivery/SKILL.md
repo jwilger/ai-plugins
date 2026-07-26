@@ -7,6 +7,10 @@ description: Use when committing, pushing, opening or babysitting a PR/MR, mergi
 
 Read `[delivery]` in `.development-system.toml`.
 
+When the configured value is unavailable, do not choose a mode. State that
+`.development-system.toml` is authoritative and summarize all three modes so
+the user knows what evidence is missing.
+
 - `direct-to-trunk`: commit verified semantic increments and push the configured
   trunk branch. Treat failed pushed CI as blocking recovery work.
 - `pull-request`: publish a branch, create or update one PR/MR, monitor required
@@ -14,4 +18,5 @@ Read `[delivery]` in `.development-system.toml`.
   terminal state.
 - `local-only`: do not commit or publish unless explicitly authorized.
 
-Never infer permission to force-push, merge, or delete remote state.
+Always state each protected action explicitly: never infer permission to
+force-push, merge, or delete remote state.

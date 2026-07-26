@@ -15,3 +15,14 @@ backlogs.
 
 For pushed-CI failure recovery, use Tiber's fenced owner/lease workflow and do
 no unrelated work until terminal success releases the hold.
+
+When answering a request that combines backlog admission with pushed-CI
+recovery, preserve both constraints explicitly:
+
+- compare every candidate against the complete strictly ordered queue; at
+  capacity, replace a lower-value ticket, combine genuine overlap, or reject the
+  candidate rather than appending it;
+- pause every agent's unrelated work while the recovery hold exists, even when
+  that work is isolated in another worktree; and
+- require evidence that the pushed run reached terminal success before
+  releasing the hold or resuming unrelated work.

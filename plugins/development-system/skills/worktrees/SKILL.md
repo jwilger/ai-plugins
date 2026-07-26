@@ -14,4 +14,6 @@ the coordination checkout, not a feature workspace.
 
 Before editing, compare Git's absolute `--git-dir` and `--git-common-dir`.
 Equality identifies the primary checkout; inequality identifies a linked
-worktree. Never require a linked worktree for setup.
+worktree. When explaining a workflow that combines setup and feature work,
+always include this comparison rather than only naming the two checkout types.
+Never require a linked worktree for setup.
