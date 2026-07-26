@@ -1840,10 +1840,13 @@ impl GitRepository {
         )
         .is_err()
         {
-            return operation(&self.with_tasks_dir(workspace.path().to_path_buf()));
+            let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+            repo.read_sync()?;
+            return operation(&repo);
         }
         self.materialize_tasks_ref("refs/heads/tasks", workspace.path())?;
         let repo = self.with_tasks_dir(workspace.path().to_path_buf());
+        repo.read_sync()?;
         operation(&repo)
     }
 

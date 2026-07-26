@@ -840,6 +840,40 @@ fn filtered_list_syncs_remote_tasks_without_explicit_sync() {
 }
 
 #[test]
+fn task_documents_sync_remote_tasks_without_explicit_sync() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let writer = clone_repo(&origin);
+    let reader = clone_repo(&origin);
+    assert_success(writer.tiber(["init"]));
+    assert_success(reader.tiber(["init"]));
+    assert_success(writer.tiber(["create", "Remote dashboard task"]));
+
+    let documents =
+        tiber_git::task_documents_at(reader.path()).expect("task documents should load");
+
+    assert!(
+        documents
+            .iter()
+            .any(|document| document.contents.contains("Remote dashboard task")),
+        "task documents should include tasks published after the reader initialized"
+    );
+}
+
+#[test]
 fn filtered_list_rejects_invalid_status_before_remote_sync() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
