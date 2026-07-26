@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+die() {
+  printf '%s\n' "$*" >&2
+  exit 2
+}
+
+primary_checkout() {
+  local project=$1
+  local common_dir
+  common_dir="$(git -C "$project" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ||
+    die "development_system.not_a_git_repository project=$project"
+  dirname "$common_dir"
+}
+
+require_primary_checkout() {
+  local project=$1
+  local git_dir common_dir primary
+  if [[ "$(git -C "$project" rev-parse --is-bare-repository 2>/dev/null)" == "true" ]]; then
+    die "development_system.setup_requires_checkout project=$project"
+  fi
+  git_dir="$(git -C "$project" rev-parse --path-format=absolute --git-dir 2>/dev/null)" ||
+    die "development_system.not_a_git_repository project=$project"
+  common_dir="$(git -C "$project" rev-parse --path-format=absolute --git-common-dir)"
+  if [[ "$git_dir" != "$common_dir" ]]; then
+    primary="$(primary_checkout "$project")"
+    die "development_system.setup_requires_primary_checkout primary_checkout=$primary"
+  fi
+}
+
+setup_command() {
+  local project=.
+  while (($#)); do
+    case "$1" in
+      --project | --preset | --delivery)
+        local option=$1
+        if (($# < 2)) || [[ "$2" == --* ]]; then
+          die "development_system.missing_option_value option=$option"
+        fi
+        if [[ "$option" == "--project" ]]; then
+          project=$2
+        fi
+        shift 2
+        ;;
+      --dry-run)
+        shift
+        ;;
+      *)
+        die "development_system.unknown_option option=$1"
+        ;;
+    esac
+  done
+  require_primary_checkout "$project"
+  printf 'development_system.setup_preview project=%s\n' "$(cd "$project" && pwd)"
+}
+
+case "${1:-}" in
+  setup)
+    shift
+    setup_command "$@"
+    ;;
+  *)
+    die "development_system.usage command=${1:-missing}"
+    ;;
+esac
