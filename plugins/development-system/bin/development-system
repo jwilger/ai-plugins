@@ -31,6 +31,9 @@ require_primary_checkout() {
 
 setup_command() {
   local project=.
+  local preset=personal-trunk
+  local mode=dry-run
+  local confirmed=false
   while (($#)); do
     case "$1" in
       --project | --preset | --delivery)
@@ -40,10 +43,21 @@ setup_command() {
         fi
         if [[ "$option" == "--project" ]]; then
           project=$2
+        elif [[ "$option" == "--preset" ]]; then
+          preset=$2
         fi
         shift 2
         ;;
       --dry-run)
+        mode=dry-run
+        shift
+        ;;
+      --apply)
+        mode=apply
+        shift
+        ;;
+      --yes)
+        confirmed=true
         shift
         ;;
       *)
@@ -52,7 +66,61 @@ setup_command() {
     esac
   done
   require_primary_checkout "$project"
-  printf 'development_system.setup_preview project=%s\n' "$(cd "$project" && pwd)"
+  project="$(cd "$project" && pwd)"
+  if [[ "$preset" != "personal-trunk" ]]; then
+    die "development_system.unsupported_preset preset=$preset"
+  fi
+  printf 'development_system.setup_preview project=%s\n' "$project"
+  printf 'write .development-system.toml\n'
+  if [[ "$mode" == "dry-run" ]]; then
+    return
+  fi
+  if [[ "$confirmed" != "true" ]]; then
+    die "development_system.setup_requires_confirmation"
+  fi
+  if [[ -n "$(git -C "$project" status --porcelain=v1 --untracked-files=no)" ]]; then
+    die "development_system.setup_tracked_changes_present"
+  fi
+
+  local config_path=$project/.development-system.toml
+  local config_tmp
+  if [[ -e "$config_path" || -L "$config_path" ]]; then
+    die "development_system.config_already_exists path=$config_path"
+  fi
+  config_tmp="$(mktemp "$project/.development-system.toml.tmp.XXXXXX")" ||
+    die "development_system.config_temp_failed project=$project"
+  trap 'rm -f -- "$config_tmp"' EXIT
+  {
+    printf 'schema_version = 1\n\n'
+    printf '[delivery]\n'
+    printf 'mode = "direct-to-trunk"\n'
+    printf 'trunk_branch = "main"\n\n'
+    printf '[features]\n'
+    printf 'worktrees = true\n'
+    printf 'tiber = true\n'
+    printf 'agentic_systems = false\n'
+    printf 'eval_case_reporting = false\n\n'
+    printf '[worktrees]\n'
+    printf 'root = ".worktrees"\n\n'
+    printf '[tiber]\n'
+    printf 'max_queued = 5\n\n'
+    printf '[mcps]\n'
+    printf 'context7 = false\n'
+    printf 'hindsight = false\n'
+    printf 'openai_developer_docs = false\n'
+    printf 'promptfoo = false\n'
+  } >"$config_tmp"
+  mv -- "$config_tmp" "$config_path"
+  git -C "$project" add -- .development-system.toml
+  if ! git -C "$project" commit \
+    -m "chore: initialize development system" \
+    -m "Record the project workflow and optional integrations in one authoritative configuration."; then
+    git -C "$project" reset -q HEAD -- .development-system.toml
+    rm -f -- "$config_path"
+    die "development_system.setup_commit_failed"
+  fi
+  trap - EXIT
+  printf 'development_system.setup_applied commit=%s\n' "$(git -C "$project" rev-parse HEAD)"
 }
 
 case "${1:-}" in
