@@ -8,11 +8,7 @@ const expectedConditions = [
   "targeted-quality-skills",
   "all-marketplace-skills",
 ];
-const expectedTargetedPlugins = [
-  "advisor",
-  "development-discipline",
-  "engineering-standards",
-];
+const expectedTargetedPlugins = ["development-system"];
 const expectedPerRunMetrics = [
   "conjunctive-success",
   "outcome-class",

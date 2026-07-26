@@ -11,12 +11,12 @@ export XDG_CACHE_HOME="${DEVELOPMENT_DISCIPLINE_RELEASE_XDG_CACHE_HOME:-$root/.d
 export PATH="$CARGO_HOME/bin:$PATH"
 mkdir -p "$ZIG_GLOBAL_CACHE_DIR" "$ZIG_LOCAL_CACHE_DIR" "$XDG_CACHE_HOME"
 
-manifest="$root/plugins/development-discipline/rust/Cargo.toml"
-plugin_root="$root/plugins/development-discipline"
+manifest="$root/plugins/development-system/components/development-discipline/rust/Cargo.toml"
+plugin_root="$root/plugins/development-system/components/development-discipline"
 toolchain_file="$plugin_root/rust/rust-toolchain.toml"
 toolchain="$(awk -F'"' '/^channel = "/ { print $2; exit }' "$toolchain_file")"
 if [ -z "$toolchain" ]; then
-  echo "release-toolchain-channel-missing path=plugins/development-discipline/rust/rust-toolchain.toml" >&2
+  echo "release-toolchain-channel-missing path=plugins/development-system/components/development-discipline/rust/rust-toolchain.toml" >&2
   exit 1
 fi
 binary_name="development-discipline-mcp"

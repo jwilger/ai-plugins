@@ -337,8 +337,7 @@ SH
   [ "$status" -eq 0 ]
   targeted_line="$(printf '%s\n' "$output" | grep -- '--plugin-mode targeted-plugins')"
   [[ "$targeted_line" == *"prepare-codex-home.mjs"* ]]
-  [[ "$targeted_line" == *"--plugins tiber"* ]]
-  [[ "$targeted_line" != *"advisor"* ]]
+  [[ "$targeted_line" == *"--plugins development-system"* ]]
   [[ "$targeted_line" != *"\\,"* ]]
 }
 
@@ -367,9 +366,8 @@ SH
 
   [ "$status" -eq 0 ]
   [ "$(grep -c '^\[plugins\.' "$targeted_home/config.toml")" -eq 1 ]
-  grep -q '\[plugins\."tiber@ai-plugins"\]' "$targeted_home/config.toml"
-  ! grep -q 'advisor@ai-plugins' "$targeted_home/config.toml"
-  [ -d "$targeted_home/plugins/cache/ai-plugins/tiber" ]
+  grep -q '\[plugins\."development-system@ai-plugins"\]' "$targeted_home/config.toml"
+  [ -d "$targeted_home/plugins/cache/ai-plugins/development-system" ]
   [ "$(find "$targeted_home/plugins/cache/ai-plugins" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ]
 
   rm -rf "$fixture_root"

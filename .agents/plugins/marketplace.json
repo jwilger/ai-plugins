@@ -5,126 +5,12 @@
   },
   "plugins": [
     {
-      "name": "worktrees",
-      "source": {
-        "source": "local",
-        "path": "./plugins/worktrees"
-      },
-      "version": "0.3.0",
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "engineering-standards",
-      "source": {
-        "source": "local",
-        "path": "./plugins/engineering-standards"
-      },
-      "version": "0.6.0",
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "agentic-systems-engineering",
-      "source": {
-        "source": "local",
-        "path": "./plugins/agentic-systems-engineering"
-      },
-      "version": "0.2.3",
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "eval-case-reporter",
-      "source": {
-        "source": "local",
-        "path": "./plugins/eval-case-reporter"
-      },
-      "version": "0.1.0",
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "babysit-pr",
-      "source": {
-        "source": "local",
-        "path": "./plugins/babysit-pr"
-      },
-      "version": "0.3.0",
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "advisor",
-      "source": {
-        "source": "local",
-        "path": "./plugins/advisor"
-      },
-      "version": "0.3.0",
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "development-discipline",
-      "source": {
-        "source": "local",
-        "path": "./plugins/development-discipline"
-      },
-      "version": "0.18.0",
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "tiber",
-      "source": {
-        "source": "local",
-        "path": "./plugins/tiber"
-      },
-      "description": "Git-backed shared task tracking for agents across worktrees with tiber CLI, stdio MCP, validation, dry-run-first scaffold previews, and dashboard priority workflows.",
-      "version": "0.15.1",
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools",
-      "keywords": [
-        "tasks",
-        "git",
-        "mcp",
-        "worktrees",
-        "task-tracking",
-        "scaffold",
-        "validation"
-      ]
-    },
-    {
       "name": "development-system",
       "source": {
         "source": "local",
         "path": "./plugins/development-system"
       },
-      "version": "1.0.0",
+      "version": "1.1.0",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"

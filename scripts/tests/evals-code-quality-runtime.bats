@@ -142,16 +142,16 @@ teardown() {
     find "$targeted_home/plugins/cache/ai-plugins" \
       -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
   )"
-  [ "$targeted_plugins" = $'advisor\ndevelopment-discipline\nengineering-standards' ]
+  [ "$targeted_plugins" = "development-system" ]
 
-  advisor_reference="skills/advisor/references/playbook.md"
-  advisor_version="$(jq -er '.version' "$ROOT/plugins/advisor/.codex-plugin/plugin.json")"
+  workflow_reference="skills/development-workflow/references/workflow-rules.md"
+  plugin_version="$(jq -er '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
   cmp -s \
-    "$ROOT/plugins/advisor/$advisor_reference" \
-    "$targeted_home/plugins/cache/ai-plugins/advisor/$advisor_version/$advisor_reference"
+    "$ROOT/plugins/development-system/$workflow_reference" \
+    "$targeted_home/plugins/cache/ai-plugins/development-system/$plugin_version/$workflow_reference"
   cmp -s \
-    "$ROOT/plugins/advisor/$advisor_reference" \
-    "$targeted_home/marketplace/plugins/advisor/$advisor_reference"
+    "$ROOT/plugins/development-system/$workflow_reference" \
+    "$targeted_home/marketplace/plugins/development-system/$workflow_reference"
 
   expected_all_plugins="$(
     jq -r '.plugins[].name' "$ROOT/.agents/plugins/marketplace.json" | sort
@@ -263,7 +263,7 @@ teardown() {
     IFS=, read -ra plugins <<<"$plugin_csv"
     for plugin in "${plugins[@]}"; do
       [ -n "$plugin" ] || continue
-      find "$ROOT/plugins/$plugin/skills" \
+      find "$ROOT/plugins/development-system/skills" \
         -mindepth 1 -maxdepth 1 -type d -printf "$plugin:%f\n" \
         >>"$expected"
     done
@@ -277,7 +277,7 @@ teardown() {
       "$RUNTIME_ROOT/manifest.json" >"$TEST_ROOT/$mode.actual"
     cmp -s "$expected" "$TEST_ROOT/$mode.actual"
   done <<EOF
-targeted-quality-skills	advisor,development-discipline,engineering-standards
+targeted-quality-skills	development-system
 all-marketplace-skills	$(jq -r '[.plugins[].name] | join(",")' "$ROOT/.agents/plugins/marketplace.json")
 EOF
 }

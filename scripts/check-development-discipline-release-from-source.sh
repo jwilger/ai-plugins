@@ -2,12 +2,12 @@
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-plugin_root="$root/plugins/development-discipline"
+plugin_root="$root/plugins/development-system/components/development-discipline"
 manifest="$plugin_root/rust/Cargo.toml"
 toolchain_file="$plugin_root/rust/rust-toolchain.toml"
 toolchain="$(awk -F'"' '/^channel = "/ { print $2; exit }' "$toolchain_file")"
 if [ -z "$toolchain" ]; then
-  echo "release-toolchain-channel-missing path=plugins/development-discipline/rust/rust-toolchain.toml" >&2
+  echo "release-toolchain-channel-missing path=plugins/development-system/components/development-discipline/rust/rust-toolchain.toml" >&2
   exit 1
 fi
 export RUSTUP_HOME="${RUSTUP_HOME:-$root/.dependencies/rustup}"

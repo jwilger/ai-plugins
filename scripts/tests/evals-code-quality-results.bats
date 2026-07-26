@@ -857,8 +857,12 @@ function pathFor(qualifiedName) {
   return `/runtime/codex-home/plugins/cache/ai-plugins/${plugin}/${versions[0]}/skills/${skill}/SKILL.md`;
 }
 
-const successful = row.availableSkills.find((name) => name === "advisor:advisor");
-const failed = row.availableSkills.find((name) => name === "worktrees:setup");
+const successful = row.availableSkills.find(
+  (name) => name === "development-system:development-workflow",
+);
+const failed = row.availableSkills.find(
+  (name) => name === "development-system:worktrees",
+);
 if (!successful || !failed) throw new Error("expected marketplace skills unavailable");
 const target = raw.results.results.find(
   (result) =>
@@ -921,7 +925,7 @@ NODE
     (.runs[] |
       select(.conditionId == $mode and .sampleIndex == 1) |
       .skillActivationEvidence == "codex-turn-successful-command-path-references" and
-      .skillActivations == ["advisor:advisor"]
+      .skillActivations == ["development-system:development-workflow"]
     )
   ' "$OUTPUT"
   run grep -E 'PRIVATE|private-plugin|spoofed-metadata|SKILL\.md' "$OUTPUT"

@@ -269,7 +269,7 @@ prepare_runtime() {
   rm -rf "$RUNTIME_ROOT"
   prepare_runtime
   skill_file="$(find \
-    "$RUNTIME_ROOT/rust-cli-feature/sample-1/targeted-quality-skills/codex-home/plugins/cache/ai-plugins/advisor" \
+    "$RUNTIME_ROOT/rust-cli-feature/sample-1/targeted-quality-skills/codex-home/plugins/cache/ai-plugins/development-system" \
     -path '*/skills/*/SKILL.md' -type f -print -quit)"
   [ -n "$skill_file" ]
   printf '\nHost-side projected skill mutation.\n' >>"$skill_file"
@@ -301,7 +301,7 @@ prepare_runtime() {
 @test "runtime evidence only advertises skill directories backed by SKILL.md" {
   prepare_runtime
   skill_file="$(find \
-    "$RUNTIME_ROOT/rust-cli-feature/sample-1/targeted-quality-skills/codex-home/plugins/cache/ai-plugins/advisor" \
+    "$RUNTIME_ROOT/rust-cli-feature/sample-1/targeted-quality-skills/codex-home/plugins/cache/ai-plugins/development-system" \
     -path '*/skills/*/SKILL.md' -type f -print -quit)"
   [ -n "$skill_file" ]
   mv "$skill_file" "${skill_file%/SKILL.md}/NOT-A-SKILL.md"
@@ -320,7 +320,7 @@ prepare_runtime() {
   prepare_runtime
   codex_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/targeted-quality-skills/codex-home"
   skills_root="$(find \
-    "$codex_home/plugins/cache/ai-plugins/advisor" \
+    "$codex_home/plugins/cache/ai-plugins/development-system" \
     -mindepth 2 -maxdepth 2 -type d -name skills -print -quit)"
   [ -n "$skills_root" ]
   printf 'not a skill runtime file\n' >"$skills_root/extra.txt"

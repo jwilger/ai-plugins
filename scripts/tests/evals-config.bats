@@ -210,7 +210,7 @@ JSON
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"path: \"$ROOT/plugins/agentic-systems-engineering\""* ]]
+  [[ "$output" == *"path: \"$ROOT/plugins/development-system\""* ]]
   [[ "$output" != *"path: \"./plugins/"* ]]
 }
 
@@ -281,13 +281,6 @@ NODE
   run node - <<'NODE'
 const assertCanary = require('./evals/promptfoo/assert-full-marketplace-canary.cjs');
 const namesOnly = [
-  'agentic-systems-engineering',
-  'babysit-pr',
-  'engineering-standards',
-  'eval-case-reporter',
-  'tiber',
-  'worktrees',
-  'development-discipline',
   'development-system',
 ].join('\n');
 

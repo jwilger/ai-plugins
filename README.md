@@ -4,101 +4,27 @@ A **multi-harness marketplace of AI coding-assistant plugins** for
 [Claude Code](https://code.claude.com), [Codex](https://openai.com/codex/), and
 other harnesses that adopt plugin or marketplace concepts.
 
-## Personal Codex quality core
+## Personal development system
 
-Codex is this repository's primary target: its first job is to support the
-maintainer's personal Codex workflow and help produce exemplary code in
-downstream projects. Claude Code support is secondary, while general-user
-ergonomics are tertiary; other users may be better served by treating these
-plugins as examples and composing a quality core for their own work.
+This marketplace has one audience and one installable plugin:
+[`development-system`](plugins/development-system/README.md). It supports Codex
+and Claude Code with one initialization command and one project configuration
+file.
 
-From a local `ai-plugins` checkout, install or refresh the default quality core:
+The default preset is direct-to-trunk delivery with linked worktrees and Tiber.
+Optional agentic-system and eval-reporting capabilities are selected in
+`.development-system.toml`; the plugin owns its bundled MCP surface.
 
-```shell
-scripts/codex-quality-core.sh install
-```
-
-The default installs `engineering-standards`, `development-discipline`, and
-`advisor`. For an AI-system project that already provides the required
-Promptfoo tooling, opt in to `agentic-systems-engineering` as well:
-
-```shell
-scripts/codex-quality-core.sh install --with-agentic
-```
-
-The opt-in is global to the current CODEX_HOME, not scoped to one downstream
-repository. It remains active for later Codex sessions until removed explicitly:
-
-```shell
-codex plugin remove agentic-systems-engineering@ai-plugins
-```
-
-Then verify the installed plugins and representative skills from a downstream
-Git repository without modifying it:
-
-```shell
-/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh check "$PWD"
-# For the opt-in composition:
-/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh check "$PWD" --with-agentic
-```
-
-Both commands are safe to rerun. `install` refuses to silently replace an
-`ai-plugins` marketplace that points to another checkout. `check` reports a
-missing marketplace, missing, stale, or disabled plugins, and skills that are
-not model-visible, with a matching repair command. To update, pull the local
-checkout and rerun `install` with the same options:
-
-Validated with Codex CLI 0.144.x (tested with 0.144.4), this workflow depends
-on the current plugin JSON and `debug prompt-input` schemas. If Codex changes
-the prompt envelope, `check` fails closed with an explicit compatibility
-diagnostic instead of reporting an installed skill as invisible.
-
-```shell
-git -C /absolute/path/to/ai-plugins pull --ff-only
-/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh install
-# For the opt-in composition:
-/absolute/path/to/ai-plugins/scripts/codex-quality-core.sh install --with-agentic
-```
-
-Then rerun the matching `check` command above and start a new Codex thread
-before relying on the refreshed skill set.
+The strong recommendation is to install only `development-system`. Additional
+plugin marketplaces expand the supply-chain trust surface. The SessionStart
+hook warns about conflicting plugins, incompatible harness settings, and
+user-managed MCPs that need compatibility review.
 
 ## Plugin catalog
 
-Most plugins ship both a `.claude-plugin/` and a `.codex-plugin/` manifest and
-are registered in both marketplace manifests. Codex-only plugins are registered
-only in [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json)
-and intentionally omitted from the Claude Code marketplace. Provider-backed
-promptfoo evals exercise the relevant marketplace surface for each harness.
-
-### Claude Code
-
-| Plugin                                                                       | Description                                                                                                                            | Version |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup, policy-gated checkout routing, and a main-checkout guard.                                                  | 0.3.0   |
-| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                   | 0.2.0   |
-| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic engineering regime that follows each repository's delivery policy.                                                    | 0.6.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                  | 0.2.3   |
-| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                         | 0.1.0   |
-| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for lifecycle routing, task-local model selection, change preflight, delivery, TDD, verification, and review. | 0.18.0  |
-| [tiber](plugins/tiber/README.md)                                             | Git-backed task boards and repository-wide CI recovery coordination for coding agents.                                                 | 0.15.1  |
-
-### Codex
-
-| Plugin                                                                       | Description                                                                                                                            | Version |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| [worktrees](plugins/worktrees/README.md)                                     | Goal-driven worktree setup, policy-gated checkout routing, and a main-checkout guard.                                                  | 0.3.0   |
-| [babysit-pr](plugins/babysit-pr/README.md)                                   | Forge-agnostic PR/MR babysitting across GitHub, Forgejo, and GitLab.                                                                   | 0.2.0   |
-| [engineering-standards](plugins/engineering-standards/README.md)             | A stack-agnostic engineering regime that follows each repository's delivery policy.                                                    | 0.6.0   |
-| [agentic-systems-engineering](plugins/agentic-systems-engineering/README.md) | Portable guardrails for building, evaluating, and delivering LLM and agentic systems.                                                  | 0.2.3   |
-| [eval-case-reporter](plugins/eval-case-reporter/README.md)                   | Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.                         | 0.1.0   |
-| [advisor](plugins/advisor/README.md)                                         | Read-only GPT-5.6 Sol advisor with high reasoning for fuzzy tradeoffs, scope shaping, specs, and ticket plans.                         | 0.3.0   |
-| [development-discipline](plugins/development-discipline/README.md)           | Personal workflow skills for lifecycle routing, task-local model selection, change preflight, delivery, TDD, verification, and review. | 0.18.0  |
-| [tiber](plugins/tiber/README.md)                                             | Git-backed task boards and repository-wide CI recovery coordination for coding agents.                                                 | 0.15.1  |
-
-> When a plugin is added under [`plugins/`](plugins/), add catalog rows only for
-> the harness marketplaces that list it. Codex-only plugins must not be added to
-> the Claude Code table.
+| Plugin                                                     | Harnesses          | Description                                                         | Version |
+| ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------- | ------- |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 1.1.0   |
 
 ## Using the marketplace (Claude Code)
 
@@ -110,7 +36,7 @@ Add this repository as a marketplace, then install a plugin from it:
 # ...or a local checkout:
 /plugin marketplace add ./ai-plugins
 
-/plugin install <plugin-name>@ai-plugins
+/plugin install development-system@ai-plugins
 ```
 
 The marketplace is referenced by its **name** (`ai-plugins`) in install
@@ -126,32 +52,8 @@ plugin has a `.codex-plugin/plugin.json` manifest. In a local checkout, install
 or sync the plugin from the matching directory under [`plugins/`](plugins/)
 using the Codex plugin flow available in your Codex environment.
 
-The plugin names are the directory names, for example:
-
-```text
-agentic-systems-engineering
-eval-case-reporter
-engineering-standards
-babysit-pr
-worktrees
-advisor
-tiber
-```
-
-Useful Codex entry points:
-
-- `agentic-systems-engineering`: route LLM, agent, RAG, tool-use, structured
-  output, provider-routing, observability, and delivery work through portable
-  agentic-system guardrails.
-- `eval-case-reporter`: recognize reusable failures or surprising assistant
-  behavior, scrub sensitive data, preview the complete GitHub issue payload, ask
-  before posting, and submit the sanitized issue with `gh issue create`.
-- `engineering-standards`: apply the repository's broader engineering regime,
-  including the no-force-push rule.
-- `advisor`: delegate fuzzy planning, tradeoff analysis, scope/spec shaping,
-  and ticket planning to a read-only GPT-5.6 Sol advisor at high reasoning.
-- `tiber`: manage repository-local task boards through a Git-backed
-  `tasks` branch, the `tiber` CLI, and stdio MCP.
+Install `development-system` from the local marketplace, then start a new
+thread and run its setup skill from the target repository's primary checkout.
 
 ## Developing in this repo
 

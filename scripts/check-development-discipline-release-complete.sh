@@ -2,17 +2,17 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-plugin_root="$root/plugins/development-discipline"
+plugin_root="$root/plugins/development-system/components/development-discipline"
 manifest="$plugin_root/release-binaries.json"
 checksums="$plugin_root/release-binaries.sha256"
 
 if [ ! -f "$manifest" ]; then
-  echo "missing-release-manifest path=plugins/development-discipline/release-binaries.json" >&2
+  echo "missing-release-manifest path=plugins/development-system/components/development-discipline/release-binaries.json" >&2
   exit 1
 fi
 
 if [ ! -f "$checksums" ]; then
-  echo "missing-release-checksums path=plugins/development-discipline/release-binaries.sha256" >&2
+  echo "missing-release-checksums path=plugins/development-system/components/development-discipline/release-binaries.sha256" >&2
   exit 1
 fi
 
@@ -48,7 +48,7 @@ jq -r '.binaries[].path' "$manifest" | sort >"$manifest_paths"
 awk '{ print $2 }' "$checksums" | sort >"$checksum_paths"
 
 if ! cmp -s "$manifest_paths" "$checksum_paths"; then
-  echo "release-checksum-paths-mismatch path=plugins/development-discipline/release-binaries.sha256" >&2
+  echo "release-checksum-paths-mismatch path=plugins/development-system/components/development-discipline/release-binaries.sha256" >&2
   diff -u "$checksum_paths" "$manifest_paths" >&2 || true
   exit 1
 fi
@@ -64,11 +64,11 @@ while IFS= read -r encoded; do
     exit 1
   fi
   if [ ! -s "$binary" ]; then
-    echo "release-binary-missing-or-empty path=plugins/development-discipline/$path" >&2
+    echo "release-binary-missing-or-empty path=plugins/development-system/components/development-discipline/$path" >&2
     exit 1
   fi
   if [ ! -x "$binary" ]; then
-    echo "release-binary-not-executable path=plugins/development-discipline/$path" >&2
+    echo "release-binary-not-executable path=plugins/development-system/components/development-discipline/$path" >&2
     exit 1
   fi
   if ! grep -aFq "$expected_source_fingerprint" "$binary"; then
@@ -115,7 +115,7 @@ while IFS= read -r encoded; do
   actual_sha="$(sha256sum "$binary" | awk '{ print $1 }')"
   checksum_sha="$(awk -v path="$path" '$2 == path { print $1 }' "$checksums")"
   if [ "$actual_sha" != "$expected_sha" ] || [ "$actual_sha" != "$checksum_sha" ]; then
-    echo "release-binary-sha-mismatch path=plugins/development-discipline/$path" >&2
+    echo "release-binary-sha-mismatch path=plugins/development-system/components/development-discipline/$path" >&2
     exit 1
   fi
 done < <(jq -r '.binaries[] | @base64' "$manifest")

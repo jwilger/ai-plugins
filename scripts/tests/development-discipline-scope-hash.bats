@@ -2,7 +2,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  HASH_SCRIPT="$ROOT/plugins/development-discipline/scripts/final-review-scope-hash.sh"
+  HASH_SCRIPT="$ROOT/plugins/development-system/components/development-discipline/scripts/final-review-scope-hash.sh"
   REPO="$BATS_TEST_TMPDIR/repo"
 
   git init -q "$REPO"

@@ -2,7 +2,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd -P)"
-  DETECTOR="$ROOT/plugins/development-discipline/scripts/detect-target.sh"
+  DETECTOR="$ROOT/plugins/development-system/components/development-discipline/scripts/detect-target.sh"
   COMPLETE_CHECK="$ROOT/scripts/check-development-discipline-release-complete.sh"
   PARITY_CHECK="$ROOT/scripts/check-development-discipline-release-from-source.sh"
   PARITY_NORMALIZER="$ROOT/scripts/tests/development-discipline-parity-normalize.mjs"
@@ -305,7 +305,7 @@ setup() {
 
   real_node="$(command -v node)"
   real_rm="$(command -v rm)"
-  toolchain="$(awk -F'"' '/^channel = "/ { print $2; exit }' "$ROOT/plugins/development-discipline/rust/rust-toolchain.toml")"
+  toolchain="$(awk -F'"' '/^channel = "/ { print $2; exit }' "$ROOT/plugins/development-system/components/development-discipline/rust/rust-toolchain.toml")"
   mkdir -p "$fake_bin"
   printf '%s\n' \
     '#!/bin/sh' \
@@ -427,19 +427,19 @@ detect_target() {
   local binary_path
 
   expected="$(
-    cd "$ROOT/plugins/development-discipline/rust"
+    cd "$ROOT/plugins/development-system/components/development-discipline/rust"
     sha256sum Cargo.toml Cargo.lock rust-toolchain.toml src/main.rs | sha256sum | awk '{ print $1 }'
   )"
-  actual="$(jq -r '.source_fingerprint' "$ROOT/plugins/development-discipline/release-binaries.json")"
+  actual="$(jq -r '.source_fingerprint' "$ROOT/plugins/development-system/components/development-discipline/release-binaries.json")"
   [ "$actual" = "$expected" ]
 
   while IFS= read -r binary_path; do
-    grep -aFq "$expected" "$ROOT/plugins/development-discipline/$binary_path"
-  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-discipline/release-binaries.json")
+    grep -aFq "$expected" "$ROOT/plugins/development-system/components/development-discipline/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/development-discipline/release-binaries.json")
 }
 
 @test "development-discipline release artifacts match their declared architectures" {
-  local plugin_root="$ROOT/plugins/development-discipline"
+  local plugin_root="$ROOT/plugins/development-system/components/development-discipline"
 
   run file "$plugin_root/dist/x86_64-unknown-linux-musl/development-discipline-mcp"
   [ "$status" -eq 0 ]

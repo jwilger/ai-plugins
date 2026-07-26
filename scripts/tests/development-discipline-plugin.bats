@@ -4,7 +4,7 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 }
 @test "delivery-workflow benchmark rejects policy-invalid plans" {
-  workspace="$ROOT/plugins/development-discipline/skills/delivery-workflow/.plugin-eval/workspace"
+  workspace="$ROOT/plugins/development-system/components/development-discipline/skills/delivery-workflow/.plugin-eval/workspace"
 
   run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/direct-to-trunk-valid.json"
   [ "$status" -eq 0 ]
@@ -23,7 +23,7 @@ setup() {
 }
 
 @test "development-workflow benchmark verifies lifecycle routing and stop boundaries" {
-  workspace="$ROOT/plugins/development-discipline/skills/development-workflow/.plugin-eval/workspace"
+  workspace="$ROOT/plugins/development-system/components/development-discipline/skills/development-workflow/.plugin-eval/workspace"
 
   run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/implementation-valid.json"
   [ "$status" -eq 0 ]

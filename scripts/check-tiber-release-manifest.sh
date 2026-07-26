@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="${1:-.}"
-manifest="$root/plugins/tiber/release-binaries.json"
+manifest="$root/plugins/development-system/components/tiber/release-binaries.json"
 
 if ! jq -e '
   (.binaries | type == "array") and
@@ -19,7 +19,7 @@ if ! jq -e '
 fi
 
 # shellcheck source=/dev/null
-source "$root/plugins/tiber/scripts/detect-target.sh"
+source "$root/plugins/development-system/components/tiber/scripts/detect-target.sh"
 host_target="$(detect_tiber_target)" || {
   echo "unsupported-host-release-binary os=$(uname -s) arch=$(uname -m)" >&2
   exit 1
@@ -31,12 +31,12 @@ host_path="$(
     "$manifest"
 )"
 
-if [ -z "$host_path" ] || [ ! -x "$root/plugins/tiber/$host_path" ]; then
-  echo "missing-host-release-binary target=$host_target path=plugins/tiber/$host_path" >&2
+if [ -z "$host_path" ] || [ ! -x "$root/plugins/development-system/components/tiber/$host_path" ]; then
+  echo "missing-host-release-binary target=$host_target path=plugins/development-system/components/tiber/$host_path" >&2
   exit 1
 fi
 
-if [ ! -s "$root/plugins/tiber/$host_path" ]; then
-  echo "invalid-host-release-binary target=$host_target path=plugins/tiber/$host_path" >&2
+if [ ! -s "$root/plugins/development-system/components/tiber/$host_path" ]; then
+  echo "invalid-host-release-binary target=$host_target path=plugins/development-system/components/tiber/$host_path" >&2
   exit 1
 fi

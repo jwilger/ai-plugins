@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 
 const root = resolve(new URL("../..", import.meta.url).pathname);
-const manifestPath = join(root, "plugins/tiber/rust/Cargo.toml");
+const manifestPath = join(root, "plugins/development-system/components/tiber/rust/Cargo.toml");
 const tiberBinary = process.env.TIBER_SMOKE_BIN
   ? resolve(root, process.env.TIBER_SMOKE_BIN)
   : null;

@@ -22,7 +22,7 @@
     {
       "id": "targeted-quality-skills",
       "surface": "skills-only",
-      "plugins": ["advisor", "development-discipline", "engineering-standards"]
+      "plugins": ["development-system"]
     },
     {
       "id": "all-marketplace-skills",

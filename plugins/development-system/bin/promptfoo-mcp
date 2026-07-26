@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+plugin_root="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+for bash_bin in /run/current-system/sw/bin/bash /bin/bash /usr/bin/bash; do
+  if [ -x "$bash_bin" ]; then
+    exec "$bash_bin" "$plugin_root/components/agentic-systems-engineering/bin/promptfoo-mcp" "$@"
+  fi
+done
+echo "development_system.bash_missing component=promptfoo" >&2
+exit 127

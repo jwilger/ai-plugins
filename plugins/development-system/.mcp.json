@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "development-discipline": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "set -eu; plugin_root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ -z \"$plugin_root\" ]; then echo \"development_system.plugin_root_missing\" >&2; exit 127; fi; exec \"$plugin_root/bin/development-discipline-mcp\""
+      ],
+      "description": "Final-review planning and relevance coordination for the configured development workflow."
+    },
+    "tiber": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "set -eu; plugin_root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ -z \"$plugin_root\" ]; then echo \"development_system.plugin_root_missing\" >&2; exit 127; fi; exec \"$plugin_root/bin/tiber\" mcp stdio"
+      ],
+      "env_vars": ["SSH_AUTH_SOCK"],
+      "description": "Git-backed task tracking and repository-wide CI recovery coordination."
+    }
+  }
+}

@@ -8,27 +8,27 @@ setup() {
 }
 
 copy_detect_target_helper() {
-  mkdir -p "$1/plugins/tiber/scripts"
-  cp "$ROOT/plugins/tiber/scripts/detect-target.sh" "$1/plugins/tiber/scripts/detect-target.sh"
+  mkdir -p "$1/plugins/development-system/components/tiber/scripts"
+  cp "$ROOT/plugins/development-system/components/tiber/scripts/detect-target.sh" "$1/plugins/development-system/components/tiber/scripts/detect-target.sh"
 }
 
 copy_launcher_helper() {
-  mkdir -p "$1/plugins/tiber/bin"
-  cp "$ROOT/plugins/tiber/bin/tiber" "$1/plugins/tiber/bin/tiber"
+  mkdir -p "$1/plugins/development-system/components/tiber/bin"
+  cp "$ROOT/plugins/development-system/components/tiber/bin/tiber" "$1/plugins/development-system/components/tiber/bin/tiber"
 }
 
 write_release_checksums() {
   local fixture="$1"
-  : >"$fixture/plugins/tiber/release-binaries.sha256"
+  : >"$fixture/plugins/development-system/components/tiber/release-binaries.sha256"
   while IFS= read -r binary_path; do
-    if [ -e "$fixture/plugins/tiber/$binary_path" ]; then
-      sha256sum "$fixture/plugins/tiber/$binary_path" |
-        awk -v path="$binary_path" '{ print $1 "  " path }' >>"$fixture/plugins/tiber/release-binaries.sha256"
+    if [ -e "$fixture/plugins/development-system/components/tiber/$binary_path" ]; then
+      sha256sum "$fixture/plugins/development-system/components/tiber/$binary_path" |
+        awk -v path="$binary_path" '{ print $1 "  " path }' >>"$fixture/plugins/development-system/components/tiber/release-binaries.sha256"
     else
       printf '0000000000000000000000000000000000000000000000000000000000000000  %s\n' \
-        "$binary_path" >>"$fixture/plugins/tiber/release-binaries.sha256"
+        "$binary_path" >>"$fixture/plugins/development-system/components/tiber/release-binaries.sha256"
     fi
-  done < <(jq -r '.binaries[].path' "$fixture/plugins/tiber/release-binaries.json")
+  done < <(jq -r '.binaries[].path' "$fixture/plugins/development-system/components/tiber/release-binaries.json")
 }
 
 host_release_path() {
@@ -36,7 +36,7 @@ host_release_path() {
     source "$1"
     host_target="$(detect_tiber_target)"
     jq -r --arg target "$host_target" ".binaries[] | select(.target == \$target) | .path" "$0"
-  ' "$ROOT/plugins/tiber/release-binaries.json" "$ROOT/plugins/tiber/scripts/detect-target.sh"
+  ' "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$ROOT/plugins/development-system/components/tiber/scripts/detect-target.sh"
 }
 
 @test "real release manifest has an executable host binary" {
@@ -46,8 +46,8 @@ host_release_path() {
 
 @test "release manifest check fails when the host binary is missing" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
 
   run bash "$SCRIPT" "$fixture"
@@ -59,17 +59,17 @@ host_release_path() {
 
 @test "release manifest check fails when the host binary is empty" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   host_path="$(bash -c '
     source "$1"
     host_target="$(detect_tiber_target)"
     jq -r --arg target "$host_target" ".binaries[] | select(.target == \$target) | .path" "$0"
-  ' "$ROOT/plugins/tiber/release-binaries.json" "$ROOT/plugins/tiber/scripts/detect-target.sh")"
-  mkdir -p "$fixture/plugins/tiber/$(dirname "$host_path")"
-  touch "$fixture/plugins/tiber/$host_path"
-  chmod +x "$fixture/plugins/tiber/$host_path"
+  ' "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$ROOT/plugins/development-system/components/tiber/scripts/detect-target.sh")"
+  mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$host_path")"
+  touch "$fixture/plugins/development-system/components/tiber/$host_path"
+  chmod +x "$fixture/plugins/development-system/components/tiber/$host_path"
 
   run bash "$SCRIPT" "$fixture"
 
@@ -80,20 +80,20 @@ host_release_path() {
 
 @test "complete release check passes when all target binaries are executable" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   copy_launcher_helper "$fixture"
   host_path="$(host_release_path)"
   while IFS= read -r binary_path; do
-    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
+    mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
     if [ "$binary_path" = "$host_path" ]; then
-      cp "$ROOT/plugins/tiber/$binary_path" "$fixture/plugins/tiber/$binary_path"
+      cp "$ROOT/plugins/development-system/components/tiber/$binary_path" "$fixture/plugins/development-system/components/tiber/$binary_path"
     else
-      printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
-      chmod +x "$fixture/plugins/tiber/$binary_path"
+      printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/development-system/components/tiber/$binary_path"
+      chmod +x "$fixture/plugins/development-system/components/tiber/$binary_path"
     fi
-  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/tiber/release-binaries.json")
   write_release_checksums "$fixture"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
@@ -107,18 +107,18 @@ host_release_path() {
 
 @test "complete release check fails when any target binary is missing" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   copy_launcher_helper "$fixture"
   while IFS= read -r binary_path; do
     if [ "$binary_path" = "dist/aarch64-apple-darwin/tiber" ]; then
       continue
     fi
-    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
-    printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
-    chmod +x "$fixture/plugins/tiber/$binary_path"
-  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+    mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
+    printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/development-system/components/tiber/$binary_path"
+    chmod +x "$fixture/plugins/development-system/components/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/tiber/release-binaries.json")
   write_release_checksums "$fixture"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
@@ -130,19 +130,19 @@ host_release_path() {
 
 @test "complete release check fails when any target binary is empty" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   copy_launcher_helper "$fixture"
   while IFS= read -r binary_path; do
-    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
+    mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
     if [ "$binary_path" != "dist/aarch64-apple-darwin/tiber" ]; then
-      printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
+      printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/development-system/components/tiber/$binary_path"
     else
-      touch "$fixture/plugins/tiber/$binary_path"
+      touch "$fixture/plugins/development-system/components/tiber/$binary_path"
     fi
-    chmod +x "$fixture/plugins/tiber/$binary_path"
-  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+    chmod +x "$fixture/plugins/development-system/components/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/tiber/release-binaries.json")
   write_release_checksums "$fixture"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
@@ -154,18 +154,18 @@ host_release_path() {
 
 @test "complete release check reports unsupported host target" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber/scripts"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
-  cat >"$fixture/plugins/tiber/scripts/detect-target.sh" <<'SH'
+  mkdir -p "$fixture/plugins/development-system/components/tiber/scripts"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
+  cat >"$fixture/plugins/development-system/components/tiber/scripts/detect-target.sh" <<'SH'
 detect_tiber_target() {
   return 1
 }
 SH
   while IFS= read -r binary_path; do
-    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
-    printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
-    chmod +x "$fixture/plugins/tiber/$binary_path"
-  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+    mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
+    printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/development-system/components/tiber/$binary_path"
+    chmod +x "$fixture/plugins/development-system/components/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/tiber/release-binaries.json")
   write_release_checksums "$fixture"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
@@ -177,21 +177,21 @@ SH
 
 @test "complete release check fails when host manifest path differs from launcher path" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   copy_launcher_helper "$fixture"
-  host_target="$(bash -c 'source "$1"; detect_tiber_target' _ "$ROOT/plugins/tiber/scripts/detect-target.sh")"
+  host_target="$(bash -c 'source "$1"; detect_tiber_target' _ "$ROOT/plugins/development-system/components/tiber/scripts/detect-target.sh")"
   jq --arg target "$host_target" \
     '(.binaries[] | select(.target == $target) | .path) = "dist/stale-host/tiber"' \
-    "$fixture/plugins/tiber/release-binaries.json" >"$fixture/plugins/tiber/release-binaries.json.tmp"
-  mv "$fixture/plugins/tiber/release-binaries.json.tmp" "$fixture/plugins/tiber/release-binaries.json"
+    "$fixture/plugins/development-system/components/tiber/release-binaries.json" >"$fixture/plugins/development-system/components/tiber/release-binaries.json.tmp"
+  mv "$fixture/plugins/development-system/components/tiber/release-binaries.json.tmp" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   while IFS= read -r binary_path; do
-    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
-    cp "$ROOT/plugins/tiber/dist/$host_target/tiber" "$fixture/plugins/tiber/$binary_path"
-  done < <(jq -r '.binaries[].path' "$fixture/plugins/tiber/release-binaries.json")
-  mkdir -p "$fixture/plugins/tiber/dist/$host_target"
-  cp "$ROOT/plugins/tiber/dist/$host_target/tiber" "$fixture/plugins/tiber/dist/$host_target/tiber"
+    mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
+    cp "$ROOT/plugins/development-system/components/tiber/dist/$host_target/tiber" "$fixture/plugins/development-system/components/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$fixture/plugins/development-system/components/tiber/release-binaries.json")
+  mkdir -p "$fixture/plugins/development-system/components/tiber/dist/$host_target"
+  cp "$ROOT/plugins/development-system/components/tiber/dist/$host_target/tiber" "$fixture/plugins/development-system/components/tiber/dist/$host_target/tiber"
   write_release_checksums "$fixture"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
@@ -203,14 +203,14 @@ SH
 
 @test "complete release check fails when launcher is missing" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   while IFS= read -r binary_path; do
-    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
-    printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/tiber/$binary_path"
-    chmod +x "$fixture/plugins/tiber/$binary_path"
-  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+    mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
+    printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/development-system/components/tiber/$binary_path"
+    chmod +x "$fixture/plugins/development-system/components/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/tiber/release-binaries.json")
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
 
@@ -221,14 +221,14 @@ SH
 
 @test "complete release check fails when checksums are missing" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   copy_launcher_helper "$fixture"
   while IFS= read -r binary_path; do
-    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
-    cp "$ROOT/plugins/tiber/$binary_path" "$fixture/plugins/tiber/$binary_path"
-  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+    mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
+    cp "$ROOT/plugins/development-system/components/tiber/$binary_path" "$fixture/plugins/development-system/components/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/tiber/release-binaries.json")
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
 
@@ -239,16 +239,16 @@ SH
 
 @test "complete release check fails when a binary does not match checksum provenance" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   copy_launcher_helper "$fixture"
   while IFS= read -r binary_path; do
-    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
-    cp "$ROOT/plugins/tiber/$binary_path" "$fixture/plugins/tiber/$binary_path"
-  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+    mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
+    cp "$ROOT/plugins/development-system/components/tiber/$binary_path" "$fixture/plugins/development-system/components/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/tiber/release-binaries.json")
   write_release_checksums "$fixture"
-  printf '\n# stale binary\n' >>"$fixture/plugins/tiber/dist/aarch64-apple-darwin/tiber"
+  printf '\n# stale binary\n' >>"$fixture/plugins/development-system/components/tiber/dist/aarch64-apple-darwin/tiber"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
 
@@ -259,16 +259,16 @@ SH
 
 @test "complete release check fails when checksum sidecar has stale entries" {
   fixture="$(mktemp -d)"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   copy_launcher_helper "$fixture"
   while IFS= read -r binary_path; do
-    mkdir -p "$fixture/plugins/tiber/$(dirname "$binary_path")"
-    cp "$ROOT/plugins/tiber/$binary_path" "$fixture/plugins/tiber/$binary_path"
-  done < <(jq -r '.binaries[].path' "$ROOT/plugins/tiber/release-binaries.json")
+    mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
+    cp "$ROOT/plugins/development-system/components/tiber/$binary_path" "$fixture/plugins/development-system/components/tiber/$binary_path"
+  done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/tiber/release-binaries.json")
   write_release_checksums "$fixture"
-  printf '0000000000000000000000000000000000000000000000000000000000000000  dist/stale/tiber\n' >>"$fixture/plugins/tiber/release-binaries.sha256"
+  printf '0000000000000000000000000000000000000000000000000000000000000000  dist/stale/tiber\n' >>"$fixture/plugins/development-system/components/tiber/release-binaries.sha256"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
 
@@ -281,8 +281,8 @@ SH
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/scripts"
   cp "$BUILD_ALL_SCRIPT" "$fixture/scripts/build-tiber-release-all.sh"
-  mkdir -p "$fixture/plugins/tiber"
-  cp "$ROOT/plugins/tiber/release-binaries.json" "$fixture/plugins/tiber/release-binaries.json"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   cargo_home="$fixture/cargo"
   rustup_home="$fixture/rustup"
   target_dir="$fixture/target"
@@ -356,9 +356,9 @@ EOF
   run env RUSTUP_HOME="$rustup_home" CARGO_HOME="$cargo_home" bash "$fixture/scripts/build-tiber-release-all.sh"
 
   for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin; do
-    [ -x "$fixture/plugins/tiber/dist/$target/tiber" ]
+    [ -x "$fixture/plugins/development-system/components/tiber/dist/$target/tiber" ]
   done
-  [ -s "$fixture/plugins/tiber/release-binaries.sha256" ]
+  [ -s "$fixture/plugins/development-system/components/tiber/release-binaries.sha256" ]
 
   rm -rf "$fixture"
   [ "$status" -eq 0 ]

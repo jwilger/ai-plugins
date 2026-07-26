@@ -6,6 +6,10 @@ die() {
   exit 2
 }
 
+warn() {
+  printf 'development_system.warning %s\n' "$*"
+}
+
 primary_checkout() {
   local project=$1
   local common_dir
@@ -32,11 +36,16 @@ require_primary_checkout() {
 setup_command() {
   local project=.
   local preset=personal-trunk
+  local delivery=direct-to-trunk
   local mode=dry-run
   local confirmed=false
+  local feature_worktrees=true
+  local feature_tiber=true
+  local feature_agentic_systems=false
+  local feature_eval_case_reporting=false
   while (($#)); do
     case "$1" in
-      --project | --preset | --delivery)
+      --project | --preset | --delivery | --enable | --disable)
         local option=$1
         if (($# < 2)) || [[ "$2" == --* ]]; then
           die "development_system.missing_option_value option=$option"
@@ -45,6 +54,20 @@ setup_command() {
           project=$2
         elif [[ "$option" == "--preset" ]]; then
           preset=$2
+        elif [[ "$option" == "--delivery" ]]; then
+          delivery=$2
+        elif [[ "$option" == "--enable" || "$option" == "--disable" ]]; then
+          local selected=true
+          if [[ "$option" == "--disable" ]]; then
+            selected=false
+          fi
+          case "$2" in
+            worktrees) feature_worktrees=$selected ;;
+            tiber) feature_tiber=$selected ;;
+            agentic-systems) feature_agentic_systems=$selected ;;
+            eval-case-reporting) feature_eval_case_reporting=$selected ;;
+            *) die "development_system.unknown_feature feature=$2" ;;
+          esac
         fi
         shift 2
         ;;
@@ -70,7 +93,14 @@ setup_command() {
   if [[ "$preset" != "personal-trunk" ]]; then
     die "development_system.unsupported_preset preset=$preset"
   fi
+  case "$delivery" in
+    direct-to-trunk | pull-request | local-only) ;;
+    *) die "development_system.unsupported_delivery mode=$delivery" ;;
+  esac
   printf 'development_system.setup_preview project=%s\n' "$project"
+  printf 'delivery %s\n' "$delivery"
+  printf 'features worktrees=%s tiber=%s agentic_systems=%s eval_case_reporting=%s\n' \
+    "$feature_worktrees" "$feature_tiber" "$feature_agentic_systems" "$feature_eval_case_reporting"
   printf 'write .development-system.toml\n'
   if [[ "$mode" == "dry-run" ]]; then
     return
@@ -93,22 +123,17 @@ setup_command() {
   {
     printf 'schema_version = 1\n\n'
     printf '[delivery]\n'
-    printf 'mode = "direct-to-trunk"\n'
+    printf 'mode = "%s"\n' "$delivery"
     printf 'trunk_branch = "main"\n\n'
     printf '[features]\n'
-    printf 'worktrees = true\n'
-    printf 'tiber = true\n'
-    printf 'agentic_systems = false\n'
-    printf 'eval_case_reporting = false\n\n'
+    printf 'worktrees = %s\n' "$feature_worktrees"
+    printf 'tiber = %s\n' "$feature_tiber"
+    printf 'agentic_systems = %s\n' "$feature_agentic_systems"
+    printf 'eval_case_reporting = %s\n\n' "$feature_eval_case_reporting"
     printf '[worktrees]\n'
     printf 'root = ".worktrees"\n\n'
     printf '[tiber]\n'
-    printf 'max_queued = 5\n\n'
-    printf '[mcps]\n'
-    printf 'context7 = false\n'
-    printf 'hindsight = false\n'
-    printf 'openai_developer_docs = false\n'
-    printf 'promptfoo = false\n'
+    printf 'max_queued = 5\n'
   } >"$config_tmp"
   mv -- "$config_tmp" "$config_path"
   git -C "$project" add -- .development-system.toml
@@ -123,10 +148,117 @@ setup_command() {
   printf 'development_system.setup_applied commit=%s\n' "$(git -C "$project" rev-parse HEAD)"
 }
 
+inspect_conflicts() {
+  local project=$1
+  local harness=$2
+  local found=false
+  local claude_settings=$project/.claude/settings.json
+  local claude_plugins=${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/plugins/installed_plugins.json
+  local codex_home=${CODEX_HOME:-${HOME:-}/.codex}
+  local codex_config
+
+  if [[ ! -f "$project/.development-system.toml" ]]; then
+    return
+  fi
+
+  if [[ -f "$claude_settings" ]] &&
+    grep -q '"enabledPlugins"' "$claude_settings" &&
+    grep -Eo '"[^"]+@[^"]+"[[:space:]]*:[[:space:]]*true' "$claude_settings" |
+    grep -qv '^"development-system@'; then
+    warn "conflicting_plugins harness=claude file=$claude_settings recommendation=install_only_development-system"
+    found=true
+  fi
+
+  if [[ -f "$claude_plugins" ]] &&
+    grep -Eo '"[^"]+@[^"]+"' "$claude_plugins" |
+    grep -qv '^"development-system@'; then
+    warn "conflicting_plugins harness=claude file=$claude_plugins recommendation=install_only_development-system"
+    found=true
+  fi
+
+  for codex_config in "$project/.codex/config.toml" "$codex_home/config.toml"; do
+    if [[ -f "$codex_config" ]] &&
+      grep -Ev '^\[plugins\."?development-system(@ai-plugins)?"?\]' "$codex_config" |
+      grep -Eq '^\[plugins\.[^]]+\]'; then
+      warn "conflicting_plugins harness=codex file=$codex_config recommendation=install_only_development-system"
+      found=true
+    fi
+
+    if [[ -f "$codex_config" ]] &&
+      grep -Eq '^[[:space:]]*(hooks|codex_hooks)[[:space:]]*=[[:space:]]*false' "$codex_config"; then
+      warn "incompatible_harness_setting harness=codex setting=hooks_disabled file=$codex_config"
+      found=true
+    fi
+
+    if [[ -f "$codex_config" ]] &&
+      grep -Eq '^[[:space:]]*allow_managed_hooks_only[[:space:]]*=[[:space:]]*true' "$codex_config"; then
+      warn "incompatible_harness_setting harness=codex setting=managed_hooks_only file=$codex_config"
+      found=true
+    fi
+  done
+
+  if [[ -f "$project/.mcp.json" ]]; then
+    warn "user_managed_mcps_detected file=$project/.mcp.json action=review_for_compatibility"
+    found=true
+  fi
+
+  if [[ "$found" == "true" ]]; then
+    warn "supply_chain_recommendation harness=$harness recommendation=use_only_development-system_and_plugin_managed_mcps"
+  fi
+}
+
+doctor_command() {
+  local project=.
+  local harness=all
+  local format=text
+  while (($#)); do
+    case "$1" in
+      --project | --harness | --format)
+        local option=$1
+        if (($# < 2)) || [[ "$2" == --* ]]; then
+          die "development_system.missing_option_value option=$option"
+        fi
+        if [[ "$option" == "--project" ]]; then
+          project=$2
+        elif [[ "$option" == "--harness" ]]; then
+          harness=$2
+        else
+          format=$2
+        fi
+        shift 2
+        ;;
+      *)
+        die "development_system.unknown_option option=$1"
+        ;;
+    esac
+  done
+  project="$(cd "$project" && pwd)" ||
+    die "development_system.project_not_found project=$project"
+  local output
+  output="$(inspect_conflicts "$project" "$harness")"
+  if [[ -z "$output" ]]; then
+    return
+  fi
+  if [[ "$format" == "text" ]]; then
+    printf '%s\n' "$output"
+  elif [[ "$format" == "json" ]]; then
+    output=${output//\\/\\\\}
+    output=${output//\"/\\\"}
+    output=${output//$'\n'/\\n}
+    printf '{"continue":true,"systemMessage":"%s"}\n' "$output"
+  else
+    die "development_system.unsupported_format format=$format"
+  fi
+}
+
 case "${1:-}" in
   setup)
     shift
     setup_command "$@"
+    ;;
+  doctor | session-start)
+    shift
+    doctor_command "$@"
     ;;
   *)
     die "development_system.usage command=${1:-missing}"

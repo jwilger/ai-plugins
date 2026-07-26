@@ -7,7 +7,7 @@ export CARGO_HOME="${CARGO_HOME:-$root/.dependencies/cargo}"
 export PATH="$CARGO_HOME/bin:$PATH"
 
 toolchain="${TIBER_RELEASE_TOOLCHAIN:-stable}"
-manifest="$root/plugins/tiber/rust/Cargo.toml"
+manifest="$root/plugins/development-system/components/tiber/rust/Cargo.toml"
 targets=(
   aarch64-unknown-linux-gnu
   x86_64-unknown-linux-gnu
@@ -50,7 +50,7 @@ build_target() {
 
 copy_binary() {
   local source="$1" target="$2"
-  local destination="$root/plugins/tiber/dist/$target/tiber"
+  local destination="$root/plugins/development-system/components/tiber/dist/$target/tiber"
   mkdir -p "$(dirname "$destination")"
   cp "$source" "$destination"
   chmod 0755 "$destination"
@@ -74,11 +74,11 @@ copy_binary "$target_dir/aarch64-unknown-linux-gnu/release/tiber" aarch64-unknow
 copy_binary "$target_dir/universal2-apple-darwin/release/tiber" x86_64-apple-darwin
 copy_binary "$target_dir/universal2-apple-darwin/release/tiber" aarch64-apple-darwin
 
-checksums="$root/plugins/tiber/release-binaries.sha256"
+checksums="$root/plugins/development-system/components/tiber/release-binaries.sha256"
 : >"$checksums"
-jq -r '.binaries[].path' "$root/plugins/tiber/release-binaries.json" |
+jq -r '.binaries[].path' "$root/plugins/development-system/components/tiber/release-binaries.json" |
   while IFS= read -r binary_path; do
-    sha256sum "$root/plugins/tiber/$binary_path" |
+    sha256sum "$root/plugins/development-system/components/tiber/$binary_path" |
       awk -v path="$binary_path" '{ print $1 "  " path }' >>"$checksums"
   done
 echo "wrote $checksums"

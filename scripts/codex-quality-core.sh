@@ -3,32 +3,30 @@ set -euo pipefail
 
 marketplace_name="ai-plugins"
 core_plugins=(
-  engineering-standards
-  development-discipline
-  advisor
+  development-system
 )
 representative_skills=(
-  engineering-standards:engineering-standards
-  development-discipline:test-driven-development
-  development-discipline:verification-before-completion
-  advisor:advisor
+  development-system:setup
+  development-system:development-workflow
+  development-system:delivery
+  development-system:worktrees
+  development-system:tasks
+  development-system:engineering-standards
+  development-system:agentic-systems
+  development-system:eval-case-reporting
 )
 install_option=""
 downstream_arg=""
-with_agentic=0
 
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/codex-quality-core.sh install [--with-agentic]
-  scripts/codex-quality-core.sh check [--with-agentic] [DOWNSTREAM]
+  scripts/codex-quality-core.sh install
+  scripts/codex-quality-core.sh check [DOWNSTREAM]
 
-install  Add or refresh the Codex quality-core plugins from this checkout.
+install  Add or refresh the single Development System plugin from this checkout.
 check    Read only: verify plugin state and model visibility in a clean
          temporary downstream Git repository.
-
-Add --with-agentic for AI-system projects that also provide the Promptfoo
-tooling required by agentic-systems-engineering.
 EOF
 }
 
@@ -279,7 +277,7 @@ check_quality_core() {
     trap - EXIT
   fi
 
-  printf 'Codex quality core is installed and model-visible from %s.\n' "$root"
+  printf 'Codex Development System is installed and model-visible from %s.\n' "$root"
 }
 
 if [ "$#" -eq 1 ] && { [ "$1" = "--help" ] || [ "$1" = "-h" ]; }; then
@@ -305,14 +303,6 @@ fi
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --with-agentic)
-      if [ "$with_agentic" -eq 1 ]; then
-        printf 'option specified more than once: --with-agentic\n' >&2
-        usage >&2
-        exit 2
-      fi
-      with_agentic=1
-      ;;
     -*)
       printf 'unknown option: %s\n' "$1" >&2
       usage >&2
@@ -334,12 +324,6 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
-
-if [ "$with_agentic" -eq 1 ]; then
-  core_plugins+=(agentic-systems-engineering)
-  representative_skills+=(agentic-systems-engineering:agentic-systems-engineering)
-  install_option=" --with-agentic"
-fi
 
 require_command codex
 require_command git

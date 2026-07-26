@@ -351,7 +351,7 @@ function providerPluginPaths(label) {
 
 const targeted = providerPluginPaths('claude-code-sonnet-targeted-plugins');
 const full = providerPluginPaths('claude-code-sonnet-full-marketplace');
-const expectedTargeted = [path.join(root, 'plugins/tiber')];
+const expectedTargeted = [path.join(root, 'plugins/development-system')];
 const expectedFull = JSON.parse(
   fs.readFileSync(path.join(root, '.claude-plugin/marketplace.json'), 'utf8'),
 ).plugins.map(({ name }) => path.join(root, 'plugins', name)).sort();
@@ -383,12 +383,12 @@ NODE
     def plugins($label):
       [.providerCompositions[] | select(.label == $label) | .plugins] | first;
     (.providerLabels | sort) == ([.providerCompositions[].label] | sort)
-      and plugins("claude-code-sonnet-targeted-plugins") == ["tiber"]
-      and plugins("codex-gpt-5.6-terra-targeted-plugins") == ["tiber"]
+      and plugins("claude-code-sonnet-targeted-plugins") == ["development-system"]
+      and plugins("codex-gpt-5.6-terra-targeted-plugins") == ["development-system"]
       and plugins("claude-code-sonnet-no-plugins") == []
       and plugins("codex-gpt-5.6-terra-no-plugins") == []
-      and (plugins("claude-code-sonnet-full-marketplace") | index("advisor") | not)
-      and (plugins("codex-gpt-5.6-terra-full-marketplace") | index("advisor") != null)
+      and plugins("claude-code-sonnet-full-marketplace") == ["development-system"]
+      and plugins("codex-gpt-5.6-terra-full-marketplace") == ["development-system"]
   ' "$generated_metadata"
   run node - "$generated_config" "$generated_metadata" <<'NODE'
 const fs = require('node:fs');
@@ -417,16 +417,13 @@ NODE
   [ "$status" -eq 0 ]
   [ -f "$no_plugins_home/config.toml" ]
   ! grep -q '\[plugins\."' "$no_plugins_home/config.toml"
-  [ ! -d "$no_plugins_home/plugins/cache/ai-plugins/agentic-systems-engineering" ]
+  [ ! -d "$no_plugins_home/plugins/cache/ai-plugins/development-system" ]
 
-  run node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$targeted_home" --plugin-mode targeted-plugins --plugins worktrees,engineering-standards
+  run node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$targeted_home" --plugin-mode targeted-plugins --plugins development-system
 
   [ "$status" -eq 0 ]
-  grep -q '\[plugins\."worktrees@ai-plugins"\]' "$targeted_home/config.toml"
-  grep -q '\[plugins\."engineering-standards@ai-plugins"\]' "$targeted_home/config.toml"
-  ! grep -q '\[plugins\."babysit-pr@ai-plugins"\]' "$targeted_home/config.toml"
-  [ -d "$targeted_home/plugins/cache/ai-plugins/worktrees" ]
-  [ ! -d "$targeted_home/plugins/cache/ai-plugins/babysit-pr" ]
+  grep -q '\[plugins\."development-system@ai-plugins"\]' "$targeted_home/config.toml"
+  [ -d "$targeted_home/plugins/cache/ai-plugins/development-system" ]
 
   run node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$targeted_home" --plugin-mode targeted-plugins --plugins missing-plugin
 
@@ -496,11 +493,11 @@ NODE
     [ -d "$eval_home/plugins/cache/ai-plugins/$plugin" ]
   done < <(jq -r '.plugins[].name' "$ROOT/.agents/plugins/marketplace.json")
 
-  agentic_version="$(jq -r '.version' "$ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
-  agentic_cache="$eval_home/plugins/cache/ai-plugins/agentic-systems-engineering/$agentic_version"
-  [ -d "$agentic_cache/skills" ]
-  [ ! -e "$agentic_cache/bin" ]
-  [ ! -e "$agentic_cache/.mcp.json" ]
+  plugin_version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  plugin_cache="$eval_home/plugins/cache/ai-plugins/development-system/$plugin_version"
+  [ -d "$plugin_cache/skills" ]
+  [ ! -e "$plugin_cache/bin" ]
+  [ ! -e "$plugin_cache/.mcp.json" ]
 }
 
 @test "improvement loop scope guards reject edits outside their allowed surfaces" {

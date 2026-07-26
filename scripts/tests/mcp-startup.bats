@@ -44,7 +44,7 @@ run_manifest_server_with_restricted_path() {
 run_promptfoo_manifest_server_with_restricted_path() {
   install_promptfoo_cache_launcher
   run_manifest_server_with_restricted_path \
-    "$ROOT/plugins/agentic-systems-engineering/.mcp.json" \
+    "$ROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json" \
     promptfoo </dev/null
 }
 
@@ -53,8 +53,8 @@ run_promptfoo_manifest_server_with_empty_path() {
   local args
   install_promptfoo_cache_launcher
 
-  command="$(jq -r '.mcpServers.promptfoo.command' "$ROOT/plugins/agentic-systems-engineering/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.promptfoo.args[]' "$ROOT/plugins/agentic-systems-engineering/.mcp.json")
+  command="$(jq -r '.mcpServers.promptfoo.command' "$ROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.promptfoo.args[]' "$ROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json")
 
   env -i \
     PATH= \
@@ -70,8 +70,8 @@ run_promptfoo_manifest_server_from_fixture_repo() {
   local args
   install_promptfoo_cache_launcher
 
-  command="$(jq -r '.mcpServers.promptfoo.command' "$ROOT/plugins/agentic-systems-engineering/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.promptfoo.args[]' "$ROOT/plugins/agentic-systems-engineering/.mcp.json")
+  command="$(jq -r '.mcpServers.promptfoo.command' "$ROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.promptfoo.args[]' "$ROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json")
 
   cd "$TMPROOT/repo"
   env -i \
@@ -85,7 +85,7 @@ run_promptfoo_manifest_server_from_fixture_repo() {
 run_tiber_manifest_server_with_restricted_path() {
   install_tiber_cache_launcher
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
-    run_manifest_server_with_restricted_path "$ROOT/plugins/tiber/.mcp.json" tiber
+    run_manifest_server_with_restricted_path "$ROOT/plugins/development-system/components/tiber/.mcp.json" tiber
 }
 
 run_tiber_manifest_server_with_empty_path() {
@@ -93,8 +93,8 @@ run_tiber_manifest_server_with_empty_path() {
   local args
   install_tiber_cache_launcher
 
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
     env -i \
@@ -114,8 +114,8 @@ run_tiber_manifest_server_with_untrusted_bash_first() {
   printf '%s\n' '#!/bin/sh' 'echo untrusted-bash-executed >&2' 'exit 42' >"$untrusted_path/bash"
   chmod +x "$untrusted_path/bash"
 
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
     env -i \
@@ -129,14 +129,14 @@ run_tiber_manifest_server_with_claude_plugin_root() {
   local command
   local args
 
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
     env -i \
       PATH="$MCP_TEST_PATH" \
       HOME="$HOME" \
-      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/tiber" \
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-system/components/tiber" \
       "$command" "${args[@]}"
 }
 
@@ -150,8 +150,8 @@ run_tiber_manifest_server_with_codex_home_and_claude_plugin_root() {
   printf '%s\n' '#!/bin/sh' 'echo claude-plugin-root-used' 'exit 0' >"$plugin_root/bin/tiber"
   chmod +x "$plugin_root/bin/tiber"
 
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
     env -i \
@@ -171,8 +171,8 @@ run_tiber_manifest_server_with_invalid_claude_plugin_root() {
   mkdir -p "$plugin_root/bin"
   printf '%s\n' '#!/bin/sh' 'echo non-executable-claude-root-used' 'exit 0' >"$plugin_root/bin/tiber"
 
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   env -i \
     PATH="$MCP_TEST_PATH" \
@@ -185,14 +185,14 @@ run_tiber_manifest_server_with_invalid_claude_plugin_root() {
 run_tiber_manifest_server_with_missing_codex_cache() {
   local command
   local args
-  local home_cache="$TMPROOT/home/.codex/plugins/cache/ai-plugins/tiber/0.6.0/bin"
+  local home_cache="$TMPROOT/home/.codex/plugins/cache/ai-plugins/development-system/0.6.0/bin"
 
   mkdir -p "$home_cache"
   printf '%s\n' '#!/bin/sh' 'echo home-codex-cache-used' 'exit 0' >"$home_cache/tiber"
   chmod +x "$home_cache/tiber"
 
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   env -i \
     PATH="$MCP_TEST_PATH" \
@@ -204,15 +204,15 @@ run_tiber_manifest_server_with_missing_codex_cache() {
 run_tiber_manifest_server_with_default_home_codex_cache() {
   local command
   local args
-  local home_cache="$TMPROOT/home/.codex/plugins/cache/ai-plugins/tiber"
+  local home_cache="$TMPROOT/home/.codex/plugins/cache/ai-plugins/development-system"
   local version
 
   mkdir -p "$home_cache"
-  version="$(jq -r '.version' "$ROOT/plugins/tiber/.codex-plugin/plugin.json")"
-  ln -sfn "$ROOT/plugins/tiber" "$home_cache/$version"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-system" "$home_cache/$version"
 
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
     env -i \
@@ -225,8 +225,8 @@ run_tiber_manifest_server_without_home() {
   local command
   local args
 
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   env -i \
     PATH="$MCP_TEST_PATH" \
@@ -250,8 +250,8 @@ run_tiber_manifest_server_with_inherited_path_tooling() {
     'esac' >"$plugin_root/bin/tiber"
   chmod +x "$plugin_root/bin/tiber"
 
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   env -i \
     PATH="$inherited_tool_path" \
@@ -265,8 +265,8 @@ run_tiber_manifest_server_from_fixture_repo() {
   local args
 
   install_tiber_cache_launcher
-  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/tiber/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/tiber/.mcp.json")
+  command="$(jq -r '.mcpServers.tiber.command' "$ROOT/plugins/development-system/components/tiber/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$ROOT/plugins/development-system/components/tiber/.mcp.json")
 
   cd "$TMPROOT/repo"
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
@@ -281,8 +281,8 @@ run_development_discipline_manifest_server_with_claude_plugin_root() {
   local command
   local args
 
-  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")
 
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
     env -i \
@@ -290,22 +290,22 @@ run_development_discipline_manifest_server_with_claude_plugin_root() {
       HOME="$HOME" \
       CARGO_HOME="$ROOT/.dependencies/cargo" \
       BASH_ENV="${BASH_ENV:-}" \
-      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-system/components/development-discipline" \
       "$command" "${args[@]}"
 }
 
 run_development_discipline_manifest_server_with_codex_cache() {
   local command
   local args
-  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
+  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system"
   local version
 
   mkdir -p "$cache_parent"
-  version="$(jq -r '.version' "$ROOT/plugins/development-discipline/.codex-plugin/plugin.json")"
-  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/$version"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-system" "$cache_parent/$version"
 
-  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")
 
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
     env -i \
@@ -319,7 +319,7 @@ run_development_discipline_manifest_server_with_codex_cache() {
 run_development_discipline_codex_cache_final_review_flow() {
   local command
   local args
-  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
+  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system"
   local project_root="$TMPROOT/final-review-project"
   local version
 
@@ -332,8 +332,8 @@ run_development_discipline_codex_cache_final_review_flow() {
   git -C "$project_root" commit --allow-empty -qm 'initialize final-review fixture'
   mkdir -p "$project_root/src"
   printf '%s\n' 'fixture change' >"$project_root/src/new.rs"
-  version="$(jq -r '.version' "$ROOT/plugins/development-discipline/.codex-plugin/plugin.json")"
-  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/$version"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-system" "$cache_parent/$version"
   cat >"$project_root/.development-discipline/final-review.toml" <<'TOML'
 [final_review.models]
 pre_filter = "config-pre"
@@ -342,8 +342,8 @@ post_filter = "config-post"
 verifier = "config-verify"
 TOML
 
-  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")
 
   env -i \
     PATH="$PATH" \
@@ -359,18 +359,18 @@ TOML
 run_development_discipline_manifest_server_with_both_harness_markers() {
   local command
   local args
-  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-discipline"
+  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system"
   local claude_root="$TMPROOT/claude-plugin-root"
   local version
 
   mkdir -p "$cache_parent" "$claude_root/bin"
-  version="$(jq -r '.version' "$ROOT/plugins/development-discipline/.codex-plugin/plugin.json")"
-  ln -sfn "$ROOT/plugins/development-discipline" "$cache_parent/$version"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-system" "$cache_parent/$version"
   printf '%s\n' '#!/bin/sh' 'echo claude-plugin-root-used' >"$claude_root/bin/development-discipline-mcp"
   chmod +x "$claude_root/bin/development-discipline-mcp"
 
-  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")
 
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
     env -i \
@@ -386,8 +386,8 @@ run_development_discipline_manifest_server_with_missing_codex_cache_and_claude_p
   local command
   local args
 
-  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-discipline/.mcp.json")"
-  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-discipline/.mcp.json")
+  command="$(jq -r '.mcpServers["development-discipline"].command' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")"
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$ROOT/plugins/development-system/components/development-discipline/.mcp.json")
 
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
     env -i \
@@ -395,7 +395,7 @@ run_development_discipline_manifest_server_with_missing_codex_cache_and_claude_p
       HOME="$HOME" \
       CARGO_HOME="$ROOT/.dependencies/cargo" \
       CODEX_HOME="$TMPROOT/missing-codex-home" \
-      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-system/components/development-discipline" \
       "$command" "${args[@]}"
 }
 
@@ -413,8 +413,8 @@ run_development_discipline_manifest_server_with_untrusted_cargo_first() {
       CARGO_HOME="$ROOT/.dependencies/cargo" \
       DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
       DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
-      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
-      "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-system/components/development-discipline" \
+      "$ROOT/plugins/development-system/components/development-discipline/bin/development-discipline-mcp"
 }
 
 run_development_discipline_manifest_server_with_untrusted_uname_first() {
@@ -432,8 +432,8 @@ run_development_discipline_manifest_server_with_untrusted_uname_first() {
     env -i \
       PATH="$untrusted_path:/bin:/usr/bin:/run/current-system/sw/bin" \
       HOME="$HOME" \
-      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
-      "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-system/components/development-discipline" \
+      "$ROOT/plugins/development-system/components/development-discipline/bin/development-discipline-mcp"
 }
 
 run_development_discipline_manifest_server_with_untrusted_cargo_env() {
@@ -451,8 +451,8 @@ run_development_discipline_manifest_server_with_untrusted_cargo_env() {
       CARGO_HOME="$ROOT/.dependencies/cargo" \
       DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
       DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
-      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-discipline" \
-      "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+      CLAUDE_PLUGIN_ROOT="$ROOT/plugins/development-system/components/development-discipline" \
+      "$ROOT/plugins/development-system/components/development-discipline/bin/development-discipline-mcp"
 }
 
 run_development_discipline_cargo_fallback_from_reviewed_checkout() {
@@ -471,7 +471,7 @@ run_development_discipline_cargo_fallback_from_reviewed_checkout() {
     CARGO="$fake_cargo" \
     DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
     DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
-    "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+    "$ROOT/plugins/development-system/components/development-discipline/bin/development-discipline-mcp"
 }
 
 run_development_discipline_cargo_fallback_with_untrusted_target_dir() {
@@ -489,7 +489,7 @@ run_development_discipline_cargo_fallback_with_untrusted_target_dir() {
     CARGO_TARGET_DIR="$TMPROOT/poisoned-target" \
     DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
     DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
-    "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+    "$ROOT/plugins/development-system/components/development-discipline/bin/development-discipline-mcp"
 }
 
 run_development_discipline_cargo_fallback_without_home() {
@@ -500,36 +500,36 @@ run_development_discipline_cargo_fallback_without_home() {
     PATH="$bash_path:/bin:/usr/bin" \
     DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
     DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
-    "$ROOT/plugins/development-discipline/bin/development-discipline-mcp"
+    "$ROOT/plugins/development-system/components/development-discipline/bin/development-discipline-mcp"
 }
 
 install_tiber_cache_launcher() {
-  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/tiber"
+  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system"
   local version
 
   mkdir -p "$cache_parent"
-  version="$(jq -r '.version' "$ROOT/plugins/tiber/.codex-plugin/plugin.json")"
-  ln -sfn "$ROOT/plugins/tiber" "$cache_parent/$version"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-system" "$cache_parent/$version"
 }
 
 install_promptfoo_cache_launcher() {
-  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/agentic-systems-engineering"
+  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system"
   local version
 
   mkdir -p "$cache_parent"
-  version="$(jq -r '.version' "$ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
-  ln -sfn "$ROOT/plugins/agentic-systems-engineering" "$cache_parent/$version"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-system" "$cache_parent/$version"
 }
 
 install_stale_tiber_cache_launcher() {
-  local cache_dir="$TMPROOT/codex-home/plugins/cache/ai-plugins/tiber/0.4.0/bin"
+  local cache_dir="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system/0.4.0/bin"
   mkdir -p "$cache_dir"
   printf '%s\n' '#!/bin/sh' 'echo stale-cache-tiber-executed >&2' 'exit 42' >"$cache_dir/tiber"
   chmod +x "$cache_dir/tiber"
 }
 
 @test "promptfoo MCP launcher starts with repo-local promptfoo and writable state" {
-  cd "$ROOT/plugins/agentic-systems-engineering"
+  cd "$ROOT/plugins/development-system/components/agentic-systems-engineering"
 
   run env PROMPTFOO_MCP_STATE_DIR="$TMPROOT/promptfoo-state" \
     timeout 20s ./bin/promptfoo-mcp </dev/null
@@ -572,10 +572,10 @@ install_stale_tiber_cache_launcher() {
 @test "promptfoo MCP manifest command ignores repo-local launchers" {
   cd "$ROOT"
 
-  mkdir -p "$TMPROOT/repo/bin" "$TMPROOT/repo/plugins/agentic-systems-engineering/bin"
+  mkdir -p "$TMPROOT/repo/bin" "$TMPROOT/repo/plugins/development-system/components/agentic-systems-engineering/bin"
   printf '%s\n' '#!/bin/sh' 'echo repo-local-promptfoo-executed >&2' 'exit 42' >"$TMPROOT/repo/bin/promptfoo-mcp"
-  cp "$TMPROOT/repo/bin/promptfoo-mcp" "$TMPROOT/repo/plugins/agentic-systems-engineering/bin/promptfoo-mcp"
-  chmod +x "$TMPROOT/repo/bin/promptfoo-mcp" "$TMPROOT/repo/plugins/agentic-systems-engineering/bin/promptfoo-mcp"
+  cp "$TMPROOT/repo/bin/promptfoo-mcp" "$TMPROOT/repo/plugins/development-system/components/agentic-systems-engineering/bin/promptfoo-mcp"
+  chmod +x "$TMPROOT/repo/bin/promptfoo-mcp" "$TMPROOT/repo/plugins/development-system/components/agentic-systems-engineering/bin/promptfoo-mcp"
 
   run run_promptfoo_manifest_server_from_fixture_repo
 
@@ -584,7 +584,7 @@ install_stale_tiber_cache_launcher() {
 }
 
 @test "tiber MCP manifest command starts from the plugin cache" {
-  cd "$ROOT/plugins/tiber"
+  cd "$ROOT/plugins/development-system/components/tiber"
 
   run run_tiber_manifest_server_with_restricted_path
 
@@ -594,7 +594,7 @@ install_stale_tiber_cache_launcher() {
 }
 
 @test "tiber MCP manifest command ignores stale plugin cache versions" {
-  cd "$ROOT/plugins/tiber"
+  cd "$ROOT/plugins/development-system/components/tiber"
 
   install_stale_tiber_cache_launcher
   run run_tiber_manifest_server_with_restricted_path
@@ -729,7 +729,7 @@ install_stale_tiber_cache_launcher() {
   run run_development_discipline_cargo_fallback_from_reviewed_checkout
 
   [ "$status" -eq 0 ]
-  [ "$output" = "$ROOT/plugins/development-discipline/rust" ]
+  [ "$output" = "$ROOT/plugins/development-system/components/development-discipline/rust" ]
 }
 
 @test "development-discipline MCP Cargo fallback ignores inherited target directory" {
@@ -820,10 +820,10 @@ install_stale_tiber_cache_launcher() {
 @test "tiber MCP manifest command ignores repo-local launchers" {
   cd "$ROOT"
 
-  mkdir -p "$TMPROOT/repo/bin" "$TMPROOT/repo/plugins/tiber/bin"
+  mkdir -p "$TMPROOT/repo/bin" "$TMPROOT/repo/plugins/development-system/components/tiber/bin"
   printf '%s\n' '#!/bin/sh' 'echo repo-local-tiber-executed >&2' 'exit 42' >"$TMPROOT/repo/bin/tiber"
-  cp "$TMPROOT/repo/bin/tiber" "$TMPROOT/repo/plugins/tiber/bin/tiber"
-  chmod +x "$TMPROOT/repo/bin/tiber" "$TMPROOT/repo/plugins/tiber/bin/tiber"
+  cp "$TMPROOT/repo/bin/tiber" "$TMPROOT/repo/plugins/development-system/components/tiber/bin/tiber"
+  chmod +x "$TMPROOT/repo/bin/tiber" "$TMPROOT/repo/plugins/development-system/components/tiber/bin/tiber"
 
   run run_tiber_manifest_server_from_fixture_repo
 
@@ -869,7 +869,7 @@ install_stale_tiber_cache_launcher() {
 @test "tiber MCP manifest command uses trusted Bash candidates for launcher scripts" {
   cd "$ROOT"
 
-  run jq -r '.mcpServers.tiber.args[1]' "$ROOT/plugins/tiber/.mcp.json"
+  run jq -r '.mcpServers.tiber.args[1]' "$ROOT/plugins/development-system/components/tiber/.mcp.json"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"for candidate_bash in /run/current-system/sw/bin/bash /bin/bash /usr/bin/bash"* ]]
@@ -880,7 +880,7 @@ install_stale_tiber_cache_launcher() {
 @test "tiber MCP manifest forwards the SSH agent socket env var" {
   cd "$ROOT"
 
-  run jq -e '.mcpServers.tiber.env_vars == ["SSH_AUTH_SOCK"]' "$ROOT/plugins/tiber/.mcp.json"
+  run jq -e '.mcpServers.tiber.env_vars == ["SSH_AUTH_SOCK"]' "$ROOT/plugins/development-system/components/tiber/.mcp.json"
 
   [ "$status" -eq 0 ]
 }

@@ -59,7 +59,7 @@ function standardCases() {
 function advisorLikeCases() {
   const selected = new Set(["tradeoff-recommendation", "ticket-plan-outline"]);
   const benchmark = readJson(
-    "plugins/advisor/skills/advisor/.plugin-eval/benchmark.json",
+    "plugins/development-system/components/advisor/skills/advisor/.plugin-eval/benchmark.json",
   );
 
   return benchmark.scenarios

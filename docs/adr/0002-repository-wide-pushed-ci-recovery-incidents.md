@@ -93,5 +93,5 @@ replace the Git coordination branch.
 ## Related
 
 - ADR-0001
-- `plugins/development-discipline/skills/ci-failure-follow-up/SKILL.md`
-- `plugins/tiber/skills/tiber/SKILL.md`
+- `plugins/development-system/components/development-discipline/skills/ci-failure-follow-up/SKILL.md`
+- `plugins/development-system/components/tiber/skills/tiber/SKILL.md`

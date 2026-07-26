@@ -11,14 +11,14 @@ teardown() {
 }
 
 @test "advisor agent pins GPT-5.6 Sol with high reasoning and no fallback" {
-  run "$CHECK" "$ROOT/plugins/advisor"
+  run "$CHECK" "$ROOT/plugins/development-system/components/advisor"
 
   [ "$status" -eq 0 ]
   [ "$output" = "advisor-agent-config: ok" ]
 }
 
 @test "advisor agent check rejects a different model" {
-  cp -R "$ROOT/plugins/advisor" "$TMPROOT/advisor"
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
   sed -i 's/model = "gpt-5.6-sol"/model = "gpt-5.6"/' \
     "$TMPROOT/advisor/agents/advisor.toml"
 
@@ -29,7 +29,7 @@ teardown() {
 }
 
 @test "advisor agent check rejects a silent default-agent fallback" {
-  cp -R "$ROOT/plugins/advisor" "$TMPROOT/advisor"
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
   printf '\nUse `agent_type: default` when unavailable.\n' \
     >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
 
@@ -40,7 +40,7 @@ teardown() {
 }
 
 @test "advisor agent check rejects a different custom-agent fallback" {
-  cp -R "$ROOT/plugins/advisor" "$TMPROOT/advisor"
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
   printf '\nIf the advisor is unavailable, use the custom `explorer` agent.\n' \
     >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
 
@@ -51,7 +51,7 @@ teardown() {
 }
 
 @test "advisor agent check rejects fallback synonyms" {
-  cp -R "$ROOT/plugins/advisor" "$TMPROOT/advisor"
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
   printf '\nIf the custom agent cannot start, spawn the default agent.\n' \
     >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
 
@@ -62,7 +62,7 @@ teardown() {
 }
 
 @test "advisor agent check rejects a skill-level reasoning override" {
-  cp -R "$ROOT/plugins/advisor" "$TMPROOT/advisor"
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
   printf '\nUse `reasoning_effort: medium` for quick advice.\n' \
     >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
 
@@ -73,7 +73,7 @@ teardown() {
 }
 
 @test "advisor agent check rejects a contradictory effort footer" {
-  cp -R "$ROOT/plugins/advisor" "$TMPROOT/advisor"
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
   printf '\nfooter: `effort=medium; playbook=no; context=none checked`\n' \
     >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
 
@@ -94,7 +94,7 @@ teardown() {
     'The reasoning effort should be medium for quick checks.' \
     'Reasoning effort is low for trivial requests.'; do
     index=$((index + 1))
-    cp -R "$ROOT/plugins/advisor" "$TMPROOT/advisor-$index"
+    cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor-$index"
     printf '\n%s\n' "$claim" \
       >>"$TMPROOT/advisor-$index/skills/advisor/SKILL.md"
 

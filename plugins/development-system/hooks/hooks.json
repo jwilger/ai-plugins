@@ -1,0 +1,14 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/development-system\" session-start --project \"$PWD\" --harness claude",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}

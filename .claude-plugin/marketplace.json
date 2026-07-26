@@ -8,66 +8,10 @@
   "version": "0.1.0",
   "plugins": [
     {
-      "name": "worktrees",
-      "source": "./plugins/worktrees",
-      "description": "Make a repository worktree-ready and safely route feature edits when policy reserves a coordination checkout.",
-      "version": "0.3.0",
-      "category": "Productivity",
-      "keywords": ["worktree", "git", "enforcement"]
-    },
-    {
-      "name": "engineering-standards",
-      "source": "./plugins/engineering-standards",
-      "description": "John's standard engineering regime as a reusable, stack-agnostic starting point for any serious project.",
-      "version": "0.6.0",
-      "category": "Developer Tools",
-      "keywords": ["standards", "tdd", "bdd", "architecture", "quality"]
-    },
-    {
-      "name": "agentic-systems-engineering",
-      "source": "./plugins/agentic-systems-engineering",
-      "description": "Portable guardrails for building, evaluating, and delivering LLM and agentic systems.",
-      "version": "0.2.3",
-      "category": "Developer Tools",
-      "keywords": ["agents", "llm", "evals", "rag", "delivery"]
-    },
-    {
-      "name": "eval-case-reporter",
-      "source": "./plugins/eval-case-reporter",
-      "description": "Capture sanitized eval cases from bad or borderline AI-assistant behavior and submit them to this marketplace.",
-      "version": "0.1.0",
-      "category": "Developer Tools",
-      "keywords": ["evals", "github", "issues", "regression", "triage"]
-    },
-    {
-      "name": "babysit-pr",
-      "source": "./plugins/babysit-pr",
-      "description": "Babysit a pull/merge request to completion across GitHub, Forgejo, and GitLab.",
-      "version": "0.3.0",
-      "category": "Developer Tools",
-      "keywords": ["pr", "ci", "review"]
-    },
-    {
-      "name": "development-discipline",
-      "source": "./plugins/development-discipline",
-      "description": "John's personal workflow discipline for repository-local delivery, test-first development, verification, final review, debugging, review handling, and skill authoring.",
-      "version": "0.18.0",
-      "category": "Developer Tools",
-      "keywords": ["tdd", "verification", "debugging", "code-review", "skills"]
-    },
-    {
-      "name": "tiber",
-      "source": "./plugins/tiber",
-      "description": "Git-backed task boards for coding agents with a tiber CLI, stdio MCP server, dry-run-first scaffolding, and dashboard priority workflow.",
-      "version": "0.15.1",
-      "category": "Developer Tools",
-      "keywords": ["tasks", "git", "mcp", "dashboard", "planning"]
-    },
-    {
       "name": "development-system",
       "source": "./plugins/development-system",
       "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "category": "Developer Tools",
       "keywords": ["development", "workflow", "worktrees", "tiber", "quality"]
     }

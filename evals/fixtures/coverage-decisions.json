@@ -4,11 +4,5 @@
     "skill": "advisor",
     "decision": "deferred",
     "reason": "Advisor is a Codex-only plugin and the current provider-backed behavior harness runs each behavior case against Claude Code and Codex. Claude Code has built-in advisor mode, so advisor behavior coverage is deferred until the harness supports provider-scoped behavior cases that can run only in Codex."
-  },
-  {
-    "plugin": "development-system",
-    "skill": "setup",
-    "decision": "deferred",
-    "reason": "The setup router is a CI-recovery walking skeleton. Remove this entry once provider-backed Codex and Claude cases cover natural routing, primary-checkout refusal, preview-before-apply, explicit confirmation, and a near-miss that must not route to setup."
   }
 ]

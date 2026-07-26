@@ -15,20 +15,20 @@ github-actions:
 
 # Rust gates for the tiber plugin workspace.
 tiber-rust:
-    cargo fmt --manifest-path plugins/tiber/rust/Cargo.toml --all --check
-    cargo clippy --manifest-path plugins/tiber/rust/Cargo.toml --all-targets -- -D warnings
-    cargo test --manifest-path plugins/tiber/rust/Cargo.toml
+    cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
+    cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
+    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml
 
 # Rust gates for the development-discipline MCP coordinator.
 development-discipline-rust:
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo fmt --manifest-path plugins/development-discipline/rust/Cargo.toml --all --check
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo clippy --manifest-path plugins/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-discipline/rust/Cargo.toml
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml
 
 development-discipline-release-complete:
-    cd plugins/development-discipline && sha256sum --check release-binaries.sha256
+    cd plugins/development-system/components/development-discipline && sha256sum --check release-binaries.sha256
     bash scripts/check-development-discipline-release-complete.sh
-    version="$(jq -r '.version' plugins/development-discipline/.codex-plugin/plugin.json)" && rg "development-discipline/${version}/bin/development-discipline-mcp" plugins/development-discipline/.mcp.json
+    version="$(jq -r '.version' plugins/development-system/.codex-plugin/plugin.json)" && rg "development-system/${version}/bin/development-discipline-mcp" plugins/development-system/components/development-discipline/.mcp.json
 
 development-discipline-release-from-source:
     bash scripts/check-development-discipline-release-from-source.sh
@@ -52,7 +52,7 @@ tiber-release-all:
 
 # Mutation gate for the pure tiber core.
 tiber-mutants:
-    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --manifest-path plugins/tiber/rust/Cargo.toml --package tiber-core --test-workspace true
+    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --package tiber-core --test-workspace true
 
 # Ensure the tiber release plan names every bundled v1 binary target.
 tiber-release-manifest:

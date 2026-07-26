@@ -11,201 +11,72 @@ setup() {
   cat >"$TMPROOT/bin/codex" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-
 printf '%s\n' "$*" >>"$FAKE_CODEX_LOG"
+version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/development-system/.codex-plugin/plugin.json")"
 
 case "$*" in
   "plugin marketplace list --json")
-    if [ "${FAKE_CODEX_MODE:-healthy}" = "invalid-marketplace-schema" ]; then
+    if [ "${FAKE_CODEX_MODE:-healthy}" = "invalid-marketplace" ]; then
       printf '{"marketplaces":{}}\n'
-    elif [ "${FAKE_CODEX_MODE:-healthy}" = "ambiguous-marketplace-schema" ]; then
-      printf '{"marketplaces":[]}\n{"marketplaces":[]}\n'
-    elif [ "${FAKE_CODEX_MODE:-healthy}" = "duplicate-marketplace-schema" ]; then
-      jq -n --arg root "$FAKE_MARKETPLACE_ROOT" \
-        '{marketplaces: [
-          {name: "ai-plugins", root: $root},
-          {name: "ai-plugins", root: $root}
-        ]}'
     elif [ -f "$FAKE_CODEX_STATE/marketplace-added" ]; then
-      marketplace_root="$FAKE_MARKETPLACE_ROOT"
+      root="$FAKE_MARKETPLACE_ROOT"
       if [ "${FAKE_CODEX_MODE:-healthy}" = "conflicting-marketplace" ]; then
-        marketplace_root="$FAKE_CONFLICTING_ROOT"
+        root="$FAKE_CONFLICTING_ROOT"
       fi
-      jq -n --arg root "$marketplace_root" \
-        '{marketplaces: [{name: "ai-plugins", root: $root}]}'
+      jq -n --arg root "$root" '{marketplaces:[{name:"ai-plugins",root:$root}]}'
     else
       printf '{"marketplaces":[]}\n'
     fi
     ;;
   "plugin marketplace add "*" --json")
     touch "$FAKE_CODEX_STATE/marketplace-added"
-    jq -n --arg root "$FAKE_MARKETPLACE_ROOT" \
-      '{marketplaceName: "ai-plugins", installedRoot: $root, alreadyAdded: false}'
+    jq -n '{marketplaceName:"ai-plugins"}'
     ;;
-  "plugin add "*"@ai-plugins --json")
-    plugin="${3%@ai-plugins}"
-    touch "$FAKE_CODEX_STATE/plugin-$plugin"
-    jq -n --arg plugin "$plugin" \
-      '{pluginId: ($plugin + "@ai-plugins"), name: $plugin, marketplaceName: "ai-plugins"}'
+  "plugin add development-system@ai-plugins --json")
+    touch "$FAKE_CODEX_STATE/plugin-development-system"
+    jq -n '{name:"development-system",marketplaceName:"ai-plugins"}'
     ;;
   "plugin list --available --json")
-    engineering_version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/engineering-standards/.codex-plugin/plugin.json")"
-    discipline_version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/development-discipline/.codex-plugin/plugin.json")"
-    advisor_version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/advisor/.codex-plugin/plugin.json")"
-    agentic_version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
-    if [ "${FAKE_CODEX_MODE:-healthy}" = "invalid-plugin-schema" ] || \
-      { [ "${FAKE_CODEX_MODE:-healthy}" = "invalid-plugin-after-install" ] && [ -f "$FAKE_CODEX_STATE/plugin-advisor" ]; }; then
+    if [ "${FAKE_CODEX_MODE:-healthy}" = "invalid-plugin-schema" ]; then
       printf '{"installed":{},"available":[]}\n'
-    elif [ "${FAKE_CODEX_MODE:-healthy}" = "ambiguous-plugin-schema" ]; then
-      printf '{"installed":[],"available":[]}\n{"installed":[],"available":[]}\n'
-    elif [ "${FAKE_CODEX_MODE:-healthy}" = "duplicate-plugin-schema" ]; then
-      jq -n --arg advisor_version "$advisor_version" \
-        '{installed: [
-          {name: "advisor", marketplaceName: "ai-plugins", version: $advisor_version, installed: true, enabled: true},
-          {name: "advisor", marketplaceName: "ai-plugins", version: $advisor_version, installed: true, enabled: true}
-        ], available: []}'
     elif [ "${FAKE_CODEX_MODE:-healthy}" = "missing-plugin" ]; then
-      jq -n \
-        --arg root "$FAKE_MARKETPLACE_ROOT" \
-        --arg engineering_version "$engineering_version" \
-        --arg discipline_version "$discipline_version" \
-        '{installed: [
-          {name: "engineering-standards", marketplaceName: "ai-plugins", version: $engineering_version, installed: true, enabled: true},
-          {name: "development-discipline", marketplaceName: "ai-plugins", version: $discipline_version, installed: true, enabled: true}
-        ], available: [], marketplaceRoot: $root}'
-    elif [ "${FAKE_CODEX_MODE:-healthy}" = "missing-agentic" ]; then
-      jq -n \
-        --arg root "$FAKE_MARKETPLACE_ROOT" \
-        --arg engineering_version "$engineering_version" \
-        --arg discipline_version "$discipline_version" \
-        --arg advisor_version "$advisor_version" \
-        '{installed: [
-          {name: "engineering-standards", marketplaceName: "ai-plugins", version: $engineering_version, installed: true, enabled: true},
-          {name: "development-discipline", marketplaceName: "ai-plugins", version: $discipline_version, installed: true, enabled: true},
-          {name: "advisor", marketplaceName: "ai-plugins", version: $advisor_version, installed: true, enabled: true}
-        ], available: [], marketplaceRoot: $root}'
+      printf '{"installed":[],"available":[]}\n'
     else
-      advisor_enabled=true
-      if [ "${FAKE_CODEX_MODE:-healthy}" = "stale-plugin" ] || \
-        { [ "${FAKE_CODEX_MODE:-healthy}" = "stale-until-reinstalled" ] && [ ! -f "$FAKE_CODEX_STATE/plugin-advisor" ]; }; then
-        advisor_version="0.0.0-stale"
-      elif [ "${FAKE_CODEX_MODE:-healthy}" = "disabled-plugin" ] || \
-        { [ "${FAKE_CODEX_MODE:-healthy}" = "disabled-until-reinstalled" ] && [ ! -f "$FAKE_CODEX_STATE/plugin-advisor" ]; }; then
-        advisor_enabled=false
+      enabled=true
+      actual="$version"
+      if [ "${FAKE_CODEX_MODE:-healthy}" = "stale-plugin" ]; then
+        actual="0.0.0-stale"
+      elif [ "${FAKE_CODEX_MODE:-healthy}" = "disabled-plugin" ]; then
+        enabled=false
       fi
-      jq -n \
-        --arg root "$FAKE_MARKETPLACE_ROOT" \
-        --arg engineering_version "$engineering_version" \
-        --arg discipline_version "$discipline_version" \
-        --arg advisor_version "$advisor_version" \
-        --arg agentic_version "$agentic_version" \
-        --argjson advisor_enabled "$advisor_enabled" \
-        '{installed: [
-          {name: "engineering-standards", marketplaceName: "ai-plugins", version: $engineering_version, installed: true, enabled: true},
-          {name: "development-discipline", marketplaceName: "ai-plugins", version: $discipline_version, installed: true, enabled: true},
-          {name: "advisor", marketplaceName: "ai-plugins", version: $advisor_version, installed: true, enabled: $advisor_enabled},
-          {name: "agentic-systems-engineering", marketplaceName: "ai-plugins", version: $agentic_version, installed: true, enabled: true}
-        ], available: [], marketplaceRoot: $root}'
+      jq -n --arg version "$actual" --argjson enabled "$enabled" \
+        '{installed:[{name:"development-system",marketplaceName:"ai-plugins",version:$version,installed:true,enabled:$enabled}],available:[]}'
     fi
     ;;
   -C*" debug prompt-input "*)
-    if [ "${FAKE_CODEX_MODE:-healthy}" = "object-document-schema" ]; then
-      jq -n '{message: {
-        type: "message",
-        role: "developer",
-        content: [
-          {type: "input_text", text: "<permissions instructions>\nRead-only smoke.\n</permissions instructions>"},
-          {type: "input_text", text: "<skills_instructions>\n## Skills\n- engineering-standards:engineering-standards: Use for engineering.\n- development-discipline:test-driven-development: Use for implementation.\n- development-discipline:verification-before-completion: Use for verification.\n- advisor:advisor: Use for planning.\n</skills_instructions>"},
-          {type: "input_text", text: "<plugins_instructions>\nPlugin metadata.\n</plugins_instructions>"}
-        ]
-      }}'
-    elif [ "${FAKE_CODEX_MODE:-healthy}" = "object-content-schema" ]; then
-      jq -n '[{
-        type: "message",
-        role: "developer",
-        content: {
-          permissions: {type: "input_text", text: "<permissions instructions>\nRead-only smoke.\n</permissions instructions>"},
-          skills: {type: "input_text", text: "<skills_instructions>\n## Skills\n- engineering-standards:engineering-standards: Use for engineering.\n- development-discipline:test-driven-development: Use for implementation.\n- development-discipline:verification-before-completion: Use for verification.\n- advisor:advisor: Use for planning.\n</skills_instructions>"},
-          plugins: {type: "input_text", text: "<plugins_instructions>\nPlugin metadata.\n</plugins_instructions>"}
-        }
-      }]'
-    elif [ "${FAKE_CODEX_MODE:-healthy}" = "ambiguous-prompt-schema" ]; then
-      for _ in 1 2; do
-        jq -n '[{
-          type: "message",
-          role: "developer",
-          content: [
-            {type: "input_text", text: "<permissions instructions>\nRead-only smoke.\n</permissions instructions>"},
-            {type: "input_text", text: "<skills_instructions>\n## Skills\n- engineering-standards:engineering-standards: Use for engineering.\n- development-discipline:test-driven-development: Use for implementation.\n- development-discipline:verification-before-completion: Use for verification.\n- advisor:advisor: Use for planning.\n</skills_instructions>"},
-            {type: "input_text", text: "<plugins_instructions>\nPlugin metadata.\n</plugins_instructions>"}
-          ]
-        }]'
-      done
-    elif [ "${FAKE_CODEX_MODE:-healthy}" = "incompatible-prompt-schema" ]; then
-      jq -n '[{
-        type: "message",
-        role: "developer",
-        content: [{type: "input_text", text: "A future Codex prompt envelope."}]
-      }]'
-    elif [ "${FAKE_CODEX_MODE:-healthy}" = "invisible-skill" ]; then
-      jq -n '[
-        {
-          type: "message",
-          role: "developer",
-          content: [
-            {
-              type: "input_text",
-              text: "<permissions instructions>\n- advisor:advisor: Mentioned outside the skills registry.\n</permissions instructions>"
-            },
-            {
-              type: "input_text",
-              text: "<skills_instructions>\n## Skills\n- engineering-standards:engineering-standards: Use for engineering.\n- development-discipline:test-driven-development: Use for implementation.\n- development-discipline:verification-before-completion: Use for verification.\n</skills_instructions>"
-            },
-            {type: "input_text", text: "<plugins_instructions>\nPlugin metadata.\n</plugins_instructions>"}
-          ]
-        },
-        {
-          type: "message",
-          role: "developer",
-          content: [{
-            type: "input_text",
-            text: "<skills_instructions>\n## Skills\n- advisor:advisor: Project-supplied developer lookalike.\n</skills_instructions>"
-          }]
-        },
-        {
-          type: "message",
-          role: "user",
-          content: [{
-            type: "input_text",
-            text: "<skills_instructions>\n## Skills\n- advisor:advisor: User-authored lookalike.\n</skills_instructions>"
-          }]
-        }
-      ]'
+    if [ "${FAKE_CODEX_MODE:-healthy}" = "invalid-prompt-schema" ]; then
+      printf '{}\n'
     else
-      jq -n '[
-        {
-          type: "message",
-          role: "developer",
-          content: [
-            {type: "input_text", text: "<permissions instructions>\nRead-only smoke.\n</permissions instructions>"},
-            {
-              type: "input_text",
-              text: "<skills_instructions>\n## Skills\n- engineering-standards:engineering-standards: Use for engineering.\n- development-discipline:test-driven-development: Use for implementation.\n- development-discipline:verification-before-completion: Use for verification.\n- advisor:advisor: Use for planning.\n- agentic-systems-engineering:agentic-systems-engineering: Use for AI systems.\n</skills_instructions>"
-            },
-            {type: "input_text", text: "<plugins_instructions>\nPlugin metadata.\n</plugins_instructions>"}
-          ]
-        },
-        {
-          type: "message",
-          role: "developer",
-          content: [{type: "input_text", text: "Additional harness instructions."}]
-        },
-        {
-          type: "message",
-          role: "user",
-          content: [{type: "input_text", text: "Plan a small feature."}]
-        }
-      ]'
+      skills='- development-system:setup: Setup.
+- development-system:development-workflow: Workflow.
+- development-system:delivery: Delivery.
+- development-system:worktrees: Worktrees.
+- development-system:tasks: Tasks.
+- development-system:engineering-standards: Standards.
+- development-system:agentic-systems: Agentic systems.
+- development-system:eval-case-reporting: Eval reporting.'
+      if [ "${FAKE_CODEX_MODE:-healthy}" = "invisible-skill" ]; then
+        skills='- development-system:setup: Setup.'
+      fi
+      jq -n --arg skills "$skills" '[{
+        type:"message",
+        role:"developer",
+        content:[
+          {type:"input_text",text:"<permissions instructions>\nRead-only.\n</permissions instructions>"},
+          {type:"input_text",text:("<skills_instructions>\n## Skills\n" + $skills + "\n</skills_instructions>")},
+          {type:"input_text",text:"<plugins_instructions>\nPlugin metadata.\n</plugins_instructions>"}
+        ]
+      }]'
     fi
     ;;
   *)
@@ -226,22 +97,22 @@ teardown() {
   rm -rf "$TMPROOT"
 }
 
-@test "install adds the local marketplace and makes the quality core model-visible" {
+seed_marketplace() {
+  touch "$FAKE_CODEX_STATE/marketplace-added"
+}
+
+@test "install adds exactly the single plugin and verifies all router skills" {
   run "$RUNNER" install
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Codex quality core is installed and model-visible"* ]]
+  [[ "$output" == *"Codex Development System is installed and model-visible"* ]]
   grep -Fqx "plugin marketplace add $ROOT --json" "$FAKE_CODEX_LOG"
-  grep -Fqx "plugin add engineering-standards@ai-plugins --json" "$FAKE_CODEX_LOG"
-  grep -Fqx "plugin add development-discipline@ai-plugins --json" "$FAKE_CODEX_LOG"
-  grep -Fqx "plugin add advisor@ai-plugins --json" "$FAKE_CODEX_LOG"
+  [ "$(grep -c '^plugin add ' "$FAKE_CODEX_LOG")" -eq 1 ]
+  grep -Fqx "plugin add development-system@ai-plugins --json" "$FAKE_CODEX_LOG"
   grep -Fq "debug prompt-input" "$FAKE_CODEX_LOG"
-
-  run grep -Fq "plugin add agentic-systems-engineering@ai-plugins" "$FAKE_CODEX_LOG"
-  [ "$status" -eq 1 ]
 }
 
-@test "help does not require Codex Git or jq" {
+@test "help documents the single-plugin commands without requiring Codex" {
   help_path="$TMPROOT/help-bin"
   mkdir "$help_path"
   ln -s "$(command -v bash)" "$help_path/bash"
@@ -250,288 +121,75 @@ teardown() {
   run env PATH="$help_path" "$RUNNER" --help
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"scripts/codex-quality-core.sh install [--with-agentic]"* ]]
-  [[ "$output" == *"scripts/codex-quality-core.sh check [--with-agentic] [DOWNSTREAM]"* ]]
-  [[ "$output" != *"missing required command"* ]]
-  [[ "$output" != *"command not found"* ]]
+  [[ "$output" == *"scripts/codex-quality-core.sh install"* ]]
+  [[ "$output" != *"--with-agentic"* ]]
 }
 
-@test "agentic systems guidance is an explicit opt-in" {
-  run "$RUNNER" install --with-agentic
+@test "check reports a missing plugin without repairing it" {
+  seed_marketplace
+  run env FAKE_CODEX_MODE=missing-plugin "$RUNNER" check
 
-  [ "$status" -eq 0 ]
-  grep -Fqx "plugin add agentic-systems-engineering@ai-plugins --json" "$FAKE_CODEX_LOG"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing Codex plugin: development-system@ai-plugins"* ]]
+  ! grep -q '^plugin add ' "$FAKE_CODEX_LOG"
 }
 
-@test "an invalid command is reported before its otherwise valid option" {
-  run "$RUNNER" bogus --with-agentic
+@test "check reports stale and disabled plugin state" {
+  seed_marketplace
+  run env FAKE_CODEX_MODE=stale-plugin "$RUNNER" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"stale Codex plugin: development-system@ai-plugins"* ]]
+
+  run env FAKE_CODEX_MODE=disabled-plugin "$RUNNER" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"disabled Codex plugin: development-system@ai-plugins"* ]]
+}
+
+@test "install refuses a marketplace pointing at another checkout" {
+  seed_marketplace
+  run env FAKE_CODEX_MODE=conflicting-marketplace "$RUNNER" install
 
   [ "$status" -eq 2 ]
-  [[ "$output" == *"unknown command: bogus"* ]]
-  [[ "$output" != *"unknown option: --with-agentic"* ]]
+  [[ "$output" == *"points to a different checkout"* ]]
+  ! grep -q '^plugin add ' "$FAKE_CODEX_LOG"
 }
 
-@test "check reports a missing core plugin without attempting repair" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=missing-plugin
-
-  run "$RUNNER" check
-
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"missing Codex plugin: advisor@ai-plugins"* ]]
-  [[ "$output" == *"rerun '$RUNNER install'"* ]]
-
-  run grep -F "plugin add" "$FAKE_CODEX_LOG"
-  [ "$status" -eq 1 ]
-}
-
-@test "check reports a stale core plugin with the matching repair command" {
-  expected_advisor_version="$(jq -er '.version' "$ROOT/plugins/advisor/.codex-plugin/plugin.json")"
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=stale-plugin
-
-  run "$RUNNER" check
-
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"stale Codex plugin: advisor@ai-plugins has version 0.0.0-stale; expected $expected_advisor_version"* ]]
-  [[ "$output" == *"rerun '$RUNNER install'"* ]]
-}
-
-@test "check reports a disabled core plugin with actionable guidance" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=disabled-plugin
-
-  run "$RUNNER" check
-
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"disabled Codex plugin: advisor@ai-plugins"* ]]
-  [[ "$output" == *"rerun '$RUNNER install' to re-enable it"* ]]
-}
-
-@test "install repairs a stale plugin snapshot" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=stale-until-reinstalled
-
-  run "$RUNNER" check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"stale Codex plugin: advisor@ai-plugins"* ]]
-
-  run "$RUNNER" install
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Codex quality core is installed and model-visible"* ]]
-}
-
-@test "install re-enables a disabled plugin" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=disabled-until-reinstalled
-
-  run "$RUNNER" check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"disabled Codex plugin: advisor@ai-plugins"* ]]
-
-  run "$RUNNER" install
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Codex quality core is installed and model-visible"* ]]
-}
-
-@test "install refuses to replace a conflicting marketplace root" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=conflicting-marketplace
-
-  run "$RUNNER" install
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"configured: $FAKE_CONFLICTING_ROOT"* ]]
-  [[ "$output" == *"requested:  $ROOT"* ]]
-  [[ "$output" == *"codex plugin marketplace remove ai-plugins"* ]]
-
-  run grep -F "plugin add" "$FAKE_CODEX_LOG"
-  [ "$status" -eq 1 ]
-}
-
-@test "install rejects an incompatible marketplace schema before mutation" {
-  export FAKE_CODEX_MODE=invalid-marketplace-schema
-
-  run "$RUNNER" install
-
+@test "schema failures are distinct from missing state" {
+  seed_marketplace
+  run env FAKE_CODEX_MODE=invalid-marketplace "$RUNNER" check
   [ "$status" -eq 2 ]
   [[ "$output" == *"unsupported Codex marketplace schema"* ]]
-  run grep -E "marketplace add|plugin add" "$FAKE_CODEX_LOG"
-  [ "$status" -eq 1 ]
-}
 
-@test "install rejects ambiguous marketplace documents before mutation" {
-  export FAKE_CODEX_MODE=ambiguous-marketplace-schema
-
-  run "$RUNNER" install
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"unsupported Codex marketplace schema"* ]]
-  run grep -E "marketplace add|plugin add" "$FAKE_CODEX_LOG"
-  [ "$status" -eq 1 ]
-}
-
-@test "install rejects duplicate marketplace entries before mutation" {
-  export FAKE_CODEX_MODE=duplicate-marketplace-schema
-
-  run "$RUNNER" install
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"unsupported Codex marketplace schema"* ]]
-  run grep -E "marketplace add|plugin add" "$FAKE_CODEX_LOG"
-  [ "$status" -eq 1 ]
-}
-
-@test "install rejects an incompatible plugin-state schema before mutation" {
-  export FAKE_CODEX_MODE=invalid-plugin-schema
-
-  run "$RUNNER" install
-
+  run env FAKE_CODEX_MODE=invalid-plugin-schema "$RUNNER" check
   [ "$status" -eq 2 ]
   [[ "$output" == *"unsupported Codex plugin state schema"* ]]
-  run grep -E "marketplace add|plugin add" "$FAKE_CODEX_LOG"
+}
+
+@test "check rejects incomplete or incompatible model-visible skill registries" {
+  seed_marketplace
+  run env FAKE_CODEX_MODE=invisible-skill "$RUNNER" check
   [ "$status" -eq 1 ]
-}
+  [[ "$output" == *"installed skill is not model-visible"* ]]
 
-@test "install rejects ambiguous plugin-state documents before mutation" {
-  export FAKE_CODEX_MODE=ambiguous-plugin-schema
-
-  run "$RUNNER" install
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"unsupported Codex plugin state schema"* ]]
-  run grep -E "marketplace add|plugin add" "$FAKE_CODEX_LOG"
-  [ "$status" -eq 1 ]
-}
-
-@test "install rejects duplicate plugin-state entries before mutation" {
-  export FAKE_CODEX_MODE=duplicate-plugin-schema
-
-  run "$RUNNER" install
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"unsupported Codex plugin state schema"* ]]
-  run grep -E "marketplace add|plugin add" "$FAKE_CODEX_LOG"
-  [ "$status" -eq 1 ]
-}
-
-@test "post-install schema diagnostics do not claim the install made no changes" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=invalid-plugin-after-install
-
-  run "$RUNNER" install
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"unsupported Codex plugin state schema"* ]]
-  [[ "$output" != *"No marketplace or plugin changes were made"* ]]
-  grep -Fqx "plugin add advisor@ai-plugins --json" "$FAKE_CODEX_LOG"
-}
-
-@test "check rejects a skill mentioned outside the model-visible skills block" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=invisible-skill
-
-  run "$RUNNER" check
-
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"installed skill is not model-visible: advisor:advisor"* ]]
-  grep -Fq -- '-c developer_instructions=""' "$FAKE_CODEX_LOG"
-}
-
-@test "check distinguishes an incompatible Codex prompt schema from an invisible skill" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=incompatible-prompt-schema
-
-  run "$RUNNER" check
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"unsupported Codex prompt schema"* ]]
-  [[ "$output" == *"validated with Codex CLI 0.144.x (tested with 0.144.4)"* ]]
-  [[ "$output" != *"installed skill is not model-visible"* ]]
-}
-
-@test "check rejects ambiguous multi-document Codex prompt output" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=ambiguous-prompt-schema
-
-  run "$RUNNER" check
-
+  run env FAKE_CODEX_MODE=invalid-prompt-schema "$RUNNER" check
   [ "$status" -eq 2 ]
   [[ "$output" == *"unsupported Codex prompt schema"* ]]
 }
 
-@test "check rejects an object-shaped Codex prompt document" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=object-document-schema
+@test "check uses the caller-provided downstream repository" {
+  seed_marketplace
+  git -C "$TMPROOT" init -q downstream
 
-  run "$RUNNER" check
+  run "$RUNNER" check "$TMPROOT/downstream"
 
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"unsupported Codex prompt schema"* ]]
+  [ "$status" -eq 0 ]
+  grep -Fq -- "-C $TMPROOT/downstream" "$FAKE_CODEX_LOG"
 }
 
-@test "check rejects object-shaped Codex prompt content" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=object-content-schema
-
-  run "$RUNNER" check
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"unsupported Codex prompt schema"* ]]
-}
-
-@test "agentic check preserves the opt-in flag in repair guidance" {
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-  export FAKE_CODEX_MODE=missing-agentic
-
+@test "unknown options fail before querying Codex" {
   run "$RUNNER" check --with-agentic
 
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"missing Codex plugin: agentic-systems-engineering@ai-plugins"* ]]
-  [[ "$output" == *"rerun '$RUNNER install --with-agentic'"* ]]
-}
-
-@test "check renders plugin context in the caller's downstream repository" {
-  downstream="$TMPROOT/downstream"
-  mkdir "$downstream"
-  git -C "$downstream" init -q
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-
-  run "$RUNNER" check "$downstream"
-
-  [ "$status" -eq 0 ]
-  grep -Fq -- "-C $downstream -c developer_instructions=\"\" debug prompt-input" "$FAKE_CODEX_LOG"
-  [ -z "$(git -C "$downstream" status --short)" ]
-}
-
-@test "check accepts the downstream repository before the agentic option" {
-  downstream="$TMPROOT/downstream"
-  mkdir "$downstream"
-  git -C "$downstream" init -q
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-
-  run "$RUNNER" check "$downstream" --with-agentic
-
-  [ "$status" -eq 0 ]
-  grep -Fq -- "-C $downstream -c developer_instructions=\"\" debug prompt-input" "$FAKE_CODEX_LOG"
-}
-
-@test "check accepts the agentic option before the downstream repository" {
-  downstream="$TMPROOT/downstream"
-  mkdir "$downstream"
-  git -C "$downstream" init -q
-  touch "$FAKE_CODEX_STATE/marketplace-added"
-
-  run "$RUNNER" check --with-agentic "$downstream"
-
-  [ "$status" -eq 0 ]
-  grep -Fq -- "-C $downstream -c developer_instructions=\"\" debug prompt-input" "$FAKE_CODEX_LOG"
-}
-
-@test "check rejects an unknown option before querying Codex" {
-  run "$RUNNER" check --with-agenti
-
   [ "$status" -eq 2 ]
-  [[ "$output" == *"unknown option: --with-agenti"* ]]
+  [[ "$output" == *"unknown option: --with-agentic"* ]]
   [ ! -s "$FAKE_CODEX_LOG" ]
 }

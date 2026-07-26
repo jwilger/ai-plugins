@@ -20,26 +20,26 @@
 
 ## Files
 
-- Create: `plugins/agentic-systems-engineering/.claude-plugin/plugin.json`
-- Create: `plugins/agentic-systems-engineering/.codex-plugin/plugin.json`
-- Create: `plugins/agentic-systems-engineering/.mcp.json`
-- Create: `plugins/agentic-systems-engineering/README.md`
-- Create: `plugins/agentic-systems-engineering/skills/agentic-systems-engineering/SKILL.md`
-- Create: `plugins/agentic-systems-engineering/skills/evaluate-stochastic-systems/SKILL.md`
-- Create: `plugins/agentic-systems-engineering/skills/scaffold-agentic-evals/SKILL.md`
-- Create: `plugins/agentic-systems-engineering/skills/agentic-delivery/SKILL.md`
-- Create: `plugins/agentic-systems-engineering/skills/*/references/*.md`
-- Create: `plugins/eval-case-reporter/.claude-plugin/plugin.json`
-- Create: `plugins/eval-case-reporter/.codex-plugin/plugin.json`
-- Create: `plugins/eval-case-reporter/README.md`
-- Create: `plugins/eval-case-reporter/skills/submit-eval-case/SKILL.md`
-- Create: `plugins/eval-case-reporter/skills/submit-eval-case/references/scrubbing.md`
+- Create: `plugins/development-system/components/agentic-systems-engineering/.claude-plugin/plugin.json`
+- Create: `plugins/development-system/components/agentic-systems-engineering/.codex-plugin/plugin.json`
+- Create: `plugins/development-system/components/agentic-systems-engineering/.mcp.json`
+- Create: `plugins/development-system/components/agentic-systems-engineering/README.md`
+- Create: `plugins/development-system/components/agentic-systems-engineering/skills/agentic-systems-engineering/SKILL.md`
+- Create: `plugins/development-system/components/agentic-systems-engineering/skills/evaluate-stochastic-systems/SKILL.md`
+- Create: `plugins/development-system/components/agentic-systems-engineering/skills/scaffold-agentic-evals/SKILL.md`
+- Create: `plugins/development-system/components/agentic-systems-engineering/skills/agentic-delivery/SKILL.md`
+- Create: `plugins/development-system/components/agentic-systems-engineering/skills/*/references/*.md`
+- Create: `plugins/development-system/components/eval-case-reporter/.claude-plugin/plugin.json`
+- Create: `plugins/development-system/components/eval-case-reporter/.codex-plugin/plugin.json`
+- Create: `plugins/development-system/components/eval-case-reporter/README.md`
+- Create: `plugins/development-system/components/eval-case-reporter/skills/submit-eval-case/SKILL.md`
+- Create: `plugins/development-system/components/eval-case-reporter/skills/submit-eval-case/references/scrubbing.md`
 - Modify: `.claude-plugin/marketplace.json`
 - Modify: `.agents/plugins/marketplace.json`
 - Modify: `README.md`
 - Modify: `.gitignore`
-- Modify: `plugins/engineering-standards/skills/engineering-standards/SKILL.md`
-- Modify: `plugins/engineering-standards/README.md`
+- Modify: `plugins/development-system/components/engineering-standards/skills/engineering-standards/SKILL.md`
+- Modify: `plugins/development-system/components/engineering-standards/README.md`
 - Create: `.github/ISSUE_TEMPLATE/config.yml`
 - Create: `.github/ISSUE_TEMPLATE/eval-case.yml`
 - Create: `evals/fixtures/agentic-systems-engineering/cases.json`

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-plugin_root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/advisor" && pwd)"}"
+plugin_root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/development-system/components/advisor" && pwd)"}"
 agent="$plugin_root/agents/advisor.toml"
 skill="$plugin_root/skills/advisor/SKILL.md"
 

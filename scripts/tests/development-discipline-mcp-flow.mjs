@@ -381,7 +381,7 @@ const routingRiskArguments = {
   scope: "base",
   project_root: routingRoot,
   harness: "codex",
-  changed_files: ["plugins/development-discipline/rust/src/main.rs"],
+  changed_files: ["plugins/development-system/components/development-discipline/rust/src/main.rs"],
   diff_hash: "routing",
   shared_test_evidence: sharedTestEvidence(
     "tests-bats-codex-routing",

@@ -538,16 +538,16 @@ NODE
 @test "Codex home preparation supports a skills-only marketplace cache" {
   temp_root="$(mktemp -d)"
   eval_home="$temp_root/codex-home"
-  plugin_home="$eval_home/plugins/cache/ai-plugins/agentic-systems-engineering"
+  plugin_home="$eval_home/plugins/cache/ai-plugins/development-system"
 
   run env OPENAI_API_KEY=fixture node \
     "$ROOT/scripts/evals/prepare-codex-home.mjs" \
     "$eval_home" \
     --plugin-mode skills-only-marketplace \
-    --plugins agentic-systems-engineering,development-discipline
+    --plugins development-system
 
   [ "$status" -eq 0 ]
-  version="$(jq -r '.version' "$ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
   cached_plugin="$plugin_home/$version"
   [ -f "$cached_plugin/.codex-plugin/plugin.json" ]
   [ -d "$cached_plugin/skills" ]
@@ -555,11 +555,8 @@ NODE
   [ ! -e "$cached_plugin/bin" ]
   [ ! -e "$cached_plugin/.claude-plugin" ]
   [ ! -e "$cached_plugin/README.md" ]
-  [ "$(grep -c '^\[plugins\.' "$eval_home/config.toml")" -eq 2 ]
-  [ -d "$eval_home/plugins/cache/ai-plugins/development-discipline" ]
-  [ ! -e "$eval_home/plugins/cache/ai-plugins/advisor" ]
-  ! grep -q 'advisor@ai-plugins' "$eval_home/config.toml"
-  grep -q '\[plugins\."agentic-systems-engineering@ai-plugins"\]' "$eval_home/config.toml"
+  [ "$(grep -c '^\[plugins\.' "$eval_home/config.toml")" -eq 1 ]
+  grep -q '\[plugins\."development-system@ai-plugins"\]' "$eval_home/config.toml"
 
   rm -rf "$temp_root"
 }
@@ -659,7 +656,7 @@ NODE
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 2 ]
   [[ "$output" == *"$skills_home --plugin-mode skills-only-marketplace"* ]]
-  [[ "$output" == *"--plugins agentic-systems-engineering\\,development-discipline"* ]]
+  [[ "$output" == *"--plugins development-system"* ]]
   [[ "$output" == *"$no_plugins_home --plugin-mode no-plugins"* ]]
   [[ "$output" == *"$out_root/execution/results.json"* ]]
   [[ "$output" == *"--max-concurrency 2"* ]]
@@ -1110,8 +1107,8 @@ NODE
   fake_promptfoo="$temp_root/promptfoo"
   marker="$temp_root/promptfoo-invoked"
   execution_artifact="$temp_root/execution-results.json"
-  expected_plugin="agentic-systems-engineering"
-  agentic_version="$(jq -r '.version' "$ROOT/plugins/agentic-systems-engineering/.codex-plugin/plugin.json")"
+  expected_plugin="development-system"
+  agentic_version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
   write_execution_artifact \
     "$execution_artifact" \
     "$skills_home" \
@@ -1123,13 +1120,9 @@ NODE
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
     'grep -q "\\[plugins\\.\\\"${EXPECTED_PLUGIN}@ai-plugins\\\"\\]" "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml"' \
-    'grep -q "\\[plugins\\.\\\"development-discipline@ai-plugins\\\"\\]" "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml"' \
-    '[ "$(grep -c "^\\[plugins\\." "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml")" -eq 2 ]' \
+    '[ "$(grep -c "^\\[plugins\\." "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml")" -eq 1 ]' \
     '[ -d "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/$EXPECTED_PLUGIN" ]' \
-    '[ -d "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/development-discipline" ]' \
-    '[ ! -e "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/advisor" ]' \
-    '! grep -q "advisor@ai-plugins" "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml"' \
-    '[ ! -e "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/agentic-systems-engineering/$AGENTIC_VERSION/.mcp.json" ]' \
+    '[ ! -e "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/development-system/$AGENTIC_VERSION/.mcp.json" ]' \
     '! grep -q "^\\[plugins\\." "$CODEX_EVAL_HOME_NO_PLUGINS/config.toml"' \
     '[ -d "$GPT56_BENCHMARK_WORKSPACE" ]' \
     'mkdir -p "$EVAL_OUT_DIR"' \
@@ -1170,10 +1163,7 @@ const loadCases = require(path.join(root, 'evals/benchmarks/gpt-5.6-model-family
 const cases = loadCases();
 
 const standardPluginNames = loadCases.standardPluginNames?.();
-const expectedStandardPluginNames = [
-  'agentic-systems-engineering',
-  'development-discipline',
-];
+const expectedStandardPluginNames = ['development-system'];
 if (JSON.stringify(standardPluginNames) !== JSON.stringify(expectedStandardPluginNames)) {
   throw new Error(`unexpected standard plugin scope: ${JSON.stringify(standardPluginNames)}`);
 }
