@@ -93,11 +93,7 @@ fn task_reads_and_writes_work_from_a_coordination_only_primary_checkout() {
     let create = repo.tiber(["create", "Created from coordination checkout"]);
 
     assert_success_ref(&create);
-    task_stem(
-        &repo,
-        "backlog",
-        "created-from-coordination-checkout",
-    );
+    task_stem(&repo, "backlog", "created-from-coordination-checkout");
 }
 
 #[test]

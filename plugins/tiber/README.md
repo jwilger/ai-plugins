@@ -34,6 +34,12 @@ tiber sync
 `tiber init` is explicit. Installing the plugin or starting an agent session does
 not mutate the repository.
 
+Tiber task reads and writes also work from a coordination-only primary checkout
+when Git cannot report a normal worktree but the repository declares its source
+root through `core.worktree`. Relative values are resolved from the Git
+directory. A true bare repository or another context without an explicit
+worktree root is refused with actionable repository-context guidance.
+
 For Codex sandboxed sessions, preview the narrow host-access setup before
 granting broad permissions:
 
@@ -294,7 +300,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.15.0` Codex plugin cache
+when that variable is set, or from the exact `tiber/0.15.1` Codex plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another

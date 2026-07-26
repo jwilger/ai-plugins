@@ -39,6 +39,11 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 ## Rules
 
 - Never mutate a repo merely because the plugin is installed or a session starts.
+- Task reads and writes may run from a coordination-only primary checkout when
+  Git reports it as bare but explicitly declares the source root through
+  `core.worktree`; relative values resolve from the Git directory. Refuse a true
+  bare repository or another context without an explicit worktree root with
+  actionable repository-context guidance.
 - Run `tiber init` only for explicit setup or when a requested task operation
   needs an initialized board, and only after confirming the source checkout has
   no root `.tasks` path. A root `.tasks` path is an existing task system, never
