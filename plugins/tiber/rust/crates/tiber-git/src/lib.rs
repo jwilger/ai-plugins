@@ -23,6 +23,12 @@ const DEFAULT_LOCK_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
 const DEFAULT_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const CONFIG_FILE: &str = ".tiber.toml";
 const MAX_SYNC_ATTEMPTS: usize = 8;
+const CI_RECOVERY_BRANCH: &str = "tiber-coordination";
+const CI_RECOVERY_LOCAL_REF: &str = "refs/heads/tiber-coordination";
+const CI_RECOVERY_REMOTE_REF: &str = "refs/remotes/origin/tiber-coordination";
+const CI_RECOVERY_LEASE_SECONDS: u64 = 60 * 60;
+const CI_RECOVERY_GIT_TIMEOUT: Duration = Duration::from_secs(10);
+const CI_RECOVERY_TEXT_MAX_BYTES: usize = 16 * 1024;
 
 pub fn init_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
@@ -48,6 +54,108 @@ pub struct DashboardStartupLock {
 pub fn init_repository_at(root: impl Into<PathBuf>) -> Result<(), Error> {
     let repo = GitRepository::at(root);
     repo.init_repository()
+}
+
+pub fn claim_ci_recovery(input: CiRecoveryTrigger) -> Result<CiRecoveryClaim, Error> {
+    let repo = GitRepository::discover()?;
+    repo.claim_ci_recovery(input)
+}
+
+pub fn assert_ci_recovery_owner(
+    incident_id: &str,
+    epoch: u64,
+) -> Result<CiRecoveryAssertion, Error> {
+    let repo = GitRepository::discover()?;
+    repo.assert_ci_recovery_owner(incident_id, epoch)
+}
+
+pub fn transfer_ci_recovery(
+    incident_id: &str,
+    epoch: u64,
+    to_host: &str,
+    to_session: &str,
+) -> Result<CiRecoveryTransfer, Error> {
+    let repo = GitRepository::discover()?;
+    repo.transfer_ci_recovery(incident_id, epoch, to_host, to_session)
+}
+
+pub fn takeover_ci_recovery(incident_id: &str, epoch: u64) -> Result<CiRecoveryTransfer, Error> {
+    let repo = GitRepository::discover()?;
+    repo.takeover_ci_recovery(incident_id, epoch)
+}
+
+pub fn assign_ci_recovery(
+    incident_id: &str,
+    epoch: u64,
+    input: CiRecoveryAssignmentInput,
+) -> Result<CiRecoveryAssignmentResult, Error> {
+    let repo = GitRepository::discover()?;
+    repo.assign_ci_recovery(incident_id, epoch, input)
+}
+
+pub fn report_ci_recovery(
+    incident_id: &str,
+    assignment_id: &str,
+    summary: &str,
+    evidence: &str,
+) -> Result<CiRecoveryAssignmentResult, Error> {
+    let repo = GitRepository::discover()?;
+    repo.report_ci_recovery(incident_id, assignment_id, summary, evidence)
+}
+
+pub fn heartbeat_ci_recovery(incident_id: &str, epoch: u64) -> Result<CiRecoveryAssertion, Error> {
+    let repo = GitRepository::discover()?;
+    repo.heartbeat_ci_recovery(incident_id, epoch)
+}
+
+pub fn wait_for_ci_recovery(
+    incident_id: &str,
+    epoch: u64,
+    timeout_seconds: u64,
+) -> Result<CiRecoveryWait, Error> {
+    let repo = GitRepository::discover()?;
+    repo.wait_for_ci_recovery(incident_id, epoch, timeout_seconds)
+}
+
+pub fn diagnose_ci_recovery(
+    incident_id: &str,
+    epoch: u64,
+    record: CiRecoveryDiagnosisInput,
+) -> Result<CiRecoveryStatus, Error> {
+    let repo = GitRepository::discover()?;
+    repo.diagnose_ci_recovery(incident_id, epoch, record)
+}
+
+pub fn choose_ci_recovery_action(
+    incident_id: &str,
+    epoch: u64,
+    kind: &str,
+    description: &str,
+) -> Result<CiRecoveryStatus, Error> {
+    let repo = GitRepository::discover()?;
+    repo.choose_ci_recovery_action(incident_id, epoch, kind, description)
+}
+
+pub fn record_ci_recovery_replacement(
+    incident_id: &str,
+    epoch: u64,
+    replacement: CiRecoveryReplacementInput,
+) -> Result<CiRecoveryStatus, Error> {
+    let repo = GitRepository::discover()?;
+    repo.record_ci_recovery_replacement(incident_id, epoch, replacement)
+}
+
+pub fn resolve_ci_recovery(
+    incident_id: &str,
+    proof: CiRecoveryReleaseInput,
+) -> Result<CiRecoveryStatus, Error> {
+    let repo = GitRepository::discover()?;
+    repo.resolve_ci_recovery(incident_id, proof)
+}
+
+pub fn ci_recovery_status() -> Result<CiRecoveryStatus, Error> {
+    let repo = GitRepository::discover()?;
+    repo.ci_recovery_status()
 }
 
 pub fn create_task_at(root: impl Into<PathBuf>, title: &str) -> Result<TaskPath, Error> {
@@ -122,6 +230,1220 @@ impl GitRepository {
         self.ensure_tasks_branch()?;
         self.ignore_local_tasks_in_source_gitignore()?;
         Ok(())
+    }
+
+    fn claim_ci_recovery(&self, input: CiRecoveryTrigger) -> Result<CiRecoveryClaim, Error> {
+        let _lock = self.acquire_lock()?;
+        let participant = ci_recovery_participant()?;
+        let input = CiRecoveryTrigger {
+            run_id: required_ci_recovery_text("run_id", &input.run_id)?,
+            run_url: required_ci_recovery_text("run_url", &input.run_url)?,
+            failed_sha: required_ci_recovery_text("failed_sha", &input.failed_sha)?,
+            workflow: required_ci_recovery_text("workflow", &input.workflow)?,
+            git_ref: required_ci_recovery_text("git_ref", &input.git_ref)?,
+        };
+
+        for attempt in 1..=MAX_SYNC_ATTEMPTS {
+            let remote_parent = self.fetch_coordination_branch()?;
+            let active_state = self.read_active_ci_recovery(remote_parent.as_deref())?;
+            if remote_parent.is_some() && active_state.is_none() {
+                return Err(Error::Parse(
+                    "ci_recovery_coordination_ref_invalid active_json=missing mutation=false"
+                        .to_string(),
+                ));
+            }
+            if let Some(mut state) = active_state {
+                if state.state != "resolved" {
+                    let role = if state.owner == participant {
+                        CiRecoveryRole::Owner
+                    } else {
+                        CiRecoveryRole::Waiting
+                    };
+                    let mut changed = false;
+                    if state.triggers.is_empty() {
+                        state.triggers.push(state.trigger.clone());
+                    }
+                    if !state.triggers.contains(&input) {
+                        let matches_failed_replacement =
+                            state.replacement.as_ref().is_some_and(|replacement| {
+                                replacement.status == "failed"
+                                    && replacement.run_id == input.run_id
+                                    && replacement.run_url == input.run_url
+                                    && replacement.sha == input.failed_sha
+                            });
+                        if !matches_failed_replacement {
+                            return Err(Error::Parse(format!(
+                                "ci_recovery_distinct_trigger_requires_separate_incident active_incident_id={}",
+                                state.incident_id
+                            )));
+                        }
+                        state.trigger = input.clone();
+                        state.triggers.push(input.clone());
+                        changed = true;
+                    }
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant.clone());
+                        changed = true;
+                    }
+                    if !changed {
+                        return Ok(CiRecoveryClaim::from_state(state, role));
+                    }
+                    match self.push_ci_recovery_state(
+                        &state,
+                        remote_parent.as_deref(),
+                        "Join CI recovery",
+                    ) {
+                        Ok(()) => {
+                            return Ok(CiRecoveryClaim::from_state(state, role));
+                        }
+                        Err(error)
+                            if is_retryable_push_failure(&error) && attempt < MAX_SYNC_ATTEMPTS =>
+                        {
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+
+            let now = unix_timestamp()?;
+            let state = CiRecoveryState {
+                schema_version: 1,
+                incident_id: ci_recovery_incident_id(&input.run_id),
+                state: "diagnosing".to_string(),
+                epoch: 1,
+                trigger: input.clone(),
+                triggers: vec![input.clone()],
+                owner: participant.clone(),
+                lease_expires_at: now.saturating_add(CI_RECOVERY_LEASE_SECONDS),
+                participants: vec![participant.clone()],
+                assignments: Vec::new(),
+                failure_record: None,
+                diagnosis: None,
+                next_action: None,
+                replacement: None,
+                release_proof: None,
+            };
+            let state_json = serde_json::to_string_pretty(&state).map_err(|error| {
+                Error::Parse(format!("ci_recovery_state_json_invalid source={error}"))
+            })?;
+            let blob = self.git_with_stdin(["hash-object", "-w", "--stdin"], &state_json)?;
+            let tree = self.git_with_stdin(
+                ["mktree"],
+                &format!("100644 blob {}\tactive.json\n", blob.trim()),
+            )?;
+            let commit = self.commit_tree(
+                tree.trim(),
+                remote_parent.as_deref().map(str::trim),
+                "Claim CI recovery",
+            )?;
+            let refspec = format!("{}:refs/heads/{CI_RECOVERY_BRANCH}", commit.trim());
+            match self.git_with_timeout(
+                ["-c", "core.hooksPath=/dev/null", "push", "origin", &refspec],
+                CI_RECOVERY_GIT_TIMEOUT,
+            ) {
+                Ok(_) => {
+                    self.git(["update-ref", CI_RECOVERY_LOCAL_REF, commit.trim()])?;
+                    return Ok(CiRecoveryClaim::from_state(state, CiRecoveryRole::Owner));
+                }
+                Err(error)
+                    if (is_retryable_push_failure(&error)
+                        || is_coordination_branch_creation_race(&error))
+                        && attempt < MAX_SYNC_ATTEMPTS =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("CI recovery claim attempts always return")
+    }
+
+    fn assert_ci_recovery_owner(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+    ) -> Result<CiRecoveryAssertion, Error> {
+        let _lock = self.acquire_lock()?;
+        let participant = ci_recovery_participant()?;
+        let coordination_ref = self
+            .fetch_coordination_branch()?
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".to_string()))?;
+        let state = self
+            .read_active_ci_recovery(Some(&coordination_ref))?
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".to_string()))?;
+        if state.incident_id != incident_id {
+            return Err(Error::Parse(format!(
+                "ci_recovery_incident_mismatch expected={} actual={incident_id}",
+                state.incident_id
+            )));
+        }
+        if state.epoch != epoch {
+            return Err(Error::Parse(format!(
+                "ci_recovery_stale_epoch expected={} actual={epoch}",
+                state.epoch
+            )));
+        }
+        if state.owner != participant {
+            return Err(Error::Parse(format!(
+                "ci_recovery_not_owner incident_id={} epoch={}",
+                state.incident_id, state.epoch
+            )));
+        }
+        ensure_ci_recovery_lease_active(&state, unix_timestamp()?)?;
+        Ok(CiRecoveryAssertion {
+            allowed: true,
+            incident_id: state.incident_id,
+            epoch: state.epoch,
+            lease_expires_at: state.lease_expires_at,
+        })
+    }
+
+    fn transfer_ci_recovery(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+        to_host: &str,
+        to_session: &str,
+    ) -> Result<CiRecoveryTransfer, Error> {
+        let _lock = self.acquire_lock()?;
+        let caller = ci_recovery_participant()?;
+        let recipient = ci_recovery_participant_from(to_host, to_session)?;
+
+        for attempt in 1..=MAX_SYNC_ATTEMPTS {
+            let parent = self.fetch_coordination_branch()?.ok_or_else(|| {
+                Error::Parse("ci_recovery_incident_missing active=false".to_string())
+            })?;
+            let mut state = self
+                .read_active_ci_recovery(Some(&parent))?
+                .ok_or_else(|| {
+                    Error::Parse("ci_recovery_incident_missing active=false".to_string())
+                })?;
+            ensure_ci_recovery_owner(&state, incident_id, epoch, &caller)?;
+            ensure_ci_recovery_not_resolved(&state)?;
+            ensure_ci_recovery_lease_active(&state, unix_timestamp()?)?;
+            state.owner = recipient.clone();
+            if !state.participants.contains(&recipient) {
+                state.participants.push(recipient.clone());
+            }
+            state.epoch = state.epoch.saturating_add(1);
+            state.lease_expires_at = unix_timestamp()?.saturating_add(CI_RECOVERY_LEASE_SECONDS);
+
+            match self.push_ci_recovery_state(&state, Some(&parent), "Transfer CI recovery") {
+                Ok(()) => {
+                    return Ok(CiRecoveryTransfer {
+                        incident_id: state.incident_id,
+                        epoch: state.epoch,
+                        lease_expires_at: state.lease_expires_at,
+                    });
+                }
+                Err(error) if is_retryable_push_failure(&error) && attempt < MAX_SYNC_ATTEMPTS => {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("CI recovery transfer attempts always return")
+    }
+
+    fn takeover_ci_recovery(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+    ) -> Result<CiRecoveryTransfer, Error> {
+        let _lock = self.acquire_lock()?;
+        let successor = ci_recovery_participant()?;
+
+        for attempt in 1..=MAX_SYNC_ATTEMPTS {
+            let parent = self.fetch_coordination_branch()?.ok_or_else(|| {
+                Error::Parse("ci_recovery_incident_missing active=false".to_string())
+            })?;
+            let mut state = self
+                .read_active_ci_recovery(Some(&parent))?
+                .ok_or_else(|| {
+                    Error::Parse("ci_recovery_incident_missing active=false".to_string())
+                })?;
+            ensure_ci_recovery_incident_epoch(&state, incident_id, epoch)?;
+            ensure_ci_recovery_not_resolved(&state)?;
+            if state.owner == successor {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_already_owner incident_id={} epoch={}",
+                    state.incident_id, state.epoch
+                )));
+            }
+            let now = unix_timestamp()?;
+            if state.lease_expires_at > now {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_lease_active incident_id={} epoch={} expires_at={}",
+                    state.incident_id, state.epoch, state.lease_expires_at
+                )));
+            }
+            state.owner = successor.clone();
+            if !state.participants.contains(&successor) {
+                state.participants.push(successor.clone());
+            }
+            state.epoch = state.epoch.saturating_add(1);
+            state.lease_expires_at = now.saturating_add(CI_RECOVERY_LEASE_SECONDS);
+
+            match self.push_ci_recovery_state(&state, Some(&parent), "Take over CI recovery") {
+                Ok(()) => {
+                    return Ok(CiRecoveryTransfer {
+                        incident_id: state.incident_id,
+                        epoch: state.epoch,
+                        lease_expires_at: state.lease_expires_at,
+                    });
+                }
+                Err(error) if is_retryable_push_failure(&error) && attempt < MAX_SYNC_ATTEMPTS => {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("CI recovery takeover attempts always return")
+    }
+
+    fn assign_ci_recovery(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+        input: CiRecoveryAssignmentInput,
+    ) -> Result<CiRecoveryAssignmentResult, Error> {
+        let caller = ci_recovery_participant()?;
+        let assignee = ci_recovery_participant_from(&input.to_host, &input.to_session)?;
+        let capabilities = input
+            .capabilities
+            .split(',')
+            .map(str::trim)
+            .filter(|capability| !capability.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if capabilities.is_empty()
+            || capabilities.iter().any(|capability| {
+                !matches!(
+                    capability.as_str(),
+                    "inspect" | "reproduce" | "edit" | "test"
+                )
+            })
+        {
+            return Err(Error::Parse(
+                "ci_recovery_capability_invalid allowed=inspect,reproduce,edit,test".to_string(),
+            ));
+        }
+        let scope = required_ci_recovery_text("assignment_scope", &input.scope)?;
+        self.mutate_ci_recovery("Assign CI recovery helper", |state, now| {
+            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
+            ensure_ci_recovery_lease_active(state, now)?;
+            if !state.participants.contains(&assignee) {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_assignee_not_joined host={} session={}",
+                    assignee.host, assignee.session
+                )));
+            }
+            let assignment_id = format!("a{}", state.assignments.len().saturating_add(1));
+            state.assignments.push(CiRecoveryAssignment {
+                id: assignment_id.clone(),
+                owner_epoch: state.epoch,
+                assignee: assignee.clone(),
+                capabilities: capabilities.clone(),
+                scope: scope.clone(),
+                report: None,
+            });
+            Ok(CiRecoveryAssignmentResult {
+                incident_id: state.incident_id.clone(),
+                assignment_id,
+                epoch: state.epoch,
+            })
+        })
+    }
+
+    fn report_ci_recovery(
+        &self,
+        incident_id: &str,
+        assignment_id: &str,
+        summary: &str,
+        evidence: &str,
+    ) -> Result<CiRecoveryAssignmentResult, Error> {
+        let caller = ci_recovery_participant()?;
+        let summary = required_ci_recovery_text("assignment_summary", summary)?;
+        let evidence = required_ci_recovery_text("assignment_evidence", evidence)?;
+        self.mutate_ci_recovery("Report CI recovery helper result", |state, _now| {
+            if state.incident_id != incident_id {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_incident_mismatch expected={} actual={incident_id}",
+                    state.incident_id
+                )));
+            }
+            let assignment = state
+                .assignments
+                .iter_mut()
+                .find(|assignment| assignment.id == assignment_id)
+                .ok_or_else(|| {
+                    Error::Parse(format!(
+                        "ci_recovery_assignment_missing assignment_id={assignment_id}"
+                    ))
+                })?;
+            if assignment.owner_epoch != state.epoch {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_assignment_stale assignment_epoch={} active_epoch={}",
+                    assignment.owner_epoch, state.epoch
+                )));
+            }
+            if assignment.assignee != caller {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_assignment_not_assignee assignment_id={assignment_id}"
+                )));
+            }
+            assignment.report = Some(CiRecoveryReport {
+                summary: summary.clone(),
+                evidence: evidence.clone(),
+            });
+            Ok(CiRecoveryAssignmentResult {
+                incident_id: state.incident_id.clone(),
+                assignment_id: assignment_id.to_string(),
+                epoch: state.epoch,
+            })
+        })
+    }
+
+    fn heartbeat_ci_recovery(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+    ) -> Result<CiRecoveryAssertion, Error> {
+        let caller = ci_recovery_participant()?;
+        self.mutate_ci_recovery("Renew CI recovery lease", |state, now| {
+            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
+            ensure_ci_recovery_lease_active(state, now)?;
+            state.lease_expires_at = now.saturating_add(CI_RECOVERY_LEASE_SECONDS);
+            Ok(CiRecoveryAssertion {
+                allowed: true,
+                incident_id: state.incident_id.clone(),
+                epoch: state.epoch,
+                lease_expires_at: state.lease_expires_at,
+            })
+        })
+    }
+
+    fn wait_for_ci_recovery(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+        timeout_seconds: u64,
+    ) -> Result<CiRecoveryWait, Error> {
+        if timeout_seconds > 60 {
+            return Err(Error::Parse(
+                "ci_recovery_wait_timeout_invalid maximum_seconds=60".to_string(),
+            ));
+        }
+        let participant = ci_recovery_participant()?;
+        if timeout_seconds == 0 {
+            return Ok(CiRecoveryWait::timeout(incident_id, epoch));
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(timeout_seconds);
+        let mut last_state = None;
+        loop {
+            if let Some(state) = last_state.as_ref() {
+                if std::time::Instant::now() >= deadline {
+                    return Ok(CiRecoveryWait::from_state(state, "timeout", None));
+                }
+            }
+            let _lock = match self.try_acquire_task_lock_once() {
+                Ok(lock) => lock,
+                Err(error) if is_tiber_lock_busy(&error) => {
+                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                    if remaining.is_zero() {
+                        return Ok(last_state
+                            .as_ref()
+                            .map(|state| CiRecoveryWait::from_state(state, "timeout", None))
+                            .unwrap_or_else(|| CiRecoveryWait::timeout(incident_id, epoch)));
+                    }
+                    std::thread::sleep(Duration::from_millis(50).min(remaining));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let state = {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
+                    return Ok(last_state
+                        .as_ref()
+                        .map(|state| CiRecoveryWait::from_state(state, "timeout", None))
+                        .unwrap_or_else(|| CiRecoveryWait::timeout(incident_id, epoch)));
+                }
+                let parent = self
+                    .fetch_coordination_branch_with_timeout(remaining.min(Duration::from_secs(10)))?
+                    .ok_or_else(|| {
+                        Error::Parse("ci_recovery_incident_missing active=false".to_string())
+                    })?;
+                self.read_active_ci_recovery(Some(&parent))?
+                    .ok_or_else(|| {
+                        Error::Parse("ci_recovery_incident_missing active=false".to_string())
+                    })?
+            };
+            if state.incident_id != incident_id {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_incident_mismatch expected={} actual={incident_id}",
+                    state.incident_id
+                )));
+            }
+            if !state.participants.contains(&participant) {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_participant_required incident_id={incident_id}"
+                )));
+            }
+            if state.epoch != epoch {
+                return Ok(CiRecoveryWait::from_state(&state, "epoch-changed", None));
+            }
+            if state.state == "resolved" {
+                return Ok(CiRecoveryWait::from_state(&state, "resolved", None));
+            }
+            if let Some(assignment) = state.assignments.iter().find(|assignment| {
+                assignment.owner_epoch == state.epoch && assignment.assignee == participant
+            }) {
+                return Ok(CiRecoveryWait::from_state(
+                    &state,
+                    "assignment",
+                    Some(assignment.id.clone()),
+                ));
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(CiRecoveryWait::from_state(&state, "timeout", None));
+            }
+            last_state = Some(state);
+            drop(_lock);
+            ci_recovery_signal_wait_ready()?;
+            std::thread::sleep(
+                Duration::from_millis(250)
+                    .min(deadline.saturating_duration_since(std::time::Instant::now())),
+            );
+        }
+    }
+
+    fn diagnose_ci_recovery(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+        record: CiRecoveryDiagnosisInput,
+    ) -> Result<CiRecoveryStatus, Error> {
+        let caller = ci_recovery_participant()?;
+        let classification = parse_ci_recovery_choice(
+            "classification",
+            &record.classification,
+            &["caused", "unrelated", "transient"],
+        )?;
+        let job = required_ci_recovery_text("job", &record.job)?;
+        let step = required_ci_recovery_text("step", &record.step)?;
+        let log_evidence = required_ci_recovery_text("log_evidence", &record.log_evidence)?;
+        let cause = required_ci_recovery_text("cause", &record.cause)?;
+        self.mutate_ci_recovery("Diagnose CI recovery", |state, now| {
+            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
+            ensure_ci_recovery_lease_active(state, now)?;
+            state.failure_record = Some(CiRecoveryFailureRecord {
+                job: job.clone(),
+                step: step.clone(),
+                log_evidence: log_evidence.clone(),
+            });
+            state.diagnosis = Some(CiRecoveryDiagnosis {
+                cause: cause.clone(),
+                classification: classification.clone(),
+            });
+            state.next_action = None;
+            state.replacement = None;
+            state.release_proof = None;
+            state.state = "diagnosing".to_string();
+            Ok(CiRecoveryStatus::from_state(state))
+        })
+    }
+
+    fn choose_ci_recovery_action(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+        kind: &str,
+        description: &str,
+    ) -> Result<CiRecoveryStatus, Error> {
+        let caller = ci_recovery_participant()?;
+        let kind = parse_ci_recovery_choice("action", kind, &["repair", "rerun"])?;
+        let description = required_ci_recovery_text("description", description)?;
+        self.mutate_ci_recovery("Choose CI recovery action", |state, now| {
+            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
+            ensure_ci_recovery_lease_active(state, now)?;
+            let diagnosis = state
+                .diagnosis
+                .as_ref()
+                .ok_or_else(|| Error::Parse("ci_recovery_diagnosis_required=true".to_string()))?;
+            let permitted = matches!(
+                (diagnosis.classification.as_str(), kind.as_str()),
+                ("caused", "repair") | ("unrelated", "rerun") | ("transient", "rerun")
+            );
+            if !permitted {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_action_conflicts classification={} action={kind}",
+                    diagnosis.classification
+                )));
+            }
+            state.next_action = Some(CiRecoveryAction {
+                kind: kind.clone(),
+                description: description.clone(),
+            });
+            state.state = "action-selected".to_string();
+            Ok(CiRecoveryStatus::from_state(state))
+        })
+    }
+
+    fn record_ci_recovery_replacement(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+        replacement: CiRecoveryReplacementInput,
+    ) -> Result<CiRecoveryStatus, Error> {
+        let caller = ci_recovery_participant()?;
+        let status = parse_ci_recovery_choice(
+            "replacement_status",
+            &replacement.status,
+            &["queued", "running", "failed"],
+        )?;
+        let run_id = required_ci_recovery_text("replacement_run_id", &replacement.run_id)?;
+        let run_url = required_ci_recovery_text("replacement_run_url", &replacement.run_url)?;
+        let sha = required_ci_recovery_text("replacement_sha", &replacement.sha)?;
+        self.mutate_ci_recovery("Record CI replacement", |state, now| {
+            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
+            ensure_ci_recovery_lease_active(state, now)?;
+            if state.next_action.is_none() {
+                return Err(Error::Parse(
+                    "ci_recovery_next_action_required=true".to_string(),
+                ));
+            }
+            if state
+                .next_action
+                .as_ref()
+                .is_some_and(|action| action.kind == "rerun")
+                && sha != state.trigger.failed_sha
+            {
+                return Err(Error::Parse(
+                    "ci_recovery_rerun_sha_mismatch expected=failed_sha".to_string(),
+                ));
+            }
+            state.replacement = Some(CiRecoveryReplacement {
+                run_id: run_id.clone(),
+                run_url: run_url.clone(),
+                sha: sha.clone(),
+                status: status.clone(),
+            });
+            if status == "failed" {
+                state.state = "diagnosing".to_string();
+                state.failure_record = None;
+                state.diagnosis = None;
+                state.next_action = None;
+            } else {
+                state.state = "waiting-ci".to_string();
+            }
+            Ok(CiRecoveryStatus::from_state(state))
+        })
+    }
+
+    fn resolve_ci_recovery(
+        &self,
+        incident_id: &str,
+        proof: CiRecoveryReleaseInput,
+    ) -> Result<CiRecoveryStatus, Error> {
+        let participant = ci_recovery_participant()?;
+        if proof.terminal_status != "success" {
+            return Err(Error::Parse(format!(
+                "ci_recovery_terminal_success_required actual={}",
+                proof.terminal_status
+            )));
+        }
+        let replacement_run_id =
+            required_ci_recovery_text("replacement_run_id", &proof.replacement_run_id)?;
+        let replacement_run_url =
+            required_ci_recovery_text("replacement_run_url", &proof.replacement_run_url)?;
+        let sha = required_ci_recovery_text("replacement_sha", &proof.sha)?;
+        self.mutate_ci_recovery("Resolve CI recovery", |state, _now| {
+            if state.incident_id != incident_id {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_incident_mismatch expected={} actual={incident_id}",
+                    state.incident_id
+                )));
+            }
+            if !state.participants.contains(&participant) {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_participant_required incident_id={}",
+                    state.incident_id
+                )));
+            }
+            let replacement = state
+                .replacement
+                .as_ref()
+                .ok_or_else(|| Error::Parse("ci_recovery_replacement_required=true".to_string()))?;
+            if replacement.status == "failed" {
+                return Err(Error::Parse(format!(
+                    "ci_recovery_replacement_failed run_id={}",
+                    replacement.run_id
+                )));
+            }
+            if replacement.run_id != replacement_run_id
+                || replacement.run_url != replacement_run_url
+                || replacement.sha != sha
+            {
+                return Err(Error::Parse(
+                    "ci_recovery_release_proof_mismatch=true".to_string(),
+                ));
+            }
+            state.release_proof = Some(CiRecoveryReleaseProof {
+                replacement_run_id: replacement_run_id.clone(),
+                replacement_run_url: replacement_run_url.clone(),
+                sha: sha.clone(),
+                terminal_status: "success".to_string(),
+            });
+            state.state = "resolved".to_string();
+            Ok(CiRecoveryStatus::from_state(state))
+        })
+    }
+
+    fn ci_recovery_status(&self) -> Result<CiRecoveryStatus, Error> {
+        let _lock = self.acquire_lock()?;
+        let parent = self
+            .fetch_coordination_branch()?
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".to_string()))?;
+        let state = self
+            .read_active_ci_recovery(Some(&parent))?
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".to_string()))?;
+        Ok(CiRecoveryStatus::from_state(&state))
+    }
+
+    fn mutate_ci_recovery<T>(
+        &self,
+        message: &str,
+        mut operation: impl FnMut(&mut CiRecoveryState, u64) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let _lock = self.acquire_lock()?;
+        for attempt in 1..=MAX_SYNC_ATTEMPTS {
+            let parent = self.fetch_coordination_branch()?.ok_or_else(|| {
+                Error::Parse("ci_recovery_incident_missing active=false".to_string())
+            })?;
+            let mut state = self
+                .read_active_ci_recovery(Some(&parent))?
+                .ok_or_else(|| {
+                    Error::Parse("ci_recovery_incident_missing active=false".to_string())
+                })?;
+            ensure_ci_recovery_not_resolved(&state)?;
+            let result = operation(&mut state, unix_timestamp()?)?;
+            match self.push_ci_recovery_state(&state, Some(&parent), message) {
+                Ok(()) => return Ok(result),
+                Err(error) if is_retryable_push_failure(&error) && attempt < MAX_SYNC_ATTEMPTS => {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("CI recovery mutation attempts always return")
+    }
+
+    fn fetch_coordination_branch(&self) -> Result<Option<String>, Error> {
+        self.fetch_coordination_branch_with_timeout(Duration::from_secs(10))
+    }
+
+    fn fetch_coordination_branch_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<Option<String>, Error> {
+        if git_status(["remote", "get-url", "origin"], Some(&self.root)).is_err() {
+            return Err(Error::Parse(
+                "ci_recovery_remote_required remote=origin".to_string(),
+            ));
+        }
+        let refspec = format!("{CI_RECOVERY_BRANCH}:{CI_RECOVERY_REMOTE_REF}");
+        match self.git_with_timeout(["fetch", "origin", &refspec], timeout) {
+            Ok(_) => Ok(Some(self.git([
+                "rev-parse",
+                "--verify",
+                CI_RECOVERY_REMOTE_REF,
+            ])?)),
+            Err(Error::CommandFailed { stderr, .. })
+                if stderr.contains("couldn't find remote ref")
+                    || stderr.contains("could not find remote ref") =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn read_active_ci_recovery(
+        &self,
+        coordination_ref: Option<&str>,
+    ) -> Result<Option<CiRecoveryState>, Error> {
+        let Some(coordination_ref) = coordination_ref else {
+            return Ok(None);
+        };
+        let active_ref = format!("{}:active.json", coordination_ref.trim());
+        match self.git(["show", &active_ref]) {
+            Ok(document) => {
+                let state: CiRecoveryState = serde_json::from_str(&document).map_err(|error| {
+                    Error::Parse(format!("ci_recovery_state_invalid source={error}"))
+                })?;
+                if state.schema_version != 1 {
+                    return Err(Error::Parse(format!(
+                        "ci_recovery_schema_unsupported expected=1 actual={}",
+                        state.schema_version
+                    )));
+                }
+                Ok(Some(state))
+            }
+            Err(Error::CommandFailed { stderr, .. })
+                if stderr.contains("does not exist")
+                    || stderr.contains("exists on disk, but not in") =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn push_ci_recovery_state(
+        &self,
+        state: &CiRecoveryState,
+        parent: Option<&str>,
+        message: &str,
+    ) -> Result<(), Error> {
+        let state_json = serde_json::to_string_pretty(state).map_err(|error| {
+            Error::Parse(format!("ci_recovery_state_json_invalid source={error}"))
+        })?;
+        let blob = self.git_with_stdin(["hash-object", "-w", "--stdin"], &state_json)?;
+        let tree = self.git_with_stdin(
+            ["mktree"],
+            &format!("100644 blob {}\tactive.json\n", blob.trim()),
+        )?;
+        let commit = self.commit_tree(tree.trim(), parent.map(str::trim), message)?;
+        let refspec = format!("{}:refs/heads/{CI_RECOVERY_BRANCH}", commit.trim());
+        self.git_with_timeout(
+            ["-c", "core.hooksPath=/dev/null", "push", "origin", &refspec],
+            CI_RECOVERY_GIT_TIMEOUT,
+        )?;
+        self.git(["update-ref", CI_RECOVERY_LOCAL_REF, commit.trim()])?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct CiRecoveryTrigger {
+    pub run_id: String,
+    pub run_url: String,
+    pub failed_sha: String,
+    pub workflow: String,
+    pub git_ref: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CiRecoveryParticipant {
+    pub host: String,
+    pub session: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CiRecoveryState {
+    schema_version: u32,
+    incident_id: String,
+    state: String,
+    epoch: u64,
+    trigger: CiRecoveryTrigger,
+    #[serde(default)]
+    triggers: Vec<CiRecoveryTrigger>,
+    owner: CiRecoveryParticipant,
+    lease_expires_at: u64,
+    #[serde(default)]
+    participants: Vec<CiRecoveryParticipant>,
+    #[serde(default)]
+    assignments: Vec<CiRecoveryAssignment>,
+    #[serde(default)]
+    failure_record: Option<CiRecoveryFailureRecord>,
+    #[serde(default)]
+    diagnosis: Option<CiRecoveryDiagnosis>,
+    #[serde(default)]
+    next_action: Option<CiRecoveryAction>,
+    #[serde(default)]
+    replacement: Option<CiRecoveryReplacement>,
+    #[serde(default)]
+    release_proof: Option<CiRecoveryReleaseProof>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CiRecoveryFailureRecord {
+    pub job: String,
+    pub step: String,
+    pub log_evidence: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CiRecoveryDiagnosis {
+    pub cause: String,
+    pub classification: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CiRecoveryAction {
+    pub kind: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CiRecoveryReplacement {
+    pub run_id: String,
+    pub run_url: String,
+    pub sha: String,
+    pub status: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CiRecoveryReleaseProof {
+    pub replacement_run_id: String,
+    pub replacement_run_url: String,
+    pub sha: String,
+    pub terminal_status: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CiRecoveryAssignment {
+    pub id: String,
+    pub owner_epoch: u64,
+    pub assignee: CiRecoveryParticipant,
+    pub capabilities: Vec<String>,
+    pub scope: String,
+    pub report: Option<CiRecoveryReport>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CiRecoveryReport {
+    pub summary: String,
+    pub evidence: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct CiRecoveryAssignmentInput {
+    pub to_host: String,
+    pub to_session: String,
+    pub capabilities: String,
+    pub scope: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct CiRecoveryDiagnosisInput {
+    pub job: String,
+    pub step: String,
+    pub log_evidence: String,
+    pub cause: String,
+    pub classification: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct CiRecoveryReplacementInput {
+    pub run_id: String,
+    pub run_url: String,
+    pub sha: String,
+    pub status: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct CiRecoveryReleaseInput {
+    pub replacement_run_id: String,
+    pub replacement_run_url: String,
+    pub sha: String,
+    pub terminal_status: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CiRecoveryRole {
+    Owner,
+    Waiting,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CiRecoveryClaim {
+    pub incident_id: String,
+    pub state: String,
+    pub role: CiRecoveryRole,
+    pub epoch: u64,
+    pub lease_expires_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CiRecoveryAssertion {
+    pub allowed: bool,
+    pub incident_id: String,
+    pub epoch: u64,
+    pub lease_expires_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CiRecoveryTransfer {
+    pub incident_id: String,
+    pub epoch: u64,
+    pub lease_expires_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CiRecoveryAssignmentResult {
+    pub incident_id: String,
+    pub assignment_id: String,
+    pub epoch: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CiRecoveryStatus {
+    pub schema_version: u32,
+    pub incident_id: String,
+    pub state: String,
+    pub epoch: u64,
+    pub lease_expires_at: u64,
+    pub hold_released: bool,
+    pub trigger_count: usize,
+    pub trigger: CiRecoveryTrigger,
+    pub triggers: Vec<CiRecoveryTrigger>,
+    pub owner: CiRecoveryParticipant,
+    pub participants: Vec<CiRecoveryParticipant>,
+    pub assignments: Vec<CiRecoveryAssignment>,
+    pub failure_record: Option<CiRecoveryFailureRecord>,
+    pub diagnosis: Option<CiRecoveryDiagnosis>,
+    pub next_action: Option<CiRecoveryAction>,
+    pub replacement: Option<CiRecoveryReplacement>,
+    pub release_proof: Option<CiRecoveryReleaseProof>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CiRecoveryWait {
+    pub incident_id: String,
+    pub state: String,
+    pub epoch: u64,
+    pub wake_reason: String,
+    pub assignment_id: Option<String>,
+}
+
+impl CiRecoveryWait {
+    fn timeout(incident_id: &str, epoch: u64) -> Self {
+        Self {
+            incident_id: incident_id.to_string(),
+            state: "unknown".to_string(),
+            epoch,
+            wake_reason: "timeout".to_string(),
+            assignment_id: None,
+        }
+    }
+
+    fn from_state(
+        state: &CiRecoveryState,
+        wake_reason: &str,
+        assignment_id: Option<String>,
+    ) -> Self {
+        Self {
+            incident_id: state.incident_id.clone(),
+            state: state.state.clone(),
+            epoch: state.epoch,
+            wake_reason: wake_reason.to_string(),
+            assignment_id,
+        }
+    }
+}
+
+impl CiRecoveryStatus {
+    fn from_state(state: &CiRecoveryState) -> Self {
+        Self {
+            schema_version: state.schema_version,
+            incident_id: state.incident_id.clone(),
+            state: state.state.clone(),
+            epoch: state.epoch,
+            lease_expires_at: state.lease_expires_at,
+            hold_released: state.state == "resolved",
+            trigger_count: if state.triggers.is_empty() {
+                1
+            } else {
+                state.triggers.len()
+            },
+            trigger: state.trigger.clone(),
+            triggers: state.triggers.clone(),
+            owner: state.owner.clone(),
+            participants: state.participants.clone(),
+            assignments: state.assignments.clone(),
+            failure_record: state.failure_record.clone(),
+            diagnosis: state.diagnosis.clone(),
+            next_action: state.next_action.clone(),
+            replacement: state.replacement.clone(),
+            release_proof: state.release_proof.clone(),
+        }
+    }
+}
+
+impl CiRecoveryClaim {
+    fn from_state(state: CiRecoveryState, role: CiRecoveryRole) -> Self {
+        Self {
+            incident_id: state.incident_id,
+            state: state.state,
+            role,
+            epoch: state.epoch,
+            lease_expires_at: state.lease_expires_at,
+        }
+    }
+}
+
+fn ci_recovery_incident_id(run_id: &str) -> String {
+    let run_id = run_id
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+        .collect::<String>();
+    format!("ci-{}", if run_id.is_empty() { "run" } else { &run_id })
+}
+
+fn ci_recovery_signal_wait_ready() -> Result<(), Error> {
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("TIBER_CI_RECOVERY_TEST_WAIT_READY") {
+        std::fs::write(path, b"ready").map_err(Error::Io)?;
+    }
+    Ok(())
+}
+
+fn unix_timestamp() -> Result<u64, Error> {
+    #[cfg(debug_assertions)]
+    if let Ok(value) = std::env::var("TIBER_CI_RECOVERY_TEST_NOW") {
+        return value.parse::<u64>().map_err(|error| {
+            Error::Parse(format!(
+                "ci_recovery_test_clock_invalid value={value} source={error}"
+            ))
+        });
+    }
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|error| Error::Parse(format!("system_clock_before_epoch source={error}")))
+}
+
+fn ci_recovery_participant() -> Result<CiRecoveryParticipant, Error> {
+    let session = std::env::var("TIBER_CLAIM_SESSION")
+        .or_else(|_| std::env::var("CODEX_SESSION_ID"))
+        .or_else(|_| std::env::var("CLAUDE_SESSION_ID"))
+        .map_err(|_| {
+            Error::Parse(
+                "ci_recovery_session_required env=TIBER_CLAIM_SESSION|CODEX_SESSION_ID|CLAUDE_SESSION_ID"
+                    .to_string(),
+            )
+        })?;
+    let session = frontmatter_scalar_value(&session);
+    if session == "unknown" {
+        return Err(Error::Parse(
+            "ci_recovery_session_required value=non-empty".to_string(),
+        ));
+    }
+    Ok(CiRecoveryParticipant {
+        host: claim_host(),
+        session,
+    })
+}
+
+fn ci_recovery_participant_from(host: &str, session: &str) -> Result<CiRecoveryParticipant, Error> {
+    let host = frontmatter_scalar_value(host);
+    let session = frontmatter_scalar_value(session);
+    if session == "unknown" {
+        return Err(Error::Parse(
+            "ci_recovery_recipient_session_required value=non-empty".to_string(),
+        ));
+    }
+    Ok(CiRecoveryParticipant { host, session })
+}
+
+fn ensure_ci_recovery_owner(
+    state: &CiRecoveryState,
+    incident_id: &str,
+    epoch: u64,
+    participant: &CiRecoveryParticipant,
+) -> Result<(), Error> {
+    ensure_ci_recovery_incident_epoch(state, incident_id, epoch)?;
+    if &state.owner != participant {
+        return Err(Error::Parse(format!(
+            "ci_recovery_not_owner incident_id={} epoch={}",
+            state.incident_id, state.epoch
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_ci_recovery_incident_epoch(
+    state: &CiRecoveryState,
+    incident_id: &str,
+    epoch: u64,
+) -> Result<(), Error> {
+    if state.incident_id != incident_id {
+        return Err(Error::Parse(format!(
+            "ci_recovery_incident_mismatch expected={} actual={incident_id}",
+            state.incident_id
+        )));
+    }
+    if state.epoch != epoch {
+        return Err(Error::Parse(format!(
+            "ci_recovery_stale_epoch expected={} actual={epoch}",
+            state.epoch
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_ci_recovery_lease_active(state: &CiRecoveryState, now: u64) -> Result<(), Error> {
+    if state.lease_expires_at <= now {
+        return Err(Error::Parse(format!(
+            "ci_recovery_lease_expired incident_id={} epoch={}",
+            state.incident_id, state.epoch
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_ci_recovery_not_resolved(state: &CiRecoveryState) -> Result<(), Error> {
+    if state.state == "resolved" {
+        return Err(Error::Parse(format!(
+            "ci_recovery_incident_resolved incident_id={} mutation=false",
+            state.incident_id
+        )));
+    }
+    Ok(())
+}
+
+fn required_ci_recovery_text(field: &str, value: &str) -> Result<String, Error> {
+    let value = value.trim();
+    let lower = value.to_ascii_lowercase();
+    let likely_credential = [
+        "ghp_",
+        "github_pat_",
+        "authorization:",
+        "bearer ",
+        "password=",
+        "token=",
+        "secret=",
+        "-----begin private key",
+        "-----begin rsa private key",
+        "-----begin openssh private key",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+    if value.is_empty()
+        || value.len() > CI_RECOVERY_TEXT_MAX_BYTES
+        || value.chars().any(char::is_control)
+        || likely_credential
+    {
+        return Err(Error::Parse(format!(
+            "ci_recovery_field_invalid field={field}"
+        )));
+    }
+    Ok(value.to_string())
+}
+
+fn parse_ci_recovery_choice(field: &str, value: &str, allowed: &[&str]) -> Result<String, Error> {
+    let value = value.trim();
+    if allowed.contains(&value) {
+        Ok(value.to_string())
+    } else {
+        Err(Error::Parse(format!(
+            "ci_recovery_choice_invalid field={field} value={value} allowed={}",
+            allowed.join(",")
+        )))
     }
 }
 
@@ -3399,6 +4721,16 @@ fn is_retryable_push_failure(error: &Error) -> bool {
         }
         _ => false,
     }
+}
+
+fn is_coordination_branch_creation_race(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::CommandFailed { args, stderr, .. }
+            if args.iter().any(|arg| arg == "push")
+                && stderr.contains("cannot lock ref")
+                && stderr.contains("reference already exists")
+    )
 }
 
 enum SectionSplit {

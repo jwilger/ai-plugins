@@ -539,6 +539,136 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(status.success());
 }
 
+#[test]
+fn mcp_stdio_exposes_strict_structured_ci_recovery_tools() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    let repo = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(repo.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(repo.path())
+        .env("TIBER_CLAIM_HOST", "mcp-host")
+        .env("TIBER_CLAIM_SESSION", "mcp-session")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tiber mcp stdio");
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+    );
+    let tools = read_json_message(&mut stdout);
+    let listed_tools = tools["result"]["tools"]
+        .as_array()
+        .expect("tools/list should return an array");
+    for name in [
+        "tiber.ci_recovery.claim",
+        "tiber.ci_recovery.status",
+        "tiber.ci_recovery.assert_owner",
+        "tiber.ci_recovery.heartbeat",
+        "tiber.ci_recovery.transfer",
+        "tiber.ci_recovery.takeover",
+        "tiber.ci_recovery.assign",
+        "tiber.ci_recovery.report",
+        "tiber.ci_recovery.wait",
+        "tiber.ci_recovery.diagnose",
+        "tiber.ci_recovery.choose_action",
+        "tiber.ci_recovery.record_replacement",
+        "tiber.ci_recovery.resolve",
+    ] {
+        let tool = listed_tools
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap_or_else(|| panic!("{name} should be advertised"));
+        assert_eq!(tool["inputSchema"]["additionalProperties"], false);
+        assert_eq!(tool["outputSchema"]["type"], "object");
+        assert_eq!(tool["outputSchema"]["additionalProperties"], false);
+    }
+    let assign = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.ci_recovery.assign")
+        .expect("tiber.ci_recovery.assign should be advertised");
+    assert_eq!(
+        assign["inputSchema"]["properties"]["capabilities"]["items"]["enum"],
+        serde_json::json!(["inspect", "reproduce", "edit", "test"])
+    );
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tiber.ci_recovery.claim","arguments":{"run_id":"123","run_url":"https://forge.example.invalid/runs/123","failed_sha":"abcdef0123456789","workflow":"CI","git_ref":"refs/heads/main","unexpected":true}}}"#,
+    );
+    let unexpected_argument = read_json_message(&mut stdout);
+    assert!(unexpected_argument["error"]["message"]
+        .as_str()
+        .expect("unexpected argument error should be text")
+        .contains("mcp_argument_unexpected name=unexpected"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tiber.ci_recovery.claim","arguments":{"run_id":"123","run_url":"https://forge.example.invalid/runs/123","failed_sha":"abcdef0123456789","workflow":"CI","git_ref":"refs/heads/main"}}}"#,
+    );
+    let claim = read_json_message(&mut stdout);
+    assert_eq!(claim["result"]["structuredContent"]["role"], "owner");
+    assert_eq!(
+        claim["result"]["structuredContent"]["incident_id"],
+        "ci-123"
+    );
+    assert_eq!(claim["result"]["content"][0]["type"], "text");
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"tiber.ci_recovery.status","arguments":{}}}"#,
+    );
+    let status = read_json_message(&mut stdout);
+    assert_eq!(
+        status["result"]["structuredContent"]["incident_id"],
+        "ci-123"
+    );
+    assert_eq!(
+        status["result"]["structuredContent"]["hold_released"],
+        false
+    );
+    assert_eq!(status["result"]["structuredContent"]["trigger_count"], 1);
+    let status_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.ci_recovery.status")
+        .expect("tiber.ci_recovery.status should be advertised");
+    assert_eq!(
+        status_tool["outputSchema"]["properties"]["trigger_count"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        status_tool["outputSchema"]["properties"]["owner"]["additionalProperties"],
+        false
+    );
+    assert_eq!(
+        status_tool["outputSchema"]["properties"]["assignments"]["items"]["properties"]["assignee"]
+            ["additionalProperties"],
+        false
+    );
+    assert_eq!(
+        status_tool["outputSchema"]["properties"]["release_proof"]["anyOf"][1]
+            ["additionalProperties"],
+        false
+    );
+
+    drop(stdin);
+    assert!(child.wait().expect("wait for mcp process").success());
+}
+
 fn write_message(stdin: &mut impl Write, message: &str) {
     writeln!(stdin, "{message}").expect("write mcp message");
     stdin.flush().expect("flush mcp message");

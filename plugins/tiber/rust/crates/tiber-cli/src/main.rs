@@ -104,6 +104,8 @@ enum Command {
     Dashboard(DashboardArgs),
     /// Run the MCP server.
     Mcp(McpArgs),
+    /// Coordinate repository-wide pushed-CI failure recovery.
+    CiRecovery(CiRecoveryArgs),
     /// Preview or install the bundled tiber launcher.
     InstallBin(InstallBinArgs),
     /// Create a backlog task.
@@ -147,6 +149,174 @@ enum Command {
     CloseFromTrailers,
     /// Scaffold repository integration.
     Scaffold(ScaffoldArgs),
+}
+
+#[derive(Args)]
+struct CiRecoveryArgs {
+    #[command(subcommand)]
+    command: CiRecoveryCommand,
+}
+
+#[derive(Subcommand)]
+enum CiRecoveryCommand {
+    /// Claim a terminal failed pushed-CI run or join as a waiter.
+    Claim(CiRecoveryClaimArgs),
+    /// Verify that this session still owns the fenced recovery lease.
+    AssertOwner(CiRecoveryOwnerArgs),
+    /// Transfer recovery ownership to another session.
+    Transfer(CiRecoveryTransferArgs),
+    /// Take over an expired recovery lease.
+    Takeover(CiRecoveryOwnerArgs),
+    /// Assign bounded recovery work to a joined helper.
+    Assign(CiRecoveryAssignArgs),
+    /// Report the result of an assigned recovery task.
+    Report(CiRecoveryReportArgs),
+    /// Renew the active owner's recovery lease.
+    Heartbeat(CiRecoveryOwnerArgs),
+    /// Wait for an assignment, epoch change, resolution, or bounded timeout.
+    Wait(CiRecoveryWaitArgs),
+    /// Record the exact failed job, step, evidence, and diagnosis.
+    Diagnose(CiRecoveryDiagnoseArgs),
+    /// Select the sole permitted recovery action.
+    ChooseAction(CiRecoveryActionArgs),
+    /// Record the queued, running, or failed replacement run.
+    RecordReplacement(CiRecoveryReplacementArgs),
+    /// Record terminal-success proof and release the hold.
+    Resolve(CiRecoveryResolveArgs),
+    /// Read the authoritative repository-wide recovery state.
+    Status,
+}
+
+#[derive(Args)]
+struct CiRecoveryClaimArgs {
+    #[arg(long)]
+    run_id: String,
+    #[arg(long)]
+    run_url: String,
+    #[arg(long)]
+    failed_sha: String,
+    #[arg(long)]
+    workflow: String,
+    #[arg(long = "ref")]
+    git_ref: String,
+}
+
+#[derive(Args)]
+struct CiRecoveryOwnerArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    epoch: u64,
+}
+
+#[derive(Args)]
+struct CiRecoveryTransferArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    epoch: u64,
+    #[arg(long)]
+    to_host: String,
+    #[arg(long)]
+    to_session: String,
+}
+
+#[derive(Args)]
+struct CiRecoveryAssignArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    epoch: u64,
+    #[arg(long)]
+    to_host: String,
+    #[arg(long)]
+    to_session: String,
+    #[arg(long)]
+    capabilities: String,
+    #[arg(long)]
+    scope: String,
+}
+
+#[derive(Args)]
+struct CiRecoveryReportArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    assignment_id: String,
+    #[arg(long)]
+    summary: String,
+    #[arg(long)]
+    evidence: String,
+}
+
+#[derive(Args)]
+struct CiRecoveryWaitArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    epoch: u64,
+    #[arg(long)]
+    timeout_seconds: u64,
+}
+
+#[derive(Args)]
+struct CiRecoveryDiagnoseArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    epoch: u64,
+    #[arg(long)]
+    job: String,
+    #[arg(long)]
+    step: String,
+    #[arg(long)]
+    log_evidence: String,
+    #[arg(long)]
+    cause: String,
+    #[arg(long)]
+    classification: String,
+}
+
+#[derive(Args)]
+struct CiRecoveryActionArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    epoch: u64,
+    #[arg(long)]
+    kind: String,
+    #[arg(long)]
+    description: String,
+}
+
+#[derive(Args)]
+struct CiRecoveryReplacementArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    epoch: u64,
+    #[arg(long)]
+    run_id: String,
+    #[arg(long)]
+    run_url: String,
+    #[arg(long)]
+    sha: String,
+    #[arg(long)]
+    status: String,
+}
+
+#[derive(Args)]
+struct CiRecoveryResolveArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    replacement_run_id: String,
+    #[arg(long)]
+    replacement_run_url: String,
+    #[arg(long)]
+    sha: String,
+    #[arg(long)]
+    terminal_status: String,
 }
 
 #[derive(Args)]
@@ -695,6 +865,162 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             let stdout = std::io::stdout();
             tiber_mcp::run_stdio(stdin.lock(), stdout.lock())
         }
+        Command::CiRecovery(CiRecoveryArgs { command }) => match command {
+            CiRecoveryCommand::Claim(CiRecoveryClaimArgs {
+                run_id,
+                run_url,
+                failed_sha,
+                workflow,
+                git_ref,
+            }) => {
+                let claim = tiber_git::claim_ci_recovery(tiber_git::CiRecoveryTrigger {
+                    run_id,
+                    run_url,
+                    failed_sha,
+                    workflow,
+                    git_ref,
+                })?;
+                print_ci_recovery_json(&claim)
+            }
+            CiRecoveryCommand::AssertOwner(CiRecoveryOwnerArgs { incident_id, epoch }) => {
+                let assertion = tiber_git::assert_ci_recovery_owner(&incident_id, epoch)?;
+                print_ci_recovery_json(&assertion)
+            }
+            CiRecoveryCommand::Transfer(CiRecoveryTransferArgs {
+                incident_id,
+                epoch,
+                to_host,
+                to_session,
+            }) => {
+                let transfer =
+                    tiber_git::transfer_ci_recovery(&incident_id, epoch, &to_host, &to_session)?;
+                print_ci_recovery_json(&transfer)
+            }
+            CiRecoveryCommand::Takeover(CiRecoveryOwnerArgs { incident_id, epoch }) => {
+                let takeover = tiber_git::takeover_ci_recovery(&incident_id, epoch)?;
+                print_ci_recovery_json(&takeover)
+            }
+            CiRecoveryCommand::Assign(CiRecoveryAssignArgs {
+                incident_id,
+                epoch,
+                to_host,
+                to_session,
+                capabilities,
+                scope,
+            }) => {
+                let assignment = tiber_git::assign_ci_recovery(
+                    &incident_id,
+                    epoch,
+                    tiber_git::CiRecoveryAssignmentInput {
+                        to_host,
+                        to_session,
+                        capabilities,
+                        scope,
+                    },
+                )?;
+                print_ci_recovery_json(&assignment)
+            }
+            CiRecoveryCommand::Report(CiRecoveryReportArgs {
+                incident_id,
+                assignment_id,
+                summary,
+                evidence,
+            }) => {
+                let report = tiber_git::report_ci_recovery(
+                    &incident_id,
+                    &assignment_id,
+                    &summary,
+                    &evidence,
+                )?;
+                print_ci_recovery_json(&report)
+            }
+            CiRecoveryCommand::Heartbeat(CiRecoveryOwnerArgs { incident_id, epoch }) => {
+                let heartbeat = tiber_git::heartbeat_ci_recovery(&incident_id, epoch)?;
+                print_ci_recovery_json(&heartbeat)
+            }
+            CiRecoveryCommand::Wait(CiRecoveryWaitArgs {
+                incident_id,
+                epoch,
+                timeout_seconds,
+            }) => {
+                let wait = tiber_git::wait_for_ci_recovery(&incident_id, epoch, timeout_seconds)?;
+                print_ci_recovery_json(&wait)
+            }
+            CiRecoveryCommand::Diagnose(CiRecoveryDiagnoseArgs {
+                incident_id,
+                epoch,
+                job,
+                step,
+                log_evidence,
+                cause,
+                classification,
+            }) => {
+                let status = tiber_git::diagnose_ci_recovery(
+                    &incident_id,
+                    epoch,
+                    tiber_git::CiRecoveryDiagnosisInput {
+                        job,
+                        step,
+                        log_evidence,
+                        cause,
+                        classification,
+                    },
+                )?;
+                print_ci_recovery_json(&status)
+            }
+            CiRecoveryCommand::ChooseAction(CiRecoveryActionArgs {
+                incident_id,
+                epoch,
+                kind,
+                description,
+            }) => {
+                let status =
+                    tiber_git::choose_ci_recovery_action(&incident_id, epoch, &kind, &description)?;
+                print_ci_recovery_json(&status)
+            }
+            CiRecoveryCommand::RecordReplacement(CiRecoveryReplacementArgs {
+                incident_id,
+                epoch,
+                run_id,
+                run_url,
+                sha,
+                status,
+            }) => {
+                let status = tiber_git::record_ci_recovery_replacement(
+                    &incident_id,
+                    epoch,
+                    tiber_git::CiRecoveryReplacementInput {
+                        run_id,
+                        run_url,
+                        sha,
+                        status,
+                    },
+                )?;
+                print_ci_recovery_json(&status)
+            }
+            CiRecoveryCommand::Resolve(CiRecoveryResolveArgs {
+                incident_id,
+                replacement_run_id,
+                replacement_run_url,
+                sha,
+                terminal_status,
+            }) => {
+                let status = tiber_git::resolve_ci_recovery(
+                    &incident_id,
+                    tiber_git::CiRecoveryReleaseInput {
+                        replacement_run_id,
+                        replacement_run_url,
+                        sha,
+                        terminal_status,
+                    },
+                )?;
+                print_ci_recovery_json(&status)
+            }
+            CiRecoveryCommand::Status => {
+                let status = tiber_git::ci_recovery_status()?;
+                print_ci_recovery_json(&status)
+            }
+        },
         Command::InstallBin(InstallBinArgs {
             target_dir, apply, ..
         }) => {
@@ -873,6 +1199,16 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             Ok(())
         }
     }
+}
+
+fn print_ci_recovery_json(value: &impl serde::Serialize) -> Result<(), tiber_git::Error> {
+    println!(
+        "{}",
+        serde_json::to_string(value).map_err(|error| {
+            tiber_git::Error::Parse(format!("ci_recovery_output_json_invalid source={error}"))
+        })?
+    );
+    Ok(())
 }
 
 struct DashboardState {

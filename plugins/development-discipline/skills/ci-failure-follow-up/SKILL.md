@@ -1,6 +1,6 @@
 ---
 name: ci-failure-follow-up
-description: Use when a pushed CI run fails or before later work or pushes; reproduce the exact recovery record without omissions, permit only a causal repair or unchanged-SHA rerun, keep separate defects outside the active ticket, and require terminal success.
+description: Use when a pushed CI run fails or before later work or pushes; coordinate multiple agents through one Tiber CI-recovery owner/lease, reproduce the exact recovery record, permit only a causal repair or unchanged-SHA rerun, and require terminal success.
 ---
 
 # CI Failure Follow-up
@@ -9,6 +9,45 @@ A failed pushed run creates a hold. Stop unrelated implementation, review
 remediation, ticket work, and all pushes except the one recovery action
 selected below. Keep the hold until the failure is diagnosed and its
 replacement run reaches terminal success.
+
+Multi-agent ownership is coordinated only through the epoch-fenced incident on
+`origin/tiber-coordination`, never through the task-board branch or local
+notes. If that remote state is unavailable, fail closed and take no recovery
+action.
+
+## Claim the Repository-Wide Incident
+
+Every agent that detects a terminal failed pushed-CI run claims it before
+diagnosis, a rerun, a push, or a release:
+
+```shell
+tiber ci-recovery claim --run-id <id> --run-url <url> --failed-sha <sha> \
+  --workflow <workflow> --ref <ref>
+```
+
+The result identifies the single incident, current epoch, and role. Only the
+epoch-fenced owner diagnoses and selects the recovery action. Nonowners hold
+and make bounded `tiber ci-recovery wait` calls; they may help only through an
+owner assignment limited to inspect, reproduce, edit, or test. Helpers report
+evidence and never push, rerun, or choose an action. Proof closure is not
+helper work, but any joined participant may independently record exact matching
+terminal-success proof; that objective closure does not grant diagnosis,
+action, push, or rerun authority.
+
+The owner heartbeats about every 15 minutes during the 60-minute lease, checks
+ownership/epoch before owner actions, and transfers explicitly for a handoff.
+A joined participant may take over only after expiry; transfer or takeover
+creates a new epoch, invalidating the former owner's authority. Cross-host
+clocks must be reasonably synchronized; do not take over on a marginal
+timestamp boundary.
+
+Tiber synchronizes this state on `origin/tiber-coordination`, not the task
+board: it fetches and compares, publishes normal fast-forward updates, and
+retries after concurrent updates. Never force-push the coordination branch. If
+Tiber or `origin` is unavailable, fail closed: preserve the global hold and do
+not diagnose, push, rerun, choose an action, or release until shared
+coordination is restored. Local notes preserve observations only; they do not
+grant ownership.
 
 There are exactly two recovery actions:
 
@@ -30,8 +69,10 @@ In advice, status, or handoff output, reproduce and complete this exact record;
 do not collapse or omit a field:
 
 ```text
+Incident: <Tiber incident ID>; epoch=<current owner epoch>; role=<owner|waiting>;
+  lease expiry=<timestamp>
 Failure record: <failed commit SHA>; <run ID or URL>; <exact failed job>;
-  <failed step>; <relevant log evidence>
+  <failed step>; <bounded sanitized log summary or authoritative-log reference>
 Diagnosis: <causal explanation>; classification=<caused|unrelated|transient>;
   <supporting evidence>
 Next action: <tested causal repair whose next pushed commit body explains the
@@ -47,19 +88,29 @@ work or pushes, inspect the pushed CI runs for the active ticket since its first
 pushed commit. Any failed run without a recorded terminal-success replacement
 recreates the hold, even when a newer run is green or running.
 
+Record the state through the incident owner as well. A replacement run that
+fails remains in this same incident: replace the exact job, step, log evidence,
+cause, classification, and selected action, then recover it. Never open a
+parallel incident for a failed recovery run.
+
 An unrelated or transient classification never releases the hold by itself:
 queued, pending, or running replacement CI is still blocked, and only terminal
 success releases it.
 
 ## Recover the Run
 
-1. Bind the failure to the exact pushed commit and CI run.
-2. Inspect the exact failed job, the failed step, and its relevant logs. Do not
-   infer the cause from the workflow or job title.
-3. Record a causal diagnosis and the evidence that supports it.
+1. Claim or join the repository-wide incident. The owner binds the failure to
+   the exact pushed commit and CI run.
+2. The owner inspects the exact failed job, failed step, and relevant logs. Store
+   only a bounded, explicitly sanitized summary or authoritative-log reference;
+   never persist raw logs, credentials, tokens, or other secrets. Do not infer
+   the cause from the workflow or job title.
+3. Record the causal diagnosis, classification, and supporting evidence in the
+   active incident and recovery record.
 4. If the diagnosed failure requires a repository change, write the focused
    test or check, repair only that cause, and make the next pushed commit the
-   repair. Its rationale-bearing body must name the diagnosed failure or risk.
+   repair. Only the owner pushes it; its rationale-bearing body must name the
+   diagnosed failure or risk.
    For a defect unrelated to the active ticket, pause that ticket and track the
    causal repair as the explicit recovery scope.
 5. If evidence proves the failure unrelated or transient, record that
@@ -69,8 +120,10 @@ success releases it.
    fails, replace the failure record with that rerun, diagnose it, and either
    rerun the unchanged revision again with evidence or transition to the
    tested causal-repair action. No unrelated commit is allowed.
-6. Poll the repair commit or evidence-backed rerun to terminal success. Queued
-   or running is not repaired. Release the hold only after success.
+6. The owner records and polls the repair commit or evidence-backed rerun to
+   terminal success. Queued or running is not repaired. Any joined participant
+   may record the matching terminal-success proof in Tiber; this is the only
+   hold release and does not grant recovery-action authority.
 
 The ordinary green-increment rule permits new work once CI is running or green
 only when no failed-run hold exists. This recovery rule takes precedence after

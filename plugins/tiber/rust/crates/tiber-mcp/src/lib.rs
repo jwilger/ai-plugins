@@ -1,5 +1,6 @@
 use std::io::{BufRead, Write};
 
+use serde::Serialize;
 use serde_json::{json, Value};
 
 pub fn codex_sandbox_setup() -> String {
@@ -137,6 +138,7 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
 }
 
 fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
+    validate_ci_recovery_arguments(name, arguments)?;
     match name {
         "tiber.init" => {
             tiber_git::init_repository()?;
@@ -330,10 +332,157 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
                 Ok(text_content(format!("would install {installed}")))
             }
         }
+        "tiber.ci_recovery.claim" => structured_content(tiber_git::claim_ci_recovery(
+            tiber_git::CiRecoveryTrigger {
+                run_id: required_string(arguments, "run_id")?.to_string(),
+                run_url: required_string(arguments, "run_url")?.to_string(),
+                failed_sha: required_string(arguments, "failed_sha")?.to_string(),
+                workflow: required_string(arguments, "workflow")?.to_string(),
+                git_ref: required_string(arguments, "git_ref")?.to_string(),
+            },
+        )?),
+        "tiber.ci_recovery.status" => structured_content(tiber_git::ci_recovery_status()?),
+        "tiber.ci_recovery.assert_owner" => {
+            structured_content(tiber_git::assert_ci_recovery_owner(
+                required_string(arguments, "incident_id")?,
+                required_u64(arguments, "epoch")?,
+            )?)
+        }
+        "tiber.ci_recovery.heartbeat" => structured_content(tiber_git::heartbeat_ci_recovery(
+            required_string(arguments, "incident_id")?,
+            required_u64(arguments, "epoch")?,
+        )?),
+        "tiber.ci_recovery.transfer" => structured_content(tiber_git::transfer_ci_recovery(
+            required_string(arguments, "incident_id")?,
+            required_u64(arguments, "epoch")?,
+            required_string(arguments, "to_host")?,
+            required_string(arguments, "to_session")?,
+        )?),
+        "tiber.ci_recovery.takeover" => structured_content(tiber_git::takeover_ci_recovery(
+            required_string(arguments, "incident_id")?,
+            required_u64(arguments, "epoch")?,
+        )?),
+        "tiber.ci_recovery.assign" => structured_content(tiber_git::assign_ci_recovery(
+            required_string(arguments, "incident_id")?,
+            required_u64(arguments, "epoch")?,
+            tiber_git::CiRecoveryAssignmentInput {
+                to_host: required_string(arguments, "to_host")?.to_string(),
+                to_session: required_string(arguments, "to_session")?.to_string(),
+                capabilities: required_ci_recovery_capabilities(arguments)?.join(","),
+                scope: required_string(arguments, "scope")?.to_string(),
+            },
+        )?),
+        "tiber.ci_recovery.report" => structured_content(tiber_git::report_ci_recovery(
+            required_string(arguments, "incident_id")?,
+            required_string(arguments, "assignment_id")?,
+            required_string(arguments, "summary")?,
+            required_string(arguments, "evidence")?,
+        )?),
+        "tiber.ci_recovery.wait" => structured_content(tiber_git::wait_for_ci_recovery(
+            required_string(arguments, "incident_id")?,
+            required_u64(arguments, "epoch")?,
+            required_u64(arguments, "timeout_seconds")?,
+        )?),
+        "tiber.ci_recovery.diagnose" => structured_content(tiber_git::diagnose_ci_recovery(
+            required_string(arguments, "incident_id")?,
+            required_u64(arguments, "epoch")?,
+            tiber_git::CiRecoveryDiagnosisInput {
+                job: required_string(arguments, "job")?.to_string(),
+                step: required_string(arguments, "step")?.to_string(),
+                log_evidence: required_string(arguments, "log_evidence")?.to_string(),
+                cause: required_string(arguments, "cause")?.to_string(),
+                classification: required_string(arguments, "classification")?.to_string(),
+            },
+        )?),
+        "tiber.ci_recovery.choose_action" => {
+            structured_content(tiber_git::choose_ci_recovery_action(
+                required_string(arguments, "incident_id")?,
+                required_u64(arguments, "epoch")?,
+                required_string(arguments, "kind")?,
+                required_string(arguments, "description")?,
+            )?)
+        }
+        "tiber.ci_recovery.record_replacement" => {
+            structured_content(tiber_git::record_ci_recovery_replacement(
+                required_string(arguments, "incident_id")?,
+                required_u64(arguments, "epoch")?,
+                tiber_git::CiRecoveryReplacementInput {
+                    run_id: required_string(arguments, "run_id")?.to_string(),
+                    run_url: required_string(arguments, "run_url")?.to_string(),
+                    sha: required_string(arguments, "sha")?.to_string(),
+                    status: required_string(arguments, "status")?.to_string(),
+                },
+            )?)
+        }
+        "tiber.ci_recovery.resolve" => structured_content(tiber_git::resolve_ci_recovery(
+            required_string(arguments, "incident_id")?,
+            tiber_git::CiRecoveryReleaseInput {
+                replacement_run_id: required_string(arguments, "replacement_run_id")?.to_string(),
+                replacement_run_url: required_string(arguments, "replacement_run_url")?.to_string(),
+                sha: required_string(arguments, "sha")?.to_string(),
+                terminal_status: required_string(arguments, "terminal_status")?.to_string(),
+            },
+        )?),
         _ => Err(tiber_git::Error::Parse(format!(
             "unsupported_mcp_tool name={name}"
         ))),
     }
+}
+
+fn validate_ci_recovery_arguments(name: &str, arguments: &Value) -> Result<(), tiber_git::Error> {
+    let allowed = match name {
+        "tiber.ci_recovery.claim" => {
+            &["run_id", "run_url", "failed_sha", "workflow", "git_ref"][..]
+        }
+        "tiber.ci_recovery.status" => &[][..],
+        "tiber.ci_recovery.assert_owner"
+        | "tiber.ci_recovery.heartbeat"
+        | "tiber.ci_recovery.takeover" => &["incident_id", "epoch"][..],
+        "tiber.ci_recovery.transfer" => &["incident_id", "epoch", "to_host", "to_session"][..],
+        "tiber.ci_recovery.assign" => &[
+            "incident_id",
+            "epoch",
+            "to_host",
+            "to_session",
+            "capabilities",
+            "scope",
+        ][..],
+        "tiber.ci_recovery.report" => &["incident_id", "assignment_id", "summary", "evidence"][..],
+        "tiber.ci_recovery.wait" => &["incident_id", "epoch", "timeout_seconds"][..],
+        "tiber.ci_recovery.diagnose" => &[
+            "incident_id",
+            "epoch",
+            "job",
+            "step",
+            "log_evidence",
+            "cause",
+            "classification",
+        ][..],
+        "tiber.ci_recovery.choose_action" => &["incident_id", "epoch", "kind", "description"][..],
+        "tiber.ci_recovery.record_replacement" => {
+            &["incident_id", "epoch", "run_id", "run_url", "sha", "status"][..]
+        }
+        "tiber.ci_recovery.resolve" => &[
+            "incident_id",
+            "replacement_run_id",
+            "replacement_run_url",
+            "sha",
+            "terminal_status",
+        ][..],
+        _ => return Ok(()),
+    };
+    let arguments = arguments.as_object().ok_or_else(|| {
+        tiber_git::Error::Parse("mcp_argument_invalid name=arguments".to_string())
+    })?;
+    if let Some(unexpected) = arguments
+        .keys()
+        .find(|name| !allowed.contains(&name.as_str()))
+    {
+        return Err(tiber_git::Error::Parse(format!(
+            "mcp_argument_unexpected name={unexpected}"
+        )));
+    }
+    Ok(())
 }
 
 fn required_string<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, tiber_git::Error> {
@@ -342,6 +491,54 @@ fn required_string<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, tibe
         .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_missing name={name}")))?
         .as_str()
         .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}")))
+}
+
+fn required_u64(arguments: &Value, name: &str) -> Result<u64, tiber_git::Error> {
+    arguments
+        .get(name)
+        .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_missing name={name}")))?
+        .as_u64()
+        .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_invalid name={name}")))
+}
+
+fn required_ci_recovery_capabilities(arguments: &Value) -> Result<Vec<&str>, tiber_git::Error> {
+    let values = arguments
+        .get("capabilities")
+        .ok_or_else(|| {
+            tiber_git::Error::Parse("mcp_argument_missing name=capabilities".to_string())
+        })?
+        .as_array()
+        .ok_or_else(|| {
+            tiber_git::Error::Parse("mcp_argument_invalid name=capabilities".to_string())
+        })?;
+    if values.is_empty() {
+        return Err(tiber_git::Error::Parse(
+            "mcp_argument_invalid name=capabilities".to_string(),
+        ));
+    }
+    let capabilities = values
+        .iter()
+        .map(|value| {
+            value.as_str().ok_or_else(|| {
+                tiber_git::Error::Parse("mcp_argument_invalid name=capabilities".to_string())
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if capabilities
+        .iter()
+        .any(|capability| !matches!(*capability, "inspect" | "reproduce" | "edit" | "test"))
+        || capabilities.iter().enumerate().any(|(index, capability)| {
+            capabilities
+                .iter()
+                .skip(index + 1)
+                .any(|other| capability == other)
+        })
+    {
+        return Err(tiber_git::Error::Parse(
+            "mcp_argument_invalid name=capabilities".to_string(),
+        ));
+    }
+    Ok(capabilities)
 }
 
 fn optional_string<'a>(arguments: &'a Value, name: &str) -> Option<&'a str> {
@@ -593,6 +790,395 @@ fn tools() -> Vec<Value> {
             vec!["target_dir"],
         ),
     ]
+    .into_iter()
+    .chain(ci_recovery_tools())
+    .collect()
+}
+
+fn ci_recovery_tools() -> Vec<Value> {
+    vec![
+        ci_recovery_tool(
+            "tiber.ci_recovery.claim",
+            "Claim CI recovery",
+            "Claim a terminal failed pushed-CI run or join its recovery as a waiter.",
+            json!({
+                "run_id": { "type": "string" },
+                "run_url": { "type": "string" },
+                "failed_sha": { "type": "string" },
+                "workflow": { "type": "string" },
+                "git_ref": { "type": "string" }
+            }),
+            vec!["run_id", "run_url", "failed_sha", "workflow", "git_ref"],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.status",
+            "Read CI recovery status",
+            "Read the authoritative repository-wide CI recovery state.",
+            json!({}),
+            vec![],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.assert_owner",
+            "Assert CI recovery ownership",
+            "Verify this session owns the active fenced recovery lease.",
+            ci_recovery_owner_properties(),
+            vec!["incident_id", "epoch"],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.heartbeat",
+            "Renew CI recovery lease",
+            "Renew the active owner's recovery lease.",
+            ci_recovery_owner_properties(),
+            vec!["incident_id", "epoch"],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.transfer",
+            "Transfer CI recovery ownership",
+            "Transfer recovery ownership to a joined session.",
+            json!({
+                "incident_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "to_host": { "type": "string" },
+                "to_session": { "type": "string" }
+            }),
+            vec!["incident_id", "epoch", "to_host", "to_session"],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.takeover",
+            "Take over expired CI recovery",
+            "Take over a recovery lease only after it expires.",
+            ci_recovery_owner_properties(),
+            vec!["incident_id", "epoch"],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.assign",
+            "Assign CI recovery helper",
+            "Assign bounded recovery work to a joined helper session.",
+            json!({
+                "incident_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "to_host": { "type": "string" },
+                "to_session": { "type": "string" },
+                "capabilities": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": { "type": "string", "enum": ["inspect", "reproduce", "edit", "test"] }
+                },
+                "scope": { "type": "string" }
+            }),
+            vec![
+                "incident_id",
+                "epoch",
+                "to_host",
+                "to_session",
+                "capabilities",
+                "scope",
+            ],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.report",
+            "Report CI recovery assignment",
+            "Report the result of an assigned recovery task.",
+            json!({
+                "incident_id": { "type": "string" },
+                "assignment_id": { "type": "string" },
+                "summary": { "type": "string" },
+                "evidence": { "type": "string" }
+            }),
+            vec!["incident_id", "assignment_id", "summary", "evidence"],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.wait",
+            "Wait for CI recovery event",
+            "Wait up to sixty seconds for an assignment, epoch change, or resolution.",
+            json!({
+                "incident_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "timeout_seconds": { "type": "integer", "minimum": 0, "maximum": 60 }
+            }),
+            vec!["incident_id", "epoch", "timeout_seconds"],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.diagnose",
+            "Record CI recovery diagnosis",
+            "Record the exact failed job, step, evidence, and diagnosis.",
+            json!({
+                "incident_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "job": { "type": "string" },
+                "step": { "type": "string" },
+                "log_evidence": { "type": "string" },
+                "cause": { "type": "string" },
+                "classification": { "type": "string", "enum": ["caused", "unrelated", "transient"] }
+            }),
+            vec![
+                "incident_id",
+                "epoch",
+                "job",
+                "step",
+                "log_evidence",
+                "cause",
+                "classification",
+            ],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.choose_action",
+            "Choose CI recovery action",
+            "Select the one permitted repair or rerun recovery action.",
+            json!({
+                "incident_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "kind": { "type": "string", "enum": ["repair", "rerun"] },
+                "description": { "type": "string" }
+            }),
+            vec!["incident_id", "epoch", "kind", "description"],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.record_replacement",
+            "Record CI replacement",
+            "Record a queued, running, or failed replacement CI run.",
+            json!({
+                "incident_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "run_id": { "type": "string" },
+                "run_url": { "type": "string" },
+                "sha": { "type": "string" },
+                "status": { "type": "string", "enum": ["queued", "running", "failed"] }
+            }),
+            vec!["incident_id", "epoch", "run_id", "run_url", "sha", "status"],
+        ),
+        ci_recovery_tool(
+            "tiber.ci_recovery.resolve",
+            "Resolve CI recovery",
+            "Record terminal-success proof and release the CI recovery hold.",
+            json!({
+                "incident_id": { "type": "string" },
+                "replacement_run_id": { "type": "string" },
+                "replacement_run_url": { "type": "string" },
+                "sha": { "type": "string" },
+                "terminal_status": { "type": "string", "enum": ["success"] }
+            }),
+            vec![
+                "incident_id",
+                "replacement_run_id",
+                "replacement_run_url",
+                "sha",
+                "terminal_status",
+            ],
+        ),
+    ]
+}
+
+fn ci_recovery_owner_properties() -> Value {
+    json!({
+        "incident_id": { "type": "string" },
+        "epoch": { "type": "integer", "minimum": 0 }
+    })
+}
+
+fn ci_recovery_tool(
+    name: &str,
+    title: &str,
+    description: &str,
+    properties: Value,
+    required: Vec<&str>,
+) -> Value {
+    let mut value = tool(name, title, description, properties, required);
+    value["inputSchema"]["additionalProperties"] = Value::Bool(false);
+    value["outputSchema"] = ci_recovery_output_schema(name);
+    value
+}
+
+fn ci_recovery_output_schema(name: &str) -> Value {
+    let (properties, required) = match name {
+        "tiber.ci_recovery.claim" => (
+            json!({
+                "incident_id": { "type": "string" },
+                "state": { "type": "string" },
+                "role": { "type": "string", "enum": ["owner", "waiting"] },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "lease_expires_at": { "type": "integer", "minimum": 0 }
+            }),
+            json!(["incident_id", "state", "role", "epoch", "lease_expires_at"]),
+        ),
+        "tiber.ci_recovery.assert_owner" | "tiber.ci_recovery.heartbeat" => (
+            json!({
+                "allowed": { "type": "boolean" },
+                "incident_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "lease_expires_at": { "type": "integer", "minimum": 0 }
+            }),
+            json!(["allowed", "incident_id", "epoch", "lease_expires_at"]),
+        ),
+        "tiber.ci_recovery.transfer" | "tiber.ci_recovery.takeover" => (
+            json!({
+                "incident_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "lease_expires_at": { "type": "integer", "minimum": 0 }
+            }),
+            json!(["incident_id", "epoch", "lease_expires_at"]),
+        ),
+        "tiber.ci_recovery.assign" | "tiber.ci_recovery.report" => (
+            json!({
+                "incident_id": { "type": "string" },
+                "assignment_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 }
+            }),
+            json!(["incident_id", "assignment_id", "epoch"]),
+        ),
+        "tiber.ci_recovery.wait" => (
+            json!({
+                "incident_id": { "type": "string" },
+                "state": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "wake_reason": { "type": "string", "enum": ["assignment", "epoch-changed", "resolved", "timeout"] },
+                "assignment_id": { "type": ["string", "null"] }
+            }),
+            json!([
+                "incident_id",
+                "state",
+                "epoch",
+                "wake_reason",
+                "assignment_id"
+            ]),
+        ),
+        _ => (
+            json!({
+                "schema_version": { "type": "integer", "minimum": 1 },
+                "incident_id": { "type": "string" },
+                "state": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "lease_expires_at": { "type": "integer", "minimum": 0 },
+                "hold_released": { "type": "boolean" },
+                "trigger_count": { "type": "integer", "minimum": 0 },
+                "trigger": ci_recovery_trigger_output_schema(),
+                "triggers": { "type": "array", "items": ci_recovery_trigger_output_schema() },
+                "owner": ci_recovery_participant_output_schema(),
+                "participants": { "type": "array", "items": ci_recovery_participant_output_schema() },
+                "assignments": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string" },
+                            "owner_epoch": { "type": "integer", "minimum": 0 },
+                            "assignee": ci_recovery_participant_output_schema(),
+                            "capabilities": { "type": "array", "items": { "type": "string" } },
+                            "scope": { "type": "string" },
+                            "report": {
+                                "anyOf": [
+                                    { "type": "null" },
+                                    {
+                                        "type": "object",
+                                        "properties": {
+                                            "summary": { "type": "string" },
+                                            "evidence": { "type": "string" }
+                                        },
+                                        "required": ["summary", "evidence"],
+                                        "additionalProperties": false
+                                    }
+                                ]
+                            }
+                        },
+                        "required": ["id", "owner_epoch", "assignee", "capabilities", "scope", "report"],
+                        "additionalProperties": false
+                    }
+                },
+                "failure_record": nullable_ci_recovery_object_schema(json!({
+                    "job": { "type": "string" },
+                    "step": { "type": "string" },
+                    "log_evidence": { "type": "string" }
+                }), json!(["job", "step", "log_evidence"])),
+                "diagnosis": nullable_ci_recovery_object_schema(json!({
+                    "cause": { "type": "string" },
+                    "classification": { "type": "string" }
+                }), json!(["cause", "classification"])),
+                "next_action": nullable_ci_recovery_object_schema(json!({
+                    "kind": { "type": "string" },
+                    "description": { "type": "string" }
+                }), json!(["kind", "description"])),
+                "replacement": nullable_ci_recovery_object_schema(json!({
+                    "run_id": { "type": "string" },
+                    "run_url": { "type": "string" },
+                    "sha": { "type": "string" },
+                    "status": { "type": "string" }
+                }), json!(["run_id", "run_url", "sha", "status"])),
+                "release_proof": nullable_ci_recovery_object_schema(json!({
+                    "replacement_run_id": { "type": "string" },
+                    "replacement_run_url": { "type": "string" },
+                    "sha": { "type": "string" },
+                    "terminal_status": { "type": "string" }
+                }), json!(["replacement_run_id", "replacement_run_url", "sha", "terminal_status"]))
+            }),
+            json!([
+                "schema_version",
+                "incident_id",
+                "state",
+                "epoch",
+                "lease_expires_at",
+                "hold_released",
+                "trigger_count",
+                "trigger",
+                "triggers",
+                "owner",
+                "participants",
+                "assignments",
+                "failure_record",
+                "diagnosis",
+                "next_action",
+                "replacement",
+                "release_proof"
+            ]),
+        ),
+    };
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false
+    })
+}
+
+fn ci_recovery_trigger_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "run_id": { "type": "string" },
+            "run_url": { "type": "string" },
+            "failed_sha": { "type": "string" },
+            "workflow": { "type": "string" },
+            "git_ref": { "type": "string" }
+        },
+        "required": ["run_id", "run_url", "failed_sha", "workflow", "git_ref"],
+        "additionalProperties": false
+    })
+}
+
+fn ci_recovery_participant_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "host": { "type": "string" },
+            "session": { "type": "string" }
+        },
+        "required": ["host", "session"],
+        "additionalProperties": false
+    })
+}
+
+fn nullable_ci_recovery_object_schema(properties: Value, required: Value) -> Value {
+    json!({
+        "anyOf": [
+            { "type": "null" },
+            {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": false
+            }
+        ]
+    })
 }
 
 fn tool(
@@ -662,6 +1248,19 @@ fn search_content(results: Value) -> Value {
             "results": results
         }
     })
+}
+
+fn structured_content(value: impl Serialize) -> Result<Value, tiber_git::Error> {
+    let value = serde_json::to_value(value).map_err(|error| {
+        tiber_git::Error::Parse(format!("mcp_structured_content_invalid source={error}"))
+    })?;
+    Ok(json!({
+        "content": [{
+            "type": "text",
+            "text": value.to_string()
+        }],
+        "structuredContent": value
+    }))
 }
 
 fn text_content(text: String) -> Value {
