@@ -62,6 +62,14 @@
       "version": "0.15.0",
       "category": "Developer Tools",
       "keywords": ["tasks", "git", "mcp", "dashboard", "planning"]
+    },
+    {
+      "name": "development-system",
+      "source": "./plugins/development-system",
+      "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
+      "version": "1.0.0",
+      "category": "Developer Tools",
+      "keywords": ["development", "workflow", "worktrees", "tiber", "quality"]
     }
   ]
 }
