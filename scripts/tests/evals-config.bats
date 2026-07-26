@@ -288,6 +288,7 @@ const namesOnly = [
   'tiber',
   'worktrees',
   'development-discipline',
+  'development-system',
 ].join('\n');
 
 const result = assertCanary(namesOnly, {
@@ -313,6 +314,7 @@ const natural = [
   'Tiber: Tiber',
   'Worktrees: Setup',
   'Development Discipline: Test Driven Development',
+  'Development System: Setup',
 ].join('\n');
 
 const result = assertCanary(natural, {
