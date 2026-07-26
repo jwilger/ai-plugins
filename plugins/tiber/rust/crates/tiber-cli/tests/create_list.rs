@@ -73,6 +73,62 @@ fn list_filters_completed_tasks_by_status() {
 }
 
 #[test]
+fn task_reads_and_writes_work_from_a_coordination_only_primary_checkout() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Existing shared task"]));
+    repo.git(["config", "core.worktree", ".."]);
+    repo.git(["config", "core.bare", "true"]);
+
+    let list = repo.tiber(["list"]);
+
+    assert_success_ref(&list);
+    assert!(
+        String::from_utf8(list.stdout)
+            .expect("list output should be utf8")
+            .contains("Existing shared task"),
+        "coordination checkout should read the shared task board"
+    );
+
+    let create = repo.tiber(["create", "Created from coordination checkout"]);
+
+    assert_success_ref(&create);
+    task_stem(
+        &repo,
+        "backlog",
+        "created-from-coordination-checkout",
+    );
+}
+
+#[test]
+fn true_bare_repository_named_dot_git_is_not_a_coordination_checkout() {
+    let seed = TempRepo::initialized();
+    let parent = TempRepo::new();
+    assert_success(parent.command(
+        "git",
+        [
+            "clone",
+            "--bare",
+            seed.path().to_str().expect("seed path should be utf8"),
+            ".git",
+        ],
+    ));
+    fs::write(parent.path().join("README.md"), "# unrelated file\n")
+        .expect("write colliding parent file");
+    let init = parent.tiber_at(parent.path(), ["init"]);
+    assert!(
+        !init.status.success(),
+        "tiber init should refuse a true bare repository"
+    );
+    assert!(
+        String::from_utf8(init.stderr)
+            .expect("init stderr should be utf8")
+            .contains("tiber.repository_root_unresolved"),
+        "failure should explain that no checkout root could be resolved"
+    );
+}
+
+#[test]
 fn search_finds_historical_titles_and_descriptions_as_structured_results() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

@@ -1784,9 +1784,30 @@ impl GitRepository {
     }
 
     fn discover() -> Result<Self, Error> {
-        let root = git_output(["rev-parse", "--show-toplevel"], None)?;
-        let root_path = PathBuf::from(root.trim());
-        Ok(Self::at(root_path))
+        if let Ok(root) = git_output(["rev-parse", "--show-toplevel"], None) {
+            return Ok(Self::at(PathBuf::from(root.trim())));
+        }
+
+        let git_dir = git_output(["rev-parse", "--absolute-git-dir"], None).map_err(|_| {
+                Error::Usage(
+                    "tiber.repository_not_found action=\"run from a repository checkout or configure the integration with an explicit repository root\""
+                        .to_string(),
+                )
+            })?;
+        if let Ok(root) = git_output(["config", "--path", "--get", "core.worktree"], None) {
+            let root = PathBuf::from(root.trim());
+            let root = if root.is_absolute() {
+                root
+            } else {
+                PathBuf::from(git_dir.trim()).join(root)
+            };
+            return Ok(Self::at(root));
+        }
+
+        Err(Error::Usage(
+            "tiber.repository_root_unresolved action=\"run from a repository checkout or configure the integration with an explicit repository root\""
+                .to_string(),
+        ))
     }
 
     fn with_tasks_dir(&self, tasks_dir: PathBuf) -> Self {
