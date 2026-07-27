@@ -17,10 +17,12 @@ and Codex support from the same canonical implementation and content.
 
 Pi support will be delivered as a Pi package containing the existing public
 skills and a first-party TypeScript extension. The extension will expose native
-Pi tools, lifecycle integration, trusted user interactions, and deterministic
-guardrails. It will reuse mature Rust components such as Tiber and the
-development-discipline review coordinator through narrow, supervised protocol
-adapters rather than rewriting them solely to obtain in-process calls.
+Pi tools, lifecycle integration, trusted user interactions, deterministic
+guardrails, and a session-scoped `/goal` command that autonomously continues
+work until explicit, verified completion. It will reuse mature Rust components
+such as Tiber and the development-discipline review coordinator through narrow,
+supervised protocol adapters rather than rewriting them solely to obtain
+in-process calls.
 
 New orchestration and lightweight tooling will prefer TypeScript. Shared
 TypeScript capability definitions will be adaptable to Pi tools, MCP tools, and
@@ -103,6 +105,9 @@ The principal problems are:
 6. **Support priority is not represented.** Documentation, release gates, and
    dashboard presentation do not yet identify Pi as primary, Claude Code as
    secondary, and Codex as tertiary.
+7. **Pi has no first-party autonomous goal driver.** Ordinary turns can stop at
+   analysis, plans, or partial progress even when the user asked the agent to
+   continue through implementation and verification.
 
 ## 4. Product vision
 
@@ -110,8 +115,8 @@ A user installs one development-system package and receives the strongest
 experience available in the current harness:
 
 - In **Pi**, skills supply progressive-disclosure guidance while a native
-  extension supplies tools, orchestration, status, trusted interactions, and
-  deterministic guardrails.
+  extension supplies tools, orchestration, status, trusted interactions,
+  deterministic guardrails, and bounded autonomous goal completion.
 - In **Claude Code**, the same skills and shared implementations are exposed
   through the plugin, hook, MCP, and agent surfaces supported by Claude Code.
 - In **Codex**, the same skills and shared implementations are exposed through
@@ -168,6 +173,9 @@ to support.
    reporting.
 9. Establish an incremental path in which each guard is justified by a concrete
    failure mode and measurable behavior.
+10. Provide a first-party Pi `/goal` mode that preserves the complete objective
+    across turns, continues autonomously, and stops only at an explicit terminal
+    state or a defined safety boundary.
 
 ### 5.2 Engineering goals
 
@@ -204,6 +212,8 @@ The initial product does not aim to:
    or every internal module boundary in this PRD.
 10. Replace eval-based product decisions with an exhaustive up-front guardrail
     design.
+11. Add ordered goal queues, background daemons, or a general-purpose task
+    scheduler to the initial `/goal` implementation.
 
 ## 7. Users and primary use cases
 
@@ -224,7 +234,9 @@ Primary needs include:
 - performing fresh-context, risk-proportional final review;
 - selecting the configured delivery mode without inventing authorization;
 - running and interpreting stochastic evals;
-- retaining the ability to work in Claude Code or Codex when appropriate.
+- retaining the ability to work in Claude Code or Codex when appropriate;
+- starting one explicit autonomous goal and having Pi continue until the full
+  objective is verified complete, paused, blocked, or safety-limited.
 
 ### 7.2 Maintainer
 
@@ -488,6 +500,8 @@ Status must report, at minimum:
 - primary versus linked checkout identity;
 - availability of bundled components;
 - active enforcement limitations for the current Pi mode;
+- the active goal status, continuation count, and token-budget usage when goal
+  mode is active or stopped; and
 - actionable configuration or compatibility errors.
 
 The model should receive only the portion needed for its current task. Detailed
@@ -500,7 +514,145 @@ The extension must tolerate Pi resource reload and session replacement. It must
 not retain stale session-bound objects or leave child processes running after
 shutdown.
 
-### 10.4 Project configuration
+### 10.4 Autonomous goal mode
+
+#### FR-GOAL-1 — Native command surface (P0)
+
+The development-system extension must own one unsuffixed `/goal` command with
+these initial operations:
+
+```text
+/goal
+/goal status
+/goal [--tokens <budget>] [--turns <limit|unlimited>] <objective>
+/goal pause
+/goal resume [--tokens <budget>] [--turns <limit|unlimited>]
+/goal clear
+```
+
+Bare `/goal` and `/goal status` report the current state. Starting a goal while
+another goal exists explicitly replaces it and invalidates the old completion
+guard. Objectives must be non-empty and limited to 4,000 characters; longer
+instructions must be referenced from an artifact. Token counts accept positive
+integer values with `k` and `m` suffixes. The default automatic-response limit
+is 25; `unlimited` must be an explicit user choice.
+
+The initial feature owns one goal at a time. It must not acquire queue semantics
+implicitly or expose unrelated commands from another package.
+
+#### FR-GOAL-2 — Session-scoped state (P0)
+
+Goal state must belong to the current Pi session branch and be persisted through
+Pi custom session entries. It must include a unique goal ID, objective, status,
+start and update times, automatic-response count, configured limits, token
+baseline, and token usage. Reloading or reopening the same session restores an
+unfinished goal; a new session in the same directory does not inherit it.
+
+The goal state is orchestration state, not a second authority for Tiber tasks,
+review status, delivery policy, repository identity, or verification evidence.
+The goal-mode module must not create global per-directory state or an
+independent settings file merely to persist an active objective.
+
+#### FR-GOAL-3 — Settled-boundary continuation (P0)
+
+A started or resumed goal must inject the complete objective and goal-mode rules
+for each owned run. If the run ends without a valid terminal tool call, the
+extension must create at most one continuation intent and dispatch it only after
+Pi emits `agent_settled`, `ctx.isIdle()` is true, and no steering, follow-up,
+retry, compaction recovery, or other pending message remains.
+
+Continuation messages must be extension-authored custom messages rather than
+messages impersonating the user. They must carry bounded ownership markers so a
+delayed prompt from a paused, cleared, completed, blocked, replaced, or older
+goal cannot start or complete the current goal. Repeated settlement events must
+not dispatch duplicate turns.
+
+#### FR-GOAL-4 — Explicit terminal tools (P0)
+
+The extension must register `goal_complete` and `goal_blocked` with stable,
+strict schemas:
+
+- `goal_complete` requires the exact current `goal_id` and a non-empty summary
+  of completed work and direct verification evidence. It is valid only for an
+  active goal after all requirements are complete. Missing or stale IDs, empty
+  summaries, and summaries that plainly admit incomplete or failing work must
+  be rejected. Prompt checks and contradictory-summary detection are
+  guardrails, not independent proof of completion.
+- `goal_blocked` requires the exact current `goal_id`, a bounded reason, bounded
+  concrete evidence, and a whole-number `repeated_turns` value of at least
+  three. It is valid only when the same external blocker persisted across those
+  attempts and user or external action is required; difficulty, uncertainty,
+  incomplete work, ordinary clarification, and recoverable failures are not
+  blockers.
+
+An accepted terminal tool must cancel pending continuation and terminate the
+owned tool batch where Pi permits. Plain assistant text must never mark a goal
+complete.
+
+#### FR-GOAL-5 — Objective integrity and stale-turn safety (P0)
+
+Every kickoff, continuation, resume, and active-goal system prompt must preserve
+the full user objective and identify it as user-provided task data rather than
+higher-priority instructions. Objective text and goal IDs must be escaped at the
+structured prompt boundary.
+
+Starting, replacing, clearing, or resuming a goal must rotate or invalidate the
+stale-turn guard as appropriate. Completion or blocking from an old in-flight
+turn must not mutate a newer goal. Before accepting completion, the model must
+be instructed to audit every explicit requirement, artifact, command, test,
+gate, invariant, and deliverable against current authoritative evidence.
+
+#### FR-GOAL-6 — Bounded autonomy and accounting (P0)
+
+Automatic work must be bounded by default. The extension must count automatic
+model responses, including responses within automatic tool loops and matching
+Pi-owned retry or compaction recovery. At the configured limit it pauses without
+claiming completion. A direct user prompt or explicit resume may start a fresh
+safety epoch; reload, shelving, or compaction may not silently reset it.
+
+The extension must also pause after three consecutive empty or normalized-
+identical tool-free automatic runs. Tool activity or materially different
+output resets that repeat detector. The user may explicitly select unbounded
+turns, but doing so must not disable other terminal, interruption, or optional
+token-budget behavior.
+
+When a token budget is configured, usage must derive from finite non-negative
+provider-reported totals with a cache-inclusive compatibility fallback. It must
+not double-count reasoning or nested cache fields. A budget may overshoot by one
+provider call because usage is authoritative only after response completion.
+Budget exhaustion pauses; it never implies success. Resume requires a budget
+above already-consumed usage.
+
+#### FR-GOAL-7 — Interruption, error, and compaction behavior (P0)
+
+User pause or abort, exhausted automatic limits, terminal provider errors,
+provider usage limits, and true external blockers must become distinct stopped
+outcomes or carry a stable machine-readable reason. Retryable provider failures
+and Pi-owned compaction retries receive their normal recovery opportunity before
+the extension decides that the goal is stopped. Resume rotates the goal ID,
+clears the applicable terminal reason, and starts a fresh blocker and automatic-
+response audit without erasing already-consumed token usage.
+
+Manual and automatic compaction must preserve the objective, counters, budget,
+and ownership state. If required terminal tools become unavailable because of
+another tool policy, the goal must pause before another automatic model call;
+the extension must not widen a deliberately restricted active-tool set.
+
+#### FR-GOAL-8 — Isolation, collisions, and side effects (P0)
+
+Goal-mode control flow must not execute model-proposed shell commands, spawn
+subprocesses, perform network requests, read project configuration, or write
+files. The agent may use Pi's already-active tools while pursuing the objective,
+subject to the development system's ordinary guards; goal mode itself must not
+broaden that tool set or bypass approvals.
+
+The package must reserve `/goal`, `goal_complete`, and `goal_blocked`. A command
+or tool collision that would suffix, shadow, or override one of those public
+names must produce a bounded diagnostic and disable ambiguous goal activation
+rather than silently selecting one implementation. The package canary must
+prove that only the development-system implementation supplies these names.
+
+### 10.5 Project configuration
 
 #### FR-CFG-1 — Authoritative project policy (P0)
 
@@ -528,7 +680,7 @@ Existing valid configuration files must continue to work. A future schema
 change must define compatibility, per-repository backfill, rollback, and
 recovery before implementation.
 
-### 10.5 Shared TypeScript capability model
+### 10.6 Shared TypeScript capability model
 
 #### FR-CAP-1 — Reusable capability definition (P0)
 
@@ -567,7 +719,7 @@ from the canonical contract. Provider-specific restrictions, including enum
 compatibility, must be covered by contract tests. Capabilities that are not
 shared with MCP are not required to adopt an MCP-shaped schema.
 
-### 10.6 Retained Rust components and MCP bridge
+### 10.7 Retained Rust components and MCP bridge
 
 #### FR-MCP-1 — Retain mature implementations (P0)
 
@@ -620,7 +772,7 @@ selected provider's supported tool-schema subset. A tool with an unsupported or
 ambiguous schema must remain inactive with a bounded diagnostic. Canaries must
 cover origin, naming, collision, and schema admission.
 
-### 10.7 Setup and compatibility workflow
+### 10.8 Setup and compatibility workflow
 
 #### FR-SET-1 — Trusted setup interaction (P1)
 
@@ -662,7 +814,7 @@ Setup must preserve its existing all-or-recoverable behavior: it must not leave
 a partially written configuration or claim success when its initialization
 commit fails.
 
-### 10.8 Deterministic worktree and path guardrails
+### 10.9 Deterministic worktree and path guardrails
 
 #### FR-GRD-1 — Structured write interception (P1)
 
@@ -734,7 +886,7 @@ Where an override is appropriate, it must be narrow, visible, operation-specific
 and short-lived. General guard disablement and conversational approval are not
 acceptable substitutes for an explicit policy mechanism.
 
-### 10.9 Delivery and CI-recovery guardrails
+### 10.10 Delivery and CI-recovery guardrails
 
 #### FR-DEL-1 — Delivery-mode enforcement (P1)
 
@@ -776,7 +928,7 @@ omit the call. Pi enforcement must occur in extension lifecycle/tool events;
 Claude Code and Codex enforcement must occur in their supported hook or command
 boundaries. MCP may supply authoritative state and operations to those guards.
 
-### 10.10 Final review and subagent orchestration
+### 10.11 Final review and subagent orchestration
 
 #### FR-REV-1 — Preserve authoritative coordinator (P1)
 
@@ -813,7 +965,7 @@ Timeout, cancellation, provider error, malformed result, or failed attestation
 must remain an unresolved assignment. The extension must not synthesize a pass
 or silently downgrade the requested role.
 
-### 10.11 User interaction and state
+### 10.12 User interaction and state
 
 #### FR-UI-1 — Trusted decisions (P1)
 
@@ -840,10 +992,11 @@ repository content.
 
 Authoritative workflow state must remain in its owning component or project
 artifact. Extension-local session state may track ephemeral UI and invocation
-context but must not become a second authority for Tiber, final review, delivery
-mode, or repository identity.
+context, including the FR-GOAL-2 active objective and continuation guards, but
+must not become a second authority for Tiber, final review, delivery mode,
+repository identity, or proof that goal requirements are satisfied.
 
-### 10.12 Claude Code and Codex compatibility
+### 10.13 Claude Code and Codex compatibility
 
 #### FR-HAR-1 — Shared behavior compatibility (P0)
 
@@ -875,7 +1028,7 @@ Making Pi primary does not permit known regressions in Claude Code or Codex.
 Relevant compatibility checks remain blocking for a release that claims support
 for those harnesses.
 
-### 10.13 Evaluation support
+### 10.14 Evaluation support
 
 #### FR-EVAL-1 — Pi provider integration (P0)
 
@@ -926,7 +1079,11 @@ results can be compared without conflating model and harness effects.
 Every extension behavior included in a release must have provider-free
 black-box tests at its public extension, command, tool, or process boundary. The
 P0 release must cover package and skill loading, startup diagnostics,
-mode-appropriate status access, and reload/shutdown behavior.
+mode-appropriate status access, reload/shutdown behavior, `/goal` parsing and
+state restoration, exact-once settled continuation, stale prompt and goal-ID
+rejection, completion and blocker contracts, pause/resume/clear, safety limits,
+token accounting, compaction, terminal errors, tool disappearance, and public-
+name collision handling.
 
 As each P1 or P2 capability ships, its release must add the corresponding setup
 preview and confirmation, coordination-checkout rejection, path
@@ -948,7 +1105,9 @@ intended public skills are discoverable, no skill-name collision exists, and
 required bundled component entry points can be resolved.
 
 A provider-backed canary must establish that the selected Pi model can discover
-and use representative package capabilities.
+and use representative package capabilities, continue an incomplete bounded
+goal without user prompting, and terminate a completed goal through
+`goal_complete` with verification evidence.
 
 #### FR-EVAL-9 — Reporting priority (P0)
 
@@ -981,7 +1140,7 @@ The canary must prove that the expected extension code executed and record its
 source provenance, not merely discover a similarly named skill or tool.
 No-package mode must prove that the package extension and skills did not load.
 
-### 10.14 Documentation and support posture
+### 10.15 Documentation and support posture
 
 #### FR-DOC-1 — Primary-support catalog transition (P1)
 
@@ -1054,6 +1213,7 @@ plugins/development-system/
 │   └── development-system/
 │       ├── index.ts              # Pi adapter composition root
 │       ├── core/                 # Pure policy and semantic types
+│       ├── goal-mode/            # Session goal state, prompts, and transitions
 │       ├── capabilities/         # Shared TypeScript capability definitions
 │       └── adapters/             # Pi, MCP, CLI and process adapters
 ├── components/
@@ -1163,11 +1323,20 @@ The extension is expected to use Pi events according to responsibility:
 - `session_start`: initialize bounded session resources and diagnostics;
 - `resources_discover`: contribute explicit resource paths when package metadata
   alone is insufficient;
-- `before_agent_start`: inject only current, task-relevant status or guidance;
+- `before_agent_start`: inject only current, task-relevant status or guidance,
+  including an active goal's bounded objective context;
+- `input`: distinguish user guidance from extension-owned goal prompts and
+  discard stale continuation markers;
+- `agent_end`: account for goal usage, terminal errors, and continuation intent;
+- `agent_settled`: dispatch at most one owned continuation after Pi retries,
+  compaction recovery, and queued messages drain;
+- `session_before_compact` and `session_compact`: checkpoint and restore active
+  goal state without duplicate continuation;
 - `tool_call`: inspect, mutate when safe, or block protected calls;
 - `tool_result`: attach bounded structured evidence when required;
 - `user_bash`: apply policy to user-entered shell execution where appropriate;
-- `session_shutdown`: terminate resources and clear session state.
+- `session_shutdown`: terminate resources, checkpoint goal state, and clear
+  session-bound runtime objects.
 
 Commands should own workflows requiring session replacement, reload, or
 interactive user control. Tools should expose model-callable operations with
@@ -1279,6 +1448,8 @@ The product should protect against:
 - omitted workflow calls;
 - cooperative concurrent worktrees or processes;
 - interruption, timeout, and child-process leakage;
+- runaway or duplicate autonomous goal continuation;
+- stale goal prompts or terminal calls mutating a replaced goal;
 - malformed protocol responses;
 - unavailable components;
 - unauthorized or incorrectly scoped delivery operations;
@@ -1364,6 +1535,9 @@ rates.
   through one documented, mode-appropriate deterministic status surface.
 - The user can complete setup through preview and trusted confirmation without
   manually constructing an apply command.
+- The user can start one `/goal`, observe its state and budget, and have Pi
+  continue without repeated prompting until verified completion or a clearly
+  reported stopped state.
 
 ### 14.2 Maintainability
 
@@ -1419,6 +1593,8 @@ no implementation depends on accidental recursive discovery.
 - Add the clean-checkout bootstrap and supported-target checks.
 - Load the eight public skills.
 - Add a minimal extension with startup diagnostics and mode-appropriate status.
+- Add the session-scoped `/goal` command, terminal tools, settled continuation,
+  and default-on safety boundaries.
 - Add provider-free package canaries and documentation.
 
 **Exit condition:** local installation is supported on the declared target
@@ -1570,9 +1746,21 @@ cross-harness contract tests, and CI drift checks.
 run package canaries against the supported version, and isolate Pi-specific code
 in its adapter.
 
+### 16.9 Autonomous goal runaway or premature completion
+
+**Risk:** Goal mode creates duplicate or unbounded model calls, continues stale
+work after replacement, or accepts a confident completion claim without direct
+evidence.
+
+**Mitigation:** dispatch only from Pi's settled idle boundary, persist single-
+flight ownership markers and stale-goal IDs, enforce default response and no-
+progress limits, support explicit token budgets, require terminal tools, and run
+provider-free lifecycle tests plus executable provider-backed completion cases.
+
 ## 17. Dependencies and constraints
 
-- Pi package, skill, extension, JSON mode or SDK, and project-trust APIs.
+- Pi package, skill, extension, JSON mode or SDK, project-trust, custom session
+  entry, `agent_settled`, pending-message, and active-tool APIs.
 - Node.js and the repository Nix development environment.
 - TypeBox/JSON Schema compatibility for shared TypeScript tools.
 - Existing development-discipline and Tiber executables and MCP contracts.
@@ -1612,6 +1800,9 @@ prematurely:
     blocking behavior?
 13. When, if ever, does the maintenance cost of a retained Rust component
     justify a language migration?
+14. After single-goal behavior is proven, is there measured value in an ordered
+    goal queue sufficient to justify its additional state and interruption
+    semantics?
 
 Each resolved architectural question that materially constrains future work
 must be recorded in an ADR.
@@ -1627,27 +1818,31 @@ The first supported Pi release is acceptable when all of the following are true:
 3. Startup diagnostics and a documented deterministic status surface work in
    every claimed Pi mode; no mode relies on stochastic model invocation to
    obtain status.
-4. Claude Code and Codex consume unchanged canonical public skill files.
-5. One canonical release version is validated across all package and
+4. The unsuffixed `/goal`, `goal_complete`, and `goal_blocked` surfaces pass
+   provider-free lifecycle and collision contracts; a provider-backed canary
+   proves incomplete work continues and verified completion terminates without
+   another user prompt.
+5. Claude Code and Codex consume unchanged canonical public skill files.
+6. One canonical release version is validated across all package and
    marketplace metadata.
-6. The Pi support inventory identifies the exact package resources, and
+7. The Pi support inventory identifies the exact package resources, and
    provider-free canaries prove extension execution provenance, project-trust
    posture, package loading, and component resolution.
-7. Every claimed Linux and macOS target has verified Tiber and
+8. Every claimed Linux and macOS target has verified Tiber and
    development-discipline artifacts; unsupported targets fail deterministically
    without relying on Cargo fallback.
-8. Promptfoo can execute Pi no-package and targeted-package variants in an
+9. Promptfoo can execute Pi no-package and targeted-package variants in an
    isolated eval environment.
-9. The eval dashboard reports Pi first and records the actual package
-   composition, provider, and model.
-10. Relevant Pi behavior meets configured thresholds and hard guards.
-11. Existing relevant Claude Code and Codex validation remains green.
-12. Documentation explains installation, trust, target support priority,
+10. The eval dashboard reports Pi first and records the actual package
+    composition, provider, and model.
+11. Relevant Pi behavior meets configured thresholds and hard guards.
+12. Existing relevant Claude Code and Codex validation remains green.
+13. Documentation explains installation, trust, target support priority,
     capability differences, and canonical-source maintenance without calling Pi
     the primary recommended experience before its P1 gate.
-13. The package declares a tested Pi compatibility range, and canary evidence
+14. The package declares a tested Pi compatibility range, and canary evidence
     records the exact Pi version used for release.
-14. No mature Rust component has been rewritten merely to satisfy the initial
+15. No mature Rust component has been rewritten merely to satisfy the initial
     release.
 
 Pi becomes the primary recommended experience only after every applicable P1
