@@ -41,6 +41,55 @@ run_manifest_server_with_restricted_path() {
     "$command" "${args[@]}"
 }
 
+run_consolidated_manifest_server_from_cache() {
+  local server="$1"
+  local cache_layout="$2"
+  local command
+  local args
+  local cache_parent
+  local version
+
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  case "$cache_layout" in
+    codex-home)
+      cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system"
+      ;;
+    home)
+      cache_parent="$TMPROOT/home/.codex/plugins/cache/ai-plugins/development-system"
+      ;;
+    *)
+      echo "unknown consolidated MCP cache layout: $cache_layout" >&2
+      return 2
+      ;;
+  esac
+  mkdir -p "$cache_parent"
+  ln -sfn "$ROOT/plugins/development-system" "$cache_parent/$version"
+
+  command="$(jq -r ".mcpServers[\"$server\"].command" "$ROOT/plugins/development-system/.mcp.json")"
+  mapfile -t args < <(jq -r ".mcpServers[\"$server\"].args[]" "$ROOT/plugins/development-system/.mcp.json")
+
+  if [ "$cache_layout" = "codex-home" ]; then
+    printf '%s\n' \
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' \
+      '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
+      env -i \
+        PATH="$PATH" \
+        HOME="$TMPROOT/home" \
+        CODEX_HOME="$TMPROOT/codex-home" \
+        CARGO_HOME="$ROOT/.dependencies/cargo" \
+        "$command" "${args[@]}"
+  else
+    printf '%s\n' \
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' \
+      '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
+      env -i \
+        PATH="$PATH" \
+        HOME="$TMPROOT/home" \
+        CARGO_HOME="$ROOT/.dependencies/cargo" \
+        "$command" "${args[@]}"
+  fi
+}
+
 run_promptfoo_manifest_server_with_restricted_path() {
   install_promptfoo_cache_launcher
   run_manifest_server_with_restricted_path \
@@ -539,6 +588,52 @@ install_stale_tiber_cache_launcher() {
   [ -d "$TMPROOT/promptfoo-state/home" ]
   [ -d "$TMPROOT/promptfoo-state/config" ]
   [ -d "$TMPROOT/promptfoo-state/cache" ]
+}
+
+@test "consolidated development-discipline MCP starts from the explicit Codex cache without plugin-root variables" {
+  cd "$ROOT"
+
+  run run_consolidated_manifest_server_from_cache development-discipline codex-home
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
+  [[ "$output" == *'"id":2'* ]]
+  [[ "$output" == *'"name":"final_review.plan"'* ]]
+  [[ "$output" != *"development_system.plugin_root_missing"* ]]
+}
+
+@test "consolidated tiber MCP starts from the explicit Codex cache without plugin-root variables" {
+  cd "$ROOT"
+
+  run run_consolidated_manifest_server_from_cache tiber codex-home
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"tiber"'* ]]
+  [[ "$output" == *'"id":2'* ]]
+  [[ "$output" == *'"name":"tiber.create"'* ]]
+  [[ "$output" != *"development_system.plugin_root_missing"* ]]
+}
+
+@test "consolidated development-discipline MCP starts from the HOME cache without plugin-root variables" {
+  cd "$ROOT"
+
+  run run_consolidated_manifest_server_from_cache development-discipline home
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
+  [[ "$output" == *'"id":2'* ]]
+  [[ "$output" == *'"name":"final_review.plan"'* ]]
+}
+
+@test "consolidated tiber MCP starts from the HOME cache without plugin-root variables" {
+  cd "$ROOT"
+
+  run run_consolidated_manifest_server_from_cache tiber home
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"tiber"'* ]]
+  [[ "$output" == *'"id":2'* ]]
+  [[ "$output" == *'"name":"tiber.create"'* ]]
 }
 
 @test "promptfoo MCP manifest command resolves from the marketplace root" {

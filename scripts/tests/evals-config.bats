@@ -246,7 +246,7 @@ JSON
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"path: \"{{ env.CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM"* ]]
-  [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/1.1.2"* ]]
+  [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/1.1.3"* ]]
   [[ "$output" != *"path: \"./plugins/"* ]]
 }
 
