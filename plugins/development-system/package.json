@@ -37,5 +37,6 @@
       "./skills/tasks",
       "./skills/worktrees"
     ]
-  }
+  },
+  "type": "module"
 }

@@ -7,11 +7,5 @@
     "email": "john@johnwilger.com"
   },
   "license": "AGPL-3.0-or-later",
-  "keywords": [
-    "development",
-    "workflow",
-    "worktrees",
-    "tiber",
-    "quality"
-  ]
+  "keywords": ["development", "workflow", "worktrees", "tiber", "quality"]
 }

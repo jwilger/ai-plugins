@@ -7,13 +7,7 @@
     "email": "john@johnwilger.com"
   },
   "license": "AGPL-3.0-or-later",
-  "keywords": [
-    "development",
-    "workflow",
-    "worktrees",
-    "tiber",
-    "quality"
-  ],
+  "keywords": ["development", "workflow", "worktrees", "tiber", "quality"],
   "mcpServers": "./.mcp.json",
   "hooks": "./hooks/codex.json",
   "interface": {
@@ -22,10 +16,7 @@
     "longDescription": "Use Development System for John's consolidated development discipline, engineering standards, worktree isolation, Tiber coordination, final review, and optional agentic-system workflows.",
     "developerName": "John Wilger",
     "category": "Developer Tools",
-    "capabilities": [
-      "Read",
-      "Write"
-    ],
+    "capabilities": ["Read", "Write"],
     "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
     "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
     "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
