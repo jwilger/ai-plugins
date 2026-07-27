@@ -63,9 +63,8 @@ teardown() {
   [ -z "$(find "$RUNTIME_ROOT" -type f ! -perm 0600 -print -quit)" ]
 
   for mode in \
-    no-marketplace-skills \
-    targeted-quality-skills \
-    all-marketplace-skills; do
+    no-plugins \
+    development-system; do
     row_root="$RUNTIME_ROOT/rust-cli-feature/sample-1/$mode"
     [ -d "$row_root/codex-home" ]
     [ -d "$row_root/tmp" ]
@@ -87,11 +86,10 @@ teardown() {
       (.contractSha256 | test("^[0-9a-f]{64}$")) and
       (.workspaceManifestSha256 | test("^[0-9a-f]{64}$")) and
       (.matrixHash | test("^[0-9a-f]{64}$")) and
-      (.rows | length) == 3 and
+      (.rows | length) == 2 and
       ([.rows[].mode] == [
-        "no-marketplace-skills",
-        "targeted-quality-skills",
-        "all-marketplace-skills"
+        "no-plugins",
+        "development-system"
       ]) and
       all(.rows[];
         .caseId == "rust-cli-feature" and
@@ -129,38 +127,28 @@ teardown() {
 
   mapfile -t codex_homes < <(jq -r '.rows[].codexHome' "$RUNTIME_ROOT/manifest.json")
   mapfile -t codex_tmps < <(jq -r '.rows[].codexTmp' "$RUNTIME_ROOT/manifest.json")
-  [ "${#codex_homes[@]}" -eq 3 ]
-  [ "$(printf '%s\n' "${codex_homes[@]}" | sort -u | wc -l)" -eq 3 ]
-  [ "$(printf '%s\n' "${codex_tmps[@]}" | sort -u | wc -l)" -eq 3 ]
+  [ "${#codex_homes[@]}" -eq 2 ]
+  [ "$(printf '%s\n' "${codex_homes[@]}" | sort -u | wc -l)" -eq 2 ]
+  [ "$(printf '%s\n' "${codex_tmps[@]}" | sort -u | wc -l)" -eq 2 ]
 
-  no_skills_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/no-marketplace-skills/codex-home"
-  targeted_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/targeted-quality-skills/codex-home"
-  all_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/all-marketplace-skills/codex-home"
+  no_skills_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/no-plugins/codex-home"
+  plugin_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/development-system/codex-home"
   [ ! -e "$no_skills_home/plugins/cache/ai-plugins" ]
 
-  targeted_plugins="$(
-    find "$targeted_home/plugins/cache/ai-plugins" \
+  installed_plugins="$(
+    find "$plugin_home/plugins/cache/ai-plugins" \
       -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
   )"
-  [ "$targeted_plugins" = "development-system" ]
+  [ "$installed_plugins" = "development-system" ]
 
   workflow_reference="skills/development-workflow/references/workflow-rules.md"
   plugin_version="$(jq -er '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
   cmp -s \
     "$ROOT/plugins/development-system/$workflow_reference" \
-    "$targeted_home/plugins/cache/ai-plugins/development-system/$plugin_version/$workflow_reference"
+    "$plugin_home/plugins/cache/ai-plugins/development-system/$plugin_version/$workflow_reference"
   cmp -s \
     "$ROOT/plugins/development-system/$workflow_reference" \
-    "$targeted_home/marketplace/plugins/development-system/$workflow_reference"
-
-  expected_all_plugins="$(
-    jq -r '.plugins[].name' "$ROOT/.agents/plugins/marketplace.json" | sort
-  )"
-  actual_all_plugins="$(
-    find "$all_home/plugins/cache/ai-plugins" \
-      -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
-  )"
-  [ "$actual_all_plugins" = "$expected_all_plugins" ]
+    "$plugin_home/marketplace/plugins/development-system/$workflow_reference"
 
   while IFS= read -r version_root; do
     projected_entries="$(
@@ -169,7 +157,7 @@ teardown() {
     [ "$projected_entries" = $'.codex-plugin\nskills' ]
     [ "$(find "$version_root/.codex-plugin" -mindepth 1 -maxdepth 1 -printf '%f\n')" = plugin.json ]
   done < <(
-    find "$targeted_home/plugins/cache/ai-plugins" "$all_home/plugins/cache/ai-plugins" \
+    find "$plugin_home/plugins/cache/ai-plugins" \
       -mindepth 2 -maxdepth 2 -type d | sort
   )
 
@@ -222,7 +210,7 @@ teardown() {
 
   jq -e '
     (.rows | map(.availableSkills | map(select(startswith("codex-system:")))) | unique | length) == 1 and
-    (.rows[] | select(.mode == "no-marketplace-skills") |
+    (.rows[] | select(.mode == "no-plugins") |
       (.availableSkills | length) > 0 and
       all(.availableSkills[]; startswith("codex-system:")))
   ' "$RUNTIME_ROOT/manifest.json"
@@ -252,7 +240,7 @@ teardown() {
     all(.availableSkills[]; test("^[a-z0-9]+(?:-[a-z0-9]+)*:[a-z0-9]+(?:-[a-z0-9]+)*$"))
   ' "$RUNTIME_ROOT/manifest.json"
   jq -e '
-    .rows[] | select(.mode == "no-marketplace-skills") |
+    .rows[] | select(.mode == "no-plugins") |
     (.availableSkills | length) > 0 and
     all(.availableSkills[]; startswith("codex-system:"))
   ' "$RUNTIME_ROOT/manifest.json"
@@ -277,8 +265,7 @@ teardown() {
       "$RUNTIME_ROOT/manifest.json" >"$TEST_ROOT/$mode.actual"
     cmp -s "$expected" "$TEST_ROOT/$mode.actual"
   done <<EOF
-targeted-quality-skills	development-system
-all-marketplace-skills	$(jq -r '[.plugins[].name] | join(",")' "$ROOT/.agents/plugins/marketplace.json")
+development-system	development-system
 EOF
 }
 
@@ -299,7 +286,7 @@ EOF
   [ "$(jq -c '[.rows[] | {compositionHash, inputHash}]' "$first_manifest")" = "$(jq -c '[.rows[] | {compositionHash, inputHash}]' "$second_manifest")" ]
   [ "$(jq -r '.matrixHash' "$first_manifest")" = "$(jq -r '.matrixHash' "$second_manifest")" ]
   [ "$(jq -r '[.rows[].inputHash] | unique | length' "$first_manifest")" -eq 1 ]
-  [ "$(jq -r '[.rows[].compositionHash] | unique | length' "$first_manifest")" -eq 3 ]
+  [ "$(jq -r '[.rows[].compositionHash] | unique | length' "$first_manifest")" -eq 2 ]
 }
 
 @test "runtime composition changes when the resolved nonsecret provider surface changes" {
@@ -353,17 +340,17 @@ EOF
 }
 
 @test "runtime preparation rejects stale credentials even in a marked runtime root" {
-  mkdir -p "$RUNTIME_ROOT/rust-cli-feature/sample-1/no-marketplace-skills/codex-home"
+  mkdir -p "$RUNTIME_ROOT/rust-cli-feature/sample-1/no-plugins/codex-home"
   printf 'ai-plugins downstream code-quality runtime root\n' \
     >"$RUNTIME_ROOT/.ai-plugins-code-quality-runtime-root"
   printf 'stale-secret\n' \
-    >"$RUNTIME_ROOT/rust-cli-feature/sample-1/no-marketplace-skills/codex-home/auth.json"
+    >"$RUNTIME_ROOT/rust-cli-feature/sample-1/no-plugins/codex-home/auth.json"
 
   run node "$RUNTIME_PREPARER" "$WORKSPACE_MANIFEST" "$RUNTIME_ROOT"
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"runtime tree contains forbidden auth credentials"* ]]
-  [ "$(cat "$RUNTIME_ROOT/rust-cli-feature/sample-1/no-marketplace-skills/codex-home/auth.json")" = stale-secret ]
+  [ "$(cat "$RUNTIME_ROOT/rust-cli-feature/sample-1/no-plugins/codex-home/auth.json")" = stale-secret ]
 }
 
 @test "runtime preparation rejects roots that overlap workspaces or the configured auth source" {

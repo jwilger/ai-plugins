@@ -22,11 +22,9 @@ cost estimates below use the current
 
 The execution comparison uses one sample from each model for four distinct
 cases: two standard marketplace scenarios and two Advisor-like scenarios. The
-standard cases load only the marketplace's plugin manifests and skill guidance;
-their home is limited to the `agentic-systems-engineering` and
-`development-discipline` plugins selected by those fixtures, so unrelated
-delegation-only Advisor guidance is absent. MCP servers, hooks, binaries,
-agents, and other plugin components are excluded.
+standard cases use the installed `development-system` plugin from its isolated
+Codex cache. The runner prepares that condition through Codex's real local
+marketplace and plugin-install commands.
 The Advisor-like cases and all graders run with no plugins and ask for a direct
 answer, preventing the installed Advisor agent from handling the task instead
 of the model being compared. Every execution output is judged by the same
@@ -95,7 +93,7 @@ only as directional evidence and do not validate the final harness.
 
 ## Superseded pilot results
 
-These figures predate the trace-enforced provider, skills-only standard home,
+These figures predate the trace-enforced provider, installed-plugin standard home,
 hostile calibration cases, and Promptfoo 0.121.18 pin. They are retained only as
 historical context and are not current release evidence. A fresh focused run
 must replace this section before the provisional selection is treated as

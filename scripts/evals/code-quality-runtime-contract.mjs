@@ -158,10 +158,10 @@ export function selectMarketplacePlugins(contract, marketplace, mode) {
     }
     allPlugins.set(entry.name, entry);
   }
-  const selectedNames =
-    condition.plugins === "codex-marketplace-skills-at-run-start"
-      ? new Set(allPlugins.keys())
-      : new Set(condition.plugins || []);
+  if (!Array.isArray(condition.plugins)) {
+    throw new Error("runtime-condition-plugins-invalid");
+  }
+  const selectedNames = new Set(condition.plugins);
   for (const name of selectedNames) {
     if (!allPlugins.has(name)) {
       throw new Error("runtime-condition-plugin-missing");

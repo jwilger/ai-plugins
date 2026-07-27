@@ -53,7 +53,8 @@ usage() {
 Usage: scripts/evals/run.sh [--suite behavior|canary] [config]
 
 Runs provider-backed promptfoo evals through Claude Code and Codex.
-Each provider loads the relevant marketplace surface for its harness.
+Each harness is tested in two isolated conditions: no plugins, and an actually
+installed and enabled development-system plugin.
 
 Default harness posture:
   Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all
@@ -69,7 +70,7 @@ Environment overrides:
   EVAL_CASE_FILTER
   EVAL_PROVIDER_FILTER         (filters tested providers by final label, variant id,
                                 provider id, plugin mode, or substring;
-                                an exact variant id selects full-marketplace only;
+                                an exact variant id selects development-system only;
                                 semantic grading still uses CODEX_GRADER_MODEL)
   PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-2; default: 1)
   EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;
@@ -212,8 +213,7 @@ selected_codex_provider_compositions() {
   node "$root/scripts/evals/provider-compositions.mjs" \
     "$generated_metadata_file" \
     "$1" \
-    "$2" \
-    "$3"
+    "$2"
 }
 
 uses_codex_grader() {
@@ -226,16 +226,16 @@ NODE
 
 prepare_codex_home_for_mode() {
   local mode="$1"
-  local plugins="${2:-}"
   case "$mode" in
-    full-marketplace)
-      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_FULL_MARKETPLACE" --plugin-mode full-marketplace >/dev/null
+    development-system)
+      if [ ! -x "$CODEX_EVAL_REAL_BIN" ]; then
+        echo "Codex eval binary is not executable: $CODEX_EVAL_REAL_BIN" >&2
+        return 2
+      fi
+      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM" --plugin-mode development-system --install-via-cli >/dev/null
       ;;
     no-plugins)
       node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_NO_PLUGINS" --plugin-mode no-plugins >/dev/null
-      ;;
-    targeted-plugins)
-      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins "$plugins" >/dev/null
       ;;
     *)
       echo "unknown Codex plugin mode in generated eval config: $mode" >&2
@@ -246,18 +246,14 @@ prepare_codex_home_for_mode() {
 
 print_prepare_codex_home_for_mode() {
   local mode="$1"
-  local plugins="${2:-}"
   case "$mode" in
-    full-marketplace)
-      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_full_home" --plugin-mode full-marketplace
+    development-system)
+      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_development_system_home" --plugin-mode development-system
+      printf '%q ' --install-via-cli
       printf '\n'
       ;;
     no-plugins)
       printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_no_plugins_home" --plugin-mode no-plugins
-      printf '\n'
-      ;;
-    targeted-plugins)
-      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_targeted_home" --plugin-mode targeted-plugins --plugins "$plugins"
       printf '\n'
       ;;
     *)
@@ -265,6 +261,131 @@ print_prepare_codex_home_for_mode() {
       return 2
       ;;
   esac
+}
+
+selected_claude_modes() {
+  jq -r '
+    .providerCompositions[]
+    | select(.provider == "anthropic:claude-agent-sdk")
+    | .pluginMode
+  ' "$generated_metadata_file"
+}
+
+provider_mode_selected() {
+  local provider="$1"
+  local mode="$2"
+  jq -e \
+    --arg provider "$provider" \
+    --arg mode "$mode" \
+    '.providerCompositions[] | select(.provider == $provider and .pluginMode == $mode)' \
+    "$generated_metadata_file" >/dev/null
+}
+
+claude_provider_selected() {
+  jq -e '
+    .providerCompositions[]
+    | select(.provider == "anthropic:claude-agent-sdk")
+  ' "$generated_metadata_file" >/dev/null
+}
+
+prepare_claude_runtime_auth() {
+  if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+    return
+  fi
+
+  local credentials_file="$CLAUDE_EVAL_AUTH_HOME/.credentials.json"
+  local access_token
+  local expires_at_ms
+  local minimum_expiry_ms
+  if [ ! -f "$credentials_file" ]; then
+    echo "Claude subscription credentials are unavailable: $credentials_file; run 'claude auth login' or set CLAUDE_CODE_OAUTH_TOKEN" >&2
+    return 2
+  fi
+  access_token="$(jq -er '.claudeAiOauth.accessToken | select(type == "string" and length > 0)' "$credentials_file")" ||
+    {
+      echo "Claude subscription access token is unavailable; run 'claude auth login' or set CLAUDE_CODE_OAUTH_TOKEN" >&2
+      return 2
+    }
+  expires_at_ms="$(jq -er '.claudeAiOauth.expiresAt | select(type == "number") | floor' "$credentials_file")" ||
+    {
+      echo "Claude subscription token expiry is unavailable; run 'claude auth login' or set CLAUDE_CODE_OAUTH_TOKEN" >&2
+      return 2
+    }
+  minimum_expiry_ms="$((($(date +%s) + 300) * 1000))"
+  if [ "$expires_at_ms" -le "$minimum_expiry_ms" ]; then
+    echo "Claude subscription access token expires too soon; run 'claude auth login' before the live eval" >&2
+    return 2
+  fi
+
+  export CLAUDE_CODE_OAUTH_TOKEN="$access_token"
+  unset access_token
+}
+
+prepare_claude_home_for_mode() {
+  local mode="$1"
+  local state
+  case "$mode" in
+    development-system)
+      state="$(
+        node "$root/scripts/evals/prepare-claude-home.mjs" \
+          "$CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM" \
+          --plugin-mode development-system
+      )"
+      export CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM
+      CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM="$(jq -r '.pluginPath' <<<"$state")"
+      ;;
+    no-plugins)
+      node "$root/scripts/evals/prepare-claude-home.mjs" \
+        "$CLAUDE_EVAL_HOME_NO_PLUGINS" \
+        --plugin-mode no-plugins >/dev/null
+      ;;
+    *)
+      echo "unknown Claude plugin mode in generated eval config: $mode" >&2
+      return 2
+      ;;
+  esac
+}
+
+print_prepare_claude_home_for_mode() {
+  local mode="$1"
+  case "$mode" in
+    development-system)
+      printf '%q ' node "$root/scripts/evals/prepare-claude-home.mjs" "$dry_claude_development_system_home" --plugin-mode development-system
+      printf '\n'
+      ;;
+    no-plugins)
+      printf '%q ' node "$root/scripts/evals/prepare-claude-home.mjs" "$dry_claude_no_plugins_home" --plugin-mode no-plugins
+      printf '\n'
+      ;;
+    *)
+      echo "unknown Claude plugin mode in generated eval config: $mode" >&2
+      return 2
+      ;;
+  esac
+}
+
+reset_session_start_markers() {
+  if provider_mode_selected "anthropic:claude-agent-sdk" "development-system"; then
+    rm -f -- "$CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE"
+  fi
+  if provider_mode_selected "openai:codex-sdk" "development-system"; then
+    rm -f -- "$CODEX_EVAL_SESSION_START_MARKER"
+  fi
+}
+
+verify_session_start_markers() {
+  local missing=0
+  if provider_mode_selected "anthropic:claude-agent-sdk" "development-system" &&
+    [ ! -f "$CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE" ]; then
+    echo "development-system SessionStart hook did not run in the Claude live eval" >&2
+    missing=1
+  fi
+  if provider_mode_selected "openai:codex-sdk" "development-system" &&
+    [ ! -f "$CODEX_EVAL_SESSION_START_MARKER" ]; then
+    echo "development-system SessionStart hook did not run in the Codex live eval" >&2
+    missing=1
+  fi
+  return "$missing"
 }
 
 acquire_provider_eval_lock() {
@@ -455,9 +576,10 @@ cd "$root"
 
 if [ "$dry_run" -eq 1 ]; then
   prepare_eval_output_dir check
-  dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-full-marketplace}}"
+  dry_development_system_home="${CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-development-system}}"
   dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
-  dry_targeted_home="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.evals/codex-home-targeted-plugins}"
+  dry_claude_development_system_home="${CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM:-$root/.evals/claude-home-development-system}"
+  dry_claude_no_plugins_home="${CLAUDE_EVAL_HOME_NO_PLUGINS:-$root/.evals/claude-home-no-plugins}"
   printf '%q ' "$root/scripts/evals/ensure-node-deps.sh"
   printf '\n'
   if [ "$generated_config" -eq 1 ]; then
@@ -468,20 +590,23 @@ if [ "$dry_run" -eq 1 ]; then
     generated_metadata_file="$dry_inspection_dir/metadata.json"
     node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$dry_inspection_config" --metadata-output "$generated_metadata_file" >/dev/null
     codex_provider_compositions="$(selected_codex_provider_compositions \
-      "$dry_full_home" \
-      "$dry_no_plugins_home" \
-      "$dry_targeted_home")"
+      "$dry_development_system_home" \
+      "$dry_no_plugins_home")"
     printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_output_file"
     printf '\n'
     if uses_codex_grader; then
-      print_prepare_codex_home_for_mode full-marketplace
+      print_prepare_codex_home_for_mode development-system
     fi
     if [ -n "$codex_provider_compositions" ]; then
-      while IFS=$'\t' read -r mode provider_plugins; do
-        [ "$mode" != "full-marketplace" ] || continue
-        print_prepare_codex_home_for_mode "$mode" "$provider_plugins"
+      while IFS=$'\t' read -r mode _provider_plugins; do
+        [ "$mode" != "development-system" ] || continue
+        print_prepare_codex_home_for_mode "$mode"
       done <<<"$codex_provider_compositions"
     fi
+    while IFS= read -r mode; do
+      [ -n "$mode" ] || continue
+      print_prepare_claude_home_for_mode "$mode"
+    done < <(selected_claude_modes)
   fi
   printf '%q ' "${run_cmd[@]}"
   printf '\n'
@@ -494,6 +619,8 @@ rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml
 trap 'forward_eval_signal INT 130' INT
 trap 'forward_eval_signal TERM 143' TERM
 "$root/scripts/evals/ensure-node-deps.sh"
+export CODEX_EVAL_REAL_BIN="${CODEX_EVAL_REAL_BIN:-$root/node_modules/.bin/codex}"
+export CODEX_EVAL_CODEX_BIN="${CODEX_EVAL_CODEX_BIN:-$CODEX_EVAL_REAL_BIN}"
 if [ "$generated_config" -eq 1 ]; then
   node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file" >/dev/null
 fi
@@ -502,28 +629,46 @@ export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
 export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$root/.dependencies/promptfoo}"
 export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.dependencies/promptfoo-cache}"
 export PROMPTFOO_CACHE_TTL="${PROMPTFOO_CACHE_TTL:-86400}"
-export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.evals/codex-home-full-marketplace}"
-export CODEX_EVAL_HOME_FULL_MARKETPLACE="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-$CODEX_EVAL_HOME}"
+export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.evals/codex-home-development-system}"
+export CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="${CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM:-$CODEX_EVAL_HOME}"
 export CODEX_EVAL_HOME_NO_PLUGINS="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
-export CODEX_EVAL_HOME_TARGETED_PLUGINS="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.evals/codex-home-targeted-plugins}"
+export CLAUDE_EVAL_AUTH_HOME="${CLAUDE_EVAL_AUTH_HOME:-${CLAUDE_CONFIG_DIR:-${HOME}/.claude}}"
+export CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM="${CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM:-$root/.evals/claude-home-development-system}"
+export CLAUDE_EVAL_HOME_NO_PLUGINS="${CLAUDE_EVAL_HOME_NO_PLUGINS:-$root/.evals/claude-home-no-plugins}"
+export CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM="${CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM:-$CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM/config}"
+export CLAUDE_EVAL_PLUGIN_CACHE_DIR_DEVELOPMENT_SYSTEM="${CLAUDE_EVAL_PLUGIN_CACHE_DIR_DEVELOPMENT_SYSTEM:-$CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM/plugin-cache}"
+export CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS="${CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS:-$CLAUDE_EVAL_HOME_NO_PLUGINS/config}"
+export CLAUDE_EVAL_PLUGIN_CACHE_DIR_NO_PLUGINS="${CLAUDE_EVAL_PLUGIN_CACHE_DIR_NO_PLUGINS:-$CLAUDE_EVAL_HOME_NO_PLUGINS/plugin-cache}"
+export CLAUDE_EVAL_RUNTIME_CONFIG_DIR_DEVELOPMENT_SYSTEM="${CLAUDE_EVAL_RUNTIME_CONFIG_DIR_DEVELOPMENT_SYSTEM:-$CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM}"
+export CLAUDE_EVAL_RUNTIME_CONFIG_DIR_NO_PLUGINS="${CLAUDE_EVAL_RUNTIME_CONFIG_DIR_NO_PLUGINS:-$CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS}"
+if [ "$generated_config" -eq 1 ] && claude_provider_selected; then
+  prepare_claude_runtime_auth
+fi
+export CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE="${CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE:-$root/.evals/session-start-claude-development-system}"
+export CODEX_EVAL_SESSION_START_MARKER="${CODEX_EVAL_SESSION_START_MARKER:-$root/.evals/session-start-codex-development-system}"
 mkdir -p "$PROMPTFOO_CONFIG_DIR"
 
 if [ "$generated_config" -eq 1 ]; then
   codex_provider_compositions="$(selected_codex_provider_compositions \
-    "$CODEX_EVAL_HOME_FULL_MARKETPLACE" \
-    "$CODEX_EVAL_HOME_NO_PLUGINS" \
-    "$CODEX_EVAL_HOME_TARGETED_PLUGINS")"
+    "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM" \
+    "$CODEX_EVAL_HOME_NO_PLUGINS")"
   write_runtime_options
   write_runtime_loader
   if uses_codex_grader; then
-    prepare_codex_home_for_mode full-marketplace
+    prepare_codex_home_for_mode development-system
   fi
   if [ -n "$codex_provider_compositions" ]; then
-    while IFS=$'\t' read -r mode provider_plugins; do
-      [ "$mode" != "full-marketplace" ] || continue
-      prepare_codex_home_for_mode "$mode" "$provider_plugins"
+    while IFS=$'\t' read -r mode _provider_plugins; do
+      [ "$mode" != "development-system" ] || continue
+      prepare_codex_home_for_mode "$mode"
     done <<<"$codex_provider_compositions"
   fi
+  claude_modes="$(selected_claude_modes)"
+  while IFS= read -r mode; do
+    [ -n "$mode" ] || continue
+    prepare_claude_home_for_mode "$mode"
+  done <<<"$claude_modes"
+  reset_session_start_markers
 fi
 
 set +e
@@ -559,6 +704,11 @@ if [ "$interrupted_status" -ne 0 ]; then
 fi
 set -e
 
+session_start_status=0
+if [ "$generated_config" -eq 1 ] && ! verify_session_start_markers; then
+  session_start_status=1
+fi
+
 if [ "$promptfoo_status" -ne 0 ]; then
   if [ "$promptfoo_status" -eq 124 ] || [ "$promptfoo_status" -eq 137 ]; then
     echo "promptfoo eval timed out after EVAL_TIMEOUT=$eval_timeout" >&2
@@ -575,10 +725,14 @@ if [ "$promptfoo_status" -ne 0 ]; then
   if [ ! -s "$out_dir/results.json" ]; then
     exit "$promptfoo_status"
   fi
-  node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
-  exit "$?"
+  threshold_status=0
+  node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json" ||
+    threshold_status="$?"
+  [ "$session_start_status" -eq 0 ] || exit "$session_start_status"
+  exit "$threshold_status"
 fi
 
 if [ -s "$out_dir/results.json" ]; then
   node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
 fi
+[ "$session_start_status" -eq 0 ] || exit "$session_start_status"

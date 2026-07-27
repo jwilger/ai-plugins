@@ -78,9 +78,9 @@ if [[ ! "$max_concurrency" =~ ^[12]$ ]]; then
   exit 2
 fi
 
-skills_home="${CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-skills-only-marketplace}}"
+development_system_home="${CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-development-system}}"
 no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
-skills_home="$(realpath -m -- "$skills_home")"
+development_system_home="$(realpath -m -- "$development_system_home")"
 no_plugins_home="$(realpath -m -- "$no_plugins_home")"
 default_workspace="${TMPDIR:-/tmp}/ai-plugins-gpt56-workspace-${UID}-$$"
 workspace="${GPT56_BENCHMARK_WORKSPACE:-$default_workspace}"
@@ -89,8 +89,8 @@ out_root="${GPT56_BENCHMARK_OUT_ROOT:-$root/evals/out/gpt-5.6-model-family}"
 
 case "$phase" in
   execution)
-    if [ "$(realpath -m "$skills_home")" = "$(realpath -m "$no_plugins_home")" ]; then
-      echo "skills-only and no-plugin Codex homes must differ" >&2
+    if [ "$(realpath -m "$development_system_home")" = "$(realpath -m "$no_plugins_home")" ]; then
+      echo "development-system and no-plugin Codex homes must differ" >&2
       exit 2
     fi
     config="$benchmark_dir/promptfooconfig.yaml"
@@ -106,7 +106,7 @@ case "$phase" in
     ;;
 esac
 
-export CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="$skills_home"
+export CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home"
 export CODEX_EVAL_HOME_NO_PLUGINS="$no_plugins_home"
 export GPT56_BENCHMARK_WORKSPACE="$workspace"
 export PROMPTFOO_MAX_CONCURRENCY="$max_concurrency"
@@ -115,7 +115,7 @@ export EVAL_OUT_DIR="${EVAL_OUT_DIR:-$out_root/$output_suffix}"
 workspace_prepare=(
   node "$root/scripts/evals/prepare-gpt56-workspace.mjs" "$workspace"
   --forbid-overlap "$root"
-  --forbid-overlap "$skills_home"
+  --forbid-overlap "$development_system_home"
   --forbid-overlap "$no_plugins_home"
   --forbid-overlap "$out_root"
   --forbid-overlap "$EVAL_OUT_DIR"
@@ -134,18 +134,11 @@ print_command() {
   printf '\n'
 }
 
-standard_plugins_csv() {
-  node -e \
-    'const loadCases = require(process.argv[1]); process.stdout.write(loadCases.standardPluginNames().join(","));' \
-    "$benchmark_dir/cases.cjs"
-}
-
 if [ "$dry_run" -eq 1 ]; then
   "${workspace_prepare[@]}" --check >/dev/null
   print_command "${workspace_prepare[@]}"
   if [ "$phase" = "execution" ]; then
-    standard_plugins="$(standard_plugins_csv)"
-    print_command node "$root/scripts/evals/prepare-codex-home.mjs" "$skills_home" --plugin-mode skills-only-marketplace --plugins "$standard_plugins"
+    print_command node "$root/scripts/evals/prepare-codex-home.mjs" "$development_system_home" --plugin-mode development-system --install-via-cli
   fi
   print_command node "$root/scripts/evals/prepare-codex-home.mjs" "$no_plugins_home" --plugin-mode no-plugins
   "$root/scripts/evals/run.sh" --dry-run "$config"
@@ -171,8 +164,7 @@ export AI_PLUGINS_EVAL_LOCK_FD=9
 
 "${workspace_prepare[@]}" >/dev/null
 if [ "$phase" = "execution" ]; then
-  standard_plugins="$(standard_plugins_csv)"
-  node "$root/scripts/evals/prepare-codex-home.mjs" "$skills_home" --plugin-mode skills-only-marketplace --plugins "$standard_plugins" >/dev/null
+  node "$root/scripts/evals/prepare-codex-home.mjs" "$development_system_home" --plugin-mode development-system --install-via-cli >/dev/null
 fi
 node "$root/scripts/evals/prepare-codex-home.mjs" "$no_plugins_home" --plugin-mode no-plugins >/dev/null
 

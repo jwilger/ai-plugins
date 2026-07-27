@@ -41,7 +41,7 @@ teardown() {
   [[ "$output" == *"Codex:       provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium"* ]]
   [[ "$output" == *"CODEX_GRADER_MODEL            (default: gpt-5.6-sol)"* ]]
   [[ "$output" == *"CODEX_GRADER_REASONING_EFFORT (default: high)"* ]]
-  [[ "$output" == *"Each provider loads the relevant marketplace surface for its harness"* ]]
+  [[ "$output" == *"Each harness is tested in two isolated conditions"* ]]
   [[ "$output" == *"Pinned eval packages are managed by package.json and package-lock.json"* ]]
   [[ "$output" == *"@openai/codex-sdk"* ]]
   [[ "$output" == *"@anthropic-ai/claude-agent-sdk"* ]]
@@ -81,7 +81,7 @@ teardown() {
   run "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"$ROOT/.evals/codex-home-full-marketplace"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
+  [[ "$output" == *"$ROOT/.evals/codex-home-development-system"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
 }
 
 @test "eval runner rejects concurrency above the canonical cap before printing a Promptfoo launch" {
@@ -331,23 +331,26 @@ SH
   [ "$preparation_invoked" -eq 0 ]
 }
 
-@test "eval runner dry-run prepares targeted Codex home from selected behavior cases" {
+@test "eval runner dry-run prepares the two consolidated plugin conditions" {
   run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  targeted_line="$(printf '%s\n' "$output" | grep -- '--plugin-mode targeted-plugins')"
-  [[ "$targeted_line" == *"prepare-codex-home.mjs"* ]]
-  [[ "$targeted_line" == *"--plugins development-system"* ]]
-  [[ "$targeted_line" != *"\\,"* ]]
+  [[ "$output" == *"prepare-codex-home.mjs"*"--plugin-mode development-system"*"--install-via-cli"* ]]
+  [[ "$output" == *"prepare-codex-home.mjs"*"--plugin-mode no-plugins"* ]]
+  [[ "$output" == *"prepare-claude-home.mjs"*"--plugin-mode development-system"* ]]
+  [[ "$output" == *"prepare-claude-home.mjs"*"--plugin-mode no-plugins"* ]]
+  [[ "$output" != *"targeted-plugins"* ]]
+  [[ "$output" != *"full-marketplace"* ]]
 }
 
-@test "eval runner prepares a focused Codex home with exactly the selected case plugins" {
+@test "eval runner prepares a focused Codex development-system home" {
   fixture_root="$(mktemp -d)"
   fake_promptfoo="$fixture_root/promptfoo"
-  targeted_home="$fixture_root/codex-targeted"
+  development_system_home="$fixture_root/codex-development-system"
   cat >"$fake_promptfoo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+touch "$CODEX_EVAL_SESSION_START_MARKER"
 SH
   chmod +x "$fake_promptfoo"
 
@@ -356,19 +359,133 @@ SH
     PROMPTFOO_BIN="$fake_promptfoo" \
     EVAL_OUT_DIR="$fixture_root/out" \
     EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
-    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-targeted-plugins \
+    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-development-system \
     EVAL_TIMEOUT=0 \
-    CODEX_EVAL_HOME="$fixture_root/codex-full" \
-    CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_root/codex-full" \
+    CODEX_EVAL_HOME="$development_system_home" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-none" \
-    CODEX_EVAL_HOME_TARGETED_PLUGINS="$targeted_home" \
+    CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
     "$RUNNER"
 
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^\[plugins\.' "$targeted_home/config.toml")" -eq 1 ]
-  grep -q '\[plugins\."development-system@ai-plugins"\]' "$targeted_home/config.toml"
-  [ -d "$targeted_home/plugins/cache/ai-plugins/development-system" ]
-  [ "$(find "$targeted_home/plugins/cache/ai-plugins" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ]
+  [ "$(grep -c '^\[plugins\.' "$development_system_home/config.toml")" -eq 1 ]
+  grep -q '\[plugins\."development-system@ai-plugins"\]' "$development_system_home/config.toml"
+  [ -d "$development_system_home/plugins/cache/ai-plugins/development-system" ]
+  [ "$(find "$development_system_home/plugins/cache/ai-plugins" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ]
+
+  rm -rf "$fixture_root"
+}
+
+@test "eval runner isolates Claude plugin state and never copies the refresh token" {
+  fixture_root="$(mktemp -d)"
+  auth_home="$fixture_root/auth"
+  claude_home="$fixture_root/claude-development-system"
+  fake_claude="$fixture_root/claude"
+  fake_promptfoo="$fixture_root/promptfoo"
+  mkdir -p "$auth_home"
+  expires_at_ms="$((($(date +%s) + 3600) * 1000))"
+  jq -n \
+    --arg access_token fixture-access-token \
+    --arg refresh_token fixture-refresh-token \
+    --argjson expires_at "$expires_at_ms" \
+    '{claudeAiOauth:{accessToken:$access_token,refreshToken:$refresh_token,expiresAt:$expires_at}}' \
+    >"$auth_home/.credentials.json"
+  cat >"$fake_claude" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+install_path="$CLAUDE_CODE_PLUGIN_CACHE_DIR/cache/ai-plugins/development-system/$FAKE_PLUGIN_VERSION"
+case "$*" in
+  "plugin marketplace add "*" --scope user")
+    ;;
+  "plugin install development-system@ai-plugins --scope user")
+    mkdir -p "$install_path"
+    ;;
+  "plugin list --json")
+    jq -n --arg install_path "$install_path" \
+      '[{id:"development-system@ai-plugins",enabled:true,installPath:$install_path,errors:[]}]'
+    ;;
+  "plugin validate "*)
+    ;;
+  *)
+    exit 91
+    ;;
+esac
+SH
+  cat >"$fake_promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$CLAUDE_CODE_OAUTH_TOKEN" = fixture-access-token ]
+[ "$CLAUDE_EVAL_RUNTIME_CONFIG_DIR_DEVELOPMENT_SYSTEM" = "$CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM" ]
+[ "$CLAUDE_EVAL_RUNTIME_CONFIG_DIR_NO_PLUGINS" = "$CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS" ]
+[ ! -e "$CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM/.credentials.json" ]
+[ ! -e "$CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS/.credentials.json" ]
+touch "$CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE"
+SH
+  chmod +x "$fake_claude" "$fake_promptfoo"
+  plugin_version="$(jq -r '.version' "$ROOT/plugins/development-system/.claude-plugin/plugin.json")"
+
+  run env \
+    OPENAI_API_KEY=fixture \
+    CLAUDE_BIN="$fake_claude" \
+    CLAUDE_EVAL_AUTH_HOME="$auth_home" \
+    CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM="$claude_home" \
+    CLAUDE_EVAL_HOME_NO_PLUGINS="$fixture_root/claude-no-plugins" \
+    CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE="$fixture_root/claude-session-start" \
+    FAKE_PLUGIN_VERSION="$plugin_version" \
+    PROMPTFOO_BIN="$fake_promptfoo" \
+    EVAL_OUT_DIR="$fixture_root/out" \
+    EVAL_PROVIDER_FILTER=claude-code-sonnet-development-system \
+    EVAL_TIMEOUT=0 \
+    "$RUNNER"
+
+  [ "$status" -eq 0 ]
+  jq -e '.claudeAiOauth.refreshToken == "fixture-refresh-token"' \
+    "$auth_home/.credentials.json" >/dev/null
+  [ ! -e "$claude_home/config/.credentials.json" ]
+  rm -rf "$fixture_root"
+}
+
+@test "eval runner preserves a missing SessionStart marker failure after thresholds pass" {
+  fixture_root="$(mktemp -d)"
+  fake_promptfoo="$fixture_root/promptfoo"
+  development_system_home="$fixture_root/codex-development-system"
+  cat >"$fake_promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cat >"$EVAL_OUT_DIR/results.json" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "success": true,
+        "provider": { "id": "openai:codex-sdk" },
+        "vars": {
+          "case_id": "development-system-canary",
+          "plugin_mode": "development-system",
+          "min_pass_rate": 1
+        }
+      }
+    ]
+  }
+}
+JSON
+SH
+  chmod +x "$fake_promptfoo"
+
+  run env \
+    OPENAI_API_KEY=fixture \
+    PROMPTFOO_BIN="$fake_promptfoo" \
+    EVAL_OUT_DIR="$fixture_root/out" \
+    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-development-system \
+    EVAL_TIMEOUT=0 \
+    CODEX_EVAL_HOME="$development_system_home" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
+    CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
+    "$RUNNER"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"development-system SessionStart hook did not run in the Codex live eval"* ]]
+  [[ "$output" == *"Eval thresholds passed"* ]]
 
   rm -rf "$fixture_root"
 }
@@ -377,29 +494,29 @@ SH
   for layout in exact-alias symlinked-descendant case-alias-descendant; do
     fixture_root="$(mktemp -d)"
     fake_promptfoo="$fixture_root/promptfoo"
-    full_home="$fixture_root/full-home"
-    mkdir -p "$full_home"
-    printf 'ai-plugins Codex eval home\n' >"$full_home/.ai-plugins-eval-home"
-    printf 'preserve config\n' >"$full_home/config.toml"
-    printf 'preserve sentinel\n' >"$full_home/sentinel"
+    development_system_home="$fixture_root/development-system-home"
+    mkdir -p "$development_system_home"
+    printf 'ai-plugins Codex eval home\n' >"$development_system_home/.ai-plugins-eval-home"
+    printf 'preserve config\n' >"$development_system_home/config.toml"
+    printf 'preserve sentinel\n' >"$development_system_home/sentinel"
     printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_promptfoo"
     chmod +x "$fake_promptfoo"
 
     case "$layout" in
       exact-alias)
-        targeted_home="$full_home"
+        no_plugins_home="$development_system_home"
         ;;
       symlinked-descendant)
-        ln -s "$full_home" "$fixture_root/full-home-link"
-        targeted_home="$(realpath -m --relative-to="$ROOT" "$fixture_root/full-home-link/targeted")"
+        ln -s "$development_system_home" "$fixture_root/development-system-home-link"
+        no_plugins_home="$(realpath -m --relative-to="$ROOT" "$fixture_root/development-system-home-link/no-plugins")"
         ;;
       case-alias-descendant)
-        full_home="$fixture_root/CaseHome"
-        mkdir -p "$full_home"
-        printf 'ai-plugins Codex eval home\n' >"$full_home/.ai-plugins-eval-home"
-        printf 'preserve config\n' >"$full_home/config.toml"
-        printf 'preserve sentinel\n' >"$full_home/sentinel"
-        targeted_home="$fixture_root/casehome/targeted"
+        development_system_home="$fixture_root/CaseHome"
+        mkdir -p "$development_system_home"
+        printf 'ai-plugins Codex eval home\n' >"$development_system_home/.ai-plugins-eval-home"
+        printf 'preserve config\n' >"$development_system_home/config.toml"
+        printf 'preserve sentinel\n' >"$development_system_home/sentinel"
+        no_plugins_home="$fixture_root/casehome/no-plugins"
         ;;
     esac
 
@@ -408,20 +525,20 @@ SH
       PROMPTFOO_BIN="$fake_promptfoo" \
       EVAL_OUT_DIR="$fixture_root/out" \
       EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
-      EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-targeted-plugins \
+      EVAL_PROVIDER_FILTER=openai:codex-sdk \
       EVAL_TIMEOUT=0 \
-      CODEX_EVAL_HOME="$full_home" \
-      CODEX_EVAL_HOME_FULL_MARKETPLACE="$full_home" \
-      CODEX_EVAL_HOME_TARGETED_PLUGINS="$targeted_home" \
+      CODEX_EVAL_HOME="$development_system_home" \
+      CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
+      CODEX_EVAL_HOME_NO_PLUGINS="$no_plugins_home" \
       "$RUNNER"
 
     [ "$status" -eq 2 ]
     [[ "$output" == *"Codex eval homes overlap for incompatible compositions"* ]]
-    [[ "$output" == *"full-marketplace"* ]]
-    [[ "$output" == *"targeted-plugins"* ]]
-    grep -q '^preserve config$' "$full_home/config.toml"
-    grep -q '^preserve sentinel$' "$full_home/sentinel"
-    [ ! -e "$full_home/targeted" ]
+    [[ "$output" == *"development-system"* ]]
+    [[ "$output" == *"no-plugins"* ]]
+    grep -q '^preserve config$' "$development_system_home/config.toml"
+    grep -q '^preserve sentinel$' "$development_system_home/sentinel"
+    [ ! -e "$development_system_home/no-plugins" ]
 
     rm -rf "$fixture_root"
   done
@@ -432,6 +549,7 @@ SH
   fake_promptfoo="$fixture_root/promptfoo"
   shared_home="$fixture_root/shared-home"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_promptfoo"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\ntouch "$CODEX_EVAL_SESSION_START_MARKER"\n' >"$fake_promptfoo"
   chmod +x "$fake_promptfoo"
 
   run env \
@@ -441,9 +559,9 @@ SH
     EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra \
     EVAL_TIMEOUT=0 \
     CODEX_EVAL_HOME="$shared_home" \
-    CODEX_EVAL_HOME_FULL_MARKETPLACE="$shared_home" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$shared_home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$shared_home" \
-    CODEX_EVAL_HOME_TARGETED_PLUGINS="$shared_home" \
+    CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
     "$RUNNER"
 
   [ "$status" -eq 0 ]
@@ -458,9 +576,8 @@ SH
   [ "$status" -eq 0 ]
   [[ "$output" == *"generate-config.mjs"* ]]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
-  [[ "$output" == *"--plugin-mode full-marketplace"* ]]
-  [[ "$output" != *"--plugin-mode no-plugins"* ]]
-  [[ "$output" != *"--plugin-mode targeted-plugins"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c 'prepare-claude-home.mjs')" -eq 2 ]
+  [[ "$output" == *"--plugin-mode development-system"* ]]
   [[ "$output" == *"promptfoo eval"* ]]
 }
 
@@ -469,9 +586,8 @@ SH
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
-  [[ "$output" == *"--plugin-mode full-marketplace"* ]]
+  [[ "$output" == *"--plugin-mode development-system"* ]]
   [[ "$output" != *"--plugin-mode no-plugins"* ]]
-  [[ "$output" != *"--plugin-mode targeted-plugins"* ]]
 }
 
 @test "eval runner passes case filter to Promptfoo CLI" {
@@ -506,19 +622,19 @@ SH
   run env EVAL_PROVIDER_FILTER=claude node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: claude-code-sonnet-full-marketplace"* ]]
-  [[ "$output" != *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
+  [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
+  [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
+  [[ "$output" != *"label: codex-gpt-5.6-terra-development-system"* ]]
 }
 
-@test "generated eval config exact provider variant filter selects one full-marketplace provider" {
+@test "generated eval config exact provider variant filter selects development-system" {
   run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
-  [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-development-system"* ]]
   [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
   [[ "$output" != *"label: claude-code-sonnet"* ]]
-  [[ "$output" == *"pluginModes:"*$'\n'"      - id: full-marketplace"* ]]
+  [[ "$output" == *"pluginModes:"*$'\n'"      - id: development-system"* ]]
 }
 
 @test "generated eval config combines case and provider filters without expanding provider modes" {
@@ -526,9 +642,8 @@ SH
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^  - id: openai:codex-sdk$')" -eq 1 ]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-development-system"* ]]
   [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
-  [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
   [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
   [[ "$output" != *"label: claude-code-sonnet"* ]]
 }
@@ -570,22 +685,22 @@ SH
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
       },
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
       },
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
       },
       {
         "success": false,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 },
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 },
         "gradingResult": { "reason": "Stochastic rubric miss" }
       }
     ]
@@ -613,13 +728,8 @@ JSON
         "gradingResult": { "pass": false, "score": 0, "reason": "No plugin-specific command known" }
       },
       {
-        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
-        "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "targeted-plugins", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
-        "gradingResult": { "pass": true, "score": 1 }
-      },
-      {
-        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
-        "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "full-marketplace", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
+        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
+        "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
         "gradingResult": { "pass": true, "score": 1 }
       }
     ]
@@ -642,7 +752,7 @@ JSON
   "results": {
     "results": [
       {
-        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
+        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
         "testCase": { "vars": { "case_id": "composition", "min_pass_rate": 1, "value_gate_mode": "none" } },
         "gradingResult": { "pass": true, "score": 1 }
       },
@@ -702,22 +812,22 @@ cat >evals/out/results.json <<'JSON'
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
       },
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
       },
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
       },
       {
         "success": false,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 },
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 },
         "gradingResult": { "reason": "Stochastic rubric miss" }
       }
     ]
@@ -764,7 +874,7 @@ cat >evals/out/results.json <<'JSON'
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 1 }
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 1 }
       }
     ]
   }
@@ -794,10 +904,10 @@ SH
 
   run env \
     PROMPTFOO_BIN="$fixture_bin/promptfoo" \
-    CODEX_EVAL_HOME="$fixture_bin/codex-full" \
-    CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_bin/codex-full" \
+    CODEX_EVAL_HOME="$fixture_bin/codex-development-system" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$fixture_bin/codex-development-system" \
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_bin/codex-none" \
-    CODEX_EVAL_HOME_TARGETED_PLUGINS="$fixture_bin/codex-targeted" \
+    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-no-plugins \
     EVAL_CASE_FILTER=tiber \
     "$RUNNER"
 
@@ -831,10 +941,10 @@ SH
 
   run env \
     PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    CODEX_EVAL_HOME="$fixture_root/codex-full" \
-    CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_root/codex-full" \
+    CODEX_EVAL_HOME="$fixture_root/codex-development-system" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$fixture_root/codex-development-system" \
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-none" \
-    CODEX_EVAL_HOME_TARGETED_PLUGINS="$fixture_root/codex-targeted" \
+    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-no-plugins \
     EVAL_OUT_DIR="$isolated_out" \
     EVAL_CASE_FILTER=tiber \
     EVAL_SAMPLES=2 \
@@ -897,7 +1007,7 @@ cat >evals/out/results.json <<'JSON'
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 1 }
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 1 }
       }
     ]
   }
@@ -945,7 +1055,7 @@ cat >evals/out/results.json <<'JSON'
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 1 }
+        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 1 }
       }
     ]
   }
@@ -1271,14 +1381,14 @@ const metadataOutput = process.argv[process.argv.indexOf('--metadata-output') + 
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, `providers:
   - id: openai:codex-sdk
-    label: codex-gpt-5.6-terra-targeted-plugins
-    pluginMode: targeted-plugins
+    label: codex-gpt-5.6-terra-development-system
+    pluginMode: development-system
 `);
 const targeted = {
-  label: 'codex-gpt-5.6-terra-targeted-plugins',
+  label: 'codex-gpt-5.6-terra-development-system',
   provider: 'openai:codex-sdk',
   providerVariant: 'codex-gpt-5.6-terra',
-  pluginMode: 'targeted-plugins',
+  pluginMode: 'development-system',
   plugins: ['tiber'],
 };
 const noPlugins = {
@@ -1294,7 +1404,7 @@ const cases = {
     targeted,
     {
       ...targeted,
-      label: 'codex-second-targeted-plugins',
+      label: 'codex-second-development-system',
       providerVariant: 'codex-second',
       plugins: ['advisor'],
     },
@@ -1325,10 +1435,10 @@ const cases = {
   both_missing_and_extra: [
     targeted,
     {
-      label: 'claude-b-full-marketplace',
+      label: 'claude-b-development-system',
       provider: 'anthropic:claude-agent-sdk',
       providerVariant: 'claude-b',
-      pluginMode: 'full-marketplace',
+      pluginMode: 'development-system',
       plugins: ['advisor'],
     },
     {
@@ -1347,7 +1457,7 @@ const providerLabelsByCase = {
   both_missing_and_extra: [
     'claude-z-no-plugins',
     targeted.label,
-    'claude-a-full-marketplace',
+    'claude-a-development-system',
   ],
   order_insensitive: [noPlugins.label, targeted.label],
 };
@@ -1366,8 +1476,8 @@ NODE
     "missing|generated eval metadata is missing providerCompositions" \
     "empty|providerCompositions must contain at least one provider" \
     "duplicate|duplicate provider label" \
-    "inconsistent|inconsistent Codex provider compositions for targeted-plugins" \
-    "targeted_empty|targeted provider composition must not be empty" \
+    "inconsistent|inconsistent Codex provider compositions for development-system" \
+    "targeted_empty|development-system provider composition must not be empty" \
     "no_plugins_nonempty|no-plugins provider composition must be empty" \
     "missing_variant|invalid provider composition" \
     "unknown_provider|unsupported provider in provider composition" \
@@ -1378,7 +1488,7 @@ NODE
     "invalid_plugin_name|invalid plugin list" \
     "missing_composition_label|provider composition labels do not match configured providers: missing: codex-gpt-5.6-terra-no-plugins" \
     "extra_composition_label|provider composition labels do not match configured providers: extra: codex-gpt-5.6-terra-no-plugins" \
-    "both_missing_and_extra|provider composition labels do not match configured providers: missing: claude-a-full-marketplace, claude-z-no-plugins; extra: claude-b-full-marketplace, claude-c-no-plugins"; do
+    "both_missing_and_extra|provider composition labels do not match configured providers: missing: claude-a-development-system, claude-z-no-plugins; extra: claude-b-development-system, claude-c-no-plugins"; do
     composition_case="${fixture%%|*}"
     expected="${fixture#*|}"
 
@@ -1393,7 +1503,7 @@ NODE
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"--plugin-mode no-plugins"* ]]
-  [[ "$output" == *"--plugin-mode targeted-plugins"* ]]
+  [[ "$output" == *"--plugin-mode development-system"* ]]
 
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
 #!/usr/bin/env bash
@@ -1416,7 +1526,7 @@ SH
       OPENAI_API_KEY=fixture \
       PROMPTFOO_BIN=/bin/true \
       CODEX_EVAL_HOME="$grader_home" \
-      CODEX_EVAL_HOME_FULL_MARKETPLACE="$grader_home" \
+      CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$grader_home" \
       "$fixture_root/scripts/evals/run.sh"
 
     [ "$status" -ne 0 ]

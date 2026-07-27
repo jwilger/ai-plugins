@@ -3,12 +3,8 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const identifierPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const expectedConditions = [
-  "no-marketplace-skills",
-  "targeted-quality-skills",
-  "all-marketplace-skills",
-];
-const expectedTargetedPlugins = ["development-system"];
+const expectedConditions = ["no-plugins", "development-system"];
+const expectedDevelopmentSystemPlugins = ["development-system"];
 const expectedPerRunMetrics = [
   "conjunctive-success",
   "outcome-class",
@@ -117,36 +113,24 @@ export function validateBenchmarkContract(contract) {
       throw new Error(`${label} must be ${String(expected)}`);
     }
   }
-  assertCanonicalPluginList(contract.conditions[0].plugins, "no-marketplace-skills");
+  assertCanonicalPluginList(contract.conditions[0].plugins, "no-plugins");
   if (contract.conditions[0].plugins.length !== 0) {
-    throw new Error("no-marketplace-skills composition must be empty");
+    throw new Error("no-plugins composition must be empty");
   }
   if (contract.conditions[0].surface !== "codex-bundled-skills-only") {
-    throw new Error(
-      "no-marketplace-skills surface must be codex-bundled-skills-only",
-    );
+    throw new Error("no-plugins surface must be codex-bundled-skills-only");
   }
   assertCanonicalPluginList(
     contract.conditions[1].plugins,
-    "targeted-quality-skills",
+    "development-system",
   );
   assertExactArray(
     contract.conditions[1].plugins,
-    expectedTargetedPlugins,
-    "targeted-quality-skills plugins",
+    expectedDevelopmentSystemPlugins,
+    "development-system plugins",
   );
   if (contract.conditions[1].surface !== "skills-only") {
-    throw new Error("targeted-quality-skills surface must be skills-only");
-  }
-  if (
-    contract.conditions[2].plugins !== "codex-marketplace-skills-at-run-start"
-  ) {
-    throw new Error(
-      "all-marketplace-skills composition must resolve from the Codex marketplace at run start",
-    );
-  }
-  if (contract.conditions[2].surface !== "skills-only") {
-    throw new Error("all-marketplace-skills surface must be skills-only");
+    throw new Error("development-system surface must be skills-only");
   }
 
   if (!Array.isArray(contract.cases) || contract.cases.length === 0) {

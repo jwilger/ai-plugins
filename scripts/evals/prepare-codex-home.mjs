@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,28 +16,19 @@ function readJson(file) {
 function parseArgs(argv) {
   const args = {
     codexHome: argv[0],
-    pluginMode: "full-marketplace",
-    plugins: null,
-    pluginsProvided: false,
+    pluginMode: "development-system",
     seedAuth: true,
+    installViaCli: false,
   };
 
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--plugin-mode") {
       args.pluginMode = argv[++index];
-    } else if (arg === "--plugins") {
-      const value = argv[++index];
-      if (value === undefined) {
-        throw new Error("--plugins requires a comma-separated plugin list");
-      }
-      args.pluginsProvided = true;
-      args.plugins = value
-        .split(",")
-        .map((plugin) => plugin.trim())
-        .filter(Boolean);
     } else if (arg === "--no-seed-auth") {
       args.seedAuth = false;
+    } else if (arg === "--install-via-cli") {
+      args.installViaCli = true;
     } else {
       throw new Error(`unknown argument: ${arg}`);
     }
@@ -44,37 +36,15 @@ function parseArgs(argv) {
 
   if (!args.codexHome) {
     throw new Error(
-      "Usage: node scripts/evals/prepare-codex-home.mjs <codex-home> [--plugin-mode no-plugins|targeted-plugins|full-marketplace|skills-only-marketplace] [--plugins comma,list] [--no-seed-auth]",
+      "Usage: node scripts/evals/prepare-codex-home.mjs <codex-home> [--plugin-mode no-plugins|development-system] [--no-seed-auth] [--install-via-cli]",
     );
   }
-  if (
-    ![
-      "no-plugins",
-      "targeted-plugins",
-      "full-marketplace",
-      "skills-only-marketplace",
-    ].includes(args.pluginMode)
-  ) {
+  if (!["no-plugins", "development-system"].includes(args.pluginMode)) {
     throw new Error(`unknown plugin mode: ${args.pluginMode}`);
   }
-  if (
-    args.pluginsProvided &&
-    ["targeted-plugins", "skills-only-marketplace"].includes(args.pluginMode) &&
-    args.plugins.length === 0
-  ) {
+  if (args.installViaCli && args.pluginMode !== "development-system") {
     throw new Error(
-      `${args.pluginMode} mode requires a non-empty --plugins list`,
-    );
-  }
-  if (args.pluginMode === "targeted-plugins" && !args.pluginsProvided) {
-    throw new Error("targeted-plugins mode requires --plugins");
-  }
-  if (
-    args.pluginsProvided &&
-    !["targeted-plugins", "skills-only-marketplace"].includes(args.pluginMode)
-  ) {
-    throw new Error(
-      `--plugins is not supported with plugin mode ${args.pluginMode}`,
+      `--install-via-cli is not supported with plugin mode ${args.pluginMode}`,
     );
   }
 
@@ -105,26 +75,21 @@ function marketplacePlugins(selectedNames = null) {
     const found = new Set(plugins.map((plugin) => plugin.name));
     const missing = [...selected].filter((name) => !found.has(name));
     if (missing.length > 0) {
-      throw new Error(`unknown targeted plugin(s): ${missing.join(", ")}`);
+      throw new Error(`unknown selected plugin(s): ${missing.join(", ")}`);
     }
   }
 
   return plugins;
 }
 
-function copyDir(source, target, { skillsOnly = false } = {}) {
+function copyDir(source, target) {
   fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.cpSync(source, target, {
     recursive: true,
     filter: (entry) => {
       if (entry.split(path.sep).includes(".git")) return false;
-      if (!skillsOnly) return true;
-
-      const relative = path.relative(source, entry);
-      if (!relative) return true;
-      const [rootEntry] = relative.split(path.sep);
-      return rootEntry === ".codex-plugin" || rootEntry === "skills";
+      return true;
     },
   });
 }
@@ -149,6 +114,70 @@ function writeConfig(codexHome, plugins) {
   }
 
   fs.writeFileSync(path.join(codexHome, "config.toml"), lines.join("\n"));
+}
+
+function runCodex(codexHome, args) {
+  const codexBin =
+    process.env.CODEX_EVAL_CODEX_BIN ||
+    path.join(root, "node_modules/.bin/codex");
+  const result = spawnSync(codexBin, args, {
+    encoding: "utf8",
+    env: { ...process.env, CODEX_HOME: codexHome },
+  });
+
+  if (result.error) {
+    throw new Error(`failed to execute Codex CLI: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim();
+    throw new Error(
+      `Codex CLI ${args.join(" ")} failed with status ${result.status}${detail ? `: ${detail}` : ""}`,
+    );
+  }
+
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`Codex CLI ${args.join(" ")} did not return JSON`);
+  }
+}
+
+function installDevelopmentSystemWithCli(codexHome) {
+  runCodex(codexHome, ["plugin", "marketplace", "add", root, "--json"]);
+  const installation = runCodex(codexHome, [
+    "plugin",
+    "add",
+    "development-system@ai-plugins",
+    "--json",
+  ]);
+  const listing = runCodex(codexHome, ["plugin", "list", "--json"]);
+  const installed = listing.installed?.find(
+    (plugin) => plugin.pluginId === "development-system@ai-plugins",
+  );
+
+  if (!installed?.installed || !installed.enabled) {
+    throw new Error(
+      "Codex CLI did not report development-system as installed and enabled",
+    );
+  }
+
+  const installedPath = path.resolve(installation.installedPath || "");
+  if (
+    !installation.installedPath ||
+    !isSameOrAncestor(
+      realPathIfExists(codexHome),
+      realPathIfExists(installedPath),
+    )
+  ) {
+    throw new Error(
+      "Codex CLI reported a development-system install path outside the eval home",
+    );
+  }
+  if (!fs.statSync(installedPath).isDirectory()) {
+    throw new Error(
+      "Codex CLI did not materialize the development-system plugin cache",
+    );
+  }
 }
 
 function seedAuth(codexHome) {
@@ -299,7 +328,9 @@ function main() {
   assertEvalHomeCanBeRecreated(resolvedHome);
 
   const plugins =
-    args.pluginMode === "no-plugins" ? [] : marketplacePlugins(args.plugins);
+    args.pluginMode === "no-plugins"
+      ? []
+      : marketplacePlugins(["development-system"]);
 
   if (!initializeInPlace) {
     fs.rmSync(resolvedHome, { recursive: true, force: true });
@@ -311,19 +342,23 @@ function main() {
     { mode: 0o600 },
   );
   if (args.seedAuth) seedAuth(resolvedHome);
-  writeConfig(resolvedHome, plugins);
 
-  for (const plugin of plugins) {
-    copyDir(
-      plugin.path,
-      path.join(
-        resolvedHome,
-        "plugins/cache/ai-plugins",
-        plugin.name,
-        plugin.version,
-      ),
-      { skillsOnly: args.pluginMode === "skills-only-marketplace" },
-    );
+  if (args.installViaCli) {
+    installDevelopmentSystemWithCli(resolvedHome);
+  } else {
+    writeConfig(resolvedHome, plugins);
+
+    for (const plugin of plugins) {
+      copyDir(
+        plugin.path,
+        path.join(
+          resolvedHome,
+          "plugins/cache/ai-plugins",
+          plugin.name,
+          plugin.version,
+        ),
+      );
+    }
   }
 
   console.log(

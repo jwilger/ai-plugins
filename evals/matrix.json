@@ -21,12 +21,8 @@
       "description": "Natural provider baseline with no marketplace plugins installed."
     },
     {
-      "id": "targeted-plugins",
-      "description": "Only the plugins mapped by each behavior case are considered target instructions."
-    },
-    {
-      "id": "full-marketplace",
-      "description": "The complete ai-plugins marketplace is installed."
+      "id": "development-system",
+      "description": "The development-system plugin is installed and enabled."
     }
   ],
   "valueGates": {

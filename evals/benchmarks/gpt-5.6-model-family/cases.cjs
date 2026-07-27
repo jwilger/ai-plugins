@@ -21,28 +21,9 @@ function readJson(file) {
 }
 
 function selectedStandardFixtures() {
-  return readJson("evals/fixtures/behavior/full-marketplace/cases.json").filter(
-    (testCase) => standardCaseIds.has(testCase.case_id),
-  );
-}
-
-function standardPluginNames() {
-  const plugins = [
-    ...new Set(
-      selectedStandardFixtures().flatMap((testCase) => testCase.plugins || []),
-    ),
-  ].sort();
-
-  if (plugins.length === 0) {
-    throw new Error("standard benchmark cases select no marketplace plugins");
-  }
-  if (plugins.includes("advisor")) {
-    throw new Error(
-      "standard benchmark cases cannot load delegation-only Advisor guidance",
-    );
-  }
-
-  return plugins;
+  return readJson(
+    "evals/fixtures/behavior/development-system/cases.json",
+  ).filter((testCase) => standardCaseIds.has(testCase.case_id));
 }
 
 function standardCases() {
@@ -125,7 +106,5 @@ function loadBenchmarkCases() {
     })),
   );
 }
-
-loadBenchmarkCases.standardPluginNames = standardPluginNames;
 
 module.exports = loadBenchmarkCases;

@@ -169,7 +169,7 @@ NODE
 
 write_execution_artifact() {
   local artifact="$1"
-  local skills_home="$2"
+  local development_system_home="$2"
   local no_plugins_home="$3"
   local workspace="$4"
   local persisted_results_path="$5"
@@ -177,7 +177,7 @@ write_execution_artifact() {
   node - \
     "$ROOT/evals/benchmarks/gpt-5.6-model-family/promptfooconfig.yaml" \
     "$artifact" \
-    "$skills_home" \
+    "$development_system_home" \
     "$no_plugins_home" \
     "$workspace" \
     "$persisted_results_path" <<'NODE'
@@ -187,7 +187,7 @@ const { parse } = require('yaml');
 
 const configPath = process.argv[2];
 const artifact = process.argv[3];
-process.env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE = process.argv[4];
+process.env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM = process.argv[4];
 process.env.CODEX_EVAL_HOME_NO_PLUGINS = process.argv[5];
 process.env.GPT56_BENCHMARK_WORKSPACE = process.argv[6];
 const persistedResultsPath = process.argv[7];
@@ -535,32 +535,6 @@ NODE
   rm -f "$artifact"
 }
 
-@test "Codex home preparation supports a skills-only marketplace cache" {
-  temp_root="$(mktemp -d)"
-  eval_home="$temp_root/codex-home"
-  plugin_home="$eval_home/plugins/cache/ai-plugins/development-system"
-
-  run env OPENAI_API_KEY=fixture node \
-    "$ROOT/scripts/evals/prepare-codex-home.mjs" \
-    "$eval_home" \
-    --plugin-mode skills-only-marketplace \
-    --plugins development-system
-
-  [ "$status" -eq 0 ]
-  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
-  cached_plugin="$plugin_home/$version"
-  [ -f "$cached_plugin/.codex-plugin/plugin.json" ]
-  [ -d "$cached_plugin/skills" ]
-  [ ! -e "$cached_plugin/.mcp.json" ]
-  [ ! -e "$cached_plugin/bin" ]
-  [ ! -e "$cached_plugin/.claude-plugin" ]
-  [ ! -e "$cached_plugin/README.md" ]
-  [ "$(grep -c '^\[plugins\.' "$eval_home/config.toml")" -eq 1 ]
-  grep -q '\[plugins\."development-system@ai-plugins"\]' "$eval_home/config.toml"
-
-  rm -rf "$temp_root"
-}
-
 @test "Codex home preparation removes stale eval state before rebuilding" {
   temp_root="$(mktemp -d)"
   eval_home="$temp_root/codex-home"
@@ -641,13 +615,13 @@ NODE
 
 @test "GPT-5.6 benchmark runner dry-run prepares each required Codex home and isolates artifacts" {
   temp_root="$(mktemp -d)"
-  skills_home="$temp_root/skills-only-home"
+  development_system_home="$temp_root/development-system-home"
   no_plugins_home="$temp_root/no-plugins-home"
   workspace="$temp_root/workspace"
   out_root="$temp_root/out"
 
   run env \
-    CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="$skills_home" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$no_plugins_home" \
     GPT56_BENCHMARK_WORKSPACE="$workspace" \
     GPT56_BENCHMARK_OUT_ROOT="$out_root" \
@@ -655,8 +629,7 @@ NODE
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 2 ]
-  [[ "$output" == *"$skills_home --plugin-mode skills-only-marketplace"* ]]
-  [[ "$output" == *"--plugins development-system"* ]]
+  [[ "$output" == *"$development_system_home --plugin-mode development-system --install-via-cli"* ]]
   [[ "$output" == *"$no_plugins_home --plugin-mode no-plugins"* ]]
   [[ "$output" == *"$out_root/execution/results.json"* ]]
   [[ "$output" == *"--max-concurrency 2"* ]]
@@ -666,7 +639,7 @@ NODE
   measurement_check_line="$(printf '%s\n' "$output" | grep -nF "$expected_measurement_check" | cut -d: -f1)"
   isolation_check_line="$(printf '%s\n' "$output" | grep -nF "check-gpt56-execution-isolation.mjs $out_root/execution/results.json" | cut -d: -f1)"
   [ "$measurement_check_line" -lt "$isolation_check_line" ]
-  [ ! -e "$skills_home/config.toml" ]
+  [ ! -e "$development_system_home/config.toml" ]
   [ ! -e "$no_plugins_home/config.toml" ]
 
   run env \
@@ -679,7 +652,7 @@ NODE
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
   [[ "$output" == *"$no_plugins_home --plugin-mode no-plugins"* ]]
-  [[ "$output" != *"--plugin-mode skills-only-marketplace"* ]]
+  [[ "$output" != *"--plugin-mode development-system"* ]]
   [[ "$output" == *"$out_root/grader-calibration/results.json"* ]]
   [[ "$output" != *"check-gpt56-execution-isolation.mjs"* ]]
   [[ "$output" == *"check-gpt56-grader-calibration.mjs $out_root/grader-calibration/results.json"* ]]
@@ -716,7 +689,7 @@ NODE
     PREPARATION_MARKER="$preparation_marker" \
     PROVIDER_MARKER="$provider_marker" \
     PROMPTFOO_BIN="$fake_promptfoo" \
-    CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="$temp_root/skills-home" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$temp_root/development-system-home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$temp_root/no-plugins-home" \
     GPT56_BENCHMARK_WORKSPACE="$temp_root/workspace" \
     GPT56_BENCHMARK_OUT_ROOT="$temp_root/out" \
@@ -727,7 +700,7 @@ NODE
   [ ! -e "$preparation_marker" ]
   [ ! -e "$provider_marker" ]
   [ ! -e "$temp_root/workspace" ]
-  [ ! -e "$temp_root/skills-home" ]
+  [ ! -e "$temp_root/development-system-home" ]
   [ ! -e "$temp_root/no-plugins-home" ]
   [ ! -e "$temp_root/out" ]
 
@@ -779,7 +752,7 @@ NODE
   run env \
     PATH="$fake_bin:$PATH" \
     PREPARATION_MARKER="$preparation_marker" \
-    CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="$temp_root/skills-home" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$temp_root/development-system-home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$temp_root/no-plugins-home" \
     GPT56_BENCHMARK_WORKSPACE="$temp_root/workspace" \
     GPT56_BENCHMARK_OUT_ROOT="$temp_root/out" \
@@ -835,15 +808,15 @@ NODE
 
 @test "GPT-5.6 benchmark runner refuses workspace overlap with protected paths" {
   temp_root="$(mktemp -d)"
-  skills_home="$temp_root/skills-home"
+  development_system_home="$temp_root/development-system-home"
   no_plugins_home="$temp_root/no-plugins-home"
   out_root="$temp_root/out"
   auth_home="$temp_root/auth-home"
 
-  for protected_kind in repository skills-home no-plugins-home output auth-home; do
+  for protected_kind in repository development-system-home no-plugins-home output auth-home; do
     case "$protected_kind" in
       repository) workspace="$ROOT/.evals/overlap-fixture-$$" ;;
-      skills-home) workspace="$skills_home" ;;
+      development-system-home) workspace="$development_system_home" ;;
       no-plugins-home) workspace="$no_plugins_home" ;;
       output) workspace="$out_root" ;;
       auth-home) workspace="$auth_home" ;;
@@ -851,7 +824,7 @@ NODE
 
     run env \
       CODEX_EVAL_AUTH_HOME="$auth_home" \
-      CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="$skills_home" \
+      CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
       CODEX_EVAL_HOME_NO_PLUGINS="$no_plugins_home" \
       GPT56_BENCHMARK_WORKSPACE="$workspace" \
       GPT56_BENCHMARK_OUT_ROOT="$out_root" \
@@ -866,7 +839,7 @@ NODE
   done
 
   [ ! -e "$ROOT/.evals/overlap-fixture-$$" ]
-  [ ! -e "$skills_home" ]
+  [ ! -e "$development_system_home" ]
   [ ! -e "$no_plugins_home" ]
   [ ! -e "$out_root" ]
   [ ! -e "$auth_home" ]
@@ -887,7 +860,7 @@ NODE
     OPENAI_API_KEY=fixture \
     PROMPTFOO_BIN="$fake_promptfoo" \
     PROMPTFOO_MARKER="$promptfoo_marker" \
-    CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="$temp_root/skills-home" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$temp_root/development-system-home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$temp_root/no-plugins-home" \
     GPT56_BENCHMARK_WORKSPACE="$workspace" \
     GPT56_BENCHMARK_OUT_ROOT="$temp_root/out" \
@@ -922,7 +895,7 @@ NODE
     OPENAI_API_KEY=fixture \
     PROMPTFOO_BIN="$fake_promptfoo" \
     PROMPTFOO_MARKER="$promptfoo_marker" \
-    CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="$temp_root/skills-home" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$temp_root/development-system-home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$temp_root/no-plugins-home" \
     GPT56_BENCHMARK_WORKSPACE="$workspace" \
     GPT56_BENCHMARK_OUT_ROOT="$temp_root/out" \
@@ -1100,7 +1073,7 @@ NODE
 
 @test "GPT-5.6 benchmark runner prepares isolated homes before invoking Promptfoo" {
   temp_root="$(mktemp -d)"
-  skills_home="$temp_root/skills-only-home"
+  development_system_home="$temp_root/development-system-home"
   no_plugins_home="$temp_root/no-plugins-home"
   workspace="$temp_root/workspace"
   out_root="$temp_root/out"
@@ -1111,7 +1084,7 @@ NODE
   agentic_version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
   write_execution_artifact \
     "$execution_artifact" \
-    "$skills_home" \
+    "$development_system_home" \
     "$no_plugins_home" \
     "$workspace" \
     "$out_root/execution/results.json"
@@ -1119,10 +1092,10 @@ NODE
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
-    'grep -q "\\[plugins\\.\\\"${EXPECTED_PLUGIN}@ai-plugins\\\"\\]" "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml"' \
-    '[ "$(grep -c "^\\[plugins\\." "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/config.toml")" -eq 1 ]' \
-    '[ -d "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/$EXPECTED_PLUGIN" ]' \
-    '[ ! -e "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE/plugins/cache/ai-plugins/development-system/$AGENTIC_VERSION/.mcp.json" ]' \
+    'grep -q "\\[plugins\\.\\\"${EXPECTED_PLUGIN}@ai-plugins\\\"\\]" "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/config.toml"' \
+    '[ "$(grep -c "^\\[plugins\\." "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/config.toml")" -eq 1 ]' \
+    '[ -d "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/plugins/cache/ai-plugins/$EXPECTED_PLUGIN" ]' \
+    '[ -e "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/plugins/cache/ai-plugins/development-system/$AGENTIC_VERSION/.mcp.json" ]' \
     '! grep -q "^\\[plugins\\." "$CODEX_EVAL_HOME_NO_PLUGINS/config.toml"' \
     '[ -d "$GPT56_BENCHMARK_WORKSPACE" ]' \
     'mkdir -p "$EVAL_OUT_DIR"' \
@@ -1139,7 +1112,7 @@ NODE
     PROMPTFOO_MARKER="$marker" \
     PROMPTFOO_BIN="$fake_promptfoo" \
     EVAL_TIMEOUT=0 \
-    CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="$skills_home" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$no_plugins_home" \
     GPT56_BENCHMARK_WORKSPACE="$workspace" \
     GPT56_BENCHMARK_OUT_ROOT="$out_root" \
@@ -1148,7 +1121,7 @@ NODE
   [ "$status" -eq 0 ]
   [ -s "$marker" ]
   [[ "$(<"$marker")" == *"promptfooconfig.yaml"* ]]
-  [ -d "$skills_home/plugins/cache/ai-plugins/$expected_plugin" ]
+  [ -d "$development_system_home/plugins/cache/ai-plugins/$expected_plugin" ]
   ! grep -q '^\[plugins\.' "$no_plugins_home/config.toml"
 
   rm -rf "$temp_root"
@@ -1161,15 +1134,6 @@ const path = require('node:path');
 const root = process.argv[2];
 const loadCases = require(path.join(root, 'evals/benchmarks/gpt-5.6-model-family/cases.cjs'));
 const cases = loadCases();
-
-const standardPluginNames = loadCases.standardPluginNames?.();
-const expectedStandardPluginNames = ['development-system'];
-if (JSON.stringify(standardPluginNames) !== JSON.stringify(expectedStandardPluginNames)) {
-  throw new Error(`unexpected standard plugin scope: ${JSON.stringify(standardPluginNames)}`);
-}
-if (standardPluginNames.includes('advisor')) {
-  throw new Error('standard plugin scope includes delegation-only Advisor guidance');
-}
 
 if (cases.length !== 4) {
   throw new Error(`expected four benchmark cases, got ${cases.length}`);

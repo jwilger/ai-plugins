@@ -31,12 +31,10 @@ client data, and avoids private implementation details or private tool names.
 The repo includes a promptfoo-based OSS eval lane that runs behavior scenarios
 through Promptfoo's native Claude Code and Codex coding-agent providers. The
 runner generates config from the marketplace manifests and labels no-plugin,
-targeted-plugin, and full-marketplace behavior modes. Codex uses a separate
-generated home for each mode. For both harnesses, targeted mode installs the
-deterministic, deduplicated union of plugins declared by the selected behavior
-cases; `EVAL_CASE_FILTER` narrows both the cases and their installed plugin set.
-Full-marketplace mode installs the complete harness-specific catalog, and
-no-plugin mode installs none. The generated config records exact installed
+and installed `development-system` behavior modes. Both harnesses use isolated
+homes for the two conditions. Claude's plugin condition is prepared through the
+real marketplace installer and loaded from the installed cache; Codex receives
+an isolated generated plugin cache. The generated config records exact installed
 provider compositions separately from individual case targets. The lane writes
 JSON, HTML, and JUnit artifacts under `evals/out/`, then builds a static
 dashboard under `site/evals/`. Hosted promptfoo sharing is not used as the

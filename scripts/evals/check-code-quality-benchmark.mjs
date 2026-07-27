@@ -39,7 +39,7 @@ const maximumManifestBytes = 1024 * 1024;
 const maximumRawTraceBytes = 16 * 1024 * 1024;
 const maximumTraceItems = 4_096;
 const maximumResults = 64;
-const expectedTurns = 9;
+const expectedTurns = 6;
 const skillActivationEvidence =
   "codex-turn-successful-command-path-references";
 const artifactKeys = [

@@ -236,6 +236,23 @@ teardown() {
     >/dev/null
 }
 
+@test "session start records an opt-in eval marker without adding normal output" {
+  mkdir -p "$TEST_ROOT/project" "$TEST_ROOT/home"
+  marker="$TEST_ROOT/session-start.marker"
+
+  run env \
+    HOME="$TEST_ROOT/home" \
+    DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER="$marker" \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    session-start \
+    --project "$TEST_ROOT/project" \
+    --harness claude
+
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -f "$marker" ]
+}
+
 @test "setup records explicit delivery and feature selections" {
   git -C "$TEST_ROOT" init --initial-branch=main project
   git -C "$TEST_ROOT/project" config user.email test@example.com

@@ -42,7 +42,7 @@ usage() {
   printf '%s\n' \
     'Usage: scripts/evals/run-code-quality-benchmark.sh [--dry-run | --runtime-preflight] [--case CASE_ID]' \
     '' \
-    'Runs the isolated nine-turn downstream Codex code-quality diagnostic.' \
+    'Runs the isolated six-turn downstream Codex code-quality diagnostic.' \
     'Live execution requires an existing ChatGPT-backed Codex login.' \
     '--runtime-preflight prints the pinned candidate PATH and Nix runtime closure.'
 }

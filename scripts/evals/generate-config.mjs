@@ -6,10 +6,8 @@ import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const require = createRequire(import.meta.url);
-const { selectedBehaviorPluginNames } = require(
-  path.join(root, "evals/promptfoo/fixtures.cjs"),
-);
 const evalWorkspace = path.join(root, ".evals/agent-workspace");
+const developmentSystemPluginName = "development-system";
 const advisoryPromptPrefix =
   "Answer the scenario as an advisory behavior question. Treat each scenario as stateless: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Use installed marketplace plugin and skill guidance when it is relevant, naming the relevant plugin or skill in the answer. You may read installed skill instruction files through the harness. When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording. Apply plugin-specific safety gates and documented commands exactly instead of replacing them with generic setup or validation advice. Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands.";
 
@@ -57,6 +55,7 @@ function readPlugins(file) {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
   return manifest.plugins.map((plugin) => ({
     name: plugin.name,
+    version: plugin.version,
     path:
       plugin.source && typeof plugin.source === "object"
         ? plugin.source.path
@@ -74,6 +73,7 @@ function normalizePlugin(plugin) {
     : `./${plugin.path || `plugins/${plugin.name}`}`;
   return {
     name: plugin.name,
+    version: plugin.version,
     path: pluginPath,
     absolutePath: path.resolve(root, pluginPath),
   };
@@ -133,11 +133,24 @@ function providerEnv(value, fallback) {
 }
 
 function claudeProvider(variant, pluginMode, plugins) {
+  const evalHome = path.join(root, `.evals/claude-home-${pluginMode.id}`);
+  const envSuffix = pluginMode.id.replaceAll("-", "_").toUpperCase();
+  const plugin = plugins[0];
+  const pluginPath = plugin
+    ? path.join(
+        evalHome,
+        "plugin-cache/cache/ai-plugins",
+        plugin.name,
+        plugin.version,
+      )
+    : null;
   const pluginLines =
     pluginMode.id === "no-plugins"
       ? ""
       : `      plugins:
-${indentedList(plugins, 8, (plugin) => `- type: local\n${" ".repeat(10)}path: ${quote(plugin.absolutePath)}`)}
+        - type: local
+          path: "{{ env.CLAUDE_EVAL_PLUGIN_PATH_${envSuffix} | default('${pluginPath}') }}"
+      include_hook_events: true
 `;
 
   return `  - id: ${variant.provider}
@@ -152,7 +165,11 @@ ${indentedList(plugins, 8, (plugin) => `- type: local\n${" ".repeat(10)}path: ${
       skills: all
       setting_sources: []
       persist_session: false
-      disallowed_tools:
+      env:
+        CLAUDE_CONFIG_DIR: "{{ env.CLAUDE_EVAL_RUNTIME_CONFIG_DIR_${envSuffix} | default('${path.join(evalHome, "config")}') }}"
+        CLAUDE_CODE_PLUGIN_CACHE_DIR: "{{ env.CLAUDE_EVAL_PLUGIN_CACHE_DIR_${envSuffix} | default('${path.join(evalHome, "plugin-cache")}') }}"
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
+${pluginMode.id === "development-system" ? `        DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER: "{{ env.CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE | default('${path.join(root, ".evals/session-start-claude-development-system")}') }}"\n` : ""}      disallowed_tools:
         - Bash
         - Write
         - Edit
@@ -175,8 +192,14 @@ function codexProvider(variant, pluginMode) {
       enable_streaming: true
       deep_tracing: false
       skip_git_repo_check: true
-      cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.evals/codex-home-${homeSuffix}`)}') }}"`;
+${pluginMode.id === "development-system" ? `      codex_path_override: "${path.join(root, "scripts/evals/codex-with-trusted-hooks.sh")}"\n` : ""}      cli_env:
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.evals/codex-home-${homeSuffix}`)}') }}"${
+          pluginMode.id === "development-system"
+            ? `
+        CODEX_EVAL_REAL_BIN: "{{ env.CODEX_EVAL_REAL_BIN | default('${path.join(root, "node_modules/.bin/codex")}') }}"
+        DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER: "{{ env.CODEX_EVAL_SESSION_START_MARKER | default('${path.join(root, ".evals/session-start-codex-development-system")}') }}"`
+            : ""
+        }`;
 }
 
 function providerFor(variant, pluginMode, plugins) {
@@ -199,21 +222,6 @@ function providerEntry(variant, pluginMode, plugins) {
   };
 }
 
-function namedPlugins(pluginNames, marketplacePlugins, harnessName) {
-  const byName = new Map(
-    marketplacePlugins.map((plugin) => [plugin.name, plugin]),
-  );
-  const missing = pluginNames.filter((pluginName) => !byName.has(pluginName));
-
-  if (missing.length > 0) {
-    throw new Error(
-      `selected behavior plugin(s) unavailable to ${harnessName}: ${missing.join(", ")}`,
-    );
-  }
-
-  return pluginNames.map((pluginName) => byName.get(pluginName));
-}
-
 function pluginsForProvider(variant, pluginMode, pluginSets) {
   if (pluginMode.id === "no-plugins") {
     return [];
@@ -229,11 +237,8 @@ function pluginsForProvider(variant, pluginMode, pluginSets) {
     throw new Error(`unsupported provider variant: ${variant.id}`);
   }
 
-  if (pluginMode.id === "targeted-plugins") {
-    return harness.targeted;
-  }
-  if (pluginMode.id === "full-marketplace") {
-    return harness.full;
+  if (pluginMode.id === "development-system") {
+    return harness;
   }
   throw new Error(`unsupported plugin mode: ${pluginMode.id}`);
 }
@@ -243,7 +248,7 @@ function providerMatches(entry, term) {
     return true;
   }
   if (term === entry.variant.id) {
-    return entry.pluginMode.id === "full-marketplace";
+    return entry.pluginMode.id === "development-system";
   }
   if (term === entry.variant.provider || term === entry.pluginMode.id) {
     return true;
@@ -285,26 +290,20 @@ function configFor(suite) {
   const claudePlugins = manifestPlugins(".claude-plugin/marketplace.json");
   const codexPlugins = manifestPlugins(".agents/plugins/marketplace.json");
   const matrix = evalMatrix();
-  const usesTargetedMode =
-    suite === "behavior" &&
-    matrix.pluginModes.some(
-      (pluginMode) => pluginMode.id === "targeted-plugins",
+  const developmentSystemPlugin = (plugins, harnessName) => {
+    const selected = plugins.filter(
+      (plugin) => plugin.name === developmentSystemPluginName,
     );
-  const targetedPluginNames = usesTargetedMode
-    ? selectedBehaviorPluginNames({
-        root,
-        caseFilter: process.env.EVAL_CASE_FILTER,
-      })
-    : [];
+    if (selected.length !== 1) {
+      throw new Error(
+        `${harnessName} marketplace must contain exactly one ${developmentSystemPluginName} plugin`,
+      );
+    }
+    return selected;
+  };
   const pluginSets = {
-    claude: {
-      full: claudePlugins,
-      targeted: namedPlugins(targetedPluginNames, claudePlugins, "Claude Code"),
-    },
-    codex: {
-      full: codexPlugins,
-      targeted: namedPlugins(targetedPluginNames, codexPlugins, "Codex"),
-    },
+    claude: developmentSystemPlugin(claudePlugins, "Claude Code"),
+    codex: developmentSystemPlugin(codexPlugins, "Codex"),
   };
   const testLoader =
     suite === "canary"
@@ -312,7 +311,7 @@ function configFor(suite) {
       : behaviorTestLoader();
   const description =
     suite === "canary"
-      ? "Full-marketplace canary for ai-plugins coding harnesses"
+      ? "Installed development-system canary for ai-plugins coding harnesses"
       : "Provider-backed behavior evals for the ai-plugins marketplace";
   const providerEntries =
     suite === "behavior"
@@ -328,8 +327,12 @@ function configFor(suite) {
       : matrix.providerVariants.map((variant) =>
           providerEntry(
             variant,
-            { id: "full-marketplace" },
-            pluginsForProvider(variant, { id: "full-marketplace" }, pluginSets),
+            { id: "development-system" },
+            pluginsForProvider(
+              variant,
+              { id: "development-system" },
+              pluginSets,
+            ),
           ),
         );
   const providers = filteredProviderEntries(providerEntries);
@@ -379,7 +382,7 @@ defaultTest:
           deep_tracing: false
           skip_git_repo_check: true
           cli_env:
-            CODEX_HOME: "{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME) | default('${path.join(root, ".evals/codex-home-full-marketplace")}') }}"
+            CODEX_HOME: "{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM | default(env.CODEX_EVAL_HOME) | default('${path.join(root, ".evals/codex-home-development-system")}') }}"
 
 tracing:
   enabled: false
@@ -394,7 +397,7 @@ metadata:
 ${indentedList(pluginModes, 6, (mode) => `- id: ${mode.id}`)}
     providerVariants:
 ${indentedList(providerVariants, 6, (variant) => `- id: ${variant.id}\n${" ".repeat(8)}provider: ${variant.provider}`)}
-  fullMarketplacePlugins:
+  marketplacePlugins:
 ${indentedList(allPlugins, 4, (plugin) => `- name: ${plugin.name}\n${" ".repeat(6)}sourcePath: ${quote(plugin.path)}`)}
 
 commandLineOptions:

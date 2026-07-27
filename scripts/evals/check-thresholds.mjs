@@ -57,18 +57,13 @@ function providerVariant(result, vars) {
   return String(
     vars.provider_variant ||
       vars.providerVariant ||
-      providerId(result).replace(
-        /-(no-plugins|targeted-plugins|full-marketplace)$/,
-        "",
-      ),
+      providerId(result).replace(/-(no-plugins|development-system)$/, ""),
   );
 }
 
 function pluginMode(result, vars) {
   return String(
-    providerId(result).match(
-      /(no-plugins|targeted-plugins|full-marketplace)$/,
-    )?.[1] ||
+    providerId(result).match(/(no-plugins|development-system)$/)?.[1] ||
       vars.plugin_mode ||
       vars.pluginMode ||
       "unknown",
@@ -177,22 +172,18 @@ for (const group of groups.values()) {
 }
 
 for (const [key, caseGroups] of groupsByCase) {
-  const full = caseGroups.find(
-    (group) => group.pluginMode === "full-marketplace",
-  );
-  const targeted = caseGroups.find(
-    (group) => group.pluginMode === "targeted-plugins",
+  const plugin = caseGroups.find(
+    (group) => group.pluginMode === "development-system",
   );
   const baseline = caseGroups.find(
     (group) => group.pluginMode === "no-plugins",
   );
 
-  if (!baseline || (!full && !targeted)) {
+  if (!baseline || !plugin) {
     continue;
   }
 
-  const reference = full || targeted;
-  const plugin = full || targeted;
+  const reference = plugin;
 
   if (reference.valueGateMode === "none") {
     continue;

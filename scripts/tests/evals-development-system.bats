@@ -5,7 +5,7 @@ setup() {
   FIXTURE_TMP=""
   TMP_REPO=""
   NO_PLUGINS_HOME=""
-  TARGETED_HOME=""
+  DEVELOPMENT_SYSTEM_HOME=""
   EVAL_BACKUP_DIR=""
 }
 
@@ -13,7 +13,7 @@ teardown() {
   [ -z "$FIXTURE_TMP" ] || rm -rf "$FIXTURE_TMP"
   [ -z "$TMP_REPO" ] || rm -rf "$TMP_REPO"
   [ -z "$NO_PLUGINS_HOME" ] || rm -rf "$NO_PLUGINS_HOME"
-  [ -z "$TARGETED_HOME" ] || rm -rf "$TARGETED_HOME"
+  [ -z "$DEVELOPMENT_SYSTEM_HOME" ] || rm -rf "$DEVELOPMENT_SYSTEM_HOME"
 
   if [ -n "$EVAL_BACKUP_DIR" ]; then
     rm -f "$ROOT/evals/out/results.json" "$ROOT/evals/out/status.json"
@@ -23,7 +23,7 @@ teardown() {
   fi
 }
 
-@test "behavior loader reads recursive full-marketplace fixtures with coverage metadata" {
+@test "behavior loader reads recursive development-system fixtures with coverage metadata" {
   run node - <<NODE
 const generateTests = require('$ROOT/evals/promptfoo/load-harness-cases.cjs');
 const tests = generateTests();
@@ -309,62 +309,27 @@ JSON
   run node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: claude-code-sonnet-full-marketplace"* ]]
-  [[ "$output" == *"label: claude-code-sonnet-targeted-plugins"* ]]
   [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
+  [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-development-system"* ]]
   [[ "$output" == *"pluginMode: no-plugins"* ]]
-  [[ "$output" == *"pluginMode: targeted-plugins"* ]]
-  [[ "$output" == *"pluginMode: full-marketplace"* ]]
+  [[ "$output" == *"pluginMode: development-system"* ]]
+  [[ "$output" != *"targeted-plugins"* ]]
+  [[ "$output" != *"full-marketplace"* ]]
   [[ "$output" == *"load-harness-cases.cjs?pluginMode={{ provider.pluginMode }}"* ]]
 }
 
-@test "filtered behavior config gives Claude targeted provider exactly the selected case plugins" {
-  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture node - "$ROOT" <<'NODE'
-const fs = require('node:fs');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-
-const root = process.argv[2];
-const result = spawnSync(
-  process.execPath,
-  [path.join(root, 'scripts/evals/generate-config.mjs'), '--suite', 'behavior', '--stdout'],
-  { cwd: root, encoding: 'utf8', env: process.env },
-);
-if (result.status !== 0) {
-  process.stderr.write(result.stderr || result.stdout);
-  process.exit(result.status);
-}
-
-function providerPluginPaths(label) {
-  const marker = `    label: ${label}\n`;
-  const start = result.stdout.indexOf(marker);
-  if (start < 0) throw new Error(`missing provider ${label}`);
-  const next = result.stdout.indexOf('\n  - id:', start + marker.length);
-  const section = result.stdout.slice(start, next < 0 ? undefined : next);
-  return [...section.matchAll(/^\s+path: "([^"]+)"$/gm)]
-    .map((match) => match[1])
-    .sort();
-}
-
-const targeted = providerPluginPaths('claude-code-sonnet-targeted-plugins');
-const full = providerPluginPaths('claude-code-sonnet-full-marketplace');
-const expectedTargeted = [path.join(root, 'plugins/development-system')];
-const expectedFull = JSON.parse(
-  fs.readFileSync(path.join(root, '.claude-plugin/marketplace.json'), 'utf8'),
-).plugins.map(({ name }) => path.join(root, 'plugins', name)).sort();
-
-if (JSON.stringify(targeted) !== JSON.stringify(expectedTargeted)) {
-  throw new Error(`targeted provider paths ${JSON.stringify(targeted)} != ${JSON.stringify(expectedTargeted)}`);
-}
-if (JSON.stringify(full) !== JSON.stringify(expectedFull)) {
-  throw new Error(`full provider paths ${JSON.stringify(full)} != ${JSON.stringify(expectedFull)}`);
-}
-NODE
+@test "filtered behavior config still compares only baseline and installed development-system" {
+  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
+    node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 4 ]
+  [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
+  [[ "$output" == *"CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM"* ]]
+  [[ "$output" != *"targeted-plugins"* ]]
+  [[ "$output" != *"full-marketplace"* ]]
 }
 
 @test "generated metadata records exact filtered provider plugin compositions" {
@@ -383,12 +348,10 @@ NODE
     def plugins($label):
       [.providerCompositions[] | select(.label == $label) | .plugins] | first;
     (.providerLabels | sort) == ([.providerCompositions[].label] | sort)
-      and plugins("claude-code-sonnet-targeted-plugins") == ["development-system"]
-      and plugins("codex-gpt-5.6-terra-targeted-plugins") == ["development-system"]
+      and plugins("claude-code-sonnet-development-system") == ["development-system"]
+      and plugins("codex-gpt-5.6-terra-development-system") == ["development-system"]
       and plugins("claude-code-sonnet-no-plugins") == []
       and plugins("codex-gpt-5.6-terra-no-plugins") == []
-      and plugins("claude-code-sonnet-full-marketplace") == ["development-system"]
-      and plugins("codex-gpt-5.6-terra-full-marketplace") == ["development-system"]
   ' "$generated_metadata"
   run node - "$generated_config" "$generated_metadata" <<'NODE'
 const fs = require('node:fs');
@@ -406,11 +369,11 @@ NODE
   [ "$status" -eq 0 ]
 }
 
-@test "codex eval home preparation supports no-plugin and targeted-plugin modes" {
+@test "codex eval home preparation supports no-plugin and development-system modes" {
   NO_PLUGINS_HOME="$(mktemp -d)"
-  TARGETED_HOME="$(mktemp -d)"
+  DEVELOPMENT_SYSTEM_HOME="$(mktemp -d)"
   no_plugins_home="$NO_PLUGINS_HOME"
-  targeted_home="$TARGETED_HOME"
+  development_system_home="$DEVELOPMENT_SYSTEM_HOME"
 
   run node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$no_plugins_home" --plugin-mode no-plugins
 
@@ -419,85 +382,31 @@ NODE
   ! grep -q '\[plugins\."' "$no_plugins_home/config.toml"
   [ ! -d "$no_plugins_home/plugins/cache/ai-plugins/development-system" ]
 
-  run node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$targeted_home" --plugin-mode targeted-plugins --plugins development-system
+  run node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$development_system_home" --plugin-mode development-system
 
   [ "$status" -eq 0 ]
-  grep -q '\[plugins\."development-system@ai-plugins"\]' "$targeted_home/config.toml"
-  [ -d "$targeted_home/plugins/cache/ai-plugins/development-system" ]
-
-  run node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$targeted_home" --plugin-mode targeted-plugins --plugins missing-plugin
-
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"unknown targeted plugin(s): missing-plugin"* ]]
+  grep -q '\[plugins\."development-system@ai-plugins"\]' "$development_system_home/config.toml"
+  [ -d "$development_system_home/plugins/cache/ai-plugins/development-system" ]
 }
 
-@test "explicitly empty targeted and skills-only lists fail before replacing an eval home" {
+@test "unsupported plugin modes fail before replacing an eval home" {
   FIXTURE_TMP="$(mktemp -d)"
 
-  for plugin_mode in targeted-plugins skills-only-marketplace; do
-    eval_home="$FIXTURE_TMP/$plugin_mode"
-    mkdir -p "$eval_home"
-    printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
-    printf 'preserve me\n' >"$eval_home/sentinel"
-
-    run env OPENAI_API_KEY=fixture node \
-      "$ROOT/scripts/evals/prepare-codex-home.mjs" \
-      "$eval_home" \
-      --plugin-mode "$plugin_mode" \
-      --plugins ""
-
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"$plugin_mode mode requires a non-empty --plugins list"* ]]
-    [ -f "$eval_home/sentinel" ]
-    [ ! -f "$eval_home/config.toml" ]
-  done
-}
-
-@test "unknown targeted and skills-only selections fail before replacing an eval home" {
-  FIXTURE_TMP="$(mktemp -d)"
-
-  for plugin_mode in targeted-plugins skills-only-marketplace; do
-    eval_home="$FIXTURE_TMP/$plugin_mode"
-    mkdir -p "$eval_home"
-    printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
-    printf 'preserve me\n' >"$eval_home/sentinel"
-
-    run env OPENAI_API_KEY=fixture node \
-      "$ROOT/scripts/evals/prepare-codex-home.mjs" \
-      "$eval_home" \
-      --plugin-mode "$plugin_mode" \
-      --plugins missing-plugin
-
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"unknown targeted plugin(s): missing-plugin"* ]]
-    [ -f "$eval_home/sentinel" ]
-    [ ! -f "$eval_home/config.toml" ]
-  done
-}
-
-@test "omitted skills-only list retains full marketplace behavior" {
-  FIXTURE_TMP="$(mktemp -d)"
-  eval_home="$FIXTURE_TMP/skills-only"
+  plugin_mode=unsupported-mode
+  eval_home="$FIXTURE_TMP/$plugin_mode"
+  mkdir -p "$eval_home"
+  printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
+  printf 'preserve me\n' >"$eval_home/sentinel"
 
   run env OPENAI_API_KEY=fixture node \
     "$ROOT/scripts/evals/prepare-codex-home.mjs" \
     "$eval_home" \
-    --plugin-mode skills-only-marketplace
+    --plugin-mode "$plugin_mode"
 
-  [ "$status" -eq 0 ]
-  expected_count="$(jq '.plugins | length' "$ROOT/.agents/plugins/marketplace.json")"
-  [ "$(grep -c '^\[plugins\.' "$eval_home/config.toml")" -eq "$expected_count" ]
-
-  while IFS= read -r plugin; do
-    grep -q "\\[plugins\\.\"${plugin}@ai-plugins\"\\]" "$eval_home/config.toml"
-    [ -d "$eval_home/plugins/cache/ai-plugins/$plugin" ]
-  done < <(jq -r '.plugins[].name' "$ROOT/.agents/plugins/marketplace.json")
-
-  plugin_version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
-  plugin_cache="$eval_home/plugins/cache/ai-plugins/development-system/$plugin_version"
-  [ -d "$plugin_cache/skills" ]
-  [ ! -e "$plugin_cache/bin" ]
-  [ ! -e "$plugin_cache/.mcp.json" ]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown plugin mode: $plugin_mode"* ]]
+  [ -f "$eval_home/sentinel" ]
+  [ ! -f "$eval_home/config.toml" ]
 }
 
 @test "improvement loop scope guards reject edits outside their allowed surfaces" {
@@ -550,8 +459,8 @@ NODE
 {
   "results": [
     {
-      "provider": {"label": "codex-gpt-5.6-terra-full-marketplace"},
-      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
+      "provider": {"label": "codex-gpt-5.6-terra-development-system"},
+      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "development-system", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
       "gradingResult": {"pass": true, "score": 1}
     },
     {
@@ -566,10 +475,10 @@ JSON
   run node "$ROOT/scripts/evals/build-site.mjs"
 
   [ "$status" -eq 0 ]
-  run node - <<NODE
+  run node - "$ROOT/site/evals/summary.json" <<'NODE'
 const fs = require('fs');
-const summary = JSON.parse(fs.readFileSync('$ROOT/site/evals/summary.json', 'utf8'));
-if (!summary.aggregates.some((group) => group.providerVariant === 'codex-gpt-5.6-terra' && group.pluginMode === 'full-marketplace')) {
+const summary = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (!summary.aggregates.some((group) => group.providerVariant === 'codex-gpt-5.6-terra' && group.pluginMode === 'development-system')) {
   throw new Error('missing provider variant/plugin mode aggregate');
 }
 if (!summary.valueGateSummaries.some((gate) => gate.caseId === 'alpha' && gate.providerVariant === 'codex-gpt-5.6-terra' && gate.status === 'pass')) {
@@ -588,8 +497,8 @@ NODE
 {
   "results": [
     {
-      "provider": {"label": "codex-gpt-5.6-terra-full-marketplace"},
-      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
+      "provider": {"label": "codex-gpt-5.6-terra-development-system"},
+      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "development-system", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
       "gradingResult": {"pass": true, "score": 1}
     },
     {
@@ -604,9 +513,9 @@ JSON
   run node "$ROOT/scripts/evals/build-site.mjs"
 
   [ "$status" -eq 0 ]
-  run node - <<NODE
+  run node - "$ROOT/site/evals/summary.json" <<'NODE'
 const fs = require('fs');
-const summary = JSON.parse(fs.readFileSync('$ROOT/site/evals/summary.json', 'utf8'));
+const summary = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const gate = summary.valueGateSummaries.find((item) => item.caseId === 'blocked-baseline');
 if (!gate || gate.status !== 'unsupported') {
   throw new Error(JSON.stringify(summary.valueGateSummaries));

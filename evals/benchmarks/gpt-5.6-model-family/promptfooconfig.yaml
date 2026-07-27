@@ -20,7 +20,7 @@ providers:
         features:
           plugins: true
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE }}"
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM }}"
   - id: file://trace-enforced-codex-provider.mjs
     label: codex-gpt-5.6-terra-standard
     config:
@@ -33,7 +33,7 @@ providers:
         features:
           plugins: true
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE }}"
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM }}"
   - id: file://trace-enforced-codex-provider.mjs
     label: codex-gpt-5.6-luna-standard
     config:
@@ -46,7 +46,7 @@ providers:
         features:
           plugins: true
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE }}"
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM }}"
   - id: file://trace-enforced-codex-provider.mjs
     label: codex-gpt-5.6-sol-advisor-like
     config:

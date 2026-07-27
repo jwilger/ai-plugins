@@ -7,12 +7,8 @@ const supportedProviders = new Set([
   "anthropic:claude-agent-sdk",
   "openai:codex-sdk",
 ]);
-const supportedPluginModes = new Set([
-  "no-plugins",
-  "targeted-plugins",
-  "full-marketplace",
-]);
-const pluginModeOrder = ["full-marketplace", "no-plugins", "targeted-plugins"];
+const supportedPluginModes = new Set(["no-plugins", "development-system"]);
+const pluginModeOrder = ["development-system", "no-plugins"];
 const pluginNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function sameStringLists(left, right) {
@@ -222,7 +218,7 @@ export function validateCodexHomeLayout({
     codexPluginSelections.map((selection) => selection.pluginMode),
   );
   if (usesCodexGrader) {
-    requiredModes.add("full-marketplace");
+    requiredModes.add("development-system");
   }
 
   const requiredHomes = pluginModeOrder
@@ -277,14 +273,13 @@ function printCodexPluginSelections(metadataFile, codexHomes) {
 const invokedPath =
   process.argv[1] && pathToFileURL(path.resolve(process.argv[1]));
 if (invokedPath?.href === import.meta.url) {
-  if (process.argv.length < 6) {
+  if (process.argv.length < 5) {
     throw new Error("provider composition metadata file is required");
   }
   try {
     printCodexPluginSelections(process.argv[2], {
-      "full-marketplace": process.argv[3],
+      "development-system": process.argv[3],
       "no-plugins": process.argv[4],
-      "targeted-plugins": process.argv[5],
     });
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

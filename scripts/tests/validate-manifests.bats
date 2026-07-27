@@ -39,6 +39,12 @@ add_codex_mcp_manifest_with_wildcard_cache() {
 JSON
 }
 
+add_claude_hooks_manifest() {
+  local name="$1" document="$2"
+  mkdir -p "$ROOT/plugins/$name/hooks"
+  printf '%s\n' "$document" >"$ROOT/plugins/$name/hooks/hooks.json"
+}
+
 write_manifests() {
   # write_manifests "<claude names>" "<codex names>"
   mkdir -p "$ROOT/.claude-plugin" "$ROOT/.agents/plugins"
@@ -144,6 +150,15 @@ manifest_for() {
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"claude-marketplace-version-mismatch"* ]]
+}
+
+@test "fails when a Claude hook manifest omits the top-level hooks record" {
+  make_plugin alpha
+  add_claude_hooks_manifest alpha '{"SessionStart":[]}'
+  write_manifests "alpha" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid-claude-hooks-manifest"* ]]
 }
 
 @test "fails when codex marketplace version differs from plugin version" {

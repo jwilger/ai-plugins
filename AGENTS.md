@@ -264,12 +264,18 @@ with Ctrl-C, `just evals` exits immediately and does not share.
 for pull-request CI without secrets; it is not behavior evidence. Provider-backed
 runs require working Claude Code and Codex authentication. The runner restores
 the pinned npm dev dependencies from `package-lock.json`, generates promptfoo
-config from the current marketplace manifests, prepares a `CODEX_EVAL_HOME`
-with every Codex marketplace plugin, configures Claude with `apiKeyRequired: false`, uses
-Codex as the default model-graded assertion provider, and disables prompt
-response caching and hosted sharing so generated artifacts are fresh and
-repo-owned. Run `scripts/evals/run.sh --suite canary` to prove full-marketplace
-plugin loading before relying on behavior results. The optional Promptfoo MCP
+config from the current marketplace manifests, prepares isolated no-plugin and
+`development-system` homes, installs the Claude plugin through the real
+marketplace CLI, and configures Claude with `apiKeyRequired: false`. Local
+Claude subscription runs read the current access token into the eval process
+while leaving the rotating refresh token in the source Claude config; both
+plugin conditions therefore use disposable runtime config without copying
+credentials or invalidating the source login. API-key or explicit-token runs
+use the same isolated runtime config. The
+runner uses Codex as the default model-graded assertion provider and disables
+prompt response caching and hosted sharing so generated artifacts are fresh and repo-owned. Run
+`scripts/evals/run.sh --suite canary` to prove installed `development-system`
+loading and SessionStart execution before relying on behavior results. The optional Promptfoo MCP
 server in the `agentic-systems-engineering` Codex manifest is for
 agent-assisted validation, focused runs, and result inspection; it does not
 replace the canonical runner.

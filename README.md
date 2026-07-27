@@ -24,7 +24,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses          | Description                                                         | Version |
 | ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 1.1.1   |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 1.1.2   |
 
 ## Using the marketplace (Claude Code)
 
@@ -98,18 +98,19 @@ loaded marketplace surface and the behavior each scenario exercises.
 
 The canonical promptfoo behavior evals run through Promptfoo's native coding
 agent providers: `anthropic:claude-agent-sdk` for Claude Code and
-`openai:codex-sdk` for Codex. The runner generates the promptfoo config from
-the current marketplace manifests and labels no-plugin, targeted-plugin, and
-full-marketplace behavior modes. Codex uses a separate generated home for each
-mode. For both harnesses, targeted mode installs the deterministic, deduplicated
-union of plugins declared by the selected behavior cases; `EVAL_CASE_FILTER`
-therefore narrows both the cases and their installed plugin set. Full-marketplace
-mode still installs the complete harness-specific catalog, while no-plugin mode
-installs none. The generated config records each provider's exact installed
-composition separately from the plugins targeted by an individual case. An
-unfiltered targeted run may equal Claude's full catalog today, but it excludes
-Codex-only plugins with no selected behavior case and remains a distinct measured
-composition. Promptfoo is pinned at `0.121.18`;
+`openai:codex-sdk` for Codex. Each harness has exactly two isolated conditions:
+no plugins, and the installed and enabled `development-system` plugin. Claude's
+condition is prepared through the real marketplace installer and then loaded
+from its installed cache path; Codex also uses the real marketplace installer
+to populate an isolated generated home and plugin cache. Claude subscription
+authentication reads the current access token into the eval process while
+leaving the rotating refresh token in the owner's normal config. Neither
+condition copies credentials, and both use disposable runtime config; API-key
+or explicit-token runs use the same isolation. The live
+runner also requires the plugin's SessionStart hook to execute.
+The generated config records each provider's installed composition separately
+from the plugins and skills targeted by an individual case.
+Promptfoo is pinned at `0.121.18`;
 the Promptfoo, Codex SDK, and Claude Agent SDK packages are pinned in
 `package.json` and `package-lock.json`. The runner disables prompt response
 caching and hosted sharing so a behavior run is a fresh local record.
@@ -118,15 +119,14 @@ Default eval harness posture:
 
 - Claude Code: `anthropic:claude-agent-sdk`, Sonnet 5 via the `sonnet` alias,
   local Claude Code authentication via `apiKeyRequired: false`, and all local
-  plugins with `skills: all`. The intended human-facing Claude Code posture
+  `development-system` skills via `skills: all`. The intended human-facing Claude Code posture
   remains Sonnet high effort with Opus 4.8 advisor where that harness exposes
   those controls; Promptfoo's current Claude Agent SDK provider does not expose
   those knobs in this repo's generated config.
 - Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with
   `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
-  deep tracing disabled, and isolated generated homes containing no plugins,
-  the selected cases' deterministic plugin union, or the complete
-  harness-specific catalog according to the behavior mode.
+  deep tracing disabled, and isolated generated homes containing either no
+  plugins or the installed `development-system` plugin.
   Model-graded assertions independently default to
   `gpt-5.6-sol` with high reasoning through the same SDK, so OpenAI model access
   goes through local Codex auth rather than `OPENAI_API_KEY`. Override the two
@@ -134,10 +134,11 @@ Default eval harness posture:
   `CODEX_GRADER_MODEL` / `CODEX_GRADER_REASONING_EFFORT`.
 
 The focused [GPT-5.6 model-family benchmark](evals/benchmarks/gpt-5.6-model-family/README.md)
-compares Sol, Terra, and Luna without running the full marketplace eval suite.
-Its trace-enforced Codex app-server wrapper and skills-only/no-plugin homes are
-benchmark controls; the canonical behavior runner above continues to use the
-native Codex SDK provider and the configured behavior-mode matrix.
+compares Sol, Terra, and Luna without running the full behavior eval suite.
+Its trace-enforced Codex app-server wrapper and installed-development-system /
+no-plugin homes are benchmark controls; the canonical behavior runner above
+continues to use the native Codex SDK provider and the configured behavior-mode
+matrix.
 
 The canary suite is separate from behavior evals. Canaries may explicitly ask
 the harness to prove plugin and skill loading. Behavior prompts stay natural and
@@ -241,4 +242,4 @@ excerpts.
 
 ## License
 
-See individual plugins for their licenses.
+See the plugin for its license.

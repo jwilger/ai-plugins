@@ -49,22 +49,28 @@ function providerId(context) {
 
 function expectedPlugins(context) {
   const id = providerId(context);
+  const developmentSystemOnly = (plugins) =>
+    plugins.filter((plugin) => plugin.name === "development-system");
 
   if (id.includes("anthropic:claude-agent-sdk")) {
-    return manifestPlugins(".claude-plugin/marketplace.json");
+    return developmentSystemOnly(
+      manifestPlugins(".claude-plugin/marketplace.json"),
+    );
   }
 
   if (id.includes("openai:codex-sdk")) {
-    return manifestPlugins(".agents/plugins/marketplace.json");
+    return developmentSystemOnly(
+      manifestPlugins(".agents/plugins/marketplace.json"),
+    );
   }
 
-  return [
+  return developmentSystemOnly([
     ...manifestPlugins(".claude-plugin/marketplace.json"),
     ...manifestPlugins(".agents/plugins/marketplace.json"),
-  ];
+  ]);
 }
 
-module.exports = function assertFullMarketplaceCanary(output, context = {}) {
+module.exports = function assertDevelopmentSystemCanary(output, context = {}) {
   const text = String(output || "").toLowerCase();
   const plugins = new Map(
     expectedPlugins(context).map((plugin) => [plugin.name, plugin]),
@@ -111,6 +117,6 @@ module.exports = function assertFullMarketplaceCanary(output, context = {}) {
     pass: true,
     score: 1,
     reason:
-      "Full marketplace canary named every plugin and representative skill",
+      "Installed development-system canary named the plugin and a representative skill",
   };
 };

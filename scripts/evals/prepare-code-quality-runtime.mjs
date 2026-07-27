@@ -470,19 +470,23 @@ function assertPinnedCodexBinary(executionSurface) {
   return { binary, digest: actual };
 }
 
-function runPinnedCodex(binary, arguments_, scratch) {
+function runPinnedCodex(
+  binary,
+  arguments_,
+  { codexHome, home, temporaryDirectory, workingDirectory },
+) {
   return spawnSync(binary, arguments_, {
-    cwd: path.join(scratch, "work"),
+    cwd: workingDirectory,
     encoding: "utf8",
     env: {
-      CODEX_HOME: path.join(scratch, "codex-home"),
-      HOME: path.join(scratch, "home"),
+      CODEX_HOME: codexHome,
+      HOME: home,
       LANG: "C.UTF-8",
       LC_ALL: "C.UTF-8",
       NO_COLOR: "1",
       PATH: "/usr/bin:/bin",
       TERM: "dumb",
-      TMPDIR: path.join(scratch, "tmp"),
+      TMPDIR: temporaryDirectory,
     },
     killSignal: "SIGKILL",
     maxBuffer: 512 * 1024,
@@ -499,7 +503,13 @@ function materializeSystemSkills(stagingRoot, executionSurface) {
     fs.mkdirSync(path.join(scratch, directory), { mode: 0o700 });
   }
 
-  const versionResult = runPinnedCodex(binary, ["--version"], scratch);
+  const invocation = {
+    codexHome: path.join(scratch, "codex-home"),
+    home: path.join(scratch, "home"),
+    temporaryDirectory: path.join(scratch, "tmp"),
+    workingDirectory: path.join(scratch, "work"),
+  };
+  const versionResult = runPinnedCodex(binary, ["--version"], invocation);
   if (
     versionResult.status !== 0 ||
     versionResult.stdout.trim() !== executionSurface.codexVersion
@@ -522,7 +532,7 @@ function materializeSystemSkills(stagingRoot, executionSurface) {
       "--",
       "materialize bundled skills",
     ],
-    scratch,
+    invocation,
   );
   if (materialization.status !== 0) {
     throw new Error(
@@ -574,9 +584,92 @@ function writePluginProjection(destination, projection) {
   writeTreeSnapshot(projection.skills, path.join(destination, "skills"));
 }
 
+function runCodexJson(binary, arguments_, invocation) {
+  const result = runPinnedCodex(binary, arguments_, invocation);
+  if (result.status !== 0) {
+    throw new Error(
+      `Codex plugin installer failed: ${result.error?.message || result.stderr || result.stdout}`,
+    );
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    throw new Error("Codex plugin installer returned invalid JSON");
+  }
+}
+
+function installProjectedPlugins({
+  executionSurface,
+  physicalCodexHome,
+  physicalTmp,
+  plugins,
+}) {
+  if (plugins.length === 0) return;
+  const { binary } = assertPinnedCodexBinary(executionSurface);
+  const marketplaceRoot = path.join(physicalCodexHome, "marketplace");
+  const invocation = {
+    codexHome: physicalCodexHome,
+    home: physicalCodexHome,
+    temporaryDirectory: physicalTmp,
+    workingDirectory: physicalCodexHome,
+  };
+  runCodexJson(
+    binary,
+    ["plugin", "marketplace", "add", marketplaceRoot, "--json"],
+    invocation,
+  );
+  for (const plugin of plugins) {
+    const pluginId = `${plugin.name}@ai-plugins`;
+    const installation = runCodexJson(
+      binary,
+      ["plugin", "add", pluginId, "--json"],
+      invocation,
+    );
+    const installedPath = path.resolve(installation.installedPath || "");
+    const expectedCacheRoot = path.join(
+      physicalCodexHome,
+      "plugins/cache/ai-plugins",
+      plugin.name,
+    );
+    if (
+      !installation.installedPath ||
+      !isSameOrAncestor(expectedCacheRoot, installedPath) ||
+      !fs.lstatSync(installedPath, { throwIfNoEntry: false })?.isDirectory()
+    ) {
+      throw new Error(
+        `Codex plugin installer did not materialize ${pluginId} in the runtime cache`,
+      );
+    }
+  }
+  const listing = runCodexJson(
+    binary,
+    ["plugin", "list", "--json"],
+    invocation,
+  );
+  for (const plugin of plugins) {
+    const installed = listing.installed?.find(
+      (entry) => entry.pluginId === `${plugin.name}@ai-plugins`,
+    );
+    if (!installed?.installed || !installed.enabled) {
+      throw new Error(
+        `Codex plugin installer did not enable ${plugin.name}@ai-plugins`,
+      );
+    }
+  }
+  fs.rmSync(path.join(physicalCodexHome, ".tmp"), {
+    force: true,
+    recursive: true,
+  });
+  fs.rmSync(path.join(physicalCodexHome, "tmp"), {
+    force: true,
+    recursive: true,
+  });
+}
+
 function prepareHome({
   executionSurface,
   physicalCodexHome,
+  physicalTmp,
   plugins,
   projections,
   system,
@@ -592,12 +685,6 @@ function prepareHome({
     `${canonicalJson(executionSurface, 2)}\n`,
     { mode: 0o600 },
   );
-  fs.writeFileSync(
-    path.join(physicalCodexHome, "config.toml"),
-    runtimeConfigForPlugins(plugins),
-    { mode: 0o600 },
-  );
-
   fs.mkdirSync(path.join(physicalCodexHome, "skills"), { mode: 0o700 });
   writeTreeSnapshot(system, path.join(physicalCodexHome, "skills/.system"));
 
@@ -623,16 +710,18 @@ function prepareHome({
       path.join(marketplaceRoot, "plugins", plugin.name),
       projection,
     );
-    writePluginProjection(
-      path.join(
-        physicalCodexHome,
-        "plugins/cache/ai-plugins",
-        plugin.name,
-        plugin.version,
-      ),
-      projection,
-    );
   }
+  installProjectedPlugins({
+    executionSurface,
+    physicalCodexHome,
+    physicalTmp,
+    plugins,
+  });
+  fs.writeFileSync(
+    path.join(physicalCodexHome, "config.toml"),
+    runtimeConfigForPlugins(plugins),
+    { mode: 0o600 },
+  );
 }
 
 function chmodPrivateTree(entry) {
@@ -693,6 +782,7 @@ function buildRuntimeManifest(
     prepareHome({
       executionSurface,
       physicalCodexHome,
+      physicalTmp,
       plugins,
       projections,
       system,

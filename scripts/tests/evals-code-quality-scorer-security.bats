@@ -45,7 +45,7 @@ setup() {
   node "$PREPARER" "$WORK_ROOT" --case rust-cli-feature --samples 1 \
     >"$TEST_ROOT/manifest.stdout"
   WORKSPACE_MANIFEST="$WORK_ROOT/manifest.json"
-  WORKSPACE="$WORK_ROOT/rust-cli-feature/sample-1/no-marketplace-skills"
+  WORKSPACE="$WORK_ROOT/rust-cli-feature/sample-1/no-plugins"
   BASELINE_OID="$(jq -r '.workspaces[0].baselineOid' "$WORKSPACE_MANIFEST")"
   FIXTURE_DIGEST="$(
     node --input-type=module -e '

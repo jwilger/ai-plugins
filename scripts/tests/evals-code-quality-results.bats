@@ -493,7 +493,7 @@ run_checker() {
 
 @test "Codex-runtime profile scans exact secrets without following allowed helper symlinks" {
   runtime="$TEST_ROOT/runtime"
-  helper_root="$runtime/rust-cli-feature/sample-1/all-marketplace-skills/codex-home/tmp/arg0/codex-arg0abc"
+  helper_root="$runtime/rust-cli-feature/sample-1/development-system/codex-home/tmp/arg0/codex-arg0abc"
   exact_secret="runtime-profile-exact-secret-0123456789"
   outside_helper="$TEST_ROOT/outside-helper"
   mkdir -m 700 -p "$helper_root"
@@ -537,7 +537,7 @@ run_checker() {
 
 @test "Codex-runtime profile rejects unsafe invocation ownership and helper topology" {
   runtime="$TEST_ROOT/runtime"
-  helper_root="$runtime/rust-cli-feature/sample-1/all-marketplace-skills/codex-home/tmp/arg0/codex-arg0abc"
+  helper_root="$runtime/rust-cli-feature/sample-1/development-system/codex-home/tmp/arg0/codex-arg0abc"
   mkdir -m 700 -p "$helper_root"
   printf 'ai-plugins downstream code-quality runtime root\n' \
     >"$runtime/.ai-plugins-code-quality-runtime-root"
@@ -602,13 +602,13 @@ run_checker() {
   rm "$runtime/special"
 
   mkdir -m 700 \
-    "$runtime/rust-cli-feature/sample-1/all-marketplace-skills/codex-home/tmp/not-arg0"
+    "$runtime/rust-cli-feature/sample-1/development-system/codex-home/tmp/not-arg0"
   run node "$SCANNER" --profile codex-runtime --exact-only "$runtime"
   [ "$status" -eq 2 ]
   [ "$output" = "secret-scan:runtime-profile-invalid" ]
 }
 
-@test "checker emits only the allowlisted canonical nine-run diagnostic" {
+@test "checker emits only the allowlisted canonical six-run diagnostic" {
   prepare_trusted_runtime
   write_valid_benchmark_inputs
 
@@ -622,10 +622,10 @@ run_checker() {
     .benchmarkId == "downstream-code-quality" and
     .promotionEligible == false and
     .diagnosticEligible == true and
-    (.runs | length) == 9 and
+    (.runs | length) == 6 and
     (.diagnostics == {
-      expectedRuns: 9,
-      completeRuns: 9,
+      expectedRuns: 6,
+      completeRuns: 6,
       unexpectedResults: 0,
       duplicateResults: 0,
       missingResults: 0,
@@ -635,7 +635,7 @@ run_checker() {
       provenanceFailures: 0,
       providerFailures: 0,
       outcomes: {
-        pass: 9,
+        pass: 6,
         candidateFailure: 0,
         safetyFailure: 0,
         operationalFailure: 0,
@@ -643,7 +643,7 @@ run_checker() {
         providerFailure: 0
       }
     }) and
-    (.aggregates | length) == 3 and
+    (.aggregates | length) == 2 and
     all(.aggregates[];
       .sampleCount == 3 and
       .successCount == 3 and
@@ -738,7 +738,7 @@ run_checker() {
     .diagnosticEligible == true and
     .diagnostics.candidateFailuresAreMeasurementOutcomes == true and
     .diagnostics.outcomes.candidateFailure == 1 and
-    .diagnostics.outcomes.pass == 8 and
+    .diagnostics.outcomes.pass == 5 and
     (.runs[] |
       select(.conditionId == $mode and .sampleIndex == 1) |
       .complete == true and
@@ -764,7 +764,7 @@ run_checker() {
   provenance_mode="$(jq -r '.rows[2].mode' "$RUNTIME_MANIFEST")"
 
   safety_artifact="$ARTIFACT_ROOT/rust-cli-feature/sample-1/$safety_mode.json"
-  provenance_artifact="$ARTIFACT_ROOT/rust-cli-feature/sample-1/$provenance_mode.json"
+  provenance_artifact="$ARTIFACT_ROOT/rust-cli-feature/sample-2/$provenance_mode.json"
   jq '
     .pass = false |
     .outcomeClass = "safety-failure" |
@@ -806,13 +806,13 @@ run_checker() {
   [ "$status" -eq 0 ]
   jq -e '
     .diagnosticEligible == false and
-    .diagnostics.completeRuns == 9 and
+    .diagnostics.completeRuns == 6 and
     .diagnostics.safetyFailures == 1 and
     .diagnostics.operationalFailures == 1 and
     .diagnostics.provenanceFailures == 1 and
     .diagnostics.providerFailures == 0 and
     .diagnostics.outcomes == {
-      pass: 6,
+      pass: 3,
       candidateFailure: 0,
       safetyFailure: 1,
       operationalFailure: 1,
@@ -820,7 +820,7 @@ run_checker() {
       providerFailure: 0
     } and
     ([.runs[].outcomeClass] | sort) ==
-      (["pass", "pass", "pass", "pass", "pass", "pass",
+      (["pass", "pass", "pass",
         "operational-failure", "provenance-failure", "safety-failure"] | sort)
   ' "$OUTPUT"
   run grep -E 'CODE_QUALITY_BOUNDARY_ERROR|node-runtime-unavailable|/tmp|/home' "$OUTPUT"
@@ -830,7 +830,7 @@ run_checker() {
 @test "checker derives activations only from successful raw-turn skill path references" {
   prepare_trusted_runtime
   write_valid_benchmark_inputs
-  mode="all-marketplace-skills"
+  mode="development-system"
   node - "$RAW_RESULTS" "$RUNTIME_MANIFEST" "$mode" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
@@ -1003,7 +1003,7 @@ NODE
   ' "$OUTPUT"
 }
 
-@test "checker keeps the outcome taxonomy to nine canonical rows when raw results contain an extra row" {
+@test "checker keeps the outcome taxonomy to six canonical rows when raw results contain an extra row" {
   prepare_trusted_runtime
   write_valid_benchmark_inputs
   jq '
@@ -1023,18 +1023,18 @@ NODE
   [ "$status" -eq 0 ]
   jq -e '
     .diagnosticEligible == false and
-    (.runs | length) == 9 and
+    (.runs | length) == 6 and
     .diagnostics.unexpectedResults == 1 and
     .diagnostics.provenanceFailures == 1 and
     .diagnostics.outcomes == {
-      pass: 9,
+      pass: 6,
       candidateFailure: 0,
       safetyFailure: 0,
       operationalFailure: 0,
       provenanceFailure: 0,
       providerFailure: 0
     } and
-    ([.diagnostics.outcomes[]] | add) == 9
+    ([.diagnostics.outcomes[]] | add) == 6
   ' "$OUTPUT"
   run grep -E 'PRIVATE|unexpected-private' "$OUTPUT"
   [ "$status" -eq 1 ]
@@ -1201,7 +1201,7 @@ NODE
   [ "$status" -eq 0 ]
   jq -e --arg mode "$mode" '
     .diagnosticEligible == false and
-    .diagnostics.completeRuns == 8 and
+    .diagnostics.completeRuns == 5 and
     .diagnostics.providerFailures == 1 and
     .diagnostics.operationalFailures == 0 and
     .diagnostics.provenanceFailures == 0 and
@@ -1243,7 +1243,7 @@ NODE
   [ "$status" -eq 0 ]
   jq -e --arg mode "$mode" '
     .diagnosticEligible == false and
-    .diagnostics.completeRuns == 8 and
+    .diagnostics.completeRuns == 5 and
     .diagnostics.providerFailures == 0 and
     .diagnostics.operationalFailures == 1 and
     (.runs[] |
@@ -1348,8 +1348,8 @@ NODE
   [ "$status" -eq 0 ]
   jq -e '
     .diagnosticEligible == false and
-    .diagnostics.provenanceFailures == 9 and
-    .diagnostics.outcomes.provenanceFailure == 9 and
+    .diagnostics.provenanceFailures == 6 and
+    .diagnostics.outcomes.provenanceFailure == 6 and
     all(.runs[];
       .pass == false and
       .outcomeClass == "provenance-failure"
@@ -1372,7 +1372,7 @@ NODE
   jq -e '
     .diagnosticEligible == false and
     .diagnostics.completeRuns == 0 and
-    .diagnostics.outcomes.pass == 9 and
+    .diagnostics.outcomes.pass == 6 and
     all(.runs[]; .complete == false and .pass == true) and
     all(.aggregates[];
       .sampleCount == 3 and

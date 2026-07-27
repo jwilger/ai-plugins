@@ -5,11 +5,18 @@ marketplace skills improve the code Codex writes in a disposable downstream
 Rust project. It deliberately measures one synthetic feature task; it is not a
 general claim about plugin quality or model capability.
 
-The canonical diagnostic runs three independent samples for each condition:
+The canonical diagnostic runs three independent samples for each of two
+conditions:
 
-- no marketplace skills, while retaining Codex-bundled system skills;
-- the declared quality-core marketplace skills; and
-- every marketplace plugin's skills-only projection.
+- no plugins, while retaining Codex-bundled system skills;
+- the installed `development-system` plugin's intentionally skills-only
+  benchmark projection.
+
+The plugin condition is populated through Codex's real local-marketplace and
+plugin-install commands, then used through the installed cache. The skills-only
+projection keeps unrelated hooks and MCP processes outside this focused
+code-quality measurement; the canonical behavior eval exercises the complete
+installed plugin and its SessionStart hook.
 
 Each turn receives a fresh Git repository, Codex home, and temporary directory.
 The outer boundary exposes only the selected skills, the writable fixture, the
@@ -26,7 +33,7 @@ the host working tree while preserving host-owned Git metadata.
 
 ## Run it
 
-Inspect the nine-turn plan without writing anything:
+Inspect the six-turn plan without writing anything:
 
 ```shell
 nix develop -c scripts/evals/run-code-quality-benchmark.sh --dry-run

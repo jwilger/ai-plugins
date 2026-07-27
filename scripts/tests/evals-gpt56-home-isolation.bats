@@ -545,7 +545,7 @@ const fs = require('node:fs');
 fs.writeFileSync(
   process.argv[2],
   `#!/usr/bin/env bash
-printf '%s\\n%s\\n' "$CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE" "$CODEX_EVAL_HOME_NO_PLUGINS" > "$CAPTURED_ENV"
+printf '%s\\n%s\\n' "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM" "$CODEX_EVAL_HOME_NO_PLUGINS" > "$CAPTURED_ENV"
 exit 42
 `,
   { mode: 0o755 },
@@ -556,7 +556,7 @@ NODE
     cd "$1"
     env \
       OPENAI_API_KEY=fixture \
-      CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE=relative/skills-home \
+      CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM=relative/development-system-home \
       CODEX_EVAL_HOME_NO_PLUGINS=relative/no-plugins-home \
       GPT56_BENCHMARK_WORKSPACE="$2/workspace" \
       GPT56_BENCHMARK_OUT_ROOT="$2/out" \
@@ -568,9 +568,9 @@ NODE
 
   [ "$status" -eq 42 ]
   mapfile -t homes < "$captured_env"
-  [ "${homes[0]}" = "$caller_dir/relative/skills-home" ]
+  [ "${homes[0]}" = "$caller_dir/relative/development-system-home" ]
   [ "${homes[1]}" = "$caller_dir/relative/no-plugins-home" ]
-  [ -f "$caller_dir/relative/skills-home/.ai-plugins-eval-home" ]
+  [ -f "$caller_dir/relative/development-system-home/.ai-plugins-eval-home" ]
   [ -f "$caller_dir/relative/no-plugins-home/.ai-plugins-eval-home" ]
 
   rm -rf "$temp_root"

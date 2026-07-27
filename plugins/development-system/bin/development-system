@@ -251,13 +251,28 @@ doctor_command() {
   fi
 }
 
+record_eval_session_start() {
+  if [[ -n "${DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER:-}" ]]; then
+    if [[ "$DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER" != /* ]]; then
+      die "development_system.eval_marker_requires_absolute_path"
+    fi
+    umask 077
+    : >"$DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER"
+  fi
+}
+
 case "${1:-}" in
   setup)
     shift
     setup_command "$@"
     ;;
-  doctor | session-start)
+  doctor)
     shift
+    doctor_command "$@"
+    ;;
+  session-start)
+    shift
+    record_eval_session_start
     doctor_command "$@"
     ;;
   *)

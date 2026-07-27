@@ -18,10 +18,10 @@ make_codex_only_eval_fixture() {
     "$FIXTURE_TMP/evals/fixtures/behavior" \
     "$FIXTURE_TMP/.claude-plugin" \
     "$FIXTURE_TMP/.agents/plugins" \
-    "$FIXTURE_TMP/plugins/shared/skills/shared-skill" \
+    "$FIXTURE_TMP/plugins/development-system/skills/shared-skill" \
     "$FIXTURE_TMP/plugins/codex-only/skills/codex-skill"
   cp "$GENERATOR" "$FIXTURE_TMP/scripts/evals/generate-config.mjs"
-  cp "$ROOT/evals/promptfoo/assert-full-marketplace-canary.cjs" "$FIXTURE_TMP/evals/promptfoo/assert-full-marketplace-canary.cjs"
+  cp "$ROOT/evals/promptfoo/assert-development-system-canary.cjs" "$FIXTURE_TMP/evals/promptfoo/assert-development-system-canary.cjs"
   cp "$ROOT/evals/promptfoo/fixtures.cjs" "$FIXTURE_TMP/evals/promptfoo/fixtures.cjs"
   cat >"$FIXTURE_TMP/evals/matrix.json" <<'JSON'
 {
@@ -43,8 +43,7 @@ make_codex_only_eval_fixture() {
   ],
   "pluginModes": [
     {"id": "no-plugins"},
-    {"id": "targeted-plugins"},
-    {"id": "full-marketplace"}
+    {"id": "development-system"}
   ]
 }
 JSON
@@ -52,7 +51,7 @@ JSON
 [
   {
     "case_id": "shared-case",
-    "plugins": ["shared"]
+    "plugins": ["development-system"]
   }
 ]
 JSON
@@ -60,8 +59,8 @@ JSON
 {
   "plugins": [
     {
-      "name": "shared",
-      "source": "./plugins/shared",
+      "name": "development-system",
+      "source": "./plugins/development-system",
       "version": "0.1.0"
     }
   ]
@@ -71,8 +70,9 @@ JSON
 {
   "plugins": [
     {
-      "name": "shared",
-      "source": {"source": "local", "path": "./plugins/shared"}
+      "name": "development-system",
+      "source": {"source": "local", "path": "./plugins/development-system"},
+      "version": "0.1.0"
     },
     {
       "name": "codex-only",
@@ -81,7 +81,7 @@ JSON
   ]
 }
 JSON
-  cat >"$FIXTURE_TMP/plugins/shared/skills/shared-skill/SKILL.md" <<'MD'
+  cat >"$FIXTURE_TMP/plugins/development-system/skills/shared-skill/SKILL.md" <<'MD'
 ---
 name: shared-skill
 description: Shared skill.
@@ -111,6 +111,8 @@ MD
   [[ "$output" == *"Treat each scenario as stateless"* ]]
   [[ "$output" == *"sandbox_mode: read-only"* ]]
   [[ "$output" == *"skip_git_repo_check: true"* ]]
+  [[ "$output" == *"codex_path_override: \"$ROOT/scripts/evals/codex-with-trusted-hooks.sh\""* ]]
+  [[ "$output" == *"CODEX_EVAL_REAL_BIN:"* ]]
   [[ "$output" == *"working_dir: \"$ROOT/.evals/agent-workspace\""* ]]
   [[ "$output" == *"skills: all"* ]]
   [[ "$output" == *"setting_sources: []"* ]]
@@ -119,11 +121,34 @@ MD
   [[ "$output" == *"load-harness-cases.cjs"* ]]
 }
 
+@test "behavior eval matrix has only baseline and development-system conditions" {
+  run jq -e '
+    [.pluginModes[].id] == ["no-plugins", "development-system"]
+  ' "$ROOT/evals/matrix.json"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "generated behavior providers compare no plugins with installed development-system" {
+  run node "$GENERATOR" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 4 ]
+  [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
+  [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-development-system"* ]]
+  [[ "$output" != *"targeted-plugins"* ]]
+  [[ "$output" != *"full-marketplace"* ]]
+  [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/"* ]]
+  [[ "$output" != *"path: \"$ROOT/plugins/development-system\""* ]]
+}
+
 @test "generated behavior config keeps all eval runtime state outside dependencies" {
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"$ROOT/.evals/codex-home-full-marketplace"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
+  [[ "$output" == *"$ROOT/.evals/codex-home-development-system"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
 }
 
 @test "generated config uses local Claude Code and Codex auth for providers and graders" {
@@ -131,8 +156,9 @@ MD
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"apiKeyRequired: false"* ]]
+  [[ "$output" == *"CLAUDE_CONFIG_DIR: \"{{ env.CLAUDE_EVAL_RUNTIME_CONFIG_DIR_DEVELOPMENT_SYSTEM | default('$ROOT/.evals/claude-home-development-system/config') }}\""* ]]
   [[ "$output" == *"provider:"*$'\n'"      text:"*$'\n'"        id: openai:codex-sdk"* ]]
-  [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME)"* ]]
+  [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM | default(env.CODEX_EVAL_HOME)"* ]]
   [[ "$output" != *"openai:gpt-5-mini"* ]]
 }
 
@@ -174,11 +200,14 @@ if (result.status !== 0) {
 
 const firstCodexProvider = result.stdout.indexOf('  - id: openai:codex-sdk');
 const claudeSection = result.stdout.slice(0, firstCodexProvider);
-const sharedPath = path.join(root, 'plugins/shared');
+const sharedPath = path.join(
+  root,
+  '.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/0.1.0',
+);
 const codexOnlyPath = path.join(root, 'plugins/codex-only');
 
 if (!claudeSection.includes(sharedPath)) {
-  throw new Error(`Claude config did not include shared plugin path: ${sharedPath}`);
+  throw new Error(`Claude config did not include installed development-system path: ${sharedPath}`);
 }
 if (claudeSection.includes(codexOnlyPath)) {
   throw new Error(`Claude config included Codex-only plugin path: ${codexOnlyPath}`);
@@ -188,7 +217,7 @@ NODE
   [ "$status" -eq 0 ]
 }
 
-@test "generated targeted config fails when a selected plugin is unavailable to a harness" {
+@test "generated config fails when development-system is unavailable to a harness" {
   make_codex_only_eval_fixture
   cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
 [
@@ -199,18 +228,25 @@ NODE
 ]
 JSON
 
-  run env EVAL_CASE_FILTER=codex-only-case node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
+  jq 'del(.plugins[] | select(.name == "development-system"))' \
+    "$FIXTURE_TMP/.claude-plugin/marketplace.json" \
+    >"$FIXTURE_TMP/.claude-plugin/marketplace.json.tmp"
+  mv "$FIXTURE_TMP/.claude-plugin/marketplace.json.tmp" \
+    "$FIXTURE_TMP/.claude-plugin/marketplace.json"
+
+  run node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"selected behavior plugin(s) unavailable to Claude Code: codex-only"* ]]
+  [[ "$output" == *"Claude Code marketplace must contain exactly one development-system plugin"* ]]
   [[ "$output" != *$'\nproviders:\n'* ]]
 }
 
-@test "generated claude plugin paths are absolute so generated configs can move" {
+@test "generated Claude plugin path points at the isolated installed cache" {
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"path: \"$ROOT/plugins/development-system\""* ]]
+  [[ "$output" == *"path: \"{{ env.CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM"* ]]
+  [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/1.1.2"* ]]
   [[ "$output" != *"path: \"./plugins/"* ]]
 }
 
@@ -224,8 +260,8 @@ JSON
   run node - <<'NODE'
 const generateTests = require('./evals/promptfoo/load-canary-cases.cjs');
 const tests = generateTests();
-if (!tests.some((testCase) => testCase.description === 'full-marketplace-canary')) {
-  throw new Error('missing full-marketplace-canary test');
+if (!tests.some((testCase) => testCase.description === 'development-system-canary')) {
+  throw new Error('missing development-system-canary test');
 }
 if (!tests.some((testCase) => testCase.vars?.scenario_prompt?.includes('Do not inspect repository files'))) {
   throw new Error('canary should answer from loaded harness context, not repository file reads');
@@ -233,24 +269,24 @@ if (!tests.some((testCase) => testCase.vars?.scenario_prompt?.includes('Do not i
 if (tests.some((testCase) => (testCase.assert || []).some((assertion) => assertion.type === 'skill-used'))) {
   throw new Error('canary must not depend on skill-used because Codex plugin-cache skills are not reported there');
 }
-if (!tests.some((testCase) => (testCase.assert || []).some((assertion) => assertion.type === 'javascript' && assertion.value.includes('assert-full-marketplace-canary.cjs')))) {
-  throw new Error('missing full-marketplace canary assertion');
+if (!tests.some((testCase) => (testCase.assert || []).some((assertion) => assertion.type === 'javascript' && assertion.value.includes('assert-development-system-canary.cjs')))) {
+  throw new Error('missing development-system canary assertion');
 }
 NODE
 
   [ "$status" -eq 0 ]
 }
 
-@test "full marketplace canary assertion uses the active provider marketplace" {
+@test "development-system canary assertion uses the active provider marketplace" {
   make_codex_only_eval_fixture
 
   run node - "$FIXTURE_TMP" <<'NODE'
 const path = require('path');
 process.chdir(process.argv[2]);
-const assertCanary = require(path.join(process.argv[2], 'evals/promptfoo/assert-full-marketplace-canary.cjs'));
+const assertCanary = require(path.join(process.argv[2], 'evals/promptfoo/assert-development-system-canary.cjs'));
 
 const claudeResult = assertCanary(
-  'Shared: Shared Skill',
+  'Development System: Shared Skill',
   { provider: { id: () => 'anthropic:claude-agent-sdk' } },
 );
 if (claudeResult.pass !== true) {
@@ -258,28 +294,28 @@ if (claudeResult.pass !== true) {
 }
 
 const codexMissingResult = assertCanary(
-  'Shared: Shared Skill',
+  'Development System',
   { provider: { id: () => 'openai:codex-sdk' } },
 );
-if (codexMissingResult.pass !== false || !codexMissingResult.reason.includes('codex-only')) {
-  throw new Error(`expected Codex canary to require Codex-only plugin: ${JSON.stringify(codexMissingResult)}`);
+if (codexMissingResult.pass !== false || !codexMissingResult.reason.includes('representative skill')) {
+  throw new Error(`expected Codex canary to require a development-system skill: ${JSON.stringify(codexMissingResult)}`);
 }
 
 const codexResult = assertCanary(
-  'Shared: Shared Skill\nCodex Only: Codex Skill',
+  'Development System: Shared Skill',
   { provider: { id: () => 'openai:codex-sdk' } },
 );
 if (codexResult.pass !== true) {
-  throw new Error(`expected Codex canary to accept Codex-only plugin: ${JSON.stringify(codexResult)}`);
+  throw new Error(`expected Codex canary to accept development-system: ${JSON.stringify(codexResult)}`);
 }
 NODE
 
   [ "$status" -eq 0 ]
 }
 
-@test "full marketplace canary requires representative skills, not only plugin names" {
+@test "development-system canary requires representative skills, not only plugin names" {
   run node - <<'NODE'
-const assertCanary = require('./evals/promptfoo/assert-full-marketplace-canary.cjs');
+const assertCanary = require('./evals/promptfoo/assert-development-system-canary.cjs');
 const namesOnly = [
   'development-system',
 ].join('\n');
@@ -296,9 +332,9 @@ NODE
   [ "$status" -eq 0 ]
 }
 
-@test "full marketplace canary accepts natural title-cased skill names" {
+@test "development-system canary accepts natural title-cased skill names" {
   run node - <<'NODE'
-const assertCanary = require('./evals/promptfoo/assert-full-marketplace-canary.cjs');
+const assertCanary = require('./evals/promptfoo/assert-development-system-canary.cjs');
 const natural = [
   'Agentic Systems Engineering: Evaluate Stochastic Systems',
   'Babysit PR: Babysit PR',
@@ -322,7 +358,7 @@ NODE
   [ "$status" -eq 0 ]
 }
 
-@test "codex eval home preparation installs all marketplace plugins into cache" {
+@test "codex eval home preparation installs development-system into cache" {
   tmp_home="$(mktemp -d)"
 
   run node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$tmp_home"
@@ -330,12 +366,70 @@ NODE
   [ "$status" -eq 0 ]
   grep -q '\[marketplaces.ai-plugins\]' "$tmp_home/config.toml"
 
-  while IFS= read -r plugin; do
-    grep -q "\\[plugins\\.\"${plugin}@ai-plugins\"\\]" "$tmp_home/config.toml"
-    [ -d "$tmp_home/plugins/cache/ai-plugins/$plugin" ]
-  done < <(jq -r '.plugins[].name' "$ROOT/.agents/plugins/marketplace.json")
+  grep -q '\[plugins\."development-system@ai-plugins"\]' "$tmp_home/config.toml"
+  [ -d "$tmp_home/plugins/cache/ai-plugins/development-system" ]
 
   rm -rf "$tmp_home"
+}
+
+@test "codex live eval home preparation installs through the Codex CLI" {
+  FIXTURE_TMP="$(mktemp -d)"
+  eval_home="$FIXTURE_TMP/eval-home"
+  fake_codex="$FIXTURE_TMP/codex"
+  invocation_log="$FIXTURE_TMP/invocations"
+  cat >"$fake_codex" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$CODEX_CLI_INVOCATION_LOG"
+case "$*" in
+  "plugin marketplace add "*" --json")
+    mkdir -p "$CODEX_HOME"
+    cat >"$CODEX_HOME/config.toml" <<EOF
+[marketplaces.ai-plugins]
+source_type = "local"
+source = "$CODEX_CLI_PLUGIN_ROOT"
+EOF
+    printf '{"marketplaceName":"ai-plugins"}\n'
+    ;;
+  "plugin add development-system@ai-plugins --json")
+    version="$(jq -r '.version' "$CODEX_CLI_PLUGIN_ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+    installed="$CODEX_HOME/plugins/cache/ai-plugins/development-system/$version"
+    mkdir -p "$installed"
+    cp -R "$CODEX_CLI_PLUGIN_ROOT/plugins/development-system/." "$installed/"
+    cat >>"$CODEX_HOME/config.toml" <<'EOF'
+
+[plugins."development-system@ai-plugins"]
+enabled = true
+EOF
+    printf '{"pluginId":"development-system@ai-plugins","installedPath":"%s"}\n' "$installed"
+    ;;
+  "plugin list --json")
+    printf '{"installed":[{"pluginId":"development-system@ai-plugins","installed":true,"enabled":true}],"available":[]}\n'
+    ;;
+  *)
+    printf 'unexpected Codex CLI arguments: %s\n' "$*" >&2
+    exit 64
+    ;;
+esac
+SH
+  chmod +x "$fake_codex"
+
+  run env \
+    OPENAI_API_KEY=fixture \
+    CODEX_EVAL_CODEX_BIN="$fake_codex" \
+    CODEX_CLI_INVOCATION_LOG="$invocation_log" \
+    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
+    node "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+    "$eval_home" \
+    --plugin-mode development-system \
+    --install-via-cli
+
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '1p' "$invocation_log")" = "plugin marketplace add $ROOT --json" ]
+  [ "$(sed -n '2p' "$invocation_log")" = "plugin add development-system@ai-plugins --json" ]
+  [ "$(sed -n '3p' "$invocation_log")" = "plugin list --json" ]
+  grep -q '\[plugins\."development-system@ai-plugins"\]' "$eval_home/config.toml"
+  [ -d "$eval_home/plugins/cache/ai-plugins/development-system" ]
 }
 
 @test "codex eval home preparation refreshes stale seeded auth" {
