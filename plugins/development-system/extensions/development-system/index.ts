@@ -3,6 +3,7 @@ import { chmod, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveStatus } from "./adapters/status-interpreter.ts";
+import { applySetupPreview, createSetupPreview } from "./adapters/setup.ts";
 import type { HarnessMode } from "./core/status.ts";
 import { parseProjectPolicy } from "./core/configuration.ts";
 import {
@@ -142,6 +143,43 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerCommand("development-system-setup", {
+    description:
+      "Preview setup and require bound local-TUI confirmation before applying",
+    handler: async (arguments_, context) => {
+      try {
+        const preview = await createSetupPreview(
+          packageRoot,
+          context.cwd,
+          arguments_,
+        );
+        context.ui.notify(
+          `${preview.preview}approval_binding ${preview.binding}`,
+          "info",
+        );
+        if (context.mode !== "tui") {
+          context.ui.notify(
+            "development_system.setup_confirmation_required: rerun this command in the local Pi TUI; RPC, print, and JSON responses cannot approve mutation.",
+            "warning",
+          );
+          return;
+        }
+        const confirmed = await context.ui.confirm(
+          "Apply this exact development-system setup?",
+          `${preview.preview}\nBinding: ${preview.binding}`,
+        );
+        if (!confirmed) return;
+        const result = await applySetupPreview(packageRoot, preview);
+        context.ui.notify(result, "info");
+      } catch (error) {
+        context.ui.notify(
+          error instanceof Error ? error.message : String(error),
+          "error",
+        );
+      }
+    },
+  });
+
   pi.registerTool({
     name: "development_system_status",
     label: "Development System Status",
@@ -158,6 +196,41 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       return {
         content: [{ type: "text", text: concise(status) }],
         details: status,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "development_system_setup_preview",
+    label: "Development System Setup Preview",
+    description:
+      "Preview repository setup without mutation. Applying setup is only available through the local-TUI command and its bound confirmation.",
+    parameters: {
+      type: "object",
+      properties: {
+        arguments: {
+          type: "string",
+          description:
+            "Optional setup pairs: --preset, --delivery, --enable, or --disable.",
+        },
+      },
+      additionalProperties: false,
+    },
+    async execute(_toolCallId, parameters, signal, _onUpdate, context) {
+      if (signal?.aborted) throw new Error("development_system.cancelled");
+      const preview = await createSetupPreview(
+        packageRoot,
+        context.cwd,
+        typeof parameters.arguments === "string" ? parameters.arguments : "",
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${preview.preview}development_system.setup_confirmation_required`,
+          },
+        ],
+        details: preview,
       };
     },
   });
@@ -283,6 +356,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       "find",
       "ls",
       "development_system_status",
+      "development_system_setup_preview",
     ]);
     const unknownBoundaryTools =
       pi

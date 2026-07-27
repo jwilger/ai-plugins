@@ -163,7 +163,7 @@ test("extension registers status command and tool and cleans session state on re
   assert.ok(registrations.commands.has("development-system-status"));
   assert.deepEqual(
     registrations.tools.map((tool) => tool.name),
-    ["development_system_status"],
+    ["development_system_status", "development_system_setup_preview"],
   );
   assert.ok(registrations.events.has("session_start"));
   assert.ok(registrations.events.has("session_shutdown"));
@@ -186,6 +186,69 @@ test("extension registers status command and tool and cleans session state on re
   await registrations.events.get("session_shutdown")(
     { reason: "reload" },
     context,
+  );
+});
+
+test("setup stops after preview outside TUI and applies exactly once after TUI confirmation", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  const notifications = [];
+  const command = registrations.commands.get(
+    "development-system-setup",
+  ).handler;
+  await command("--delivery pull-request", {
+    cwd: project,
+    mode: "json",
+    ui: {
+      notify: (message) => notifications.push(message),
+      confirm: async () => true,
+    },
+  });
+  assert.equal(
+    fs.existsSync(path.join(project, ".development-system.toml")),
+    false,
+  );
+  assert.ok(
+    notifications.some((message) =>
+      message.includes("setup_confirmation_required"),
+    ),
+  );
+  await command("--delivery pull-request", {
+    cwd: project,
+    mode: "tui",
+    ui: {
+      notify: (message) => notifications.push(message),
+      confirm: async () => true,
+    },
+  });
+  assert.equal(
+    fs.existsSync(path.join(project, ".development-system.toml")),
+    true,
+  );
+  assert.match(
+    fs.readFileSync(path.join(project, ".development-system.toml"), "utf8"),
+    /mode = "pull-request"/,
+  );
+  assert.equal(Number(git(project, "rev-list", "--count", "HEAD")), 2);
+});
+
+test("setup rejects a confirmation after bound repository preconditions change", async () => {
+  const project = fixture();
+  const { createSetupPreview, applySetupPreview } = await import(
+    path.join(plugin, "extensions/development-system/adapters/setup.ts")
+  );
+  const preview = await createSetupPreview(plugin, project, "");
+  fs.writeFileSync(path.join(project, "README.md"), "changed\n");
+  git(project, "add", "README.md");
+  git(project, "commit", "-m", "test: change precondition");
+  await assert.rejects(
+    () => applySetupPreview(plugin, preview),
+    /setup_confirmation_stale/,
+  );
+  assert.equal(
+    fs.existsSync(path.join(project, ".development-system.toml")),
+    false,
   );
 });
 
