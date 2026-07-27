@@ -72,6 +72,10 @@ tiber-release-manifest:
 tiber-release-complete:
     bash scripts/check-tiber-release-complete.sh
 
+# Run executable provider-backed Pi guard scenarios in disposable repositories.
+pi-guard-evals:
+    node scripts/evals/run-pi-guard-scenarios.mjs
+
 # Run provider-backed promptfoo evals locally, upload/share the latest result,
 # and print the share URL. This sends eval data to the configured promptfoo
 # sharing service.
