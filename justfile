@@ -143,6 +143,9 @@ validate-marketplace:
     jq empty .agents/plugins/marketplace.json
     find plugins -name plugin.json -exec jq empty {} \;
     bash scripts/validate-manifests.sh
+    node scripts/sync-development-system-metadata.mjs --check
+    node scripts/validate-pi-package.mjs
     bash scripts/check-advisor-agent-config.sh
     bash scripts/check-model-routing-config.sh
+    node scripts/generate-development-system-agents.mjs --check
     prettier --check "**/*.{json,md}"
