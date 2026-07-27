@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { resolveStatus } from "./adapters/status-interpreter.ts";
 import { applySetupPreview, createSetupPreview } from "./adapters/setup.ts";
 import { resolveReviewRoute, runReviewChild } from "./adapters/review-child.ts";
+import { activeCiRecoveryHold } from "./adapters/ci-hold.ts";
 import {
   McpClient,
   publicToolName,
@@ -340,6 +341,26 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", async (event, context) => {
+    if (["write", "edit", "bash"].includes(event.toolName)) {
+      const current = await guardContext(
+        context.cwd,
+        context.mode as HarnessMode,
+      );
+      if (current.policy?.features.tiber) {
+        const hold = await activeCiRecoveryHold(packageRoot, context.cwd);
+        if (hold)
+          return {
+            block: true,
+            reason: guardMessage({
+              code: "development_system.ci_recovery_hold",
+              boundary: "unrelated guarded work",
+              missing: `terminal success for CI incident ${hold.incidentId}`,
+              nextAction:
+                "Complete the authoritative Tiber CI-recovery transition before other guarded work.",
+            }),
+          };
+      }
+    }
     if (["write", "edit", "read"].includes(event.toolName)) {
       const rawPath = (event.input as { path?: unknown }).path;
       if (typeof rawPath === "string") {
@@ -431,6 +452,29 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         truncated: false,
       },
     };
+  });
+
+  pi.on("before_agent_start", async (_event, context) => {
+    try {
+      const policy = parseProjectPolicy(
+        await readFile(
+          path.join(context.cwd, ".development-system.toml"),
+          "utf8",
+        ),
+      );
+      if (!policy.features.tiber) return;
+      const hold = await activeCiRecoveryHold(packageRoot, context.cwd);
+      if (hold)
+        return {
+          message: {
+            customType: "development-system-ci-hold",
+            content: `development_system.ci_recovery_hold incident=${hold.incidentId} state=${hold.state}. Do not claim readiness or start unrelated guarded work; continue authoritative Tiber recovery.`,
+            display: true,
+          },
+        };
+    } catch {
+      return;
+    }
   });
 
   pi.on("session_start", async (_event, context) => {
