@@ -46,3 +46,13 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"development_system.pi_bootstrap_ready"* ]]
 }
+
+@test "provider-free Pi canary proves package provenance and no-package absence" {
+  run node "$REPO_ROOT/scripts/pi-package-canary.mjs"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '
+    .ok == true and .package == "development-system" and .piVersion == "0.82.1" and
+    (.skills | length) == 8 and
+    (.extension.extension | endswith("/plugins/development-system/extensions/development-system/index.ts"))
+  ' >/dev/null
+}
