@@ -121,9 +121,11 @@ MD
   [[ "$output" == *"load-harness-cases.cjs"* ]]
 }
 
-@test "behavior eval matrix has only baseline and development-system conditions" {
+@test "behavior eval matrix adds full marketplace only for Pi" {
   run jq -e '
-    [.pluginModes[].id] == ["no-plugins", "development-system"]
+    [.pluginModes[].id] == ["no-plugins", "development-system", "full-marketplace"] and
+    (.providerVariants[] | select(.id | startswith("pi-")) | .pluginModes) == ["no-plugins", "development-system", "full-marketplace"] and
+    all(.providerVariants[] | select(.id | startswith("pi-") | not); .pluginModes == ["no-plugins", "development-system"])
   ' "$ROOT/evals/matrix.json"
 
   [ "$status" -eq 0 ]
@@ -133,13 +135,16 @@ MD
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 4 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 7 ]
+  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-no-plugins"* ]]
+  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-development-system"* ]]
+  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-full-marketplace"* ]]
   [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
   [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-development-system"* ]]
   [[ "$output" != *"targeted-plugins"* ]]
-  [[ "$output" != *"full-marketplace"* ]]
+  [[ "$output" == *"full-marketplace"* ]]
   [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/"* ]]
   [[ "$output" != *"path: \"$ROOT/plugins/development-system\""* ]]
 }
@@ -246,7 +251,7 @@ JSON
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"path: \"{{ env.CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM"* ]]
-  [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/1.1.2"* ]]
+  [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/1.2.0"* ]]
   [[ "$output" != *"path: \"./plugins/"* ]]
 }
 

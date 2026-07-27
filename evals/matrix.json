@@ -1,10 +1,20 @@
 {
   "providerVariants": [
     {
+      "id": "pi-openai-gpt-5.6-terra",
+      "provider": "file://scripts/evals/pi-provider.mjs",
+      "modelEnv": "PI_EVAL_MODEL",
+      "defaultModel": "gpt-5.6-terra",
+      "reasoningEffortEnv": "PI_EVAL_REASONING_EFFORT",
+      "defaultReasoningEffort": "medium",
+      "pluginModes": ["no-plugins", "development-system", "full-marketplace"]
+    },
+    {
       "id": "claude-code-sonnet",
       "provider": "anthropic:claude-agent-sdk",
       "modelEnv": "CLAUDE_EVAL_MODEL",
-      "defaultModel": "sonnet"
+      "defaultModel": "sonnet",
+      "pluginModes": ["no-plugins", "development-system"]
     },
     {
       "id": "codex-gpt-5.6-terra",
@@ -12,7 +22,8 @@
       "modelEnv": "CODEX_EVAL_MODEL",
       "defaultModel": "gpt-5.6-terra",
       "reasoningEffortEnv": "CODEX_EVAL_REASONING_EFFORT",
-      "defaultReasoningEffort": "medium"
+      "defaultReasoningEffort": "medium",
+      "pluginModes": ["no-plugins", "development-system"]
     }
   ],
   "pluginModes": [
@@ -23,6 +34,10 @@
     {
       "id": "development-system",
       "description": "The development-system plugin is installed and enabled."
+    },
+    {
+      "id": "full-marketplace",
+      "description": "Every package declared in the canonical Pi support inventory is enabled."
     }
   ],
   "valueGates": {

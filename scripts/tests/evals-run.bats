@@ -41,11 +41,11 @@ teardown() {
   [[ "$output" == *"Codex:       provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium"* ]]
   [[ "$output" == *"CODEX_GRADER_MODEL            (default: gpt-5.6-sol)"* ]]
   [[ "$output" == *"CODEX_GRADER_REASONING_EFFORT (default: high)"* ]]
-  [[ "$output" == *"Each harness is tested in two isolated conditions"* ]]
+  [[ "$output" == *"Pi is tested with no package, development-system, and the full Pi support inventory"* ]]
   [[ "$output" == *"Pinned eval packages are managed by package.json and package-lock.json"* ]]
   [[ "$output" == *"@openai/codex-sdk"* ]]
   [[ "$output" == *"@anthropic-ai/claude-agent-sdk"* ]]
-  [[ "$output" == *"Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"* ]]
+  [[ "$output" == *"Local runs reuse existing Pi/OpenAI, Claude Code/Anthropic, and Codex/ChatGPT subscription sessions"* ]]
   [[ "$output" == *"They do not require provider API keys or fresh approval for repository-owned evals"* ]]
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
   [[ "$output" == *"EVAL_PROVIDER_FILTER"* ]]
@@ -331,7 +331,7 @@ SH
   [ "$preparation_invoked" -eq 0 ]
 }
 
-@test "eval runner dry-run prepares the two consolidated plugin conditions" {
+@test "eval runner dry-run prepares harness-specific package conditions" {
   run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
@@ -339,8 +339,10 @@ SH
   [[ "$output" == *"prepare-codex-home.mjs"*"--plugin-mode no-plugins"* ]]
   [[ "$output" == *"prepare-claude-home.mjs"*"--plugin-mode development-system"* ]]
   [[ "$output" == *"prepare-claude-home.mjs"*"--plugin-mode no-plugins"* ]]
+  [[ "$output" == *"prepare-pi-home.mjs"*"no-plugins"* ]]
+  [[ "$output" == *"prepare-pi-home.mjs"*"development-system"* ]]
+  [[ "$output" == *"prepare-pi-home.mjs"*"full-marketplace"* ]]
   [[ "$output" != *"targeted-plugins"* ]]
-  [[ "$output" != *"full-marketplace"* ]]
 }
 
 @test "eval runner prepares a focused Codex development-system home" {

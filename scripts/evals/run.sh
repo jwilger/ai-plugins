@@ -52,15 +52,18 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/evals/run.sh [--suite behavior|canary] [config]
 
-Runs provider-backed promptfoo evals through Claude Code and Codex.
-Each harness is tested in two isolated conditions: no plugins, and an actually
-installed and enabled development-system plugin.
+Runs provider-backed promptfoo evals through Pi, Claude Code, and Codex.
+Pi is tested with no package, development-system, and the full Pi support inventory.
+Claude Code and Codex retain isolated no-plugin and development-system conditions.
 
 Default harness posture:
   Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all
   Codex:       provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium
 
 Environment overrides:
+  PI_EVAL_MODEL
+  PI_EVAL_REASONING_EFFORT
+  PI_EVAL_SOURCE_HOME          (default: ~/.pi/agent; only openai-codex auth is copied)
   CLAUDE_EVAL_MODEL
   CODEX_EVAL_MODEL
   CODEX_EVAL_REASONING_EFFORT
@@ -85,7 +88,7 @@ Prompt response caching and hosted sharing are disabled for behavior evidence.
 Pinned eval packages are managed by package.json and package-lock.json:
 promptfoo, @openai/codex-sdk, and @anthropic-ai/claude-agent-sdk.
 
-Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions.
+Local runs reuse existing Pi/OpenAI, Claude Code/Anthropic, and Codex/ChatGPT subscription sessions.
 They do not require provider API keys or fresh approval for repository-owned evals.
 
 Writes repo-owned artifacts:
@@ -261,6 +264,43 @@ print_prepare_codex_home_for_mode() {
       return 2
       ;;
   esac
+}
+
+selected_pi_modes() {
+  jq -r '
+    .providerCompositions[]
+    | select(.provider == "file://scripts/evals/pi-provider.mjs")
+    | .pluginMode
+  ' "$generated_metadata_file"
+}
+
+cleanup_pi_eval_homes() {
+  local status=$?
+  trap - EXIT
+  rm -rf -- "${PI_EVAL_HOME_NO_PLUGINS:-}" "${PI_EVAL_HOME_DEVELOPMENT_SYSTEM:-}" "${PI_EVAL_HOME_FULL_MARKETPLACE:-}"
+  if [ -n "${PI_EVAL_SOURCE_AUTH_FILE:-}" ] && [ -f "$PI_EVAL_SOURCE_AUTH_FILE" ]; then
+    local current_hash
+    current_hash="$(sha256sum "$PI_EVAL_SOURCE_AUTH_FILE" | awk '{print $1}')"
+    if [ "$current_hash" != "${PI_EVAL_SOURCE_AUTH_HASH:-}" ]; then
+      echo "Pi source authentication changed during isolated eval execution" >&2
+      [ "$status" -ne 0 ] || status=2
+    fi
+  fi
+  exit "$status"
+}
+
+prepare_pi_home_for_mode() {
+  local mode="$1"
+  local variable="PI_EVAL_HOME_$(tr '[:lower:]-' '[:upper:]_' <<<"$mode")"
+  local home="${!variable}"
+  node "$root/scripts/evals/prepare-pi-home.mjs" "$home" "$mode" >/dev/null
+}
+
+print_prepare_pi_home_for_mode() {
+  local mode="$1"
+  local variable="dry_pi_$(tr '-' '_' <<<"$mode")_home"
+  printf '%q ' node "$root/scripts/evals/prepare-pi-home.mjs" "${!variable}" "$mode"
+  printf '\n'
 }
 
 selected_claude_modes() {
@@ -580,6 +620,9 @@ if [ "$dry_run" -eq 1 ]; then
   dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
   dry_claude_development_system_home="${CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM:-$root/.evals/claude-home-development-system}"
   dry_claude_no_plugins_home="${CLAUDE_EVAL_HOME_NO_PLUGINS:-$root/.evals/claude-home-no-plugins}"
+  dry_pi_no_plugins_home="${PI_EVAL_HOME_NO_PLUGINS:-$root/.evals/pi-home-no-plugins}"
+  dry_pi_development_system_home="${PI_EVAL_HOME_DEVELOPMENT_SYSTEM:-$root/.evals/pi-home-development-system}"
+  dry_pi_full_marketplace_home="${PI_EVAL_HOME_FULL_MARKETPLACE:-$root/.evals/pi-home-full-marketplace}"
   printf '%q ' "$root/scripts/evals/ensure-node-deps.sh"
   printf '\n'
   if [ "$generated_config" -eq 1 ]; then
@@ -603,6 +646,10 @@ if [ "$dry_run" -eq 1 ]; then
         print_prepare_codex_home_for_mode "$mode"
       done <<<"$codex_provider_compositions"
     fi
+    while IFS= read -r mode; do
+      [ -n "$mode" ] || continue
+      print_prepare_pi_home_for_mode "$mode"
+    done < <(selected_pi_modes)
     while IFS= read -r mode; do
       [ -n "$mode" ] || continue
       print_prepare_claude_home_for_mode "$mode"
@@ -629,6 +676,14 @@ export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
 export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$root/.dependencies/promptfoo}"
 export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.dependencies/promptfoo-cache}"
 export PROMPTFOO_CACHE_TTL="${PROMPTFOO_CACHE_TTL:-86400}"
+export PI_EVAL_HOME_NO_PLUGINS="${PI_EVAL_HOME_NO_PLUGINS:-$root/.evals/pi-home-no-plugins}"
+export PI_EVAL_HOME_DEVELOPMENT_SYSTEM="${PI_EVAL_HOME_DEVELOPMENT_SYSTEM:-$root/.evals/pi-home-development-system}"
+export PI_EVAL_HOME_FULL_MARKETPLACE="${PI_EVAL_HOME_FULL_MARKETPLACE:-$root/.evals/pi-home-full-marketplace}"
+if [ -n "$(selected_pi_modes)" ]; then
+  export PI_EVAL_SOURCE_AUTH_FILE="${PI_EVAL_SOURCE_HOME:-${HOME}/.pi/agent}/auth.json"
+  export PI_EVAL_SOURCE_AUTH_HASH="$(sha256sum "$PI_EVAL_SOURCE_AUTH_FILE" | awk '{print $1}')"
+  trap cleanup_pi_eval_homes EXIT
+fi
 export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.evals/codex-home-development-system}"
 export CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="${CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM:-$CODEX_EVAL_HOME}"
 export CODEX_EVAL_HOME_NO_PLUGINS="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
@@ -663,6 +718,11 @@ if [ "$generated_config" -eq 1 ]; then
       prepare_codex_home_for_mode "$mode"
     done <<<"$codex_provider_compositions"
   fi
+  pi_modes="$(selected_pi_modes)"
+  while IFS= read -r mode; do
+    [ -n "$mode" ] || continue
+    prepare_pi_home_for_mode "$mode"
+  done <<<"$pi_modes"
   claude_modes="$(selected_claude_modes)"
   while IFS= read -r mode; do
     [ -n "$mode" ] || continue

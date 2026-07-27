@@ -35,9 +35,14 @@ function readArtifact(file) {
         const providerVariant =
           testCase.provider_variant ||
           testCase.providerVariant ||
-          String(provider).replace(/-(no-plugins|development-system)$/, "");
+          String(provider).replace(
+            /-(no-plugins|development-system|full-marketplace)$/,
+            "",
+          );
         const pluginMode =
-          String(provider).match(/(no-plugins|development-system)$/)?.[1] ||
+          String(provider).match(
+            /(no-plugins|development-system|full-marketplace)$/,
+          )?.[1] ||
           testCase.plugin_mode ||
           testCase.pluginMode ||
           "unknown";
@@ -164,6 +169,23 @@ function isProviderUnavailable(reason) {
   );
 }
 
+function providerOrder(providerVariant) {
+  if (String(providerVariant).startsWith("pi-")) return 0;
+  if (String(providerVariant).startsWith("claude-")) return 1;
+  if (String(providerVariant).startsWith("codex-")) return 2;
+  return 3;
+}
+
+function providerSort(left, right, leftSuffix = "", rightSuffix = "") {
+  return (
+    providerOrder(left.providerVariant) -
+      providerOrder(right.providerVariant) ||
+    `${left.providerVariant}:${leftSuffix}`.localeCompare(
+      `${right.providerVariant}:${rightSuffix}`,
+    )
+  );
+}
+
 function aggregateCases(cases) {
   const groups = new Map();
 
@@ -233,8 +255,11 @@ function aggregateCases(cases) {
               : "fail",
     }))
     .sort((left, right) =>
-      `${left.providerVariant}:${left.pluginMode}:${left.id}`.localeCompare(
-        `${right.providerVariant}:${right.pluginMode}:${right.id}`,
+      providerSort(
+        left,
+        right,
+        `${left.pluginMode}:${left.id}`,
+        `${right.pluginMode}:${right.id}`,
       ),
     );
 }
@@ -279,8 +304,11 @@ function aggregateDimension(cases, field, idName) {
       cases: [...group.cases].sort(),
     }))
     .sort((left, right) =>
-      `${left.providerVariant}:${left.pluginMode}:${left[idName]}`.localeCompare(
-        `${right.providerVariant}:${right.pluginMode}:${right[idName]}`,
+      providerSort(
+        left,
+        right,
+        `${left.pluginMode}:${left[idName]}`,
+        `${right.pluginMode}:${right[idName]}`,
       ),
     );
 }
@@ -350,9 +378,7 @@ function valueGateSummaries(aggregates) {
       };
     })
     .sort((left, right) =>
-      `${left.providerVariant}:${left.caseId}`.localeCompare(
-        `${right.providerVariant}:${right.caseId}`,
-      ),
+      providerSort(left, right, left.caseId, right.caseId),
     );
 }
 

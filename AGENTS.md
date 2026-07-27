@@ -303,8 +303,9 @@ unless that automation is explicitly requested and secrets are protected.
 ### Standing authorization for repository-owned live evals
 
 The repository owner grants standing approval to run repository-owned
-provider-backed evals and benchmarks through both supported coding harnesses:
+provider-backed evals and benchmarks through all supported coding harnesses:
 
+- Pi using the owner's existing ChatGPT/OpenAI subscription authentication.
 - Claude Code using the owner's existing Claude/Anthropic subscription authentication.
 - Codex CLI using the owner's existing ChatGPT/OpenAI subscription authentication.
 
@@ -330,6 +331,12 @@ nix develop -c scripts/evals/run-code-quality-benchmark.sh
 
 It does not authorize broad `nix develop` execution rules or other external
 destinations.
+
+For Pi, live evals must use disposable `PI_CODING_AGENT_DIR` and session locations,
+copy only the `openai-codex` authentication entry with restrictive permissions,
+serialize each mutable copied store to one writer, remove the copied stores after
+the run, and prove the source Pi login did not change. This authorization does not
+permit uploading Pi authentication state.
 
 This applies across all marketplace plugins, not only the plugin currently being
 edited. Do not blanket-ignore `.plugin-eval/`. Stable benchmark configs and
