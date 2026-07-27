@@ -4,6 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveStatus } from "./adapters/status-interpreter.ts";
 import { applySetupPreview, createSetupPreview } from "./adapters/setup.ts";
+import {
+  McpClient,
+  publicToolName,
+  schemaIsAdmissible,
+  type McpTool,
+} from "./adapters/mcp-client.ts";
 import type { HarnessMode } from "./core/status.ts";
 import { parseProjectPolicy } from "./core/configuration.ts";
 import {
@@ -127,6 +133,52 @@ async function recordProvenanceMarker(): Promise<void> {
 /** Pi adapter composition root. Domain behavior lives in pure core modules. */
 export default function developmentSystemExtension(pi: ExtensionAPI): void {
   let started = false;
+  const componentClients: McpClient[] = [];
+
+  const bridge = async (
+    origin: "tiber" | "review",
+    command: string,
+    args: readonly string[],
+    cwd: string,
+    approvedNames: ReadonlySet<string>,
+  ): Promise<readonly string[]> => {
+    const client = new McpClient({ command, args, cwd });
+    await client.start();
+    componentClients.push(client);
+    const tools = (await client.listTools()).filter((tool) =>
+      approvedNames.has(tool.name),
+    );
+    const admitted = tools.filter((tool) =>
+      schemaIsAdmissible(tool.inputSchema),
+    );
+    const existing = new Set(pi.getAllTools().map((tool) => tool.name));
+    const registrations = admitted.map((tool) => ({
+      tool,
+      publicName: publicToolName(origin, tool.name),
+    }));
+    if (registrations.some(({ publicName }) => existing.has(publicName))) {
+      client.stop();
+      throw new Error(`development_system.mcp_tool_collision origin=${origin}`);
+    }
+    for (const { tool, publicName } of registrations) {
+      pi.registerTool({
+        name: publicName,
+        label: `${origin === "tiber" ? "Tiber" : "Final Review"}: ${tool.name}`,
+        description:
+          tool.description ?? `First-party ${origin} operation ${tool.name}`,
+        parameters: tool.inputSchema as McpTool["inputSchema"],
+        async execute(_toolCallId, parameters, signal) {
+          const result = await client.callTool(tool.name, parameters, signal);
+          const text = JSON.stringify(result);
+          if (Buffer.byteLength(text) > 50 * 1024) {
+            throw new Error("development_system.component_output_limit");
+          }
+          return { content: [{ type: "text", text }], details: result };
+        },
+      });
+    }
+    return registrations.map(({ publicName }) => publicName);
+  };
 
   pi.registerCommand("development-system-status", {
     description: "Show deterministic development-system project status",
@@ -372,11 +424,61 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         "warning",
       );
     }
+    if (status.configured) {
+      try {
+        const reviewTools = await bridge(
+          "review",
+          path.join(packageRoot, "bin/development-discipline-mcp"),
+          [],
+          context.cwd,
+          new Set([
+            "final_review.assess_risk",
+            "final_review.plan",
+            "final_review.filter_findings",
+            "final_review.advance",
+            "final_review.clean_status",
+            "final_review.out_of_scope_report",
+          ]),
+        );
+        const tiberTools = status.enabledFeatures.includes("tiber")
+          ? await bridge(
+              "tiber",
+              path.join(packageRoot, "bin/tiber"),
+              ["mcp", "stdio"],
+              context.cwd,
+              new Set([
+                "tiber.create",
+                "tiber.list",
+                "tiber.search",
+                "tiber.show",
+                "tiber.next",
+                "tiber.transition",
+                "tiber.prioritize",
+                "tiber.update",
+                "tiber.validate_fix",
+                "tiber.ci_recovery.claim",
+                "tiber.ci_recovery.status",
+                "tiber.ci_recovery.resolve",
+              ]),
+            )
+          : [];
+        context.ui.notify(
+          `development_system.component_tools_active review=${reviewTools.length} tiber=${tiberTools.length}`,
+          "info",
+        );
+      } catch (error) {
+        context.ui.notify(
+          error instanceof Error ? error.message : String(error),
+          "error",
+        );
+      }
+    }
   });
 
   pi.on("session_shutdown", async (_event, context) => {
     if (!started) return;
     started = false;
+    for (const client of componentClients.splice(0)) client.stop();
     context.ui.setStatus("development-system", undefined);
   });
 }
