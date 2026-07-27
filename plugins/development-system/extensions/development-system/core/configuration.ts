@@ -16,6 +16,7 @@ export type ProjectPolicy = Readonly<{
   }>;
   worktrees: Readonly<{ root: string }>;
   tiber: Readonly<{ maxQueued: number }>;
+  piReviewModels: Readonly<Record<string, string>>;
 }>;
 
 export class ConfigurationError extends Error {
@@ -48,7 +49,7 @@ export function parseProjectPolicy(source: string): ProjectPolicy {
   for (const [index, original] of source.split("\n").entries()) {
     const line = original.replace(/\s+#.*$/, "").trim();
     if (!line) continue;
-    const sectionMatch = line.match(/^\[([a-z-]+)]$/);
+    const sectionMatch = line.match(/^\[([a-z0-9_.-]+)]$/);
     if (sectionMatch) {
       section = sectionMatch[1];
       continue;
@@ -93,5 +94,15 @@ export function parseProjectPolicy(source: string): ProjectPolicy {
     }),
     worktrees: Object.freeze({ root: unquote(required("worktrees.root")) }),
     tiber: Object.freeze({ maxQueued }),
+    piReviewModels: Object.freeze(
+      Object.fromEntries(
+        [...values.entries()]
+          .filter(([key]) => key.startsWith("pi.review_models."))
+          .map(([key, value]) => [
+            key.slice("pi.review_models.".length).replaceAll("_", "-"),
+            unquote(value),
+          ]),
+      ),
+    ),
   });
 }

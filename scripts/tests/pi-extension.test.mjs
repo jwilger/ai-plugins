@@ -163,7 +163,11 @@ test("extension registers status command and tool and cleans session state on re
   assert.ok(registrations.commands.has("development-system-status"));
   assert.deepEqual(
     registrations.tools.map((tool) => tool.name),
-    ["development_system_status", "development_system_setup_preview"],
+    [
+      "development_system_status",
+      "development_system_setup_preview",
+      "development_system_run_review_assignment",
+    ],
   );
   assert.ok(registrations.events.has("session_start"));
   assert.ok(registrations.events.has("session_shutdown"));

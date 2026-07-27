@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveStatus } from "./adapters/status-interpreter.ts";
 import { applySetupPreview, createSetupPreview } from "./adapters/setup.ts";
+import { resolveReviewRoute, runReviewChild } from "./adapters/review-child.ts";
 import {
   McpClient,
   publicToolName,
@@ -287,6 +288,57 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerTool({
+    name: "development_system_run_review_assignment",
+    label: "Run Fresh Final-Review Assignment",
+    description:
+      "Run a development-discipline coordinator assignment in a fresh isolated Pi child using the project route for its abstract model role. Failures remain unresolved.",
+    parameters: {
+      type: "object",
+      properties: {
+        assignment: { type: "string", minLength: 1 },
+        model_role: {
+          type: "string",
+          enum: [
+            "bounded-helper",
+            "substantive-worker",
+            "strong-reviewer",
+            "strong-worker",
+          ],
+        },
+      },
+      required: ["assignment", "model_role"],
+      additionalProperties: false,
+    },
+    async execute(_toolCallId, parameters, signal, _onUpdate, context) {
+      if (
+        typeof parameters.assignment !== "string" ||
+        typeof parameters.model_role !== "string"
+      ) {
+        throw new Error("development_system.review_assignment_invalid");
+      }
+      const policy = parseProjectPolicy(
+        await readFile(
+          path.join(context.cwd, ".development-system.toml"),
+          "utf8",
+        ),
+      );
+      const result = await runReviewChild({
+        assignment: {
+          assignment: parameters.assignment,
+          modelRole: parameters.model_role,
+        },
+        cwd: context.cwd,
+        route: resolveReviewRoute(parameters.model_role, policy.piReviewModels),
+        signal,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+      };
+    },
+  });
+
   pi.on("tool_call", async (event, context) => {
     if (["write", "edit", "read"].includes(event.toolName)) {
       const rawPath = (event.input as { path?: unknown }).path;
@@ -409,6 +461,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       "ls",
       "development_system_status",
       "development_system_setup_preview",
+      "development_system_run_review_assignment",
     ]);
     const unknownBoundaryTools =
       pi
