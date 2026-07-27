@@ -5,6 +5,24 @@ import path from "node:path";
 const root = path.resolve(import.meta.dirname, "../..");
 const pinnedPi =
   process.env.PI_EVAL_BIN ?? path.join(root, "node_modules/.bin/pi");
+const homeQueues = new Map();
+
+async function withHomeWriter(home, operation) {
+  const previous = homeQueues.get(home) ?? Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  homeQueues.set(home, tail);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (homeQueues.get(home) === tail) homeQueues.delete(home);
+  }
+}
 
 export default class PiProvider {
   constructor(options = {}) {
@@ -15,6 +33,14 @@ export default class PiProvider {
   }
 
   async callApi(prompt) {
+    const agentDirectory = this.options.config?.agent_dir;
+    if (typeof agentDirectory !== "string") {
+      return { error: "Pi provider requires an absolute isolated agent_dir" };
+    }
+    return withHomeWriter(agentDirectory, () => this.#callApi(prompt));
+  }
+
+  async #callApi(prompt) {
     const config = this.options.config ?? {};
     const agentDirectory = config.agent_dir;
     if (!path.isAbsolute(agentDirectory ?? ""))
