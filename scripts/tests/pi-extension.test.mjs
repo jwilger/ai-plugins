@@ -117,7 +117,7 @@ test("invalid configuration returns a typed actionable error", () => {
   assert.match(result.error.nextAction, /setup|configuration/i);
 });
 
-test("extension registers status command and tool and cleans session state on reload", async () => {
+function extensionHarness() {
   const registrations = { commands: new Map(), tools: [], events: new Map() };
   const pi = {
     registerCommand(name, definition) {
@@ -129,11 +129,37 @@ test("extension registers status command and tool and cleans session state on re
     on(name, handler) {
       registrations.events.set(name, handler);
     },
+    getAllTools() {
+      return [];
+    },
   };
-  const { default: extension } = await import(
-    path.join(plugin, "extensions/development-system/index.ts")
-  );
-  extension(pi);
+  return { pi, registrations };
+}
+
+async function loadExtension() {
+  return (
+    await import(path.join(plugin, "extensions/development-system/index.ts"))
+  ).default;
+}
+
+const configuredPolicy = (mode, worktrees = true) => `schema_version = 1
+[delivery]
+mode = "${mode}"
+trunk_branch = "main"
+[features]
+worktrees = ${worktrees}
+tiber = true
+agentic_systems = false
+eval_case_reporting = false
+[worktrees]
+root = ".worktrees"
+[tiber]
+max_queued = 5
+`;
+
+test("extension registers status command and tool and cleans session state on reload", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
   assert.ok(registrations.commands.has("development-system-status"));
   assert.deepEqual(
     registrations.tools.map((tool) => tool.name),
@@ -141,7 +167,6 @@ test("extension registers status command and tool and cleans session state on re
   );
   assert.ok(registrations.events.has("session_start"));
   assert.ok(registrations.events.has("session_shutdown"));
-
   const project = fixture();
   const notifications = [];
   const context = {
@@ -162,4 +187,82 @@ test("extension registers status command and tool and cleans session state on re
     { reason: "reload" },
     context,
   );
+});
+
+test("extension blocks coordination writes, secret reads, and unclassified shell mutation", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk"),
+  );
+  const context = {
+    cwd: project,
+    mode: "tui",
+    ui: { confirm: async () => false },
+  };
+  const guard = registrations.events.get("tool_call");
+  const write = await guard(
+    { toolName: "write", input: { path: "README.md" } },
+    context,
+  );
+  assert.equal(write.block, true);
+  assert.match(write.reason, /coordination_write_blocked/);
+  const secret = await guard(
+    { toolName: "read", input: { path: ".env" } },
+    context,
+  );
+  assert.equal(secret.block, true);
+  assert.match(secret.reason, /protected_secret/);
+  const shell = await guard(
+    { toolName: "bash", input: { command: "python script.py" } },
+    context,
+  );
+  assert.equal(shell.block, true);
+  assert.match(shell.reason, /coordination_shell_blocked/);
+  assert.equal(
+    await guard(
+      { toolName: "bash", input: { command: "git status --short" } },
+      context,
+    ),
+    undefined,
+  );
+});
+
+test("extension enforces delivery mode and case-specific destructive TUI approval", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("local-only", false),
+  );
+  const guard = registrations.events.get("tool_call");
+  const blocked = await guard(
+    { toolName: "bash", input: { command: "git push origin main" } },
+    { cwd: project, mode: "tui", ui: { confirm: async () => true } },
+  );
+  assert.equal(blocked.block, true);
+  assert.match(blocked.reason, /local_only_publication_blocked/);
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", false),
+  );
+  const denied = await guard(
+    {
+      toolName: "bash",
+      input: { command: "git push --force-with-lease origin main" },
+    },
+    { cwd: project, mode: "json", ui: { confirm: async () => true } },
+  );
+  assert.match(denied.reason, /destructive_approval_required/);
+  const allowed = await guard(
+    {
+      toolName: "bash",
+      input: { command: "git push --force-with-lease origin main" },
+    },
+    { cwd: project, mode: "tui", ui: { confirm: async () => true } },
+  );
+  assert.equal(allowed, undefined);
 });
