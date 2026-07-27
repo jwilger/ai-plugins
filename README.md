@@ -1,15 +1,15 @@
 # ai-plugins
 
 A **multi-harness marketplace of AI coding-assistant plugins** for
-[Claude Code](https://code.claude.com), [Codex](https://openai.com/codex/), and
-other harnesses that adopt plugin or marketplace concepts.
+[Pi](https://pi.dev), [Claude Code](https://code.claude.com), and
+[Codex](https://openai.com/codex/) from one canonical package tree.
 
 ## Personal development system
 
 This marketplace has one audience and one installable plugin:
-[`development-system`](plugins/development-system/README.md). It supports Codex
-and Claude Code with one initialization command and one project configuration
-file.
+[`development-system`](plugins/development-system/README.md). Pi is the primary
+recommended surface, Claude Code is secondary, and Codex is tertiary. They use
+one project configuration and the same eight physical skill files.
 
 The default preset is direct-to-trunk delivery with linked worktrees and Tiber.
 Optional agentic-system and eval-reporting capabilities are selected in
@@ -22,11 +22,25 @@ user-managed MCPs that need compatibility review.
 
 ## Plugin catalog
 
-| Plugin                                                     | Harnesses          | Description                                                         | Version |
-| ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 1.1.2   |
+| Plugin                                                     | Harnesses              | Description                                                         | Version |
+| ---------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- | ------- |
+| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.2.0   |
 
-## Using the marketplace (Claude Code)
+## Using the package (Pi — primary)
+
+Pi packages execute trusted extension code with the user's full permissions.
+Review the checkout, then run the documented clean bootstrap and local install:
+
+```shell
+nix develop -c scripts/bootstrap-pi-package.sh
+pi install ./plugins/development-system
+```
+
+See the [development-system guide](plugins/development-system/README.md) for
+project trust, setup, updates, status, target support, capability differences,
+and removal.
+
+## Using the marketplace (Claude Code — secondary)
 
 Add this repository as a marketplace, then install a plugin from it:
 
@@ -44,7 +58,7 @@ commands, regardless of the URL you added it from. List and manage with
 `/plugin list`, `/plugin marketplace update ai-plugins`, and
 `/plugin marketplace remove ai-plugins`.
 
-## Using the marketplace (Codex)
+## Using the marketplace (Codex — tertiary)
 
 Codex-facing marketplace metadata lives in
 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json), and each
@@ -84,8 +98,8 @@ The repo-owned eval dashboard is generated under `site/evals/` by
 and workflow uploads; the durable record is repo-owned and does not depend on
 promptfoo-hosted sharing.
 
-Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription
-sessions. They do not require provider API keys or fresh approval for the
+Local runs reuse existing Pi/OpenAI, Claude Code/Anthropic, and Codex/ChatGPT
+subscription sessions. They do not require provider API keys or fresh approval for the
 repository-owned evals authorized in [`AGENTS.md`](AGENTS.md). Unattended trusted
 automation may instead use protected provider credentials when interactive
 harness sessions are unavailable; untrusted pull-request checks remain
@@ -96,10 +110,11 @@ threshold status, exact installed provider compositions, and separate
 case-target plugin/skill summaries so regressions can be traced back to both the
 loaded marketplace surface and the behavior each scenario exercises.
 
-The canonical promptfoo behavior evals run through Promptfoo's native coding
-agent providers: `anthropic:claude-agent-sdk` for Claude Code and
-`openai:codex-sdk` for Codex. Each harness has exactly two isolated conditions:
-no plugins, and the installed and enabled `development-system` plugin. Claude's
+The canonical Promptfoo behavior evals use a repository-owned Pi JSON provider,
+`anthropic:claude-agent-sdk` for Claude Code, and `openai:codex-sdk` for Codex.
+Pi has no-package, targeted development-system, and inventory-derived full
+marketplace conditions. Claude Code and Codex retain no-plugin and installed
+`development-system` conditions. Claude's
 condition is prepared through the real marketplace installer and then loaded
 from its installed cache path; Codex also uses the real marketplace installer
 to populate an isolated generated home and plugin cache. Claude subscription
@@ -110,13 +125,18 @@ or explicit-token runs use the same isolation. The live
 runner also requires the plugin's SessionStart hook to execute.
 The generated config records each provider's installed composition separately
 from the plugins and skills targeted by an individual case.
-Promptfoo is pinned at `0.121.18`;
+Pi is pinned at `0.82.1` and Promptfoo is pinned at `0.121.19`;
 the Promptfoo, Codex SDK, and Claude Agent SDK packages are pinned in
 `package.json` and `package-lock.json`. The runner disables prompt response
 caching and hosted sharing so a behavior run is a fresh local record.
 
 Default eval harness posture:
 
+- Pi: `openai-codex/gpt-5.6-terra` at medium reasoning through the owner's
+  ChatGPT subscription. Each package condition has a disposable, single-writer
+  Pi home; only the OpenAI auth entry is copied with mode 0600, extension source
+  provenance is required, source auth integrity is checked, and copied stores
+  are deleted after execution.
 - Claude Code: `anthropic:claude-agent-sdk`, Sonnet 5 via the `sonnet` alias,
   local Claude Code authentication via `apiKeyRequired: false`, and all local
   `development-system` skills via `skills: all`. The intended human-facing Claude Code posture
@@ -151,9 +171,8 @@ small stochastic differences. Trusted release evidence for this repository
 defaults to `EVAL_SAMPLES=3`; PR dry-runs do not run live samples.
 
 Pull-request CI validates the eval configuration with `--dry-run` but does not
-claim behavior evidence. Provider-backed behavior evidence comes from local,
-scheduled, manual, or `main` runs where Claude Code and Codex authentication are
-available.
+claim behavior evidence. Provider-backed behavior evidence comes from trusted
+runs where Pi, Claude Code, and Codex subscription authentication is available.
 
 To produce the same artifacts locally:
 
@@ -161,6 +180,7 @@ To produce the same artifacts locally:
 just evals  # runs provider-backed evals, shares the result, and prints the URL
 nix develop -c scripts/evals/run.sh
 nix develop -c scripts/evals/run.sh --suite canary
+nix develop -c just pi-guard-evals
 nix develop -c node scripts/evals/build-site.mjs
 ```
 
