@@ -324,6 +324,69 @@ test("setup stops after preview outside TUI and applies exactly once after TUI c
   assert.equal(Number(git(project, "rev-list", "--count", "HEAD")), 2);
 });
 
+test("setup preview and apply preserve every unspecified existing policy value", async () => {
+  const project = fixture();
+  const { createSetupPreview, applySetupPreview } = await import(
+    path.join(plugin, "extensions/development-system/adapters/setup.ts")
+  );
+  const source = `schema_version = 1
+
+[delivery]
+mode = "pull-request"
+trunk_branch = "stable"
+
+[features]
+worktrees = true
+tiber = true
+agentic_systems = true
+eval_case_reporting = true
+
+[worktrees]
+root = ".custom-worktrees"
+
+[tiber]
+max_queued = 3
+
+[pi.review_models]
+strong_reviewer = "custom/reviewer"
+`;
+  fs.writeFileSync(path.join(project, ".development-system.toml"), source);
+  git(project, "add", ".development-system.toml");
+  git(project, "commit", "-m", "test: configure policy");
+
+  const preserving = await createSetupPreview(
+    plugin,
+    project,
+    "--enable worktrees",
+  );
+  assert.equal(preserving.existingConfig, true);
+  assert.equal(preserving.proposedConfig, source);
+  assert.match(preserving.preview, /delivery pull-request/);
+  assert.match(preserving.preview, /agentic_systems=true/);
+  assert.match(preserving.preview, /eval_case_reporting=true/);
+
+  const changing = await createSetupPreview(
+    plugin,
+    project,
+    "--disable tiber",
+  );
+  await applySetupPreview(plugin, changing);
+  const updated = fs.readFileSync(
+    path.join(project, ".development-system.toml"),
+    "utf8",
+  );
+  assert.match(updated, /mode = "pull-request"/);
+  assert.match(updated, /trunk_branch = "stable"/);
+  assert.match(updated, /worktrees = true/);
+  assert.match(updated, /tiber = false/);
+  assert.match(updated, /agentic_systems = true/);
+  assert.match(updated, /eval_case_reporting = true/);
+  assert.match(updated, /root = "\.custom-worktrees"/);
+  assert.match(updated, /max_queued = 3/);
+  assert.match(updated, /strong_reviewer = "custom\/reviewer"/);
+  assert.equal(Number(git(project, "rev-list", "--count", "HEAD")), 3);
+});
+
 test("setup rejects a confirmation after bound repository preconditions change", async () => {
   const project = fixture();
   const { createSetupPreview, applySetupPreview } = await import(
