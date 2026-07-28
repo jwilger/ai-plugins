@@ -184,6 +184,8 @@ test("extension registers status command and tool and cleans session state on re
       "goal_complete",
       "goal_blocked",
       "development_system_status",
+      "development_system_worktree_list",
+      "development_system_worktree_create",
       "development_system_setup_preview",
       "development_system_run_review_assignment",
     ],
@@ -210,6 +212,43 @@ test("extension registers status command and tool and cleans session state on re
   await registrations.events.get("session_shutdown")(
     { reason: "reload" },
     context,
+  );
+});
+
+test("semantic worktree tools bootstrap a primary checkout and report immutable-session relaunch", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk"),
+  );
+  const context = { cwd: project, mode: "json" };
+  const list = registrations.tools.find(
+    (tool) => tool.name === "development_system_worktree_list",
+  );
+  const create = registrations.tools.find(
+    (tool) => tool.name === "development_system_worktree_create",
+  );
+
+  const before = await list.execute("list", {}, undefined, undefined, context);
+  assert.equal(before.details.currentKind, "primary");
+  assert.equal(before.details.requiresRelaunch, true);
+  assert.match(before.content[0].text, /command-level cd or git -C/);
+
+  const created = await create.execute(
+    "create",
+    { name: "bootstrap", branch: "fix/bootstrap" },
+    undefined,
+    undefined,
+    context,
+  );
+  assert.equal(created.details.status, "created");
+  assert.equal(created.details.requiresRelaunch, true);
+  assert.match(created.details.nextAction, /This Pi session remains bound/);
+  assert.equal(
+    git(created.details.path, "branch", "--show-current"),
+    "fix/bootstrap",
   );
 });
 

@@ -8,6 +8,10 @@ import { resolveReviewRoute, runReviewChild } from "./adapters/review-child.ts";
 import { registerGoalMode } from "./adapters/goal-mode.ts";
 import { activeCiRecoveryHold } from "./adapters/ci-hold.ts";
 import {
+  createWorktree,
+  listWorktrees,
+} from "./adapters/worktrees.ts";
+import {
   McpClient,
   publicToolName,
   schemaIsAdmissible,
@@ -285,6 +289,65 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
+    name: "development_system_worktree_list",
+    label: "List Development Worktrees",
+    description:
+      "List canonical linked worktrees, branches, the authoritative current checkout, and exact Pi relaunch commands. This is the supported primary-checkout discovery path.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    async execute(_toolCallId, _parameters, signal, _onUpdate, context) {
+      if (signal?.aborted) throw new Error("development_system.cancelled");
+      const inventory = await listWorktrees(context.cwd);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              ...inventory,
+              currentSessionImmutable: true,
+              nextAction: inventory.requiresRelaunch
+                ? "Use development_system_worktree_create or a listed relaunchCommand. A command-level cd or git -C does not move this Pi session."
+                : "Continue ordinary mutation in the current linked worktree.",
+            }),
+          },
+        ],
+        details: inventory,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "development_system_worktree_create",
+    label: "Create Development Worktree",
+    description:
+      "Create one new repository-local linked worktree from the authoritative primary HEAD using parsed name and branch values, then return the exact command for starting a new Pi process there.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          minLength: 1,
+          maxLength: 100,
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        },
+        branch: { type: "string", minLength: 1, maxLength: 255 },
+      },
+      required: ["name", "branch"],
+      additionalProperties: false,
+    },
+    async execute(_toolCallId, parameters, signal, _onUpdate, context) {
+      if (signal?.aborted) throw new Error("development_system.cancelled");
+      const result = await createWorktree(context.cwd, {
+        name: parameters.name,
+        branch: parameters.branch,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "development_system_setup_preview",
     label: "Development System Setup Preview",
     description:
@@ -535,6 +598,8 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       "ls",
       "development_system_status",
       "development_system_setup_preview",
+      "development_system_worktree_list",
+      "development_system_worktree_create",
       "development_system_run_review_assignment",
       "goal_complete",
       "goal_blocked",
