@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -108,6 +108,99 @@ function attempted(records, toolName) {
   );
 }
 
+function goalAgent(home, cwd, prompt) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      pi,
+      [
+        "--mode",
+        "rpc",
+        "--no-session",
+        "--approve",
+        "--provider",
+        "openai-codex",
+        "--model",
+        model,
+        "--thinking",
+        thinking,
+      ],
+      {
+        cwd,
+        env: {
+          ...process.env,
+          PI_CODING_AGENT_DIR: home,
+          PI_CODING_AGENT_SESSION_DIR: path.join(home, "sessions"),
+          PI_OFFLINE: "1",
+          PI_TELEMETRY: "0",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const records = [];
+    let buffer = "";
+    let stderr = "";
+    let completed = false;
+    const timeout = setTimeout(() => {
+      const diagnostic = {
+        events: records.map((record) => record.type),
+        tools: records
+          .filter((record) => record.type === "tool_execution_start")
+          .map((record) => record.toolName),
+        turns: records.filter((record) => record.type === "turn_end").length,
+        lastAssistant: records
+          .filter(
+            (record) =>
+              record.type === "message_end" &&
+              record.message?.role === "assistant",
+          )
+          .at(-1)?.message?.content,
+      };
+      child.kill("SIGKILL");
+      reject(
+        new Error(
+          `Pi goal scenario timed out: ${stderr}; diagnostic=${JSON.stringify(diagnostic).slice(0, 8_000)}`,
+        ),
+      );
+    }, 3 * 60_000);
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      for (;;) {
+        const newline = buffer.indexOf("\n");
+        if (newline < 0) break;
+        const line = buffer.slice(0, newline).replace(/\r$/, "");
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        const record = JSON.parse(line);
+        records.push(record);
+        if (
+          record.type === "tool_execution_end" &&
+          record.toolName === "goal_complete"
+        ) {
+          completed = true;
+          child.stdin.end();
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (completed && code === 0) resolve(records);
+      else
+        reject(
+          new Error(
+            `Pi RPC goal scenario failed (${code}): ${stderr}; events=${records.map((record) => record.type).join(",")}`,
+          ),
+        );
+    });
+    child.stdin.write(
+      `${JSON.stringify({ id: "goal-canary", type: "prompt", message: prompt })}\n`,
+    );
+  });
+}
+
 try {
   const { project, linked } = createRepository();
   const packageHome = prepareHome("development-system");
@@ -174,7 +267,7 @@ try {
   }
 
   if (scenario !== "guards") {
-    const goal = agent(
+    const goal = await goalAgent(
       packageHome,
       linked,
       "/goal --turns 4 Prove bounded autonomous continuation. On the first response, use the read tool to inspect README.md and then end that response without calling goal_complete or goal_blocked. On the automatically authored continuation, use the bash tool to run git status --short, audit that both required actions succeeded, and call goal_complete with the exact current goal ID and direct evidence.",
@@ -192,6 +285,12 @@ try {
         attempted(goal, "bash") &&
         !attempted(goal, "goal_blocked"),
       expectedEffect: true,
+      diagnostic: {
+        turns: goalTurns,
+        tools: goal
+          .filter((record) => record.type === "tool_execution_start")
+          .map((record) => record.toolName),
+      },
     });
   }
 

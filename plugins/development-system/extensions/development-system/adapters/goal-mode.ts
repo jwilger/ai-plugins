@@ -103,6 +103,7 @@ export function registerGoalMode(pi: ExtensionAPI): {
   };
 
   const dispatch = (current: GoalState, continuation: boolean) => {
+    ownedRunGoalId = current.goalId;
     pi.sendMessage(
       {
         customType: MESSAGE_TYPE,
@@ -145,7 +146,14 @@ export function registerGoalMode(pi: ExtensionAPI): {
         `development_system.goal_collision ${collisionDiagnostic}; autonomous goal activation disabled`,
         "error",
       );
+      return;
     }
+    const active = new Set(pi.getActiveTools());
+    const ordinaryDefault = ["read", "bash", "edit", "write"].every((tool) =>
+      active.has(tool),
+    );
+    if (ordinaryDefault)
+      pi.setActiveTools([...new Set([...active, ...TERMINAL_TOOLS])]);
   });
   pi.on("session_tree", async (_event, context) => restore(context));
 
