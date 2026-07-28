@@ -60,6 +60,7 @@ fi
 skill_names=()
 pi_package=0
 pi_guards=0
+pi_goal=0
 for file in "${changed[@]}"; do
   case "$file" in
     plugins/development-system/skills/*/SKILL.md)
@@ -71,8 +72,15 @@ for file in "${changed[@]}"; do
       ;;
   esac
   case "$file" in
-    plugins/development-system/extensions/development-system/core/guards.ts | plugins/development-system/extensions/development-system/index.ts | plugins/development-system/extensions/development-system/adapters/ci-hold.ts | scripts/evals/run-pi-guard-scenarios.mjs)
+    plugins/development-system/extensions/development-system/core/guards.ts | plugins/development-system/extensions/development-system/adapters/ci-hold.ts)
       pi_guards=1
+      ;;
+    plugins/development-system/extensions/development-system/core/goal.ts | plugins/development-system/extensions/development-system/adapters/goal-mode.ts)
+      pi_goal=1
+      ;;
+    scripts/evals/run-pi-guard-scenarios.mjs)
+      pi_guards=1
+      pi_goal=1
       ;;
   esac
 done
@@ -106,7 +114,15 @@ fi
 if [ "$pi_guards" -eq 1 ]; then
   echo "eval scope: Pi guard/runtime -> executable baseline, worktree, and delivery outcomes"
   if [ "$dry_run" -eq 0 ]; then
-    node scripts/evals/run-pi-guard-scenarios.mjs
+    node scripts/evals/run-pi-guard-scenarios.mjs --scenario guards
+  fi
+  ran=1
+fi
+
+if [ "$pi_goal" -eq 1 ]; then
+  echo "eval scope: Pi autonomous goal -> settled continuation and guarded completion outcome"
+  if [ "$dry_run" -eq 0 ]; then
+    node scripts/evals/run-pi-guard-scenarios.mjs --scenario goal
   fi
   ran=1
 fi

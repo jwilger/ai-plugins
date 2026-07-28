@@ -48,6 +48,19 @@ commit_change() {
   [[ "$output" != *"all supported harnesses"* ]]
 }
 
+@test "changed eval planner selects only autonomous goal evidence for goal code" {
+  mkdir -p "$TMPROOT/plugins/development-system/extensions/development-system/core"
+  echo goal >"$TMPROOT/plugins/development-system/extensions/development-system/core/goal.ts"
+  commit_change
+
+  run "$TMPROOT/scripts/evals/run-changed.sh" --base "$BASE" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Pi package/runtime"* ]]
+  [[ "$output" == *"Pi autonomous goal"* ]]
+  [[ "$output" != *"Pi guard/runtime"* ]]
+}
+
 @test "changed eval planner maps shared skill changes to affected behavior cases" {
   mkdir -p "$TMPROOT/plugins/development-system/skills/eval-case-reporting"
   echo skill >"$TMPROOT/plugins/development-system/skills/eval-case-reporting/SKILL.md"
