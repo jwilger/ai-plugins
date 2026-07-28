@@ -185,7 +185,10 @@ export function registerGoalMode(pi: ExtensionAPI): {
           return;
         }
         if (command.operation === "resume") {
-          if (!state || state.status === "active")
+          if (
+            !state ||
+            (state.status !== "paused" && state.status !== "blocked")
+          )
             throw new Error("development_system.goal_stopped_required");
           const resumed = resumeGoal(state, {
             goalId: randomUUID(),

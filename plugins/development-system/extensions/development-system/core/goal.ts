@@ -300,6 +300,12 @@ export function blockedDecision(
   if (
     /\b(?:difficult|uncertain|incomplete|need clarification|recoverable|tests? failing)\b/i.test(
       reason,
+    ) ||
+    !/\b(?:external|user|owner|human|service|provider|account|authorization|approval|credential|permission|network|dependency)\b/i.test(
+      `${reason} ${evidence}`,
+    ) ||
+    !/\b(?:action|required|requires|approve|authorize|provide|restore|resolve|unblock|grant|renew)\b/i.test(
+      `${reason} ${evidence}`,
     )
   )
     throw new Error("development_system.goal_blocked_not_external");

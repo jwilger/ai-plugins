@@ -138,6 +138,17 @@ test("terminal decisions reject stale, premature, and weak blocker claims", () =
       }),
     /not_external/,
   );
+  assert.throws(
+    () =>
+      core.blockedDecision(active(), {
+        goalId: id,
+        reason: "The implementation does not work",
+        evidence: "Three attempts produced the same test result",
+        repeatedTurns: 3,
+        now: time,
+      }),
+    /not_external/,
+  );
   assert.equal(
     core.blockedDecision(active(), {
       goalId: id,
