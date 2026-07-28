@@ -19,7 +19,7 @@ on:
 
 permissions:
   contents: write
-  packages: write
+  id-token: write
 
 concurrency:
   group: publish-development-system
@@ -50,12 +50,10 @@ jobs:
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Configure npm for GitHub Packages
+      - name: Install Node for npm trusted publishing
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.0
-          registry-url: https://npm.pkg.github.com
-          scope: "@jwilger"
 
       - name: Refuse a stale or dirty release checkout
         env:
@@ -142,13 +140,12 @@ jobs:
       - name: Check package publication state
         id: package
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE_NAME: "@jwilger/development-system-pi"
           VERSION: ${{ steps.version.outputs.version }}
           RELEASE_BUMP: ${{ steps.version.outputs.bump }}
         run: |
           if npm view "$PACKAGE_NAME@$VERSION" version \
-            --registry https://npm.pkg.github.com >/dev/null 2>&1; then
+            --registry https://registry.npmjs.org >/dev/null 2>&1; then
             if [ "$RELEASE_BUMP" != current ]; then
               echo "Package $PACKAGE_NAME@$VERSION already exists" >&2
               exit 1
@@ -176,11 +173,13 @@ jobs:
           test "$(git rev-parse origin/main)" = "$commit"
           git reset --hard "$commit"
 
-      - name: Publish to GitHub Packages
+      - name: Publish to npmjs.org with trusted publishing
         if: steps.package.outputs.publish == 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm publish "${{ steps.pack.outputs.tarball }}" --registry https://npm.pkg.github.com
+        run: |
+          npx --yes npm@11.6.2 publish "${{ steps.pack.outputs.tarball }}" \
+            --registry https://registry.npmjs.org \
+            --provenance \
+            --access public
 
       - name: Tag the published version
         env:
@@ -202,7 +201,7 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           {
-            echo "Published **@jwilger/development-system-pi@$VERSION** to GitHub Packages."
+            echo "Published **@jwilger/development-system-pi@$VERSION** to npmjs.org with GitHub OIDC trusted publishing."
             echo
             echo "Git tag: \`$TAG\`"
           } >>"$GITHUB_STEP_SUMMARY"

@@ -21,6 +21,10 @@ teardown() {
     .files > 0 and
     .unpackedBytes < 104857600
   ' >/dev/null
+  jq -e '
+    .publishConfig.registry == "https://registry.npmjs.org" and
+    .publishConfig.access == "public"
+  ' "$ROOT/plugins/development-system/package.json" >/dev/null
 }
 
 @test "automatic releases infer the highest conventional semantic change" {
@@ -72,6 +76,20 @@ NODE
   [ "$status" -eq 0 ]
   run rg "github\.event\.workflow_run\.head_sha" "$workflow"
   [ "$status" -eq 0 ]
+}
+
+@test "publication uses npmjs trusted publishing without an npm token" {
+  workflow="$ROOT/.github/workflows/publish-development-system.yml"
+
+  [ "$(yq -r '.permissions."id-token"' "$workflow")" = write ]
+  run rg "npm@11\.6\.2 publish" "$workflow"
+  [ "$status" -eq 0 ]
+  run rg -- "--provenance" "$workflow"
+  [ "$status" -eq 0 ]
+  run rg "https://registry\.npmjs\.org" "$workflow"
+  [ "$status" -eq 0 ]
+  run rg "NPM_TOKEN|NODE_AUTH_TOKEN|npm\.pkg\.github\.com|packages: write" "$workflow"
+  [ "$status" -eq 1 ]
 }
 
 @test "release commit contains every synchronized surface and requires signed GraphQL output" {

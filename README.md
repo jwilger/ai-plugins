@@ -37,15 +37,14 @@ pi install ./plugins/development-system
 ```
 
 See the [development-system guide](plugins/development-system/README.md) for
-GitHub Packages and local installation, project trust, setup, updates, status,
+npmjs.org and local installation, project trust, setup, updates, status,
 target support, capability differences, and removal.
 
 ## Publishing the Pi npm package
 
 After a push to `main` completes the **CI** workflow successfully, the trusted
 **Publish development-system npm package** workflow automatically versions and
-publishes `@jwilger/development-system-pi` to this repository's GitHub Packages
-registry. It evaluates every commit since the latest
+publishes the public `@jwilger/development-system-pi` package to npmjs.org. It evaluates every commit since the latest
 `development-system-v<version>` tag: any Conventional Commit breaking marker
 selects a major change, otherwise `feat` selects minor, and every other push
 selects patch. The workflow is bound to the exact CI-verified commit and stops
@@ -53,16 +52,19 @@ if `main` advances before publication.
 
 The workflow updates every canonical/harness version surface, restores pinned
 validation dependencies, reruns package and release gates, creates one atomic
-GitHub `web-flow`-signed version commit, publishes one exact tarball using the
-workflow `GITHUB_TOKEN`, and tags the published commit. Its own token-authored
+GitHub `web-flow`-signed version commit, exchanges GitHub's job-scoped OIDC
+identity through npm trusted publishing, publishes one provenance-attested exact
+tarball without an npm token, and tags the published commit. Its own token-authored
 version update does not recursively start another workflow run.
 
 Manual dispatch remains available on `main` with `patch`, `minor`, or `major` for
 an explicit release. Choose `current` only to publish or finish tagging the
 already checked-in version after a recoverable partial release. Releases are
 serialized, reject stale checkouts and duplicate bumped versions, and never
-store a long-lived publication token. Repository Actions policy must allow the
-declared `contents: write` and `packages: write` permissions.
+store a long-lived publication token. The npm package's trusted-publisher
+configuration must name this repository and
+`.github/workflows/publish-development-system.yml`; Repository Actions policy
+must allow the declared `contents: write` and `id-token: write` permissions.
 
 Local payload validation is provider-free:
 

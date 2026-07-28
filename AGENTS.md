@@ -419,11 +419,13 @@ since the latest package tag selects the highest required semantic change:
 breaking marker → major, `feat` → minor, and every other push → patch. Manual
 `patch`, `minor`, and `major` dispatches remain available; use `current` only to
 recover publication or tagging for the already checked-in version. The workflow
-owns the atomic GitHub `web-flow`-signed version commit, exact tarball, GitHub
-Packages publication, and `development-system-v<version>` tag. Never hand-edit
-one version surface or
-publish the package from a developer token. Validate the payload locally with
-`just npm-package`.
+owns the atomic GitHub `web-flow`-signed version commit, exact tarball,
+npmjs.org trusted publication with provenance, and
+`development-system-v<version>` tag. The npm trusted-publisher binding must be
+limited to this repository and `.github/workflows/publish-development-system.yml`.
+Never hand-edit one version surface, add an npm publication token, or publish
+from a developer credential. Validate the payload locally with `just
+npm-package`.
 
 CI runs on GitHub Actions (`.github/workflows/ci.yml`):
 

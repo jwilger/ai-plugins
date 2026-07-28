@@ -145,7 +145,7 @@ worktree-teardown path:
     scripts/worktree-teardown.sh "{{path}}"
     git worktree remove "{{path}}"
 
-# Validate the exact npm/GitHub Packages payload without publishing it.
+# Validate the exact public npmjs.org payload without publishing it.
 npm-package:
     node scripts/validate-development-system-npm-package.mjs
 

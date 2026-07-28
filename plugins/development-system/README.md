@@ -11,19 +11,15 @@ CI-recovery, retained-component, and final-review behavior.
 Pi packages execute trusted code with the user's full operating-system
 permissions. Review this package and trust only a source you control.
 
-### GitHub Packages
+### npmjs.org
 
-Published releases use `@jwilger/development-system-pi` in GitHub Packages.
-Successful `main` push CI automatically publishes the next semantic version:
-breaking Conventional Commits select major, `feat` selects minor, and other
-changes select patch. The package currently has restricted visibility, so
-authenticate npm with a classic
-personal access token carrying `read:packages`, then install it through Pi's npm
-package source:
+Published releases use the public `@jwilger/development-system-pi` package on
+npmjs.org. Successful `main` push CI automatically publishes the next semantic
+version: breaking Conventional Commits select major, `feat` selects minor, and
+other changes select patch. Install it through Pi's npm package source without a
+registry credential:
 
 ```shell
-npm login --scope=@jwilger --auth-type=legacy \
-  --registry=https://npm.pkg.github.com
 pi install npm:@jwilger/development-system-pi
 ```
 
@@ -31,7 +27,7 @@ Pin a release with
 `pi install npm:@jwilger/development-system-pi@<version>`. Use
 `pi update npm:@jwilger/development-system-pi` for an unpinned install and
 `pi remove npm:@jwilger/development-system-pi` to remove it. Never commit the
-resulting npm credential.
+npm credentials if you use a private registry override.
 
 ### Local checkout
 
