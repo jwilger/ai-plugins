@@ -23,6 +23,57 @@ teardown() {
   ' >/dev/null
 }
 
+@test "automatic releases infer the highest conventional semantic change" {
+  run node --input-type=module - "$ROOT/scripts/determine-development-system-bump.mjs" <<'NODE'
+import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
+const module = await import(pathToFileURL(process.argv[2]));
+assert.deepEqual(module.determineBump(["docs: clarify setup"]), {
+  bump: "patch",
+  breaking: false,
+  features: false,
+});
+assert.equal(
+  module.determineBump(["fix: repair launcher", "feat(pi): add command"]).bump,
+  "minor",
+);
+assert.equal(
+  module.determineBump(["feat: add mode", "refactor(core)!: remove old mode"]).bump,
+  "major",
+);
+assert.equal(
+  module.determineBump(["fix: preserve API\n\nBREAKING CHANGE: config schema changed"]).bump,
+  "major",
+);
+assert.equal(
+  module.determineBump(["fix: preserve API\n\nbreaking-change: config schema changed"]).bump,
+  "major",
+);
+assert.throws(() => module.determineBump([]));
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
+@test "automatic publish waits for successful main-push CI" {
+  workflow="$ROOT/.github/workflows/publish-development-system.yml"
+
+  run yq -r '.on.workflow_run.workflows[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = CI ]
+  run yq -r '.on.workflow_run.types[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = completed ]
+  run rg "github\.event\.workflow_run\.conclusion == 'success'" "$workflow"
+  [ "$status" -eq 0 ]
+  run rg "github\.event\.workflow_run\.event == 'push'" "$workflow"
+  [ "$status" -eq 0 ]
+  run rg "github\.event\.workflow_run\.head_branch == 'main'" "$workflow"
+  [ "$status" -eq 0 ]
+  run rg "github\.event\.workflow_run\.head_sha" "$workflow"
+  [ "$status" -eq 0 ]
+}
+
 @test "release versioning applies strict semantic increments" {
   run node --input-type=module - "$ROOT/scripts/version-development-system.mjs" <<'NODE'
 import assert from "node:assert/strict";

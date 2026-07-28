@@ -1,6 +1,9 @@
 name: Publish development-system npm package
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch:
     inputs:
       bump:
@@ -25,14 +28,19 @@ concurrency:
 jobs:
   release:
     name: Version, verify, and publish
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      - name: Check out main with release credentials
+      - name: Check out the CI-verified main commit with release credentials
         uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
           fetch-depth: 0
           persist-credentials: true
 
@@ -50,17 +58,43 @@ jobs:
           scope: "@jwilger"
 
       - name: Refuse a stale or dirty release checkout
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          git fetch --no-tags origin main
-          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          git fetch --tags origin main
+          expected_sha="$(git rev-parse origin/main)"
+          if [ "$EVENT_NAME" = workflow_run ]; then
+            test -n "$VERIFIED_SHA"
+            expected_sha="$VERIFIED_SHA"
+            test "$VERIFIED_SHA" = "$(git rev-parse origin/main)"
+          fi
+          test "$(git rev-parse HEAD)" = "$expected_sha"
           test -z "$(git status --porcelain=v1)"
 
-      - name: Apply canonical version change
+      - name: Resolve semantic change and apply canonical version
         id: version
         env:
-          RELEASE_BUMP: ${{ inputs.bump }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_BUMP: ${{ inputs.bump }}
         run: |
-          result="$(node scripts/version-development-system.mjs --bump "$RELEASE_BUMP")"
+          if [ "$EVENT_NAME" = workflow_run ]; then
+            previous_tag="$(git describe --tags --match 'development-system-v[0-9]*' --abbrev=0 HEAD)"
+            analysis="$(
+              node scripts/determine-development-system-bump.mjs \
+                --from "$previous_tag" \
+                --to HEAD
+            )"
+            release_bump="$(jq -r '.bump' <<<"$analysis")"
+            jq -r '
+              "Automatic semantic change: **\(.bump)** " +
+              "from `\(.commits)` commit(s) since `\(.from)` " +
+              "(breaking=\(.breaking), features=\(.features))."
+            ' <<<"$analysis" >>"$GITHUB_STEP_SUMMARY"
+          else
+            release_bump="$MANUAL_BUMP"
+          fi
+          result="$(node scripts/version-development-system.mjs --bump "$release_bump")"
           version="$(jq -r '.version' <<<"$result")"
           changed="$(jq -r '.changed' <<<"$result")"
           nix develop -c prettier --write \
@@ -78,6 +112,7 @@ jobs:
           {
             echo "version=$version"
             echo "changed=$changed"
+            echo "bump=$release_bump"
             echo "tag=development-system-v$version"
           } >>"$GITHUB_OUTPUT"
 
@@ -110,7 +145,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE_NAME: "@jwilger/development-system-pi"
           VERSION: ${{ steps.version.outputs.version }}
-          RELEASE_BUMP: ${{ inputs.bump }}
+          RELEASE_BUMP: ${{ steps.version.outputs.bump }}
         run: |
           if npm view "$PACKAGE_NAME@$VERSION" version \
             --registry https://npm.pkg.github.com >/dev/null 2>&1; then
