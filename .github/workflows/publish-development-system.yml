@@ -52,6 +52,28 @@ jobs:
         with:
           node-version: 22.22.0
 
+      - name: Verify npm trusted publisher binding before version mutation
+        env:
+          PACKAGE_NAME: "@jwilger/development-system-pi"
+        run: |
+          test -n "$ACTIONS_ID_TOKEN_REQUEST_URL"
+          test -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+          oidc_response="$(
+            curl --fail --silent --show-error \
+              --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm%3Aregistry.npmjs.org"
+          )"
+          oidc_token="$(jq -er '.value' <<<"$oidc_response")"
+          encoded_package="$(node -p 'encodeURIComponent(process.env.PACKAGE_NAME)')"
+          exchange_response="$(
+            curl --fail --silent --show-error \
+              --request POST \
+              --header "Authorization: Bearer $oidc_token" \
+              "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/$encoded_package"
+          )"
+          jq -er '.token | length > 0' <<<"$exchange_response" >/dev/null
+          unset oidc_token exchange_response
+
       - name: Refuse a stale or dirty release checkout
         env:
           EVENT_NAME: ${{ github.event_name }}

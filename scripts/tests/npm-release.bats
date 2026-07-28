@@ -135,6 +135,20 @@ NODE
   [ "$status" -eq 1 ]
 }
 
+@test "trusted publisher binding is verified before release metadata mutates" {
+  workflow="$ROOT/.github/workflows/publish-development-system.yml"
+
+  run yq -r '.jobs.release.steps[].name' "$workflow"
+  [ "$status" -eq 0 ]
+  preflight_line="$(printf '%s\n' "$output" | grep -n '^Verify npm trusted publisher binding before version mutation$' | cut -d: -f1)"
+  version_line="$(printf '%s\n' "$output" | grep -n '^Resolve semantic change and apply canonical version$' | cut -d: -f1)"
+  [ -n "$preflight_line" ]
+  [ -n "$version_line" ]
+  [ "$preflight_line" -lt "$version_line" ]
+  run rg 'oidc/token/exchange/package' "$workflow"
+  [ "$status" -eq 0 ]
+}
+
 @test "release commit contains every synchronized surface and requires signed GraphQL output" {
   run node --input-type=module - "$ROOT/scripts/create-github-release-commit.mjs" "$ROOT" <<'NODE'
 import assert from "node:assert/strict";
