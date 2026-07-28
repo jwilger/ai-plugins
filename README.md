@@ -24,7 +24,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses              | Description                                                         | Version |
 | ---------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.2.1   |
+| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.3.0   |
 
 ## Using the package (Pi — primary)
 
