@@ -1,0 +1,17 @@
+schema_version = 1
+
+[delivery]
+mode = "direct-to-trunk"
+trunk_branch = "main"
+
+[features]
+worktrees = true
+tiber = true
+agentic_systems = true
+eval_case_reporting = true
+
+[worktrees]
+root = ".worktrees"
+
+[tiber]
+max_queued = 5
