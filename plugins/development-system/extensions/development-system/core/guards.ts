@@ -269,11 +269,18 @@ export function classifyShellCommand(command: string): ShellClassification {
 }
 
 export function worktreeTargetAllowed(
-  input: Readonly<{ rawPath: string; cwd: string; primary: string }>,
+  input: Readonly<{
+    rawPath: string;
+    cwd: string;
+    primary: string;
+    configuredRoot?: string;
+  }>,
 ): boolean {
   const canonicalPrimary = fs.realpathSync(input.primary);
+  const configuredRoot = input.configuredRoot ?? ".worktrees";
+  if (path.isAbsolute(configuredRoot)) return false;
   const canonicalRoot = canonicalProspectivePath(
-    path.resolve(canonicalPrimary, ".worktrees"),
+    path.resolve(canonicalPrimary, configuredRoot),
   );
   const canonicalTarget = canonicalProspectivePath(
     path.resolve(input.cwd, input.rawPath),

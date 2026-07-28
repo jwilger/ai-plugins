@@ -28,6 +28,11 @@ import {
 import type { HarnessMode } from "./core/status.ts";
 import { parseProjectPolicy } from "./core/configuration.ts";
 import {
+  configuredWorktreeRoot,
+  parseWorktreeBranch,
+  parseWorktreeName,
+} from "./core/worktrees.ts";
+import {
   classifyPath,
   classifyShellCommand,
   deliveryDecision,
@@ -142,14 +147,27 @@ async function shellRejection(
     context.status.checkout.kind === "primary" &&
     classification.kind === "worktree-creation"
   ) {
-    if (
-      worktreeTargetAllowed({
-        rawPath: classification.targetPath,
-        cwd,
-        primary: context.status.checkout.primary,
-      })
-    )
-      return null;
+    try {
+      const root = configuredWorktreeRoot(
+        context.status.checkout.primary,
+        context.policy.worktrees.root,
+      );
+      const lexicalTarget = path.resolve(cwd, classification.targetPath);
+      const relative = path.relative(root, lexicalTarget);
+      parseWorktreeName(relative);
+      parseWorktreeBranch(classification.branch);
+      if (
+        worktreeTargetAllowed({
+          rawPath: classification.targetPath,
+          cwd,
+          primary: context.status.checkout.primary,
+          configuredRoot: context.policy.worktrees.root,
+        })
+      )
+        return null;
+    } catch {
+      // Invalid semantic values do not gain shell mutation authority.
+    }
     return guardMessage({
       code: "development_system.coordination_worktree_target_blocked",
       boundary: "coordination-checkout worktree creation",

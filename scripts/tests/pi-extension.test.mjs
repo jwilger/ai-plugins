@@ -474,6 +474,17 @@ test("extension blocks coordination writes, secret reads, and unclassified shell
   );
   assert.equal(escapedWorktree.block, true);
   assert.match(escapedWorktree.reason, /coordination_worktree_target_blocked/);
+  const injectedWorktree = await guard(
+    {
+      toolName: "bash",
+      input: {
+        command: "git worktree add .worktrees/injected -b --force",
+      },
+    },
+    context,
+  );
+  assert.equal(injectedWorktree.block, true);
+  assert.match(injectedWorktree.reason, /coordination_worktree_target_blocked/);
   const shell = await guard(
     { toolName: "bash", input: { command: "python script.py" } },
     context,

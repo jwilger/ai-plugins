@@ -138,6 +138,30 @@ test("configured worktree root symlink escape is rejected without mutation", asy
   assert.equal(fs.readdirSync(outside).length, 0);
 });
 
+test("partial Git failure preserves user and diagnostic state without cleanup", async () => {
+  const root = repository();
+  const lock = path.join(root, ".git", "refs", "heads", "feat", "fail.lock");
+  fs.mkdirSync(lock, { recursive: true });
+
+  const result = await createWorktree(root, {
+    name: "failed",
+    branch: "feat/fail",
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.code, "development_system.worktree_git_failed");
+  assert.match(result.nextAction, /No cleanup was performed/);
+  assert.equal(fs.existsSync(lock), true);
+  assert.equal(fs.existsSync(path.join(root, "README.md")), true);
+  assert.equal(fs.existsSync(path.join(root, ".worktrees", "failed")), true);
+  assert.equal(
+    execFileSync("git", ["-C", root, "status", "--porcelain"], {
+      encoding: "utf8",
+    }),
+    "",
+  );
+});
+
 test("concurrent same-target creation deterministically preserves one worktree", async () => {
   const root = repository();
   const [first, second] = await Promise.all([
