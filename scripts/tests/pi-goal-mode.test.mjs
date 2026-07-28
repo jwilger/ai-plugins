@@ -271,6 +271,43 @@ test("goal adapter persists only in the session branch and dispatches one custom
   assert.equal(newMode.current(), null);
 });
 
+test("goal pause resume and compaction restoration preserve consumed usage", async () => {
+  const runtime = harness();
+  const mode = registerGoalMode(runtime.pi);
+  await runtime.emit("session_start", {});
+  await runtime.registeredCommands
+    .get("goal")
+    .handler("--tokens 100 work", runtime.context);
+  await runtime.emit("before_agent_start", {
+    systemPrompt: "base",
+    prompt: runtime.messages[0].message.content,
+  });
+  await runtime.emit("turn_end", {
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "working" }],
+      usage: { totalTokens: 20 },
+    },
+    toolResults: [{ role: "toolResult" }],
+  });
+  await runtime.registeredCommands
+    .get("goal")
+    .handler("pause", runtime.context);
+  const pausedId = mode.current().goalId;
+  await runtime.registeredCommands
+    .get("goal")
+    .handler("resume --tokens 200 --turns 3", runtime.context);
+  assert.equal(mode.current().status, "active");
+  assert.notEqual(mode.current().goalId, pausedId);
+  assert.equal(mode.current().tokenUsage, 20);
+  assert.equal(mode.current().automaticResponses, 0);
+  assert.equal(mode.current().automaticLimit, 3);
+
+  await runtime.emit("session_tree", {});
+  assert.equal(mode.current().tokenUsage, 20);
+  assert.equal(mode.current().objective, "work");
+});
+
 test("goal adapter rotates stale-turn ownership on direct user intervention", async () => {
   const runtime = harness();
   const mode = registerGoalMode(runtime.pi);

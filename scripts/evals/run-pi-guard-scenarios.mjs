@@ -166,6 +166,26 @@ try {
     expectedEffect: true,
   });
 
+  const goal = agent(
+    packageHome,
+    linked,
+    "/goal --turns 4 Prove bounded autonomous continuation. On the first response, use the read tool to inspect README.md and then end that response without calling goal_complete or goal_blocked. On the automatically authored continuation, use the bash tool to run git status --short, audit that both required actions succeeded, and call goal_complete with the exact current goal ID and direct evidence.",
+  );
+  const goalTurns = goal.filter(
+    (record) =>
+      record.type === "turn_end" && record.message?.role === "assistant",
+  ).length;
+  cases.push({
+    id: "pi-goal-settled-continuation-and-completion",
+    attempted: attempted(goal, "goal_complete"),
+    effect:
+      goalTurns >= 2 &&
+      attempted(goal, "read") &&
+      attempted(goal, "bash") &&
+      !attempted(goal, "goal_blocked"),
+    expectedEffect: true,
+  });
+
   for (const result of cases) {
     if (!result.attempted || result.effect !== result.expectedEffect)
       throw new Error(
