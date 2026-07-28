@@ -250,8 +250,9 @@ JSON
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/package.json")"
   [[ "$output" == *"path: \"{{ env.CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM"* ]]
-  [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/1.2.0"* ]]
+  [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/$version"* ]]
   [[ "$output" != *"path: \"./plugins/"* ]]
 }
 
