@@ -74,6 +74,48 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "release commit contains every synchronized surface and requires signed GraphQL output" {
+  run node --input-type=module - "$ROOT/scripts/create-github-release-commit.mjs" "$ROOT" <<'NODE'
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+const module = await import(pathToFileURL(process.argv[2]));
+const root = process.argv[3];
+const input = module.releaseCommitInput({
+  repository: "jwilger/ai-plugins",
+  branch: "main",
+  expectedHeadOid: "a".repeat(40),
+  version: "2.3.4",
+});
+assert.equal(input.message.headline, "chore(release): development-system v2.3.4");
+assert.equal(input.fileChanges.additions.length, module.releaseFiles.length);
+assert.deepEqual(
+  input.fileChanges.additions.map(({ path }) => path),
+  [...module.releaseFiles],
+);
+for (const addition of input.fileChanges.additions) {
+  assert.deepEqual(
+    Buffer.from(addition.contents, "base64"),
+    fs.readFileSync(path.join(root, addition.path)),
+  );
+}
+assert.throws(() => module.releaseCommitInput({
+  repository: "invalid",
+  branch: "main",
+  expectedHeadOid: "a".repeat(40),
+  version: "2.3.4",
+}));
+NODE
+
+  [ "$status" -eq 0 ]
+  workflow="$ROOT/.github/workflows/publish-development-system.yml"
+  run rg "scripts/create-github-release-commit\.mjs" "$workflow"
+  [ "$status" -eq 0 ]
+  run rg "git commit" "$workflow"
+  [ "$status" -eq 1 ]
+}
+
 @test "main CI restores the pinned package toolchain before the full gate" {
   workflow="$ROOT/.github/workflows/ci.yml"
 

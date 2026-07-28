@@ -52,10 +52,10 @@ selects patch. The workflow is bound to the exact CI-verified commit and stops
 if `main` advances before publication.
 
 The workflow updates every canonical/harness version surface, restores pinned
-validation dependencies, reruns package and release gates, pushes the version
-commit, publishes one exact tarball using the workflow `GITHUB_TOKEN`, and tags
-the published commit. Its own token-authored version push does not recursively
-start another workflow run.
+validation dependencies, reruns package and release gates, creates one atomic
+GitHub `web-flow`-signed version commit, publishes one exact tarball using the
+workflow `GITHUB_TOKEN`, and tags the published commit. Its own token-authored
+version update does not recursively start another workflow run.
 
 Manual dispatch remains available on `main` with `patch`, `minor`, or `major` for
 an explicit release. Choose `current` only to publish or finish tagging the

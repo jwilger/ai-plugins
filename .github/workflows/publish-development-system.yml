@@ -158,27 +158,23 @@ jobs:
             echo "publish=true" >>"$GITHUB_OUTPUT"
           fi
 
-      - name: Commit and push the version
+      - name: Create and check out the signed version commit
         if: steps.version.outputs.changed == 'true'
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            plugins/development-system/package.json \
-            plugins/development-system/.claude-plugin/plugin.json \
-            plugins/development-system/.codex-plugin/plugin.json \
-            plugins/development-system/.mcp.json \
-            plugins/development-system/components/agentic-systems-engineering/.mcp.json \
-            plugins/development-system/components/development-discipline/.mcp.json \
-            plugins/development-system/components/tiber/.mcp.json \
-            .claude-plugin/marketplace.json \
-            .agents/plugins/marketplace.json \
-            README.md \
-            plugins/development-system/README.md
-          git commit -m "chore(release): development-system v$VERSION"
-          git push origin HEAD:main
+          expected_head="$(git rev-parse HEAD)"
+          result="$(
+            node scripts/create-github-release-commit.mjs \
+              --version "$VERSION" \
+              --expected-head "$expected_head" \
+              --branch main
+          )"
+          commit="$(jq -r '.oid' <<<"$result")"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$commit"
+          git reset --hard "$commit"
 
       - name: Publish to GitHub Packages
         if: steps.package.outputs.publish == 'true'

@@ -419,8 +419,9 @@ since the latest package tag selects the highest required semantic change:
 breaking marker → major, `feat` → minor, and every other push → patch. Manual
 `patch`, `minor`, and `major` dispatches remain available; use `current` only to
 recover publication or tagging for the already checked-in version. The workflow
-owns the version commit, exact tarball, GitHub Packages publication, and
-`development-system-v<version>` tag. Never hand-edit one version surface or
+owns the atomic GitHub `web-flow`-signed version commit, exact tarball, GitHub
+Packages publication, and `development-system-v<version>` tag. Never hand-edit
+one version surface or
 publish the package from a developer token. Validate the payload locally with
 `just npm-package`.
 
