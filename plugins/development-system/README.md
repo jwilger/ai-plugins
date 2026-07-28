@@ -96,16 +96,28 @@ development-system setup --project . --preset personal-trunk --dry-run
 development-system setup --project . --preset personal-trunk --apply --yes
 ```
 
-Both paths delegate to the same setup implementation, which rejects linked
-worktrees and rolls back the config and index if its single initialization
-commit fails.
+Initial setup delegates to the compatible CLI. Updating an existing policy
+patches only explicitly requested delivery or feature fields, preserving every
+unspecified value, review route, comment, and formatting choice. Both initial
+and update paths reject linked checkouts and roll back the file and index if
+their bound commit fails.
 
-When worktrees are enabled, the primary checkout remains coordination-only, but
-the guard admits the bounded bootstrap command
-`git worktree add .worktrees/<name> -b <branch>`. It still rejects targets
-outside the primary checkout's canonical `.worktrees/` directory, alternate
-start points, additional options, command chaining, and subsequent ordinary
-mutation in the primary checkout.
+When worktrees are enabled, the primary checkout remains coordination-only. Use
+`development_system_worktree_list` to inspect canonical paths and branches, and
+`development_system_worktree_create` with a repository-local name and new
+branch to bootstrap work. The create result includes the canonical path and an
+exact `cd ... && exec pi` command. The current Pi process remains bound to its
+original checkout; command-level `cd` or `git -C` never changes enforcement, so
+start a new Pi process with that command before ordinary mutation.
+
+The semantic worktree tools reject malformed refs, option-like values,
+traversal, control characters, configured-root and target symlink escapes, and
+path or branch collisions. Creation is queued per repository and reconciles
+external races without deleting existing branches, directories, worktrees, or
+user content. A narrowly parsed compatibility
+`git worktree add <root>/<name> -b <branch>` form remains available, but
+additional options, start points, chaining, and later primary-checkout mutation
+remain blocked.
 
 `.development-system.toml` remains authoritative. The default preset is
 direct-to-trunk delivery with linked worktrees and Tiber. Optional features are
@@ -146,8 +158,11 @@ verification evidence can complete a goal. `goal_blocked` requires the same
 external blocker across at least three attempts and concrete evidence that user
 or external action is required. Plain assistant text, stale turns, delayed
 continuations, difficulty, incomplete work, and recoverable failures cannot
-terminate successfully. Continuations are extension-authored custom messages
-dispatched only after Pi's settled and idle boundary.
+terminate successfully. A stale terminal call reports the current non-secret
+goal ID, guard epoch, state, consumed bounds, and
+`development_system_goal_status` refresh/retry path instead of creating a stale
+loop. Continuations are extension-authored custom messages dispatched only
+after Pi's settled and idle boundary.
 
 ## Status and diagnostics
 
@@ -165,6 +180,16 @@ limitations, and actionable typed errors. Startup runs the same compatibility
 doctor used by the existing harness hooks. A model-callable read-only status
 tool returns only a concise task-facing summary by default.
 
+`development_system_policy_read` is the narrow reader for the authoritative
+protected policy. `development_system_pi_reference` pages through an allowlist
+of installed Pi references without opening arbitrary outside-path reads.
+Registered-worktree status commands and the checkout guard script are admitted
+as bounded discovery, while mutations remain tied to the process checkout.
+Fresh review children emit a running lifecycle update and return structured,
+non-secret cancellation, timeout, provider, output-limit, spawn, or malformed
+result diagnostics; broader streaming subagent observability remains tracked by
+Tiber ticket `20260728-9rym`.
+
 ## Capability matrix
 
 | Capability                          | Pi (primary)                                                | Claude Code (secondary)       | Codex (tertiary)              |
@@ -173,6 +198,7 @@ tool returns only a concise task-facing summary by default.
 | Setup/doctor core                   | Native command/tool and CLI                                 | Hook/CLI adapter              | Hook/CLI adapter              |
 | Trusted consequential approval      | Local TUI, preview-bound                                    | Unavailable                   | Unavailable                   |
 | Bounded autonomous goal mode        | Session-scoped `/goal` with guarded terminal tools          | Unavailable                   | Unavailable                   |
+| Worktree discovery/bootstrap        | Semantic list/create tools with exact relaunch command      | Hook/skill adapter            | Hook/skill adapter            |
 | Generic write/edit worktree guard   | Extension event-enforced                                    | Hook-enforced where supported | Hook-enforced where supported |
 | Default model bash guard            | Extension event-enforced in TUI/print/JSON model-tool paths | Instruction/hook boundary     | Instruction/hook boundary     |
 | Direct RPC bash                     | Unsupported for guarded execution                           | N/A                           | N/A                           |
@@ -181,7 +207,7 @@ tool returns only a concise task-facing summary by default.
 | Tiber CI-recovery hold              | Extension event plus authoritative Tiber state              | Hook/skill plus Tiber state   | Hook/skill plus Tiber state   |
 | Tiber tools                         | Feature-aware native Pi bridge                              | Plugin MCP                    | Plugin MCP                    |
 | Final-review coordinator            | Native Pi bridge to authoritative Rust MCP                  | Plugin MCP                    | Plugin MCP                    |
-| Fresh final-review children         | Isolated Pi child sessions with attestation                 | Harness agents                | Harness agents                |
+| Fresh final-review children         | Isolated children with lifecycle and failure diagnostics    | Harness agents                | Harness agents                |
 | Agent definitions                   | Canonical source with generated adapter                     | Generated Markdown            | Generated TOML                |
 
 The populated-secret claim covers the characterized built-in guarded tool

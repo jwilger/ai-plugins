@@ -88,10 +88,16 @@ test("provider and malformed results remain unresolved failures", async () => {
   } catch (error) {
     providerFailure = reviewFailureResult(error);
   }
-  assert.equal(providerFailure.code, "development_system.review_child_provider_failed");
+  assert.equal(
+    providerFailure.code,
+    "development_system.review_child_provider_failed",
+  );
   assert.equal(providerFailure.reason, "provider-exit");
   assert.equal(providerFailure.lifecycle.exitCode, 7);
-  assert.equal(JSON.stringify(providerFailure).includes("status\":\"clean"), false);
+  assert.equal(
+    JSON.stringify(providerFailure).includes('status":"clean'),
+    false,
+  );
 });
 
 test("cancelled and timed-out children expose structured lifecycle diagnostics", async () => {
@@ -123,7 +129,10 @@ test("cancelled and timed-out children expose structured lifecycle diagnostics",
   assert.equal(cancelled.lifecycle.state, "cancelled");
   assert.equal(cancelled.lifecycle.terminationRequested, true);
   assert.ok(cancelled.lifecycle.stderrBytes > 0);
-  assert.equal(JSON.stringify(cancelled).includes("private-provider-detail"), false);
+  assert.equal(
+    JSON.stringify(cancelled).includes("private-provider-detail"),
+    false,
+  );
   assert.match(cancelled.retry, /rerun the assignment/);
 
   let timedOut;

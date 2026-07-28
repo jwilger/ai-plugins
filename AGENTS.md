@@ -70,6 +70,13 @@ Before making edits, agents should run:
 scripts/agent-checkout-guard.sh
 ```
 
+In Pi with `development-system` active, a primary-checkout session should call
+`development_system_worktree_list` and
+`development_system_worktree_create` rather than improvising mutation. Creation
+returns the exact command for starting a new Pi process in the linked worktree;
+`cd` or `git -C` in one shell command does not move the current session's
+enforcement checkout.
+
 The guard exits successfully only from a linked worktree. In the main checkout
 it blocks feature work, points to the linked-worktree command above, and
 distinguishes ordinary local changes from the common case where the dirty

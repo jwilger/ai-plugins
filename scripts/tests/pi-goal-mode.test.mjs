@@ -363,7 +363,8 @@ test("goal adapter rotates stale-turn ownership on direct user intervention", as
         {
           goal_id: originalId,
           reason: "The external service requires owner approval",
-          evidence: "The owner action remained required on attempts 1, 2, and 3",
+          evidence:
+            "The owner action remained required on attempts 1, 2, and 3",
           repeated_turns: 3,
         },
         undefined,

@@ -132,7 +132,7 @@ function parsePorcelain(
   context: RepositoryContext,
 ): WorktreeRecord[] {
   const records: WorktreeRecord[] = [];
-  let current: Partial<WorktreeRecord> = {};
+  let current: { path?: string; branch?: string; head?: string } = {};
   const flush = () => {
     if (!current.path || !current.head) return;
     const worktreePath = current.path;

@@ -96,10 +96,7 @@ async function preconditions(project: string): Promise<
   let configIdentity: string | null = null;
   let configSource: string | null = null;
   try {
-    const configPath = path.join(
-      canonicalProject,
-      ".development-system.toml",
-    );
+    const configPath = path.join(canonicalProject, ".development-system.toml");
     const stat = await lstat(configPath);
     if (stat.isSymbolicLink())
       throw new Error("development_system.setup_config_symlink_blocked");
@@ -164,9 +161,7 @@ function proposeExistingConfig(source: string, arguments_: readonly string[]) {
     const option = arguments_[index];
     const value = arguments_[index + 1];
     if (option === "--preset" && value !== "personal-trunk")
-      throw new Error(
-        `development_system.unsupported_preset preset=${value}`,
-      );
+      throw new Error(`development_system.unsupported_preset preset=${value}`);
     if (option === "--delivery")
       proposed = replaceAssignment(
         proposed,
@@ -190,7 +185,11 @@ function proposeExistingConfig(source: string, arguments_: readonly string[]) {
   return { proposed, policy };
 }
 
-function existingPreview(project: string, source: string, arguments_: string[]) {
+function existingPreview(
+  project: string,
+  source: string,
+  arguments_: string[],
+) {
   const { proposed, policy } = proposeExistingConfig(source, arguments_);
   const preview = [
     `development_system.setup_preview project=${project}`,
@@ -282,10 +281,7 @@ export async function applySetupPreview(
     return "development_system.setup_no_changes\n";
   if (state.configSource === null)
     throw new Error("development_system.setup_confirmation_stale");
-  const configPath = path.join(
-    approved.project,
-    ".development-system.toml",
-  );
+  const configPath = path.join(approved.project, ".development-system.toml");
   const original = state.configSource;
   await atomicWrite(configPath, approved.proposedConfig);
   try {

@@ -52,10 +52,7 @@ export async function readPiReference(
     nextOffset: number | null;
   }>
 > {
-  if (
-    typeof input.document !== "string" ||
-    !(input.document in PI_REFERENCES)
-  )
+  if (typeof input.document !== "string" || !(input.document in PI_REFERENCES))
     throw new Error("development_system.pi_reference_invalid");
   const offset = input.offset === undefined ? 1 : input.offset;
   const limit = input.limit === undefined ? 400 : input.limit;

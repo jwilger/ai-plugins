@@ -265,13 +265,10 @@ test("authoritative policy tool reads the protected config without opening metad
     (candidate) => candidate.name === "development_system_policy_read",
   );
 
-  const result = await tool.execute(
-    "policy",
-    {},
-    undefined,
-    undefined,
-    { cwd: project, mode: "json" },
-  );
+  const result = await tool.execute("policy", {}, undefined, undefined, {
+    cwd: project,
+    mode: "json",
+  });
 
   assert.equal(result.content[0].text, source);
   assert.equal(result.details.policy.delivery.mode, "pull-request");
@@ -366,11 +363,7 @@ strong_reviewer = "custom/reviewer"
   assert.match(preserving.preview, /agentic_systems=true/);
   assert.match(preserving.preview, /eval_case_reporting=true/);
 
-  const changing = await createSetupPreview(
-    plugin,
-    project,
-    "--disable tiber",
-  );
+  const changing = await createSetupPreview(plugin, project, "--disable tiber");
   await applySetupPreview(plugin, changing);
   const updated = fs.readFileSync(
     path.join(project, ".development-system.toml"),

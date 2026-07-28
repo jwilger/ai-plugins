@@ -11,14 +11,8 @@ import {
 } from "./adapters/review-child.ts";
 import { registerGoalMode } from "./adapters/goal-mode.ts";
 import { activeCiRecoveryHold } from "./adapters/ci-hold.ts";
-import {
-  createWorktree,
-  listWorktrees,
-} from "./adapters/worktrees.ts";
-import {
-  PI_REFERENCES,
-  readPiReference,
-} from "./adapters/references.ts";
+import { createWorktree, listWorktrees } from "./adapters/worktrees.ts";
+import { PI_REFERENCES, readPiReference } from "./adapters/references.ts";
 import {
   McpClient,
   publicToolName,
@@ -127,7 +121,9 @@ async function shellRejection(
     classification.kind === "read-only-discovery"
   ) {
     try {
-      const target = await realpath(path.resolve(cwd, classification.targetPath));
+      const target = await realpath(
+        path.resolve(cwd, classification.targetPath),
+      );
       const inventory = await listWorktrees(cwd);
       if (inventory.worktrees.some((worktree) => worktree.path === target))
         return null;

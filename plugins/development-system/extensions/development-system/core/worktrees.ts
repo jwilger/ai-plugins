@@ -45,11 +45,7 @@ export function configuredWorktreeRoot(
   primary: string,
   configured: string,
 ): string {
-  if (
-    !configured ||
-    path.isAbsolute(configured) ||
-    controls.test(configured)
-  )
+  if (!configured || path.isAbsolute(configured) || controls.test(configured))
     throw new Error("development_system.worktree_root_not_repository_local");
   const resolved = path.resolve(primary, configured);
   const relative = path.relative(primary, resolved);

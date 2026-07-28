@@ -88,10 +88,7 @@ test("existing worktree paths and branches return actionable collisions", async 
     branch: "feat/two",
   });
   assert.equal(pathCollision.status, "collision");
-  assert.equal(
-    pathCollision.code,
-    "development_system.worktree_path_exists",
-  );
+  assert.equal(pathCollision.code, "development_system.worktree_path_exists");
   assert.match(pathCollision.nextAction, /existing worktree/);
 
   const branchCollision = await createWorktree(root, {
@@ -132,7 +129,9 @@ test("semantic worktree inputs reject traversal, options, controls, and malforme
 
 test("configured worktree root symlink escape is rejected without mutation", async () => {
   const root = repository();
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "pi-worktree-outside-"));
+  const outside = fs.mkdtempSync(
+    path.join(os.tmpdir(), "pi-worktree-outside-"),
+  );
   fs.symlinkSync(outside, path.join(root, ".worktrees"));
 
   await assert.rejects(
@@ -177,10 +176,10 @@ test("concurrent same-target creation deterministically preserves one worktree",
     createWorktree(root, { name: "race", branch: "feat/race" }),
   ]);
 
-  assert.deepEqual(
-    [first.status, second.status].sort(),
-    ["collision", "created"],
-  );
+  assert.deepEqual([first.status, second.status].sort(), [
+    "collision",
+    "created",
+  ]);
   const inventory = await listWorktrees(root);
   assert.equal(
     inventory.worktrees.filter((worktree) => worktree.branch === "feat/race")
