@@ -101,7 +101,18 @@ async function inspectPackage(piBinary, packageRoot, cwd, temporaryRoot) {
     (command) => command.name === "development-system-status",
   );
   assert.ok(extension, "development-system extension command did not load");
+  assert.equal(
+    packageCommands.filter((command) => command.name === "goal").length,
+    1,
+    "development-system must supply exactly one unsuffixed goal command",
+  );
   const provenance = JSON.parse(fs.readFileSync(marker, "utf8"));
+  assert.deepEqual(provenance.reservedPublicNames, [
+    "goal",
+    "goal_complete",
+    "goal_blocked",
+  ]);
+  assert.equal(provenance.goalCollision, false);
   assert.equal(
     fs.realpathSync(provenance.extension),
     fs.realpathSync(
@@ -125,6 +136,11 @@ async function inspectPackage(piBinary, packageRoot, cwd, temporaryRoot) {
     !baselineResponse.data.commands.some(
       (command) => command.sourceInfo?.baseDir === fs.realpathSync(packageRoot),
     ),
+  );
+  assert.equal(
+    baselineResponse.data.commands.some((command) => command.name === "goal"),
+    false,
+    "no-package baseline unexpectedly supplies the reserved goal command",
   );
   assert.equal(
     fs.existsSync(absentMarker),

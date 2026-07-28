@@ -36,7 +36,10 @@ cancellation, and terminates its process group on session shutdown. No arbitrary
 user MCP server is admitted.
 
 Use Pi event interception for configured coordination-checkout, path, secret,
-shell, delivery-mode, destructive-operation, and CI-recovery boundaries. Only a
+shell, delivery-mode, destructive-operation, and CI-recovery boundaries. Keep
+bounded autonomous goal state in Pi session-branch custom entries, continue only
+from the settled/idle boundary, and reserve explicit stale-ID-guarded terminal
+tools rather than inferring completion from assistant prose. Only a
 local Pi TUI confirmation is trusted for consequential approval. RPC, print, and
 JSON modes fail closed for approval; guarded direct RPC bash is unsupported and
 reported as such. This is protection against ordinary model and owner mistakes,

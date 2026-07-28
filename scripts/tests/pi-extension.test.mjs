@@ -127,11 +127,28 @@ function extensionHarness() {
       registrations.tools.push(definition);
     },
     on(name, handler) {
-      registrations.events.set(name, handler);
+      const previous = registrations.events.get(name);
+      registrations.events.set(
+        name,
+        previous
+          ? async (event, context) => {
+              const first = await previous(event, context);
+              return (await handler(event, context)) ?? first;
+            }
+          : handler,
+      );
     },
     getAllTools() {
-      return [];
+      return registrations.tools;
     },
+    getActiveTools() {
+      return registrations.tools.map((tool) => tool.name);
+    },
+    getCommands() {
+      return [...registrations.commands].map(([name]) => ({ name }));
+    },
+    appendEntry() {},
+    sendMessage() {},
   };
   return { pi, registrations };
 }
@@ -164,6 +181,8 @@ test("extension registers status command and tool and cleans session state on re
   assert.deepEqual(
     registrations.tools.map((tool) => tool.name),
     [
+      "goal_complete",
+      "goal_blocked",
       "development_system_status",
       "development_system_setup_preview",
       "development_system_run_review_assignment",
@@ -177,6 +196,7 @@ test("extension registers status command and tool and cleans session state on re
     cwd: project,
     mode: "tui",
     ui: { notify: (...args) => notifications.push(args), setStatus() {} },
+    sessionManager: { getBranch: () => [] },
   };
   await registrations.events.get("session_start")(
     { reason: "startup" },

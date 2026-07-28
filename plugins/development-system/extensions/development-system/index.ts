@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { resolveStatus } from "./adapters/status-interpreter.ts";
 import { applySetupPreview, createSetupPreview } from "./adapters/setup.ts";
 import { resolveReviewRoute, runReviewChild } from "./adapters/review-child.ts";
+import { registerGoalMode } from "./adapters/goal-mode.ts";
 import { activeCiRecoveryHold } from "./adapters/ci-hold.ts";
 import {
   McpClient,
@@ -115,7 +116,7 @@ async function shellRejection(
   return null;
 }
 
-async function recordProvenanceMarker(): Promise<void> {
+async function recordProvenanceMarker(goalCollision: boolean): Promise<void> {
   const marker = process.env.DEVELOPMENT_SYSTEM_PI_EVAL_MARKER;
   if (!marker) return;
   if (!path.isAbsolute(marker))
@@ -126,6 +127,8 @@ async function recordProvenanceMarker(): Promise<void> {
       package: "development-system",
       extension: fileURLToPath(import.meta.url),
       version: "1.2.0",
+      reservedPublicNames: ["goal", "goal_complete", "goal_blocked"],
+      goalCollision,
     })}\n`,
     { mode: 0o600 },
   );
@@ -136,6 +139,7 @@ async function recordProvenanceMarker(): Promise<void> {
 export default function developmentSystemExtension(pi: ExtensionAPI): void {
   let started = false;
   const componentClients: McpClient[] = [];
+  const goalMode = registerGoalMode(pi);
 
   const bridge = async (
     origin: "tiber" | "review",
@@ -191,7 +195,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         context.mode as HarnessMode,
       );
       context.ui.notify(
-        JSON.stringify(status, null, 2),
+        JSON.stringify({ ...status, goal: goalMode.current() }, null, 2),
         status.errors.length > 0 ? "warning" : "info",
       );
     },
@@ -249,7 +253,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       );
       return {
         content: [{ type: "text", text: concise(status) }],
-        details: status,
+        details: { ...status, goal: goalMode.current() },
       };
     },
   });
@@ -479,7 +483,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, context) => {
     started = true;
-    await recordProvenanceMarker();
+    await recordProvenanceMarker(goalMode.collision);
     const status = await resolveStatus(
       context.cwd,
       packageRoot,
@@ -506,6 +510,8 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       "development_system_status",
       "development_system_setup_preview",
       "development_system_run_review_assignment",
+      "goal_complete",
+      "goal_blocked",
     ]);
     const unknownBoundaryTools =
       pi

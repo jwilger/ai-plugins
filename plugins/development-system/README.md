@@ -79,6 +79,35 @@ strong_reviewer = "openai-codex/gpt-5.6-sol"
 strong_worker = "openai-codex/gpt-5.6-sol"
 ```
 
+## Autonomous goals
+
+Pi owns one session-branch-scoped autonomous goal at a time:
+
+```text
+/goal
+/goal status
+/goal [--tokens 200k] [--turns 25|unlimited] <objective>
+/goal pause
+/goal resume [--tokens 300k] [--turns 10|unlimited]
+/goal clear
+```
+
+The default is 25 automatic responses. `unlimited` must be explicit; an optional
+token budget uses provider-reported usage and may overshoot by one call. Goals
+pause rather than claim success at response, token, repeated-output, provider,
+interruption, restricted-terminal-tool, or collision boundaries. Resume rotates
+the goal ID and safety epoch while retaining consumed token usage. State is
+stored only in Pi custom entries on the current session branch, so reopening that
+session restores it while a new session does not inherit it.
+
+Only `goal_complete` with the exact current goal ID and direct completion and
+verification evidence can complete a goal. `goal_blocked` requires the same
+external blocker across at least three attempts and concrete evidence that user
+or external action is required. Plain assistant text, stale turns, delayed
+continuations, difficulty, incomplete work, and recoverable failures cannot
+terminate successfully. Continuations are extension-authored custom messages
+dispatched only after Pi's settled and idle boundary.
+
 ## Status and diagnostics
 
 Use `/development-system-status` in Pi. Headless callers use the deterministic
@@ -102,6 +131,7 @@ tool returns only a concise task-facing summary by default.
 | Eight shared public skills          | Canonical files                                             | Same canonical files          | Same canonical files          |
 | Setup/doctor core                   | Native command/tool and CLI                                 | Hook/CLI adapter              | Hook/CLI adapter              |
 | Trusted consequential approval      | Local TUI, preview-bound                                    | Unavailable                   | Unavailable                   |
+| Bounded autonomous goal mode        | Session-scoped `/goal` with guarded terminal tools          | Unavailable                   | Unavailable                   |
 | Generic write/edit worktree guard   | Extension event-enforced                                    | Hook-enforced where supported | Hook-enforced where supported |
 | Default model bash guard            | Extension event-enforced in TUI/print/JSON model-tool paths | Instruction/hook boundary     | Instruction/hook boundary     |
 | Direct RPC bash                     | Unsupported for guarded execution                           | N/A                           | N/A                           |
