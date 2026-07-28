@@ -388,6 +388,36 @@ strong_reviewer = "custom/reviewer"
   assert.equal(Number(git(project, "rev-list", "--count", "HEAD")), 3);
 });
 
+test("existing setup update rolls back file and index when its commit fails", async () => {
+  const project = fixture();
+  const { createSetupPreview, applySetupPreview } = await import(
+    path.join(plugin, "extensions/development-system/adapters/setup.ts")
+  );
+  const source = configuredPolicy("direct-to-trunk");
+  fs.writeFileSync(path.join(project, ".development-system.toml"), source);
+  git(project, "add", ".development-system.toml");
+  git(project, "commit", "-m", "test: configure policy");
+  const preview = await createSetupPreview(
+    plugin,
+    project,
+    "--enable agentic-systems",
+  );
+  const hook = path.join(project, ".git", "hooks", "pre-commit");
+  fs.writeFileSync(hook, "#!/usr/bin/env bash\nexit 1\n");
+  fs.chmodSync(hook, 0o755);
+
+  await assert.rejects(
+    () => applySetupPreview(plugin, preview),
+    /setup_commit_failed/,
+  );
+
+  assert.equal(
+    fs.readFileSync(path.join(project, ".development-system.toml"), "utf8"),
+    source,
+  );
+  assert.equal(git(project, "status", "--porcelain"), "");
+});
+
 test("setup rejects a confirmation after bound repository preconditions change", async () => {
   const project = fixture();
   const { createSetupPreview, applySetupPreview } = await import(
@@ -561,6 +591,7 @@ test("review assignment tool returns structured cancellation evidence to its par
   const previous = process.env.DEVELOPMENT_SYSTEM_PI_BIN;
   process.env.DEVELOPMENT_SYSTEM_PI_BIN = child;
   const controller = new AbortController();
+  const updates = [];
   setTimeout(() => controller.abort(), 25);
   try {
     const tool = registrations.tools.find(
@@ -571,9 +602,12 @@ test("review assignment tool returns structured cancellation evidence to its par
       "review",
       { assignment: "Inspect the bounded scope", model_role: "bounded-helper" },
       controller.signal,
-      undefined,
+      (update) => updates.push(update),
       { cwd: project },
     );
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].details.state, "starting-fresh-child");
+    assert.match(updates[0].content[0].text, /"status":"running"/);
     assert.equal(result.details.status, "failed");
     assert.equal(
       result.details.code,

@@ -107,7 +107,14 @@ test("existing worktree paths and branches return actionable collisions", async 
 });
 
 test("semantic worktree inputs reject traversal, options, controls, and malformed refs", () => {
-  for (const input of ["../escape", "nested/path", "-option", "bad\nname", ""]) {
+  for (const input of [
+    "../escape",
+    "nested/path",
+    "-option",
+    "bad\nname",
+    "bad\0name",
+    "",
+  ]) {
     assert.throws(() => parseWorktreeName(input), /worktree_name_invalid/);
   }
   for (const input of [
@@ -116,6 +123,7 @@ test("semantic worktree inputs reject traversal, options, controls, and malforme
     "feat//double",
     "feat/@{bad",
     "bad\nbranch",
+    "bad\0branch",
     "",
   ]) {
     assert.throws(() => parseWorktreeBranch(input), /worktree_branch_invalid/);

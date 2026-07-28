@@ -186,7 +186,8 @@ async function shellRejection(
       code: "development_system.coordination_shell_blocked",
       boundary: "coordination-checkout mutation",
       missing: "a provably read-only bounded command",
-      nextAction: "Run ordinary mutation work from a linked worktree.",
+      nextAction:
+        "Call development_system_worktree_list, create one with development_system_worktree_create if needed, then start a new Pi process with its relaunchCommand.",
     });
   }
   return null;
@@ -517,7 +518,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       required: ["assignment", "model_role"],
       additionalProperties: false,
     },
-    async execute(_toolCallId, parameters, signal, _onUpdate, context) {
+    async execute(_toolCallId, parameters, signal, onUpdate, context) {
       if (
         typeof parameters.assignment !== "string" ||
         typeof parameters.model_role !== "string"
@@ -530,6 +531,28 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           "utf8",
         ),
       );
+      const route = resolveReviewRoute(
+        parameters.model_role,
+        policy.piReviewModels,
+      );
+      onUpdate?.({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "running",
+              lifecycle: { state: "starting-fresh-child" },
+              model_role: parameters.model_role,
+              route: { provider: route.provider, model: route.model },
+            }),
+          },
+        ],
+        details: {
+          status: "running",
+          state: "starting-fresh-child",
+          modelRole: parameters.model_role,
+        },
+      });
       try {
         const result = await runReviewChild({
           assignment: {
@@ -537,10 +560,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
             modelRole: parameters.model_role,
           },
           cwd: context.cwd,
-          route: resolveReviewRoute(
-            parameters.model_role,
-            policy.piReviewModels,
-          ),
+          route,
           signal,
         });
         return {
@@ -624,7 +644,8 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
                 code: "development_system.coordination_write_blocked",
                 boundary: "coordination checkout",
                 missing: "an allowed linked-worktree target",
-                nextAction: "Create or enter a linked worktree before editing.",
+                nextAction:
+                  "Call development_system_worktree_list, create one with development_system_worktree_create if needed, then relaunch Pi with the returned command.",
               }),
             };
         }
