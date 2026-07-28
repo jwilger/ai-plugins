@@ -302,6 +302,31 @@ test("extension blocks coordination writes, secret reads, and unclassified shell
   );
   assert.equal(secret.block, true);
   assert.match(secret.reason, /protected_secret/);
+  assert.equal(
+    await guard(
+      {
+        toolName: "bash",
+        input: {
+          command:
+            "git worktree add .worktrees/observable-subagents -b feat/observable-subagents",
+        },
+      },
+      context,
+    ),
+    undefined,
+  );
+  const escapedWorktree = await guard(
+    {
+      toolName: "bash",
+      input: {
+        command:
+          "git worktree add ../observable-subagents -b feat/observable-subagents",
+      },
+    },
+    context,
+  );
+  assert.equal(escapedWorktree.block, true);
+  assert.match(escapedWorktree.reason, /coordination_worktree_target_blocked/);
   const shell = await guard(
     { toolName: "bash", input: { command: "python script.py" } },
     context,

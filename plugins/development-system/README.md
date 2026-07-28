@@ -100,6 +100,13 @@ Both paths delegate to the same setup implementation, which rejects linked
 worktrees and rolls back the config and index if its single initialization
 commit fails.
 
+When worktrees are enabled, the primary checkout remains coordination-only, but
+the guard admits the bounded bootstrap command
+`git worktree add .worktrees/<name> -b <branch>`. It still rejects targets
+outside the primary checkout's canonical `.worktrees/` directory, alternate
+start points, additional options, command chaining, and subsequent ordinary
+mutation in the primary checkout.
+
 `.development-system.toml` remains authoritative. The default preset is
 direct-to-trunk delivery with linked worktrees and Tiber. Optional features are
 `agentic-systems` and `eval-case-reporting`. Existing schema-version 1 files

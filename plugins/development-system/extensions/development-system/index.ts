@@ -20,6 +20,7 @@ import {
   classifyShellCommand,
   deliveryDecision,
   guardMessage,
+  worktreeTargetAllowed,
 } from "./core/guards.ts";
 
 const packageRoot = path.resolve(
@@ -100,6 +101,28 @@ async function shellRejection(
       return approved ? null : guardMessage(rejection);
     }
     return rejection ? guardMessage(rejection) : null;
+  }
+  if (
+    context.policy?.features.worktrees &&
+    context.status.checkout.kind === "primary" &&
+    classification.kind === "worktree-creation"
+  ) {
+    if (
+      worktreeTargetAllowed({
+        rawPath: classification.targetPath,
+        cwd,
+        primary: context.status.checkout.primary,
+      })
+    )
+      return null;
+    return guardMessage({
+      code: "development_system.coordination_worktree_target_blocked",
+      boundary: "coordination-checkout worktree creation",
+      missing:
+        "a target contained by the primary checkout's .worktrees directory",
+      nextAction:
+        "Create the linked worktree under .worktrees/ with a new -b branch.",
+    });
   }
   if (
     context.policy?.features.worktrees &&

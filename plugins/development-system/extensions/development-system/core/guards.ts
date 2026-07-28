@@ -64,14 +64,20 @@ export function classifyPath(
   return { kind: "inside", canonicalPath };
 }
 
-export type ShellClassification = Readonly<{
-  kind:
-    | "read-only"
-    | "delivery"
-    | "destructive-delivery"
-    | "mutation"
-    | "ambiguous";
-}>;
+export type ShellClassification =
+  | Readonly<{
+      kind:
+        | "read-only"
+        | "delivery"
+        | "destructive-delivery"
+        | "mutation"
+        | "ambiguous";
+    }>
+  | Readonly<{
+      kind: "worktree-creation";
+      targetPath: string;
+      branch: string;
+    }>;
 
 function shellWords(command: string): Readonly<{
   words: string[];
@@ -127,6 +133,25 @@ export function classifyShellCommand(command: string): ShellClassification {
   if (parsed.hazard === "redirection") return { kind: "mutation" };
   const words = parsed.words;
   const [program, operation] = words;
+  if (
+    program === "git" &&
+    operation === "worktree" &&
+    words[2] === "add" &&
+    words.length === 6
+  ) {
+    if (words[4] === "-b")
+      return {
+        kind: "worktree-creation",
+        targetPath: words[3],
+        branch: words[5],
+      };
+    if (words[3] === "-b")
+      return {
+        kind: "worktree-creation",
+        targetPath: words[5],
+        branch: words[4],
+      };
+  }
   if (program === "git" && operation === "push") {
     const destructive = words.some(
       (word) =>
@@ -161,6 +186,24 @@ export function classifyShellCommand(command: string): ShellClassification {
   )
     return { kind: "mutation" };
   return { kind: "ambiguous" };
+}
+
+export function worktreeTargetAllowed(
+  input: Readonly<{ rawPath: string; cwd: string; primary: string }>,
+): boolean {
+  const canonicalPrimary = fs.realpathSync(input.primary);
+  const canonicalRoot = canonicalProspectivePath(
+    path.resolve(canonicalPrimary, ".worktrees"),
+  );
+  const canonicalTarget = canonicalProspectivePath(
+    path.resolve(input.cwd, input.rawPath),
+  );
+  return (
+    canonicalRoot !== canonicalPrimary &&
+    isWithin(canonicalPrimary, canonicalRoot) &&
+    canonicalTarget !== canonicalRoot &&
+    isWithin(canonicalRoot, canonicalTarget)
+  );
 }
 
 export type DeliveryRejection = Readonly<{

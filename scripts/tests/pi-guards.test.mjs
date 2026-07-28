@@ -8,6 +8,7 @@ import {
   classifyPath,
   classifyShellCommand,
   deliveryDecision,
+  worktreeTargetAllowed,
 } from "../../plugins/development-system/extensions/development-system/core/guards.ts";
 
 function repository() {
@@ -47,6 +48,38 @@ test("path guard canonicalizes absolute, relative, and symlink targets", () => {
   );
 });
 
+test("worktree creation targets remain inside primary coordination storage", () => {
+  const root = repository();
+  assert.equal(
+    worktreeTargetAllowed({
+      rawPath: ".worktrees/feature",
+      cwd: root,
+      primary: root,
+    }),
+    true,
+  );
+  assert.equal(
+    worktreeTargetAllowed({
+      rawPath: "../feature",
+      cwd: root,
+      primary: root,
+    }),
+    false,
+  );
+  const outside = fs.mkdtempSync(
+    path.join(os.tmpdir(), "pi-worktrees-outside-"),
+  );
+  fs.symlinkSync(outside, path.join(root, ".worktrees"));
+  assert.equal(
+    worktreeTargetAllowed({
+      rawPath: ".worktrees/feature",
+      cwd: root,
+      primary: root,
+    }),
+    false,
+  );
+});
+
 test("shell classifier permits bounded read-only work and fails closed on ambiguity", () => {
   assert.deepEqual(classifyShellCommand("git status --short"), {
     kind: "read-only",
@@ -55,6 +88,32 @@ test("shell classifier permits bounded read-only work and fails closed on ambigu
   assert.equal(
     classifyShellCommand("git push --force-with-lease origin main").kind,
     "destructive-delivery",
+  );
+  assert.deepEqual(
+    classifyShellCommand(
+      "git worktree add .worktrees/observable-subagents -b feat/observable-subagents",
+    ),
+    {
+      kind: "worktree-creation",
+      targetPath: ".worktrees/observable-subagents",
+      branch: "feat/observable-subagents",
+    },
+  );
+  assert.deepEqual(
+    classifyShellCommand(
+      "git worktree add -b feat/observable-subagents .worktrees/observable-subagents",
+    ),
+    {
+      kind: "worktree-creation",
+      targetPath: ".worktrees/observable-subagents",
+      branch: "feat/observable-subagents",
+    },
+  );
+  assert.equal(
+    classifyShellCommand(
+      "git worktree add .worktrees/observable-subagents -b feat/observable-subagents origin/main",
+    ).kind,
+    "ambiguous",
   );
   assert.equal(classifyShellCommand("printf x > file").kind, "mutation");
   assert.equal(classifyShellCommand("git status && touch x").kind, "ambiguous");
