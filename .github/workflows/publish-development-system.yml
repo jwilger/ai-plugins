@@ -47,9 +47,6 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Cache Nix store
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
       - name: Install Node for npm trusted publishing
         uses: actions/setup-node@v6
         with:
@@ -77,17 +74,18 @@ jobs:
           MANUAL_BUMP: ${{ inputs.bump }}
         run: |
           if [ "$EVENT_NAME" = workflow_run ]; then
-            previous_tag="$(git describe --tags --match 'development-system-v[0-9]*' --abbrev=0 HEAD)"
+            current_version="$(jq -r '.version' plugins/development-system/package.json)"
             analysis="$(
               node scripts/determine-development-system-bump.mjs \
-                --from "$previous_tag" \
+                --current-version "$current_version" \
                 --to HEAD
             )"
             release_bump="$(jq -r '.bump' <<<"$analysis")"
             jq -r '
               "Automatic semantic change: **\(.bump)** " +
               "from `\(.commits)` commit(s) since `\(.from)` " +
-              "(breaking=\(.breaking), features=\(.features))."
+              "(breaking=\(.breaking), features=\(.features), " +
+              "pending-version-recovery=\(.pendingVersionCommit))."
             ' <<<"$analysis" >>"$GITHUB_STEP_SUMMARY"
           else
             release_bump="$MANUAL_BUMP"
@@ -176,10 +174,21 @@ jobs:
       - name: Publish to npmjs.org with trusted publishing
         if: steps.package.outputs.publish == 'true'
         run: |
+          test -n "$ACTIONS_ID_TOKEN_REQUEST_URL"
+          test -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+          oidc_response="$(
+            curl --fail --silent --show-error \
+              --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm%3Aregistry.npmjs.org"
+          )"
+          NPM_ID_TOKEN="$(jq -er '.value' <<<"$oidc_response")"
+          export NPM_ID_TOKEN
           npx --yes npm@11.6.2 publish "${{ steps.pack.outputs.tarball }}" \
             --registry https://registry.npmjs.org \
             --provenance \
-            --access public
+            --access public \
+            --loglevel verbose
+          unset NPM_ID_TOKEN
 
       - name: Tag the published version
         env:

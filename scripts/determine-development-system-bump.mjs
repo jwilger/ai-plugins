@@ -36,6 +36,15 @@ function argument(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+function git(args) {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  if (result.status !== 0)
+    throw new Error(
+      `development_system.release_git_failed args=${JSON.stringify(args)} status=${result.status}\n${result.stderr}`,
+    );
+  return result.stdout.trim();
+}
+
 function commitsInRange(from, to) {
   const result = spawnSync(
     "git",
@@ -52,20 +61,65 @@ function commitsInRange(from, to) {
     .filter(Boolean);
 }
 
+function automaticBase(currentVersion, to) {
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(currentVersion))
+    throw new Error("development_system.release_version_invalid");
+  const currentTag = `development-system-v${currentVersion}`;
+  const matchingTag = git(["tag", "--list", currentTag, "--merged", to]);
+  if (matchingTag === currentTag)
+    return { from: currentTag, pendingVersionCommit: false };
+
+  const versionCommit = git([
+    "log",
+    "-1",
+    "--format=%H%x00%s",
+    to,
+    "--",
+    "plugins/development-system/package.json",
+  ]);
+  const separator = versionCommit.indexOf("\0");
+  const oid = separator >= 0 ? versionCommit.slice(0, separator) : "";
+  const subject = separator >= 0 ? versionCommit.slice(separator + 1) : "";
+  if (
+    /^[0-9a-f]{40}$/.test(oid) &&
+    subject === `chore(release): development-system v${currentVersion}`
+  )
+    return { from: oid, pendingVersionCommit: true };
+
+  return {
+    from: git([
+      "describe",
+      "--tags",
+      "--match",
+      "development-system-v[0-9]*",
+      "--abbrev=0",
+      to,
+    ]),
+    pendingVersionCommit: false,
+  };
+}
+
 const invokedDirectly =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
-  const from = argument("--from");
+  const explicitFrom = argument("--from");
+  const currentVersion = argument("--current-version");
   const to = argument("--to");
-  if (!from || !to) {
+  if ((!explicitFrom && !currentVersion) || !to) {
     console.error(
-      "usage: determine-development-system-bump.mjs --from <release-tag> --to <commit>",
+      "usage: determine-development-system-bump.mjs (--from <release-tag>|--current-version <semver>) --to <commit>",
     );
     process.exit(2);
   }
-  const messages = commitsInRange(from, to);
-  const result = determineBump(messages);
+  const base = explicitFrom
+    ? { from: explicitFrom, pendingVersionCommit: false }
+    : automaticBase(currentVersion, to);
+  const messages = commitsInRange(base.from, to);
+  const result =
+    messages.length === 0
+      ? { bump: "current", breaking: false, features: false }
+      : determineBump(messages);
   process.stdout.write(
-    `${JSON.stringify({ ...result, commits: messages.length, from, to })}\n`,
+    `${JSON.stringify({ ...result, commits: messages.length, from: base.from, to, pendingVersionCommit: base.pendingVersionCommit })}\n`,
   );
 }

@@ -59,6 +59,45 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "automatic semantic analysis recovers an untagged partial version commit" {
+  mkdir -p "$TMPROOT/scripts" "$TMPROOT/plugins/development-system"
+  cp "$ROOT/scripts/determine-development-system-bump.mjs" "$TMPROOT/scripts/"
+  git -C "$TMPROOT" init --initial-branch=main >/dev/null
+  git -C "$TMPROOT" config user.name Test
+  git -C "$TMPROOT" config user.email test@example.invalid
+  git -C "$TMPROOT" config commit.gpgSign false
+  git -C "$TMPROOT" config tag.gpgSign false
+  printf '{"version":"1.3.0"}\n' >"$TMPROOT/plugins/development-system/package.json"
+  git -C "$TMPROOT" add .
+  git -C "$TMPROOT" commit -m "feat: initial release" >/dev/null
+  git -C "$TMPROOT" tag development-system-v1.3.0
+  printf '{"version":"1.4.0"}\n' >"$TMPROOT/plugins/development-system/package.json"
+  git -C "$TMPROOT" add .
+  git -C "$TMPROOT" commit -m "chore(release): development-system v1.4.0" >/dev/null
+  version_commit="$(git -C "$TMPROOT" rev-parse HEAD)"
+
+  run node "$TMPROOT/scripts/determine-development-system-bump.mjs" \
+    --current-version 1.4.0 --to HEAD
+
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e --arg from "$version_commit" '
+    .bump == "current" and .commits == 0 and
+    .from == $from and .pendingVersionCommit == true
+  ' >/dev/null
+
+  printf 'fix\n' >"$TMPROOT/fix.txt"
+  git -C "$TMPROOT" add .
+  git -C "$TMPROOT" commit -m "fix: recover publication" >/dev/null
+  run node "$TMPROOT/scripts/determine-development-system-bump.mjs" \
+    --current-version 1.4.0 --to HEAD
+
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e --arg from "$version_commit" '
+    .bump == "patch" and .commits == 1 and
+    .from == $from and .pendingVersionCommit == true
+  ' >/dev/null
+}
+
 @test "automatic publish waits for successful main-push CI" {
   workflow="$ROOT/.github/workflows/publish-development-system.yml"
 
@@ -82,6 +121,10 @@ NODE
   workflow="$ROOT/.github/workflows/publish-development-system.yml"
 
   [ "$(yq -r '.permissions."id-token"' "$workflow")" = write ]
+  run rg "NPM_ID_TOKEN" "$workflow"
+  [ "$status" -eq 0 ]
+  run rg "ACTIONS_ID_TOKEN_REQUEST_URL" "$workflow"
+  [ "$status" -eq 0 ]
   run rg "npm@11\.6\.2 publish" "$workflow"
   [ "$status" -eq 0 ]
   run rg -- "--provenance" "$workflow"
