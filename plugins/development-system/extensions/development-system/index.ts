@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { chmod, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveStatus } from "./adapters/status-interpreter.ts";
@@ -11,6 +11,10 @@ import {
   createWorktree,
   listWorktrees,
 } from "./adapters/worktrees.ts";
+import {
+  PI_REFERENCES,
+  readPiReference,
+} from "./adapters/references.ts";
 import {
   McpClient,
   publicToolName,
@@ -50,7 +54,9 @@ function pathRejection(kind: string): string {
     boundary: kind,
     missing,
     nextAction:
-      "Use an allowed linked-worktree path and never expose protected repository or secret data.",
+      kind === "outside"
+        ? "Use development_system_pi_reference for installed Pi docs or an allowed path in the active checkout."
+        : "Use development_system_policy_read for the authoritative project policy; other protected metadata and secrets remain blocked.",
   });
 }
 
@@ -105,6 +111,27 @@ async function shellRejection(
       return approved ? null : guardMessage(rejection);
     }
     return rejection ? guardMessage(rejection) : null;
+  }
+  if (
+    context.policy?.features.worktrees &&
+    context.status.checkout.kind === "primary" &&
+    classification.kind === "read-only-discovery"
+  ) {
+    try {
+      const target = await realpath(path.resolve(cwd, classification.targetPath));
+      const inventory = await listWorktrees(cwd);
+      if (inventory.worktrees.some((worktree) => worktree.path === target))
+        return null;
+    } catch {
+      // Missing and non-worktree targets do not gain read authority.
+    }
+    return guardMessage({
+      code: "development_system.coordination_discovery_target_blocked",
+      boundary: "coordination-checkout discovery",
+      missing: "a registered primary or linked worktree target",
+      nextAction:
+        "Call development_system_worktree_list and inspect only a returned canonical path.",
+    });
   }
   if (
     context.policy?.features.worktrees &&
@@ -289,6 +316,70 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
+    name: "development_system_policy_read",
+    label: "Read Development System Policy",
+    description:
+      "Read only the authoritative .development-system.toml from the canonical primary checkout and return its parsed non-secret workflow policy.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    async execute(_toolCallId, _parameters, signal, _onUpdate, context) {
+      if (signal?.aborted) throw new Error("development_system.cancelled");
+      const status = await resolveStatus(
+        context.cwd,
+        packageRoot,
+        context.mode as HarnessMode,
+      );
+      const policyPath = path.join(
+        status.checkout.primary,
+        ".development-system.toml",
+      );
+      const canonicalPolicy = await realpath(policyPath);
+      if (path.dirname(canonicalPolicy) !== status.checkout.primary)
+        throw new Error("development_system.policy_symlink_escape");
+      const source = await readFile(canonicalPolicy, "utf8");
+      const policy = parseProjectPolicy(source);
+      return {
+        content: [{ type: "text", text: source }],
+        details: { path: canonicalPolicy, policy },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "development_system_pi_reference",
+    label: "Read Installed Pi Reference",
+    description:
+      "Read a bounded page from an allowlisted installed Pi documentation file. Use nextOffset until the complete required reference has been read.",
+    parameters: {
+      type: "object",
+      properties: {
+        document: { type: "string", enum: Object.keys(PI_REFERENCES) },
+        offset: { type: "integer", minimum: 1 },
+        limit: { type: "integer", minimum: 1, maximum: 2_000 },
+      },
+      required: ["document"],
+      additionalProperties: false,
+    },
+    async execute(_toolCallId, parameters, signal) {
+      if (signal?.aborted) throw new Error("development_system.cancelled");
+      const result = await readPiReference({
+        document: parameters.document,
+        offset: parameters.offset,
+        limit: parameters.limit,
+      });
+      return {
+        content: [{ type: "text", text: result.lines.join("\n") }],
+        details: {
+          document: result.document,
+          path: result.path,
+          offset: result.offset,
+          totalLines: result.totalLines,
+          nextOffset: result.nextOffset,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "development_system_worktree_list",
     label: "List Development Worktrees",
     description:
@@ -467,7 +558,15 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           cwd: context.cwd,
           boundary: status.checkout.current,
         });
-        if (classified.kind !== "inside")
+        const authoritativePolicy = path.join(
+          status.checkout.primary,
+          ".development-system.toml",
+        );
+        const allowedPolicyRead =
+          event.toolName === "read" &&
+          classified.kind === "protected-metadata" &&
+          classified.canonicalPath === authoritativePolicy;
+        if (classified.kind !== "inside" && !allowedPolicyRead)
           return { block: true, reason: pathRejection(classified.kind) };
         if (
           ["write", "edit"].includes(event.toolName) &&
@@ -598,6 +697,8 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       "ls",
       "development_system_status",
       "development_system_setup_preview",
+      "development_system_policy_read",
+      "development_system_pi_reference",
       "development_system_worktree_list",
       "development_system_worktree_create",
       "development_system_run_review_assignment",

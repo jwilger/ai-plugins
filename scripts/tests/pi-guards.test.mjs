@@ -115,6 +115,25 @@ test("shell classifier permits bounded read-only work and fails closed on ambigu
     ).kind,
     "ambiguous",
   );
+  assert.deepEqual(
+    classifyShellCommand("git -C .worktrees/feature status --short --branch"),
+    { kind: "read-only-discovery", targetPath: ".worktrees/feature" },
+  );
+  assert.deepEqual(
+    classifyShellCommand(
+      "cd .worktrees/feature && git status --short --branch",
+    ),
+    { kind: "read-only-discovery", targetPath: ".worktrees/feature" },
+  );
+  assert.equal(
+    classifyShellCommand("scripts/agent-checkout-guard.sh").kind,
+    "read-only",
+  );
+  assert.equal(classifyShellCommand("git branch new-branch").kind, "ambiguous");
+  assert.equal(
+    classifyShellCommand("cd .worktrees/feature && touch x").kind,
+    "ambiguous",
+  );
   assert.equal(classifyShellCommand("printf x > file").kind, "mutation");
   assert.equal(classifyShellCommand("git status && touch x").kind, "ambiguous");
   assert.equal(classifyShellCommand("python script.py").kind, "ambiguous");

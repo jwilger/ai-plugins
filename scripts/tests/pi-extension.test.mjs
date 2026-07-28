@@ -184,6 +184,8 @@ test("extension registers status command and tool and cleans session state on re
       "goal_complete",
       "goal_blocked",
       "development_system_status",
+      "development_system_policy_read",
+      "development_system_pi_reference",
       "development_system_worktree_list",
       "development_system_worktree_create",
       "development_system_setup_preview",
@@ -249,6 +251,32 @@ test("semantic worktree tools bootstrap a primary checkout and report immutable-
   assert.equal(
     git(created.details.path, "branch", "--show-current"),
     "fix/bootstrap",
+  );
+});
+
+test("authoritative policy tool reads the protected config without opening metadata access", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  const source = configuredPolicy("pull-request");
+  fs.writeFileSync(path.join(project, ".development-system.toml"), source);
+  const tool = registrations.tools.find(
+    (candidate) => candidate.name === "development_system_policy_read",
+  );
+
+  const result = await tool.execute(
+    "policy",
+    {},
+    undefined,
+    undefined,
+    { cwd: project, mode: "json" },
+  );
+
+  assert.equal(result.content[0].text, source);
+  assert.equal(result.details.policy.delivery.mode, "pull-request");
+  assert.equal(
+    result.details.path,
+    path.join(fs.realpathSync(project), ".development-system.toml"),
   );
 });
 
@@ -335,12 +363,28 @@ test("extension blocks coordination writes, secret reads, and unclassified shell
   );
   assert.equal(write.block, true);
   assert.match(write.reason, /coordination_write_blocked/);
+  assert.equal(
+    await guard(
+      { toolName: "read", input: { path: ".development-system.toml" } },
+      context,
+    ),
+    undefined,
+  );
   const secret = await guard(
     { toolName: "read", input: { path: ".env" } },
     context,
   );
   assert.equal(secret.block, true);
   assert.match(secret.reason, /protected_secret/);
+  const outside = await guard(
+    {
+      toolName: "read",
+      input: { path: "/tmp/installed-pi/docs/extensions.md" },
+    },
+    context,
+  );
+  assert.equal(outside.block, true);
+  assert.match(outside.reason, /development_system_pi_reference/);
   assert.equal(
     await guard(
       {
@@ -379,6 +423,53 @@ test("extension blocks coordination writes, secret reads, and unclassified shell
     ),
     undefined,
   );
+  assert.equal(
+    await guard(
+      {
+        toolName: "bash",
+        input: { command: "scripts/agent-checkout-guard.sh" },
+      },
+      context,
+    ),
+    undefined,
+  );
+  const linked = path.join(project, ".worktrees", "inspection");
+  git(project, "worktree", "add", "-b", "inspection", linked);
+  assert.equal(
+    await guard(
+      {
+        toolName: "bash",
+        input: { command: `git -C ${linked} status --short --branch` },
+      },
+      context,
+    ),
+    undefined,
+  );
+  assert.equal(
+    await guard(
+      {
+        toolName: "bash",
+        input: { command: `cd ${linked} && git status --short --branch` },
+      },
+      context,
+    ),
+    undefined,
+  );
+  const spoofedMutation = await guard(
+    {
+      toolName: "bash",
+      input: { command: `git -C ${linked} branch spoofed-mutation` },
+    },
+    context,
+  );
+  assert.equal(spoofedMutation.block, true);
+  assert.match(spoofedMutation.reason, /coordination_shell_blocked/);
+  const stillPrimary = await guard(
+    { toolName: "write", input: { path: "still-primary.txt" } },
+    context,
+  );
+  assert.equal(stillPrimary.block, true);
+  assert.match(stillPrimary.reason, /coordination_write_blocked/);
 });
 
 test("extension enforces delivery mode and case-specific destructive TUI approval", async () => {

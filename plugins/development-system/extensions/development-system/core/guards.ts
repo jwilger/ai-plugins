@@ -77,6 +77,10 @@ export type ShellClassification =
       kind: "worktree-creation";
       targetPath: string;
       branch: string;
+    }>
+  | Readonly<{
+      kind: "read-only-discovery";
+      targetPath: string;
     }>;
 
 function shellWords(command: string): Readonly<{
@@ -126,13 +130,86 @@ function shellWords(command: string): Readonly<{
   return { words, hazard };
 }
 
+function boundedGitRead(words: readonly string[]): boolean {
+  if (words[0] !== "git") return false;
+  const operation = words[1];
+  const args = words.slice(2);
+  if (operation === "status")
+    return args.every(
+      (argument) =>
+        ["--short", "--branch", "--porcelain", "--porcelain=v1", "-b"].includes(
+          argument,
+        ) || argument.startsWith("--untracked-files="),
+    );
+  if (operation === "worktree")
+    return (
+      args[0] === "list" &&
+      args.slice(1).every((argument) => argument === "--porcelain")
+    );
+  if (operation === "branch")
+    return (
+      args.length >= 1 &&
+      ["--show-current", "--list"].includes(args[0]) &&
+      args.slice(1).every((argument) => !argument.startsWith("-"))
+    );
+  if (operation === "rev-parse")
+    return args.every(
+      (argument) =>
+        [
+          "--path-format=absolute",
+          "--git-dir",
+          "--git-common-dir",
+          "--show-toplevel",
+          "--show-prefix",
+          "--is-inside-work-tree",
+          "--abbrev-ref",
+          "HEAD",
+        ].includes(argument) || /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(argument),
+    );
+  if (operation === "log")
+    return args.every(
+      (argument) =>
+        ["--oneline", "--decorate", "--no-decorate"].includes(argument) ||
+        /^--max-count=\d+$/.test(argument) ||
+        /^-n\d+$/.test(argument) ||
+        /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(argument),
+    );
+  return false;
+}
+
+function boundedCdDiscovery(command: string): ShellClassification | null {
+  const parts = command.split("&&");
+  if (parts.length !== 2) return null;
+  const left = shellWords(parts[0]);
+  const right = shellWords(parts[1]);
+  if (
+    !left ||
+    !right ||
+    left.hazard !== "none" ||
+    right.hazard !== "none" ||
+    left.words.length !== 2 ||
+    left.words[0] !== "cd" ||
+    !boundedGitRead(right.words)
+  )
+    return null;
+  return { kind: "read-only-discovery", targetPath: left.words[1] };
+}
+
 export function classifyShellCommand(command: string): ShellClassification {
+  const cdDiscovery = boundedCdDiscovery(command);
+  if (cdDiscovery) return cdDiscovery;
   const parsed = shellWords(command);
   if (!parsed || parsed.hazard === "control" || parsed.words.length === 0)
     return { kind: "ambiguous" };
   if (parsed.hazard === "redirection") return { kind: "mutation" };
   const words = parsed.words;
   const [program, operation] = words;
+  if (
+    (program === "scripts/agent-checkout-guard.sh" ||
+      program === "./scripts/agent-checkout-guard.sh") &&
+    words.length === 1
+  )
+    return { kind: "read-only" };
   if (
     program === "git" &&
     operation === "worktree" &&
@@ -164,9 +241,12 @@ export function classifyShellCommand(command: string): ShellClassification {
   }
   if (
     program === "git" &&
-    ["status", "log", "rev-parse", "branch"].includes(operation)
+    operation === "-C" &&
+    words.length >= 4 &&
+    boundedGitRead(["git", ...words.slice(3)])
   )
-    return { kind: "read-only" };
+    return { kind: "read-only-discovery", targetPath: words[2] };
+  if (boundedGitRead(words)) return { kind: "read-only" };
   if (["pwd", "ls"].includes(program)) return { kind: "read-only" };
   if (
     [
