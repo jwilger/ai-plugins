@@ -40,6 +40,20 @@ pi remove ./plugins/development-system
 
 Use `pi list` and `pi config` to inspect or disable installed resources.
 
+### Canonical Pi support inventory
+
+This block is generated from `.agents/plugins/pi-support.json`; do not edit it
+by hand.
+
+<!-- pi-support-inventory:start -->
+
+- **development-system** (`./plugins/development-system`)
+  - extension: `./extensions/development-system/index.ts`
+  - public skills (8): `agentic-systems`, `delivery`, `development-workflow`, `engineering-standards`, `eval-case-reporting`, `setup`, `tasks`, `worktrees`
+  - bundled component entry points: `./bin/development-discipline-mcp`, `./bin/tiber`
+
+<!-- pi-support-inventory:end -->
+
 ## Configure a project
 
 Run trusted setup from the repository's primary checkout in the local Pi TUI:
@@ -179,8 +193,10 @@ Regenerate or validate adapters with:
 ```shell
 node scripts/sync-development-system-metadata.mjs --write
 node scripts/generate-development-system-agents.mjs --write
+node scripts/generate-pi-support-docs.mjs --write
 node scripts/sync-development-system-metadata.mjs --check
 node scripts/generate-development-system-agents.mjs --check
+node scripts/generate-pi-support-docs.mjs --check
 just pi-extension
 just pi-clean-canary
 ```

@@ -153,6 +153,7 @@ validate-marketplace:
     bash scripts/validate-manifests.sh
     node scripts/sync-development-system-metadata.mjs --check
     node scripts/validate-pi-package.mjs
+    node scripts/generate-pi-support-docs.mjs --check
     bash scripts/check-advisor-agent-config.sh
     bash scripts/check-model-routing-config.sh
     node scripts/generate-development-system-agents.mjs --check
