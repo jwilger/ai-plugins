@@ -42,19 +42,27 @@ target support, capability differences, and removal.
 
 ## Publishing the Pi npm package
 
-The trusted, manually dispatched **Publish development-system npm package**
-workflow versions and publishes `@jwilger/development-system-pi` to this
-repository's GitHub Packages registry. Run it from `main` with `patch`, `minor`,
-or `major`. It updates every canonical/harness version surface, restores pinned
-validation dependencies, runs package and release gates, pushes the version
-commit, publishes one exact tarball using the workflow `GITHUB_TOKEN`, and tags
-the published commit as `development-system-v<version>`.
+After a push to `main` completes the **CI** workflow successfully, the trusted
+**Publish development-system npm package** workflow automatically versions and
+publishes `@jwilger/development-system-pi` to this repository's GitHub Packages
+registry. It evaluates every commit since the latest
+`development-system-v<version>` tag: any Conventional Commit breaking marker
+selects a major change, otherwise `feat` selects minor, and every other push
+selects patch. The workflow is bound to the exact CI-verified commit and stops
+if `main` advances before publication.
 
-Choose `current` only to publish or finish tagging the already checked-in
-version after a recoverable partial release. The workflow serializes releases,
-refuses stale checkouts and duplicate bumped versions, and never stores a
-long-lived publication token. Repository Actions policy must allow the declared
-`contents: write` and `packages: write` permissions.
+The workflow updates every canonical/harness version surface, restores pinned
+validation dependencies, reruns package and release gates, pushes the version
+commit, publishes one exact tarball using the workflow `GITHUB_TOKEN`, and tags
+the published commit. Its own token-authored version push does not recursively
+start another workflow run.
+
+Manual dispatch remains available on `main` with `patch`, `minor`, or `major` for
+an explicit release. Choose `current` only to publish or finish tagging the
+already checked-in version after a recoverable partial release. Releases are
+serialized, reject stale checkouts and duplicate bumped versions, and never
+store a long-lived publication token. Repository Actions policy must allow the
+declared `contents: write` and `packages: write` permissions.
 
 Local payload validation is provider-free:
 

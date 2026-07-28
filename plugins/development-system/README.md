@@ -13,8 +13,11 @@ permissions. Review this package and trust only a source you control.
 
 ### GitHub Packages
 
-Published releases use `@jwilger/development-system-pi` in GitHub Packages. The
-package currently has restricted visibility, so authenticate npm with a classic
+Published releases use `@jwilger/development-system-pi` in GitHub Packages.
+Successful `main` push CI automatically publishes the next semantic version:
+breaking Conventional Commits select major, `feat` selects minor, and other
+changes select patch. The package currently has restricted visibility, so
+authenticate npm with a classic
 personal access token carrying `read:packages`, then install it through Pi's npm
 package source:
 
