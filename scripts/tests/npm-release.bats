@@ -2,6 +2,11 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  TMPROOT="$(mktemp -d)"
+}
+
+teardown() {
+  rm -rf "$TMPROOT"
 }
 
 @test "development-system npm payload contains every declared runtime resource" {
@@ -31,6 +36,60 @@ assert.throws(() => module.nextVersion("1.2", "patch"));
 assert.throws(() => module.nextVersion("1.2.3", "prerelease"));
 NODE
 
+  [ "$status" -eq 0 ]
+}
+
+@test "version command updates every canonical release surface in an isolated checkout" {
+  mkdir -p "$TMPROOT/scripts"
+  cp "$ROOT/scripts/version-development-system.mjs" \
+    "$ROOT/scripts/sync-development-system-metadata.mjs" \
+    "$ROOT/scripts/generate-pi-support-docs.mjs" \
+    "$TMPROOT/scripts/"
+  while read -r relative; do
+    mkdir -p "$TMPROOT/$(dirname "$relative")"
+    cp "$ROOT/$relative" "$TMPROOT/$relative"
+  done <<'FILES'
+.agents/plugins/marketplace.json
+.agents/plugins/pi-support.json
+.claude-plugin/marketplace.json
+README.md
+plugins/development-system/README.md
+plugins/development-system/package.json
+plugins/development-system/.claude-plugin/plugin.json
+plugins/development-system/.codex-plugin/plugin.json
+plugins/development-system/.mcp.json
+plugins/development-system/components/agentic-systems-engineering/.mcp.json
+plugins/development-system/components/development-discipline/.mcp.json
+plugins/development-system/components/tiber/.mcp.json
+FILES
+
+  current="$(jq -r '.version' "$TMPROOT/plugins/development-system/package.json")"
+  expected="$(
+    node --input-type=module - "$TMPROOT/scripts/version-development-system.mjs" "$current" <<'NODE'
+import { pathToFileURL } from "node:url";
+const module = await import(pathToFileURL(process.argv[2]));
+process.stdout.write(module.nextVersion(process.argv[3], "patch"));
+NODE
+  )"
+  run node "$TMPROOT/scripts/version-development-system.mjs" --bump patch
+
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e --arg current "$current" --arg expected "$expected" '
+    .previous == $current and .version == $expected and .changed == true
+  ' >/dev/null
+  [ "$(jq -r '.version' "$TMPROOT/plugins/development-system/package.json")" = "$expected" ]
+  [ "$(jq -r '.version' "$TMPROOT/plugins/development-system/.claude-plugin/plugin.json")" = "$expected" ]
+  [ "$(jq -r '.version' "$TMPROOT/plugins/development-system/.codex-plugin/plugin.json")" = "$expected" ]
+  [ "$(jq -r '.plugins[] | select(.name == "development-system") | .version' "$TMPROOT/.claude-plugin/marketplace.json")" = "$expected" ]
+  [ "$(jq -r '.plugins[] | select(.name == "development-system") | .version' "$TMPROOT/.agents/plugins/marketplace.json")" = "$expected" ]
+  run bash -c 'expected=$1; shift; rg -o "development-system/[0-9.]+/bin/" "$@" | grep -Fv "development-system/$expected/bin/"' \
+    _ "$expected" \
+    "$TMPROOT/plugins/development-system/.mcp.json" \
+    "$TMPROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json" \
+    "$TMPROOT/plugins/development-system/components/development-discipline/.mcp.json" \
+    "$TMPROOT/plugins/development-system/components/tiber/.mcp.json"
+  [ "$status" -eq 1 ]
+  run rg "\\| $expected\\s+\\|" "$TMPROOT/README.md"
   [ "$status" -eq 0 ]
 }
 
