@@ -702,6 +702,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       "development_system_worktree_list",
       "development_system_worktree_create",
       "development_system_run_review_assignment",
+      "development_system_goal_status",
       "goal_complete",
       "goal_blocked",
     ]);

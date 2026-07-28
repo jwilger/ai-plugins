@@ -60,6 +60,41 @@ function sessionTokenTotal(context: ExtensionContext): number {
   return total;
 }
 
+function safeGoalState(state: GoalState | null) {
+  if (!state)
+    return {
+      status: "none",
+      goal_id: null,
+      guard_epoch: null,
+      retry: "Start a goal with /goal <objective>.",
+    };
+  return {
+    status: state.status,
+    goal_id: state.goalId,
+    guard_epoch: state.guardEpoch,
+    automatic_responses: state.automaticResponses,
+    automatic_limit: state.automaticLimit,
+    token_usage: state.tokenUsage,
+    token_budget: state.tokenBudget,
+    continuation_pending: state.continuationPending,
+    stopped_reason: state.stoppedReason ?? null,
+    retry:
+      state.status === "active"
+        ? `Retry the terminal tool with goal_id=${state.goalId}, or call development_system_goal_status again after any direct user intervention.`
+        : "Use /goal resume to create a fresh goal ID and guard epoch before retrying a terminal tool.",
+  };
+}
+
+function staleRecovery(
+  operation: "completion" | "blocked",
+  state: GoalState | null,
+  providedGoalId: string,
+): Error {
+  return new Error(
+    `development_system.goal_${operation}_stale ${JSON.stringify({ provided_goal_id: providedGoalId, current: safeGoalState(state), refresh_tool: "development_system_goal_status" })}`,
+  );
+}
+
 function formatStatus(state: GoalState | null): string {
   if (!state) return "development_system.goal status=none";
   return [
@@ -224,6 +259,21 @@ export function registerGoalMode(pi: ExtensionAPI): {
   });
 
   pi.registerTool({
+    name: "development_system_goal_status",
+    label: "Refresh Autonomous Goal State",
+    description:
+      "Return the current non-secret goal ID, guard epoch, status, consumed bounds, and exact retry path after stale ownership or user intervention.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    async execute() {
+      const current = safeGoalState(state);
+      return {
+        content: [{ type: "text", text: JSON.stringify(current) }],
+        details: current,
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "goal_complete",
     label: "Complete Autonomous Goal",
     description:
@@ -247,11 +297,21 @@ export function registerGoalMode(pi: ExtensionAPI): {
         typeof parameters.summary !== "string"
       )
         throw new Error("development_system.goal_completion_arguments_invalid");
-      const completed = completionDecision(state, {
-        goalId: parameters.goal_id,
-        summary: parameters.summary,
-        now: now(),
-      });
+      let completed: GoalState;
+      try {
+        completed = completionDecision(state, {
+          goalId: parameters.goal_id,
+          summary: parameters.summary,
+          now: now(),
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "development_system.goal_completion_stale"
+        )
+          throw staleRecovery("completion", state, parameters.goal_id);
+        throw error;
+      }
       persist(completed);
       context.abort();
       return {
@@ -289,13 +349,23 @@ export function registerGoalMode(pi: ExtensionAPI): {
         typeof parameters.repeated_turns !== "number"
       )
         throw new Error("development_system.goal_blocked_arguments_invalid");
-      const blocked = blockedDecision(state, {
-        goalId: parameters.goal_id,
-        reason: parameters.reason,
-        evidence: parameters.evidence,
-        repeatedTurns: parameters.repeated_turns,
-        now: now(),
-      });
+      let blocked: GoalState;
+      try {
+        blocked = blockedDecision(state, {
+          goalId: parameters.goal_id,
+          reason: parameters.reason,
+          evidence: parameters.evidence,
+          repeatedTurns: parameters.repeated_turns,
+          now: now(),
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "development_system.goal_blocked_stale"
+        )
+          throw staleRecovery("blocked", state, parameters.goal_id);
+        throw error;
+      }
       persist(blocked);
       context.abort();
       return {

@@ -181,6 +181,7 @@ test("extension registers status command and tool and cleans session state on re
   assert.deepEqual(
     registrations.tools.map((tool) => tool.name),
     [
+      "development_system_goal_status",
       "goal_complete",
       "goal_blocked",
       "development_system_status",

@@ -340,7 +340,42 @@ test("goal adapter rotates stale-turn ownership on direct user intervention", as
         undefined,
         runtime.context,
       ),
-    /completion_stale/,
+    (error) => {
+      assert.match(error.message, /completion_stale/);
+      assert.match(error.message, new RegExp(mode.current().goalId));
+      assert.match(error.message, new RegExp(mode.current().guardEpoch));
+      assert.match(error.message, /development_system_goal_status/);
+      return true;
+    },
+  );
+  const status = await runtime.registeredTools
+    .find((tool) => tool.name === "development_system_goal_status")
+    .execute();
+  assert.equal(status.details.goal_id, mode.current().goalId);
+  assert.equal(status.details.guard_epoch, mode.current().guardEpoch);
+  assert.match(status.details.retry, /Retry the terminal tool/);
+
+  await assert.rejects(
+    runtime.registeredTools
+      .find((tool) => tool.name === "goal_blocked")
+      .execute(
+        "call",
+        {
+          goal_id: originalId,
+          reason: "The external service requires owner approval",
+          evidence: "The owner action remained required on attempts 1, 2, and 3",
+          repeated_turns: 3,
+        },
+        undefined,
+        undefined,
+        runtime.context,
+      ),
+    (error) => {
+      assert.match(error.message, /goal_blocked_stale/);
+      assert.match(error.message, new RegExp(mode.current().goalId));
+      assert.match(error.message, /refresh_tool/);
+      return true;
+    },
   );
 });
 
