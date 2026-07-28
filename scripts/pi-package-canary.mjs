@@ -156,6 +156,15 @@ async function inspectPackage(piBinary, packageRoot, cwd, temporaryRoot) {
 
 async function main() {
   const clean = process.argv.includes("--clean-checkout");
+  const packageRootIndex = process.argv.indexOf("--package-root");
+  if (packageRootIndex >= 0 && !process.argv[packageRootIndex + 1])
+    throw new Error("--package-root requires a path");
+  const explicitPackageRoot =
+    packageRootIndex >= 0
+      ? path.resolve(process.argv[packageRootIndex + 1])
+      : null;
+  if (clean && explicitPackageRoot)
+    throw new Error("--clean-checkout and --package-root are mutually exclusive");
   const temporaryRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), "development-system-pi-canary-"),
   );
@@ -180,7 +189,8 @@ async function main() {
         cwd: root,
       });
     }
-    const packageRoot = path.join(root, "plugins/development-system");
+    const packageRoot =
+      explicitPackageRoot ?? path.join(root, "plugins/development-system");
     const piBinary = path.join(root, "node_modules/.bin/pi");
     const evidence = await inspectPackage(
       piBinary,

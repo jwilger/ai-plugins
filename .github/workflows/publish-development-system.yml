@@ -89,6 +89,7 @@ jobs:
           nix develop -c just \
             validate-marketplace \
             pi-extension \
+            npm-package-canary \
             development-discipline-release-complete \
             tiber-release-complete \
             github-actions

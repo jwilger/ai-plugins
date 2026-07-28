@@ -121,12 +121,15 @@ async function recordProvenanceMarker(goalCollision: boolean): Promise<void> {
   if (!marker) return;
   if (!path.isAbsolute(marker))
     throw new Error("development_system.eval_marker_requires_absolute_path");
+  const packageMetadata = JSON.parse(
+    await readFile(path.join(packageRoot, "package.json"), "utf8"),
+  ) as { version: string };
   await writeFile(
     marker,
     `${JSON.stringify({
       package: "development-system",
       extension: fileURLToPath(import.meta.url),
-      version: "1.2.0",
+      version: packageMetadata.version,
       reservedPublicNames: ["goal", "goal_complete", "goal_blocked"],
       goalCollision,
     })}\n`,

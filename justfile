@@ -149,6 +149,10 @@ worktree-teardown path:
 npm-package:
     node scripts/validate-development-system-npm-package.mjs
 
+# Pack, extract, install, and load the npm artifact through the pinned Pi canary.
+npm-package-canary:
+    node scripts/development-system-npm-canary.mjs
+
 # Marketplace manifest + formatting validation.
 validate-marketplace:
     jq empty .claude-plugin/marketplace.json
