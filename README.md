@@ -24,7 +24,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses              | Description                                                         | Version |
 | ---------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.2.0   |
+| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.2.1   |
 
 ## Using the package (Pi — primary)
 
@@ -37,8 +37,30 @@ pi install ./plugins/development-system
 ```
 
 See the [development-system guide](plugins/development-system/README.md) for
-project trust, setup, updates, status, target support, capability differences,
-and removal.
+GitHub Packages and local installation, project trust, setup, updates, status,
+target support, capability differences, and removal.
+
+## Publishing the Pi npm package
+
+The trusted, manually dispatched **Publish development-system npm package**
+workflow versions and publishes `@jwilger/development-system-pi` to this
+repository's GitHub Packages registry. Run it from `main` with `patch`, `minor`,
+or `major`. It updates every canonical/harness version surface, restores pinned
+validation dependencies, runs package and release gates, pushes the version
+commit, publishes one exact tarball using the workflow `GITHUB_TOKEN`, and tags
+the published commit as `development-system-v<version>`.
+
+Choose `current` only to publish or finish tagging the already checked-in
+version after a recoverable partial release. The workflow serializes releases,
+refuses stale checkouts and duplicate bumped versions, and never stores a
+long-lived publication token. Repository Actions policy must allow the declared
+`contents: write` and `packages: write` permissions.
+
+Local payload validation is provider-free:
+
+```shell
+nix develop -c just npm-package
+```
 
 ## Using the marketplace (Claude Code — secondary)
 

@@ -1,0 +1,176 @@
+name: Publish development-system npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver change, or current to retry the checked-in version
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - current
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: publish-development-system
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Version, verify, and publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out main with release credentials
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Configure npm for GitHub Packages
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+          registry-url: https://npm.pkg.github.com
+          scope: "@jwilger"
+
+      - name: Refuse a stale or dirty release checkout
+        run: |
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Apply canonical version change
+        id: version
+        env:
+          RELEASE_BUMP: ${{ inputs.bump }}
+        run: |
+          result="$(node scripts/version-development-system.mjs --bump "$RELEASE_BUMP")"
+          version="$(jq -r '.version' <<<"$result")"
+          changed="$(jq -r '.changed' <<<"$result")"
+          nix develop -c prettier --write \
+            plugins/development-system/package.json \
+            plugins/development-system/.claude-plugin/plugin.json \
+            plugins/development-system/.codex-plugin/plugin.json \
+            plugins/development-system/.mcp.json \
+            plugins/development-system/components/agentic-systems-engineering/.mcp.json \
+            plugins/development-system/components/development-discipline/.mcp.json \
+            plugins/development-system/components/tiber/.mcp.json \
+            .claude-plugin/marketplace.json \
+            .agents/plugins/marketplace.json \
+            README.md \
+            plugins/development-system/README.md
+          {
+            echo "version=$version"
+            echo "changed=$changed"
+            echo "tag=development-system-v$version"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Restore pinned package validation dependencies
+        run: nix develop -c scripts/bootstrap-pi-package.sh
+
+      - name: Run release gate
+        run: |
+          nix develop -c just \
+            validate-marketplace \
+            pi-extension \
+            development-discipline-release-complete \
+            tiber-release-complete \
+            github-actions
+
+      - name: Build the exact publication tarball
+        id: pack
+        run: |
+          pack_json="$(npm pack ./plugins/development-system --json --pack-destination "$RUNNER_TEMP")"
+          tarball="$RUNNER_TEMP/$(jq -r '.[0].filename' <<<"$pack_json")"
+          test -f "$tarball"
+          echo "tarball=$tarball" >>"$GITHUB_OUTPUT"
+          jq -r '.[0] | "Package: \(.name)@\(.version)\nPacked bytes: \(.size)\nUnpacked bytes: \(.unpackedSize)\nFiles: \(.entryCount)"' \
+            <<<"$pack_json" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Check package publication state
+        id: package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_NAME: "@jwilger/development-system-pi"
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_BUMP: ${{ inputs.bump }}
+        run: |
+          if npm view "$PACKAGE_NAME@$VERSION" version \
+            --registry https://npm.pkg.github.com >/dev/null 2>&1; then
+            if [ "$RELEASE_BUMP" != current ]; then
+              echo "Package $PACKAGE_NAME@$VERSION already exists" >&2
+              exit 1
+            fi
+            echo "publish=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push the version
+        if: steps.version.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            plugins/development-system/package.json \
+            plugins/development-system/.claude-plugin/plugin.json \
+            plugins/development-system/.codex-plugin/plugin.json \
+            plugins/development-system/.mcp.json \
+            plugins/development-system/components/agentic-systems-engineering/.mcp.json \
+            plugins/development-system/components/development-discipline/.mcp.json \
+            plugins/development-system/components/tiber/.mcp.json \
+            .claude-plugin/marketplace.json \
+            .agents/plugins/marketplace.json \
+            README.md \
+            plugins/development-system/README.md
+          git commit -m "chore(release): development-system v$VERSION"
+          git push origin HEAD:main
+
+      - name: Publish to GitHub Packages
+        if: steps.package.outputs.publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --registry https://npm.pkg.github.com
+
+      - name: Tag the published version
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          published_commit="$(git rev-parse HEAD)"
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            test "$(git rev-list -n 1 "$TAG")" = "$published_commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "development-system $TAG"
+            git push origin "refs/tags/$TAG"
+          fi
+
+      - name: Record publication
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          {
+            echo "Published **@jwilger/development-system-pi@$VERSION** to GitHub Packages."
+            echo
+            echo "Git tag: \`$TAG\`"
+          } >>"$GITHUB_STEP_SUMMARY"

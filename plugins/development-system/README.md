@@ -9,7 +9,28 @@ CI-recovery, retained-component, and final-review behavior.
 ## Install in Pi
 
 Pi packages execute trusted code with the user's full operating-system
-permissions. Review this package and trust only a checkout you control.
+permissions. Review this package and trust only a source you control.
+
+### GitHub Packages
+
+Published releases use `@jwilger/development-system-pi` in GitHub Packages. The
+package currently has restricted visibility, so authenticate npm with a classic
+personal access token carrying `read:packages`, then install it through Pi's npm
+package source:
+
+```shell
+npm login --scope=@jwilger --auth-type=legacy \
+  --registry=https://npm.pkg.github.com
+pi install npm:@jwilger/development-system-pi
+```
+
+Pin a release with
+`pi install npm:@jwilger/development-system-pi@<version>`. Use
+`pi update npm:@jwilger/development-system-pi` for an unpinned install and
+`pi remove npm:@jwilger/development-system-pi` to remove it. Never commit the
+resulting npm credential.
+
+### Local checkout
 
 From a clean local checkout, run the one reproducible bootstrap and install the
 local package:
@@ -32,7 +53,7 @@ explicit trust decision; the repository eval runner uses `--approve` only for
 its owned disposable fixtures. The extension itself has full code-execution
 privileges.
 
-Remove the package with:
+Remove a local-path installation with:
 
 ```shell
 pi remove ./plugins/development-system

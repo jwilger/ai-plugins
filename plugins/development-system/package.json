@@ -1,7 +1,20 @@
 {
   "name": "@jwilger/development-system-pi",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A disciplined development workflow for Pi, Claude Code, and Codex.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jwilger/ai-plugins.git",
+    "directory": "plugins/development-system"
+  },
+  "homepage": "https://github.com/jwilger/ai-plugins/tree/main/plugins/development-system#readme",
+  "bugs": {
+    "url": "https://github.com/jwilger/ai-plugins/issues"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
   "license": "AGPL-3.0-or-later",
   "author": {
     "name": "John Wilger",
@@ -23,6 +36,32 @@
     "typebox": "*"
   },
   "piCompatibility": ">=0.82.0 <0.83.0",
+  "files": [
+    "README.md",
+    ".claude-plugin",
+    ".codex-plugin",
+    ".mcp.json",
+    "hooks",
+    "bin",
+    "extensions",
+    "skills",
+    "components/tiber/bin",
+    "components/tiber/scripts",
+    "components/tiber/dist",
+    "components/tiber/release-binaries.json",
+    "components/tiber/release-binaries.sha256",
+    "components/development-discipline/bin",
+    "components/development-discipline/scripts",
+    "components/development-discipline/dist",
+    "components/development-discipline/release-binaries.json",
+    "components/development-discipline/release-binaries.sha256"
+  ],
+  "bin": {
+    "development-system": "./bin/development-system",
+    "development-system-pi": "./bin/development-system-pi",
+    "development-discipline-mcp": "./bin/development-discipline-mcp",
+    "tiber": "./bin/tiber"
+  },
   "pi": {
     "extensions": [
       "./extensions/development-system/index.ts"

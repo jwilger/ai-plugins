@@ -145,6 +145,10 @@ worktree-teardown path:
     scripts/worktree-teardown.sh "{{path}}"
     git worktree remove "{{path}}"
 
+# Validate the exact npm/GitHub Packages payload without publishing it.
+npm-package:
+    node scripts/validate-development-system-npm-package.mjs
+
 # Marketplace manifest + formatting validation.
 validate-marketplace:
     jq empty .claude-plugin/marketplace.json
@@ -154,6 +158,7 @@ validate-marketplace:
     node scripts/sync-development-system-metadata.mjs --check
     node scripts/validate-pi-package.mjs
     node scripts/generate-pi-support-docs.mjs --check
+    node scripts/validate-development-system-npm-package.mjs
     bash scripts/check-advisor-agent-config.sh
     bash scripts/check-model-routing-config.sh
     node scripts/generate-development-system-agents.mjs --check

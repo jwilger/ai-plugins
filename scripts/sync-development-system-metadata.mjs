@@ -54,6 +54,30 @@ for (const [relativeFile, select] of targets) {
   fs.writeFileSync(file, `${JSON.stringify(document, null, 2)}\n`);
 }
 
+const catalogFile = path.join(root, "README.md");
+const catalogSource = fs.readFileSync(catalogFile, "utf8");
+const catalogPattern =
+  /(\| \[development-system\]\(plugins\/development-system\/README\.md\) \|[^\n]*\| )\d+\.\d+\.\d+(\s+\|)/;
+const catalogMatch = catalogSource.match(catalogPattern);
+if (!catalogMatch)
+  throw new Error("development-system catalog row missing from README.md");
+const catalogVersion = catalogSource.match(
+  /\| \[development-system\]\(plugins\/development-system\/README\.md\) \|[^\n]*\| (\d+\.\d+\.\d+)\s+\|/,
+)?.[1];
+if (catalogVersion !== expectedVersion) {
+  changed = true;
+  if (!write) {
+    console.error(
+      `README.md: expected catalog version ${expectedVersion}, found ${catalogVersion}`,
+    );
+  } else {
+    fs.writeFileSync(
+      catalogFile,
+      catalogSource.replace(catalogPattern, `$1${expectedVersion}$2`),
+    );
+  }
+}
+
 for (const relativeFile of cacheLauncherTargets) {
   const file = path.join(root, relativeFile);
   const source = fs.readFileSync(file, "utf8");

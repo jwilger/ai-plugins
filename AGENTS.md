@@ -412,6 +412,15 @@ rules apply to **both Claude Code and Codex**;
 
 ## CI/CD and release
 
+The development-system Pi npm package is released only through the manually
+dispatched `.github/workflows/publish-development-system.yml` workflow on
+`main`. Select a semantic bump for a new release; use `current` only to recover
+publication or tagging for the already checked-in version. The workflow owns the
+version commit, exact tarball, GitHub Packages publication, and
+`development-system-v<version>` tag. Never hand-edit one version surface or
+publish the package from a developer token. Validate the payload locally with
+`just npm-package`.
+
 CI runs on GitHub Actions (`.github/workflows/ci.yml`):
 
 - **`ci.yml`** (pushes to `main` + PR + merge queue): `just ci`, marketplace
