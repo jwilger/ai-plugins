@@ -74,6 +74,14 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "main CI restores the pinned package toolchain before the full gate" {
+  workflow="$ROOT/.github/workflows/ci.yml"
+
+  run yq -r '.jobs.quality.steps[] | select(.name == "Restore pinned package dependencies") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"scripts/bootstrap-pi-package.sh"* ]]
+}
+
 @test "release versioning applies strict semantic increments" {
   run node --input-type=module - "$ROOT/scripts/version-development-system.mjs" <<'NODE'
 import assert from "node:assert/strict";
