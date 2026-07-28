@@ -309,6 +309,9 @@ JSON
   run node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
+  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-no-plugins"* ]]
+  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-development-system"* ]]
+  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-full-marketplace"* ]]
   [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
   [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]
@@ -316,20 +319,21 @@ JSON
   [[ "$output" == *"pluginMode: no-plugins"* ]]
   [[ "$output" == *"pluginMode: development-system"* ]]
   [[ "$output" != *"targeted-plugins"* ]]
-  [[ "$output" != *"full-marketplace"* ]]
+  [[ "$output" == *"pluginMode: full-marketplace"* ]]
   [[ "$output" == *"load-harness-cases.cjs?pluginMode={{ provider.pluginMode }}"* ]]
 }
 
-@test "filtered behavior config still compares only baseline and installed development-system" {
+@test "filtered behavior config preserves every declared provider composition" {
   run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
     node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 4 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 7 ]
+  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-full-marketplace"* ]]
   [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
   [[ "$output" == *"CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM"* ]]
   [[ "$output" != *"targeted-plugins"* ]]
-  [[ "$output" != *"full-marketplace"* ]]
+  [[ "$output" == *"pluginMode: full-marketplace"* ]]
 }
 
 @test "generated metadata records exact filtered provider plugin compositions" {
