@@ -6,7 +6,7 @@ setup() {
   export JUST_TEMPDIR="$TMPROOT"
   mkdir -p "$TMPROOT/scripts/evals"
   cp "$ROOT/justfile" "$TMPROOT/justfile"
-  cat >"$TMPROOT/scripts/evals/run.sh" <<'SH'
+  cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
 echo run >> eval-order.log
 mkdir -p evals/out
@@ -17,7 +17,7 @@ SH
 echo share >> eval-order.log
 echo "Promptfoo share URL: https://promptfoo.example/eval/abc123"
 SH
-  chmod +x "$TMPROOT/scripts/evals/run.sh" "$TMPROOT/scripts/evals/share.sh"
+  chmod +x "$TMPROOT/scripts/evals/run-changed.sh" "$TMPROOT/scripts/evals/share.sh"
 }
 
 teardown() {
@@ -33,14 +33,14 @@ teardown() {
 }
 
 @test "just evals shares the report before returning a failed eval status" {
-  cat >"$TMPROOT/scripts/evals/run.sh" <<'SH'
+  cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
 echo run >> eval-order.log
 mkdir -p evals/out
 : > evals/out/results.json
 exit 100
 SH
-  chmod +x "$TMPROOT/scripts/evals/run.sh"
+  chmod +x "$TMPROOT/scripts/evals/run-changed.sh"
 
   run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
 
@@ -50,12 +50,12 @@ SH
 }
 
 @test "just evals skips share when a failed run produced no fresh artifacts" {
-  cat >"$TMPROOT/scripts/evals/run.sh" <<'SH'
+  cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
 echo run >> eval-order.log
 exit 100
 SH
-  chmod +x "$TMPROOT/scripts/evals/run.sh"
+  chmod +x "$TMPROOT/scripts/evals/run-changed.sh"
 
   run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
 
@@ -65,12 +65,12 @@ SH
 }
 
 @test "just evals does not share after user interrupt" {
-  cat >"$TMPROOT/scripts/evals/run.sh" <<'SH'
+  cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
 echo run >> eval-order.log
 exit 130
 SH
-  chmod +x "$TMPROOT/scripts/evals/run.sh"
+  chmod +x "$TMPROOT/scripts/evals/run-changed.sh"
 
   run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
 
@@ -79,14 +79,14 @@ SH
 }
 
 @test "just evals does not share after eval timeout" {
-  cat >"$TMPROOT/scripts/evals/run.sh" <<'SH'
+  cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
 echo run >> eval-order.log
 mkdir -p evals/out
 : > evals/out/results.json
 exit 124
 SH
-  chmod +x "$TMPROOT/scripts/evals/run.sh"
+  chmod +x "$TMPROOT/scripts/evals/run-changed.sh"
 
   run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
 

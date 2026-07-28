@@ -167,31 +167,38 @@ do not tell the model to use this repository's plugins.
 Repeated samples are a deliberate measurement choice, not a blanket rule. Use
 more distinct cases when estimating population quality; use repeated samples
 when measuring per-input reliability, pass@k capability, pass^k reliability, or
-small stochastic differences. Trusted release evidence for this repository
-defaults to `EVAL_SAMPLES=3`; PR dry-runs do not run live samples.
+small stochastic differences. Changed-surface release evidence defaults to one
+sample; increase `EVAL_SAMPLES` only when a named reliability or variance metric
+requires repetition. PR dry-runs do not run live samples.
 
 Pull-request CI validates the eval configuration with `--dry-run` but does not
 claim behavior evidence. Provider-backed behavior evidence comes from trusted
 runs where Pi, Claude Code, and Codex subscription authentication is available.
 
-To produce the same artifacts locally:
+Provider-backed evaluation is change-scoped by default:
 
 ```shell
-just evals  # runs provider-backed evals, shares the result, and prints the URL
-nix develop -c scripts/evals/run.sh
-nix develop -c scripts/evals/run.sh --suite canary
-nix develop -c just pi-guard-evals
+just evals  # maps the origin/main diff to affected cases/harnesses, then shares
+EVAL_BASE_REF=<ref> nix develop -c scripts/evals/run-changed.sh
+EVAL_CASE_FILTER='<case>' EVAL_PROVIDER_FILTER='<provider>' EVAL_SAMPLES=1 \
+  nix develop -c scripts/evals/run.sh
 nix develop -c node scripts/evals/build-site.mjs
 ```
 
-Eval runs are time-bounded by default: 90 minutes for the full behavior suite
-and 20 minutes for focused, filtered, or canary runs. Override with
+Shared skill changes select only mapped cases across supported harnesses. Pi
+package changes select the Pi installed-package canary; Pi guard changes also
+run executable tool/outcome scenarios. Documentation and unrelated code select
+no live eval. `just evals-all` is an explicit exhaustive research experiment,
+never the normal completion gate.
+
+Eval runs are time-bounded by default: 90 minutes for an explicitly exhaustive
+behavior suite and 20 minutes for focused, filtered, or canary runs. Override with
 `EVAL_TIMEOUT`, or adjust the default classes with `EVAL_TIMEOUT_FULL_DEFAULT`
 and `EVAL_TIMEOUT_FOCUSED_DEFAULT`. Timed-out or interrupted runs write
 `evals/out/status.json` so the dashboard can show why no fresh result completed.
 
-`just evals` uploads the latest eval result through `promptfoo share`. For a
-local-only report, run `scripts/evals/run.sh` and then
+`just evals` uploads a fresh selected Promptfoo result through `promptfoo share`.
+For a local-only report, run the selected `scripts/evals/run.sh` command and then
 `nix develop -c node_modules/.bin/promptfoo view`. If a behavior eval exits
 with Promptfoo's normal failure status after writing artifacts, `just evals`
 still attempts to share the report and then returns the original eval status. If

@@ -241,28 +241,35 @@ find plugins -name plugin.json -exec jq empty {} \;  # every plugin manifest val
 prettier --check "**/*.{json,md}"                 # formatting (use --write to fix)
 ```
 
-For every plugin in this marketplace, when modifying anything under `plugins/`
-that could affect plugin or skill behavior, run the full relevant eval set
-before claiming completion. Behavior evals for the marketplace run through
-promptfoo's native Claude Code and Codex coding-agent providers, loading the
-relevant marketplace surface for each harness:
+Run provider-backed evals only for behavior that changed files could plausibly
+affect. Case, condition, and harness selection are causal engineering choices,
+not a ritual full-suite gate. `just evals` compares the branch with
+`origin/main` and applies the repository mapping: shared skill prose selects
+only cases targeting those skills across the harnesses that load them; Pi
+package/runtime work selects the installed Pi canary; Pi guard work selects the
+executable Pi outcome scenarios; documentation, tests, and unrelated
+implementation details select no live eval. Every selected case defaults to one
+sample unless the named metric requires repetition.
 
 ```shell
 just evals
-nix develop -c scripts/evals/run.sh
+EVAL_BASE_REF=<ref> scripts/evals/run-changed.sh
+EVAL_CASE_FILTER='<case-regex>' EVAL_PROVIDER_FILTER='<provider>' EVAL_SAMPLES=1 \
+  scripts/evals/run.sh
 nix develop -c node scripts/evals/build-site.mjs
 ```
 
-`just evals` is the convenience path for local provider-backed evals plus
-`promptfoo share`; it uploads the latest result and prints the share URL. Use
-the lower-level commands when you need local-only artifacts or `promptfoo view`.
-If Promptfoo writes artifacts and exits with failed evals, `just evals` still
-shares and then returns the eval failure status. If the run is interrupted
-with Ctrl-C, `just evals` exits immediately and does not share.
+Use `just evals-all` only as an explicit research experiment when a concrete
+cross-case, cross-condition, cross-harness hypothesis requires the exhaustive
+matrix. It is never a routine completion or release gate. `just evals` shares
+fresh Promptfoo artifacts when its selected scope produces them; executable
+outcome scenarios remain local evidence. If Promptfoo writes artifacts and
+exits with failed evals, the command shares before returning the eval failure.
+Interrupted or timed-out runs are not shared.
 
 `scripts/evals/run.sh --dry-run` only validates promptfoo wiring and is useful
 for pull-request CI without secrets; it is not behavior evidence. Provider-backed
-runs require working Claude Code and Codex authentication. The runner restores
+runs require working authentication for only the selected harnesses. The runner restores
 the pinned npm dev dependencies from `package-lock.json`, generates promptfoo
 config from the current marketplace manifests, prepares isolated no-plugin and
 `development-system` homes, installs the Claude plugin through the real

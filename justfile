@@ -76,9 +76,8 @@ tiber-release-complete:
 pi-guard-evals:
     node scripts/evals/run-pi-guard-scenarios.mjs
 
-# Run provider-backed promptfoo evals locally, upload/share the latest result,
-# and print the share URL. This sends eval data to the configured promptfoo
-# sharing service.
+# Run only provider-backed evals mapped to behavior affected since origin/main,
+# then upload/share fresh Promptfoo artifacts when the scope produced them.
 evals:
     #!/usr/bin/env bash
     set +e
@@ -86,7 +85,7 @@ evals:
     trap 'rm -f "$marker"' EXIT
     touch "$marker"
 
-    scripts/evals/run.sh
+    scripts/evals/run-changed.sh
     status=$?
     if [ "$status" -eq 124 ] || [ "$status" -ge 128 ]; then
       exit "$status"
@@ -111,6 +110,11 @@ evals:
       exit "$status"
     fi
     exit "$share_status"
+
+# Explicit, expensive research run across every case, condition, and harness.
+# This is never the default validation path.
+evals-all:
+    scripts/evals/run.sh
 
 # Run the plugin-instruction improvement loop with a plugin-only diff guard.
 improve-plugins:
