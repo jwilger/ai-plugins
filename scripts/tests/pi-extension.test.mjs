@@ -536,6 +536,47 @@ test("extension blocks coordination writes, secret reads, and unclassified shell
   assert.match(stillPrimary.reason, /coordination_write_blocked/);
 });
 
+test("review assignment tool returns structured cancellation evidence to its parent", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", false),
+  );
+  const child = path.join(project, "pi-child-fixture");
+  fs.writeFileSync(child, "#!/usr/bin/env bash\nsleep 30\n");
+  fs.chmodSync(child, 0o755);
+  const previous = process.env.DEVELOPMENT_SYSTEM_PI_BIN;
+  process.env.DEVELOPMENT_SYSTEM_PI_BIN = child;
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 25);
+  try {
+    const tool = registrations.tools.find(
+      (candidate) =>
+        candidate.name === "development_system_run_review_assignment",
+    );
+    const result = await tool.execute(
+      "review",
+      { assignment: "Inspect the bounded scope", model_role: "bounded-helper" },
+      controller.signal,
+      undefined,
+      { cwd: project },
+    );
+    assert.equal(result.details.status, "failed");
+    assert.equal(
+      result.details.code,
+      "development_system.review_child_cancelled",
+    );
+    assert.equal(result.details.lifecycle.state, "cancelled");
+    assert.equal(result.details.reason, "parent-abort");
+    assert.match(result.content[0].text, /terminationRequested/);
+  } finally {
+    if (previous === undefined) delete process.env.DEVELOPMENT_SYSTEM_PI_BIN;
+    else process.env.DEVELOPMENT_SYSTEM_PI_BIN = previous;
+  }
+});
+
 test("extension enforces delivery mode and case-specific destructive TUI approval", async () => {
   const { pi, registrations } = extensionHarness();
   (await loadExtension())(pi);

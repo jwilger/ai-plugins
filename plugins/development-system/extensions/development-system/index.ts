@@ -4,7 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveStatus } from "./adapters/status-interpreter.ts";
 import { applySetupPreview, createSetupPreview } from "./adapters/setup.ts";
-import { resolveReviewRoute, runReviewChild } from "./adapters/review-child.ts";
+import {
+  resolveReviewRoute,
+  reviewFailureResult,
+  runReviewChild,
+} from "./adapters/review-child.ts";
 import { registerGoalMode } from "./adapters/goal-mode.ts";
 import { activeCiRecoveryHold } from "./adapters/ci-hold.ts";
 import {
@@ -508,19 +512,31 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           "utf8",
         ),
       );
-      const result = await runReviewChild({
-        assignment: {
-          assignment: parameters.assignment,
-          modelRole: parameters.model_role,
-        },
-        cwd: context.cwd,
-        route: resolveReviewRoute(parameters.model_role, policy.piReviewModels),
-        signal,
-      });
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result,
-      };
+      try {
+        const result = await runReviewChild({
+          assignment: {
+            assignment: parameters.assignment,
+            modelRole: parameters.model_role,
+          },
+          cwd: context.cwd,
+          route: resolveReviewRoute(
+            parameters.model_role,
+            policy.piReviewModels,
+          ),
+          signal,
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          details: result,
+        };
+      } catch (error) {
+        const failure = reviewFailureResult(error);
+        if (!failure) throw error;
+        return {
+          content: [{ type: "text", text: JSON.stringify(failure) }],
+          details: failure,
+        };
+      }
     },
   });
 
