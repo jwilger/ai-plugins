@@ -176,7 +176,7 @@ test("cleanup preserves valuable ignored state while allowing generated caches",
   const root = repository();
   fs.writeFileSync(
     path.join(root, ".gitignore"),
-    "private-results/\n.dependencies/\n.direnv/\n.env.worktree\nnode_modules/\ntarget/\n",
+    "private-results/\n.dependencies/\n.direnv/\n.envrc\n.env.worktree\nnode_modules/\ntarget/\n",
   );
   execFileSync("git", ["-C", root, "add", ".gitignore"]);
   execFileSync("git", ["-C", root, "commit", "-m", "test: ignore state"]);
@@ -210,6 +210,13 @@ test("cleanup preserves valuable ignored state while allowing generated caches",
     ),
     "valuable\n",
   );
+
+  fs.rmSync(path.join(created.path, "private-results"), { recursive: true });
+  fs.writeFileSync(path.join(created.path, ".envrc"), "use flake\n");
+  fs.writeFileSync(path.join(created.path, ".env.worktree"), "PORT=4100\n");
+  const removed = await removeWorktree(root, expected);
+  assert.equal(removed.status, "removed");
+  assert.equal(fs.existsSync(created.path), false);
 });
 
 test("cleanup rejects detached HEAD and identity changes without removal", async () => {

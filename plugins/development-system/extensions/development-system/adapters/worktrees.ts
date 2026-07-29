@@ -247,6 +247,7 @@ async function withRepositoryQueue<T>(
 
 function disposableIgnoredPath(candidate: string): boolean {
   return (
+    candidate === ".envrc" ||
     candidate === ".env.worktree" ||
     [".dependencies/", ".direnv/", "node_modules/", "target/"].some((prefix) =>
       candidate.startsWith(prefix),
