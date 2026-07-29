@@ -72,13 +72,14 @@ scripts/agent-checkout-guard.sh
 
 In Pi with `development-system` active, a primary-checkout session should call
 `development_system_worktree_list` and
-`development_system_worktree_create` rather than improvising mutation. In the
-local TUI, creation queues session replacement automatically and preserves the
-conversation; `development_system_worktree_switch` does the same for an
-existing worktree. Headless modes receive a new-Pi process command instead.
-Plain `cd` or `git -C` does not move the current session's enforcement checkout.
-After verified delivery from a clean linked worktree, call
-`development_system_worktree_finish` to return to primary, run repository
+`development_system_worktree_create` rather than improvising mutation. Pi keeps
+its host cwd and conversation in the coordination checkout while the extension
+persists a session-level logical workspace. Creation and
+`development_system_worktree_switch` activate a registered linked worktree;
+each shell and relative file/search tool call is independently routed there in
+TUI and headless modes, so no relaunch or private slash-command handoff is
+needed. After verified delivery from a clean logical worktree, call
+`development_system_worktree_finish` to route back to primary, run repository
 teardown, and remove the worktree while preserving its branch.
 
 The guard exits successfully only from a linked worktree. In the main checkout

@@ -1,5 +1,7 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { randomUUID } from "node:crypto";
+import {
+  createLocalBashOperations,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { chmod, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +21,7 @@ import {
   validateWorktreeForCleanup,
   type WorktreeRecord,
 } from "./adapters/worktrees.ts";
-import { switchWorktreeSession } from "./adapters/worktree-session.ts";
+import { LogicalWorkspaceAuthority } from "./adapters/logical-workspace.ts";
 import { PI_REFERENCES, readPiReference } from "./adapters/references.ts";
 import {
   McpClient,
@@ -48,6 +50,10 @@ const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
 
 function terminalSafe(value: string): string {
   return value
@@ -211,7 +217,7 @@ async function shellRejection(
       boundary: "coordination-checkout mutation",
       missing: "a provably read-only bounded command",
       nextAction:
-        "Call development_system_worktree_list, create one with development_system_worktree_create if needed, then run its switchCommand in the local Pi TUI to preserve this conversation without relaunching. Headless modes use relaunchCommand.",
+        "Call development_system_worktree_list, then create or activate a registered linked logical workspace. Pi remains in this conversation and requires no relaunch.",
     });
   }
   return null;
@@ -242,36 +248,73 @@ async function recordProvenanceMarker(goalCollision: boolean): Promise<void> {
 /** Pi adapter composition root. Domain behavior lives in pure core modules. */
 export default function developmentSystemExtension(pi: ExtensionAPI): void {
   let started = false;
-  const componentClients: McpClient[] = [];
-  const pendingAutomaticSwitches = new Map<string, WorktreeRecord>();
-  const pendingAutomaticFinishes = new Map<string, WorktreeRecord>();
   const goalMode = registerGoalMode(pi);
+  const workspace = new LogicalWorkspaceAuthority((customType, data) =>
+    pi.appendEntry(customType, data),
+  );
+  const projectCwd = (hostCwd: string): string => workspace.path(hostCwd);
 
-  const ensureNoAutomaticTransitionPending = (): void => {
-    if (pendingAutomaticSwitches.size > 0 || pendingAutomaticFinishes.size > 0)
-      throw new Error("development_system.worktree_transition_already_queued");
+  const assertLifecycleToolIsolated = (
+    context: {
+      sessionManager?: {
+        getBranch?(): readonly {
+          type?: string;
+          message?: { role?: string; content?: unknown };
+        }[];
+      };
+    },
+    toolName: string,
+  ): void => {
+    const branch = context.sessionManager?.getBranch?.();
+    if (!branch) return;
+    const assistant = [...branch]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.type === "message" && entry.message?.role === "assistant",
+      )?.message;
+    if (!assistant) return;
+    const calls = Array.isArray(assistant.content)
+      ? assistant.content.filter(
+          (item): item is { type: "toolCall"; name: string } =>
+            !!item &&
+            typeof item === "object" &&
+            (item as { type?: unknown }).type === "toolCall" &&
+            typeof (item as { name?: unknown }).name === "string",
+        )
+      : [];
+    if (calls.length !== 1 || calls[0].name !== toolName)
+      throw new Error(
+        `development_system.worktree_lifecycle_tool_must_be_isolated tool=${toolName}; retry it as the only tool call in one assistant message`,
+      );
   };
 
-  const queueAutomaticSwitch = (worktree: WorktreeRecord): string => {
-    ensureNoAutomaticTransitionPending();
-    const token = randomUUID();
-    pendingAutomaticSwitches.set(token, worktree);
-    pi.sendUserMessage(
-      `/development-system-worktree-switch --automatic ${token}`,
-      { deliverAs: "followUp" },
+  const activateWorkspace = async (
+    context: {
+      cwd: string;
+      ui?: { setStatus?(key: string, value: string): void };
+    },
+    target: string,
+    expectedBranch?: string | null,
+  ) => {
+    const activated = await workspace.activate(context, target, expectedBranch);
+    context.ui?.setStatus?.(
+      "development-system-workspace",
+      `workspace: ${path.basename(activated.path)}`,
     );
-    return token;
+    return activated;
   };
 
-  const queueAutomaticFinish = (worktree: WorktreeRecord): string => {
-    ensureNoAutomaticTransitionPending();
-    const token = randomUUID();
-    pendingAutomaticFinishes.set(token, worktree);
-    pi.sendUserMessage(
-      `/development-system-worktree-finish --automatic ${token}`,
-      { deliverAs: "followUp" },
-    );
-    return token;
+  const assertHostDoesNotDependOn = async (
+    hostCwd: string,
+    target: string,
+  ): Promise<void> => {
+    const hostInventory = await listWorktrees(hostCwd);
+    const host = hostInventory.worktrees.find((worktree) => worktree.current);
+    if (host?.path === target)
+      throw new Error(
+        `development_system.worktree_finish_host_checkout_migration_required primary=${hostInventory.primary}; this Pi process was launched in the worktree that cleanup would remove, so start Pi from the primary checkout once before retrying finish`,
+      );
   };
 
   const bridge = async (
@@ -282,11 +325,14 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     approvedNames: ReadonlySet<string>,
   ): Promise<readonly string[]> => {
     const client = new McpClient({ command, args, cwd });
-    await client.start();
-    componentClients.push(client);
-    const tools = (await client.listTools()).filter((tool) =>
-      approvedNames.has(tool.name),
-    );
+    let discovered: readonly McpTool[];
+    try {
+      await client.start();
+      discovered = await client.listTools();
+    } finally {
+      client.stop();
+    }
+    const tools = discovered.filter((tool) => approvedNames.has(tool.name));
     const admitted = tools.filter((tool) =>
       schemaIsAdmissible(tool.inputSchema),
     );
@@ -295,10 +341,8 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       tool,
       publicName: publicToolName(origin, tool.name),
     }));
-    if (registrations.some(({ publicName }) => existing.has(publicName))) {
-      client.stop();
+    if (registrations.some(({ publicName }) => existing.has(publicName)))
       throw new Error(`development_system.mcp_tool_collision origin=${origin}`);
-    }
     for (const { tool, publicName } of registrations) {
       pi.registerTool({
         name: publicName,
@@ -306,13 +350,22 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         description:
           tool.description ?? `First-party ${origin} operation ${tool.name}`,
         parameters: tool.inputSchema as McpTool["inputSchema"],
-        async execute(_toolCallId, parameters, signal) {
-          const result = await client.callTool(tool.name, parameters, signal);
-          const text = JSON.stringify(result);
-          if (Buffer.byteLength(text) > 50 * 1024) {
-            throw new Error("development_system.component_output_limit");
+        async execute(_toolCallId, parameters, signal, _onUpdate, context) {
+          const routed = new McpClient({
+            command,
+            args,
+            cwd: projectCwd(context.cwd),
+          });
+          await routed.start();
+          try {
+            const result = await routed.callTool(tool.name, parameters, signal);
+            const text = JSON.stringify(result);
+            if (Buffer.byteLength(text) > 50 * 1024)
+              throw new Error("development_system.component_output_limit");
+            return { content: [{ type: "text", text }], details: result };
+          } finally {
+            routed.stop();
           }
-          return { content: [{ type: "text", text }], details: result };
         },
       });
     }
@@ -323,28 +376,75 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     description: "Show deterministic development-system project status",
     handler: async (_arguments, context) => {
       const status = await resolveStatus(
-        context.cwd,
+        projectCwd(context.cwd),
         packageRoot,
         context.mode as HarnessMode,
       );
       context.ui.notify(
-        JSON.stringify({ ...status, goal: goalMode.current() }, null, 2),
+        JSON.stringify(
+          {
+            ...status,
+            hostCwd: context.cwd,
+            logicalWorkspace: projectCwd(context.cwd),
+            goal: goalMode.current(),
+          },
+          null,
+          2,
+        ),
         status.errors.length > 0 ? "warning" : "info",
       );
     },
   });
 
-  pi.registerCommand("development-system-worktree-switch", {
+  pi.registerCommand("development-system-worktree-create", {
     description:
-      "Switch this Pi conversation to another registered worktree without relaunching",
+      "Create a linked worktree and make it this session's logical workspace",
     handler: async (arguments_, context) => {
-      if (context.mode !== "tui" || !context.hasUI) {
+      const [name, branch, ...extra] = arguments_.trim().split(/\s+/);
+      if (!name || !branch || extra.length > 0) {
         context.ui.notify(
-          "development_system.worktree_switch_requires_local_tui: workspace replacement requires the local Pi TUI runtime.",
+          "development_system.worktree_create_arguments_invalid expected=<name> <branch>",
           "error",
         );
         return;
       }
+      try {
+        await context.waitForIdle();
+        if (context.mode === "tui" && context.hasUI) {
+          const confirmed = await context.ui.confirm(
+            "Create and activate logical workspace?",
+            `Create ${terminalSafe(name)} on new branch ${terminalSafe(branch)} and route this session into it?`,
+          );
+          if (!confirmed) return;
+        }
+        const created = await createWorktree(projectCwd(context.cwd), {
+          name,
+          branch,
+        });
+        if (created.status !== "created")
+          throw new Error(`${created.code}: ${created.nextAction}`);
+        const activated = await activateWorkspace(
+          context,
+          created.path,
+          created.branch,
+        );
+        context.ui.notify(
+          `Created and activated logical workspace ${terminalSafe(activated.path)} on branch ${terminalSafe(activated.branch ?? "detached")}. Pi's host cwd was unchanged.`,
+          "info",
+        );
+      } catch (error) {
+        context.ui.notify(
+          terminalSafe(error instanceof Error ? error.message : String(error)),
+          "error",
+        );
+      }
+    },
+  });
+
+  pi.registerCommand("development-system-worktree-switch", {
+    description:
+      "Set this session's logical workspace to one registered linked worktree",
+    handler: async (arguments_, context) => {
       const selector = arguments_.trim();
       if (selector.length > 500 || /[\u0000-\u001f\u007f]/.test(selector)) {
         context.ui.notify(
@@ -355,23 +455,17 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       }
       try {
         await context.waitForIdle();
-        const inventory = await listWorktrees(context.cwd);
+        try {
+          await workspace.resolve(context.cwd);
+        } catch {
+          await workspace.resetToHost(context);
+        }
+        const inventory = await listWorktrees(projectCwd(context.cwd));
         const candidates = inventory.worktrees.filter(
-          (worktree) => !worktree.current,
+          (worktree) => !worktree.current && !worktree.primary,
         );
-        const automaticMatch = selector.match(
-          /^--automatic ([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i,
-        );
-        const automatic = automaticMatch !== null;
         let selected: WorktreeRecord | undefined;
-        if (automaticMatch) {
-          selected = pendingAutomaticSwitches.get(automaticMatch[1]);
-          pendingAutomaticSwitches.delete(automaticMatch[1]);
-          if (!selected)
-            throw new Error(
-              "development_system.worktree_switch_automatic_request_stale",
-            );
-        } else if (selector) {
+        if (selector) {
           const matches = candidates.filter(
             (worktree) =>
               worktree.path === selector ||
@@ -384,7 +478,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
             );
           if (matches.length > 1)
             throw new Error(
-              `development_system.worktree_switch_ambiguous selector=${selector}; use the exact branch or canonical path`,
+              `development_system.worktree_switch_ambiguous selector=${selector}`,
             );
           selected = matches[0];
         } else {
@@ -397,38 +491,30 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
               `${index + 1}. ${terminalSafe(worktree.branch ?? "detached")} — ${terminalSafe(worktree.path)}`,
           );
           const choice = await context.ui.select(
-            "Switch this Pi conversation to a registered worktree",
+            "Use a registered linked worktree as this session's logical workspace",
             labels,
           );
           if (!choice) return;
           selected = candidates[labels.indexOf(choice)];
-          if (!selected)
-            throw new Error(
-              "development_system.worktree_switch_selection_stale",
-            );
         }
         if (!selected)
           throw new Error("development_system.worktree_switch_selection_stale");
-        if (!automatic) {
+        if (context.mode === "tui" && context.hasUI) {
           const confirmed = await context.ui.confirm(
-            "Switch Pi workspace?",
-            `Preserve this conversation and active session branch in ${terminalSafe(selected.path)} (${terminalSafe(selected.branch ?? "detached")})? Pi will rebuild its cwd-bound runtime and re-evaluate project trust and resources there.`,
+            "Switch logical workspace?",
+            `Route subsequent shell and file tools into ${terminalSafe(selected.path)} without relaunching Pi?`,
           );
           if (!confirmed) return;
         }
-
-        const current = await listWorktrees(context.cwd);
-        const revalidated = current.worktrees.find(
-          (worktree) =>
-            worktree.path === selected.path &&
-            worktree.branch === selected.branch &&
-            worktree.head === selected.head,
+        const activated = await activateWorkspace(
+          context,
+          selected.path,
+          selected.branch,
         );
-        if (!revalidated || revalidated.current)
-          throw new Error(
-            "development_system.worktree_switch_identity_changed; list worktrees and select again",
-          );
-        await switchWorktreeSession(context, revalidated.path);
+        context.ui.notify(
+          `Logical workspace is now ${terminalSafe(activated.path)}. Pi's host working directory and conversation were unchanged.`,
+          "info",
+        );
       } catch (error) {
         context.ui.notify(
           terminalSafe(error instanceof Error ? error.message : String(error)),
@@ -440,17 +526,9 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("development-system-worktree-finish", {
     description:
-      "Switch this Pi conversation to the primary checkout and remove the finished clean linked worktree",
+      "Return logical routing to primary and remove the finished clean worktree",
     handler: async (arguments_, context) => {
-      if (context.mode !== "tui" || !context.hasUI) {
-        context.ui.notify(
-          "development_system.worktree_finish_requires_local_tui",
-          "error",
-        );
-        return;
-      }
-      const selector = arguments_.trim();
-      if (selector.length > 500 || /[\u0000-\u001f\u007f]/.test(selector)) {
+      if (arguments_.trim()) {
         context.ui.notify(
           "development_system.worktree_finish_selector_invalid",
           "error",
@@ -459,62 +537,41 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       }
       try {
         await context.waitForIdle();
-        const inventory = await listWorktrees(context.cwd);
-        const automaticMatch = selector.match(
-          /^--automatic ([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i,
-        );
-        const automatic = automaticMatch !== null;
-        let selected: WorktreeRecord | undefined;
-        if (automaticMatch) {
-          selected = pendingAutomaticFinishes.get(automaticMatch[1]);
-          pendingAutomaticFinishes.delete(automaticMatch[1]);
-          if (!selected)
-            throw new Error(
-              "development_system.worktree_finish_automatic_request_stale",
-            );
-        } else if (!selector) {
-          selected = inventory.worktrees.find((worktree) => worktree.current);
-        } else {
-          throw new Error(
-            "development_system.worktree_finish_selector_invalid",
-          );
-        }
-        if (!selected || selected.primary || !selected.current)
-          throw new Error(
-            "development_system.worktree_finish_requires_linked_checkout",
-          );
-        const validated = await validateWorktreeForCleanup(
-          context.cwd,
-          selected.path,
-        );
-        if (
-          validated.branch !== selected.branch ||
-          validated.head !== selected.head ||
-          !validated.current
-        )
-          throw new Error(
-            "development_system.worktree_cleanup_identity_changed",
-          );
-        if (!automatic) {
-          const confirmed = await context.ui.confirm(
-            "Finish and remove this worktree?",
-            `Switch this conversation to ${terminalSafe(inventory.primary)}, run repository teardown, and remove the clean worktree ${terminalSafe(selected.path)}? The branch ${terminalSafe(selected.branch ?? "detached")} will be preserved.`,
-          );
-          if (!confirmed) return;
-        }
-        await switchWorktreeSession(
+        await workspace.finish(
           context,
-          inventory.primary,
-          async (replacement) => {
+          async (source) => {
+            await assertHostDoesNotDependOn(context.cwd, source.path);
+            const validated = await validateWorktreeForCleanup(
+              source.path,
+              source.path,
+            );
+            if (context.mode === "tui" && context.hasUI) {
+              const confirmed = await context.ui.confirm(
+                "Finish and remove this worktree?",
+                `Return logical routing to ${terminalSafe(source.primary)}, run teardown, and remove ${terminalSafe(source.path)} while preserving branch ${terminalSafe(source.branch ?? "detached")}?`,
+              );
+              if (!confirmed) return null;
+            }
+            return validated;
+          },
+          async (source, primary, validated) => {
+            context.ui.setStatus?.(
+              "development-system-workspace",
+              `workspace: ${path.basename(primary.path)}`,
+            );
             try {
-              const removed = await removeWorktree(replacement.cwd, validated);
-              replacement.ui.notify(
+              const removed = await removeWorktree(
+                primary.path,
+                validated,
+                () => workspace.assertIdentity(source),
+              );
+              context.ui.notify(
                 `Removed finished worktree ${terminalSafe(removed.path)}. Branch ${terminalSafe(removed.branch ?? "detached")} was preserved.`,
                 "info",
               );
             } catch (error) {
-              replacement.ui.notify(
-                `Workspace returned to the primary checkout, but cleanup preserved the worktree: ${terminalSafe(error instanceof Error ? error.message : String(error))}`,
+              context.ui.notify(
+                `Logical routing returned to primary, but cleanup preserved the worktree: ${terminalSafe(error instanceof Error ? error.message : String(error))}`,
                 "error",
               );
             }
@@ -536,7 +593,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       try {
         const preview = await createSetupPreview(
           packageRoot,
-          context.cwd,
+          projectCwd(context.cwd),
           arguments_,
         );
         context.ui.notify(
@@ -575,13 +632,18 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, _parameters, signal, _onUpdate, context) {
       if (signal?.aborted) throw new Error("development_system.cancelled");
       const status = await resolveStatus(
-        context.cwd,
+        projectCwd(context.cwd),
         packageRoot,
         context.mode as HarnessMode,
       );
       return {
         content: [{ type: "text", text: concise(status) }],
-        details: { ...status, goal: goalMode.current() },
+        details: {
+          ...status,
+          hostCwd: context.cwd,
+          logicalWorkspace: projectCwd(context.cwd),
+          goal: goalMode.current(),
+        },
       };
     },
   });
@@ -595,7 +657,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, _parameters, signal, _onUpdate, context) {
       if (signal?.aborted) throw new Error("development_system.cancelled");
       const status = await resolveStatus(
-        context.cwd,
+        projectCwd(context.cwd),
         packageRoot,
         context.mode as HarnessMode,
       );
@@ -654,23 +716,22 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     name: "development_system_worktree_list",
     label: "List Development Worktrees",
     description:
-      "List canonical linked worktrees, branches, the authoritative current checkout, local-TUI conversation switch commands, and headless relaunch fallbacks. This is the supported primary-checkout discovery path.",
+      "List canonical linked worktrees, branches, and this session's authoritative logical workspace.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     async execute(_toolCallId, _parameters, signal, _onUpdate, context) {
       if (signal?.aborted) throw new Error("development_system.cancelled");
-      const inventory = await listWorktrees(context.cwd);
-      const automaticSwitchAvailable = context.mode === "tui" && context.hasUI;
+      const inventory = await listWorktrees(projectCwd(context.cwd));
       const result = {
         ...inventory,
-        requiresUserWorkspaceSwitch:
-          inventory.requiresUserWorkspaceSwitch && !automaticSwitchAvailable,
+        hostCwd: context.cwd,
+        logicalWorkspace: inventory.current,
         processCwdImmutable: true,
-        sessionWorkspaceSwitchAvailable: automaticSwitchAvailable,
-        nextAction: automaticSwitchAvailable
-          ? inventory.currentKind === "primary"
-            ? "Use development_system_worktree_create if needed, or development_system_worktree_switch for an existing worktree. Development-system will preserve this conversation and replace the cwd-bound runtime automatically."
-            : "Continue ordinary work in the current linked worktree, use development_system_worktree_switch to move, or call development_system_worktree_finish after verified delivery to return and clean up."
-          : "Start a new Pi process with a returned relaunchCommand; this mode cannot replace the active cwd-bound runtime.",
+        requiresUserWorkspaceSwitch: false,
+        sessionWorkspaceSwitchAvailable: true,
+        nextAction:
+          inventory.currentKind === "primary"
+            ? "Create a linked worktree or activate an existing one; no Pi relaunch is required."
+            : "Continue in the logical linked worktree or finish it after verified delivery.",
       } as const;
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
@@ -683,7 +744,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     name: "development_system_worktree_switch",
     label: "Switch Development Worktree",
     description:
-      "Queue an automatic local-TUI replacement of this Pi conversation into one exact registered worktree. No manual slash command is required.",
+      "Treat one exact registered linked worktree as this session's logical workspace without relaunching Pi.",
     parameters: {
       type: "object",
       properties: {
@@ -694,19 +755,20 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     },
     async execute(_toolCallId, parameters, signal, _onUpdate, context) {
       if (signal?.aborted) throw new Error("development_system.cancelled");
-      if (context.mode !== "tui" || !context.hasUI)
-        throw new Error(
-          "development_system.worktree_switch_requires_local_tui",
-        );
+      assertLifecycleToolIsolated(
+        context,
+        "development_system_worktree_switch",
+      );
       if (
         typeof parameters.selector !== "string" ||
         /[\u0000-\u001f\u007f]/.test(parameters.selector)
       )
         throw new Error("development_system.worktree_switch_selector_invalid");
-      const inventory = await listWorktrees(context.cwd);
+      const inventory = await listWorktrees(projectCwd(context.cwd));
       const matches = inventory.worktrees.filter(
         (worktree) =>
           !worktree.current &&
+          !worktree.primary &&
           (worktree.path === parameters.selector ||
             worktree.branch === parameters.selector ||
             path.basename(worktree.path) === parameters.selector),
@@ -719,14 +781,20 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         throw new Error(
           `development_system.worktree_switch_ambiguous selector=${parameters.selector}`,
         );
-      queueAutomaticSwitch(matches[0]);
+      const activated = await activateWorkspace(
+        context,
+        matches[0].path,
+        matches[0].branch,
+      );
       const result = {
-        status: "queued",
-        target: matches[0].path,
-        branch: matches[0].branch,
+        status: "active",
+        target: activated.path,
+        branch: activated.branch,
+        hostCwd: context.cwd,
+        logicalWorkspace: activated.path,
         requiresUserWorkspaceSwitch: false,
         nextAction:
-          "Finish the current response; development-system will replace the Pi workspace automatically.",
+          "Route every repository operation through the logical workspace; no relaunch or slash command is needed.",
       } as const;
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
@@ -739,32 +807,46 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     name: "development_system_worktree_finish",
     label: "Finish Development Worktree",
     description:
-      "After verified delivery is complete, queue automatic return to the primary checkout, run repository teardown, and remove the current clean linked worktree while preserving its branch.",
+      "After verified delivery, route this session back to primary, run teardown, and remove the clean linked worktree while preserving its branch.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     async execute(_toolCallId, _parameters, signal, _onUpdate, context) {
       if (signal?.aborted) throw new Error("development_system.cancelled");
-      if (context.mode !== "tui" || !context.hasUI)
-        throw new Error(
-          "development_system.worktree_finish_requires_local_tui",
-        );
-      const inventory = await listWorktrees(context.cwd);
-      const current = inventory.worktrees.find((worktree) => worktree.current);
-      if (!current || current.primary)
-        throw new Error(
-          "development_system.worktree_finish_requires_linked_checkout",
-        );
-      const validated = await validateWorktreeForCleanup(
-        context.cwd,
-        current.path,
+      assertLifecycleToolIsolated(
+        context,
+        "development_system_worktree_finish",
       );
-      queueAutomaticFinish(validated);
+      const removed = await workspace.finish(
+        context,
+        async (source) => {
+          await assertHostDoesNotDependOn(context.cwd, source.path);
+          return validateWorktreeForCleanup(source.path, source.path);
+        },
+        async (source, primary, validated) => {
+          context.ui?.setStatus?.(
+            "development-system-workspace",
+            `workspace: ${path.basename(primary.path)}`,
+          );
+          try {
+            return await removeWorktree(primary.path, validated, () =>
+              workspace.assertIdentity(source),
+            );
+          } catch (error) {
+            throw new Error(
+              `development_system.worktree_finish_cleanup_preserved logical_workspace=${primary.path} cause=${terminalSafe(error instanceof Error ? error.message : String(error))}`,
+            );
+          }
+        },
+      );
+      if (!removed)
+        throw new Error("development_system.worktree_finish_cancelled");
       const result = {
-        status: "queued",
-        target: validated.path,
-        branch: validated.branch,
+        status: "removed",
+        target: removed.path,
+        logicalWorkspace: workspace.path(context.cwd),
+        branch: removed.branch,
         branchPreserved: true,
-        nextAction:
-          "Finish the current response; development-system will return to the primary checkout and remove the clean worktree automatically.",
+        hostCwd: context.cwd,
+        nextAction: "Continue coordination from the primary logical workspace.",
       } as const;
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
@@ -777,7 +859,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     name: "development_system_worktree_create",
     label: "Create Development Worktree",
     description:
-      "Create one new repository-local linked worktree from the authoritative primary HEAD. In local TUI mode, queue automatic conversation replacement into it; headless callers receive a relaunch fallback.",
+      "Create a repository-local linked worktree from primary HEAD and immediately make it this session's logical workspace.",
     parameters: {
       type: "object",
       properties: {
@@ -794,36 +876,35 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     },
     async execute(_toolCallId, parameters, signal, _onUpdate, context) {
       if (signal?.aborted) throw new Error("development_system.cancelled");
-      const result = await createWorktree(context.cwd, {
+      assertLifecycleToolIsolated(
+        context,
+        "development_system_worktree_create",
+      );
+      const result = await createWorktree(projectCwd(context.cwd), {
         name: parameters.name,
         branch: parameters.branch,
       });
-      if (
-        result.status === "created" &&
-        context.mode === "tui" &&
-        context.hasUI
-      ) {
-        const created = (await listWorktrees(context.cwd)).worktrees.find(
-          (worktree) => worktree.path === result.path,
-        );
-        if (!created)
-          throw new Error("development_system.worktree_creation_unobservable");
-        queueAutomaticSwitch(created);
-        const queued = {
-          ...result,
-          requiresUserWorkspaceSwitch: false,
-          switchQueued: true,
-          nextAction:
-            "Automatic local-TUI workspace replacement is queued for the end of this response.",
-        } as const;
+      if (result.status !== "created")
         return {
-          content: [{ type: "text", text: JSON.stringify(queued) }],
-          details: queued,
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          details: result,
         };
-      }
+      const activated = await activateWorkspace(
+        context,
+        result.path,
+        result.branch,
+      );
+      const active = {
+        ...result,
+        status: "created" as const,
+        logicalWorkspace: activated.path,
+        requiresUserWorkspaceSwitch: false,
+        nextAction:
+          "The linked worktree is active as this session's logical workspace; no relaunch is required.",
+      } as const;
       return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result,
+        content: [{ type: "text", text: JSON.stringify(active) }],
+        details: active,
       };
     },
   });
@@ -848,7 +929,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       if (signal?.aborted) throw new Error("development_system.cancelled");
       const preview = await createSetupPreview(
         packageRoot,
-        context.cwd,
+        projectCwd(context.cwd),
         typeof parameters.arguments === "string" ? parameters.arguments : "",
       );
       return {
@@ -893,7 +974,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         throw new Error("development_system.review_assignment_invalid");
       }
       const status = await resolveStatus(
-        context.cwd,
+        projectCwd(context.cwd),
         packageRoot,
         context.mode as HarnessMode,
       );
@@ -931,7 +1012,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
             assignment: parameters.assignment,
             modelRole: parameters.model_role,
           },
-          cwd: context.cwd,
+          cwd: projectCwd(context.cwd),
           route,
           signal,
         });
@@ -951,13 +1032,53 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", async (event, context) => {
+    let logicalCwd: string;
+    try {
+      logicalCwd = await workspace.resolve(context.cwd);
+    } catch (error) {
+      const recoveryTools = new Set([
+        "development_system_status",
+        "development_system_policy_read",
+        "development_system_worktree_list",
+        "development_system_worktree_switch",
+        "development_system_worktree_create",
+      ]);
+      if (recoveryTools.has(event.toolName)) {
+        try {
+          logicalCwd = (await workspace.resetToHost(context)).path;
+        } catch (recoveryError) {
+          return {
+            block: true,
+            reason: guardMessage({
+              code: "development_system.logical_workspace_recovery_failed",
+              boundary: "logical workspace recovery",
+              missing: "a registered host checkout",
+              nextAction: terminalSafe(
+                recoveryError instanceof Error
+                  ? recoveryError.message
+                  : String(recoveryError),
+              ),
+            }),
+          };
+        }
+      } else
+        return {
+          block: true,
+          reason: guardMessage({
+            code: "development_system.logical_workspace_stale",
+            boundary: "logical workspace routing",
+            missing: "a currently registered logical workspace identity",
+            nextAction: `Run development_system_worktree_list and activate a valid worktree before retrying. ${terminalSafe(error instanceof Error ? error.message : String(error))}`,
+          }),
+        };
+    }
     if (["write", "edit", "bash"].includes(event.toolName)) {
       const current = await guardContext(
-        context.cwd,
+        logicalCwd,
         context.mode as HarnessMode,
       );
       if (current.policy?.features.tiber) {
-        const hold = await activeCiRecoveryHold(packageRoot, context.cwd);
+        const hold = await activeCiRecoveryHold(packageRoot, logicalCwd);
         if (hold)
           return {
             block: true,
@@ -971,17 +1092,26 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           };
       }
     }
-    if (["write", "edit", "read"].includes(event.toolName)) {
-      const rawPath = (event.input as { path?: unknown }).path;
-      if (typeof rawPath === "string") {
+
+    if (
+      ["write", "edit", "read", "grep", "find", "ls"].includes(event.toolName)
+    ) {
+      const input = event.input as { path?: unknown };
+      const rawPath =
+        typeof input.path === "string"
+          ? input.path
+          : ["grep", "find", "ls"].includes(event.toolName)
+            ? "."
+            : null;
+      if (rawPath !== null) {
         const status = await resolveStatus(
-          context.cwd,
+          logicalCwd,
           packageRoot,
           context.mode as HarnessMode,
         );
         const classified = classifyPath({
           rawPath,
-          cwd: context.cwd,
+          cwd: logicalCwd,
           boundary: status.checkout.current,
         });
         const authoritativePolicy = path.join(
@@ -1004,7 +1134,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
               await readFile(authoritativePolicy, "utf8"),
             ).features.worktrees;
           } catch {
-            /* missing policy grants nothing but does not impose configured worktree policy */
+            // Missing policy grants nothing but does not impose worktree policy.
           }
           if (worktrees)
             return {
@@ -1012,24 +1142,28 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
               reason: guardMessage({
                 code: "development_system.coordination_write_blocked",
                 boundary: "coordination checkout",
-                missing: "an allowed linked-worktree target",
+                missing: "an active linked logical workspace",
                 nextAction:
-                  "Call development_system_worktree_list, create one with development_system_worktree_create if needed, then relaunch Pi with the returned command.",
+                  "Create or activate a registered linked worktree with the development-system worktree tools; no Pi relaunch is required.",
               }),
             };
         }
+        input.path = classified.canonicalPath;
       }
     }
+
     if (event.toolName === "bash") {
-      const command = (event.input as { command?: unknown }).command;
+      const input = event.input as { command?: unknown };
+      const command = input.command;
       if (typeof command === "string") {
         const reason = await shellRejection(
           command,
-          context.cwd,
+          logicalCwd,
           context.mode as HarnessMode,
           (title, message) => context.ui.confirm(title, message),
         );
         if (reason) return { block: true, reason };
+        input.command = `cd -- ${shellQuote(logicalCwd)} && ${command}`;
       }
     }
   });
@@ -1053,27 +1187,54 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("user_bash", async (event, context) => {
-    const reason = await shellRejection(
-      event.command,
-      event.cwd,
-      context.mode as HarnessMode,
-      (title, message) => context.ui.confirm(title, message),
-    );
-    if (!reason) return;
-    return {
-      result: {
-        output: reason,
-        exitCode: 2,
-        cancelled: false,
-        truncated: false,
-      },
-    };
+    try {
+      const logicalCwd = await workspace.resolve(context.cwd);
+      const reason = await shellRejection(
+        event.command,
+        logicalCwd,
+        context.mode as HarnessMode,
+        (title, message) => context.ui.confirm(title, message),
+      );
+      if (reason)
+        return {
+          result: {
+            output: reason,
+            exitCode: 2,
+            cancelled: false,
+            truncated: false,
+          },
+        };
+      const local = createLocalBashOperations();
+      return {
+        operations: {
+          exec(command, _cwd, options) {
+            return local.exec(command, logicalCwd, options);
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        result: {
+          output: guardMessage({
+            code: "development_system.logical_workspace_user_bash_failed",
+            boundary: "logical workspace routing",
+            missing: "a reachable and policy-valid logical workspace",
+            nextAction: `Run development_system_worktree_list and restore a valid logical workspace before retrying. ${terminalSafe(error instanceof Error ? error.message : String(error))}`,
+          }),
+          exitCode: 2,
+          cancelled: false,
+          truncated: false,
+        },
+      };
+    }
   });
 
-  pi.on("before_agent_start", async (_event, context) => {
+  pi.on("before_agent_start", async (event, context) => {
+    const logicalCwd = projectCwd(context.cwd);
+    const routedSystemPrompt = `${event.systemPrompt}\n\nDevelopment-system logical workspace: ${logicalCwd}. Pi's host cwd remains ${context.cwd}. Every built-in shell and relative file/search operation is independently routed to the logical workspace. Treat its files, branch, index, environment, and Git status as authoritative; do not request a relaunch merely because host cwd differs.`;
     try {
       const status = await resolveStatus(
-        context.cwd,
+        logicalCwd,
         packageRoot,
         context.mode as HarnessMode,
       );
@@ -1083,26 +1244,34 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           "utf8",
         ),
       );
-      if (!policy.features.tiber) return;
-      const hold = await activeCiRecoveryHold(packageRoot, context.cwd);
+      if (!policy.features.tiber) return { systemPrompt: routedSystemPrompt };
+      const hold = await activeCiRecoveryHold(packageRoot, logicalCwd);
       if (hold)
         return {
+          systemPrompt: routedSystemPrompt,
           message: {
             customType: "development-system-ci-hold",
             content: `development_system.ci_recovery_hold incident=${hold.incidentId} state=${hold.state}. Do not claim readiness or start unrelated guarded work; continue authoritative Tiber recovery.`,
             display: true,
           },
         };
+      return { systemPrompt: routedSystemPrompt };
     } catch {
-      return;
+      return { systemPrompt: routedSystemPrompt };
     }
   });
 
   pi.on("session_start", async (_event, context) => {
     started = true;
     await recordProvenanceMarker(goalMode.collision);
+    const restoration = await workspace.restore(context);
+    if (restoration.status === "rejected")
+      context.ui.notify(
+        restoration.code ?? "development_system.logical_workspace_stale",
+        "warning",
+      );
     const status = await resolveStatus(
-      context.cwd,
+      projectCwd(context.cwd),
       packageRoot,
       context.mode as HarnessMode,
     );
@@ -1111,6 +1280,10 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       status.configured
         ? `development-system: ${status.deliveryMode}`
         : "development-system: setup required",
+    );
+    context.ui.setStatus(
+      "development-system-workspace",
+      `workspace: ${path.basename(projectCwd(context.cwd))}`,
     );
     for (const error of status.errors)
       context.ui.notify(`${error.code}: ${error.nextAction}`, "warning");
@@ -1157,7 +1330,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           "review",
           path.join(packageRoot, "bin/development-discipline-mcp"),
           [],
-          context.cwd,
+          projectCwd(context.cwd),
           new Set([
             "final_review.assess_risk",
             "final_review.plan",
@@ -1172,7 +1345,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
               "tiber",
               path.join(packageRoot, "bin/tiber"),
               ["mcp", "stdio"],
-              context.cwd,
+              projectCwd(context.cwd),
               new Set([
                 "tiber.create",
                 "tiber.list",
@@ -1202,10 +1375,22 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     }
   });
 
+  pi.on("session_tree", async (_event, context) => {
+    const restoration = await workspace.restore(context);
+    if (restoration.status === "rejected")
+      context.ui.notify(
+        restoration.code ?? "development_system.logical_workspace_stale",
+        "warning",
+      );
+    context.ui.setStatus(
+      "development-system-workspace",
+      `workspace: ${path.basename(projectCwd(context.cwd))}`,
+    );
+  });
+
   pi.on("session_shutdown", async (_event, context) => {
     if (!started) return;
     started = false;
-    for (const client of componentClients.splice(0)) client.stop();
     context.ui.setStatus("development-system", undefined);
   });
 }

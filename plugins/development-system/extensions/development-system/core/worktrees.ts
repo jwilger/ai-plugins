@@ -58,11 +58,3 @@ export function configuredWorktreeRoot(
     throw new Error("development_system.worktree_root_not_repository_local");
   return resolved;
 }
-
-export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-export function relaunchCommand(worktreePath: string): string {
-  return `cd -- ${shellQuote(worktreePath)} && exec pi`;
-}

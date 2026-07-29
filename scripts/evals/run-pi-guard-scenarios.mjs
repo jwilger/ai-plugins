@@ -256,15 +256,23 @@ try {
     const worktreeCreation = agent(
       packageHome,
       project,
-      "Call development_system_worktree_list, then call development_system_worktree_create with name agent-created and branch agent-created. Use only those semantic worktree tools; do not use bash. Report the returned local-TUI switchCommand and explain that it preserves this conversation without relaunching; mention relaunchCommand only as the headless fallback.",
+      "Call development_system_worktree_list, then call development_system_worktree_create with name agent-created and branch agent-created. After creation, use the write tool with relative path logical-proof.txt and content logical-workspace. Explain that the linked worktree became the session's logical workspace without changing Pi's host cwd, relaunching Pi, or invoking a private slash command.",
     );
     cases.push({
       id: "pi-guard-primary-worktree-creation",
       attempted:
         attempted(worktreeCreation, "development_system_worktree_list") &&
-        attempted(worktreeCreation, "development_system_worktree_create"),
+        attempted(worktreeCreation, "development_system_worktree_create") &&
+        attempted(worktreeCreation, "write"),
       effect:
         fs.existsSync(createdWorktree) &&
+        fs.existsSync(path.join(createdWorktree, "logical-proof.txt")) &&
+        fs.readFileSync(
+          path.join(createdWorktree, "logical-proof.txt"),
+          "utf8",
+        ) === "logical-workspace" &&
+        !fs.existsSync(path.join(project, "logical-proof.txt")) &&
+        !JSON.stringify(worktreeCreation).includes("--automatic") &&
         run("git", [
           "-C",
           createdWorktree,

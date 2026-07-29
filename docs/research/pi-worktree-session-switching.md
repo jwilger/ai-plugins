@@ -2,9 +2,12 @@
 
 Date: 2026-07-29
 
-> Historical note: this research informed ADR-0005. ADR-0006 supersedes the
-> user-initiation conclusion after confirming Pi's documented
-> `sendUserMessage()` follow-up bridge into extension commands.
+> Historical note: this research informed ADR-0005 and ADR-0006. Live outcomes
+> and Pi 0.82.1 source later proved that `sendUserMessage()` deliberately skips
+> extension-command dispatch; private transition text reached ordinary chat.
+> ADR-0007 therefore supersedes the selected session-replacement design with
+> session-persistent logical routing. The comparison below is retained as the
+> evidence available when the earlier decisions were made.
 
 ## Question
 
@@ -54,80 +57,30 @@ Higher-download orchestration packages such as `pi-crew` were also inspected.
 They create worktrees for child agents rather than rebind the active root Pi
 session, so they do not answer this question.
 
-## Selected reference
+## Updated validation and direction
 
-`@narumitw/pi-worktree` is the behavioral and architectural reference. Its key
-insight is that a Pi process need not change its operating-system cwd. A Pi
-**session** stores its own cwd, and a user-initiated extension command can use
-Pi's public session-replacement API to rebuild the runtime around another cwd.
-This is a true workspace replacement rather than command/path spoofing.
+Pi 0.82.1 exposes `switchSession()` only on manually invoked command contexts.
+Tools receive `ExtensionContext`, and `sendUserMessage()` invokes `prompt()`
+with command/template expansion disabled. Upstream issues 4754, 5912, 6010,
+and 6574 confirm that deferred tool-to-command session mutation is not a
+supported extension operation. Both automatic switch and finish reproduced the
+same failure: their private `--automatic` command appeared as model-visible user
+chat.
 
-The implementation in development-system is repository-native and limited to
-switching already registered worktrees. No third-party package or runtime
-transitive dependency is added, and no third-party source is vendored. The MIT
-reference permits learning from its public design; this document provides
-attribution.
+The desired behavior is instead the logical-routing pattern represented by the
+season179 and rezamonangg candidates: keep the host cwd stable and route every
+operation. Development-system closes the gaps identified in the original
+comparison by centralizing one persisted authority, mutating all supported
+built-in path tools, routing bash and user bash, and resolving status, guards,
+review children, and component MCP calls through the same path. It explicitly
+does not claim to reload Pi-native resources or provide a hostile shell sandbox.
+See ADR-0007.
 
-## Security review and resulting boundary
+## Historical conclusion and attribution
 
-### Session and transcript handling
-
-The active session-tree branch is serialized with Pi's `SessionManager` into a
-new target-cwd session file using exclusive creation and mode `0600`. It is not
-written into the worktree and contains no copied environment or authentication
-store. Existing conversation content is intentionally preserved; the local TUI
-confirmation makes that transfer explicit. A cancelled or failed replacement
-retains the private session for recovery rather than risking destructive
-cleanup.
-
-### Authority and project trust
-
-Only `ExtensionCommandContext` exposes `switchSession()`. Therefore the switch
-is a user-initiated local-TUI command, not an LLM tool. A model can create a
-worktree through the existing parsed semantic tool and can report the exact
-switch command, but it cannot silently transfer the conversation. Pi owns
-reloading cwd-bound resources, extensions, context files, and project trust in
-the replacement runtime.
-
-Headless JSON, print, and RPC callers fail closed and retain the explicit
-new-process command as a fallback. This limitation is preferable to casting an
-ordinary tool context to an unsupported command context or virtualizing only a
-subset of tools.
-
-### Path, race, and terminal handling
-
-The selector resolves only to Git's registered worktree inventory. Exact path,
-branch, or unique basename matches are accepted; ambiguous and control-bearing
-selectors fail. After confirmation, path, branch, and HEAD identity are read
-again before preparation. Target cwd is canonicalized before serialization and
-verified after opening the prepared session. The replacement callback verifies
-Pi's fresh cwd before reporting success. User-visible paths, branches, and
-errors are stripped of terminal control sequences and bounded.
-
-There is an unavoidable same-UID race between final Git revalidation and Pi
-runtime replacement. This extension remains protection against ordinary model
-and owner mistakes, not a same-UID operating-system sandbox.
-
-### Process, command, and supply-chain behavior
-
-Switching spawns no shell and no new Pi process. It runs no third-party install
-script, copies no auth state, and adds no dependency. Worktree creation remains
-argv-based, repository-root-contained, collision-safe, and non-destructive.
-The switch command does not add removal, prune, force, branch deletion, commit,
-or push authority.
-
-## Implemented contract
-
-- `/development-system-worktree-switch` opens a registered-worktree selector.
-- `/development-system-worktree-switch <exact-branch-or-path>` selects directly;
-  a basename is accepted only when unique.
-- The local TUI waits for idle, confirms conversation transfer, revalidates Git
-  identity, prepares and verifies a private target session, then invokes Pi's
-  public session replacement API.
-- The old extension context is never used after successful replacement.
-- `development_system_worktree_list` and
-  `development_system_worktree_create` return `switchCommand` as the preferred
-  TUI handoff and retain `relaunchCommand` for headless use.
-- The operating-system process cwd remains immutable; the complete Pi
-  cwd-bound runtime is replaced. Command-level `cd` and `git -C` still do not
-  grant workspace identity.
+The original investigation selected `@narumitw/pi-worktree` as the reference
+for a user-invoked, true session replacement and implemented that design in
+ADR-0005. No third-party package, runtime dependency, or source was installed,
+vendored, or copied. The later automatic-command premise in ADR-0006 proved
+false under live Pi 0.82.1 outcomes. ADR-0007 is the current implemented
+contract; this document retains the candidate evidence and attribution only.

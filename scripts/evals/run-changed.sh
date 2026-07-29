@@ -61,6 +61,7 @@ skill_names=()
 pi_package=0
 pi_guards=0
 pi_goal=0
+pi_worktree_tui=0
 for file in "${changed[@]}"; do
   case "$file" in
     plugins/development-system/skills/*/SKILL.md)
@@ -74,6 +75,9 @@ for file in "${changed[@]}"; do
   case "$file" in
     plugins/development-system/extensions/development-system/core/guards.ts | plugins/development-system/extensions/development-system/adapters/ci-hold.ts)
       pi_guards=1
+      ;;
+    plugins/development-system/extensions/development-system/index.ts | plugins/development-system/extensions/development-system/adapters/logical-workspace.ts | plugins/development-system/extensions/development-system/adapters/worktrees.ts | plugins/development-system/extensions/development-system/core/worktrees.ts | plugins/development-system/skills/worktrees/SKILL.md | plugins/development-system/skills/delivery/SKILL.md | scripts/evals/run-pi-worktree-tui-scenario.mjs)
+      pi_worktree_tui=1
       ;;
     plugins/development-system/extensions/development-system/core/goal.ts | plugins/development-system/extensions/development-system/adapters/goal-mode.ts)
       pi_goal=1
@@ -115,6 +119,14 @@ if [ "$pi_guards" -eq 1 ]; then
   echo "eval scope: Pi guard/runtime -> executable baseline, worktree, and delivery outcomes"
   if [ "$dry_run" -eq 0 ]; then
     node scripts/evals/run-pi-guard-scenarios.mjs --scenario guards
+  fi
+  ran=1
+fi
+
+if [ "$pi_worktree_tui" -eq 1 ]; then
+  echo "eval scope: Pi logical workspace -> provider-backed real local-TUI trajectory"
+  if [ "$dry_run" -eq 0 ]; then
+    node scripts/evals/run-pi-worktree-tui-scenario.mjs --live-tool
   fi
   ran=1
 fi

@@ -23,7 +23,7 @@ force-push, merge, or delete remote state.
 
 When worktrees are enabled, delivery is not complete while an agent-created
 linked worktree is needlessly retained. After terminal delivery evidence and a
-clean status, call `development_system_worktree_finish` to return the Pi session
-to the primary checkout, run repository teardown, and remove the worktree while
+clean status, call `development_system_worktree_finish` to return Pi's logical
+workspace to the primary checkout, run repository teardown, and remove the worktree while
 preserving its branch. A dirty worktree or cleanup failure remains unresolved;
 never force removal.

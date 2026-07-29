@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const plugin = path.join(root, "plugins/development-system");
@@ -132,6 +131,7 @@ function extensionHarness() {
     commands: new Map(),
     tools: [],
     events: new Map(),
+    entries: [],
     userMessages: [],
   };
   const pi = {
@@ -162,7 +162,9 @@ function extensionHarness() {
     getCommands() {
       return [...registrations.commands].map(([name]) => ({ name }));
     },
-    appendEntry() {},
+    appendEntry(customType, data) {
+      registrations.entries.push({ type: "custom", customType, data });
+    },
     sendMessage() {},
     sendUserMessage(message, options) {
       registrations.userMessages.push({ message, options });
@@ -238,7 +240,7 @@ test("extension registers status command and tool and cleans session state on re
   );
 });
 
-test("semantic worktree tools bootstrap a primary checkout and report session-switch handoff", async () => {
+test("semantic worktree create activates a logical workspace without chat or relaunch", async () => {
   const { pi, registrations } = extensionHarness();
   (await loadExtension())(pi);
   const project = fixture();
@@ -246,19 +248,18 @@ test("semantic worktree tools bootstrap a primary checkout and report session-sw
     path.join(project, ".development-system.toml"),
     configuredPolicy("direct-to-trunk"),
   );
-  const context = { cwd: project, mode: "tui", hasUI: true };
+  const context = {
+    cwd: project,
+    mode: "tui",
+    hasUI: true,
+    ui: { setStatus() {}, confirm: async () => false },
+  };
   const list = registrations.tools.find(
     (tool) => tool.name === "development_system_worktree_list",
   );
   const create = registrations.tools.find(
     (tool) => tool.name === "development_system_worktree_create",
   );
-
-  const before = await list.execute("list", {}, undefined, undefined, context);
-  assert.equal(before.details.currentKind, "primary");
-  assert.equal(before.details.requiresRelaunch, false);
-  assert.equal(before.details.requiresUserWorkspaceSwitch, false);
-  assert.match(before.content[0].text, /switchCommand/);
 
   const created = await create.execute(
     "create",
@@ -268,29 +269,31 @@ test("semantic worktree tools bootstrap a primary checkout and report session-sw
     context,
   );
   assert.equal(created.details.status, "created");
-  assert.equal(created.details.requiresRelaunch, false);
-  assert.equal(
-    created.details.switchCommand,
-    "/development-system-worktree-switch fix/bootstrap",
-  );
   assert.equal(created.details.requiresUserWorkspaceSwitch, false);
-  assert.equal(created.details.switchQueued, true);
-  assert.match(created.details.nextAction, /queued/i);
-  assert.equal(registrations.userMessages.length, 1);
-  assert.match(
-    registrations.userMessages[0].message,
-    /^\/development-system-worktree-switch --automatic /,
-  );
-  assert.deepEqual(registrations.userMessages[0].options, {
-    deliverAs: "followUp",
-  });
   assert.equal(
-    git(created.details.path, "branch", "--show-current"),
-    "fix/bootstrap",
+    created.details.logicalWorkspace,
+    fs.realpathSync(created.details.path),
   );
+  assert.match(created.details.nextAction, /no relaunch/i);
+  assert.equal(registrations.userMessages.length, 0);
+  assert.ok(
+    registrations.entries.some(
+      (entry) =>
+        entry.customType === "development-system-logical-workspace-state" &&
+        entry.data.path === fs.realpathSync(created.details.path),
+    ),
+  );
+
+  const after = await list.execute("list", {}, undefined, undefined, context);
+  assert.equal(after.details.currentKind, "linked");
+  assert.equal(
+    after.details.logicalWorkspace,
+    fs.realpathSync(created.details.path),
+  );
+  assert.equal(after.details.hostCwd, project);
 });
 
-test("local TUI command switches the active Pi conversation into a registered worktree", async () => {
+test("logical workspace routes every built-in path and shell call independently", async () => {
   const { pi, registrations } = extensionHarness();
   (await loadExtension())(pi);
   const project = fixture();
@@ -298,53 +301,97 @@ test("local TUI command switches the active Pi conversation into a registered wo
     path.join(project, ".development-system.toml"),
     configuredPolicy("direct-to-trunk", true),
   );
-  const linked = path.join(project, ".worktrees", "switch-target");
-  git(project, "worktree", "add", "-b", "switch-target", linked);
-  const manager = SessionManager.inMemory(project);
-  manager.appendMessage({
-    role: "user",
-    content: "continue the ticket",
-    timestamp: Date.now(),
-  });
-  let switchedPath = "";
-  let replacementNotice = "";
-  const notifications = [];
-  const command = registrations.commands.get(
-    "development-system-worktree-switch",
+  const linked = path.join(project, ".worktrees", "routed");
+  git(project, "worktree", "add", "-b", "routed", linked);
+  const switchTool = registrations.tools.find(
+    (tool) => tool.name === "development_system_worktree_switch",
   );
-  assert.ok(command);
+  const context = {
+    cwd: project,
+    mode: "json",
+    hasUI: false,
+    ui: { setStatus() {}, confirm: async () => false },
+  };
+  const switched = await switchTool.execute(
+    "switch",
+    { selector: "routed" },
+    undefined,
+    undefined,
+    context,
+  );
+  assert.equal(switched.details.status, "active");
+  assert.equal(registrations.userMessages.length, 0);
 
-  await command.handler("switch-target", {
+  const guard = registrations.events.get("tool_call");
+  for (const toolName of ["read", "write", "edit", "grep", "find", "ls"]) {
+    const event = {
+      toolName,
+      input:
+        toolName === "grep" || toolName === "find" || toolName === "ls"
+          ? {}
+          : { path: "nested/file.txt" },
+    };
+    const decision = await guard(event, context);
+    assert.equal(decision, undefined, `${toolName} should be routed`);
+    assert.equal(
+      event.input.path,
+      toolName === "grep" || toolName === "find" || toolName === "ls"
+        ? fs.realpathSync(linked)
+        : path.join(fs.realpathSync(linked), "nested", "file.txt"),
+    );
+  }
+
+  const bash = { toolName: "bash", input: { command: "pwd" } };
+  assert.equal(await guard(bash, context), undefined);
+  assert.match(bash.input.command, /^cd -- '.*\/\.worktrees\/routed' && pwd$/);
+
+  const outside = {
+    toolName: "read",
+    input: { path: path.join(project, "README.md") },
+  };
+  const blocked = await guard(outside, context);
+  assert.equal(blocked.block, true);
+  assert.match(blocked.reason, /path_outside_blocked/);
+});
+
+test("user bash fails closed when the logical workspace disappears", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", true),
+  );
+  const linked = path.join(project, ".worktrees", "removed-routing");
+  git(project, "worktree", "add", "-b", "removed-routing", linked);
+  const switchTool = registrations.tools.find(
+    (tool) => tool.name === "development_system_worktree_switch",
+  );
+  const context = {
     cwd: project,
     mode: "tui",
     hasUI: true,
-    sessionManager: manager,
-    waitForIdle: async () => {},
-    ui: {
-      confirm: async () => true,
-      notify: (message) => notifications.push(message),
-    },
-    async switchSession(sessionPath, options) {
-      switchedPath = sessionPath;
-      await options.withSession({
-        cwd: fs.realpathSync(linked),
-        ui: { notify: (message) => (replacementNotice = message) },
-      });
-      return { cancelled: false };
-    },
-  });
-
-  const switched = SessionManager.open(switchedPath);
-  assert.equal(switched.getCwd(), fs.realpathSync(linked));
-  assert.equal(
-    switched.buildSessionContext().messages[0].content,
-    "continue the ticket",
+    ui: { setStatus() {}, confirm: async () => false },
+  };
+  await switchTool.execute(
+    "switch",
+    { selector: "removed-routing" },
+    undefined,
+    undefined,
+    context,
   );
-  assert.match(replacementNotice, /workspace switched/i);
-  assert.equal(notifications.length, 0);
+  git(project, "worktree", "remove", "--force", linked);
+
+  const result = await registrations.events.get("user_bash")(
+    { command: "touch must-not-run", cwd: project, excludeFromContext: false },
+    context,
+  );
+  assert.equal(result.result.exitCode, 2);
+  assert.match(result.result.output, /logical_workspace_user_bash_failed/);
+  assert.equal(fs.existsSync(path.join(project, "must-not-run")), false);
 });
 
-test("model-callable worktree switch queues command-context replacement without another confirmation", async () => {
+test("worktree switch command works in headless mode without replacing the Pi session", async () => {
   const { pi, registrations } = extensionHarness();
   (await loadExtension())(pi);
   const project = fixture();
@@ -352,65 +399,77 @@ test("model-callable worktree switch queues command-context replacement without 
     path.join(project, ".development-system.toml"),
     configuredPolicy("direct-to-trunk", true),
   );
-  const linked = path.join(project, ".worktrees", "automatic-target");
-  git(project, "worktree", "add", "-b", "automatic-target", linked);
-  const tool = registrations.tools.find(
-    (candidate) => candidate.name === "development_system_worktree_switch",
-  );
-  const queued = await tool.execute(
-    "switch",
-    { selector: "automatic-target" },
-    undefined,
-    undefined,
-    { cwd: project, mode: "tui", hasUI: true },
-  );
-  assert.equal(queued.details.status, "queued");
-  assert.equal(queued.details.requiresUserWorkspaceSwitch, false);
-  await assert.rejects(
-    () =>
-      tool.execute(
-        "parallel-switch",
-        { selector: "automatic-target" },
-        undefined,
-        undefined,
-        { cwd: project, mode: "tui", hasUI: true },
-      ),
-    /worktree_transition_already_queued/,
-  );
-  const queuedCommand = registrations.userMessages.at(-1).message;
-  assert.match(queuedCommand, /^\/development-system-worktree-switch /);
-
-  let switched = false;
+  const linked = path.join(project, ".worktrees", "command-target");
+  git(project, "worktree", "add", "-b", "command-target", linked);
+  const notifications = [];
   await registrations.commands
     .get("development-system-worktree-switch")
-    .handler(
-      queuedCommand.replace(/^\/development-system-worktree-switch /, ""),
-      {
-        cwd: project,
-        mode: "tui",
-        hasUI: true,
-        sessionManager: SessionManager.inMemory(project),
-        waitForIdle: async () => {},
-        ui: {
-          confirm: async () => {
-            throw new Error("automatic switch must not ask for confirmation");
-          },
-          notify() {},
-        },
-        async switchSession(sessionPath, options) {
-          switched = true;
-          await options.withSession({
-            cwd: fs.realpathSync(linked),
-            ui: { notify() {} },
-          });
-          return { cancelled: false };
-        },
+    .handler("command-target", {
+      cwd: project,
+      mode: "json",
+      hasUI: false,
+      waitForIdle: async () => {},
+      ui: {
+        notify: (message) => notifications.push(message),
+        setStatus() {},
       },
-    );
-  assert.equal(switched, true);
+    });
+  assert.match(notifications.at(-1), /Logical workspace is now/);
+  assert.equal(registrations.userMessages.length, 0);
+  const statusTool = registrations.tools.find(
+    (tool) => tool.name === "development_system_status",
+  );
+  const result = await statusTool.execute("status", {}, undefined, undefined, {
+    cwd: project,
+    mode: "json",
+  });
+  assert.equal(result.details.checkout.kind, "linked");
+  assert.equal(result.details.logicalWorkspace, fs.realpathSync(linked));
+  assert.equal(result.details.hostCwd, project);
 });
 
-test("finish tool returns to primary and removes the clean worktree without deleting its branch", async () => {
+test("worktree lifecycle tools reject sibling parallel operations", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const switchTool = registrations.tools.find(
+    (tool) => tool.name === "development_system_worktree_switch",
+  );
+  const context = {
+    cwd: fixture(),
+    mode: "json",
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "toolCall",
+                name: "development_system_worktree_switch",
+              },
+              { type: "toolCall", name: "write" },
+            ],
+          },
+        },
+      ],
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      switchTool.execute(
+        "switch",
+        { selector: "anything" },
+        undefined,
+        undefined,
+        context,
+      ),
+    /worktree_lifecycle_tool_must_be_isolated/,
+  );
+});
+
+test("finish routes to primary before removing a clean worktree and preserves its branch", async () => {
   const { pi, registrations } = extensionHarness();
   (await loadExtension())(pi);
   const project = fixture();
@@ -422,59 +481,79 @@ test("finish tool returns to primary and removes the clean worktree without dele
   git(project, "commit", "-m", "test: configure fixture");
   const linked = path.join(project, ".worktrees", "finished-target");
   git(project, "worktree", "add", "-b", "finished-target", linked);
-  const tool = registrations.tools.find(
-    (candidate) => candidate.name === "development_system_worktree_finish",
+  const switchTool = registrations.tools.find(
+    (tool) => tool.name === "development_system_worktree_switch",
   );
-  const queued = await tool.execute("finish", {}, undefined, undefined, {
-    cwd: linked,
-    mode: "tui",
-    hasUI: true,
-  });
-  assert.equal(queued.details.status, "queued");
-  assert.equal(queued.details.branchPreserved, true);
-  const queuedCommand = registrations.userMessages.at(-1).message;
-  assert.match(queuedCommand, /^\/development-system-worktree-finish /);
+  const finishTool = registrations.tools.find(
+    (tool) => tool.name === "development_system_worktree_finish",
+  );
+  const context = {
+    cwd: project,
+    mode: "json",
+    hasUI: false,
+    ui: { setStatus() {} },
+  };
+  await switchTool.execute(
+    "switch",
+    { selector: "finished-target" },
+    undefined,
+    undefined,
+    context,
+  );
+  const finished = await finishTool.execute(
+    "finish",
+    {},
+    undefined,
+    undefined,
+    context,
+  );
 
-  let replacementNotice = "";
-  await registrations.commands
-    .get("development-system-worktree-finish")
-    .handler(
-      queuedCommand.replace(/^\/development-system-worktree-finish /, ""),
-      {
-        cwd: linked,
-        mode: "tui",
-        hasUI: true,
-        sessionManager: SessionManager.inMemory(linked),
-        waitForIdle: async () => {},
-        ui: {
-          confirm: async () => {
-            throw new Error("automatic finish must not ask for confirmation");
-          },
-          notify() {},
-        },
-        async switchSession(sessionPath, options) {
-          await options.withSession({
-            cwd: fs.realpathSync(project),
-            ui: {
-              notify(message) {
-                replacementNotice += `${message}\n`;
-              },
-            },
-          });
-          return { cancelled: false };
-        },
-      },
-    );
-
+  assert.equal(finished.details.status, "removed");
+  assert.equal(finished.details.logicalWorkspace, fs.realpathSync(project));
+  assert.equal(finished.details.branchPreserved, true);
   assert.equal(fs.existsSync(linked), false);
-  assert.match(replacementNotice, /Removed finished worktree/);
+  assert.equal(registrations.userMessages.length, 0);
   assert.equal(
     git(project, "branch", "--list", "finished-target", "--format=%(refname)"),
     "refs/heads/finished-target",
   );
 });
 
-test("worktree switch command fails closed outside local TUI and on ambiguous selectors", async () => {
+test("finish preserves a worktree that still owns Pi's host cwd", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", true),
+  );
+  git(project, "add", ".development-system.toml");
+  git(project, "commit", "-m", "test: configure fixture");
+  const linked = path.join(project, ".worktrees", "host-target");
+  git(project, "worktree", "add", "-b", "host-target", linked);
+  const finishTool = registrations.tools.find(
+    (tool) => tool.name === "development_system_worktree_finish",
+  );
+  const context = {
+    cwd: linked,
+    mode: "json",
+    hasUI: false,
+    sessionManager: { getBranch: () => [] },
+    ui: { setStatus() {}, notify() {} },
+  };
+  await registrations.events.get("session_start")(
+    { reason: "startup" },
+    context,
+  );
+
+  await assert.rejects(
+    () => finishTool.execute("finish", {}, undefined, undefined, context),
+    /worktree_finish_host_checkout_migration_required/,
+  );
+  assert.equal(fs.existsSync(linked), true);
+});
+
+test("worktree switch rejects ambiguous selectors and stale detached identity", async () => {
   const { pi, registrations } = extensionHarness();
   (await loadExtension())(pi);
   const project = fixture();
@@ -490,71 +569,27 @@ test("worktree switch command fails closed outside local TUI and on ambiguous se
     "development-system-worktree-switch",
   );
   const notifications = [];
-  let switched = false;
   const context = {
-    cwd: project,
-    mode: "json",
-    hasUI: false,
-    sessionManager: SessionManager.inMemory(project),
-    waitForIdle: async () => {},
-    ui: { notify: (message) => notifications.push(message) },
-    async switchSession() {
-      switched = true;
-      return { cancelled: false };
-    },
-  };
-
-  await command.handler("first-same", context);
-  assert.equal(switched, false);
-  assert.match(notifications.at(-1), /requires.*local Pi TUI/i);
-
-  context.mode = "tui";
-  context.hasUI = true;
-  context.ui.confirm = async () => true;
-  await command.handler("same", context);
-  assert.equal(switched, false);
-  assert.match(notifications.at(-1), /ambiguous/i);
-});
-
-test("worktree switch revalidates selected Git identity after confirmation", async () => {
-  const { pi, registrations } = extensionHarness();
-  (await loadExtension())(pi);
-  const project = fixture();
-  fs.writeFileSync(
-    path.join(project, ".development-system.toml"),
-    configuredPolicy("direct-to-trunk", true),
-  );
-  const linked = path.join(project, ".worktrees", "race-target");
-  git(project, "worktree", "add", "-b", "race-target", linked);
-  const notifications = [];
-  let switched = false;
-  const command = registrations.commands.get(
-    "development-system-worktree-switch",
-  );
-
-  await command.handler("race-target", {
     cwd: project,
     mode: "tui",
     hasUI: true,
-    sessionManager: SessionManager.inMemory(project),
     waitForIdle: async () => {},
     ui: {
       notify: (message) => notifications.push(message),
-      confirm: async () => {
-        fs.writeFileSync(path.join(linked, "changed.txt"), "changed\n");
-        git(linked, "add", "changed.txt");
-        git(linked, "commit", "-m", "test: move target");
-        return true;
-      },
+      setStatus() {},
+      confirm: async () => true,
     },
-    async switchSession() {
-      switched = true;
-      return { cancelled: false };
-    },
-  });
+  };
 
-  assert.equal(switched, false);
-  assert.match(notifications.at(-1), /identity_changed/);
+  await command.handler("same", context);
+  assert.match(notifications.at(-1), /ambiguous/i);
+
+  context.ui.confirm = async () => {
+    git(first, "checkout", "--detach");
+    return true;
+  };
+  await command.handler("first-same", context);
+  assert.match(notifications.at(-1), /detached_head/);
 });
 
 test("authoritative policy tool reads the protected config without opening metadata access", async () => {

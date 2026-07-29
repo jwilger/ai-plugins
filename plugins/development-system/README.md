@@ -106,18 +106,21 @@ When worktrees are enabled, the primary checkout remains coordination-only for
 tracked changes and commits, but ordinary Git inspection, exploration, tests,
 and builds remain available there. Direct `read`, `write`, and `edit` boundaries
 still protect metadata, secrets, outside paths, and primary-checkout writes;
-obvious filesystem mutation and Git index/history/worktree mutation remain
-blocked from primary-checkout shell calls.
+obvious filesystem mutation and Git index/history mutation remain blocked from
+primary-checkout shell calls. Worktree mutation is blocked except for the
+narrowly parsed repository-local `git worktree add <root>/<name> -b <branch>`
+compatibility form documented below.
 
 Use `development_system_worktree_list` to inspect canonical paths and branches,
 `development_system_worktree_create` with a repository-local name and new branch
 to bootstrap work, and `development_system_worktree_switch` for an existing
-worktree. In local TUI mode these tools queue a one-time extension command that
-preserves the active conversation in a private mode-0600 target-cwd session and
-uses Pi's public session-replacement API after the current response settles. No
-manual slash command or second confirmation is required. Pi rebuilds its
-cwd-bound runtime, re-evaluates project trust and resources, and reads the
-authoritative `.development-system.toml` from the primary checkout. The manual
+worktree. These tools persist a session-level logical workspace while Pi's host
+cwd and conversation remain in the coordination checkout. The supported mutable
+`tool_call` event resolves relative read/write/edit/grep/find/ls paths inside the
+logical workspace and prefixes every built-in shell call with an independently
+quoted `cd -- <logical-workspace> &&`. Status, policy, guards, review children,
+and bridged component tools use the same authority. TUI, JSON, print, and RPC
+modes therefore need no relaunch or private slash-command handoff. The manual
 commands remain available for interactive selection:
 
 ```text
@@ -126,25 +129,34 @@ commands remain available for interactive selection:
 ```
 
 After verified delivery is complete, call
-`development_system_worktree_finish`. It verifies that the current linked
-worktree is clean, returns the conversation to the primary checkout, runs an
-executable repository `scripts/worktree-teardown.sh` when present, and removes
-the worktree without deleting its branch. Dirty worktrees, detached or changed
-Git identities, and ignored state outside known generated cache paths are
-preserved with an actionable error. The corresponding manual
-command is `/development-system-worktree-finish`.
+`development_system_worktree_finish`. It verifies that the current logical
+linked worktree is clean, persists primary logical routing before teardown,
+runs an executable repository `scripts/worktree-teardown.sh` when present, and
+removes the worktree without deleting its branch. Dirty worktrees, detached or
+changed Git identities, and ignored state outside known generated cache paths
+are preserved with an actionable error. Generated cache roots are excluded at
+the Git pathspec boundary and the first remaining ignored path is streamed with
+strict output bounds, so multi-gigabyte caches cannot overflow child-process
+buffers. The corresponding manual command is
+`/development-system-worktree-finish`.
 
-The operating-system process cwd remains unchanged; command-level `cd` or
-`git -C` still cannot change enforcement. JSON, print, and RPC callers use the
-returned `cd ... && exec pi` fallback because those modes cannot replace the
-active TUI runtime.
+The operating-system process cwd remains unchanged. Session state restores the
+latest logical workspace only while its canonical repository registration and
+branch identity still match; stale state falls back safely and reports a typed
+warning. Absolute file paths outside the logical workspace remain blocked.
+Shell routing establishes the starting directory and retains the existing
+observable mutation/delivery guards, but it is not presented as a sandbox
+against deliberately hostile same-UID programs. Sessions launched by the older
+session-replacement design from inside a linked worktree must start Pi from
+primary once before removing that host worktree; finish reports
+`development_system.worktree_finish_host_checkout_migration_required` and
+preserves it rather than deleting the process's configured cwd.
 
 The semantic worktree tools reject malformed refs, option-like values,
 traversal, control characters, configured-root and target symlink escapes, and
-path or branch collisions. Automatic switch and finish requests use private,
-one-time tokens and revalidate path, branch, and HEAD before replacement.
-Failed or cancelled replacement preserves the worktree and private prepared
-session for recovery.
+path or branch collisions. Activation revalidates canonical registration and
+branch identity. Failure leaves the prior logical authority active and emits no
+model-visible private transition command.
 
 Creation is queued per repository and reconciles external races without
 deleting existing branches, directories, worktrees, or user content. A narrowly
@@ -218,7 +230,9 @@ tool returns only a concise task-facing summary by default.
 protected policy. `development_system_pi_reference` pages through an allowlist
 of installed Pi references without opening arbitrary outside-path reads.
 Registered-worktree status commands and the checkout guard script are admitted
-as bounded discovery, while mutations remain tied to the process checkout.
+as bounded discovery. When a linked logical workspace is active, repository
+mutations, status, guards, review children, and bridged component tools are all
+routed through that authority rather than Pi's immutable host cwd.
 Fresh review children emit a running lifecycle update and return structured,
 non-secret cancellation, timeout, provider, output-limit, spawn, or malformed
 result diagnostics; broader streaming subagent observability remains tracked by
@@ -226,23 +240,23 @@ Tiber ticket `20260728-9rym`.
 
 ## Capability matrix
 
-| Capability                          | Pi (primary)                                                  | Claude Code (secondary)       | Codex (tertiary)              |
-| ----------------------------------- | ------------------------------------------------------------- | ----------------------------- | ----------------------------- |
-| Eight shared public skills          | Canonical files                                               | Same canonical files          | Same canonical files          |
-| Setup/doctor core                   | Native command/tool and CLI                                   | Hook/CLI adapter              | Hook/CLI adapter              |
-| Trusted consequential approval      | Local TUI, preview-bound                                      | Unavailable                   | Unavailable                   |
-| Bounded autonomous goal mode        | Session-scoped `/goal` with guarded terminal tools            | Unavailable                   | Unavailable                   |
-| Worktree discovery/bootstrap        | Semantic list/create plus local-TUI in-process session switch | Hook/skill adapter            | Hook/skill adapter            |
-| Generic write/edit worktree guard   | Extension event-enforced                                      | Hook-enforced where supported | Hook-enforced where supported |
-| Default model bash guard            | Extension event-enforced in TUI/print/JSON model-tool paths   | Instruction/hook boundary     | Instruction/hook boundary     |
-| Direct RPC bash                     | Unsupported for guarded execution                             | N/A                           | N/A                           |
-| Protected metadata/secret paths     | Guarded built-in path tools; search output mediated           | Instruction/hook limits       | Instruction/hook limits       |
-| Delivery-mode and force-push policy | Extension event-enforced                                      | Hook/command-enforced         | Hook/command-enforced         |
-| Tiber CI-recovery hold              | Extension event plus authoritative Tiber state                | Hook/skill plus Tiber state   | Hook/skill plus Tiber state   |
-| Tiber tools                         | Feature-aware native Pi bridge                                | Plugin MCP                    | Plugin MCP                    |
-| Final-review coordinator            | Native Pi bridge to authoritative Rust MCP                    | Plugin MCP                    | Plugin MCP                    |
-| Fresh final-review children         | Isolated children with lifecycle and failure diagnostics      | Harness agents                | Harness agents                |
-| Agent definitions                   | Canonical source with generated adapter                       | Generated Markdown            | Generated TOML                |
+| Capability                          | Pi (primary)                                                 | Claude Code (secondary)       | Codex (tertiary)              |
+| ----------------------------------- | ------------------------------------------------------------ | ----------------------------- | ----------------------------- |
+| Eight shared public skills          | Canonical files                                              | Same canonical files          | Same canonical files          |
+| Setup/doctor core                   | Native command/tool and CLI                                  | Hook/CLI adapter              | Hook/CLI adapter              |
+| Trusted consequential approval      | Local TUI, preview-bound                                     | Unavailable                   | Unavailable                   |
+| Bounded autonomous goal mode        | Session-scoped `/goal` with guarded terminal tools           | Unavailable                   | Unavailable                   |
+| Worktree discovery/bootstrap        | Semantic list/create plus session-persistent logical routing | Hook/skill adapter            | Hook/skill adapter            |
+| Generic write/edit worktree guard   | Extension event-enforced                                     | Hook-enforced where supported | Hook-enforced where supported |
+| Default model bash guard            | Extension event-enforced in TUI/print/JSON model-tool paths  | Instruction/hook boundary     | Instruction/hook boundary     |
+| Direct RPC bash                     | Unsupported for guarded execution                            | N/A                           | N/A                           |
+| Protected metadata/secret paths     | Guarded built-in path tools; search output mediated          | Instruction/hook limits       | Instruction/hook limits       |
+| Delivery-mode and force-push policy | Extension event-enforced                                     | Hook/command-enforced         | Hook/command-enforced         |
+| Tiber CI-recovery hold              | Extension event plus authoritative Tiber state               | Hook/skill plus Tiber state   | Hook/skill plus Tiber state   |
+| Tiber tools                         | Feature-aware native Pi bridge                               | Plugin MCP                    | Plugin MCP                    |
+| Final-review coordinator            | Native Pi bridge to authoritative Rust MCP                   | Plugin MCP                    | Plugin MCP                    |
+| Fresh final-review children         | Isolated children with lifecycle and failure diagnostics     | Harness agents                | Harness agents                |
+| Agent definitions                   | Canonical source with generated adapter                      | Generated Markdown            | Generated TOML                |
 
 The populated-secret claim covers the characterized built-in guarded tool
 composition. It does not claim protection from an intentionally unmediated
@@ -285,6 +299,7 @@ node scripts/sync-development-system-metadata.mjs --check
 node scripts/generate-development-system-agents.mjs --check
 node scripts/generate-pi-support-docs.mjs --check
 just pi-extension
+just pi-worktree-tui-live-eval
 just pi-clean-canary
 ```
 

@@ -49,7 +49,7 @@ max_queued = 5
   return root;
 }
 
-test("primary checkout lists and creates a canonical session-switchable worktree", async () => {
+test("primary checkout lists and creates a canonical logical-workspace candidate", async () => {
   const root = repository();
   const before = await listWorktrees(root);
   assert.equal(before.currentKind, "primary");
@@ -65,14 +65,9 @@ test("primary checkout lists and creates a canonical session-switchable worktree
     created.path,
     path.join(root, ".worktrees", "observable-subagents"),
   );
-  assert.equal(created.requiresRelaunch, false);
-  assert.equal(created.requiresUserWorkspaceSwitch, true);
-  assert.equal(
-    created.switchCommand,
-    "/development-system-worktree-switch feat/observable-subagents",
-  );
-  assert.match(created.relaunchCommand, /^cd -- '.*' && exec pi$/);
-  assert.match(created.nextAction, /preserve this conversation/i);
+  assert.equal(created.requiresLogicalWorkspaceActivation, true);
+  assert.match(created.nextAction, /logical workspace/i);
+  assert.match(created.nextAction, /no Pi relaunch/i);
   const nested = path.join(created.path, "nested", "package");
   fs.mkdirSync(nested, { recursive: true });
   const nestedInventory = await listWorktrees(nested);
@@ -104,7 +99,7 @@ test("existing worktree paths and branches return actionable collisions", async 
   });
   assert.equal(pathCollision.status, "collision");
   assert.equal(pathCollision.code, "development_system.worktree_path_exists");
-  assert.match(pathCollision.nextAction, /Switch this Pi conversation/);
+  assert.match(pathCollision.nextAction, /Activate the existing worktree/);
 
   const branchCollision = await createWorktree(root, {
     name: "two",
@@ -115,7 +110,7 @@ test("existing worktree paths and branches return actionable collisions", async 
     branchCollision.code,
     "development_system.worktree_branch_exists",
   );
-  assert.match(branchCollision.nextAction, /Switch this Pi conversation/);
+  assert.match(branchCollision.nextAction, /Activate the existing worktree/);
 });
 
 test("cleanup removes a clean linked worktree while preserving its branch", async () => {
@@ -176,7 +171,7 @@ test("cleanup preserves valuable ignored state while allowing generated caches",
   const root = repository();
   fs.writeFileSync(
     path.join(root, ".gitignore"),
-    "private-results/\n.dependencies/\n.direnv/\n.envrc\n.env.worktree\nnode_modules/\ntarget/\n",
+    "private-results/\n.dependencies/\n.direnv/\n.evals/\n.envrc\n.env.worktree\nnode_modules/\ntarget/\n",
   );
   execFileSync("git", ["-C", root, "add", ".gitignore"]);
   execFileSync("git", ["-C", root, "commit", "-m", "test: ignore state"]);
@@ -195,6 +190,8 @@ test("cleanup preserves valuable ignored state while allowing generated caches",
     path.join(created.path, ".dependencies", "cache"),
     "cache\n",
   );
+  fs.mkdirSync(path.join(created.path, ".evals"));
+  fs.writeFileSync(path.join(created.path, ".evals", "result.json"), "cache\n");
   const expected = (await listWorktrees(root)).worktrees.find(
     (worktree) => worktree.path === created.path,
   );
@@ -224,6 +221,55 @@ test("cleanup preserves valuable ignored state while allowing generated caches",
   const removed = await removeWorktree(root, expected);
   assert.equal(removed.status, "removed");
   assert.equal(fs.existsSync(created.path), false);
+});
+
+test("cleanup bounds ignored inspection for caches larger than child-process buffers", async () => {
+  const root = repository();
+  fs.writeFileSync(
+    path.join(root, ".gitignore"),
+    ".dependencies/\nprivate-results/\n",
+  );
+  execFileSync("git", ["-C", root, "add", ".gitignore"]);
+  execFileSync("git", ["-C", root, "commit", "-m", "test: ignore caches"]);
+  const created = await createWorktree(root, {
+    name: "large-cache",
+    branch: "feat/large-cache",
+  });
+  assert.equal(created.status, "created");
+  const cache = path.join(created.path, ".dependencies", "cache");
+  fs.mkdirSync(cache, { recursive: true });
+  for (let index = 0; index < 13_000; index += 1) {
+    const name = `${String(index).padStart(5, "0")}-${"x".repeat(80)}`;
+    fs.writeFileSync(path.join(cache, name), "x");
+  }
+  const expected = (await listWorktrees(root)).worktrees.find(
+    (worktree) => worktree.path === created.path,
+  );
+
+  const removed = await removeWorktree(root, expected);
+  assert.equal(removed.status, "removed");
+  assert.equal(fs.existsSync(created.path), false);
+
+  const valuable = await createWorktree(root, {
+    name: "large-cache-valuable",
+    branch: "feat/large-cache-valuable",
+  });
+  assert.equal(valuable.status, "created");
+  fs.mkdirSync(path.join(valuable.path, ".dependencies"));
+  fs.writeFileSync(path.join(valuable.path, ".dependencies", "cache"), "x");
+  fs.mkdirSync(path.join(valuable.path, "private-results"));
+  fs.writeFileSync(
+    path.join(valuable.path, "private-results", "evidence.json"),
+    "keep\n",
+  );
+  const valuableExpected = (await listWorktrees(root)).worktrees.find(
+    (worktree) => worktree.path === valuable.path,
+  );
+  await assert.rejects(
+    () => removeWorktree(root, valuableExpected),
+    /worktree_cleanup_ignored_state.*evidence\.json/,
+  );
+  assert.equal(fs.existsSync(valuable.path), true);
 });
 
 test("cleanup rejects detached HEAD and identity changes without removal", async () => {

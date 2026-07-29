@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, lstat, mkdir, realpath, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -8,7 +8,6 @@ import {
   configuredWorktreeRoot,
   parseWorktreeBranch,
   parseWorktreeName,
-  relaunchCommand,
 } from "../core/worktrees.ts";
 
 const execFileAsync = promisify(execFile);
@@ -20,8 +19,6 @@ export type WorktreeRecord = Readonly<{
   head: string;
   current: boolean;
   primary: boolean;
-  relaunchCommand: string;
-  switchCommand: string;
 }>;
 
 export type WorktreeInventory = Readonly<{
@@ -30,8 +27,6 @@ export type WorktreeInventory = Readonly<{
   currentKind: "primary" | "linked";
   configuredRoot: string;
   worktrees: readonly WorktreeRecord[];
-  requiresRelaunch: false;
-  requiresUserWorkspaceSwitch: boolean;
 }>;
 
 export type WorktreeRemovalResult = Readonly<{
@@ -47,10 +42,7 @@ export type WorktreeCreationResult =
       path: string;
       branch: string;
       head: string;
-      relaunchCommand: string;
-      switchCommand: string;
-      requiresRelaunch: false;
-      requiresUserWorkspaceSwitch: true;
+      requiresLogicalWorkspaceActivation: true;
       currentSessionCheckout: string;
       nextAction: string;
     }>
@@ -59,10 +51,7 @@ export type WorktreeCreationResult =
       code: string;
       path: string;
       branch: string;
-      relaunchCommand?: string;
-      switchCommand?: string;
-      requiresRelaunch: false;
-      requiresUserWorkspaceSwitch: true;
+      requiresLogicalWorkspaceActivation: true;
       nextAction: string;
     }>;
 
@@ -161,8 +150,6 @@ function parsePorcelain(
       branch: current.branch ?? null,
       current: worktreePath === context.current,
       primary: worktreePath === context.primary,
-      relaunchCommand: relaunchCommand(worktreePath),
-      switchCommand: `/development-system-worktree-switch ${current.branch ?? worktreePath}`,
     });
     current = {};
   };
@@ -197,8 +184,6 @@ export async function listWorktrees(cwd: string): Promise<WorktreeInventory> {
   return {
     ...context,
     worktrees: parsePorcelain(stdout, context),
-    requiresRelaunch: false,
-    requiresUserWorkspaceSwitch: context.currentKind === "primary",
   };
 }
 
@@ -245,19 +230,47 @@ async function withRepositoryQueue<T>(
   }
 }
 
-function disposableIgnoredPath(candidate: string): boolean {
-  return (
-    candidate === ".env.worktree" ||
-    [".dependencies/", ".direnv/", "node_modules/", "target/"].some((prefix) =>
-      candidate.startsWith(prefix),
-    )
-  );
+async function ignoredEnvrcIsValuable(worktreePath: string): Promise<boolean> {
+  const envrcPath = path.join(worktreePath, ".envrc");
+  let metadata;
+  try {
+    metadata = await lstat(envrcPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  try {
+    await execFileAsync("git", [
+      "-C",
+      worktreePath,
+      "check-ignore",
+      "--quiet",
+      "--",
+      ".envrc",
+    ]);
+  } catch (error) {
+    if ((error as { code?: number }).code === 1) return false;
+    throw error;
+  }
+  const generated = "use flake\n";
+  if (!metadata.isFile() || metadata.size !== Buffer.byteLength(generated))
+    return true;
+  return (await readFile(envrcPath, "utf8")) !== generated;
 }
 
-async function assertNoValuableIgnoredState(
+function firstValuableIgnoredPath(
   worktreePath: string,
-): Promise<void> {
-  const { stdout } = await execFileAsync("git", [
+): Promise<string | null> {
+  const disposable = [
+    ".dependencies",
+    ".direnv",
+    ".evals",
+    "node_modules",
+    "target",
+    ".env.worktree",
+    ".envrc",
+  ];
+  const args = [
     "-C",
     worktreePath,
     "ls-files",
@@ -265,24 +278,66 @@ async function assertNoValuableIgnoredState(
     "--ignored",
     "--exclude-standard",
     "-z",
-  ]);
-  const valuable: string[] = [];
-  for (const candidate of stdout.split("\0").filter(Boolean)) {
-    if (disposableIgnoredPath(candidate)) continue;
-    if (candidate === ".envrc") {
-      const envrcPath = path.join(worktreePath, candidate);
-      const metadata = await lstat(envrcPath);
-      if (
-        metadata.isFile() &&
-        (await readFile(envrcPath, "utf8")) === "use flake\n"
-      )
-        continue;
-    }
-    valuable.push(candidate);
-  }
-  if (valuable.length > 0)
+    "--",
+    ".",
+    ...disposable.flatMap((candidate) => [
+      `:(exclude)${candidate}`,
+      `:(exclude)${candidate}/**`,
+    ]),
+  ];
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let pending = Buffer.alloc(0);
+    let stderr = "";
+    let found: string | null = null;
+    let outputLimitExceeded = false;
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (found !== null || outputLimitExceeded) return;
+      pending = Buffer.concat([pending, chunk]);
+      const separator = pending.indexOf(0);
+      if (separator >= 0) {
+        found = pending.subarray(0, separator).toString("utf8");
+        child.kill("SIGTERM");
+        return;
+      }
+      if (pending.length > 8 * 1024) {
+        outputLimitExceeded = true;
+        child.kill("SIGTERM");
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (stderr.length < 8 * 1024)
+        stderr += chunk.toString("utf8").slice(0, 8 * 1024 - stderr.length);
+    });
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (found !== null) return resolve(found);
+      if (outputLimitExceeded)
+        return reject(
+          new Error("development_system.worktree_cleanup_ignored_scan_limit"),
+        );
+      if (code === 0) return resolve(null);
+      reject(
+        new Error(
+          `development_system.worktree_cleanup_ignored_scan_failed code=${code ?? "none"} signal=${signal ?? "none"} stderr=${stderr.replace(/[\\r\\n]+/g, " ").slice(0, 500)}`,
+        ),
+      );
+    });
+  });
+}
+
+async function assertNoValuableIgnoredState(
+  worktreePath: string,
+): Promise<void> {
+  const envrcValuable = await ignoredEnvrcIsValuable(worktreePath);
+  const candidate = envrcValuable
+    ? ".envrc"
+    : await firstValuableIgnoredPath(worktreePath);
+  if (candidate !== null)
     throw new Error(
-      `development_system.worktree_cleanup_ignored_state path=${worktreePath} count=${valuable.length}; transfer or remove ignored state before cleanup`,
+      `development_system.worktree_cleanup_ignored_state path=${worktreePath} sample=${JSON.stringify(candidate.slice(0, 500))}; transfer or remove ignored state before cleanup`,
     );
 }
 
@@ -338,7 +393,9 @@ export async function validateWorktreeForCleanup(
 export async function removeWorktree(
   cwd: string,
   expected: WorktreeRecord,
+  assertRegistrationIdentity: () => Promise<void> = async () => {},
 ): Promise<WorktreeRemovalResult> {
+  await assertRegistrationIdentity();
   const context = await repositoryContext(cwd);
   const target = await realpath(expected.path);
   if (!isWithin(context.configuredRoot, target))
@@ -364,6 +421,7 @@ export async function removeWorktree(
   ]);
 
   return withRepositoryQueue(context.primary, async () => {
+    await assertRegistrationIdentity();
     const revalidated = (await listWorktrees(context.primary)).worktrees.find(
       (worktree) =>
         worktree.path === expected.path &&
@@ -404,6 +462,7 @@ export async function removeWorktree(
       assertCleanWorktree(context.primary, target),
       assertNoValuableIgnoredState(target),
     ]);
+    await assertRegistrationIdentity();
     await execFileAsync(
       "git",
       ["-C", context.primary, "worktree", "remove", target],
@@ -455,12 +514,9 @@ export async function createWorktree(
         code: "development_system.worktree_path_exists",
         path: target,
         branch,
-        relaunchCommand: existingPath?.relaunchCommand,
-        switchCommand: existingPath?.switchCommand,
-        requiresRelaunch: false,
-        requiresUserWorkspaceSwitch: true,
+        requiresLogicalWorkspaceActivation: true,
         nextAction: existingPath
-          ? `Switch this Pi conversation with: ${existingPath.switchCommand}`
+          ? `Activate the existing worktree with development_system_worktree_switch selector=${JSON.stringify(existingPath.branch ?? existingPath.path)}`
           : "Choose a different worktree name; the existing path was preserved.",
       };
     if (existingBranch || (await branchExists(context.primary, branch)))
@@ -469,12 +525,9 @@ export async function createWorktree(
         code: "development_system.worktree_branch_exists",
         path: existingBranch?.path ?? target,
         branch,
-        relaunchCommand: existingBranch?.relaunchCommand,
-        switchCommand: existingBranch?.switchCommand,
-        requiresRelaunch: false,
-        requiresUserWorkspaceSwitch: true,
+        requiresLogicalWorkspaceActivation: true,
         nextAction: existingBranch
-          ? `Switch this Pi conversation with: ${existingBranch.switchCommand}`
+          ? `Activate the existing worktree with development_system_worktree_switch selector=${JSON.stringify(existingBranch.branch ?? existingBranch.path)}`
           : "Choose a different new branch or attach the existing branch manually after review.",
       };
 
@@ -495,12 +548,9 @@ export async function createWorktree(
         code: "development_system.worktree_concurrent_collision",
         path: created?.path ?? target,
         branch,
-        relaunchCommand: created?.relaunchCommand,
-        switchCommand: created?.switchCommand,
-        requiresRelaunch: false,
-        requiresUserWorkspaceSwitch: true,
+        requiresLogicalWorkspaceActivation: true,
         nextAction: created
-          ? `A concurrent creator won; switch with: ${created.switchCommand}`
+          ? `A concurrent creator won; activate ${created.path} with development_system_worktree_switch.`
           : "The target appeared concurrently and was preserved; list worktrees and choose a different name.",
       };
     }
@@ -529,12 +579,9 @@ export async function createWorktree(
           : "development_system.worktree_git_failed",
         path: created?.path ?? target,
         branch,
-        relaunchCommand: created?.relaunchCommand,
-        switchCommand: created?.switchCommand,
-        requiresRelaunch: false,
-        requiresUserWorkspaceSwitch: true,
+        requiresLogicalWorkspaceActivation: true,
         nextAction: created
-          ? `A concurrent creator won; switch with: ${created.switchCommand}`
+          ? `A concurrent creator won; activate ${created.path} with development_system_worktree_switch.`
           : "Run development_system_worktree_list, inspect Git worktree state, and retry with a new name and branch. No cleanup was performed.",
       };
     }
@@ -548,12 +595,10 @@ export async function createWorktree(
       path: created.path,
       branch,
       head: created.head,
-      relaunchCommand: created.relaunchCommand,
-      switchCommand: created.switchCommand,
-      requiresRelaunch: false,
-      requiresUserWorkspaceSwitch: true,
+      requiresLogicalWorkspaceActivation: true,
       currentSessionCheckout: context.current,
-      nextAction: `In the local Pi TUI, preserve this conversation and rebuild its cwd-bound runtime with: ${created.switchCommand}. Headless callers can instead start a new process with: ${created.relaunchCommand}`,
+      nextAction:
+        "Activate the created path as this session's logical workspace; no Pi relaunch is required.",
     };
   });
 }
