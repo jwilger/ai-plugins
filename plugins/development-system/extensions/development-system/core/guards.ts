@@ -227,6 +227,7 @@ function gitReadInvocationSafe(
       argument.startsWith("--output=") ||
       argument === "--ext-diff" ||
       argument === "--textconv" ||
+      argument === "--filters" ||
       argument === "--open-files-in-pager" ||
       argument.startsWith("--open-files-in-pager="),
   );
@@ -268,8 +269,6 @@ const gitFlagOptions = new Set([
   "--bare",
   "--no-pager",
   "--no-replace-objects",
-  "--paginate",
-  "-p",
   "-P",
   "--literal-pathspecs",
   "--no-literal-pathspecs",
@@ -353,13 +352,22 @@ function unwrapCommand(words: readonly string[]): readonly string[] {
 function normalizedGitInvocation(words: readonly string[]): Readonly<{
   operation: string;
   args: readonly string[];
+  unsafeGlobalOption: boolean;
 }> | null {
   const command = unwrapCommand(words);
   if (path.basename(command[0] ?? "") !== "git") return null;
   let index = 1;
+  let unsafeGlobalOption = false;
   while (index < command.length) {
     const option = command[index];
     if (gitOptionsWithValues.has(option)) {
+      const value = command[index + 1] ?? "";
+      if (
+        option === "--config-env" ||
+        option === "--exec-path" ||
+        (option === "-c" && !value.startsWith("color."))
+      )
+        unsafeGlobalOption = true;
       index += 2;
       continue;
     }
@@ -369,13 +377,17 @@ function normalizedGitInvocation(words: readonly string[]): Readonly<{
         option,
       )
     ) {
+      if (/^--(?:config-env|exec-path)=/.test(option))
+        unsafeGlobalOption = true;
       index += 1;
       continue;
     }
     break;
   }
   const operation = command[index];
-  return operation ? { operation, args: command.slice(index + 1) } : null;
+  return operation
+    ? { operation, args: command.slice(index + 1), unsafeGlobalOption }
+    : null;
 }
 
 function normalizedCommandWords(command: string, depth = 0): string[][] {
@@ -409,6 +421,7 @@ function normalizedGitInvocations(command: string) {
       ): invocation is Readonly<{
         operation: string;
         args: readonly string[];
+        unsafeGlobalOption: boolean;
       }> => invocation !== null,
     );
 }
@@ -492,6 +505,7 @@ function containsObviousMutation(command: string): boolean {
   if (normalizedFilesystemMutation) return true;
   const normalizedMutation = normalizedGitInvocations(command).some(
     (invocation) =>
+      invocation.unsafeGlobalOption ||
       gitMutationOperations.has(invocation.operation) ||
       (invocation.operation === "branch" &&
         !["--show-current", "--list"].includes(invocation.args[0] ?? "")) ||

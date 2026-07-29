@@ -236,6 +236,10 @@ test("shell classifier allows exploration while identifying direct repository mu
     "rsync -a source/ destination/",
     "git diff --output=README.md",
     "git show --textconv HEAD:file",
+    "git cat-file --filters --path=README.md HEAD:README.md",
+    "git -c filter.pwn.smudge=touch cat-file --filters HEAD:file",
+    "git -c diff.external=touch diff",
+    "git --paginate status",
   ])
     assert.equal(classifyShellCommand(command).kind, "mutation", command);
   for (const command of [
