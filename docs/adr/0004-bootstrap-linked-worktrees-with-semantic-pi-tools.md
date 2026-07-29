@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded in part by ADR-0005
 
 ## Date
 
@@ -109,6 +109,7 @@ and ambiguity surface and cannot return a stable structured recovery contract.
 ## Related
 
 - `docs/adr/0003-make-pi-the-primary-development-system-adapter.md`
+- `docs/adr/0005-switch-pi-sessions-between-registered-worktrees.md`
 - `docs/pi-extension-prd.md`
 - `plugins/development-system/README.md`
 - Tiber ticket `20260728-9rym`

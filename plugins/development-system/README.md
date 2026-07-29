@@ -105,16 +105,37 @@ their bound commit fails.
 When worktrees are enabled, the primary checkout remains coordination-only. Use
 `development_system_worktree_list` to inspect canonical paths and branches, and
 `development_system_worktree_create` with a repository-local name and new
-branch to bootstrap work. The create result includes the canonical path and an
-exact `cd ... && exec pi` command. The current Pi process remains bound to its
-original checkout; command-level `cd` or `git -C` never changes enforcement, so
-start a new Pi process with that command before ordinary mutation.
+branch to bootstrap work. In the local Pi TUI, move the active conversation
+without relaunching:
+
+```text
+/development-system-worktree-switch
+/development-system-worktree-switch feat/my-change
+```
+
+The command waits for idle, confirms transcript transfer, revalidates the Git
+identity, and uses Pi's public session-replacement API to preserve the active
+conversation branch in a private mode-0600 target-cwd session. Pi rebuilds its
+cwd-bound runtime and re-evaluates project trust and resources in the selected
+worktree. Check `/goal status` after switching and resume if direct user
+intervention paused an active goal.
+
+The operating-system process cwd remains unchanged; command-level `cd` or
+`git -C` still cannot change enforcement. JSON, print, and RPC callers cannot
+approve session transfer and use the returned `cd ... && exec pi` fallback.
 
 The semantic worktree tools reject malformed refs, option-like values,
 traversal, control characters, configured-root and target symlink escapes, and
-path or branch collisions. Creation is queued per repository and reconciles
-external races without deleting existing branches, directories, worktrees, or
-user content. A narrowly parsed compatibility
+path or branch collisions. The switch command accepts an exact registered path
+or branch, or a unique basename; strips terminal controls, requires explicit
+local-TUI approval, and revalidates path, branch, and HEAD after approval. A
+model can create and report the switch command but cannot invoke Pi's
+command-context-only session replacement silently. Failed or cancelled
+replacement preserves the worktree and private prepared session for recovery.
+
+Creation is queued per repository and reconciles external races without
+deleting existing branches, directories, worktrees, or user content. A narrowly
+parsed compatibility
 `git worktree add <root>/<name> -b <branch>` form remains available, but
 additional options, start points, chaining, and later primary-checkout mutation
 remain blocked.
@@ -192,23 +213,23 @@ Tiber ticket `20260728-9rym`.
 
 ## Capability matrix
 
-| Capability                          | Pi (primary)                                                | Claude Code (secondary)       | Codex (tertiary)              |
-| ----------------------------------- | ----------------------------------------------------------- | ----------------------------- | ----------------------------- |
-| Eight shared public skills          | Canonical files                                             | Same canonical files          | Same canonical files          |
-| Setup/doctor core                   | Native command/tool and CLI                                 | Hook/CLI adapter              | Hook/CLI adapter              |
-| Trusted consequential approval      | Local TUI, preview-bound                                    | Unavailable                   | Unavailable                   |
-| Bounded autonomous goal mode        | Session-scoped `/goal` with guarded terminal tools          | Unavailable                   | Unavailable                   |
-| Worktree discovery/bootstrap        | Semantic list/create tools with exact relaunch command      | Hook/skill adapter            | Hook/skill adapter            |
-| Generic write/edit worktree guard   | Extension event-enforced                                    | Hook-enforced where supported | Hook-enforced where supported |
-| Default model bash guard            | Extension event-enforced in TUI/print/JSON model-tool paths | Instruction/hook boundary     | Instruction/hook boundary     |
-| Direct RPC bash                     | Unsupported for guarded execution                           | N/A                           | N/A                           |
-| Protected metadata/secret paths     | Guarded built-in path tools; search output mediated         | Instruction/hook limits       | Instruction/hook limits       |
-| Delivery-mode and force-push policy | Extension event-enforced                                    | Hook/command-enforced         | Hook/command-enforced         |
-| Tiber CI-recovery hold              | Extension event plus authoritative Tiber state              | Hook/skill plus Tiber state   | Hook/skill plus Tiber state   |
-| Tiber tools                         | Feature-aware native Pi bridge                              | Plugin MCP                    | Plugin MCP                    |
-| Final-review coordinator            | Native Pi bridge to authoritative Rust MCP                  | Plugin MCP                    | Plugin MCP                    |
-| Fresh final-review children         | Isolated children with lifecycle and failure diagnostics    | Harness agents                | Harness agents                |
-| Agent definitions                   | Canonical source with generated adapter                     | Generated Markdown            | Generated TOML                |
+| Capability                          | Pi (primary)                                                  | Claude Code (secondary)       | Codex (tertiary)              |
+| ----------------------------------- | ------------------------------------------------------------- | ----------------------------- | ----------------------------- |
+| Eight shared public skills          | Canonical files                                               | Same canonical files          | Same canonical files          |
+| Setup/doctor core                   | Native command/tool and CLI                                   | Hook/CLI adapter              | Hook/CLI adapter              |
+| Trusted consequential approval      | Local TUI, preview-bound                                      | Unavailable                   | Unavailable                   |
+| Bounded autonomous goal mode        | Session-scoped `/goal` with guarded terminal tools            | Unavailable                   | Unavailable                   |
+| Worktree discovery/bootstrap        | Semantic list/create plus local-TUI in-process session switch | Hook/skill adapter            | Hook/skill adapter            |
+| Generic write/edit worktree guard   | Extension event-enforced                                      | Hook-enforced where supported | Hook-enforced where supported |
+| Default model bash guard            | Extension event-enforced in TUI/print/JSON model-tool paths   | Instruction/hook boundary     | Instruction/hook boundary     |
+| Direct RPC bash                     | Unsupported for guarded execution                             | N/A                           | N/A                           |
+| Protected metadata/secret paths     | Guarded built-in path tools; search output mediated           | Instruction/hook limits       | Instruction/hook limits       |
+| Delivery-mode and force-push policy | Extension event-enforced                                      | Hook/command-enforced         | Hook/command-enforced         |
+| Tiber CI-recovery hold              | Extension event plus authoritative Tiber state                | Hook/skill plus Tiber state   | Hook/skill plus Tiber state   |
+| Tiber tools                         | Feature-aware native Pi bridge                                | Plugin MCP                    | Plugin MCP                    |
+| Final-review coordinator            | Native Pi bridge to authoritative Rust MCP                    | Plugin MCP                    | Plugin MCP                    |
+| Fresh final-review children         | Isolated children with lifecycle and failure diagnostics      | Harness agents                | Harness agents                |
+| Agent definitions                   | Canonical source with generated adapter                       | Generated Markdown            | Generated TOML                |
 
 The populated-secret claim covers the characterized built-in guarded tool
 composition. It does not claim protection from an intentionally unmediated
