@@ -105,7 +105,7 @@ async function perform(
       try {
         return {
           source: await readFile(
-            path.join(project, ".development-system.toml"),
+            path.join(effect.primary, ".development-system.toml"),
             "utf8",
           ),
         };
@@ -128,7 +128,7 @@ async function perform(
       try {
         const { stdout } = await execFileAsync(
           path.join(packageRoot, "bin/development-system"),
-          ["doctor", "--project", project, "--harness", "pi"],
+          ["doctor", "--project", effect.primary, "--harness", "pi"],
         );
         return stdout
           .split("\n")

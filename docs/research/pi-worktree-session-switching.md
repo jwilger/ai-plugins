@@ -2,6 +2,10 @@
 
 Date: 2026-07-29
 
+> Historical note: this research informed ADR-0005. ADR-0006 supersedes the
+> user-initiation conclusion after confirming Pi's documented
+> `sendUserMessage()` follow-up bridge into extension commands.
+
 ## Question
 
 Can a Pi extension move an active conversation into another Git worktree

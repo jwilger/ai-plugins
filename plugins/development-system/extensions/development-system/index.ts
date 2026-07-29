@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
 import { chmod, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +12,13 @@ import {
 } from "./adapters/review-child.ts";
 import { registerGoalMode } from "./adapters/goal-mode.ts";
 import { activeCiRecoveryHold } from "./adapters/ci-hold.ts";
-import { createWorktree, listWorktrees } from "./adapters/worktrees.ts";
+import {
+  createWorktree,
+  listWorktrees,
+  removeWorktree,
+  validateWorktreeForCleanup,
+  type WorktreeRecord,
+} from "./adapters/worktrees.ts";
 import { switchWorktreeSession } from "./adapters/worktree-session.ts";
 import { PI_REFERENCES, readPiReference } from "./adapters/references.ts";
 import {
@@ -79,7 +86,10 @@ async function guardContext(cwd: string, mode: HarnessMode) {
   let policy = null;
   try {
     policy = parseProjectPolicy(
-      await readFile(path.join(cwd, ".development-system.toml"), "utf8"),
+      await readFile(
+        path.join(status.checkout.primary, ".development-system.toml"),
+        "utf8",
+      ),
     );
   } catch {
     // Missing/invalid policy remains null and cannot grant delivery authority.
@@ -226,7 +236,29 @@ async function recordProvenanceMarker(goalCollision: boolean): Promise<void> {
 export default function developmentSystemExtension(pi: ExtensionAPI): void {
   let started = false;
   const componentClients: McpClient[] = [];
+  const pendingAutomaticSwitches = new Map<string, WorktreeRecord>();
+  const pendingAutomaticFinishes = new Map<string, WorktreeRecord>();
   const goalMode = registerGoalMode(pi);
+
+  const queueAutomaticSwitch = (worktree: WorktreeRecord): string => {
+    const token = randomUUID();
+    pendingAutomaticSwitches.set(token, worktree);
+    pi.sendUserMessage(
+      `/development-system-worktree-switch --automatic ${token}`,
+      { deliverAs: "followUp" },
+    );
+    return token;
+  };
+
+  const queueAutomaticFinish = (worktree: WorktreeRecord): string => {
+    const token = randomUUID();
+    pendingAutomaticFinishes.set(token, worktree);
+    pi.sendUserMessage(
+      `/development-system-worktree-finish --automatic ${token}`,
+      { deliverAs: "followUp" },
+    );
+    return token;
+  };
 
   const bridge = async (
     origin: "tiber" | "review",
@@ -294,7 +326,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     handler: async (arguments_, context) => {
       if (context.mode !== "tui" || !context.hasUI) {
         context.ui.notify(
-          "development_system.worktree_switch_requires_local_tui: workspace replacement requires a user-initiated command in the local Pi TUI.",
+          "development_system.worktree_switch_requires_local_tui: workspace replacement requires the local Pi TUI runtime.",
           "error",
         );
         return;
@@ -313,8 +345,19 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         const candidates = inventory.worktrees.filter(
           (worktree) => !worktree.current,
         );
-        let selected;
-        if (selector) {
+        const automaticMatch = selector.match(
+          /^--automatic ([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i,
+        );
+        const automatic = automaticMatch !== null;
+        let selected: WorktreeRecord | undefined;
+        if (automaticMatch) {
+          selected = pendingAutomaticSwitches.get(automaticMatch[1]);
+          pendingAutomaticSwitches.delete(automaticMatch[1]);
+          if (!selected)
+            throw new Error(
+              "development_system.worktree_switch_automatic_request_stale",
+            );
+        } else if (selector) {
           const matches = candidates.filter(
             (worktree) =>
               worktree.path === selector ||
@@ -350,11 +393,15 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
               "development_system.worktree_switch_selection_stale",
             );
         }
-        const confirmed = await context.ui.confirm(
-          "Switch Pi workspace?",
-          `Preserve this conversation and active session branch in ${terminalSafe(selected.path)} (${terminalSafe(selected.branch ?? "detached")})? Pi will rebuild its cwd-bound runtime and re-evaluate project trust and resources there.`,
-        );
-        if (!confirmed) return;
+        if (!selected)
+          throw new Error("development_system.worktree_switch_selection_stale");
+        if (!automatic) {
+          const confirmed = await context.ui.confirm(
+            "Switch Pi workspace?",
+            `Preserve this conversation and active session branch in ${terminalSafe(selected.path)} (${terminalSafe(selected.branch ?? "detached")})? Pi will rebuild its cwd-bound runtime and re-evaluate project trust and resources there.`,
+          );
+          if (!confirmed) return;
+        }
 
         const current = await listWorktrees(context.cwd);
         const revalidated = current.worktrees.find(
@@ -368,6 +415,100 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
             "development_system.worktree_switch_identity_changed; list worktrees and select again",
           );
         await switchWorktreeSession(context, revalidated.path);
+      } catch (error) {
+        context.ui.notify(
+          terminalSafe(error instanceof Error ? error.message : String(error)),
+          "error",
+        );
+      }
+    },
+  });
+
+  pi.registerCommand("development-system-worktree-finish", {
+    description:
+      "Switch this Pi conversation to the primary checkout and remove the finished clean linked worktree",
+    handler: async (arguments_, context) => {
+      if (context.mode !== "tui" || !context.hasUI) {
+        context.ui.notify(
+          "development_system.worktree_finish_requires_local_tui",
+          "error",
+        );
+        return;
+      }
+      const selector = arguments_.trim();
+      if (selector.length > 500 || /[\u0000-\u001f\u007f]/.test(selector)) {
+        context.ui.notify(
+          "development_system.worktree_finish_selector_invalid",
+          "error",
+        );
+        return;
+      }
+      try {
+        await context.waitForIdle();
+        const inventory = await listWorktrees(context.cwd);
+        const automaticMatch = selector.match(
+          /^--automatic ([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i,
+        );
+        const automatic = automaticMatch !== null;
+        let selected: WorktreeRecord | undefined;
+        if (automaticMatch) {
+          selected = pendingAutomaticFinishes.get(automaticMatch[1]);
+          pendingAutomaticFinishes.delete(automaticMatch[1]);
+          if (!selected)
+            throw new Error(
+              "development_system.worktree_finish_automatic_request_stale",
+            );
+        } else if (!selector) {
+          selected = inventory.worktrees.find((worktree) => worktree.current);
+        } else {
+          throw new Error(
+            "development_system.worktree_finish_selector_invalid",
+          );
+        }
+        if (!selected || selected.primary || !selected.current)
+          throw new Error(
+            "development_system.worktree_finish_requires_linked_checkout",
+          );
+        const validated = await validateWorktreeForCleanup(
+          context.cwd,
+          selected.path,
+        );
+        if (
+          validated.branch !== selected.branch ||
+          validated.head !== selected.head ||
+          !validated.current
+        )
+          throw new Error(
+            "development_system.worktree_cleanup_identity_changed",
+          );
+        if (!automatic) {
+          const confirmed = await context.ui.confirm(
+            "Finish and remove this worktree?",
+            `Switch this conversation to ${terminalSafe(inventory.primary)}, run repository teardown, and remove the clean worktree ${terminalSafe(selected.path)}? The branch ${terminalSafe(selected.branch ?? "detached")} will be preserved.`,
+          );
+          if (!confirmed) return;
+        }
+        await switchWorktreeSession(
+          context,
+          inventory.primary,
+          async (replacement) => {
+            try {
+              const removed = await removeWorktree(
+                replacement.cwd,
+                selected.path,
+              );
+              replacement.ui.notify(
+                `Removed finished worktree ${terminalSafe(removed.path)}. Branch ${terminalSafe(removed.branch ?? "detached")} was preserved.`,
+                "info",
+              );
+            } catch (error) {
+              replacement.ui.notify(
+                `Workspace returned to the primary checkout, but cleanup preserved the worktree: ${terminalSafe(error instanceof Error ? error.message : String(error))}`,
+                "error",
+              );
+            }
+          },
+        );
       } catch (error) {
         context.ui.notify(
           terminalSafe(error instanceof Error ? error.message : String(error)),
@@ -507,21 +648,116 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, _parameters, signal, _onUpdate, context) {
       if (signal?.aborted) throw new Error("development_system.cancelled");
       const inventory = await listWorktrees(context.cwd);
+      const automaticSwitchAvailable = context.mode === "tui" && context.hasUI;
+      const result = {
+        ...inventory,
+        requiresUserWorkspaceSwitch:
+          inventory.requiresUserWorkspaceSwitch && !automaticSwitchAvailable,
+        processCwdImmutable: true,
+        sessionWorkspaceSwitchAvailable: automaticSwitchAvailable,
+        nextAction: automaticSwitchAvailable
+          ? inventory.currentKind === "primary"
+            ? "Use development_system_worktree_create if needed, or development_system_worktree_switch for an existing worktree. Development-system will preserve this conversation and replace the cwd-bound runtime automatically."
+            : "Continue ordinary work in the current linked worktree, use development_system_worktree_switch to move, or call development_system_worktree_finish after verified delivery to return and clean up."
+          : "Start a new Pi process with a returned relaunchCommand; this mode cannot replace the active cwd-bound runtime.",
+      } as const;
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              ...inventory,
-              processCwdImmutable: true,
-              sessionWorkspaceSwitchAvailable: context.mode === "tui",
-              nextAction: inventory.requiresUserWorkspaceSwitch
-                ? "Use development_system_worktree_create if needed, then run a listed switchCommand in the local Pi TUI. Pi will preserve this conversation and rebuild the cwd-bound runtime. Headless modes use relaunchCommand."
-                : "Continue ordinary mutation in the current linked worktree or use a listed switchCommand to move this conversation.",
-            }),
-          },
-        ],
-        details: inventory,
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "development_system_worktree_switch",
+    label: "Switch Development Worktree",
+    description:
+      "Queue an automatic local-TUI replacement of this Pi conversation into one exact registered worktree. No manual slash command is required.",
+    parameters: {
+      type: "object",
+      properties: {
+        selector: { type: "string", minLength: 1, maxLength: 500 },
+      },
+      required: ["selector"],
+      additionalProperties: false,
+    },
+    async execute(_toolCallId, parameters, signal, _onUpdate, context) {
+      if (signal?.aborted) throw new Error("development_system.cancelled");
+      if (context.mode !== "tui" || !context.hasUI)
+        throw new Error(
+          "development_system.worktree_switch_requires_local_tui",
+        );
+      if (
+        typeof parameters.selector !== "string" ||
+        /[\u0000-\u001f\u007f]/.test(parameters.selector)
+      )
+        throw new Error("development_system.worktree_switch_selector_invalid");
+      const inventory = await listWorktrees(context.cwd);
+      const matches = inventory.worktrees.filter(
+        (worktree) =>
+          !worktree.current &&
+          (worktree.path === parameters.selector ||
+            worktree.branch === parameters.selector ||
+            path.basename(worktree.path) === parameters.selector),
+      );
+      if (matches.length === 0)
+        throw new Error(
+          `development_system.worktree_switch_not_found selector=${parameters.selector}`,
+        );
+      if (matches.length > 1)
+        throw new Error(
+          `development_system.worktree_switch_ambiguous selector=${parameters.selector}`,
+        );
+      queueAutomaticSwitch(matches[0]);
+      const result = {
+        status: "queued",
+        target: matches[0].path,
+        branch: matches[0].branch,
+        requiresUserWorkspaceSwitch: false,
+        nextAction:
+          "Finish the current response; development-system will replace the Pi workspace automatically.",
+      } as const;
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "development_system_worktree_finish",
+    label: "Finish Development Worktree",
+    description:
+      "After verified delivery is complete, queue automatic return to the primary checkout, run repository teardown, and remove the current clean linked worktree while preserving its branch.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    async execute(_toolCallId, _parameters, signal, _onUpdate, context) {
+      if (signal?.aborted) throw new Error("development_system.cancelled");
+      if (context.mode !== "tui" || !context.hasUI)
+        throw new Error(
+          "development_system.worktree_finish_requires_local_tui",
+        );
+      const inventory = await listWorktrees(context.cwd);
+      const current = inventory.worktrees.find((worktree) => worktree.current);
+      if (!current || current.primary)
+        throw new Error(
+          "development_system.worktree_finish_requires_linked_checkout",
+        );
+      const validated = await validateWorktreeForCleanup(
+        context.cwd,
+        current.path,
+      );
+      queueAutomaticFinish(validated);
+      const result = {
+        status: "queued",
+        target: validated.path,
+        branch: validated.branch,
+        branchPreserved: true,
+        nextAction:
+          "Finish the current response; development-system will return to the primary checkout and remove the clean worktree automatically.",
+      } as const;
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
       };
     },
   });
@@ -530,7 +766,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     name: "development_system_worktree_create",
     label: "Create Development Worktree",
     description:
-      "Create one new repository-local linked worktree from the authoritative primary HEAD using parsed name and branch values, then return a local-TUI conversation switch command and a headless relaunch fallback.",
+      "Create one new repository-local linked worktree from the authoritative primary HEAD. In local TUI mode, queue automatic conversation replacement into it; headless callers receive a relaunch fallback.",
     parameters: {
       type: "object",
       properties: {
@@ -551,6 +787,29 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         name: parameters.name,
         branch: parameters.branch,
       });
+      if (
+        result.status === "created" &&
+        context.mode === "tui" &&
+        context.hasUI
+      ) {
+        const created = (await listWorktrees(context.cwd)).worktrees.find(
+          (worktree) => worktree.path === result.path,
+        );
+        if (!created)
+          throw new Error("development_system.worktree_creation_unobservable");
+        queueAutomaticSwitch(created);
+        const queued = {
+          ...result,
+          requiresUserWorkspaceSwitch: false,
+          switchQueued: true,
+          nextAction:
+            "Automatic local-TUI workspace replacement is queued for the end of this response.",
+        } as const;
+        return {
+          content: [{ type: "text", text: JSON.stringify(queued) }],
+          details: queued,
+        };
+      }
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         details: result,
@@ -622,9 +881,14 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       ) {
         throw new Error("development_system.review_assignment_invalid");
       }
+      const status = await resolveStatus(
+        context.cwd,
+        packageRoot,
+        context.mode as HarnessMode,
+      );
       const policy = parseProjectPolicy(
         await readFile(
-          path.join(context.cwd, ".development-system.toml"),
+          path.join(status.checkout.primary, ".development-system.toml"),
           "utf8",
         ),
       );
@@ -726,10 +990,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           let worktrees = false;
           try {
             worktrees = parseProjectPolicy(
-              await readFile(
-                path.join(context.cwd, ".development-system.toml"),
-                "utf8",
-              ),
+              await readFile(authoritativePolicy, "utf8"),
             ).features.worktrees;
           } catch {
             /* missing policy grants nothing but does not impose configured worktree policy */
@@ -800,9 +1061,14 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (_event, context) => {
     try {
+      const status = await resolveStatus(
+        context.cwd,
+        packageRoot,
+        context.mode as HarnessMode,
+      );
       const policy = parseProjectPolicy(
         await readFile(
-          path.join(context.cwd, ".development-system.toml"),
+          path.join(status.checkout.primary, ".development-system.toml"),
           "utf8",
         ),
       );
@@ -852,6 +1118,8 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       "development_system_policy_read",
       "development_system_pi_reference",
       "development_system_worktree_list",
+      "development_system_worktree_switch",
+      "development_system_worktree_finish",
       "development_system_worktree_create",
       "development_system_run_review_assignment",
       "development_system_goal_status",

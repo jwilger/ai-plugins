@@ -102,36 +102,48 @@ unspecified value, review route, comment, and formatting choice. Both initial
 and update paths reject linked checkouts and roll back the file and index if
 their bound commit fails.
 
-When worktrees are enabled, the primary checkout remains coordination-only. Use
-`development_system_worktree_list` to inspect canonical paths and branches, and
-`development_system_worktree_create` with a repository-local name and new
-branch to bootstrap work. In the local Pi TUI, move the active conversation
-without relaunching:
+When worktrees are enabled, the primary checkout remains coordination-only for
+tracked changes and commits, but ordinary Git inspection, exploration, tests,
+and builds remain available there. Direct `read`, `write`, and `edit` boundaries
+still protect metadata, secrets, outside paths, and primary-checkout writes;
+obvious filesystem mutation and Git index/history/worktree mutation remain
+blocked from primary-checkout shell calls.
+
+Use `development_system_worktree_list` to inspect canonical paths and branches,
+`development_system_worktree_create` with a repository-local name and new branch
+to bootstrap work, and `development_system_worktree_switch` for an existing
+worktree. In local TUI mode these tools queue a one-time extension command that
+preserves the active conversation in a private mode-0600 target-cwd session and
+uses Pi's public session-replacement API after the current response settles. No
+manual slash command or second confirmation is required. Pi rebuilds its
+cwd-bound runtime, re-evaluates project trust and resources, and reads the
+authoritative `.development-system.toml` from the primary checkout. The manual
+commands remain available for interactive selection:
 
 ```text
 /development-system-worktree-switch
 /development-system-worktree-switch feat/my-change
 ```
 
-The command waits for idle, confirms transcript transfer, revalidates the Git
-identity, and uses Pi's public session-replacement API to preserve the active
-conversation branch in a private mode-0600 target-cwd session. Pi rebuilds its
-cwd-bound runtime and re-evaluates project trust and resources in the selected
-worktree. Check `/goal status` after switching and resume if direct user
-intervention paused an active goal.
+After verified delivery is complete, call
+`development_system_worktree_finish`. It verifies that the current linked
+worktree is clean, returns the conversation to the primary checkout, runs an
+executable repository `scripts/worktree-teardown.sh` when present, and removes
+the worktree without deleting its branch. Dirty worktrees and changed Git
+identities are preserved with an actionable error. The corresponding manual
+command is `/development-system-worktree-finish`.
 
 The operating-system process cwd remains unchanged; command-level `cd` or
-`git -C` still cannot change enforcement. JSON, print, and RPC callers cannot
-approve session transfer and use the returned `cd ... && exec pi` fallback.
+`git -C` still cannot change enforcement. JSON, print, and RPC callers use the
+returned `cd ... && exec pi` fallback because those modes cannot replace the
+active TUI runtime.
 
 The semantic worktree tools reject malformed refs, option-like values,
 traversal, control characters, configured-root and target symlink escapes, and
-path or branch collisions. The switch command accepts an exact registered path
-or branch, or a unique basename; strips terminal controls, requires explicit
-local-TUI approval, and revalidates path, branch, and HEAD after approval. A
-model can create and report the switch command but cannot invoke Pi's
-command-context-only session replacement silently. Failed or cancelled
-replacement preserves the worktree and private prepared session for recovery.
+path or branch collisions. Automatic switch and finish requests use private,
+one-time tokens and revalidate path, branch, and HEAD before replacement.
+Failed or cancelled replacement preserves the worktree and private prepared
+session for recovery.
 
 Creation is queued per repository and reconciles external races without
 deleting existing branches, directories, worktrees, or user content. A narrowly

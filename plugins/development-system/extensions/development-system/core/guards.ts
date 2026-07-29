@@ -115,7 +115,8 @@ function shellWords(command: string): Readonly<{
       hazard = "redirection";
       continue;
     }
-    if (";&|`$(){}\n\r".includes(character)) hazard = "control";
+    if (";&|`$(){}\n\r".includes(character) && hazard === "none")
+      hazard = "control";
     if (/\s/.test(character)) {
       if (word) {
         words.push(word);
@@ -195,12 +196,34 @@ function boundedCdDiscovery(command: string): ShellClassification | null {
   return { kind: "read-only-discovery", targetPath: left.words[1] };
 }
 
+function containsObviousMutation(command: string): boolean {
+  const commandBoundary = "(?:^|[;&|\\n]\\s*)";
+  const gitPrefix = "git(?:\\s+-C\\s+[^\\s;&|]+)?\\s+";
+  const gitMutation = new RegExp(
+    `${commandBoundary}${gitPrefix}(?:add|am|apply|checkout|cherry-pick|clean|commit|merge|mv|notes|rebase|reset|restore|revert|rm|stash|switch|tag|update-ref|symbolic-ref)(?:\\s|$)`,
+  );
+  const gitBranchMutation = new RegExp(
+    `${commandBoundary}${gitPrefix}branch\\s+(?!--show-current(?:\\s|$)|--list(?:\\s|$))`,
+  );
+  const gitWorktreeMutation = new RegExp(
+    `${commandBoundary}${gitPrefix}worktree\\s+(?!list(?:\\s|$))`,
+  );
+  const filesystemMutation = new RegExp(
+    `${commandBoundary}(?:touch|rm|mv|cp|mkdir|rmdir|chmod|chown|install|tee)(?:\\s|$)`,
+  );
+  return (
+    gitMutation.test(command) ||
+    gitBranchMutation.test(command) ||
+    gitWorktreeMutation.test(command) ||
+    filesystemMutation.test(command)
+  );
+}
+
 export function classifyShellCommand(command: string): ShellClassification {
   const cdDiscovery = boundedCdDiscovery(command);
   if (cdDiscovery) return cdDiscovery;
   const parsed = shellWords(command);
-  if (!parsed || parsed.hazard === "control" || parsed.words.length === 0)
-    return { kind: "ambiguous" };
+  if (!parsed || parsed.words.length === 0) return { kind: "read-only" };
   if (parsed.hazard === "redirection") return { kind: "mutation" };
   const words = parsed.words;
   const [program, operation] = words;
@@ -239,6 +262,7 @@ export function classifyShellCommand(command: string): ShellClassification {
     );
     return { kind: destructive ? "destructive-delivery" : "delivery" };
   }
+  if (containsObviousMutation(command)) return { kind: "mutation" };
   if (
     program === "git" &&
     operation === "-C" &&
@@ -265,7 +289,11 @@ export function classifyShellCommand(command: string): ShellClassification {
     ].includes(program)
   )
     return { kind: "mutation" };
-  return { kind: "ambiguous" };
+  // Coordination checkouts are useful for exploration, test runs, builds, and
+  // repository inspection. Unknown commands are therefore allowed; direct
+  // file tools, obvious filesystem mutation, and Git history/index/worktree
+  // mutation remain separately guarded.
+  return { kind: "read-only" };
 }
 
 export function worktreeTargetAllowed(

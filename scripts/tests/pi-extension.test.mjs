@@ -86,14 +86,21 @@ max_queued = 5
   assert.equal(result.status.enforcement.trustedApproval, false);
 });
 
-test("status identifies linked checkout and the primary checkout", () => {
+test("status identifies linked checkout and inherits primary-checkout policy", () => {
   const primary = fixture();
   const linked = `${primary}-linked`;
   git(primary, "worktree", "add", "-b", "feature", linked);
+  fs.writeFileSync(
+    path.join(primary, ".development-system.toml"),
+    configuredPolicy("pull-request"),
+  );
   const result = status(linked);
   assert.equal(result.status.checkout.kind, "linked");
   assert.equal(result.status.checkout.primary, fs.realpathSync(primary));
   assert.equal(result.status.checkout.current, fs.realpathSync(linked));
+  assert.equal(result.status.configured, true);
+  assert.equal(result.status.deliveryMode, "pull-request");
+  assert.ok(result.status.enabledFeatures.includes("worktrees"));
 });
 
 test("invalid configuration returns a typed actionable error", () => {
@@ -119,7 +126,12 @@ test("invalid configuration returns a typed actionable error", () => {
 });
 
 function extensionHarness() {
-  const registrations = { commands: new Map(), tools: [], events: new Map() };
+  const registrations = {
+    commands: new Map(),
+    tools: [],
+    events: new Map(),
+    userMessages: [],
+  };
   const pi = {
     registerCommand(name, definition) {
       registrations.commands.set(name, definition);
@@ -150,6 +162,9 @@ function extensionHarness() {
     },
     appendEntry() {},
     sendMessage() {},
+    sendUserMessage(message, options) {
+      registrations.userMessages.push({ message, options });
+    },
   };
   return { pi, registrations };
 }
@@ -189,6 +204,8 @@ test("extension registers status command and tool and cleans session state on re
       "development_system_policy_read",
       "development_system_pi_reference",
       "development_system_worktree_list",
+      "development_system_worktree_switch",
+      "development_system_worktree_finish",
       "development_system_worktree_create",
       "development_system_setup_preview",
       "development_system_run_review_assignment",
@@ -227,7 +244,7 @@ test("semantic worktree tools bootstrap a primary checkout and report session-sw
     path.join(project, ".development-system.toml"),
     configuredPolicy("direct-to-trunk"),
   );
-  const context = { cwd: project, mode: "json" };
+  const context = { cwd: project, mode: "tui", hasUI: true };
   const list = registrations.tools.find(
     (tool) => tool.name === "development_system_worktree_list",
   );
@@ -238,7 +255,7 @@ test("semantic worktree tools bootstrap a primary checkout and report session-sw
   const before = await list.execute("list", {}, undefined, undefined, context);
   assert.equal(before.details.currentKind, "primary");
   assert.equal(before.details.requiresRelaunch, false);
-  assert.equal(before.details.requiresUserWorkspaceSwitch, true);
+  assert.equal(before.details.requiresUserWorkspaceSwitch, false);
   assert.match(before.content[0].text, /switchCommand/);
 
   const created = await create.execute(
@@ -250,12 +267,21 @@ test("semantic worktree tools bootstrap a primary checkout and report session-sw
   );
   assert.equal(created.details.status, "created");
   assert.equal(created.details.requiresRelaunch, false);
-  assert.equal(created.details.requiresUserWorkspaceSwitch, true);
   assert.equal(
     created.details.switchCommand,
     "/development-system-worktree-switch fix/bootstrap",
   );
-  assert.match(created.details.nextAction, /preserve this conversation/i);
+  assert.equal(created.details.requiresUserWorkspaceSwitch, false);
+  assert.equal(created.details.switchQueued, true);
+  assert.match(created.details.nextAction, /queued/i);
+  assert.equal(registrations.userMessages.length, 1);
+  assert.match(
+    registrations.userMessages[0].message,
+    /^\/development-system-worktree-switch --automatic /,
+  );
+  assert.deepEqual(registrations.userMessages[0].options, {
+    deliverAs: "followUp",
+  });
   assert.equal(
     git(created.details.path, "branch", "--show-current"),
     "fix/bootstrap",
@@ -314,6 +340,125 @@ test("local TUI command switches the active Pi conversation into a registered wo
   );
   assert.match(replacementNotice, /workspace switched/i);
   assert.equal(notifications.length, 0);
+});
+
+test("model-callable worktree switch queues command-context replacement without another confirmation", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", true),
+  );
+  const linked = path.join(project, ".worktrees", "automatic-target");
+  git(project, "worktree", "add", "-b", "automatic-target", linked);
+  const tool = registrations.tools.find(
+    (candidate) => candidate.name === "development_system_worktree_switch",
+  );
+  const queued = await tool.execute(
+    "switch",
+    { selector: "automatic-target" },
+    undefined,
+    undefined,
+    { cwd: project, mode: "tui", hasUI: true },
+  );
+  assert.equal(queued.details.status, "queued");
+  assert.equal(queued.details.requiresUserWorkspaceSwitch, false);
+  const queuedCommand = registrations.userMessages.at(-1).message;
+  assert.match(queuedCommand, /^\/development-system-worktree-switch /);
+
+  let switched = false;
+  await registrations.commands
+    .get("development-system-worktree-switch")
+    .handler(
+      queuedCommand.replace(/^\/development-system-worktree-switch /, ""),
+      {
+        cwd: project,
+        mode: "tui",
+        hasUI: true,
+        sessionManager: SessionManager.inMemory(project),
+        waitForIdle: async () => {},
+        ui: {
+          confirm: async () => {
+            throw new Error("automatic switch must not ask for confirmation");
+          },
+          notify() {},
+        },
+        async switchSession(sessionPath, options) {
+          switched = true;
+          await options.withSession({
+            cwd: fs.realpathSync(linked),
+            ui: { notify() {} },
+          });
+          return { cancelled: false };
+        },
+      },
+    );
+  assert.equal(switched, true);
+});
+
+test("finish tool returns to primary and removes the clean worktree without deleting its branch", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", true),
+  );
+  git(project, "add", ".development-system.toml");
+  git(project, "commit", "-m", "test: configure fixture");
+  const linked = path.join(project, ".worktrees", "finished-target");
+  git(project, "worktree", "add", "-b", "finished-target", linked);
+  const tool = registrations.tools.find(
+    (candidate) => candidate.name === "development_system_worktree_finish",
+  );
+  const queued = await tool.execute("finish", {}, undefined, undefined, {
+    cwd: linked,
+    mode: "tui",
+    hasUI: true,
+  });
+  assert.equal(queued.details.status, "queued");
+  assert.equal(queued.details.branchPreserved, true);
+  const queuedCommand = registrations.userMessages.at(-1).message;
+  assert.match(queuedCommand, /^\/development-system-worktree-finish /);
+
+  let replacementNotice = "";
+  await registrations.commands
+    .get("development-system-worktree-finish")
+    .handler(
+      queuedCommand.replace(/^\/development-system-worktree-finish /, ""),
+      {
+        cwd: linked,
+        mode: "tui",
+        hasUI: true,
+        sessionManager: SessionManager.inMemory(linked),
+        waitForIdle: async () => {},
+        ui: {
+          confirm: async () => {
+            throw new Error("automatic finish must not ask for confirmation");
+          },
+          notify() {},
+        },
+        async switchSession(sessionPath, options) {
+          await options.withSession({
+            cwd: fs.realpathSync(project),
+            ui: {
+              notify(message) {
+                replacementNotice += `${message}\n`;
+              },
+            },
+          });
+          return { cancelled: false };
+        },
+      },
+    );
+
+  assert.equal(fs.existsSync(linked), false);
+  assert.match(replacementNotice, /Removed finished worktree/);
+  assert.equal(
+    git(project, "branch", "--list", "finished-target", "--format=%(refname)"),
+    "refs/heads/finished-target",
+  );
 });
 
 test("worktree switch command fails closed outside local TUI and on ambiguous selectors", async () => {
@@ -574,7 +719,7 @@ test("setup rejects a confirmation after bound repository preconditions change",
   );
 });
 
-test("extension blocks coordination writes, secret reads, and unclassified shell mutation", async () => {
+test("extension allows primary exploration while blocking tracked writes and Git mutation", async () => {
   const { pi, registrations } = extensionHarness();
   (await loadExtension())(pi);
   const project = fixture();
@@ -652,12 +797,32 @@ test("extension blocks coordination writes, secret reads, and unclassified shell
   );
   assert.equal(injectedWorktree.block, true);
   assert.match(injectedWorktree.reason, /coordination_worktree_target_blocked/);
-  const shell = await guard(
-    { toolName: "bash", input: { command: "python script.py" } },
+  assert.equal(
+    await guard(
+      { toolName: "bash", input: { command: "python script.py --help" } },
+      context,
+    ),
+    undefined,
+  );
+  assert.equal(
+    await guard(
+      {
+        toolName: "bash",
+        input: {
+          command:
+            "env | sort | grep '^PI_' || true; git status --short --branch; find . -maxdepth 2 -type f | head",
+        },
+      },
+      context,
+    ),
+    undefined,
+  );
+  const commit = await guard(
+    { toolName: "bash", input: { command: "git commit -m 'wrong checkout'" } },
     context,
   );
-  assert.equal(shell.block, true);
-  assert.match(shell.reason, /coordination_shell_blocked/);
+  assert.equal(commit.block, true);
+  assert.match(commit.reason, /coordination_shell_blocked/);
   assert.equal(
     await guard(
       { toolName: "bash", input: { command: "git status --short" } },

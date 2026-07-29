@@ -80,7 +80,7 @@ test("worktree creation targets remain inside primary coordination storage", () 
   );
 });
 
-test("shell classifier permits bounded read-only work and fails closed on ambiguity", () => {
+test("shell classifier allows exploration while identifying direct repository mutation", () => {
   assert.deepEqual(classifyShellCommand("git status --short"), {
     kind: "read-only",
   });
@@ -113,7 +113,7 @@ test("shell classifier permits bounded read-only work and fails closed on ambigu
     classifyShellCommand(
       "git worktree add .worktrees/observable-subagents -b feat/observable-subagents origin/main",
     ).kind,
-    "ambiguous",
+    "mutation",
   );
   assert.deepEqual(
     classifyShellCommand("git -C .worktrees/feature status --short --branch"),
@@ -129,14 +129,22 @@ test("shell classifier permits bounded read-only work and fails closed on ambigu
     classifyShellCommand("scripts/agent-checkout-guard.sh").kind,
     "read-only",
   );
-  assert.equal(classifyShellCommand("git branch new-branch").kind, "ambiguous");
+  assert.equal(
+    classifyShellCommand("git branch --show-current").kind,
+    "read-only",
+  );
+  assert.equal(
+    classifyShellCommand("git worktree list --porcelain").kind,
+    "read-only",
+  );
+  assert.equal(classifyShellCommand("git branch new-branch").kind, "mutation");
   assert.equal(
     classifyShellCommand("cd .worktrees/feature && touch x").kind,
-    "ambiguous",
+    "mutation",
   );
   assert.equal(classifyShellCommand("printf x > file").kind, "mutation");
-  assert.equal(classifyShellCommand("git status && touch x").kind, "ambiguous");
-  assert.equal(classifyShellCommand("python script.py").kind, "ambiguous");
+  assert.equal(classifyShellCommand("git status && touch x").kind, "mutation");
+  assert.equal(classifyShellCommand("python script.py").kind, "read-only");
 });
 
 test("delivery decisions never infer a missing mode or destructive approval", () => {

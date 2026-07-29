@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { lstat, mkdir, realpath, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, lstat, mkdir, realpath, readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { parseProjectPolicy } from "../core/configuration.ts";
@@ -31,6 +32,13 @@ export type WorktreeInventory = Readonly<{
   worktrees: readonly WorktreeRecord[];
   requiresRelaunch: false;
   requiresUserWorkspaceSwitch: boolean;
+}>;
+
+export type WorktreeRemovalResult = Readonly<{
+  status: "removed";
+  path: string;
+  branch: string | null;
+  branchPreserved: true;
 }>;
 
 export type WorktreeCreationResult =
@@ -230,6 +238,101 @@ async function withRepositoryQueue<T>(
     if (repositoryQueues.get(primary) === chain)
       repositoryQueues.delete(primary);
   }
+}
+
+async function assertCleanWorktree(
+  primary: string,
+  worktreePath: string,
+): Promise<void> {
+  const { stdout } = await execFileAsync("git", [
+    "-C",
+    worktreePath,
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+  ]);
+  if (stdout.trim())
+    throw new Error(
+      `development_system.worktree_cleanup_dirty path=${worktreePath}; commit, transfer, or remove the remaining state before cleanup`,
+    );
+  const { stdout: registered } = await execFileAsync("git", [
+    "-C",
+    primary,
+    "worktree",
+    "list",
+    "--porcelain",
+    "-z",
+  ]);
+  if (!registered.includes(`worktree ${worktreePath}\0`))
+    throw new Error("development_system.worktree_cleanup_not_registered");
+}
+
+export async function validateWorktreeForCleanup(
+  cwd: string,
+  requestedTarget: string,
+): Promise<WorktreeRecord> {
+  const context = await repositoryContext(cwd);
+  const target = await realpath(requestedTarget);
+  if (!isWithin(context.configuredRoot, target))
+    throw new Error("development_system.worktree_cleanup_target_outside_root");
+  const selected = (await listWorktrees(cwd)).worktrees.find(
+    (worktree) => worktree.path === target,
+  );
+  if (!selected || selected.primary)
+    throw new Error("development_system.worktree_cleanup_target_invalid");
+  await assertCleanWorktree(context.primary, target);
+  return selected;
+}
+
+export async function removeWorktree(
+  cwd: string,
+  requestedTarget: string,
+): Promise<WorktreeRemovalResult> {
+  const context = await repositoryContext(cwd);
+  const selected = await validateWorktreeForCleanup(cwd, requestedTarget);
+  const target = selected.path;
+  if (selected.current)
+    throw new Error("development_system.worktree_cleanup_switch_required");
+
+  return withRepositoryQueue(context.primary, async () => {
+    const revalidated = (await listWorktrees(context.primary)).worktrees.find(
+      (worktree) =>
+        worktree.path === selected.path &&
+        worktree.branch === selected.branch &&
+        worktree.head === selected.head,
+    );
+    if (!revalidated || revalidated.current)
+      throw new Error("development_system.worktree_cleanup_identity_changed");
+    await assertCleanWorktree(context.primary, target);
+
+    const teardown = path.join(
+      context.primary,
+      "scripts",
+      "worktree-teardown.sh",
+    );
+    try {
+      await access(teardown, constants.X_OK);
+      await execFileAsync(teardown, [target], { cwd: context.primary });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await execFileAsync(
+      "git",
+      ["-C", context.primary, "worktree", "remove", target],
+      { cwd: context.primary },
+    );
+    const remaining = (await listWorktrees(context.primary)).worktrees.some(
+      (worktree) => worktree.path === target,
+    );
+    if (remaining)
+      throw new Error("development_system.worktree_cleanup_unobservable");
+    return {
+      status: "removed",
+      path: target,
+      branch: selected.branch,
+      branchPreserved: true,
+    };
+  });
 }
 
 export async function createWorktree(

@@ -70,6 +70,10 @@ export async function switchWorktreeSession(
     "cwd" | "mode" | "hasUI" | "sessionManager" | "switchSession" | "ui"
   >,
   requestedTarget: string,
+  afterSwitch?: (replacement: {
+    cwd: string;
+    ui: { notify(message: string, level: "info" | "warning" | "error"): void };
+  }) => Promise<void>,
 ): Promise<WorktreeSessionSwitchResult> {
   const target = realpathSync(requestedTarget);
   if (context.mode !== "tui" || !context.hasUI)
@@ -110,6 +114,7 @@ export async function switchWorktreeSession(
           `Development-system workspace switched to ${sanitizeDiagnostic(target)}. The conversation and active session branch were preserved.`,
           "info",
         );
+        await afterSwitch?.(replacement);
       },
     });
     if (switched.cancelled) {

@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   createWorktree,
   listWorktrees,
+  removeWorktree,
 } from "../../plugins/development-system/extensions/development-system/adapters/worktrees.ts";
 import {
   parseWorktreeBranch,
@@ -106,6 +107,54 @@ test("existing worktree paths and branches return actionable collisions", async 
     "development_system.worktree_branch_exists",
   );
   assert.match(branchCollision.nextAction, /Switch this Pi conversation/);
+});
+
+test("cleanup removes a clean linked worktree while preserving its branch", async () => {
+  const root = repository();
+  const created = await createWorktree(root, {
+    name: "finished",
+    branch: "feat/finished",
+  });
+  assert.equal(created.status, "created");
+
+  const removed = await removeWorktree(root, created.path);
+
+  assert.equal(removed.status, "removed");
+  assert.equal(removed.path, created.path);
+  assert.equal(removed.branch, "feat/finished");
+  assert.equal(fs.existsSync(created.path), false);
+  assert.equal(
+    execFileSync(
+      "git",
+      ["-C", root, "branch", "--list", "feat/finished", "--format=%(refname)"],
+      { encoding: "utf8" },
+    ).trim(),
+    "refs/heads/feat/finished",
+  );
+});
+
+test("cleanup refuses a dirty linked worktree without deleting user state", async () => {
+  const root = repository();
+  const created = await createWorktree(root, {
+    name: "dirty",
+    branch: "feat/dirty",
+  });
+  assert.equal(created.status, "created");
+  fs.writeFileSync(path.join(created.path, "user-state.txt"), "keep me\n");
+
+  await assert.rejects(
+    () => removeWorktree(root, created.path),
+    /worktree_cleanup_dirty/,
+  );
+  assert.equal(
+    fs.readFileSync(path.join(created.path, "user-state.txt"), "utf8"),
+    "keep me\n",
+  );
+  assert.ok(
+    (await listWorktrees(root)).worktrees.some(
+      (worktree) => worktree.path === created.path,
+    ),
+  );
 });
 
 test("semantic worktree inputs reject traversal, options, controls, and malformed refs", () => {

@@ -7,6 +7,7 @@
 - Final review is required before a readiness claim.
 - Verification output must be fresh and relevant to the changed surfaces.
 - Commit messages explain why the change exists and use Conventional Commits.
+- After terminal delivery from a clean linked worktree, use the semantic worktree finish tool to return to primary and remove the worktree without deleting its branch.
 - Never add `Co-Authored-By` trailers.
 - A terminal pushed-CI failure creates a repository-wide hold. One Tiber owner
   records the exact failure, chooses either one causal repair or an unchanged-SHA

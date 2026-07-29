@@ -18,12 +18,21 @@ worktree. When explaining a workflow that combines setup and feature work,
 always include this comparison rather than only naming the two checkout types.
 Never require a linked worktree for setup.
 
-In Pi, use `development_system_worktree_list` and
-`development_system_worktree_create` instead of improvising primary-checkout
-mutation. After selecting or creating a worktree, ask the user to run the
-returned `/development-system-worktree-switch <branch>` command in the local
-TUI. That command preserves the active conversation and asks Pi to rebuild its
-cwd-bound runtime in the registered worktree without restarting the process.
-The model cannot invoke this user-confirmed command-context operation silently.
-Headless callers use the returned relaunch command. Plain `cd` or `git -C` does
-not change Pi's authoritative session checkout.
+In Pi, use `development_system_worktree_list`,
+`development_system_worktree_create`, and `development_system_worktree_switch`
+instead of improvising primary-checkout mutation. Local-TUI creation and switch
+tools queue one-time command-context replacement automatically after the current
+response; do not ask the user to type a slash command. Headless callers use the
+returned relaunch command. Plain `cd` or `git -C` does not change Pi's
+authoritative session checkout.
+
+The primary checkout permits ordinary Git inspection, exploration, tests, and
+builds. Keep tracked writes, Git index/history mutation, and commits in linked
+worktrees. Read workflow policy from the canonical primary checkout so linked
+worktrees inherit `.development-system.toml` even when it is absent locally.
+
+After verified delivery is complete and the linked worktree is clean, call
+`development_system_worktree_finish`. It returns the conversation to the
+primary checkout, runs repository teardown when available, removes the worktree,
+and preserves the branch. Never force cleanup of dirty or identity-changed
+worktrees.

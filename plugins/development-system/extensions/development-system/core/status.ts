@@ -35,17 +35,16 @@ export type DevelopmentSystemStatus = Readonly<{
 }>;
 
 export type StatusEffect =
-  | Readonly<{ type: "read-policy" }>
   | Readonly<{ type: "resolve-repository" }>
+  | Readonly<{ type: "read-policy"; primary: string }>
   | Readonly<{ type: "resolve-components" }>
-  | Readonly<{ type: "run-doctor" }>;
+  | Readonly<{ type: "run-doctor"; primary: string }>;
 
 type State =
-  | Readonly<{ tag: "waiting-policy" }>
+  | Readonly<{ tag: "waiting-repository" }>
   | Readonly<{
-      tag: "waiting-repository";
-      policy: ProjectPolicy | null;
-      errors: readonly StatusError[];
+      tag: "waiting-policy";
+      repository: RepositoryIdentity;
     }>
   | Readonly<{
       tag: "waiting-components";
@@ -68,7 +67,7 @@ export type StatusStep =
 
 /** Pure Step/Trampoline workflow. The interpreter owns all filesystem and process effects. */
 export class StatusFlow {
-  #state: State = { tag: "waiting-policy" };
+  #state: State = { tag: "waiting-repository" };
   readonly #mode: HarnessMode;
 
   constructor(mode: HarnessMode) {
@@ -77,14 +76,26 @@ export class StatusFlow {
 
   step(): StatusStep {
     switch (this.#state.tag) {
-      case "waiting-policy":
-        return { done: false, effect: { type: "read-policy" } };
       case "waiting-repository":
         return { done: false, effect: { type: "resolve-repository" } };
+      case "waiting-policy":
+        return {
+          done: false,
+          effect: {
+            type: "read-policy",
+            primary: this.#state.repository.primary,
+          },
+        };
       case "waiting-components":
         return { done: false, effect: { type: "resolve-components" } };
       case "waiting-doctor":
-        return { done: false, effect: { type: "run-doctor" } };
+        return {
+          done: false,
+          effect: {
+            type: "run-doctor",
+            primary: this.#state.repository.primary,
+          },
+        };
       case "done":
         return { done: true, value: this.#state.status };
     }
@@ -92,6 +103,12 @@ export class StatusFlow {
 
   resume(result: unknown): void {
     switch (this.#state.tag) {
+      case "waiting-repository":
+        this.#state = {
+          tag: "waiting-policy",
+          repository: result as RepositoryIdentity,
+        };
+        return;
       case "waiting-policy": {
         const policyResult = result as {
           source: string | null;
@@ -111,16 +128,14 @@ export class StatusFlow {
         } else {
           policy = parseProjectPolicy(policyResult.source);
         }
-        this.#state = { tag: "waiting-repository", policy, errors };
-        return;
-      }
-      case "waiting-repository":
         this.#state = {
-          ...this.#state,
           tag: "waiting-components",
-          repository: result as RepositoryIdentity,
+          policy,
+          errors,
+          repository: this.#state.repository,
         };
         return;
+      }
       case "waiting-components":
         this.#state = {
           ...this.#state,
