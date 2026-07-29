@@ -246,6 +246,9 @@ test("shell classifier allows exploration while identifying direct repository mu
     "nohup command git reset --hard HEAD~1",
     "printf '%s\\n' valuable | xargs rm",
     "find . -exec rm {} +",
+    "dd if=/dev/zero of=README.md count=1",
+    "fallocate -l 0 README.md",
+    "patch -p1 change.patch",
   ])
     assert.equal(classifyShellCommand(command).kind, "mutation", command);
   for (const command of [
