@@ -311,7 +311,7 @@ function normalizedGitInvocation(words: readonly string[]): Readonly<{
   args: readonly string[];
 }> | null {
   const command = unwrapCommand(words);
-  if (command[0] !== "git") return null;
+  if (path.basename(command[0] ?? "") !== "git") return null;
   let index = 1;
   while (index < command.length) {
     const option = command[index];
@@ -334,8 +334,30 @@ function normalizedGitInvocation(words: readonly string[]): Readonly<{
   return operation ? { operation, args: command.slice(index + 1) } : null;
 }
 
+function normalizedCommandWords(command: string, depth = 0): string[][] {
+  const commands = normalizedShellCommands(command) ?? [];
+  if (depth >= 3) return commands;
+  return commands.flatMap((words) => {
+    const unwrapped = unwrapCommand(words);
+    const executable = path.basename(unwrapped[0] ?? "");
+    const commandIndex = unwrapped.findIndex(
+      (word, index) => index > 0 && word === "-c",
+    );
+    if (
+      ["bash", "dash", "ksh", "sh", "zsh"].includes(executable) &&
+      commandIndex >= 0 &&
+      unwrapped[commandIndex + 1]
+    )
+      return [
+        words,
+        ...normalizedCommandWords(unwrapped[commandIndex + 1], depth + 1),
+      ];
+    return [words];
+  });
+}
+
 function normalizedGitInvocations(command: string) {
-  return (normalizedShellCommands(command) ?? [])
+  return normalizedCommandWords(command)
     .map(normalizedGitInvocation)
     .filter(
       (
@@ -385,6 +407,23 @@ export function classifyShellDelivery(
 }
 
 function containsObviousMutation(command: string): boolean {
+  const filesystemMutationNames = new Set([
+    "chmod",
+    "chown",
+    "cp",
+    "install",
+    "mkdir",
+    "mv",
+    "rm",
+    "rmdir",
+    "tee",
+    "touch",
+  ]);
+  const normalizedFilesystemMutation = normalizedCommandWords(command).some(
+    (words) =>
+      filesystemMutationNames.has(path.basename(unwrapCommand(words)[0] ?? "")),
+  );
+  if (normalizedFilesystemMutation) return true;
   const normalizedMutation = normalizedGitInvocations(command).some(
     (invocation) =>
       gitMutationOperations.has(invocation.operation) ||

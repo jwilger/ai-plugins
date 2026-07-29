@@ -34,5 +34,5 @@ worktrees inherit `.development-system.toml` even when it is absent locally.
 After verified delivery is complete and the linked worktree is clean, call
 `development_system_worktree_finish`. It returns the conversation to the
 primary checkout, runs repository teardown when available, removes the worktree,
-and preserves the branch. Never force cleanup of dirty or identity-changed
-worktrees.
+and preserves the branch. Never force cleanup of dirty, detached,
+identity-changed, or valuable ignored-state worktrees.

@@ -129,8 +129,9 @@ After verified delivery is complete, call
 `development_system_worktree_finish`. It verifies that the current linked
 worktree is clean, returns the conversation to the primary checkout, runs an
 executable repository `scripts/worktree-teardown.sh` when present, and removes
-the worktree without deleting its branch. Dirty worktrees and changed Git
-identities are preserved with an actionable error. The corresponding manual
+the worktree without deleting its branch. Dirty worktrees, detached or changed
+Git identities, and ignored state outside known generated cache paths are
+preserved with an actionable error. The corresponding manual
 command is `/development-system-worktree-finish`.
 
 The operating-system process cwd remains unchanged; command-level `cd` or

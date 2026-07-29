@@ -207,6 +207,15 @@ test("shell classifier allows exploration while identifying direct repository mu
     classifyShellDelivery("git push '--force' origin main").kind,
     "destructive-delivery",
   );
+  assert.equal(
+    classifyShellDelivery("/usr/bin/git push --force origin main").kind,
+    "destructive-delivery",
+  );
+  assert.equal(
+    classifyShellCommand('/bin/sh -c "git reset --hard HEAD~1"').kind,
+    "mutation",
+  );
+  assert.equal(classifyShellCommand('/bin/rm -rf "$PWD"').kind, "mutation");
 });
 
 test("delivery decisions never infer a missing mode or destructive approval", () => {

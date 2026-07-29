@@ -53,8 +53,9 @@ The finish operation requires a clean, registered, identity-stable linked
 worktree. It first replaces the Pi session into the primary checkout, then runs
 an executable repository `scripts/worktree-teardown.sh` when present and invokes
 non-forced `git worktree remove`. It never deletes the branch. Dirty state,
-identity changes, teardown failures, and removal failures preserve the worktree
-and report an actionable error.
+detached or changed identities, ignored state outside known generated cache
+paths, teardown failures, and removal failures preserve the worktree and report
+an actionable error.
 
 ## Consequences
 
