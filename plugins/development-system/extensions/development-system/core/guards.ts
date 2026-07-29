@@ -520,11 +520,14 @@ export function classifyShellDelivery(
 function containsObviousMutation(command: string): boolean {
   const filesystemMutationNames = new Set([
     "chmod",
+    "bzip2",
     "chown",
     "cp",
     "csplit",
     "dd",
     "fallocate",
+    "gunzip",
+    "gzip",
     "install",
     "ln",
     "mkdir",
@@ -536,10 +539,15 @@ function containsObviousMutation(command: string): boolean {
     "rmdir",
     "shred",
     "split",
+    "tar",
     "tee",
     "touch",
     "truncate",
     "unlink",
+    "unzip",
+    "wget",
+    "xz",
+    "zip",
   ]);
   const normalizedFilesystemMutation = normalizedCommandWords(command).some(
     (words) => {
@@ -562,6 +570,14 @@ function containsObviousMutation(command: string): boolean {
               path.basename(argument) === "git",
           )) ||
         executable === "rsync" ||
+        (executable === "curl" &&
+          args.some(
+            (argument) =>
+              argument === "-o" ||
+              argument === "-O" ||
+              argument === "--output" ||
+              argument.startsWith("--output="),
+          )) ||
         (executable === "sed" &&
           args.some(
             (argument) =>
