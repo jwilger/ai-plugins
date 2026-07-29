@@ -182,6 +182,18 @@ test("shell classifier allows exploration while identifying direct repository mu
     ).kind,
     "destructive-delivery",
   );
+  assert.equal(
+    classifyShellCommand("X=1 git commit -m prefixed").kind,
+    "mutation",
+  );
+  assert.equal(
+    classifyShellDelivery("X=1 git push --force origin main").kind,
+    "destructive-delivery",
+  );
+  assert.equal(
+    classifyShellCommand("(git reset --hard HEAD~1)").kind,
+    "mutation",
+  );
 });
 
 test("delivery decisions never infer a missing mode or destructive approval", () => {

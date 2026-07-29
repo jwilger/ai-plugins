@@ -943,6 +943,7 @@ test("extension enforces delivery mode and case-specific destructive TUI approva
     "git -c color.ui=false push origin main",
     "command git push origin main",
     "git status; git push origin main",
+    "X=1 git push --force origin main",
   ]) {
     const wrapped = await guard(
       { toolName: "bash", input: { command } },
@@ -951,6 +952,23 @@ test("extension enforces delivery mode and case-specific destructive TUI approva
     assert.equal(wrapped.block, true);
     assert.match(wrapped.reason, /local_only_publication_blocked/);
   }
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", true),
+  );
+  const compoundMutation = await guard(
+    {
+      toolName: "bash",
+      input: {
+        command:
+          "git -c core.hooksPath=/dev/null commit -am increment; git push origin main",
+      },
+    },
+    { cwd: project, mode: "tui", ui: { confirm: async () => true } },
+  );
+  assert.equal(compoundMutation.block, true);
+  assert.match(compoundMutation.reason, /coordination_shell_blocked/);
+
   fs.writeFileSync(
     path.join(project, ".development-system.toml"),
     configuredPolicy("direct-to-trunk", false),

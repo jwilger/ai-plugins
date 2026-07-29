@@ -196,9 +196,9 @@ function boundedCdDiscovery(command: string): ShellClassification | null {
   return { kind: "read-only-discovery", targetPath: left.words[1] };
 }
 
-const commandBoundary = "(?:^|[;&|\\n]\\s*)";
+const commandBoundary = "(?:^|[;&|({\\n]\\s*)";
 const wrapperPrefix =
-  "(?:(?:env(?:\\s+(?:-[^\\s;&|]+|[A-Za-z_][A-Za-z0-9_]*=[^\\s;&|]+))*|command(?:\\s+-[^\\s;&|]+)?)\\s+)*";
+  "(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\\s;&|]+|env(?:\\s+(?:-[^\\s;&|]+|[A-Za-z_][A-Za-z0-9_]*=[^\\s;&|]+))*|command(?:\\s+-[^\\s;&|]+)?)\\s+)*";
 const gitOption =
   "(?:(?:-C|-c|--git-dir|--work-tree|--namespace|--config-env|--exec-path)\\s+[^\\s;&|]+|(?:--git-dir|--work-tree|--namespace|--config-env|--exec-path)=[^\\s;&|]+|--bare|--no-pager|--paginate|--literal-pathspecs|--no-literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs)";
 const gitPrefix = `${wrapperPrefix}git(?:\\s+${gitOption})*\\s+`;

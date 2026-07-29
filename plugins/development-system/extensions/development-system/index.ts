@@ -131,9 +131,12 @@ async function shellRejection(
         "Approve destructive delivery operation?",
         command,
       );
-      return approved ? null : guardMessage(rejection);
+      if (!approved) return guardMessage(rejection);
+    } else if (rejection) {
+      return guardMessage(rejection);
     }
-    return rejection ? guardMessage(rejection) : null;
+    // A permitted delivery embedded in a compound command does not authorize
+    // earlier filesystem or Git mutation from the coordination checkout.
   }
   if (
     context.policy?.features.worktrees &&
