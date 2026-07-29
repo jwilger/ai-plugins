@@ -278,12 +278,22 @@ async function main() {
         "rev-parse",
         "HEAD",
       ]).trim();
-      const defaultCommit = run("git", [
-        "-C",
-        repositoryRoot,
-        "rev-parse",
-        "HEAD^",
-      ]).trim();
+      const defaultCommit = run(
+        "git",
+        ["--git-dir", remoteRepository, "commit-tree", `${commit}^{tree}`],
+        {
+          input: "synthetic canary default\n",
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: "Pi Canary",
+            GIT_AUTHOR_EMAIL: "pi-canary@example.invalid",
+            GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
+            GIT_COMMITTER_NAME: "Pi Canary",
+            GIT_COMMITTER_EMAIL: "pi-canary@example.invalid",
+            GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
+          },
+        },
+      ).trim();
       assert.notEqual(defaultCommit, commit);
       run("git", [
         "--git-dir",

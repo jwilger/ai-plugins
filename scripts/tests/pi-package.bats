@@ -66,7 +66,19 @@ teardown() {
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_ROOT/git-package/node_modules" ]
 
-  run node "$REPO_ROOT/scripts/pi-package-canary.mjs" --git-source
+  shallow="$TEST_ROOT/shallow-checkout"
+  mkdir -p "$shallow"
+  git -C "$REPO_ROOT" archive HEAD | tar -x -C "$shallow"
+  cp "$REPO_ROOT/scripts/pi-package-canary.mjs" \
+    "$shallow/scripts/pi-package-canary.mjs"
+  git -C "$shallow" init -q --initial-branch=main
+  git -C "$shallow" config user.name "Pi Canary"
+  git -C "$shallow" config user.email "pi-canary@example.invalid"
+  git -C "$shallow" add .
+  git -C "$shallow" commit -qm "test: one-commit checkout"
+  ln -s "$REPO_ROOT/tooling/evals/node_modules" "$shallow/node_modules"
+
+  run node "$shallow/scripts/pi-package-canary.mjs" --git-source
   [ "$status" -eq 0 ]
   printf '%s' "$output" | jq -e '
     .ok == true and .package == "development-system" and
