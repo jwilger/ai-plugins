@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const expectedSkills = JSON.parse(
@@ -65,18 +66,24 @@ function jsonlRequest(piBinary, cwd, agentDirectory, marker) {
   });
 }
 
-async function inspectPackage(piBinary, packageRoot, cwd, temporaryRoot) {
+async function inspectPackage(piBinary, installation, cwd, temporaryRoot) {
+  const packageHome = path.join(temporaryRoot, "package-home");
+  fs.mkdirSync(packageHome, { recursive: true, mode: 0o700 });
+  run(piBinary, ["install", installation.source], {
+    cwd,
+    env: {
+      ...process.env,
+      ...installation.env,
+      PI_CODING_AGENT_DIR: packageHome,
+      PI_OFFLINE: "1",
+    },
+  });
+  const packageRoot = installation.resolvePackageRoot(packageHome);
   const manifest = JSON.parse(
     fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
   );
   const [expectedExtension] = manifest.pi?.extensions ?? [];
   assert.ok(expectedExtension, "Pi package extension manifest is missing");
-  const packageHome = path.join(temporaryRoot, "package-home");
-  fs.mkdirSync(packageHome, { recursive: true, mode: 0o700 });
-  run(piBinary, ["install", packageRoot], {
-    cwd,
-    env: { ...process.env, PI_CODING_AGENT_DIR: packageHome, PI_OFFLINE: "1" },
-  });
   const marker = path.join(temporaryRoot, "extension-provenance.json");
   const records = await jsonlRequest(piBinary, cwd, packageHome, marker);
   const response = records.find(
@@ -159,6 +166,7 @@ async function inspectPackage(piBinary, packageRoot, cwd, temporaryRoot) {
     "no-package mode executed package extension",
   );
   return {
+    source: installation.evidenceSource,
     skills: skillNames,
     extension: provenance,
     piVersion: run(piBinary, ["--version"]).trim(),
@@ -167,6 +175,7 @@ async function inspectPackage(piBinary, packageRoot, cwd, temporaryRoot) {
 
 async function main() {
   const clean = process.argv.includes("--clean-checkout");
+  const gitSource = process.argv.includes("--git-source");
   const packageRootIndex = process.argv.indexOf("--package-root");
   if (packageRootIndex >= 0 && !process.argv[packageRootIndex + 1])
     throw new Error("--package-root requires a path");
@@ -174,9 +183,11 @@ async function main() {
     packageRootIndex >= 0
       ? path.resolve(process.argv[packageRootIndex + 1])
       : null;
-  if (clean && explicitPackageRoot)
+  if (
+    [clean, gitSource, Boolean(explicitPackageRoot)].filter(Boolean).length > 1
+  )
     throw new Error(
-      "--clean-checkout and --package-root are mutually exclusive",
+      "--clean-checkout, --git-source, and --package-root are mutually exclusive",
     );
   const temporaryRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), "development-system-pi-canary-"),
@@ -202,12 +213,55 @@ async function main() {
         cwd: root,
       });
     }
-    const packageRoot =
-      explicitPackageRoot ?? path.join(root, "plugins/development-system");
+    let installation;
+    if (gitSource) {
+      const remoteRoot = path.join(temporaryRoot, "remotes");
+      const remoteParent = path.join(remoteRoot, "jwilger");
+      const remoteRepository = path.join(remoteParent, "ai-plugins");
+      fs.mkdirSync(remoteParent, { recursive: true });
+      run("git", [
+        "clone",
+        "--quiet",
+        "--bare",
+        repositoryRoot,
+        remoteRepository,
+      ]);
+      fs.symlinkSync("ai-plugins", `${remoteRepository}.git`);
+      const commit = run("git", [
+        "-C",
+        repositoryRoot,
+        "rev-parse",
+        "HEAD",
+      ]).trim();
+      const source = `git:github.com/jwilger/ai-plugins@${commit}`;
+      const rewriteBase = `${pathToFileURL(remoteRoot).href.replace(/\/$/, "")}/`;
+      installation = {
+        source,
+        evidenceSource: { type: "git", spec: source },
+        env: {
+          GIT_CONFIG_COUNT: "2",
+          GIT_CONFIG_KEY_0: `url.${rewriteBase}.insteadOf`,
+          GIT_CONFIG_VALUE_0: "https://github.com/",
+          GIT_CONFIG_KEY_1: "protocol.file.allow",
+          GIT_CONFIG_VALUE_1: "always",
+        },
+        resolvePackageRoot: (packageHome) =>
+          path.join(packageHome, "git/github.com/jwilger/ai-plugins"),
+      };
+    } else {
+      const packageRoot =
+        explicitPackageRoot ?? path.join(root, "plugins/development-system");
+      installation = {
+        source: packageRoot,
+        evidenceSource: { type: "local", spec: packageRoot },
+        env: {},
+        resolvePackageRoot: () => packageRoot,
+      };
+    }
     const piBinary = path.join(root, "node_modules/.bin/pi");
     const evidence = await inspectPackage(
       piBinary,
-      packageRoot,
+      installation,
       root,
       temporaryRoot,
     );

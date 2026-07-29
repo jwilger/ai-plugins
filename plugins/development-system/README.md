@@ -22,7 +22,14 @@ pi install git:github.com/jwilger/ai-plugins@<commit>
 
 The unpinned form follows the repository's default branch when Pi updates Git
 packages. The pinned form stays on the selected commit until its source is
-changed explicitly.
+changed explicitly. Update all unpinned Git packages, replace a pin, or remove
+this package with:
+
+```shell
+pi update --extensions
+pi install git:github.com/jwilger/ai-plugins@<new-commit>
+pi remove git:github.com/jwilger/ai-plugins
+```
 
 ### Local checkout
 

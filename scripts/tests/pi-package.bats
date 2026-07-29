@@ -66,11 +66,12 @@ teardown() {
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_ROOT/git-package/node_modules" ]
 
-  run node "$REPO_ROOT/scripts/pi-package-canary.mjs" \
-    --package-root "$REPO_ROOT"
+  run node "$REPO_ROOT/scripts/pi-package-canary.mjs" --git-source
   [ "$status" -eq 0 ]
   printf '%s' "$output" | jq -e '
     .ok == true and .package == "development-system" and
+    .source.type == "git" and
+    (.source.spec | startswith("git:github.com/jwilger/ai-plugins@")) and
     (.skills | length) == 8 and
     (.extension.extension | endswith("/plugins/development-system/extensions/development-system/index.ts"))
   ' >/dev/null
