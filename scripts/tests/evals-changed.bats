@@ -35,6 +35,18 @@ commit_change() {
   [[ "$output" == *"no provider evals selected"* ]]
 }
 
+@test "changed eval planner selects Pi package canary for the Git facade" {
+  echo '{"pi":{}}' >"$TMPROOT/package.json"
+  commit_change
+
+  run "$TMPROOT/scripts/evals/run-changed.sh" --base "$BASE" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Pi package/runtime"* ]]
+  [[ "$output" != *"Pi guard/runtime"* ]]
+  [[ "$output" != *"all supported harnesses"* ]]
+}
+
 @test "changed eval planner selects only Pi package canary and guard outcomes" {
   mkdir -p "$TMPROOT/plugins/development-system/extensions/development-system/core"
   echo guard >"$TMPROOT/plugins/development-system/extensions/development-system/core/guards.ts"

@@ -66,6 +66,11 @@ function jsonlRequest(piBinary, cwd, agentDirectory, marker) {
 }
 
 async function inspectPackage(piBinary, packageRoot, cwd, temporaryRoot) {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+  );
+  const [expectedExtension] = manifest.pi?.extensions ?? [];
+  assert.ok(expectedExtension, "Pi package extension manifest is missing");
   const packageHome = path.join(temporaryRoot, "package-home");
   fs.mkdirSync(packageHome, { recursive: true, mode: 0o700 });
   run(piBinary, ["install", packageRoot], {
@@ -123,9 +128,7 @@ async function inspectPackage(piBinary, packageRoot, cwd, temporaryRoot) {
   assert.equal(provenance.goalCollision, false);
   assert.equal(
     fs.realpathSync(provenance.extension),
-    fs.realpathSync(
-      path.join(packageRoot, "extensions/development-system/index.ts"),
-    ),
+    fs.realpathSync(path.join(packageRoot, expectedExtension)),
   );
 
   const noPackageHome = path.join(temporaryRoot, "no-package-home");

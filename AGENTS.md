@@ -44,12 +44,13 @@ point inside `./.dependencies/` and prepending the local npm `bin/` dir to
 Never commit `./.dependencies/`. If the environment looks broken, `rm -rf
 .dependencies` and re-enter the devshell.
 
-The Promptfoo eval runner is the exception to the "no root npm project" shape:
-`package.json` and `package-lock.json` are committed so Promptfoo can resolve
-its optional coding-harness provider SDKs from the project root. `node_modules/`
-is git-ignored and restored with `npm ci`; `scripts/evals/run.sh` and
-`scripts/evals/share.sh` run that restore automatically when Promptfoo, the
-Codex SDK, or the Claude Agent SDK is missing.
+The root `package.json` is a lightweight Pi Git-package facade and must not gain
+the repository's eval dependencies. Promptfoo and its optional coding-harness
+provider SDKs are pinned in `tooling/evals/package.json` and
+`tooling/evals/package-lock.json`. `scripts/evals/ensure-node-deps.sh` installs
+them there and maintains the git-ignored root `node_modules` symlink required by
+existing module-resolution paths; `scripts/evals/run.sh` and
+`scripts/evals/share.sh` restore them automatically when missing.
 
 `.envrc` (`use flake`) is git-ignored here per the maintainer's global config;
 recreate it locally if you use direnv.
@@ -282,7 +283,7 @@ Interrupted or timed-out runs are not shared.
 `scripts/evals/run.sh --dry-run` only validates promptfoo wiring and is useful
 for pull-request CI without secrets; it is not behavior evidence. Provider-backed
 runs require working authentication for only the selected harnesses. The runner restores
-the pinned npm dev dependencies from `package-lock.json`, generates promptfoo
+the pinned npm dev dependencies from `tooling/evals/package-lock.json`, generates promptfoo
 config from the current marketplace manifests, prepares isolated no-plugin and
 `development-system` homes, installs the Claude plugin through the real
 marketplace CLI, and configures Claude with `apiKeyRequired: false`. Local
@@ -422,22 +423,19 @@ over-engineered; this is a scope heuristic, not permission to skip a gate. These
 rules apply to **both Claude Code and Codex**;
 `CLAUDE.md` is a thin pointer to this file.
 
-## CI/CD and release
+## CI/CD and package lifecycle
 
-The development-system Pi npm package is released only through
-`.github/workflows/publish-development-system.yml`. Successful push CI on
-`main` triggers it for the exact verified commit. Conventional Commit history
-since the latest package tag selects the highest required semantic change:
-breaking marker → major, `feat` → minor, and every other push → patch. Manual
-`patch`, `minor`, and `major` dispatches remain available; use `current` only to
-recover publication or tagging for the already checked-in version. The workflow
-owns the atomic GitHub `web-flow`-signed version commit, exact tarball,
-npmjs.org trusted publication with provenance, and
-`development-system-v<version>` tag. The npm trusted-publisher binding must be
-limited to this repository and `.github/workflows/publish-development-system.yml`.
-Never hand-edit one version surface, add an npm publication token, or publish
-from a developer credential. Validate the payload locally with `just
-npm-package`.
+The development-system Pi package is not published to npm. Do not add a
+publication workflow, registry credential, trusted-publisher binding,
+publication-only version commit, or package tag. The checked-in npm-format
+package exists for local Pi installation and marketplace consumption.
+
+`plugins/development-system/package.json` remains the canonical package version.
+For a required version bump, update that one source and run
+`node scripts/sync-development-system-metadata.mjs --write` to synchronize the
+harness manifests, marketplaces, cache launchers, and catalog. Validate the
+packed payload with `just npm-package` and its Pi load behavior with `just
+npm-package-canary`; both checks run in `just ci` without publishing.
 
 CI runs on GitHub Actions (`.github/workflows/ci.yml`):
 

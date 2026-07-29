@@ -24,12 +24,20 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses              | Description                                                         | Version |
 | ---------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.6.0   |
+| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.7.0   |
 
 ## Using the package (Pi — primary)
 
 Pi packages execute trusted extension code with the user's full permissions.
-Review the checkout, then run the documented clean bootstrap and local install:
+Review the repository, then install it directly from Git:
+
+```shell
+pi install git:github.com/jwilger/ai-plugins
+```
+
+Pin a reviewed commit with
+`pi install git:github.com/jwilger/ai-plugins@<commit>`. For development from a
+local checkout, run the clean bootstrap and install the package subdirectory:
 
 ```shell
 nix develop -c scripts/bootstrap-pi-package.sh
@@ -37,39 +45,23 @@ pi install ./plugins/development-system
 ```
 
 See the [development-system guide](plugins/development-system/README.md) for
-npmjs.org and local installation, project trust, setup, updates, status,
-target support, capability differences, and removal.
+local installation, project trust, setup, updates, status, target support,
+capability differences, and removal.
 
-## Publishing the Pi npm package
+## Validating the Pi package
 
-After a push to `main` completes the **CI** workflow successfully, the trusted
-**Publish development-system npm package** workflow automatically versions and
-publishes the public `@jwilger/development-system-pi` package to npmjs.org. It evaluates every commit since the latest
-`development-system-v<version>` tag: any Conventional Commit breaking marker
-selects a major change, otherwise `feat` selects minor, and every other push
-selects patch. The workflow is bound to the exact CI-verified commit and stops
-if `main` advances before publication.
+This repository does not publish `@jwilger/development-system-pi` to npmjs.org.
+Registry releases, publication tags, and automated release-version commits are
+not part of the supported lifecycle. The checked-in package remains an
+npm-format artifact because Pi uses its manifest and resource inventory for
+local installation.
 
-The workflow updates every canonical/harness version surface, restores pinned
-validation dependencies, reruns package and release gates, creates one atomic
-GitHub `web-flow`-signed version commit, exchanges GitHub's job-scoped OIDC
-identity through npm trusted publishing, publishes one provenance-attested exact
-tarball without an npm token, and tags the published commit. Its own token-authored
-version update does not recursively start another workflow run.
-
-Manual dispatch remains available on `main` with `patch`, `minor`, or `major` for
-an explicit release. Choose `current` only to publish or finish tagging the
-already checked-in version after a recoverable partial release. Releases are
-serialized, reject stale checkouts and duplicate bumped versions, and never
-store a long-lived publication token. The npm package's trusted-publisher
-configuration must name this repository and
-`.github/workflows/publish-development-system.yml`; Repository Actions policy
-must allow the declared `contents: write` and `id-token: write` permissions.
-
-Local payload validation is provider-free:
+CI validates both the package payload and an exact pack, extract, and load
+canary. Run the same provider-free checks locally:
 
 ```shell
 nix develop -c just npm-package
+nix develop -c just npm-package-canary
 ```
 
 ## Using the marketplace (Claude Code — secondary)
@@ -116,10 +108,12 @@ Any **globally installed** npm tooling (`npm install -g …`) is redirected into
 git-ignored `./.dependencies/` directory by the devshell, so it never pollutes
 your home directory. Delete that directory any time for a clean slate.
 
-This repo also has a committed `package.json`/`package-lock.json` for the local
-Promptfoo eval runner. `node_modules/` is ignored and restored with `npm ci`;
-the eval scripts run that automatically when the Promptfoo, Codex SDK, or
-Claude Agent SDK packages are missing.
+The root `package.json` is the lightweight Pi Git-package facade. Promptfoo and
+its optional coding-harness provider SDKs are pinned separately in
+`tooling/evals/package.json` and `tooling/evals/package-lock.json`. Their
+`node_modules/` tree is ignored and exposed through a generated root symlink so
+existing module-resolution paths remain stable; the eval scripts restore it
+automatically when dependencies are missing.
 
 See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
 
@@ -159,7 +153,7 @@ The generated config records each provider's installed composition separately
 from the plugins and skills targeted by an individual case.
 Pi is pinned at `0.82.1` and Promptfoo is pinned at `0.121.19`;
 the Promptfoo, Codex SDK, and Claude Agent SDK packages are pinned in
-`package.json` and `package-lock.json`. The runner disables prompt response
+`tooling/evals/package.json` and `tooling/evals/package-lock.json`. The runner disables prompt response
 caching and hosted sharing so a behavior run is a fresh local record.
 
 Default eval harness posture:

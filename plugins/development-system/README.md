@@ -11,27 +11,22 @@ CI-recovery, retained-component, and final-review behavior.
 Pi packages execute trusted code with the user's full operating-system
 permissions. Review this package and trust only a source you control.
 
-### npmjs.org
-
-Published releases use the public `@jwilger/development-system-pi` package on
-npmjs.org. Successful `main` push CI automatically publishes the next semantic
-version: breaking Conventional Commits select major, `feat` selects minor, and
-other changes select patch. Install it through Pi's npm package source without a
-registry credential:
+The repository does not publish this package to npmjs.org. Existing registry
+releases are historical and are not a supported installation or update path.
+Install a reviewed repository revision directly from Git:
 
 ```shell
-pi install npm:@jwilger/development-system-pi
+pi install git:github.com/jwilger/ai-plugins
+pi install git:github.com/jwilger/ai-plugins@<commit>
 ```
 
-Pin a release with
-`pi install npm:@jwilger/development-system-pi@<version>`. Use
-`pi update npm:@jwilger/development-system-pi` for an unpinned install and
-`pi remove npm:@jwilger/development-system-pi` to remove it. Never commit the
-npm credentials if you use a private registry override.
+The unpinned form follows the repository's default branch when Pi updates Git
+packages. The pinned form stays on the selected commit until its source is
+changed explicitly.
 
 ### Local checkout
 
-From a clean local checkout, run the one reproducible bootstrap and install the
+From a clean local checkout, run the reproducible bootstrap and install the
 local package:
 
 ```shell
@@ -39,8 +34,8 @@ nix develop -c scripts/bootstrap-pi-package.sh
 PI_OFFLINE=1 pi install ./plugins/development-system
 ```
 
-The bootstrap restores pinned root dependencies inside the repository, validates
-release metadata and the explicit Pi resource inventory, and verifies both
+The bootstrap restores pinned eval-tooling dependencies inside the repository,
+validates package metadata and the explicit Pi resource inventory, and verifies both
 bundled binaries for the current supported target. Pi's local-path installation
 references this package directory; it does not copy it. Pulling a package update
 therefore makes it available to the next Pi process, or to `/reload` when the

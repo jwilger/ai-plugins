@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ "${DEVELOPMENT_SYSTEM_BOOTSTRAP_SKIP_NPM:-0}" != 1 ]]; then
-  npm --prefix "$root" ci
+  "$root/scripts/evals/ensure-node-deps.sh" "$root"
 fi
 
 node "$root/scripts/sync-development-system-metadata.mjs" --check

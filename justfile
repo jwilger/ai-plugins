@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace pi-extension github-actions tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
+ci: validate-marketplace pi-extension npm-package-canary github-actions tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
@@ -150,11 +150,11 @@ worktree-teardown path:
     scripts/worktree-teardown.sh "{{path}}"
     git worktree remove "{{path}}"
 
-# Validate the exact public npmjs.org payload without publishing it.
+# Validate the exact local npm-format package payload without registry publication.
 npm-package:
     node scripts/validate-development-system-npm-package.mjs
 
-# Pack, extract, install, and load the npm artifact through the pinned Pi canary.
+# Pack, extract, install, and load the local package through the pinned Pi canary.
 npm-package-canary:
     node scripts/development-system-npm-canary.mjs
 

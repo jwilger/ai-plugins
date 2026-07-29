@@ -47,6 +47,35 @@ teardown() {
   [[ "$output" == *"development_system.pi_bootstrap_ready"* ]]
 }
 
+@test "repository root is a lightweight Pi Git-package facade" {
+  run jq -e '
+    .private == true and
+    (has("dependencies") | not) and
+    (has("devDependencies") | not) and
+    ([.peerDependenciesMeta[].optional] | all) and
+    .pi.extensions == ["./plugins/development-system/extensions/development-system/index.ts"] and
+    (.pi.skills | length) == 8 and
+    (.pi.skills | all(startswith("./plugins/development-system/skills/")))
+  ' "$REPO_ROOT/package.json"
+  [ "$status" -eq 0 ]
+
+  mkdir -p "$TEST_ROOT/git-package"
+  cp "$REPO_ROOT/package.json" "$TEST_ROOT/git-package/"
+  run npm --prefix "$TEST_ROOT/git-package" install \
+    --ignore-scripts --no-audit --no-fund --package-lock=false --offline
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_ROOT/git-package/node_modules" ]
+
+  run node "$REPO_ROOT/scripts/pi-package-canary.mjs" \
+    --package-root "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | jq -e '
+    .ok == true and .package == "development-system" and
+    (.skills | length) == 8 and
+    (.extension.extension | endswith("/plugins/development-system/extensions/development-system/index.ts"))
+  ' >/dev/null
+}
+
 @test "provider-free Pi canary proves package provenance and no-package absence" {
   run node "$REPO_ROOT/scripts/pi-package-canary.mjs"
   [ "$status" -eq 0 ]

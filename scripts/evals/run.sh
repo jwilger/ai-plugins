@@ -85,8 +85,9 @@ Environment overrides:
   EVAL_OUT_DIR                 (default: evals/out; isolates generated config and artifacts)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
-Pinned eval packages are managed by package.json and package-lock.json:
-promptfoo, @openai/codex-sdk, and @anthropic-ai/claude-agent-sdk.
+Pinned eval packages are managed by tooling/evals/package.json and
+tooling/evals/package-lock.json: promptfoo, @openai/codex-sdk, and
+@anthropic-ai/claude-agent-sdk.
 
 Local runs reuse existing Pi/OpenAI, Claude Code/Anthropic, and Codex/ChatGPT subscription sessions.
 They do not require provider API keys or fresh approval for repository-owned evals.

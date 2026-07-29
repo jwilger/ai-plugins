@@ -1,6 +1,7 @@
 {
   "name": "@jwilger/development-system-pi",
-  "version": "1.6.0",
+  "version": "1.7.0",
+  "private": true,
   "description": "A disciplined development workflow for Pi, Claude Code, and Codex.",
   "repository": {
     "type": "git",
@@ -10,10 +11,6 @@
   "homepage": "https://github.com/jwilger/ai-plugins/tree/main/plugins/development-system#readme",
   "bugs": {
     "url": "https://github.com/jwilger/ai-plugins/issues"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org",
-    "access": "public"
   },
   "license": "AGPL-3.0-or-later",
   "author": {

@@ -68,7 +68,7 @@ for file in "${changed[@]}"; do
       skill="${file#plugins/development-system/skills/}"
       skill_names+=("${skill%%/*}")
       ;;
-    .agents/plugins/pi-support.json | plugins/development-system/package.json | plugins/development-system/extensions/* | plugins/development-system/bin/development-system-pi | scripts/bootstrap-pi-package.sh | scripts/pi-package-canary.mjs | scripts/validate-pi-package.mjs | scripts/evals/pi-provider.mjs | scripts/evals/prepare-pi-home.mjs | scripts/evals/provider-compositions.mjs | scripts/evals/generate-config.mjs)
+    package.json | .agents/plugins/pi-support.json | plugins/development-system/package.json | plugins/development-system/extensions/* | plugins/development-system/bin/development-system-pi | scripts/bootstrap-pi-package.sh | scripts/pi-package-canary.mjs | scripts/validate-pi-package.mjs | scripts/evals/pi-provider.mjs | scripts/evals/prepare-pi-home.mjs | scripts/evals/provider-compositions.mjs | scripts/evals/generate-config.mjs)
       pi_package=1
       ;;
   esac

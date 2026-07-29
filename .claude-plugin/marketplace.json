@@ -11,7 +11,7 @@
       "name": "development-system",
       "source": "./plugins/development-system",
       "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "category": "Developer Tools",
       "keywords": ["development", "workflow", "worktrees", "tiber", "quality"]
     }

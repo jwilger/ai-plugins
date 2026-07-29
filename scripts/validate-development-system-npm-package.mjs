@@ -71,12 +71,10 @@ for (const [file, metadata] of files) {
 
 if (manifest.name !== "@jwilger/development-system-pi")
   throw new Error("development_system.npm_package_name_invalid");
-if (manifest.private === true)
-  throw new Error("development_system.npm_package_private");
-if (manifest.publishConfig?.registry !== "https://registry.npmjs.org")
-  throw new Error("development_system.npm_registry_invalid");
-if (manifest.publishConfig?.access !== "public")
-  throw new Error("development_system.npm_access_invalid");
+if (manifest.private !== true)
+  throw new Error("development_system.npm_package_must_be_private");
+if (Object.hasOwn(manifest, "publishConfig"))
+  throw new Error("development_system.npm_publish_config_forbidden");
 if (report.name !== manifest.name || report.version !== manifest.version)
   throw new Error("development_system.npm_pack_identity_mismatch");
 if (

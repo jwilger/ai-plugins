@@ -2,8 +2,10 @@
 # Provisioned by the Nix devshell; never committed.
 /.dependencies/
 
-# Project-local npm dependencies are restored from package-lock.json.
-/node_modules/
+# Eval-tooling dependencies are restored from tooling/evals/package-lock.json;
+# the root path is a generated compatibility symlink.
+/node_modules
+/tooling/evals/node_modules/
 
 # Rust build artifacts (workspace target dir at repo root).
 /target/
