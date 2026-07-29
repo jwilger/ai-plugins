@@ -256,7 +256,7 @@ try {
     const worktreeCreation = agent(
       packageHome,
       project,
-      "Call development_system_worktree_list, then call development_system_worktree_create with name agent-created and branch agent-created. Use only those semantic worktree tools; do not use bash. Report the returned relaunch command.",
+      "Call development_system_worktree_list, then call development_system_worktree_create with name agent-created and branch agent-created. Use only those semantic worktree tools; do not use bash. Report the returned local-TUI switchCommand and explain that it preserves this conversation without relaunching; mention relaunchCommand only as the headless fallback.",
     );
     cases.push({
       id: "pi-guard-primary-worktree-creation",

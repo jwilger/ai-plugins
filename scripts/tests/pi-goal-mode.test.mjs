@@ -450,6 +450,21 @@ test("cleared or replaced ownership cannot dispatch a delayed extension prompt",
   assert.equal(aborted, true);
 });
 
+test("goal adapter remains active after Pi session replacement changes source metadata", async () => {
+  const runtime = harness();
+  const mode = registerGoalMode(runtime.pi);
+  runtime.registeredCommands.get("goal").sourceInfo = {
+    baseDir: "/replacement-runtime",
+  };
+  for (const tool of runtime.registeredTools) {
+    tool.sourceInfo = { baseDir: "/replacement-runtime" };
+  }
+
+  await runtime.emit("session_start", {});
+
+  assert.equal(mode.collision, false);
+});
+
 test("goal adapter disables all activation on reserved-name collision", async () => {
   const runtime = harness({ commands: ["goal"], tools: ["goal_complete"] });
   const mode = registerGoalMode(runtime.pi);

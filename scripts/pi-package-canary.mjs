@@ -101,6 +101,14 @@ async function inspectPackage(piBinary, packageRoot, cwd, temporaryRoot) {
     (command) => command.name === "development-system-status",
   );
   assert.ok(extension, "development-system extension command did not load");
+  assert.ok(
+    packageCommands.some(
+      (command) =>
+        command.name === "development-system-worktree-switch" &&
+        command.source === "extension",
+    ),
+    "development-system worktree session-switch command did not load",
+  );
   assert.equal(
     packageCommands.filter((command) => command.name === "goal").length,
     1,
@@ -164,7 +172,9 @@ async function main() {
       ? path.resolve(process.argv[packageRootIndex + 1])
       : null;
   if (clean && explicitPackageRoot)
-    throw new Error("--clean-checkout and --package-root are mutually exclusive");
+    throw new Error(
+      "--clean-checkout and --package-root are mutually exclusive",
+    );
   const temporaryRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), "development-system-pi-canary-"),
   );

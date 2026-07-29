@@ -3,8 +3,6 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   accountResponse,
   blockedDecision,
@@ -23,10 +21,6 @@ import {
 const STATE_ENTRY = "development-system-goal-state";
 const MESSAGE_TYPE = "development-system-goal-continuation";
 const TERMINAL_TOOLS = ["goal_complete", "goal_blocked"] as const;
-const packageRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../..",
-);
 
 function now(): string {
   return new Date().toISOString();
@@ -159,21 +153,14 @@ export function registerGoalMode(pi: ExtensionAPI): {
     const goalCommands = pi
       .getCommands()
       .filter((command) => command.name === "goal");
-    const ownGoalCommands = goalCommands.filter(
-      (command) => command.sourceInfo?.baseDir === packageRoot,
-    );
     const reservedTools = pi
       .getAllTools()
       .filter((tool) => TERMINAL_TOOLS.includes(tool.name as never));
-    const ownReservedTools = reservedTools.filter(
-      (tool) => tool.sourceInfo?.baseDir === packageRoot,
-    );
-    collision =
-      goalCommands.length !== 1 ||
-      ownGoalCommands.length !== 1 ||
-      reservedTools.length !== 2 ||
-      ownReservedTools.length !== 2;
-    collisionDiagnostic = `commands=${goalCommands.length}/${ownGoalCommands.length} tools=${reservedTools.length}/${ownReservedTools.length}`;
+    // Pi may rebuild source metadata when a session is replaced. Exact reserved
+    // name cardinality detects real collisions without coupling ownership to a
+    // stale baseDir representation.
+    collision = goalCommands.length !== 1 || reservedTools.length !== 2;
+    collisionDiagnostic = `commands=${goalCommands.length} tools=${reservedTools.length}`;
     if (collision) {
       if (state?.status === "active")
         persist(pauseGoal(state, now(), "reserved-name-collision"));

@@ -358,6 +358,47 @@ test("worktree switch command fails closed outside local TUI and on ambiguous se
   assert.match(notifications.at(-1), /ambiguous/i);
 });
 
+test("worktree switch revalidates selected Git identity after confirmation", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", true),
+  );
+  const linked = path.join(project, ".worktrees", "race-target");
+  git(project, "worktree", "add", "-b", "race-target", linked);
+  const notifications = [];
+  let switched = false;
+  const command = registrations.commands.get(
+    "development-system-worktree-switch",
+  );
+
+  await command.handler("race-target", {
+    cwd: project,
+    mode: "tui",
+    hasUI: true,
+    sessionManager: SessionManager.inMemory(project),
+    waitForIdle: async () => {},
+    ui: {
+      notify: (message) => notifications.push(message),
+      confirm: async () => {
+        fs.writeFileSync(path.join(linked, "changed.txt"), "changed\n");
+        git(linked, "add", "changed.txt");
+        git(linked, "commit", "-m", "test: move target");
+        return true;
+      },
+    },
+    async switchSession() {
+      switched = true;
+      return { cancelled: false };
+    },
+  });
+
+  assert.equal(switched, false);
+  assert.match(notifications.at(-1), /identity_changed/);
+});
+
 test("authoritative policy tool reads the protected config without opening metadata access", async () => {
   const { pi, registrations } = extensionHarness();
   (await loadExtension())(pi);
