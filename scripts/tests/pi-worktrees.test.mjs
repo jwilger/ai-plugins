@@ -212,6 +212,13 @@ test("cleanup preserves valuable ignored state while allowing generated caches",
   );
 
   fs.rmSync(path.join(created.path, "private-results"), { recursive: true });
+  fs.writeFileSync(path.join(created.path, ".envrc"), "source custom.sh\n");
+  await assert.rejects(
+    () => removeWorktree(root, expected),
+    /worktree_cleanup_ignored_state/,
+  );
+  assert.equal(fs.existsSync(created.path), true);
+
   fs.writeFileSync(path.join(created.path, ".envrc"), "use flake\n");
   fs.writeFileSync(path.join(created.path, ".env.worktree"), "PORT=4100\n");
   const removed = await removeWorktree(root, expected);

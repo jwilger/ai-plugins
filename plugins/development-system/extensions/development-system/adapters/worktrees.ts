@@ -247,7 +247,6 @@ async function withRepositoryQueue<T>(
 
 function disposableIgnoredPath(candidate: string): boolean {
   return (
-    candidate === ".envrc" ||
     candidate === ".env.worktree" ||
     [".dependencies/", ".direnv/", "node_modules/", "target/"].some((prefix) =>
       candidate.startsWith(prefix),
@@ -267,10 +266,20 @@ async function assertNoValuableIgnoredState(
     "--exclude-standard",
     "-z",
   ]);
-  const valuable = stdout
-    .split("\0")
-    .filter(Boolean)
-    .filter((candidate) => !disposableIgnoredPath(candidate));
+  const valuable: string[] = [];
+  for (const candidate of stdout.split("\0").filter(Boolean)) {
+    if (disposableIgnoredPath(candidate)) continue;
+    if (candidate === ".envrc") {
+      const envrcPath = path.join(worktreePath, candidate);
+      const metadata = await lstat(envrcPath);
+      if (
+        metadata.isFile() &&
+        (await readFile(envrcPath, "utf8")) === "use flake\n"
+      )
+        continue;
+    }
+    valuable.push(candidate);
+  }
   if (valuable.length > 0)
     throw new Error(
       `development_system.worktree_cleanup_ignored_state path=${worktreePath} count=${valuable.length}; transfer or remove ignored state before cleanup`,
