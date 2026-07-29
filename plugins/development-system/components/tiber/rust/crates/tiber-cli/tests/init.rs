@@ -98,10 +98,10 @@ fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
     ));
     assert!(stdout.contains("prefix_rule [\"git\", \"update-ref\", \"refs/heads/tasks\"]"));
     assert!(stdout.contains(
-        "case-by-case approval for prefix_rule [\"git\", \"fetch\", \"origin\", \"tasks:refs/remotes/origin/tasks\"]"
+        "case-by-case approval for prefix_rule [\"git\", \"fetch\", \"--no-write-fetch-head\", \"origin\", \"tasks:refs/remotes/origin/tasks\"]"
     ));
     assert!(stdout.contains(
-        "prefix_rule [\"git\", \"fetch\", \"origin\", \"tasks:refs/remotes/origin/tasks\"]"
+        "prefix_rule [\"git\", \"fetch\", \"--no-write-fetch-head\", \"origin\", \"tasks:refs/remotes/origin/tasks\"]"
     ));
     assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"-c\", \"core.hooksPath=/dev/null\", \"push\", \"origin\", \"refs/heads/tasks:refs/heads/tasks\"]"));
     assert!(stdout.contains(

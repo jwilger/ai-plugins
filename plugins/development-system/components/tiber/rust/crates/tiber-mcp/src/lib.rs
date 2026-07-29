@@ -20,7 +20,7 @@ pub fn codex_sandbox_setup() -> String {
         "- case-by-case approval for prefix_rule [\"git\", \"mktree\"] because it can construct arbitrary Git trees from stdin",
         "- case-by-case approval for prefix_rule [\"git\", \"commit-tree\"] because it can create commits, including signed commit-tree -S when commit.gpgsign=true",
         "- case-by-case approval for prefix_rule [\"git\", \"update-ref\", \"refs/heads/tasks\"] because raw prefix approval can still be reused outside the current Tiber operation",
-        "- case-by-case approval for prefix_rule [\"git\", \"fetch\", \"origin\", \"tasks:refs/remotes/origin/tasks\"] because raw prefix approval can be extended with additional Git arguments",
+        "- case-by-case approval for prefix_rule [\"git\", \"fetch\", \"--no-write-fetch-head\", \"origin\", \"tasks:refs/remotes/origin/tasks\"] because raw prefix approval can be extended with additional Git arguments",
         "- case-by-case approval for prefix_rule [\"git\", \"-c\", \"core.hooksPath=/dev/null\", \"push\", \"origin\", \"refs/heads/tasks:refs/heads/tasks\"] because raw prefix approval can be extended with additional refspecs or options",
         "",
         "Persist approval only when the harness can scope it to the exact Tiber-internal operation, not merely to a raw git prefix.",

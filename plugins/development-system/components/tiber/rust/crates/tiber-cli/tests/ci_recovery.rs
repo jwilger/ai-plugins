@@ -110,6 +110,54 @@ fn ci_recovery_claim_refuses_an_unknown_session_identity() {
 }
 
 #[test]
+fn ci_recovery_fetch_preserves_the_callers_fetch_head() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    let repo = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(repo.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    repo.git(["push", "origin", "main"]);
+
+    let claim = repo.tiber_with_env(
+        [
+            "ci-recovery",
+            "claim",
+            "--run-id",
+            "fetch-head",
+            "--run-url",
+            "https://ci.example.test/fetch-head",
+            "--failed-sha",
+            "cafebabe",
+            "--workflow",
+            "CI",
+            "--ref",
+            "refs/heads/main",
+        ],
+        [
+            ("TIBER_CLAIM_HOST", "owner-host"),
+            ("TIBER_CLAIM_SESSION", "owner-session"),
+        ],
+    );
+    assert_success(claim);
+    let fetch_head = repo.path().join(".git/FETCH_HEAD");
+    let sentinel = "caller-owned fetch state\n";
+    fs::write(&fetch_head, sentinel).expect("write FETCH_HEAD sentinel");
+
+    assert_success(repo.tiber(["ci-recovery", "status"]));
+
+    assert_eq!(
+        fs::read_to_string(fetch_head).expect("read FETCH_HEAD after status"),
+        sentinel
+    );
+}
+
+#[test]
 fn ci_recovery_refuses_unowned_or_unsupported_coordination_state() {
     for (document, expected) in [
         (

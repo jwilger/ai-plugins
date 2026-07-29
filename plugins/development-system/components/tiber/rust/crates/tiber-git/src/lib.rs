@@ -954,7 +954,10 @@ impl GitRepository {
             ));
         }
         let refspec = format!("{CI_RECOVERY_BRANCH}:{CI_RECOVERY_REMOTE_REF}");
-        match self.git_with_timeout(["fetch", "origin", &refspec], timeout) {
+        match self.git_with_timeout(
+            ["fetch", "--no-write-fetch-head", "origin", &refspec],
+            timeout,
+        ) {
             Ok(_) => Ok(Some(self.git([
                 "rev-parse",
                 "--verify",
@@ -2021,7 +2024,12 @@ impl GitRepository {
             return Ok(None);
         }
         match self.git_with_timeout(
-            ["fetch", "origin", "tasks:refs/remotes/origin/tasks"],
+            [
+                "fetch",
+                "--no-write-fetch-head",
+                "origin",
+                "tasks:refs/remotes/origin/tasks",
+            ],
             Duration::from_secs(10),
         ) {
             Ok(_) => Ok(Some(self.git([
