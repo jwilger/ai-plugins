@@ -229,6 +229,10 @@ test("shell classifier allows exploration while identifying direct repository mu
     classifyShellDelivery("git push -fu origin main").kind,
     "destructive-delivery",
   );
+  assert.equal(
+    classifyShellDelivery("! time -p git push --force origin main").kind,
+    "destructive-delivery",
+  );
   for (const command of [
     "truncate -s 0 valuable",
     "unlink valuable",

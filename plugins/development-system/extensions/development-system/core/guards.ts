@@ -356,7 +356,9 @@ function unwrapCommand(words: readonly string[]): readonly string[] {
       consumeAssignments();
       continue;
     }
-    if (["command", "exec", "nohup"].includes(wrapper)) {
+    if (
+      ["!", "builtin", "command", "exec", "nohup", "time"].includes(wrapper)
+    ) {
       index += 1;
       while ((words[index] ?? "").startsWith("-")) index += 1;
       consumeAssignments();
