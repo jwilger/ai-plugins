@@ -53,12 +53,16 @@ test("prepared worktree session preserves the active conversation branch and use
       source,
       path.join(root, "source-sessions"),
     );
-    const active = manager.appendMessage({
+    manager.appendMessage({
       role: "user",
       content: "active branch",
       timestamp: Date.now(),
     });
     manager.appendMessage(assistant("active answer"));
+    const active = manager.appendCustomEntry("development-system-goal-state", {
+      goalId: "goal-in-worktree",
+      status: "active",
+    });
     manager.appendMessage({
       role: "user",
       content: "abandoned branch",
@@ -73,8 +77,16 @@ test("prepared worktree session preserves the active conversation branch and use
     assert.equal(switched.getLeafId(), active);
     assert.deepEqual(
       switched.buildSessionContext().messages.map((message) => message.role),
-      ["user"],
+      ["user", "assistant"],
     );
+    const goalEntry = switched
+      .getBranch()
+      .find(
+        (entry) =>
+          entry.type === "custom" &&
+          entry.customType === "development-system-goal-state",
+      );
+    assert.equal(goalEntry.data.goalId, "goal-in-worktree");
     assert.equal(fs.statSync(prepared).mode & 0o777, 0o600);
     assert.equal(prepared.startsWith(target), false);
   } finally {
