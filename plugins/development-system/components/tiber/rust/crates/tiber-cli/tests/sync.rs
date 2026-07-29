@@ -385,6 +385,38 @@ fn sync_fetches_and_preserves_remote_tasks_before_pushing() {
 }
 
 #[test]
+fn sync_preserves_the_callers_fetch_head() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+
+    let seed = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(seed.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let clone = clone_repo(&origin);
+    assert_success(clone.tiber(["init"]));
+    assert_success(clone.tiber(["create", "Preserve fetch head"]));
+    let fetch_head = clone.path().join(".git/FETCH_HEAD");
+    let sentinel = "caller-owned fetch state\n";
+    fs::write(&fetch_head, sentinel).expect("write FETCH_HEAD sentinel");
+
+    assert_success(clone.tiber(["sync"]));
+
+    assert_eq!(
+        fs::read_to_string(fetch_head).expect("read FETCH_HEAD after sync"),
+        sentinel
+    );
+}
+
+#[test]
 fn sync_hard_fails_when_remote_and_local_task_contents_conflict() {
     let origin = TempRepo::new();
     origin.git(["init", "--bare"]);
