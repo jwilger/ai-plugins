@@ -332,11 +332,22 @@ function unwrapCommand(words: readonly string[]): readonly string[] {
   while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")) index += 1;
   if (words[index] === "env") {
     index += 1;
-    while (
-      (words[index] ?? "").startsWith("-") ||
-      /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")
-    )
-      index += 1;
+    for (;;) {
+      const argument = words[index] ?? "";
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argument)) {
+        index += 1;
+        continue;
+      }
+      if (["-C", "--chdir", "-u", "--unset", "--argv0"].includes(argument)) {
+        index += 2;
+        continue;
+      }
+      if (argument.startsWith("-")) {
+        index += 1;
+        continue;
+      }
+      break;
+    }
   }
   if (words[index] === "command") {
     index += 1;
@@ -484,6 +495,13 @@ function containsObviousMutation(command: string): boolean {
   ]);
   const normalizedFilesystemMutation = normalizedCommandWords(command).some(
     (words) => {
+      if (
+        path.basename(words[0] ?? "") === "env" &&
+        words.some(
+          (argument) => argument === "-S" || argument === "--split-string",
+        )
+      )
+        return true;
       const unwrapped = unwrapCommand(words);
       const executable = path.basename(unwrapped[0] ?? "");
       const args = unwrapped.slice(1);

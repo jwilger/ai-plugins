@@ -240,6 +240,8 @@ test("shell classifier allows exploration while identifying direct repository mu
     "git -c filter.pwn.smudge=touch cat-file --filters HEAD:file",
     "git -c diff.external=touch diff",
     "git --paginate status",
+    "env -C . git -c core.hooksPath=/dev/null commit --allow-empty -m bypass",
+    "env -S 'git commit --allow-empty -m bypass'",
   ])
     assert.equal(classifyShellCommand(command).kind, "mutation", command);
   for (const command of [
