@@ -9,6 +9,7 @@ import {
   classifyShellCommand,
   classifyShellDelivery,
   deliveryDecision,
+  deliveryExplicitlyTargetsTrunk,
   worktreeTargetAllowed,
 } from "../../plugins/development-system/extensions/development-system/core/guards.ts";
 
@@ -324,6 +325,24 @@ test("delivery decisions never infer a missing mode or destructive approval", ()
       branch: "main",
       trunk: "main",
       destructive: false,
+    }),
+    null,
+  );
+  assert.equal(
+    deliveryExplicitlyTargetsTrunk("git push origin HEAD:main", "main"),
+    true,
+  );
+  assert.equal(
+    deliveryExplicitlyTargetsTrunk("git push origin other HEAD:main", "main"),
+    false,
+  );
+  assert.equal(
+    deliveryDecision({
+      mode: "direct-to-trunk",
+      branch: "feature",
+      trunk: "main",
+      destructive: false,
+      explicitTrunkTarget: true,
     }),
     null,
   );

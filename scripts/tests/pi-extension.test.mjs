@@ -969,6 +969,24 @@ test("extension enforces delivery mode and case-specific destructive TUI approva
     path.join(project, ".development-system.toml"),
     configuredPolicy("direct-to-trunk", true),
   );
+  const linked = `${project}-delivery-linked`;
+  git(project, "worktree", "add", "-b", "feat/delivery", linked);
+  const directFromLinked = await guard(
+    {
+      toolName: "bash",
+      input: { command: "git push origin HEAD:main" },
+    },
+    { cwd: linked, mode: "tui", ui: { confirm: async () => true } },
+  );
+  assert.equal(directFromLinked, undefined);
+  const wrongTargetFromLinked = await guard(
+    {
+      toolName: "bash",
+      input: { command: "git push origin HEAD:other" },
+    },
+    { cwd: linked, mode: "tui", ui: { confirm: async () => true } },
+  );
+  assert.match(wrongTargetFromLinked.reason, /direct_trunk_branch_required/);
   const compoundMutation = await guard(
     {
       toolName: "bash",

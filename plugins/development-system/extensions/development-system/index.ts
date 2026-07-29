@@ -39,6 +39,7 @@ import {
   classifyShellCommand,
   classifyShellDelivery,
   deliveryDecision,
+  deliveryExplicitlyTargetsTrunk,
   guardMessage,
   worktreeTargetAllowed,
 } from "./core/guards.ts";
@@ -122,6 +123,10 @@ async function shellRejection(
       branch: context.branch,
       trunk: context.policy?.delivery.trunkBranch ?? "",
       destructive: delivery.kind === "destructive-delivery",
+      explicitTrunkTarget: deliveryExplicitlyTargetsTrunk(
+        command,
+        context.policy?.delivery.trunkBranch ?? "",
+      ),
     });
     if (
       rejection?.code === "development_system.destructive_approval_required" &&

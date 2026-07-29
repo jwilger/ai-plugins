@@ -507,6 +507,22 @@ const gitOption =
   "(?:(?:-C|-c|--git-dir|--work-tree|--namespace|--config-env|--exec-path)\\s+[^\\s;&|]+|(?:--git-dir|--work-tree|--namespace|--config-env|--exec-path)=[^\\s;&|]+|--bare|--no-pager|--paginate|--literal-pathspecs|--no-literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs)";
 const gitPrefix = `${wrapperPrefix}git(?:\\s+${gitOption})*\\s+`;
 
+export function deliveryExplicitlyTargetsTrunk(
+  command: string,
+  trunk: string,
+): boolean {
+  if (!trunk) return false;
+  const pushes = normalizedGitInvocations(command).filter(
+    (invocation) => invocation.operation === "push",
+  );
+  if (pushes.length !== 1) return false;
+  const expected = new Set([`HEAD:${trunk}`, `HEAD:refs/heads/${trunk}`]);
+  const targetIndex = pushes[0].args.findIndex((argument) =>
+    expected.has(argument),
+  );
+  return targetIndex === 1 && pushes[0].args.length === 2;
+}
+
 export function classifyShellDelivery(
   command: string,
 ): Readonly<{ kind: "delivery" | "destructive-delivery" }> | null {
@@ -769,6 +785,7 @@ export function deliveryDecision(
     branch: string;
     trunk: string;
     destructive: boolean;
+    explicitTrunkTarget?: boolean;
   }>,
 ): DeliveryRejection | null {
   if (input.mode === null)
@@ -792,7 +809,11 @@ export function deliveryDecision(
       missing: "non-trunk pull-request branch",
       nextAction: "Create and push a feature branch.",
     };
-  if (input.mode === "direct-to-trunk" && input.branch !== input.trunk)
+  if (
+    input.mode === "direct-to-trunk" &&
+    input.branch !== input.trunk &&
+    !input.explicitTrunkTarget
+  )
     return {
       code: "development_system.direct_trunk_branch_required",
       boundary: "delivery",
