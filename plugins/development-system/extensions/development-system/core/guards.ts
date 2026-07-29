@@ -329,33 +329,76 @@ function normalizedShellCommands(command: string): string[][] | null {
 
 function unwrapCommand(words: readonly string[]): readonly string[] {
   let index = 0;
-  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")) index += 1;
-  if (words[index] === "env") {
-    index += 1;
-    for (;;) {
-      const argument = words[index] ?? "";
-      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argument)) {
-        index += 1;
-        continue;
+  const consumeAssignments = () => {
+    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")) index += 1;
+  };
+  consumeAssignments();
+  for (;;) {
+    const wrapper = path.basename(words[index] ?? "");
+    if (wrapper === "env") {
+      index += 1;
+      for (;;) {
+        const argument = words[index] ?? "";
+        if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argument)) {
+          index += 1;
+          continue;
+        }
+        if (["-C", "--chdir", "-u", "--unset", "--argv0"].includes(argument)) {
+          index += 2;
+          continue;
+        }
+        if (argument.startsWith("-")) {
+          index += 1;
+          continue;
+        }
+        break;
       }
-      if (["-C", "--chdir", "-u", "--unset", "--argv0"].includes(argument)) {
-        index += 2;
-        continue;
-      }
-      if (argument.startsWith("-")) {
-        index += 1;
-        continue;
-      }
-      break;
+      consumeAssignments();
+      continue;
     }
-  }
-  if (words[index] === "command") {
-    index += 1;
-    while ((words[index] ?? "").startsWith("-")) index += 1;
-  }
-  if (words[index] === "exec") {
-    index += 1;
-    while ((words[index] ?? "").startsWith("-")) index += 1;
+    if (["command", "exec", "nohup"].includes(wrapper)) {
+      index += 1;
+      while ((words[index] ?? "").startsWith("-")) index += 1;
+      consumeAssignments();
+      continue;
+    }
+    if (wrapper === "sudo") {
+      index += 1;
+      for (;;) {
+        const argument = words[index] ?? "";
+        if (
+          [
+            "-u",
+            "--user",
+            "-g",
+            "--group",
+            "-h",
+            "--host",
+            "-p",
+            "--prompt",
+            "-C",
+            "--close-from",
+            "-T",
+            "--command-timeout",
+            "-R",
+            "--chroot",
+            "-D",
+            "--chdir",
+          ].includes(argument)
+        ) {
+          index += 2;
+          continue;
+        }
+        if (argument.startsWith("-")) {
+          index += 1;
+          continue;
+        }
+        break;
+      }
+      consumeAssignments();
+      continue;
+    }
+    break;
   }
   return words.slice(index);
 }
@@ -507,6 +550,12 @@ function containsObviousMutation(command: string): boolean {
       const args = unwrapped.slice(1);
       return (
         filesystemMutationNames.has(executable) ||
+        (executable === "xargs" &&
+          args.some(
+            (argument) =>
+              filesystemMutationNames.has(path.basename(argument)) ||
+              path.basename(argument) === "git",
+          )) ||
         executable === "rsync" ||
         (executable === "sed" &&
           args.some(
@@ -516,7 +565,15 @@ function containsObviousMutation(command: string): boolean {
               argument === "--in-place" ||
               argument.startsWith("--in-place="),
           )) ||
-        (executable === "find" && args.includes("-delete"))
+        (executable === "find" &&
+          (args.includes("-delete") ||
+            args.some((argument, index) =>
+              ["-exec", "-execdir", "-ok", "-okdir"].includes(
+                args[index - 1] ?? "",
+              )
+                ? filesystemMutationNames.has(path.basename(argument))
+                : false,
+            )))
       );
     },
   );

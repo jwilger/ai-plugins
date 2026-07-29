@@ -242,6 +242,10 @@ test("shell classifier allows exploration while identifying direct repository mu
     "git --paginate status",
     "env -C . git -c core.hooksPath=/dev/null commit --allow-empty -m bypass",
     "env -S 'git commit --allow-empty -m bypass'",
+    "sudo -u root git commit --allow-empty -m bypass",
+    "nohup command git reset --hard HEAD~1",
+    "printf '%s\\n' valuable | xargs rm",
+    "find . -exec rm {} +",
   ])
     assert.equal(classifyShellCommand(command).kind, "mutation", command);
   for (const command of [
