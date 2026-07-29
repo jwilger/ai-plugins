@@ -225,6 +225,10 @@ test("shell classifier allows exploration while identifying direct repository mu
       .kind,
     "delivery",
   );
+  assert.equal(
+    classifyShellDelivery("git push -fu origin main").kind,
+    "destructive-delivery",
+  );
   for (const command of [
     "truncate -s 0 valuable",
     "unlink valuable",
@@ -249,6 +253,10 @@ test("shell classifier allows exploration while identifying direct repository mu
     "dd if=/dev/zero of=README.md count=1",
     "fallocate -l 0 README.md",
     "patch -p1 change.patch",
+    "curl -sSLo README.md https://example.invalid/file",
+    "env --split-string='git reset --hard HEAD~1'",
+    "r\\\nm -rf target",
+    "timeout 10 git reset --hard HEAD~1",
   ])
     assert.equal(classifyShellCommand(command).kind, "mutation", command);
   for (const command of [

@@ -94,7 +94,7 @@ function shellWords(command: string): Readonly<{
   let hazard: "none" | "redirection" | "control" = "none";
   for (const character of command) {
     if (escaped) {
-      word += character;
+      if (character !== "\n" && character !== "\r") word += character;
       escaped = false;
       continue;
     }
@@ -295,7 +295,7 @@ function normalizedShellCommands(command: string): string[][] | null {
   };
   for (const character of command) {
     if (escaped) {
-      word += character;
+      if (character !== "\n" && character !== "\r") word += character;
       escaped = false;
       continue;
     }
@@ -359,6 +359,24 @@ function unwrapCommand(words: readonly string[]): readonly string[] {
     if (["command", "exec", "nohup"].includes(wrapper)) {
       index += 1;
       while ((words[index] ?? "").startsWith("-")) index += 1;
+      consumeAssignments();
+      continue;
+    }
+    if (wrapper === "timeout") {
+      index += 1;
+      for (;;) {
+        const argument = words[index] ?? "";
+        if (["-k", "--kill-after", "-s", "--signal"].includes(argument)) {
+          index += 2;
+          continue;
+        }
+        if (argument.startsWith("-")) {
+          index += 1;
+          continue;
+        }
+        index += 1;
+        break;
+      }
       consumeAssignments();
       continue;
     }
@@ -497,7 +515,7 @@ export function classifyShellDelivery(
     const destructive = normalizedPushes.some((push) =>
       push.args.some(
         (argument) =>
-          argument === "-f" ||
+          /^-[^-]*f/.test(argument) ||
           argument === "--force" ||
           argument.startsWith("--force-with-lease") ||
           argument.startsWith("+"),
@@ -554,7 +572,11 @@ function containsObviousMutation(command: string): boolean {
       if (
         path.basename(words[0] ?? "") === "env" &&
         words.some(
-          (argument) => argument === "-S" || argument === "--split-string",
+          (argument) =>
+            argument === "-S" ||
+            argument.startsWith("-S") ||
+            argument === "--split-string" ||
+            argument.startsWith("--split-string="),
         )
       )
         return true;
@@ -573,8 +595,7 @@ function containsObviousMutation(command: string): boolean {
         (executable === "curl" &&
           args.some(
             (argument) =>
-              argument === "-o" ||
-              argument === "-O" ||
+              /^-[^-]*[oO]/.test(argument) ||
               argument === "--output" ||
               argument.startsWith("--output="),
           )) ||
