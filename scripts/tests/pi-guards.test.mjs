@@ -216,6 +216,21 @@ test("shell classifier allows exploration while identifying direct repository mu
     "mutation",
   );
   assert.equal(classifyShellCommand('/bin/rm -rf "$PWD"').kind, "mutation");
+  assert.equal(
+    classifyShellDelivery('bash -lc "git push --force origin main"').kind,
+    "destructive-delivery",
+  );
+  assert.equal(
+    classifyShellDelivery("exec git --no-replace-objects push origin main")
+      .kind,
+    "delivery",
+  );
+  for (const command of [
+    "truncate -s 0 valuable",
+    "unlink valuable",
+    "ln -sf replacement valuable",
+  ])
+    assert.equal(classifyShellCommand(command).kind, "mutation");
 });
 
 test("delivery decisions never infer a missing mode or destructive approval", () => {

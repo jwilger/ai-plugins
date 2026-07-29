@@ -230,7 +230,10 @@ const gitOptionsWithValues = new Set([
 const gitFlagOptions = new Set([
   "--bare",
   "--no-pager",
+  "--no-replace-objects",
   "--paginate",
+  "-p",
+  "-P",
   "--literal-pathspecs",
   "--no-literal-pathspecs",
   "--glob-pathspecs",
@@ -303,6 +306,10 @@ function unwrapCommand(words: readonly string[]): readonly string[] {
     index += 1;
     while ((words[index] ?? "").startsWith("-")) index += 1;
   }
+  if (words[index] === "exec") {
+    index += 1;
+    while ((words[index] ?? "").startsWith("-")) index += 1;
+  }
   return words.slice(index);
 }
 
@@ -341,7 +348,7 @@ function normalizedCommandWords(command: string, depth = 0): string[][] {
     const unwrapped = unwrapCommand(words);
     const executable = path.basename(unwrapped[0] ?? "");
     const commandIndex = unwrapped.findIndex(
-      (word, index) => index > 0 && word === "-c",
+      (word, index) => index > 0 && /^-[^-]*c[^-]*$/.test(word),
     );
     if (
       ["bash", "dash", "ksh", "sh", "zsh"].includes(executable) &&
@@ -412,12 +419,18 @@ function containsObviousMutation(command: string): boolean {
     "chown",
     "cp",
     "install",
+    "ln",
     "mkdir",
+    "mkfifo",
+    "mknod",
     "mv",
     "rm",
     "rmdir",
+    "shred",
     "tee",
     "touch",
+    "truncate",
+    "unlink",
   ]);
   const normalizedFilesystemMutation = normalizedCommandWords(command).some(
     (words) =>
