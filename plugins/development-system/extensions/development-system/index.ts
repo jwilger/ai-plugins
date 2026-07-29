@@ -37,6 +37,7 @@ import {
 import {
   classifyPath,
   classifyShellCommand,
+  classifyShellDelivery,
   deliveryDecision,
   guardMessage,
   worktreeTargetAllowed,
@@ -113,16 +114,14 @@ async function shellRejection(
   confirm: (title: string, message: string) => Promise<boolean>,
 ): Promise<string | null> {
   const classification = classifyShellCommand(command);
+  const delivery = classifyShellDelivery(command);
   const context = await guardContext(cwd, mode);
-  if (
-    classification.kind === "delivery" ||
-    classification.kind === "destructive-delivery"
-  ) {
+  if (delivery) {
     const rejection = deliveryDecision({
       mode: context.policy?.delivery.mode ?? null,
       branch: context.branch,
       trunk: context.policy?.delivery.trunkBranch ?? "",
-      destructive: classification.kind === "destructive-delivery",
+      destructive: delivery.kind === "destructive-delivery",
     });
     if (
       rejection?.code === "development_system.destructive_approval_required" &&

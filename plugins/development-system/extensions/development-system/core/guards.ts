@@ -196,13 +196,29 @@ function boundedCdDiscovery(command: string): ShellClassification | null {
   return { kind: "read-only-discovery", targetPath: left.words[1] };
 }
 
+const commandBoundary = "(?:^|[;&|\\n]\\s*)";
+const wrapperPrefix =
+  "(?:(?:env(?:\\s+(?:-[^\\s;&|]+|[A-Za-z_][A-Za-z0-9_]*=[^\\s;&|]+))*|command(?:\\s+-[^\\s;&|]+)?)\\s+)*";
+const gitOption =
+  "(?:(?:-C|-c|--git-dir|--work-tree|--namespace|--config-env|--exec-path)\\s+[^\\s;&|]+|(?:--git-dir|--work-tree|--namespace|--config-env|--exec-path)=[^\\s;&|]+|--bare|--no-pager|--paginate|--literal-pathspecs|--no-literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs)";
+const gitPrefix = `${wrapperPrefix}git(?:\\s+${gitOption})*\\s+`;
+
+export function classifyShellDelivery(
+  command: string,
+): Readonly<{ kind: "delivery" | "destructive-delivery" }> | null {
+  const pushes = command.match(
+    new RegExp(`${commandBoundary}${gitPrefix}push(?:\\s+[^;&|\\n]*)?`, "g"),
+  );
+  if (!pushes || pushes.length === 0) return null;
+  const destructive = pushes.some((push) =>
+    /(?:^|\s)(?:-f|--force)(?:\s|$)|(?:^|\s)--force-with-lease(?:=\S+)?(?:\s|$)|(?:^|\s)\+[^\s]+/.test(
+      push,
+    ),
+  );
+  return { kind: destructive ? "destructive-delivery" : "delivery" };
+}
+
 function containsObviousMutation(command: string): boolean {
-  const commandBoundary = "(?:^|[;&|\\n]\\s*)";
-  const wrapperPrefix =
-    "(?:(?:env(?:\\s+(?:-[^\\s;&|]+|[A-Za-z_][A-Za-z0-9_]*=[^\\s;&|]+))*|command(?:\\s+-[^\\s;&|]+)?)\\s+)*";
-  const gitOption =
-    "(?:(?:-C|-c|--git-dir|--work-tree|--namespace|--config-env|--exec-path)\\s+[^\\s;&|]+|(?:--git-dir|--work-tree|--namespace|--config-env|--exec-path)=[^\\s;&|]+|--bare|--no-pager|--paginate|--literal-pathspecs|--no-literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs)";
-  const gitPrefix = `${wrapperPrefix}git(?:\\s+${gitOption})*\\s+`;
   const gitMutation = new RegExp(
     `${commandBoundary}${gitPrefix}(?:add|am|apply|checkout|cherry-pick|clean|commit|merge|mv|notes|rebase|reset|restore|revert|rm|stash|switch|tag|update-ref|symbolic-ref)(?:\\s|$)`,
   );
@@ -256,17 +272,9 @@ export function classifyShellCommand(command: string): ShellClassification {
         branch: words[4],
       };
   }
-  if (program === "git" && operation === "push") {
-    const destructive = words.some(
-      (word) =>
-        word === "-f" ||
-        word === "--force" ||
-        word.startsWith("--force-with-lease") ||
-        word.startsWith("+"),
-    );
-    return { kind: destructive ? "destructive-delivery" : "delivery" };
-  }
+  const delivery = classifyShellDelivery(command);
   if (containsObviousMutation(command)) return { kind: "mutation" };
+  if (delivery) return delivery;
   if (
     program === "git" &&
     operation === "-C" &&

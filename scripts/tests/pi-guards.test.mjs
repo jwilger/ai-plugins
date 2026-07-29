@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   classifyPath,
   classifyShellCommand,
+  classifyShellDelivery,
   deliveryDecision,
   worktreeTargetAllowed,
 } from "../../plugins/development-system/extensions/development-system/core/guards.ts";
@@ -158,6 +159,28 @@ test("shell classifier allows exploration while identifying direct repository mu
   assert.equal(
     classifyShellCommand("git -c color.ui=false status --short").kind,
     "read-only",
+  );
+  assert.equal(
+    classifyShellCommand("git -c color.ui=false push origin main").kind,
+    "delivery",
+  );
+  assert.equal(
+    classifyShellCommand("command git push --force origin main").kind,
+    "destructive-delivery",
+  );
+  assert.equal(
+    classifyShellCommand("git status; git push origin main").kind,
+    "delivery",
+  );
+  assert.equal(
+    classifyShellCommand("git commit -m increment; git push origin main").kind,
+    "mutation",
+  );
+  assert.equal(
+    classifyShellDelivery(
+      "git commit -m increment; git push --force origin main",
+    ).kind,
+    "destructive-delivery",
   );
 });
 

@@ -939,6 +939,18 @@ test("extension enforces delivery mode and case-specific destructive TUI approva
   );
   assert.equal(blocked.block, true);
   assert.match(blocked.reason, /local_only_publication_blocked/);
+  for (const command of [
+    "git -c color.ui=false push origin main",
+    "command git push origin main",
+    "git status; git push origin main",
+  ]) {
+    const wrapped = await guard(
+      { toolName: "bash", input: { command } },
+      { cwd: project, mode: "tui", ui: { confirm: async () => true } },
+    );
+    assert.equal(wrapped.block, true);
+    assert.match(wrapped.reason, /local_only_publication_blocked/);
+  }
   fs.writeFileSync(
     path.join(project, ".development-system.toml"),
     configuredPolicy("direct-to-trunk", false),

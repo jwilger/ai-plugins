@@ -206,6 +206,43 @@ test("cleanup rejects detached HEAD and identity changes without removal", async
     /worktree_cleanup_identity_changed/,
   );
   assert.equal(fs.existsSync(created.path), true);
+
+  const teardownRace = await createWorktree(root, {
+    name: "teardown-race",
+    branch: "feat/teardown-race",
+  });
+  assert.equal(teardownRace.status, "created");
+  fs.writeFileSync(path.join(teardownRace.path, "commit.txt"), "commit\n");
+  execFileSync("git", ["-C", teardownRace.path, "add", "commit.txt"]);
+  execFileSync("git", [
+    "-C",
+    teardownRace.path,
+    "commit",
+    "-m",
+    "test: create teardown parent",
+  ]);
+  const teardownExpected = (await listWorktrees(root)).worktrees.find(
+    (worktree) => worktree.path === teardownRace.path,
+  );
+  fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+  const teardown = path.join(root, "scripts", "worktree-teardown.sh");
+  fs.writeFileSync(
+    teardown,
+    '#!/usr/bin/env bash\nset -eu\ngit -C "$1" checkout --detach HEAD^\n',
+  );
+  fs.chmodSync(teardown, 0o755);
+
+  await assert.rejects(
+    () => removeWorktree(root, teardownExpected),
+    /worktree_cleanup_identity_changed/,
+  );
+  assert.equal(fs.existsSync(teardownRace.path), true);
+  assert.equal(
+    (await listWorktrees(root)).worktrees.find(
+      (worktree) => worktree.path === teardownRace.path,
+    ).branch,
+    null,
+  );
 });
 
 test("semantic worktree inputs reject traversal, options, controls, and malformed refs", () => {

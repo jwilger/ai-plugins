@@ -333,6 +333,15 @@ export async function removeWorktree(
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    const afterTeardown = (await listWorktrees(context.primary)).worktrees.find(
+      (worktree) =>
+        worktree.path === expected.path &&
+        worktree.branch === expected.branch &&
+        worktree.head === expected.head,
+    );
+    if (!afterTeardown || afterTeardown.current)
+      throw new Error("development_system.worktree_cleanup_identity_changed");
+    await assertCleanWorktree(context.primary, target);
     await execFileAsync(
       "git",
       ["-C", context.primary, "worktree", "remove", target],
