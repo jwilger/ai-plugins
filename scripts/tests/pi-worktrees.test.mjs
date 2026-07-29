@@ -73,6 +73,15 @@ test("primary checkout lists and creates a canonical session-switchable worktree
   );
   assert.match(created.relaunchCommand, /^cd -- '.*' && exec pi$/);
   assert.match(created.nextAction, /preserve this conversation/i);
+  const nested = path.join(created.path, "nested", "package");
+  fs.mkdirSync(nested, { recursive: true });
+  const nestedInventory = await listWorktrees(nested);
+  assert.equal(nestedInventory.current, created.path);
+  assert.equal(nestedInventory.currentKind, "linked");
+  assert.equal(
+    nestedInventory.worktrees.find((worktree) => worktree.current)?.path,
+    created.path,
+  );
   assert.equal(
     execFileSync("git", ["-C", created.path, "branch", "--show-current"], {
       encoding: "utf8",

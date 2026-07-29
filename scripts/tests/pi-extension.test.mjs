@@ -94,7 +94,9 @@ test("status identifies linked checkout and inherits primary-checkout policy", (
     path.join(primary, ".development-system.toml"),
     configuredPolicy("pull-request"),
   );
-  const result = status(linked);
+  const nested = path.join(linked, "nested", "package");
+  fs.mkdirSync(nested, { recursive: true });
+  const result = status(nested);
   assert.equal(result.status.checkout.kind, "linked");
   assert.equal(result.status.checkout.primary, fs.realpathSync(primary));
   assert.equal(result.status.checkout.current, fs.realpathSync(linked));

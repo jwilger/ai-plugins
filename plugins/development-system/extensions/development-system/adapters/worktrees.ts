@@ -100,26 +100,31 @@ async function canonicalProspective(candidate: string): Promise<string> {
 }
 
 async function repositoryContext(cwd: string): Promise<RepositoryContext> {
-  const current = await realpath(cwd);
-  const [{ stdout: gitDirectory }, { stdout: commonDirectory }] =
-    await Promise.all([
-      execFileAsync("git", [
-        "-C",
-        current,
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-dir",
-      ]),
-      execFileAsync("git", [
-        "-C",
-        current,
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-common-dir",
-      ]),
-    ]);
+  const projectPath = await realpath(cwd);
+  const [
+    { stdout: gitDirectory },
+    { stdout: commonDirectory },
+    { stdout: topLevel },
+  ] = await Promise.all([
+    execFileAsync("git", [
+      "-C",
+      projectPath,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+    ]),
+    execFileAsync("git", [
+      "-C",
+      projectPath,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]),
+    execFileAsync("git", ["-C", projectPath, "rev-parse", "--show-toplevel"]),
+  ]);
   const git = await realpath(gitDirectory.trim());
   const common = await realpath(commonDirectory.trim());
+  const current = await realpath(topLevel.trim());
   const primary = path.dirname(common);
   const policy = parseProjectPolicy(
     await readFile(path.join(primary, ".development-system.toml"), "utf8"),

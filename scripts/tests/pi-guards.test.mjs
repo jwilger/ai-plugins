@@ -229,8 +229,20 @@ test("shell classifier allows exploration while identifying direct repository mu
     "truncate -s 0 valuable",
     "unlink valuable",
     "ln -sf replacement valuable",
+    "git pull --rebase",
+    "git unknown-alias",
+    "sed -i s/old/new/ README.md",
+    "find . -delete",
+    "rsync -a source/ destination/",
   ])
-    assert.equal(classifyShellCommand(command).kind, "mutation");
+    assert.equal(classifyShellCommand(command).kind, "mutation", command);
+  for (const command of [
+    "git diff -- README.md",
+    "git show HEAD:README.md",
+    "git grep pattern",
+    "git ls-files",
+  ])
+    assert.equal(classifyShellCommand(command).kind, "read-only", command);
 });
 
 test("delivery decisions never infer a missing mode or destructive approval", () => {

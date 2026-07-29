@@ -196,6 +196,26 @@ function boundedCdDiscovery(command: string): ShellClassification | null {
   return { kind: "read-only-discovery", targetPath: left.words[1] };
 }
 
+const gitReadOperations = new Set([
+  "blame",
+  "cat-file",
+  "check-ignore",
+  "count-objects",
+  "describe",
+  "diff",
+  "for-each-ref",
+  "grep",
+  "log",
+  "ls-files",
+  "ls-tree",
+  "name-rev",
+  "rev-list",
+  "rev-parse",
+  "shortlog",
+  "show",
+  "status",
+]);
+
 const gitMutationOperations = new Set([
   "add",
   "am",
@@ -207,6 +227,7 @@ const gitMutationOperations = new Set([
   "merge",
   "mv",
   "notes",
+  "pull",
   "rebase",
   "reset",
   "restore",
@@ -433,8 +454,24 @@ function containsObviousMutation(command: string): boolean {
     "unlink",
   ]);
   const normalizedFilesystemMutation = normalizedCommandWords(command).some(
-    (words) =>
-      filesystemMutationNames.has(path.basename(unwrapCommand(words)[0] ?? "")),
+    (words) => {
+      const unwrapped = unwrapCommand(words);
+      const executable = path.basename(unwrapped[0] ?? "");
+      const args = unwrapped.slice(1);
+      return (
+        filesystemMutationNames.has(executable) ||
+        executable === "rsync" ||
+        (executable === "sed" &&
+          args.some(
+            (argument) =>
+              argument === "-i" ||
+              argument.startsWith("-i") ||
+              argument === "--in-place" ||
+              argument.startsWith("--in-place="),
+          )) ||
+        (executable === "find" && args.includes("-delete"))
+      );
+    },
   );
   if (normalizedFilesystemMutation) return true;
   const normalizedMutation = normalizedGitInvocations(command).some(
@@ -442,7 +479,18 @@ function containsObviousMutation(command: string): boolean {
       gitMutationOperations.has(invocation.operation) ||
       (invocation.operation === "branch" &&
         !["--show-current", "--list"].includes(invocation.args[0] ?? "")) ||
-      (invocation.operation === "worktree" && invocation.args[0] !== "list"),
+      (invocation.operation === "worktree" && invocation.args[0] !== "list") ||
+      (invocation.operation === "config" &&
+        !invocation.args.some((argument) =>
+          ["--get", "--get-all", "--get-regexp", "--list", "-l"].includes(
+            argument,
+          ),
+        )) ||
+      (invocation.operation !== "push" &&
+        invocation.operation !== "branch" &&
+        invocation.operation !== "worktree" &&
+        invocation.operation !== "config" &&
+        !gitReadOperations.has(invocation.operation)),
   );
   if (normalizedMutation) return true;
   const gitMutation = new RegExp(
