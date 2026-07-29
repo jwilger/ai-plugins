@@ -16,7 +16,7 @@ github-actions:
 # Deterministic Pi package and TypeScript extension gate.
 pi-extension:
     npx tsc -p plugins/development-system/tsconfig.json
-    node --experimental-strip-types --test scripts/tests/pi-extension.test.mjs scripts/tests/pi-goal-mode.test.mjs scripts/tests/pi-guards.test.mjs scripts/tests/pi-worktrees.test.mjs scripts/tests/pi-references.test.mjs scripts/tests/pi-mcp-bridge.test.mjs scripts/tests/pi-review-child.test.mjs scripts/tests/pi-ci-hold.test.mjs scripts/tests/pi-eval-provider.test.mjs
+    node --experimental-strip-types --test scripts/tests/pi-extension.test.mjs scripts/tests/pi-goal-mode.test.mjs scripts/tests/pi-guards.test.mjs scripts/tests/pi-worktrees.test.mjs scripts/tests/pi-worktree-session.test.mjs scripts/tests/pi-references.test.mjs scripts/tests/pi-mcp-bridge.test.mjs scripts/tests/pi-review-child.test.mjs scripts/tests/pi-ci-hold.test.mjs scripts/tests/pi-eval-provider.test.mjs
     node scripts/pi-package-canary.mjs
 
 # Clean-checkout Pi release canary (runs the documented bootstrap exactly).

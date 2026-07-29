@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const plugin = path.join(root, "plugins/development-system");
@@ -218,7 +219,7 @@ test("extension registers status command and tool and cleans session state on re
   );
 });
 
-test("semantic worktree tools bootstrap a primary checkout and report immutable-session relaunch", async () => {
+test("semantic worktree tools bootstrap a primary checkout and report session-switch handoff", async () => {
   const { pi, registrations } = extensionHarness();
   (await loadExtension())(pi);
   const project = fixture();
@@ -236,8 +237,9 @@ test("semantic worktree tools bootstrap a primary checkout and report immutable-
 
   const before = await list.execute("list", {}, undefined, undefined, context);
   assert.equal(before.details.currentKind, "primary");
-  assert.equal(before.details.requiresRelaunch, true);
-  assert.match(before.content[0].text, /command-level cd or git -C/);
+  assert.equal(before.details.requiresRelaunch, false);
+  assert.equal(before.details.requiresUserWorkspaceSwitch, true);
+  assert.match(before.content[0].text, /switchCommand/);
 
   const created = await create.execute(
     "create",
@@ -247,12 +249,113 @@ test("semantic worktree tools bootstrap a primary checkout and report immutable-
     context,
   );
   assert.equal(created.details.status, "created");
-  assert.equal(created.details.requiresRelaunch, true);
-  assert.match(created.details.nextAction, /This Pi session remains bound/);
+  assert.equal(created.details.requiresRelaunch, false);
+  assert.equal(created.details.requiresUserWorkspaceSwitch, true);
+  assert.equal(
+    created.details.switchCommand,
+    "/development-system-worktree-switch fix/bootstrap",
+  );
+  assert.match(created.details.nextAction, /preserve this conversation/i);
   assert.equal(
     git(created.details.path, "branch", "--show-current"),
     "fix/bootstrap",
   );
+});
+
+test("local TUI command switches the active Pi conversation into a registered worktree", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", true),
+  );
+  const linked = path.join(project, ".worktrees", "switch-target");
+  git(project, "worktree", "add", "-b", "switch-target", linked);
+  const manager = SessionManager.inMemory(project);
+  manager.appendMessage({
+    role: "user",
+    content: "continue the ticket",
+    timestamp: Date.now(),
+  });
+  let switchedPath = "";
+  let replacementNotice = "";
+  const notifications = [];
+  const command = registrations.commands.get(
+    "development-system-worktree-switch",
+  );
+  assert.ok(command);
+
+  await command.handler("switch-target", {
+    cwd: project,
+    mode: "tui",
+    hasUI: true,
+    sessionManager: manager,
+    waitForIdle: async () => {},
+    ui: {
+      confirm: async () => true,
+      notify: (message) => notifications.push(message),
+    },
+    async switchSession(sessionPath, options) {
+      switchedPath = sessionPath;
+      await options.withSession({
+        cwd: fs.realpathSync(linked),
+        ui: { notify: (message) => (replacementNotice = message) },
+      });
+      return { cancelled: false };
+    },
+  });
+
+  const switched = SessionManager.open(switchedPath);
+  assert.equal(switched.getCwd(), fs.realpathSync(linked));
+  assert.equal(
+    switched.buildSessionContext().messages[0].content,
+    "continue the ticket",
+  );
+  assert.match(replacementNotice, /workspace switched/i);
+  assert.equal(notifications.length, 0);
+});
+
+test("worktree switch command fails closed outside local TUI and on ambiguous selectors", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", true),
+  );
+  const first = path.join(project, ".worktrees", "same");
+  const second = path.join(project, ".worktrees", "other", "same");
+  git(project, "worktree", "add", "-b", "first-same", first);
+  git(project, "worktree", "add", "-b", "second-same", second);
+  const command = registrations.commands.get(
+    "development-system-worktree-switch",
+  );
+  const notifications = [];
+  let switched = false;
+  const context = {
+    cwd: project,
+    mode: "json",
+    hasUI: false,
+    sessionManager: SessionManager.inMemory(project),
+    waitForIdle: async () => {},
+    ui: { notify: (message) => notifications.push(message) },
+    async switchSession() {
+      switched = true;
+      return { cancelled: false };
+    },
+  };
+
+  await command.handler("first-same", context);
+  assert.equal(switched, false);
+  assert.match(notifications.at(-1), /requires.*local Pi TUI/i);
+
+  context.mode = "tui";
+  context.hasUI = true;
+  context.ui.confirm = async () => true;
+  await command.handler("same", context);
+  assert.equal(switched, false);
+  assert.match(notifications.at(-1), /ambiguous/i);
 });
 
 test("authoritative policy tool reads the protected config without opening metadata access", async () => {

@@ -26,7 +26,10 @@ export type WorktreeSessionSwitchResult =
 function sanitizeDiagnostic(value: string): string {
   return value
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
-    .replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\))/g, "")
+    .replace(
+      /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\))/g,
+      "",
+    )
     .slice(0, 500);
 }
 
@@ -64,12 +67,7 @@ export function prepareWorktreeSession(
 export async function switchWorktreeSession(
   context: Pick<
     ExtensionCommandContext,
-    | "cwd"
-    | "mode"
-    | "hasUI"
-    | "sessionManager"
-    | "switchSession"
-    | "ui"
+    "cwd" | "mode" | "hasUI" | "sessionManager" | "switchSession" | "ui"
   >,
   requestedTarget: string,
 ): Promise<WorktreeSessionSwitchResult> {

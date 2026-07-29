@@ -12,6 +12,7 @@ import {
 import { registerGoalMode } from "./adapters/goal-mode.ts";
 import { activeCiRecoveryHold } from "./adapters/ci-hold.ts";
 import { createWorktree, listWorktrees } from "./adapters/worktrees.ts";
+import { switchWorktreeSession } from "./adapters/worktree-session.ts";
 import { PI_REFERENCES, readPiReference } from "./adapters/references.ts";
 import {
   McpClient,
@@ -38,6 +39,16 @@ const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
+
+function terminalSafe(value: string): string {
+  return value
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .replace(
+      /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\))/g,
+      "",
+    )
+    .slice(0, 1_000);
+}
 
 function concise(status: Awaited<ReturnType<typeof resolveStatus>>): string {
   const summary = status.configured
@@ -183,7 +194,7 @@ async function shellRejection(
       boundary: "coordination-checkout mutation",
       missing: "a provably read-only bounded command",
       nextAction:
-        "Call development_system_worktree_list, create one with development_system_worktree_create if needed, then start a new Pi process with its relaunchCommand.",
+        "Call development_system_worktree_list, create one with development_system_worktree_create if needed, then run its switchCommand in the local Pi TUI to preserve this conversation without relaunching. Headless modes use relaunchCommand.",
     });
   }
   return null;
@@ -274,6 +285,95 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         JSON.stringify({ ...status, goal: goalMode.current() }, null, 2),
         status.errors.length > 0 ? "warning" : "info",
       );
+    },
+  });
+
+  pi.registerCommand("development-system-worktree-switch", {
+    description:
+      "Switch this Pi conversation to another registered worktree without relaunching",
+    handler: async (arguments_, context) => {
+      if (context.mode !== "tui" || !context.hasUI) {
+        context.ui.notify(
+          "development_system.worktree_switch_requires_local_tui: workspace replacement requires a user-initiated command in the local Pi TUI.",
+          "error",
+        );
+        return;
+      }
+      const selector = arguments_.trim();
+      if (selector.length > 500 || /[\u0000-\u001f\u007f]/.test(selector)) {
+        context.ui.notify(
+          "development_system.worktree_switch_selector_invalid",
+          "error",
+        );
+        return;
+      }
+      try {
+        await context.waitForIdle();
+        const inventory = await listWorktrees(context.cwd);
+        const candidates = inventory.worktrees.filter(
+          (worktree) => !worktree.current,
+        );
+        let selected;
+        if (selector) {
+          const matches = candidates.filter(
+            (worktree) =>
+              worktree.path === selector ||
+              worktree.branch === selector ||
+              path.basename(worktree.path) === selector,
+          );
+          if (matches.length === 0)
+            throw new Error(
+              `development_system.worktree_switch_not_found selector=${selector}`,
+            );
+          if (matches.length > 1)
+            throw new Error(
+              `development_system.worktree_switch_ambiguous selector=${selector}; use the exact branch or canonical path`,
+            );
+          selected = matches[0];
+        } else {
+          if (candidates.length === 0)
+            throw new Error(
+              "development_system.worktree_switch_none_available",
+            );
+          const labels = candidates.map(
+            (worktree, index) =>
+              `${index + 1}. ${terminalSafe(worktree.branch ?? "detached")} — ${terminalSafe(worktree.path)}`,
+          );
+          const choice = await context.ui.select(
+            "Switch this Pi conversation to a registered worktree",
+            labels,
+          );
+          if (!choice) return;
+          selected = candidates[labels.indexOf(choice)];
+          if (!selected)
+            throw new Error(
+              "development_system.worktree_switch_selection_stale",
+            );
+        }
+        const confirmed = await context.ui.confirm(
+          "Switch Pi workspace?",
+          `Preserve this conversation and active session branch in ${terminalSafe(selected.path)} (${terminalSafe(selected.branch ?? "detached")})? Pi will rebuild its cwd-bound runtime and re-evaluate project trust and resources there.`,
+        );
+        if (!confirmed) return;
+
+        const current = await listWorktrees(context.cwd);
+        const revalidated = current.worktrees.find(
+          (worktree) =>
+            worktree.path === selected.path &&
+            worktree.branch === selected.branch &&
+            worktree.head === selected.head,
+        );
+        if (!revalidated || revalidated.current)
+          throw new Error(
+            "development_system.worktree_switch_identity_changed; list worktrees and select again",
+          );
+        await switchWorktreeSession(context, revalidated.path);
+      } catch (error) {
+        context.ui.notify(
+          terminalSafe(error instanceof Error ? error.message : String(error)),
+          "error",
+        );
+      }
     },
   });
 
@@ -402,7 +502,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     name: "development_system_worktree_list",
     label: "List Development Worktrees",
     description:
-      "List canonical linked worktrees, branches, the authoritative current checkout, and exact Pi relaunch commands. This is the supported primary-checkout discovery path.",
+      "List canonical linked worktrees, branches, the authoritative current checkout, local-TUI conversation switch commands, and headless relaunch fallbacks. This is the supported primary-checkout discovery path.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     async execute(_toolCallId, _parameters, signal, _onUpdate, context) {
       if (signal?.aborted) throw new Error("development_system.cancelled");
@@ -413,10 +513,11 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
             type: "text",
             text: JSON.stringify({
               ...inventory,
-              currentSessionImmutable: true,
-              nextAction: inventory.requiresRelaunch
-                ? "Use development_system_worktree_create or a listed relaunchCommand. A command-level cd or git -C does not move this Pi session."
-                : "Continue ordinary mutation in the current linked worktree.",
+              processCwdImmutable: true,
+              sessionWorkspaceSwitchAvailable: context.mode === "tui",
+              nextAction: inventory.requiresUserWorkspaceSwitch
+                ? "Use development_system_worktree_create if needed, then run a listed switchCommand in the local Pi TUI. Pi will preserve this conversation and rebuild the cwd-bound runtime. Headless modes use relaunchCommand."
+                : "Continue ordinary mutation in the current linked worktree or use a listed switchCommand to move this conversation.",
             }),
           },
         ],
@@ -429,7 +530,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     name: "development_system_worktree_create",
     label: "Create Development Worktree",
     description:
-      "Create one new repository-local linked worktree from the authoritative primary HEAD using parsed name and branch values, then return the exact command for starting a new Pi process there.",
+      "Create one new repository-local linked worktree from the authoritative primary HEAD using parsed name and branch values, then return a local-TUI conversation switch command and a headless relaunch fallback.",
     parameters: {
       type: "object",
       properties: {

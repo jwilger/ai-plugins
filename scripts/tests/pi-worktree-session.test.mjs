@@ -10,7 +10,9 @@ import {
 } from "../../plugins/development-system/extensions/development-system/adapters/worktree-session.ts";
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "development-system-switch-"));
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), "development-system-switch-"),
+  );
   const source = path.join(root, "source");
   const target = path.join(root, "target");
   fs.mkdirSync(source);

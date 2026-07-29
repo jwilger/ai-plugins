@@ -20,6 +20,7 @@ export type WorktreeRecord = Readonly<{
   current: boolean;
   primary: boolean;
   relaunchCommand: string;
+  switchCommand: string;
 }>;
 
 export type WorktreeInventory = Readonly<{
@@ -28,7 +29,8 @@ export type WorktreeInventory = Readonly<{
   currentKind: "primary" | "linked";
   configuredRoot: string;
   worktrees: readonly WorktreeRecord[];
-  requiresRelaunch: boolean;
+  requiresRelaunch: false;
+  requiresUserWorkspaceSwitch: boolean;
 }>;
 
 export type WorktreeCreationResult =
@@ -38,7 +40,9 @@ export type WorktreeCreationResult =
       branch: string;
       head: string;
       relaunchCommand: string;
-      requiresRelaunch: true;
+      switchCommand: string;
+      requiresRelaunch: false;
+      requiresUserWorkspaceSwitch: true;
       currentSessionCheckout: string;
       nextAction: string;
     }>
@@ -48,7 +52,9 @@ export type WorktreeCreationResult =
       path: string;
       branch: string;
       relaunchCommand?: string;
-      requiresRelaunch: true;
+      switchCommand?: string;
+      requiresRelaunch: false;
+      requiresUserWorkspaceSwitch: true;
       nextAction: string;
     }>;
 
@@ -143,6 +149,7 @@ function parsePorcelain(
       current: worktreePath === context.current,
       primary: worktreePath === context.primary,
       relaunchCommand: relaunchCommand(worktreePath),
+      switchCommand: `/development-system-worktree-switch ${current.branch ?? worktreePath}`,
     });
     current = {};
   };
@@ -177,7 +184,8 @@ export async function listWorktrees(cwd: string): Promise<WorktreeInventory> {
   return {
     ...context,
     worktrees: parsePorcelain(stdout, context),
-    requiresRelaunch: context.currentKind === "primary",
+    requiresRelaunch: false,
+    requiresUserWorkspaceSwitch: context.currentKind === "primary",
   };
 }
 
@@ -257,9 +265,11 @@ export async function createWorktree(
         path: target,
         branch,
         relaunchCommand: existingPath?.relaunchCommand,
-        requiresRelaunch: true,
+        switchCommand: existingPath?.switchCommand,
+        requiresRelaunch: false,
+        requiresUserWorkspaceSwitch: true,
         nextAction: existingPath
-          ? `Use the existing worktree: ${existingPath.relaunchCommand}`
+          ? `Switch this Pi conversation with: ${existingPath.switchCommand}`
           : "Choose a different worktree name; the existing path was preserved.",
       };
     if (existingBranch || (await branchExists(context.primary, branch)))
@@ -269,9 +279,11 @@ export async function createWorktree(
         path: existingBranch?.path ?? target,
         branch,
         relaunchCommand: existingBranch?.relaunchCommand,
-        requiresRelaunch: true,
+        switchCommand: existingBranch?.switchCommand,
+        requiresRelaunch: false,
+        requiresUserWorkspaceSwitch: true,
         nextAction: existingBranch
-          ? `Use the branch's existing worktree: ${existingBranch.relaunchCommand}`
+          ? `Switch this Pi conversation with: ${existingBranch.switchCommand}`
           : "Choose a different new branch or attach the existing branch manually after review.",
       };
 
@@ -293,9 +305,11 @@ export async function createWorktree(
         path: created?.path ?? target,
         branch,
         relaunchCommand: created?.relaunchCommand,
-        requiresRelaunch: true,
+        switchCommand: created?.switchCommand,
+        requiresRelaunch: false,
+        requiresUserWorkspaceSwitch: true,
         nextAction: created
-          ? `A concurrent creator won; use: ${created.relaunchCommand}`
+          ? `A concurrent creator won; switch with: ${created.switchCommand}`
           : "The target appeared concurrently and was preserved; list worktrees and choose a different name.",
       };
     }
@@ -325,9 +339,11 @@ export async function createWorktree(
         path: created?.path ?? target,
         branch,
         relaunchCommand: created?.relaunchCommand,
-        requiresRelaunch: true,
+        switchCommand: created?.switchCommand,
+        requiresRelaunch: false,
+        requiresUserWorkspaceSwitch: true,
         nextAction: created
-          ? `A concurrent creator won; use: ${created.relaunchCommand}`
+          ? `A concurrent creator won; switch with: ${created.switchCommand}`
           : "Run development_system_worktree_list, inspect Git worktree state, and retry with a new name and branch. No cleanup was performed.",
       };
     }
@@ -342,9 +358,11 @@ export async function createWorktree(
       branch,
       head: created.head,
       relaunchCommand: created.relaunchCommand,
-      requiresRelaunch: true,
+      switchCommand: created.switchCommand,
+      requiresRelaunch: false,
+      requiresUserWorkspaceSwitch: true,
       currentSessionCheckout: context.current,
-      nextAction: `This Pi session remains bound to ${context.current}. Start a new Pi process with: ${created.relaunchCommand}`,
+      nextAction: `In the local Pi TUI, preserve this conversation and rebuild its cwd-bound runtime with: ${created.switchCommand}. Headless callers can instead start a new process with: ${created.relaunchCommand}`,
     };
   });
 }

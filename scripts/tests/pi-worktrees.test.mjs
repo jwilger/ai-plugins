@@ -48,7 +48,7 @@ max_queued = 5
   return root;
 }
 
-test("primary checkout lists and creates a canonical relaunchable worktree", async () => {
+test("primary checkout lists and creates a canonical session-switchable worktree", async () => {
   const root = repository();
   const before = await listWorktrees(root);
   assert.equal(before.currentKind, "primary");
@@ -64,9 +64,14 @@ test("primary checkout lists and creates a canonical relaunchable worktree", asy
     created.path,
     path.join(root, ".worktrees", "observable-subagents"),
   );
-  assert.equal(created.requiresRelaunch, true);
+  assert.equal(created.requiresRelaunch, false);
+  assert.equal(created.requiresUserWorkspaceSwitch, true);
+  assert.equal(
+    created.switchCommand,
+    "/development-system-worktree-switch feat/observable-subagents",
+  );
   assert.match(created.relaunchCommand, /^cd -- '.*' && exec pi$/);
-  assert.match(created.nextAction, /This Pi session remains bound/);
+  assert.match(created.nextAction, /preserve this conversation/i);
   assert.equal(
     execFileSync("git", ["-C", created.path, "branch", "--show-current"], {
       encoding: "utf8",
@@ -89,7 +94,7 @@ test("existing worktree paths and branches return actionable collisions", async 
   });
   assert.equal(pathCollision.status, "collision");
   assert.equal(pathCollision.code, "development_system.worktree_path_exists");
-  assert.match(pathCollision.nextAction, /existing worktree/);
+  assert.match(pathCollision.nextAction, /Switch this Pi conversation/);
 
   const branchCollision = await createWorktree(root, {
     name: "two",
@@ -100,7 +105,7 @@ test("existing worktree paths and branches return actionable collisions", async 
     branchCollision.code,
     "development_system.worktree_branch_exists",
   );
-  assert.match(branchCollision.nextAction, /existing worktree/);
+  assert.match(branchCollision.nextAction, /Switch this Pi conversation/);
 });
 
 test("semantic worktree inputs reject traversal, options, controls, and malformed refs", () => {
