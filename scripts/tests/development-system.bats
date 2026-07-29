@@ -203,6 +203,69 @@ teardown() {
   [[ "$output" == *"supply_chain_recommendation"* ]]
 }
 
+@test "doctor reports only conflicts for the selected harness" {
+  mkdir -p \
+    "$TEST_ROOT/project/.claude" \
+    "$TEST_ROOT/project/.codex" \
+    "$TEST_ROOT/home/.claude/plugins" \
+    "$TEST_ROOT/home/.codex"
+  touch "$TEST_ROOT/project/.development-system.toml"
+  printf '%s\n' '{"enabledPlugins":{"another-plugin@third-party":true}}' \
+    >"$TEST_ROOT/project/.claude/settings.json"
+  printf '%s\n' '{"plugins":{"another-plugin@third-party":[{"version":"1.0.0"}]}}' \
+    >"$TEST_ROOT/home/.claude/plugins/installed_plugins.json"
+  printf '%s\n' '[plugins.another-plugin]' 'enabled = true' \
+    >"$TEST_ROOT/project/.codex/config.toml"
+  printf '%s\n' '{"mcpServers":{"custom":{"command":"custom-mcp"}}}' \
+    >"$TEST_ROOT/project/.mcp.json"
+
+  run env HOME="$TEST_ROOT/home" \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    doctor \
+    --project "$TEST_ROOT/project" \
+    --harness pi
+
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  run env HOME="$TEST_ROOT/home" \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    doctor \
+    --project "$TEST_ROOT/project" \
+    --harness claude
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"conflicting_plugins harness=claude"* ]]
+  [[ "$output" == *"user_managed_mcps_detected harness=claude"* ]]
+  [[ "$output" == *"supply_chain_recommendation harness=claude"* ]]
+  [[ "$output" != *"harness=codex"* ]]
+
+  run env HOME="$TEST_ROOT/home" \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    doctor \
+    --project "$TEST_ROOT/project" \
+    --harness codex
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"conflicting_plugins harness=codex"* ]]
+  [[ "$output" == *"supply_chain_recommendation harness=codex"* ]]
+  [[ "$output" != *"harness=claude"* ]]
+  [[ "$output" != *"user_managed_mcps_detected"* ]]
+}
+
+@test "doctor rejects an unknown harness instead of silently skipping checks" {
+  mkdir -p "$TEST_ROOT/project"
+  touch "$TEST_ROOT/project/.development-system.toml"
+
+  run "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    doctor \
+    --project "$TEST_ROOT/project" \
+    --harness clauude
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.unsupported_harness harness=clauude"* ]]
+}
+
 @test "doctor is quiet outside configured projects" {
   mkdir -p "$TEST_ROOT/project" "$TEST_ROOT/home"
   printf '%s\n' '{"mcpServers":{"custom":{"command":"custom-mcp"}}}' \

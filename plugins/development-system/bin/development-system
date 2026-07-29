@@ -161,45 +161,49 @@ inspect_conflicts() {
     return
   fi
 
-  if [[ -f "$claude_settings" ]] &&
-    grep -q '"enabledPlugins"' "$claude_settings" &&
-    grep -Eo '"[^"]+@[^"]+"[[:space:]]*:[[:space:]]*true' "$claude_settings" |
-    grep -qv '^"development-system@'; then
-    warn "conflicting_plugins harness=claude file=$claude_settings recommendation=install_only_development-system"
-    found=true
+  if [[ "$harness" == "all" || "$harness" == "claude" ]]; then
+    if [[ -f "$claude_settings" ]] &&
+      grep -q '"enabledPlugins"' "$claude_settings" &&
+      grep -Eo '"[^"]+@[^"]+"[[:space:]]*:[[:space:]]*true' "$claude_settings" |
+      grep -qv '^"development-system@'; then
+      warn "conflicting_plugins harness=claude file=$claude_settings recommendation=install_only_development-system"
+      found=true
+    fi
+
+    if [[ -f "$claude_plugins" ]] &&
+      grep -Eo '"[^"]+@[^"]+"' "$claude_plugins" |
+      grep -qv '^"development-system@'; then
+      warn "conflicting_plugins harness=claude file=$claude_plugins recommendation=install_only_development-system"
+      found=true
+    fi
+
+    if [[ -f "$project/.mcp.json" ]]; then
+      warn "user_managed_mcps_detected harness=claude file=$project/.mcp.json action=review_for_compatibility"
+      found=true
+    fi
   fi
 
-  if [[ -f "$claude_plugins" ]] &&
-    grep -Eo '"[^"]+@[^"]+"' "$claude_plugins" |
-    grep -qv '^"development-system@'; then
-    warn "conflicting_plugins harness=claude file=$claude_plugins recommendation=install_only_development-system"
-    found=true
-  fi
+  if [[ "$harness" == "all" || "$harness" == "codex" ]]; then
+    for codex_config in "$project/.codex/config.toml" "$codex_home/config.toml"; do
+      if [[ -f "$codex_config" ]] &&
+        grep -Ev '^\[plugins\."?development-system(@ai-plugins)?"?\]' "$codex_config" |
+        grep -Eq '^\[plugins\.[^]]+\]'; then
+        warn "conflicting_plugins harness=codex file=$codex_config recommendation=install_only_development-system"
+        found=true
+      fi
 
-  for codex_config in "$project/.codex/config.toml" "$codex_home/config.toml"; do
-    if [[ -f "$codex_config" ]] &&
-      grep -Ev '^\[plugins\."?development-system(@ai-plugins)?"?\]' "$codex_config" |
-      grep -Eq '^\[plugins\.[^]]+\]'; then
-      warn "conflicting_plugins harness=codex file=$codex_config recommendation=install_only_development-system"
-      found=true
-    fi
+      if [[ -f "$codex_config" ]] &&
+        grep -Eq '^[[:space:]]*(hooks|codex_hooks)[[:space:]]*=[[:space:]]*false' "$codex_config"; then
+        warn "incompatible_harness_setting harness=codex setting=hooks_disabled file=$codex_config"
+        found=true
+      fi
 
-    if [[ -f "$codex_config" ]] &&
-      grep -Eq '^[[:space:]]*(hooks|codex_hooks)[[:space:]]*=[[:space:]]*false' "$codex_config"; then
-      warn "incompatible_harness_setting harness=codex setting=hooks_disabled file=$codex_config"
-      found=true
-    fi
-
-    if [[ -f "$codex_config" ]] &&
-      grep -Eq '^[[:space:]]*allow_managed_hooks_only[[:space:]]*=[[:space:]]*true' "$codex_config"; then
-      warn "incompatible_harness_setting harness=codex setting=managed_hooks_only file=$codex_config"
-      found=true
-    fi
-  done
-
-  if [[ -f "$project/.mcp.json" ]]; then
-    warn "user_managed_mcps_detected file=$project/.mcp.json action=review_for_compatibility"
-    found=true
+      if [[ -f "$codex_config" ]] &&
+        grep -Eq '^[[:space:]]*allow_managed_hooks_only[[:space:]]*=[[:space:]]*true' "$codex_config"; then
+        warn "incompatible_harness_setting harness=codex setting=managed_hooks_only file=$codex_config"
+        found=true
+      fi
+    done
   fi
 
   if [[ "$found" == "true" ]]; then
@@ -232,6 +236,10 @@ doctor_command() {
         ;;
     esac
   done
+  case "$harness" in
+    all | claude | codex | pi) ;;
+    *) die "development_system.unsupported_harness harness=$harness" ;;
+  esac
   project="$(cd "$project" && pwd)" ||
     die "development_system.project_not_found project=$project"
   local output

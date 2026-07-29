@@ -225,8 +225,10 @@ plugins/development-system/bin/development-system-pi status \
 Status reports configuration presence, delivery mode, enabled features, primary
 or linked checkout identity, bundled component availability, active mode
 limitations, and actionable typed errors. Startup runs the same compatibility
-doctor used by the existing harness hooks. A model-callable read-only status
-tool returns only a concise task-facing summary by default.
+doctor used by the existing harness hooks, scoped to the harness that is
+starting so another harness's configuration cannot produce warnings. A
+model-callable read-only status tool returns only a concise task-facing summary
+by default.
 
 `development_system_policy_read` is the narrow reader for the authoritative
 protected policy. `development_system_pi_reference` pages through an allowlist

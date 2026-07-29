@@ -16,15 +16,15 @@ Optional agentic-system and eval-reporting capabilities are selected in
 `.development-system.toml`; the plugin owns its bundled MCP surface.
 
 The strong recommendation is to install only `development-system`. Additional
-plugin marketplaces expand the supply-chain trust surface. The SessionStart
-hook warns about conflicting plugins, incompatible harness settings, and
-user-managed MCPs that need compatibility review.
+plugin marketplaces expand the supply-chain trust surface. Each SessionStart
+hook warns only about conflicting plugins, incompatible settings, and
+user-managed MCPs for the harness that is starting.
 
 ## Plugin catalog
 
 | Plugin                                                     | Harnesses              | Description                                                         | Version |
 | ---------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.7.0   |
+| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.7.1   |
 
 ## Using the package (Pi — primary)
 
