@@ -117,7 +117,10 @@ test("cleanup removes a clean linked worktree while preserving its branch", asyn
   });
   assert.equal(created.status, "created");
 
-  const removed = await removeWorktree(root, created.path);
+  const expected = (await listWorktrees(root)).worktrees.find(
+    (worktree) => worktree.path === created.path,
+  );
+  const removed = await removeWorktree(root, expected);
 
   assert.equal(removed.status, "removed");
   assert.equal(removed.path, created.path);
@@ -142,8 +145,11 @@ test("cleanup refuses a dirty linked worktree without deleting user state", asyn
   assert.equal(created.status, "created");
   fs.writeFileSync(path.join(created.path, "user-state.txt"), "keep me\n");
 
+  const expected = (await listWorktrees(root)).worktrees.find(
+    (worktree) => worktree.path === created.path,
+  );
   await assert.rejects(
-    () => removeWorktree(root, created.path),
+    () => removeWorktree(root, expected),
     /worktree_cleanup_dirty/,
   );
   assert.equal(
@@ -155,6 +161,51 @@ test("cleanup refuses a dirty linked worktree without deleting user state", asyn
       (worktree) => worktree.path === created.path,
     ),
   );
+});
+
+test("cleanup rejects detached HEAD and identity changes without removal", async () => {
+  const root = repository();
+  const detachedPath = path.join(root, ".worktrees", "detached");
+  execFileSync("git", [
+    "-C",
+    root,
+    "worktree",
+    "add",
+    "--detach",
+    detachedPath,
+  ]);
+  const detached = (await listWorktrees(root)).worktrees.find(
+    (worktree) => worktree.path === detachedPath,
+  );
+  await assert.rejects(
+    () => removeWorktree(root, detached),
+    /worktree_cleanup_detached_head/,
+  );
+  assert.equal(fs.existsSync(detachedPath), true);
+
+  const created = await createWorktree(root, {
+    name: "identity-change",
+    branch: "feat/identity-change",
+  });
+  assert.equal(created.status, "created");
+  const expected = (await listWorktrees(root)).worktrees.find(
+    (worktree) => worktree.path === created.path,
+  );
+  fs.writeFileSync(path.join(created.path, "advance.txt"), "advance\n");
+  execFileSync("git", ["-C", created.path, "add", "advance.txt"]);
+  execFileSync("git", [
+    "-C",
+    created.path,
+    "commit",
+    "-m",
+    "test: advance identity",
+  ]);
+
+  await assert.rejects(
+    () => removeWorktree(root, expected),
+    /worktree_cleanup_identity_changed/,
+  );
+  assert.equal(fs.existsSync(created.path), true);
 });
 
 test("semantic worktree inputs reject traversal, options, controls, and malformed refs", () => {

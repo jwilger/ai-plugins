@@ -142,6 +142,51 @@ test("switch uses Pi session replacement and never touches stale source context 
   }
 });
 
+test("post-replacement callback failures report through the replacement without touching stale source context", async () => {
+  const { root, source, target } = fixture();
+  try {
+    const manager = SessionManager.inMemory(source);
+    const replacementNotices = [];
+    let replacementStarted = false;
+    const result = await switchWorktreeSession(
+      {
+        cwd: source,
+        mode: "tui",
+        hasUI: true,
+        sessionManager: manager,
+        ui: {
+          notify() {
+            if (replacementStarted)
+              throw new Error("stale source context accessed");
+          },
+        },
+        async switchSession(_sessionPath, options) {
+          replacementStarted = true;
+          await options.withSession({
+            cwd: fs.realpathSync(target),
+            ui: {
+              notify(message) {
+                replacementNotices.push(message);
+              },
+            },
+          });
+          return { cancelled: false };
+        },
+      },
+      target,
+      async () => {
+        throw new Error("post-switch cleanup failed");
+      },
+    );
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.code, "development_system.worktree_switch_failed");
+    assert.match(replacementNotices.at(-1), /post-switch cleanup failed/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("headless and replacement failures fail closed while retaining recoverable session state", async () => {
   const { root, source, target } = fixture();
   try {

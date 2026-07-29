@@ -493,10 +493,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           inventory.primary,
           async (replacement) => {
             try {
-              const removed = await removeWorktree(
-                replacement.cwd,
-                selected.path,
-              );
+              const removed = await removeWorktree(replacement.cwd, validated);
               replacement.ui.notify(
                 `Removed finished worktree ${terminalSafe(removed.path)}. Branch ${terminalSafe(removed.branch ?? "detached")} was preserved.`,
                 "info",

@@ -145,6 +145,20 @@ test("shell classifier allows exploration while identifying direct repository mu
   assert.equal(classifyShellCommand("printf x > file").kind, "mutation");
   assert.equal(classifyShellCommand("git status && touch x").kind, "mutation");
   assert.equal(classifyShellCommand("python script.py").kind, "read-only");
+  assert.equal(
+    classifyShellCommand("git -c core.hooksPath=/dev/null commit -m bypass")
+      .kind,
+    "mutation",
+  );
+  assert.equal(
+    classifyShellCommand("env SAFE=1 git reset --hard HEAD~1").kind,
+    "mutation",
+  );
+  assert.equal(classifyShellCommand("command git clean -fd").kind, "mutation");
+  assert.equal(
+    classifyShellCommand("git -c color.ui=false status --short").kind,
+    "read-only",
+  );
 });
 
 test("delivery decisions never infer a missing mode or destructive approval", () => {

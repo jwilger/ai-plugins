@@ -102,26 +102,44 @@ export async function switchWorktreeSession(
     };
   }
 
+  let replacementStarted = false;
+  let replacementFailure: string | null = null;
   try {
     const switched = await context.switchSession(sessionPath, {
       withSession: async (replacement) => {
-        const replacementTarget = realpathSync(replacement.cwd);
-        if (replacementTarget !== target)
-          throw new Error(
-            "development_system.worktree_replacement_cwd_mismatch",
+        replacementStarted = true;
+        try {
+          const replacementTarget = realpathSync(replacement.cwd);
+          if (replacementTarget !== target)
+            throw new Error(
+              "development_system.worktree_replacement_cwd_mismatch",
+            );
+          replacement.ui.notify(
+            `Development-system workspace switched to ${sanitizeDiagnostic(target)}. The conversation and active session branch were preserved.`,
+            "info",
           );
-        replacement.ui.notify(
-          `Development-system workspace switched to ${sanitizeDiagnostic(target)}. The conversation and active session branch were preserved.`,
-          "info",
-        );
-        await afterSwitch?.(replacement);
+          await afterSwitch?.(replacement);
+        } catch (error) {
+          replacementFailure = sanitizeDiagnostic(
+            error instanceof Error ? error.message : String(error),
+          );
+          try {
+            replacement.ui.notify(
+              `Workspace replacement completed, but post-switch work failed and recoverable state was preserved. ${replacementFailure}`,
+              "error",
+            );
+          } catch {
+            // The replacement UI itself failed; never fall back to stale source state.
+          }
+        }
       },
     });
     if (switched.cancelled) {
-      context.ui.notify(
-        `Workspace switch cancelled. The prepared private session was retained at ${sanitizeDiagnostic(sessionPath)} for recovery.`,
-        "info",
-      );
+      if (!replacementStarted)
+        context.ui.notify(
+          `Workspace switch cancelled. The prepared private session was retained at ${sanitizeDiagnostic(sessionPath)} for recovery.`,
+          "info",
+        );
       return {
         status: "cancelled",
         target,
@@ -130,8 +148,22 @@ export async function switchWorktreeSession(
       };
     }
     // The source context is stale after successful replacement. Do not access it.
+    if (replacementFailure)
+      return {
+        status: "failed",
+        target,
+        sessionPath,
+        code: "development_system.worktree_switch_failed",
+      };
     return { status: "switched", target, sessionPath };
   } catch (error) {
+    if (replacementStarted)
+      return {
+        status: "failed",
+        target,
+        sessionPath,
+        code: "development_system.worktree_switch_failed",
+      };
     const reason = sanitizeDiagnostic(
       error instanceof Error ? error.message : String(error),
     );

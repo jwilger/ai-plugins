@@ -280,26 +280,43 @@ export async function validateWorktreeForCleanup(
   );
   if (!selected || selected.primary)
     throw new Error("development_system.worktree_cleanup_target_invalid");
+  if (selected.branch === null)
+    throw new Error("development_system.worktree_cleanup_detached_head");
   await assertCleanWorktree(context.primary, target);
   return selected;
 }
 
 export async function removeWorktree(
   cwd: string,
-  requestedTarget: string,
+  expected: WorktreeRecord,
 ): Promise<WorktreeRemovalResult> {
   const context = await repositoryContext(cwd);
-  const selected = await validateWorktreeForCleanup(cwd, requestedTarget);
-  const target = selected.path;
+  const target = await realpath(expected.path);
+  if (!isWithin(context.configuredRoot, target))
+    throw new Error("development_system.worktree_cleanup_target_outside_root");
+  if (expected.primary)
+    throw new Error("development_system.worktree_cleanup_target_invalid");
+  if (expected.branch === null)
+    throw new Error("development_system.worktree_cleanup_detached_head");
+  const selected = (await listWorktrees(cwd)).worktrees.find(
+    (worktree) => worktree.path === target,
+  );
+  if (
+    !selected ||
+    selected.branch !== expected.branch ||
+    selected.head !== expected.head
+  )
+    throw new Error("development_system.worktree_cleanup_identity_changed");
   if (selected.current)
     throw new Error("development_system.worktree_cleanup_switch_required");
+  await assertCleanWorktree(context.primary, target);
 
   return withRepositoryQueue(context.primary, async () => {
     const revalidated = (await listWorktrees(context.primary)).worktrees.find(
       (worktree) =>
-        worktree.path === selected.path &&
-        worktree.branch === selected.branch &&
-        worktree.head === selected.head,
+        worktree.path === expected.path &&
+        worktree.branch === expected.branch &&
+        worktree.head === expected.head,
     );
     if (!revalidated || revalidated.current)
       throw new Error("development_system.worktree_cleanup_identity_changed");
@@ -329,7 +346,7 @@ export async function removeWorktree(
     return {
       status: "removed",
       path: target,
-      branch: selected.branch,
+      branch: expected.branch,
       branchPreserved: true,
     };
   });
