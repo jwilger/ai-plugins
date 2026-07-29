@@ -84,6 +84,51 @@ async function inspectPackage(piBinary, installation, cwd, temporaryRoot) {
   );
   const [expectedExtension] = manifest.pi?.extensions ?? [];
   assert.ok(expectedExtension, "Pi package extension manifest is missing");
+  const settings = JSON.parse(
+    fs.readFileSync(path.join(packageHome, "settings.json"), "utf8"),
+  );
+  assert.equal(
+    settings.packages?.length,
+    1,
+    "Pi settings did not preserve one installed package source",
+  );
+  if (installation.expectedSettingsSource) {
+    assert.equal(
+      settings.packages[0],
+      installation.expectedSettingsSource,
+      "Pi settings did not preserve the installed package source identity",
+    );
+  }
+  const sourceEvidence = {
+    ...installation.evidenceSource,
+    observedSettings:
+      !installation.expectedSettingsSource ||
+      settings.packages[0] === installation.expectedSettingsSource,
+  };
+  if (installation.expectedCommit) {
+    const checkout = run("git", [
+      "-C",
+      packageRoot,
+      "rev-parse",
+      "HEAD",
+    ]).trim();
+    assert.equal(
+      checkout,
+      installation.expectedCommit,
+      "Pi Git package checkout did not honor the requested commit",
+    );
+    const generatedLock = JSON.parse(
+      fs.readFileSync(path.join(packageRoot, "package-lock.json"), "utf8"),
+    );
+    assert.equal(
+      generatedLock.packages?.[""]?.name,
+      manifest.name,
+      "Pi Git package npm reconciliation did not produce the root lock entry",
+    );
+    sourceEvidence.requestedCommit = installation.expectedCommit;
+    sourceEvidence.checkout = checkout;
+    sourceEvidence.npmReconciled = true;
+  }
   const marker = path.join(temporaryRoot, "extension-provenance.json");
   const records = await jsonlRequest(piBinary, cwd, packageHome, marker);
   const response = records.find(
@@ -166,7 +211,7 @@ async function inspectPackage(piBinary, installation, cwd, temporaryRoot) {
     "no-package mode executed package extension",
   );
   return {
-    source: installation.evidenceSource,
+    source: sourceEvidence,
     skills: skillNames,
     extension: provenance,
     piVersion: run(piBinary, ["--version"]).trim(),
@@ -233,11 +278,41 @@ async function main() {
         "rev-parse",
         "HEAD",
       ]).trim();
+      const defaultCommit = run("git", [
+        "-C",
+        repositoryRoot,
+        "rev-parse",
+        "HEAD^",
+      ]).trim();
+      assert.notEqual(defaultCommit, commit);
+      run("git", [
+        "--git-dir",
+        remoteRepository,
+        "update-ref",
+        "refs/heads/main",
+        defaultCommit,
+      ]);
+      run("git", [
+        "--git-dir",
+        remoteRepository,
+        "update-ref",
+        "refs/heads/review-target",
+        commit,
+      ]);
+      run("git", [
+        "--git-dir",
+        remoteRepository,
+        "symbolic-ref",
+        "HEAD",
+        "refs/heads/main",
+      ]);
       const source = `git:github.com/jwilger/ai-plugins@${commit}`;
       const rewriteBase = `${pathToFileURL(remoteRoot).href.replace(/\/$/, "")}/`;
       installation = {
         source,
         evidenceSource: { type: "git", spec: source },
+        expectedSettingsSource: source,
+        expectedCommit: commit,
         env: {
           GIT_CONFIG_COUNT: "2",
           GIT_CONFIG_KEY_0: `url.${rewriteBase}.insteadOf`,

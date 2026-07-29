@@ -72,6 +72,9 @@ teardown() {
     .ok == true and .package == "development-system" and
     .source.type == "git" and
     (.source.spec | startswith("git:github.com/jwilger/ai-plugins@")) and
+    .source.observedSettings == true and
+    .source.npmReconciled == true and
+    .source.checkout == .source.requestedCommit and
     (.skills | length) == 8 and
     (.extension.extension | endswith("/plugins/development-system/extensions/development-system/index.ts"))
   ' >/dev/null
