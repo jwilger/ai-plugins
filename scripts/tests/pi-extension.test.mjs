@@ -364,6 +364,17 @@ test("model-callable worktree switch queues command-context replacement without 
   );
   assert.equal(queued.details.status, "queued");
   assert.equal(queued.details.requiresUserWorkspaceSwitch, false);
+  await assert.rejects(
+    () =>
+      tool.execute(
+        "parallel-switch",
+        { selector: "automatic-target" },
+        undefined,
+        undefined,
+        { cwd: project, mode: "tui", hasUI: true },
+      ),
+    /worktree_transition_already_queued/,
+  );
   const queuedCommand = registrations.userMessages.at(-1).message;
   assert.match(queuedCommand, /^\/development-system-worktree-switch /);
 

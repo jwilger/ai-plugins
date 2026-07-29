@@ -194,6 +194,19 @@ test("shell classifier allows exploration while identifying direct repository mu
     classifyShellCommand("(git reset --hard HEAD~1)").kind,
     "mutation",
   );
+  assert.equal(classifyShellCommand('git c""ommit -m bypass').kind, "mutation");
+  assert.equal(
+    classifyShellCommand("FOO='a b' git commit -m bypass").kind,
+    "mutation",
+  );
+  assert.equal(
+    classifyShellDelivery('git pu""sh origin main').kind,
+    "delivery",
+  );
+  assert.equal(
+    classifyShellDelivery("git push '--force' origin main").kind,
+    "destructive-delivery",
+  );
 });
 
 test("delivery decisions never infer a missing mode or destructive approval", () => {

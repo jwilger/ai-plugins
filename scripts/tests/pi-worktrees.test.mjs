@@ -163,6 +163,46 @@ test("cleanup refuses a dirty linked worktree without deleting user state", asyn
   );
 });
 
+test("cleanup preserves valuable ignored state while allowing generated caches", async () => {
+  const root = repository();
+  fs.writeFileSync(
+    path.join(root, ".gitignore"),
+    "private-results/\n.dependencies/\n.direnv/\n.env.worktree\nnode_modules/\ntarget/\n",
+  );
+  execFileSync("git", ["-C", root, "add", ".gitignore"]);
+  execFileSync("git", ["-C", root, "commit", "-m", "test: ignore state"]);
+  const created = await createWorktree(root, {
+    name: "ignored-state",
+    branch: "feat/ignored-state",
+  });
+  assert.equal(created.status, "created");
+  fs.mkdirSync(path.join(created.path, "private-results"));
+  fs.writeFileSync(
+    path.join(created.path, "private-results", "evidence.json"),
+    "valuable\n",
+  );
+  fs.mkdirSync(path.join(created.path, ".dependencies"));
+  fs.writeFileSync(
+    path.join(created.path, ".dependencies", "cache"),
+    "cache\n",
+  );
+  const expected = (await listWorktrees(root)).worktrees.find(
+    (worktree) => worktree.path === created.path,
+  );
+
+  await assert.rejects(
+    () => removeWorktree(root, expected),
+    /worktree_cleanup_ignored_state/,
+  );
+  assert.equal(
+    fs.readFileSync(
+      path.join(created.path, "private-results", "evidence.json"),
+      "utf8",
+    ),
+    "valuable\n",
+  );
+});
+
 test("cleanup rejects detached HEAD and identity changes without removal", async () => {
   const root = repository();
   const detachedPath = path.join(root, ".worktrees", "detached");

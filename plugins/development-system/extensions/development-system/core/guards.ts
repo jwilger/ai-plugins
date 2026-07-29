@@ -196,6 +196,157 @@ function boundedCdDiscovery(command: string): ShellClassification | null {
   return { kind: "read-only-discovery", targetPath: left.words[1] };
 }
 
+const gitMutationOperations = new Set([
+  "add",
+  "am",
+  "apply",
+  "checkout",
+  "cherry-pick",
+  "clean",
+  "commit",
+  "merge",
+  "mv",
+  "notes",
+  "rebase",
+  "reset",
+  "restore",
+  "revert",
+  "rm",
+  "stash",
+  "switch",
+  "tag",
+  "update-ref",
+  "symbolic-ref",
+]);
+const gitOptionsWithValues = new Set([
+  "-C",
+  "-c",
+  "--git-dir",
+  "--work-tree",
+  "--namespace",
+  "--config-env",
+  "--exec-path",
+]);
+const gitFlagOptions = new Set([
+  "--bare",
+  "--no-pager",
+  "--paginate",
+  "--literal-pathspecs",
+  "--no-literal-pathspecs",
+  "--glob-pathspecs",
+  "--noglob-pathspecs",
+  "--icase-pathspecs",
+]);
+
+function normalizedShellCommands(command: string): string[][] | null {
+  const commands: string[][] = [];
+  let words: string[] = [];
+  let word = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  const flushWord = () => {
+    if (!word) return;
+    words.push(word);
+    word = "";
+  };
+  const flushCommand = () => {
+    flushWord();
+    if (words.length > 0) commands.push(words);
+    words = [];
+  };
+  for (const character of command) {
+    if (escaped) {
+      word += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = null;
+      else word += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (";&|(){}\n\r`".includes(character)) {
+      flushCommand();
+      continue;
+    }
+    if (/\s/.test(character)) {
+      flushWord();
+      continue;
+    }
+    word += character;
+  }
+  if (quote || escaped) return null;
+  flushCommand();
+  return commands;
+}
+
+function unwrapCommand(words: readonly string[]): readonly string[] {
+  let index = 0;
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")) index += 1;
+  if (words[index] === "env") {
+    index += 1;
+    while (
+      (words[index] ?? "").startsWith("-") ||
+      /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? "")
+    )
+      index += 1;
+  }
+  if (words[index] === "command") {
+    index += 1;
+    while ((words[index] ?? "").startsWith("-")) index += 1;
+  }
+  return words.slice(index);
+}
+
+function normalizedGitInvocation(words: readonly string[]): Readonly<{
+  operation: string;
+  args: readonly string[];
+}> | null {
+  const command = unwrapCommand(words);
+  if (command[0] !== "git") return null;
+  let index = 1;
+  while (index < command.length) {
+    const option = command[index];
+    if (gitOptionsWithValues.has(option)) {
+      index += 2;
+      continue;
+    }
+    if (
+      gitFlagOptions.has(option) ||
+      /^(?:--git-dir|--work-tree|--namespace|--config-env|--exec-path)=/.test(
+        option,
+      )
+    ) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  const operation = command[index];
+  return operation ? { operation, args: command.slice(index + 1) } : null;
+}
+
+function normalizedGitInvocations(command: string) {
+  return (normalizedShellCommands(command) ?? [])
+    .map(normalizedGitInvocation)
+    .filter(
+      (
+        invocation,
+      ): invocation is Readonly<{
+        operation: string;
+        args: readonly string[];
+      }> => invocation !== null,
+    );
+}
+
 const commandBoundary = "(?:^|[;&|({\\n]\\s*)";
 const wrapperPrefix =
   "(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\\s;&|]+|env(?:\\s+(?:-[^\\s;&|]+|[A-Za-z_][A-Za-z0-9_]*=[^\\s;&|]+))*|command(?:\\s+-[^\\s;&|]+)?)\\s+)*";
@@ -206,6 +357,21 @@ const gitPrefix = `${wrapperPrefix}git(?:\\s+${gitOption})*\\s+`;
 export function classifyShellDelivery(
   command: string,
 ): Readonly<{ kind: "delivery" | "destructive-delivery" }> | null {
+  const normalizedPushes = normalizedGitInvocations(command).filter(
+    (invocation) => invocation.operation === "push",
+  );
+  if (normalizedPushes.length > 0) {
+    const destructive = normalizedPushes.some((push) =>
+      push.args.some(
+        (argument) =>
+          argument === "-f" ||
+          argument === "--force" ||
+          argument.startsWith("--force-with-lease") ||
+          argument.startsWith("+"),
+      ),
+    );
+    return { kind: destructive ? "destructive-delivery" : "delivery" };
+  }
   const pushes = command.match(
     new RegExp(`${commandBoundary}${gitPrefix}push(?:\\s+[^;&|\\n]*)?`, "g"),
   );
@@ -219,6 +385,14 @@ export function classifyShellDelivery(
 }
 
 function containsObviousMutation(command: string): boolean {
+  const normalizedMutation = normalizedGitInvocations(command).some(
+    (invocation) =>
+      gitMutationOperations.has(invocation.operation) ||
+      (invocation.operation === "branch" &&
+        !["--show-current", "--list"].includes(invocation.args[0] ?? "")) ||
+      (invocation.operation === "worktree" && invocation.args[0] !== "list"),
+  );
+  if (normalizedMutation) return true;
   const gitMutation = new RegExp(
     `${commandBoundary}${gitPrefix}(?:add|am|apply|checkout|cherry-pick|clean|commit|merge|mv|notes|rebase|reset|restore|revert|rm|stash|switch|tag|update-ref|symbolic-ref)(?:\\s|$)`,
   );

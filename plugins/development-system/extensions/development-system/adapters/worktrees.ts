@@ -240,6 +240,37 @@ async function withRepositoryQueue<T>(
   }
 }
 
+function disposableIgnoredPath(candidate: string): boolean {
+  return (
+    candidate === ".env.worktree" ||
+    [".dependencies/", ".direnv/", "node_modules/", "target/"].some((prefix) =>
+      candidate.startsWith(prefix),
+    )
+  );
+}
+
+async function assertNoValuableIgnoredState(
+  worktreePath: string,
+): Promise<void> {
+  const { stdout } = await execFileAsync("git", [
+    "-C",
+    worktreePath,
+    "ls-files",
+    "--others",
+    "--ignored",
+    "--exclude-standard",
+    "-z",
+  ]);
+  const valuable = stdout
+    .split("\0")
+    .filter(Boolean)
+    .filter((candidate) => !disposableIgnoredPath(candidate));
+  if (valuable.length > 0)
+    throw new Error(
+      `development_system.worktree_cleanup_ignored_state path=${worktreePath} count=${valuable.length}; transfer or remove ignored state before cleanup`,
+    );
+}
+
 async function assertCleanWorktree(
   primary: string,
   worktreePath: string,
@@ -282,7 +313,10 @@ export async function validateWorktreeForCleanup(
     throw new Error("development_system.worktree_cleanup_target_invalid");
   if (selected.branch === null)
     throw new Error("development_system.worktree_cleanup_detached_head");
-  await assertCleanWorktree(context.primary, target);
+  await Promise.all([
+    assertCleanWorktree(context.primary, target),
+    assertNoValuableIgnoredState(target),
+  ]);
   return selected;
 }
 
@@ -309,7 +343,10 @@ export async function removeWorktree(
     throw new Error("development_system.worktree_cleanup_identity_changed");
   if (selected.current)
     throw new Error("development_system.worktree_cleanup_switch_required");
-  await assertCleanWorktree(context.primary, target);
+  await Promise.all([
+    assertCleanWorktree(context.primary, target),
+    assertNoValuableIgnoredState(target),
+  ]);
 
   return withRepositoryQueue(context.primary, async () => {
     const revalidated = (await listWorktrees(context.primary)).worktrees.find(
@@ -320,19 +357,26 @@ export async function removeWorktree(
     );
     if (!revalidated || revalidated.current)
       throw new Error("development_system.worktree_cleanup_identity_changed");
-    await assertCleanWorktree(context.primary, target);
+    await Promise.all([
+      assertCleanWorktree(context.primary, target),
+      assertNoValuableIgnoredState(target),
+    ]);
 
     const teardown = path.join(
       context.primary,
       "scripts",
       "worktree-teardown.sh",
     );
+    let teardownPresent = true;
     try {
       await access(teardown, constants.X_OK);
-      await execFileAsync(teardown, [target], { cwd: context.primary });
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        teardownPresent = false;
+      else throw error;
     }
+    if (teardownPresent)
+      await execFileAsync(teardown, [target], { cwd: context.primary });
     const afterTeardown = (await listWorktrees(context.primary)).worktrees.find(
       (worktree) =>
         worktree.path === expected.path &&
@@ -341,7 +385,10 @@ export async function removeWorktree(
     );
     if (!afterTeardown || afterTeardown.current)
       throw new Error("development_system.worktree_cleanup_identity_changed");
-    await assertCleanWorktree(context.primary, target);
+    await Promise.all([
+      assertCleanWorktree(context.primary, target),
+      assertNoValuableIgnoredState(target),
+    ]);
     await execFileAsync(
       "git",
       ["-C", context.primary, "worktree", "remove", target],

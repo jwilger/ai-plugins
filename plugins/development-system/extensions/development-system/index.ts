@@ -242,7 +242,13 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
   const pendingAutomaticFinishes = new Map<string, WorktreeRecord>();
   const goalMode = registerGoalMode(pi);
 
+  const ensureNoAutomaticTransitionPending = (): void => {
+    if (pendingAutomaticSwitches.size > 0 || pendingAutomaticFinishes.size > 0)
+      throw new Error("development_system.worktree_transition_already_queued");
+  };
+
   const queueAutomaticSwitch = (worktree: WorktreeRecord): string => {
+    ensureNoAutomaticTransitionPending();
     const token = randomUUID();
     pendingAutomaticSwitches.set(token, worktree);
     pi.sendUserMessage(
@@ -253,6 +259,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
   };
 
   const queueAutomaticFinish = (worktree: WorktreeRecord): string => {
+    ensureNoAutomaticTransitionPending();
     const token = randomUUID();
     pendingAutomaticFinishes.set(token, worktree);
     pi.sendUserMessage(
