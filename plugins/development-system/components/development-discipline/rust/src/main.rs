@@ -13,13 +13,12 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
 
 const DEFAULT_BASE: &str = "origin/main";
-const DURABLE_REPORT_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_CLEAN_ITERATIONS: u64 = 3;
 const MAX_CLEAN_ITERATIONS: u64 = 10;
 const DEFAULT_CONFIG_PATH: &str = ".development-discipline/final-review.toml";
@@ -6561,9 +6560,6 @@ fn remove_report_artifact_files(path: &Path) -> Result<(), String> {
 }
 
 fn initialize_durable_report_schema(connection: &Connection) -> Result<(), String> {
-    connection
-        .busy_timeout(DURABLE_REPORT_BUSY_TIMEOUT)
-        .map_err(|error| format!("durable_report_busy_timeout_failed source={error}"))?;
     const SNAPSHOT_TABLE: &str = "
         CREATE TABLE IF NOT EXISTS final_review_lens_snapshot (
             report_binding_id TEXT NOT NULL,
@@ -14167,49 +14163,6 @@ pre_filter = "project-pre"
                 .expect("artifact"),
         )
         .starts_with(root));
-    }
-
-    #[test]
-    fn durable_report_connections_wait_for_a_concurrent_writer() {
-        use std::sync::mpsc;
-        use std::thread;
-        use std::time::Instant;
-
-        let root = test_project_root("durable-report-concurrent-writer");
-        let database = durable_report_database_path(
-            root.to_str().expect("project root"),
-            Some("concurrent-writer"),
-        )
-        .expect("database path");
-        fs::create_dir_all(database.parent().expect("database parent"))
-            .expect("database directory");
-        let mut first = Connection::open(&database).expect("first connection");
-        let second = Connection::open(&database).expect("second connection");
-        initialize_durable_report_schema(&first).expect("first schema");
-        initialize_durable_report_schema(&second).expect("second schema");
-        let first_transaction = first
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .expect("first writer");
-        let (started_tx, started_rx) = mpsc::sync_channel(0);
-        let waiter = thread::spawn(move || {
-            let mut second = second;
-            started_tx.send(()).expect("signal waiter");
-            let started = Instant::now();
-            second
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .expect("second writer waits")
-                .commit()
-                .expect("second commit");
-            started.elapsed()
-        });
-        started_rx.recv().expect("waiter started");
-        thread::sleep(Duration::from_millis(100));
-        first_transaction.commit().expect("release first writer");
-
-        assert!(
-            waiter.join().expect("waiter result") >= Duration::from_millis(75),
-            "second writer must wait rather than fail immediately",
-        );
     }
 
     #[cfg(unix)]
