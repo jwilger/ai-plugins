@@ -216,6 +216,22 @@ const gitReadOperations = new Set([
   "status",
 ]);
 
+function gitReadInvocationSafe(
+  operation: string,
+  args: readonly string[],
+): boolean {
+  if (!gitReadOperations.has(operation)) return false;
+  return !args.some(
+    (argument) =>
+      argument === "--output" ||
+      argument.startsWith("--output=") ||
+      argument === "--ext-diff" ||
+      argument === "--textconv" ||
+      argument === "--open-files-in-pager" ||
+      argument.startsWith("--open-files-in-pager="),
+  );
+}
+
 const gitMutationOperations = new Set([
   "add",
   "am",
@@ -490,7 +506,7 @@ function containsObviousMutation(command: string): boolean {
         invocation.operation !== "branch" &&
         invocation.operation !== "worktree" &&
         invocation.operation !== "config" &&
-        !gitReadOperations.has(invocation.operation)),
+        !gitReadInvocationSafe(invocation.operation, invocation.args)),
   );
   if (normalizedMutation) return true;
   const gitMutation = new RegExp(

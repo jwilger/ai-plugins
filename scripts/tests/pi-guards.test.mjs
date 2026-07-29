@@ -234,6 +234,8 @@ test("shell classifier allows exploration while identifying direct repository mu
     "sed -i s/old/new/ README.md",
     "find . -delete",
     "rsync -a source/ destination/",
+    "git diff --output=README.md",
+    "git show --textconv HEAD:file",
   ])
     assert.equal(classifyShellCommand(command).kind, "mutation", command);
   for (const command of [
