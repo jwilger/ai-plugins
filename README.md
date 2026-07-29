@@ -29,15 +29,17 @@ user-managed MCPs that need compatibility review.
 ## Using the package (Pi — primary)
 
 Pi packages execute trusted extension code with the user's full permissions.
-Review the repository, then install it directly from Git:
+Review an exact repository commit, then install that reviewed revision directly
+from Git:
 
 ```shell
-pi install git:github.com/jwilger/ai-plugins
+pi install git:github.com/jwilger/ai-plugins@<reviewed-commit>
 ```
 
-Pin a reviewed commit with
-`pi install git:github.com/jwilger/ai-plugins@<commit>`. For development from a
-local checkout, run the clean bootstrap and install the package subdirectory:
+To opt into following future default-branch revisions without reviewing each
+one first, use `pi install git:github.com/jwilger/ai-plugins`. For development
+from a local checkout, run the clean bootstrap and install the package
+subdirectory:
 
 ```shell
 nix develop -c scripts/bootstrap-pi-package.sh

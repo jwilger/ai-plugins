@@ -16,14 +16,14 @@ releases are historical and are not a supported installation or update path.
 Install a reviewed repository revision directly from Git:
 
 ```shell
-pi install git:github.com/jwilger/ai-plugins
-pi install git:github.com/jwilger/ai-plugins@<commit>
+pi install git:github.com/jwilger/ai-plugins@<reviewed-commit>
 ```
 
-The unpinned form follows the repository's default branch when Pi updates Git
-packages. The pinned form stays on the selected commit until its source is
-changed explicitly. Update all unpinned Git packages, replace a pin, or remove
-this package with:
+The pinned form stays on the selected commit until its source is changed
+explicitly. The unpinned
+`pi install git:github.com/jwilger/ai-plugins` form instead opts into following
+future default-branch revisions without reviewing each one first. Update all
+unpinned Git packages, replace a pin, or remove this package with:
 
 ```shell
 pi update --extensions
