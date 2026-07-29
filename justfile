@@ -62,7 +62,7 @@ tiber-release-all:
 
 # Mutation gate for the pure tiber core.
 tiber-mutants:
-    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --package tiber-core --test-workspace true
+    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --jobs 1 --minimum-test-timeout 60 --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --package tiber-core --test-workspace true
 
 # Ensure the tiber release plan names every bundled v1 binary target.
 tiber-release-manifest:
