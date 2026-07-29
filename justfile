@@ -33,7 +33,7 @@ tiber-rust:
 development-discipline-rust:
     CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
     CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml -- --test-threads=1
 
 development-discipline-release-complete:
     cd plugins/development-system/components/development-discipline && sha256sum --check release-binaries.sha256
