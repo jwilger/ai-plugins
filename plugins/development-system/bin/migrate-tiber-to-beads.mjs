@@ -315,8 +315,10 @@ function main(argv) {
   const inferredPrefix = path
     .basename(project)
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 20)
+    .replace(/-+$/g, "");
   const prefix = selected.prefix ?? (inferredPrefix || "beads");
   const trackedStatus = git(project, ["status", "--porcelain=v1", "--untracked-files=no"]);
   if (selected.mode === "apply" && trackedStatus)
