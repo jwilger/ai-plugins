@@ -1,4 +1,12 @@
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
+import {
+  consumeReviewEvent,
+  initialReviewEventState,
+  refreshReviewProgress,
+  type ReviewEventState,
+  type ReviewProgress,
+} from "../core/review-progress.ts";
 
 export type ReviewModelRoute = Readonly<{
   provider: string;
@@ -32,6 +40,7 @@ export type ReviewResult = Readonly<{
   status: "completed";
   result: Record<string, unknown>;
   lifecycle: ReviewChildLifecycle;
+  progress: ReviewProgress;
   attestation: Readonly<{
     model_role: string;
     fresh_context: true;
@@ -49,7 +58,18 @@ export type ReviewFailure = Readonly<{
     | "malformed-result"
     | "spawn-error";
   lifecycle: ReviewChildLifecycle;
+  progress: ReviewProgress;
   retry: string;
+}>;
+
+const MAX_PROTOCOL_LINE_BYTES = 4 * 1024 * 1024;
+const MAX_PROTOCOL_STREAM_BYTES = 64 * 1024 * 1024;
+const MAX_STDERR_BYTES = 128 * 1024;
+
+type PendingFailure = Readonly<{
+  code: string;
+  reason: ReviewFailure["reason"];
+  state: ReviewChildLifecycle["state"];
 }>;
 
 export class ReviewChildError extends Error {
@@ -136,11 +156,36 @@ export async function runReviewChild(
     signal?: AbortSignal;
     piBinary?: string;
     timeoutMs?: number;
+    terminationGraceMs?: number;
+    progressIntervalMs?: number;
+    progressThrottleMs?: number;
+    protocolLineLimitBytes?: number;
+    protocolStreamLimitBytes?: number;
+    stderrLimitBytes?: number;
+    onProgress?: (progress: ReviewProgress) => void;
   }>,
 ): Promise<ReviewResult> {
   const piBinary =
     options.piBinary ?? process.env.DEVELOPMENT_SYSTEM_PI_BIN ?? "pi";
   const timeoutMs = options.timeoutMs ?? 10 * 60_000;
+  const terminationGraceMs = Math.max(10, options.terminationGraceMs ?? 1_000);
+  const progressIntervalMs = Math.max(10, options.progressIntervalMs ?? 1_000);
+  const progressThrottleMs =
+    options.progressThrottleMs === 0
+      ? 0
+      : Math.max(10, options.progressThrottleMs ?? 250);
+  const protocolLineLimitBytes = Math.max(
+    1,
+    options.protocolLineLimitBytes ?? MAX_PROTOCOL_LINE_BYTES,
+  );
+  const protocolStreamLimitBytes = Math.max(
+    1,
+    options.protocolStreamLimitBytes ?? MAX_PROTOCOL_STREAM_BYTES,
+  );
+  const stderrLimitBytes = Math.max(
+    1,
+    options.stderrLimitBytes ?? MAX_STDERR_BYTES,
+  );
   const prompt = `${options.assignment.assignment}\n\nReturn only one JSON object matching the coordinator assignment. Do not use parent conversation state.`;
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
@@ -155,6 +200,8 @@ export async function runReviewChild(
         "--thinking",
         options.route.thinking,
         "--no-session",
+        "--mode",
+        "json",
         "--print",
         prompt,
       ],
@@ -164,13 +211,24 @@ export async function runReviewChild(
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    let stdout = "";
+    const stdoutDecoder = new StringDecoder("utf8");
+    let stdoutBuffer = "";
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let settled = false;
     let terminationRequested = false;
     let exitCode: number | null = null;
     let exitSignal: string | null = null;
+    let eventState: ReviewEventState = initialReviewEventState();
+    let pendingFailure: PendingFailure | null = null;
+    const readPendingFailure = (): PendingFailure | null => pendingFailure;
+    let forceKillTimer: NodeJS.Timeout | undefined;
+    let timeoutTimer: NodeJS.Timeout | undefined;
+    let progressTimer: NodeJS.Timeout | undefined;
+    let progressFlushTimer: NodeJS.Timeout | undefined;
+    let lastProgressEmittedAt = 0;
+    let flushFinalProgress: () => void = () => {};
+
     const lifecycle = (
       state: ReviewChildLifecycle["state"],
     ): ReviewChildLifecycle => {
@@ -188,17 +246,6 @@ export async function runReviewChild(
         stderrBytes,
       };
     };
-    const stop = () => {
-      terminationRequested = true;
-      if (child.killed) return;
-      if (process.platform !== "win32" && child.pid) {
-        try {
-          process.kill(-child.pid, "SIGTERM");
-        } catch {
-          child.kill("SIGTERM");
-        }
-      } else child.kill("SIGTERM");
-    };
     const failure = (
       code: string,
       reason: ReviewFailure["reason"],
@@ -209,69 +256,264 @@ export async function runReviewChild(
         code,
         reason,
         lifecycle: lifecycle(state),
+        progress: eventState.progress,
         retry: retryFor(reason),
       });
-    const timer = setTimeout(() => {
-      stop();
-      finish(
-        failure(
-          "development_system.review_child_timeout",
-          "timeout",
-          "timed-out",
-        ),
-      );
-    }, timeoutMs);
+    const signalProcessGroup = (signal: NodeJS.Signals) => {
+      terminationRequested = true;
+      if (process.platform !== "win32" && child.pid) {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch {
+          // The child may have exited between observation and signaling.
+        }
+      }
+      try {
+        child.kill(signal);
+      } catch {
+        // Close/error remains the authoritative process boundary.
+      }
+    };
+    const processGroupExists = () => {
+      if (process.platform === "win32" || !child.pid) return false;
+      try {
+        process.kill(-child.pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const waitForProcessGroupExit = async () => {
+      const deadline = Date.now() + terminationGraceMs;
+      while (processGroupExists() && Date.now() < deadline) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+      }
+      return !processGroupExists();
+    };
+    const closeRemainingProcessGroup = async (forceImmediately: boolean) => {
+      if (!processGroupExists()) return true;
+      signalProcessGroup(forceImmediately ? "SIGKILL" : "SIGTERM");
+      if (await waitForProcessGroupExit()) return true;
+      signalProcessGroup("SIGKILL");
+      return waitForProcessGroupExit();
+    };
     const finish = (error?: Error) => {
       if (settled) return;
+      flushFinalProgress();
       settled = true;
-      clearTimeout(timer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (progressTimer) clearInterval(progressTimer);
+      if (progressFlushTimer) clearTimeout(progressFlushTimer);
       options.signal?.removeEventListener("abort", aborted);
       if (error) reject(error);
     };
+    const requestTermination = (
+      code: string,
+      reason: ReviewFailure["reason"],
+      state: ReviewChildLifecycle["state"],
+    ) => {
+      if (settled || pendingFailure) return;
+      pendingFailure = { code, reason, state };
+      signalProcessGroup("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        if (!settled) signalProcessGroup("SIGKILL");
+      }, terminationGraceMs);
+    };
     const aborted = () => {
-      stop();
-      finish(
-        failure(
-          "development_system.review_child_cancelled",
-          "parent-abort",
-          "cancelled",
-        ),
+      requestTermination(
+        "development_system.review_child_cancelled",
+        "parent-abort",
+        "cancelled",
       );
     };
+    const publishProgress = () => {
+      lastProgressEmittedAt = Date.now();
+      try {
+        options.onProgress?.(eventState.progress);
+      } catch {
+        // Parent rendering failures do not alter child execution or evidence.
+      }
+    };
+    const emitProgress = (force = false) => {
+      if (!options.onProgress) return;
+      const elapsed = Date.now() - lastProgressEmittedAt;
+      if (
+        force ||
+        progressThrottleMs === 0 ||
+        lastProgressEmittedAt === 0 ||
+        elapsed >= progressThrottleMs
+      ) {
+        if (progressFlushTimer) clearTimeout(progressFlushTimer);
+        progressFlushTimer = undefined;
+        publishProgress();
+        return;
+      }
+      if (!progressFlushTimer) {
+        progressFlushTimer = setTimeout(() => {
+          progressFlushTimer = undefined;
+          if (!settled) publishProgress();
+        }, progressThrottleMs - elapsed);
+      }
+    };
+    flushFinalProgress = () => emitProgress(true);
+
+    timeoutTimer = setTimeout(() => {
+      requestTermination(
+        "development_system.review_child_timeout",
+        "timeout",
+        "timed-out",
+      );
+    }, timeoutMs);
+    progressTimer = setInterval(() => {
+      if (settled || pendingFailure) return;
+      eventState = refreshReviewProgress(
+        eventState,
+        Math.max(0, Date.now() - started),
+      );
+      emitProgress();
+    }, progressIntervalMs);
     if (options.signal?.aborted) aborted();
     else options.signal?.addEventListener("abort", aborted, { once: true });
-    child.stdout.on("data", (chunk: Buffer) => {
-      const text = chunk.toString("utf8");
-      stdout += text;
-      stdoutBytes += Buffer.byteLength(text);
-      if (stdoutBytes > 50 * 1024) {
-        stop();
-        finish(
-          failure(
-            "development_system.review_child_output_limit",
-            "output-limit",
-            "output-limited",
-          ),
+
+    const processEventLine = (line: string) => {
+      if (!line.trim() || settled || pendingFailure) return;
+      let event: unknown;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        requestTermination(
+          "development_system.review_child_result_malformed",
+          "malformed-result",
+          "malformed-result",
         );
+        return;
+      }
+      const update = consumeReviewEvent(
+        eventState,
+        event,
+        Math.max(0, Date.now() - started),
+      );
+      eventState = update.state;
+      if (update.progressChanged) emitProgress();
+      if (eventState.outputLimited) {
+        requestTermination(
+          "development_system.review_child_output_limit",
+          "output-limit",
+          "output-limited",
+        );
+      }
+    };
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (settled || pendingFailure) return;
+      const text = stdoutDecoder.write(chunk);
+      stdoutBytes += chunk.byteLength;
+      stdoutBuffer += text;
+      if (
+        stdoutBytes > protocolStreamLimitBytes ||
+        Buffer.byteLength(stdoutBuffer, "utf8") > protocolLineLimitBytes
+      ) {
+        requestTermination(
+          "development_system.review_child_output_limit",
+          "output-limit",
+          "output-limited",
+        );
+        return;
+      }
+      let newline = stdoutBuffer.indexOf("\n");
+      while (newline >= 0 && !settled && !pendingFailure) {
+        const line = stdoutBuffer.slice(0, newline).replace(/\r$/, "");
+        stdoutBuffer = stdoutBuffer.slice(newline + 1);
+        processEventLine(line);
+        newline = stdoutBuffer.indexOf("\n");
       }
     });
     child.stderr.on("data", (chunk: Buffer) => {
+      if (settled || pendingFailure) return;
       stderrBytes += chunk.byteLength;
+      if (stderrBytes > stderrLimitBytes) {
+        requestTermination(
+          "development_system.review_child_output_limit",
+          "output-limit",
+          "output-limited",
+        );
+      }
     });
-    child.on("error", () =>
+    child.on("exit", () => {
+      if (settled || pendingFailure || !processGroupExists()) return;
+      signalProcessGroup("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        if (!settled && processGroupExists()) signalProcessGroup("SIGKILL");
+      }, terminationGraceMs);
+    });
+    child.on("error", () => {
+      const requested = pendingFailure;
       finish(
-        failure(
-          "development_system.review_child_spawn_failed",
-          "spawn-error",
-          "spawn-failed",
-        ),
-      ),
-    );
-    child.on("close", (code, signal) => {
+        requested
+          ? failure(requested.code, requested.reason, requested.state)
+          : failure(
+              "development_system.review_child_spawn_failed",
+              "spawn-error",
+              "spawn-failed",
+            ),
+      );
+    });
+    child.on("close", async (code, signal) => {
       exitCode = code;
       exitSignal = signal;
       if (settled) return;
-      if (code !== 0) {
+      eventState = refreshReviewProgress(
+        eventState,
+        Math.max(0, Date.now() - started),
+      );
+      const processGroupClosed = await closeRemainingProcessGroup(
+        pendingFailure !== null,
+      );
+      if (settled) return;
+      if (!processGroupClosed) {
+        finish(
+          failure(
+            "development_system.review_child_process_group_not_closed",
+            "provider-exit",
+            "provider-failed",
+          ),
+        );
+        return;
+      }
+      if (pendingFailure) {
+        const requested = pendingFailure;
+        finish(failure(requested.code, requested.reason, requested.state));
+        return;
+      }
+      stdoutBuffer += stdoutDecoder.end();
+      if (stdoutBuffer.trim())
+        processEventLine(stdoutBuffer.replace(/\r$/, ""));
+      const requestedAfterFinalLine = readPendingFailure();
+      if (requestedAfterFinalLine) {
+        finish(
+          failure(
+            requestedAfterFinalLine.code,
+            requestedAfterFinalLine.reason,
+            requestedAfterFinalLine.state,
+          ),
+        );
+        return;
+      }
+      if (eventState.progress.state !== "settled") {
+        const settledUpdate = consumeReviewEvent(
+          eventState,
+          { type: "agent_settled" },
+          Math.max(0, Date.now() - started),
+        );
+        eventState = settledUpdate.state;
+        emitProgress();
+      }
+      if (
+        code !== 0 ||
+        eventState.terminalStopReason === "error" ||
+        eventState.terminalStopReason === "aborted"
+      ) {
         finish(
           failure(
             "development_system.review_child_provider_failed",
@@ -281,9 +523,19 @@ export async function runReviewChild(
         );
         return;
       }
+      if (eventState.outputLimited) {
+        finish(
+          failure(
+            "development_system.review_child_output_limit",
+            "output-limit",
+            "output-limited",
+          ),
+        );
+        return;
+      }
       let result: unknown;
       try {
-        result = JSON.parse(stdout.trim());
+        result = JSON.parse(eventState.finalText ?? "");
       } catch {
         finish(
           failure(
@@ -309,6 +561,7 @@ export async function runReviewChild(
         status: "completed",
         result: result as Record<string, unknown>,
         lifecycle: lifecycle("completed"),
+        progress: eventState.progress,
         attestation: {
           model_role: options.assignment.modelRole,
           fresh_context: true,

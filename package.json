@@ -1,6 +1,6 @@
 {
   "name": "ai-plugins",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "private": true,
   "description": "Git-installable Pi facade for the development-system multi-harness marketplace.",
   "repository": {

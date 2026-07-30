@@ -237,30 +237,47 @@ Registered-worktree status commands and the checkout guard script are admitted
 as bounded discovery. When a linked logical workspace is active, repository
 mutations, status, guards, review children, and bridged component tools are all
 routed through that authority rather than Pi's immutable host cwd.
-Fresh review children emit a running lifecycle update and return structured,
-non-secret cancellation, timeout, provider, output-limit, spawn, or malformed
-result diagnostics; broader streaming subagent observability remains tracked by
-Tiber ticket `20260728-9rym`.
+Fresh review children stream a bounded, redacted progress projection while they
+run. Parent tool rows show lifecycle state, heartbeat-updated elapsed time,
+aggregate turn/tool counts, active-tool count, and a known built-in tool name or
+a generic first-party/extension category. Parallel tools remain active until
+their matching completion event. The projection retains at most 20 synthetic
+events and never includes the assignment, model text, thinking, arbitrary tool
+names, tool arguments, paths, tool results, stderr, environment, auth state, or
+a raw child transcript. Event-driven parent updates are coalesced to at most
+four per second, with a final forced snapshot at process close.
+Final results and structured cancellation, timeout, provider, output-limit,
+spawn, or malformed-result failures include the same bounded progress snapshot.
+Pressing Escape interrupts the parent tool call. Cancellation and timeout send
+`SIGTERM`, escalate a resistant process group to `SIGKILL`, and wait for the
+child close boundary before reporting failure. Successful and provider-failed
+root exits also check the process group and close any retained descendants
+before returning or attesting closure. The default timeout remains ten minutes.
+
+The implementation uses Pi's JSON lifecycle stream and adds no third-party
+runtime dependency. The repository's
+[sourced design comparison](https://github.com/jwilger/ai-plugins/blob/main/docs/research/pi-subagent-observability.md)
+records the selected reference and supply-chain analysis.
 
 ## Capability matrix
 
-| Capability                          | Pi (primary)                                                 | Claude Code (secondary)       | Codex (tertiary)              |
-| ----------------------------------- | ------------------------------------------------------------ | ----------------------------- | ----------------------------- |
-| Eight shared public skills          | Canonical files                                              | Same canonical files          | Same canonical files          |
-| Setup/doctor core                   | Native command/tool and CLI                                  | Hook/CLI adapter              | Hook/CLI adapter              |
-| Trusted consequential approval      | Local TUI, preview-bound                                     | Unavailable                   | Unavailable                   |
-| Bounded autonomous goal mode        | Session-scoped `/goal` with guarded terminal tools           | Unavailable                   | Unavailable                   |
-| Worktree discovery/bootstrap        | Semantic list/create plus session-persistent logical routing | Hook/skill adapter            | Hook/skill adapter            |
-| Generic write/edit worktree guard   | Extension event-enforced                                     | Hook-enforced where supported | Hook-enforced where supported |
-| Default model bash guard            | Extension event-enforced in TUI/print/JSON model-tool paths  | Instruction/hook boundary     | Instruction/hook boundary     |
-| Direct RPC bash                     | Unsupported for guarded execution                            | N/A                           | N/A                           |
-| Protected metadata/secret paths     | Guarded built-in path tools; search output mediated          | Instruction/hook limits       | Instruction/hook limits       |
-| Delivery-mode and force-push policy | Extension event-enforced                                     | Hook/command-enforced         | Hook/command-enforced         |
-| Tiber CI-recovery hold              | Extension event plus authoritative Tiber state               | Hook/skill plus Tiber state   | Hook/skill plus Tiber state   |
-| Tiber tools                         | Feature-aware native Pi bridge                               | Plugin MCP                    | Plugin MCP                    |
-| Final-review coordinator            | Native Pi bridge to authoritative Rust MCP                   | Plugin MCP                    | Plugin MCP                    |
-| Fresh final-review children         | Isolated children with lifecycle and failure diagnostics     | Harness agents                | Harness agents                |
-| Agent definitions                   | Canonical source with generated adapter                      | Generated Markdown            | Generated TOML                |
+| Capability                          | Pi (primary)                                                          | Claude Code (secondary)       | Codex (tertiary)              |
+| ----------------------------------- | --------------------------------------------------------------------- | ----------------------------- | ----------------------------- |
+| Eight shared public skills          | Canonical files                                                       | Same canonical files          | Same canonical files          |
+| Setup/doctor core                   | Native command/tool and CLI                                           | Hook/CLI adapter              | Hook/CLI adapter              |
+| Trusted consequential approval      | Local TUI, preview-bound                                              | Unavailable                   | Unavailable                   |
+| Bounded autonomous goal mode        | Session-scoped `/goal` with guarded terminal tools                    | Unavailable                   | Unavailable                   |
+| Worktree discovery/bootstrap        | Semantic list/create plus session-persistent logical routing          | Hook/skill adapter            | Hook/skill adapter            |
+| Generic write/edit worktree guard   | Extension event-enforced                                              | Hook-enforced where supported | Hook-enforced where supported |
+| Default model bash guard            | Extension event-enforced in TUI/print/JSON model-tool paths           | Instruction/hook boundary     | Instruction/hook boundary     |
+| Direct RPC bash                     | Unsupported for guarded execution                                     | N/A                           | N/A                           |
+| Protected metadata/secret paths     | Guarded built-in path tools; search output mediated                   | Instruction/hook limits       | Instruction/hook limits       |
+| Delivery-mode and force-push policy | Extension event-enforced                                              | Hook/command-enforced         | Hook/command-enforced         |
+| Tiber CI-recovery hold              | Extension event plus authoritative Tiber state                        | Hook/skill plus Tiber state   | Hook/skill plus Tiber state   |
+| Tiber tools                         | Feature-aware native Pi bridge                                        | Plugin MCP                    | Plugin MCP                    |
+| Final-review coordinator            | Native Pi bridge to authoritative Rust MCP                            | Plugin MCP                    | Plugin MCP                    |
+| Fresh final-review children         | Isolated children with redacted live progress and failure diagnostics | Harness agents                | Harness agents                |
+| Agent definitions                   | Canonical source with generated adapter                               | Generated Markdown            | Generated TOML                |
 
 The populated-secret claim covers the characterized built-in guarded tool
 composition. It does not claim protection from an intentionally unmediated

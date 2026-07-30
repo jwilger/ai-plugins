@@ -1015,6 +1015,27 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           cwd: projectCwd(context.cwd),
           route,
           signal,
+          onProgress: (progress) => {
+            const elapsedSeconds = Math.floor(progress.elapsedMs / 1_000);
+            const activity = progress.currentTool
+              ? `${progress.state} ${progress.currentTool}`
+              : progress.state;
+            onUpdate?.({
+              content: [
+                {
+                  type: "text",
+                  text: `Fresh child ${activity} · ${progress.turns} turn(s) · ${progress.toolCalls} tool call(s) · ${progress.activeToolCount} active · ${elapsedSeconds}s`,
+                },
+              ],
+              details: {
+                status: "running",
+                state: progress.state,
+                modelRole: parameters.model_role,
+                currentTool: progress.currentTool,
+                progress,
+              },
+            });
+          },
         });
         return {
           content: [{ type: "text", text: JSON.stringify(result) }],

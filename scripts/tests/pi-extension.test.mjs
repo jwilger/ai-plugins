@@ -955,7 +955,7 @@ test("review assignment tool returns structured cancellation evidence to its par
       (update) => updates.push(update),
       { cwd: project },
     );
-    assert.equal(updates.length, 1);
+    assert.ok(updates.length >= 1);
     assert.equal(updates[0].details.state, "starting-fresh-child");
     assert.match(updates[0].content[0].text, /"status":"running"/);
     assert.equal(result.details.status, "failed");
@@ -966,6 +966,72 @@ test("review assignment tool returns structured cancellation evidence to its par
     assert.equal(result.details.lifecycle.state, "cancelled");
     assert.equal(result.details.reason, "parent-abort");
     assert.match(result.content[0].text, /terminationRequested/);
+  } finally {
+    if (previous === undefined) delete process.env.DEVELOPMENT_SYSTEM_PI_BIN;
+    else process.env.DEVELOPMENT_SYSTEM_PI_BIN = previous;
+  }
+});
+
+test("review assignment tool streams redacted child progress to its parent", async () => {
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk", false),
+  );
+  const child = path.join(project, "pi-child-fixture");
+  const events = [
+    { type: "agent_start" },
+    {
+      type: "tool_execution_start",
+      toolCallId: "tool-1",
+      toolName: "read",
+      args: { path: "/private/client/secret.txt" },
+    },
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: '{"status":"clean"}' }],
+        stopReason: "stop",
+      },
+    },
+    { type: "agent_settled" },
+  ];
+  fs.writeFileSync(
+    child,
+    `#!/usr/bin/env bash\n${events
+      .map(
+        (event, index) =>
+          `printf '%s\\n' '${JSON.stringify(event)}'${index === 1 ? "\nsleep 0.3" : ""}`,
+      )
+      .join("\n")}\n`,
+  );
+  fs.chmodSync(child, 0o755);
+  const previous = process.env.DEVELOPMENT_SYSTEM_PI_BIN;
+  process.env.DEVELOPMENT_SYSTEM_PI_BIN = child;
+  const updates = [];
+  try {
+    const tool = registrations.tools.find(
+      (candidate) =>
+        candidate.name === "development_system_run_review_assignment",
+    );
+    const result = await tool.execute(
+      "review",
+      { assignment: "Inspect the bounded scope", model_role: "bounded-helper" },
+      undefined,
+      (update) => updates.push(update),
+      { cwd: project, mode: "json" },
+    );
+    assert.equal(result.details.status, "completed");
+    assert.ok(
+      updates.some((update) => update.details.state === "tool-running"),
+    );
+    assert.ok(updates.some((update) => update.details.currentTool === "read"));
+    const observable = JSON.stringify(updates);
+    assert.equal(observable.includes("/private/client/secret.txt"), false);
+    assert.equal(observable.includes("Inspect the bounded scope"), false);
   } finally {
     if (previous === undefined) delete process.env.DEVELOPMENT_SYSTEM_PI_BIN;
     else process.env.DEVELOPMENT_SYSTEM_PI_BIN = previous;
