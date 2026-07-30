@@ -24,12 +24,10 @@ teardown() {
       path: "./plugins/development-system",
       extension: "./extensions/development-system/index.ts",
       skills: [
-        "agentic-systems", "delivery", "development-workflow",
-        "engineering-standards", "eval-case-reporting", "setup", "tasks", "worktrees"
+        "agentic-systems", "beads", "delivery", "development-workflow",
+        "engineering-standards", "eval-case-reporting", "setup", "worktrees"
       ],
-      componentEntrypoints: [
-        "./bin/development-discipline-mcp", "./bin/tiber"
-      ]
+      componentEntrypoints: ["./bin/development-discipline-mcp"]
     }]
   ' "$REPO_ROOT/.agents/plugins/pi-support.json"
   [ "$status" -eq 0 ]

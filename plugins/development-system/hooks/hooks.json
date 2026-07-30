@@ -8,6 +8,11 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/development-system\" session-start --project \"$PWD\" --harness claude",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bd prime --hook-json",
+            "timeout": 15
           }
         ]
       }

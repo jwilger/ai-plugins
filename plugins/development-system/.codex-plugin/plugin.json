@@ -1,19 +1,26 @@
 {
   "name": "development-system",
-  "version": "1.9.0",
-  "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
+  "version": "1.10.0",
+  "description": "John's consolidated development workflow with Beads and Dolt, engineering standards, worktrees, review, and agentic-system tooling.",
   "author": {
     "name": "John Wilger",
     "email": "john@johnwilger.com"
   },
   "license": "AGPL-3.0-or-later",
-  "keywords": ["development", "workflow", "worktrees", "tiber", "quality"],
+  "keywords": [
+    "development",
+    "workflow",
+    "worktrees",
+    "beads",
+    "dolt",
+    "quality"
+  ],
   "mcpServers": "./.mcp.json",
   "hooks": "./hooks/codex.json",
   "interface": {
     "displayName": "Development System",
     "shortDescription": "One configured development workflow for Codex and Claude Code.",
-    "longDescription": "Use Development System for John's consolidated development discipline, engineering standards, worktree isolation, Tiber coordination, final review, and optional agentic-system workflows.",
+    "longDescription": "Use Development System for John's consolidated development discipline, Beads and Dolt workflow coordination, engineering standards, worktree isolation, final review, and optional agentic-system workflows.",
     "developerName": "John Wilger",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],

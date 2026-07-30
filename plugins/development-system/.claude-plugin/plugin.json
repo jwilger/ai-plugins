@@ -1,11 +1,18 @@
 {
   "name": "development-system",
-  "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
-  "version": "1.9.0",
+  "description": "John's consolidated development workflow with Beads and Dolt, engineering standards, worktrees, review, and agentic-system tooling.",
+  "version": "1.10.0",
   "author": {
     "name": "John Wilger",
     "email": "john@johnwilger.com"
   },
   "license": "AGPL-3.0-or-later",
-  "keywords": ["development", "workflow", "worktrees", "tiber", "quality"]
+  "keywords": [
+    "development",
+    "workflow",
+    "worktrees",
+    "beads",
+    "dolt",
+    "quality"
+  ]
 }

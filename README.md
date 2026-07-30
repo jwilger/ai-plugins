@@ -11,9 +11,12 @@ This marketplace has one audience and one installable plugin:
 recommended surface, Claude Code is secondary, and Codex is tertiary. They use
 one project configuration and the same eight physical skill files.
 
-The default preset is direct-to-trunk delivery with linked worktrees and Tiber.
+The default preset is direct-to-trunk delivery with linked worktrees and Beads
+using its Dolt backend. Development-system installs delivery, behavior-driven
+testing, documentation, CI-workflow, validation-only, and CI-recovery formulas.
 Optional agentic-system and eval-reporting capabilities are selected in
-`.development-system.toml`; the plugin owns its bundled MCP surface.
+`.development-system.toml`; the plugin owns its final-review MCP surface while
+Beads is driven directly through `bd`.
 
 The strong recommendation is to install only `development-system`. Additional
 plugin marketplaces expand the supply-chain trust surface. Each SessionStart
@@ -24,7 +27,7 @@ user-managed MCPs for the harness that is starting.
 
 | Plugin                                                     | Harnesses              | Description                                                         | Version |
 | ---------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.9.0   |
+| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.10.0  |
 
 ## Using the package (Pi — primary)
 
@@ -247,12 +250,11 @@ Promptfoo's separate `mcp` provider is for testing MCP servers as systems under
 test and should be added only when a plugin or project exposes an MCP server to
 evaluate.
 
-If Codex reports `No such file or directory` for the `promptfoo` or `tiber` MCP
-client at startup, upgrade or reinstall the marketplace plugins so Codex loads
-`agentic-systems-engineering` `0.1.4` or newer and `tiber` `0.5.0` or newer.
-For Claude Code, reinstall or upgrade `tiber` to `0.5.0` or newer if its bundled
-MCP server cannot resolve. Those manifests bootstrap through an absolute
-`/bin/sh` launcher before resolving the bundled plugin command.
+If Codex reports `No such file or directory` for the optional `promptfoo` MCP
+client at startup, upgrade or reinstall the marketplace plugin so Codex loads a
+current `agentic-systems-engineering` component. Beads is intentionally not an
+MCP server in this marketplace: install `bd >= 1.0.0` and let the plugin hooks
+load `bd prime` directly.
 
 ## Reporting eval cases
 

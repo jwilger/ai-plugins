@@ -1,97 +1,57 @@
-# ADR-0002: Coordinate pushed-CI recovery through one fenced incident
+# ADR-0002: Coordinate pushed-CI recovery through Beads
 
 ## Status
 
-Accepted
-
-## Date
-
-2026-07-25
+Accepted (revised 2026-07-30)
 
 ## Context
 
-Several agents and worktrees can observe the same terminal pushed-CI failure.
-Without shared ownership, they can concurrently diagnose from different logs,
-push incompatible repairs, rerun different revisions, or let a newer green run
-mask an unresolved failure. A local handoff note is not sufficient across
-worktrees or sessions.
-
-The existing Tiber task board is shared Git state but task ownership is too
-coarse for the short, safety-critical recovery window. Recovery needs one
-owner, fencing against stale owners, a bounded recovery path, and a durable
-release condition.
+Several agents and worktrees can observe the same unexpected terminal pushed-CI
+failure. Independent diagnosis, repair pushes, or reruns can conflict, while a
+newer green run can mask the unresolved failure. The repository now uses Beads
+with Dolt for shared task and workflow state and should not maintain a second
+incident protocol.
 
 ## Decision
 
-Store one active CI-recovery incident in a dedicated remote
-`tiber-coordination` branch. Every agent that sees a terminal failed pushed run
-must claim or join it before acting. The claim grants one owner a 60-minute,
-epoch-fenced lease; all other agents wait in bounded intervals unless the owner
-assigns inspect, reproduce, edit, or test work. Helpers cannot push, rerun,
-or choose a recovery action; proof closure is not a helper assignment.
+Represent recovery as one P0 Beads issue poured from the `ci-recovery` formula
+and labeled `development-system:ci-recovery`. Claim the issue atomically and
+acquire the project merge slot before selecting a recovery action. All other
+sessions pause unrelated work.
 
-The owner records the failed SHA/run, exact job and step, a bounded explicitly
-sanitized log summary or authoritative-log reference, causal explanation, and
-classification. It selects exactly one action: a causal repair or unchanged-SHA
-rerun. It heartbeats roughly every 15 minutes, may transfer ownership
-explicitly, and can be replaced only after lease expiry. Cross-host clocks are
-expected to be reasonably synchronized; agents do not take over on a marginal
-timestamp boundary. A failed
-replacement remains in the same incident as the next failure record. Any joined
-participant may record exact matching replacement-run proof with terminal
-success; it is the only repository-wide hold release and does not grant owner
-authority.
+The molecule records the failed SHA and run, exact job and step, bounded
+sanitized evidence, causal diagnosis, classification, selected action, and
+replacement identity. The owner chooses exactly one tested causal repair or an
+unchanged-SHA rerun. Helpers may inspect, reproduce, edit, or test only through
+an explicit bounded assignment; they do not independently push, rerun, select
+an action, or release the hold.
 
-The coordination client fetches and compares the remote branch, publishes only
-normal fast-forward updates, and retries after concurrent updates. It never
-force-pushes. If Tiber or the remote is unavailable, recovery fails closed:
-agents retain the hold and restore shared coordination before choosing an
-action, pushing, rerunning, or releasing.
+The workflow's CI gate closes only for exact terminal-success proof. The owner
+then closes the recovery issue, releases the merge slot, and pushes Dolt state.
+Queued, running, canceled, and failed outcomes retain the hold. If Beads or its
+Dolt remote is unavailable, preserve the hold and restore shared coordination
+before action.
+
+An expected failure generated while testing an active `ci-workflow-slice` is
+related test evidence, not a separate incident.
+
+This replaces the former custom fenced-lease implementation. The simpler Beads
+claim, merge slot, molecule, gate, and Dolt history are the authoritative shared
+primitives.
 
 ## Consequences
 
-### Positive
+- Recovery uses the same synchronized dependency graph and audit history as
+  other work.
+- The package deletes substantial custom incident, MCP, and Git-branch code.
+- Beads claims do not reproduce the former epoch lease. Merge-slot ownership and
+  explicit handoff are therefore mandatory operating rules.
+- Remote unavailability can delay recovery, but private notes never become
+  authority.
 
-- One durable owner makes the repair-versus-rerun decision from shared evidence.
-- Epochs prevent a timed-out or transferred owner from acting after replacement.
-- Bounded helper work preserves useful parallelism without concurrent release
-  or mutation authority.
-- Terminal-success proof prevents nonterminal or unrelated runs from releasing
-  the hold.
+## Alternatives
 
-### Negative
-
-- A transient remote outage blocks recovery mutations and may delay a repair.
-- Agents must report enough incident data to make ownership and takeover
-  auditable.
-- The separate branch adds operational state alongside the task-board branch.
-
-## Alternatives Considered
-
-### Independent per-worktree recovery
-
-Rejected because concurrent reruns and repairs race, and local notes cannot
-fence stale sessions or establish a single release condition.
-
-### Use the task board alone
-
-Rejected because task transitions do not model a short lease, owner epoch,
-replacement-run evidence, or safe expiry takeover.
-
-### Permit force-push conflict resolution
-
-Rejected because it can discard a newer incident update and reauthorize stale
-ownership. Normal fast-forward compare-and-retry preserves the authoritative
-state.
-
-## Revisit when
-
-The repository adopts a trusted central incident service with equivalent
-compare-and-swap, fencing, audit history, and an availability model that can
-replace the Git coordination branch.
-
-## Related
-
-- ADR-0001
-- `plugins/development-system/components/development-discipline/skills/ci-failure-follow-up/SKILL.md`
-- `plugins/development-system/components/tiber/skills/tiber/SKILL.md`
+Independent recovery remains unsafe. A separate custom incident service would
+restore lease fencing but would duplicate Beads and recreate the maintenance
+burden this decision removes. Force-pushing shared task state remains
+prohibited.

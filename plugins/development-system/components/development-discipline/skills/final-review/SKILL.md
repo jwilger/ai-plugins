@@ -107,7 +107,7 @@ and supplies a concrete causal prerequisite—not administrative review ordering
 For already-landed work, broadness authorizes retrospective review batching
 only. It does not authorize delivery decomposition, tracker tickets, or a
 review-only branch. Never manufacture or push synthetic review-only branches,
-create recursive split tickets, or use Tiber `blocks` relationships for
+create recursive split tickets, or use Beads `blocks` relationships for
 administrative review. Review batches stay inside the original work item; only
 a concrete unresolved defect or unfinished independently deliverable change may
 become a follow-up ticket.
@@ -303,7 +303,7 @@ actual acceptance criterion; disposition is not permission to omit required
 behavior.
 
 When the review is for a tracked ticket, pass its stable tracker ID as
-`work_item_id` to `final_review.plan` (for example, the active Tiber task ID).
+`work_item_id` to `final_review.plan` (for example, the active Beads task ID).
 The coordinator stores one current SQLite snapshot per worktree and
 work item in user state (`$XDG_STATE_HOME`, or `~/.local/state` as fallback),
 not in the reviewed repository or in per-session files. Each completed review

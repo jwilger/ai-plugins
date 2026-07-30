@@ -7,18 +7,15 @@
       "extension": "./extensions/development-system/index.ts",
       "skills": [
         "agentic-systems",
+        "beads",
         "delivery",
         "development-workflow",
         "engineering-standards",
         "eval-case-reporting",
         "setup",
-        "tasks",
         "worktrees"
       ],
-      "componentEntrypoints": [
-        "./bin/development-discipline-mcp",
-        "./bin/tiber"
-      ]
+      "componentEntrypoints": ["./bin/development-discipline-mcp"]
     }
   ]
 }

@@ -257,7 +257,7 @@ switch (compositionCase) {
     byMode("development-system").plugins = [];
     break;
   case "no_plugins_nonempty":
-    byMode("no-plugins").plugins = ["tiber"];
+    byMode("no-plugins").plugins = ["beads"];
     break;
   case "unknown_provider":
     byMode("development-system").provider = "unknown:provider";
@@ -281,7 +281,7 @@ switch (compositionCase) {
     ];
     break;
   case "unsorted_plugins":
-    byMode("development-system").plugins = ["tiber", "advisor"];
+    byMode("development-system").plugins = ["beads", "advisor"];
     break;
   case "invalid_plugin_name":
     byMode("development-system").plugins = ["Development-System"];

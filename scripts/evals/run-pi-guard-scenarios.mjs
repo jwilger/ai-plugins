@@ -31,19 +31,19 @@ function createRepository() {
   fs.writeFileSync(path.join(project, "README.md"), "Pi guard fixture\n");
   fs.writeFileSync(
     path.join(project, ".development-system.toml"),
-    `schema_version = 1
+    `schema_version = 2
 [delivery]
 mode = "local-only"
 trunk_branch = "main"
 [features]
 worktrees = true
-tiber = false
+beads = false
 agentic_systems = false
 eval_case_reporting = false
 [worktrees]
 root = ".worktrees"
-[tiber]
-max_queued = 5
+[beads]
+workflow = "development-change-direct"
 `,
   );
   run("git", ["-C", project, "add", "."]);

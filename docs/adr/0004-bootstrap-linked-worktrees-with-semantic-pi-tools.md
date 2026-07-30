@@ -59,7 +59,7 @@ Expose current non-secret goal ID, guard epoch, status, and consumed bounds when
 a terminal call is stale. Emit review-child start progress and return structured
 lifecycle and cancellation diagnostics without stderr, environment, or auth
 content. Keep full streaming subagent observability outside this repair under
-Tiber ticket `20260728-9rym`.
+the original task record `20260728-9rym`.
 
 ## Consequences
 
@@ -112,4 +112,4 @@ and ambiguity surface and cannot return a stable structured recovery contract.
 - `docs/adr/0005-switch-pi-sessions-between-registered-worktrees.md`
 - `docs/pi-extension-prd.md`
 - `plugins/development-system/README.md`
-- Tiber ticket `20260728-9rym`
+- Original task record `20260728-9rym`

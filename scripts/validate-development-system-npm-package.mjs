@@ -35,7 +35,12 @@ const required = new Set([
   ...inventory.skills.map((skill) => `skills/${skill}/SKILL.md`),
   ...inventory.componentEntrypoints.map((entry) => entry.replace(/^\.\//, "")),
 ]);
-for (const component of ["tiber", "development-discipline"]) {
+for (const formula of fs
+  .readdirSync(path.join(packageRoot, "formulas"))
+  .filter((name) => name.endsWith(".formula.toml")))
+  required.add(`formulas/${formula}`);
+required.add("bin/migrate-tiber-to-beads.mjs");
+for (const component of ["development-discipline"]) {
   const release = JSON.parse(
     fs.readFileSync(
       path.join(packageRoot, `components/${component}/release-binaries.json`),

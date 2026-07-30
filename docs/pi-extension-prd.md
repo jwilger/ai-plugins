@@ -4,7 +4,7 @@
 - **Primary product surface:** Pi
 - **Secondary product surface:** Claude Code
 - **Tertiary product surface:** Codex
-- **Last updated:** 2026-07-27
+- **Last updated:** 2026-07-30
 - **Target repository area:** `plugins/development-system/`
 
 ## 1. Summary
@@ -19,10 +19,10 @@ Pi support will be delivered as a Pi package containing the existing public
 skills and a first-party TypeScript extension. The extension will expose native
 Pi tools, lifecycle integration, trusted user interactions, deterministic
 guardrails, and a session-scoped `/goal` command that autonomously continues
-work until explicit, verified completion. It will reuse mature Rust components
-such as Tiber and the development-discipline review coordinator through narrow,
-supervised protocol adapters rather than rewriting them solely to obtain
-in-process calls.
+work until explicit, verified completion. It uses Beads through the direct `bd` CLI and retains the mature Rust
+development-discipline review coordinator through a narrow, supervised protocol
+adapter. It does not duplicate Beads behind an MCP bridge or second task state
+machine.
 
 New orchestration and lightweight tooling will prefer TypeScript. Shared
 TypeScript capability definitions will be adaptable to Pi tools, MCP tools, and
@@ -48,14 +48,14 @@ consolidated skills:
 - `engineering-standards`
 - `eval-case-reporting`
 - `setup`
-- `tasks`
+- `beads`
 - `worktrees`
 
 The plugin also bundles component implementations and more detailed specialist
 material, including:
 
 - the development-discipline final-review coordinator;
-- Tiber task and CI-recovery tooling;
+- Beads/Dolt task, workflow-molecule, and CI-recovery coordination;
 - worktree scripts;
 - setup and compatibility diagnostics;
 - agentic-system and eval-reporting guidance;
@@ -95,10 +95,10 @@ The principal problems are:
 3. **Component boundaries are harness-oriented.** Some behavior is exposed as
    MCP or CLI commands even when Pi could invoke a library or native extension
    tool more directly.
-4. **A wholesale language rewrite would be wasteful.** Tiber and
-   development-discipline have substantial Rust implementations and test
-   coverage. Rewriting them in TypeScript only to avoid local protocol calls
-   would add risk without clear product value.
+4. **Duplicate task orchestration would be wasteful.** Beads already provides
+   Dolt-backed issues, claims, dependencies, molecules, gates, and memories.
+   Reimplementing those semantics in TypeScript or an MCP bridge would add risk
+   without clear product value.
 5. **Eval coverage omits Pi.** Existing provider-backed marketplace evals cover
    Claude Code and Codex, so they cannot establish Pi package loading,
    extension effectiveness, or deterministic guard behavior.
@@ -196,7 +196,7 @@ to support.
 
 The initial product does not aim to:
 
-1. Rewrite Tiber in TypeScript.
+1. Reimplement Beads or proxy it through a custom MCP task bridge.
 2. Rewrite the development-discipline coordinator in TypeScript.
 3. Restore the reverted event-sourced SDLC system or require a new workflow
    history branch.
@@ -229,7 +229,7 @@ Primary needs include:
 - configuring a repository safely;
 - routing work through the correct lifecycle phase;
 - working in linked worktrees when configured;
-- maintaining a bounded Tiber backlog;
+- maintaining a bounded, strictly prioritized Beads backlog;
 - receiving deterministic protection around mistakes with high recovery cost;
 - performing fresh-context, risk-proportional final review;
 - selecting the configured delivery mode without inventing authorization;
@@ -426,14 +426,14 @@ heuristics or Claude/Codex manifests.
 
 The initial bundled-component support matrix is:
 
-- x86_64 Linux with the runtime needed by the bundled Tiber GNU target;
-- aarch64 Linux with the runtime needed by the bundled Tiber GNU target;
+- x86_64 Linux with the pinned Beads and Dolt CLIs;
+- aarch64 Linux with the pinned Beads and Dolt CLIs;
 - x86_64 macOS; and
 - Apple-silicon macOS.
 
-Tiber and development-discipline may select different Rust target triples
-internally, but both required binaries must be present, executable, and verified
-for every claimed product target. Windows and other OS/architecture combinations
+Beads, Dolt, and development-discipline may use different target-specific
+artifacts internally, but all required binaries must be present, executable, and
+verified for every claimed product target. Windows and other OS/architecture combinations
 are unsupported initially and must receive a deterministic unsupported-platform
 result before a component is invoked.
 
@@ -548,7 +548,7 @@ start and update times, automatic-response count, configured limits, token
 baseline, and token usage. Reloading or reopening the same session restores an
 unfinished goal; a new session in the same directory does not inherit it.
 
-The goal state is orchestration state, not a second authority for Tiber tasks,
+The goal state is orchestration state, not a second authority for Beads tasks,
 review status, delivery policy, repository identity, or verification evidence.
 The goal-mode module must not create global per-directory state or an
 independent settings file merely to persist an active objective.
@@ -719,20 +719,21 @@ from the canonical contract. Provider-specific restrictions, including enum
 compatibility, must be covered by contract tests. Capabilities that are not
 shared with MCP are not required to adopt an MCP-shaped schema.
 
-### 10.7 Retained Rust components and MCP bridge
+### 10.7 Beads CLI and retained review MCP bridge
 
-#### FR-MCP-1 — Retain mature implementations (P0)
+#### FR-MCP-1 — Retain authoritative implementations (P0)
 
-Tiber and development-discipline remain Rust implementations for the initial Pi
-release. Their existing state, Git, locking, review, and CI-recovery semantics
-must not be reimplemented in the extension.
+Beads remains authoritative for task, dependency, workflow, claim, memory, and
+CI-recovery state through its Dolt backend. Development-discipline remains
+authoritative for final review. Neither state machine may be reimplemented in
+the extension.
 
 #### FR-MCP-2 — First-party bridge (P1)
 
-The Pi extension must be able to expose approved tools from the bundled Tiber
-and development-discipline MCP servers as Pi tools. The bridge must be limited
-to plugin-owned, explicitly configured servers; it is not a general arbitrary
-MCP loader.
+The Pi extension must use direct `bd` CLI JSON output and `bd prime` for Beads;
+it must not expose a custom Beads MCP bridge. It may expose approved tools from
+the bundled development-discipline MCP server. That bridge is limited to the
+plugin-owned, explicitly configured server.
 
 #### FR-MCP-3 — Dynamic discovery without semantic duplication (P1)
 
@@ -916,10 +917,10 @@ the minimum required contract.
 
 #### FR-DEL-4 — CI-recovery hold (P1)
 
-When Tiber records an active pushed-CI recovery incident, Pi must prevent the
-development system from claiming readiness or initiating unrelated guarded
-work. The hold ends only when Tiber's authoritative transition records terminal
-success.
+When Beads records an open P0 `development-system:ci-recovery` issue, Pi must
+prevent the development system from claiming readiness or initiating unrelated
+guarded work. The hold ends only after exact replacement-run terminal-success
+evidence is recorded and the incident closes.
 
 #### FR-DEL-5 — No MCP-only enforcement (P0)
 
@@ -993,7 +994,7 @@ repository content.
 Authoritative workflow state must remain in its owning component or project
 artifact. Extension-local session state may track ephemeral UI and invocation
 context, including the FR-GOAL-2 active objective and continuation guards, but
-must not become a second authority for Tiber, final review, delivery mode,
+must not become a second authority for Beads, final review, delivery mode,
 repository identity, or proof that goal requirements are satisfied.
 
 ### 10.13 Claude Code and Codex compatibility
@@ -1187,10 +1188,10 @@ The product consists of one package with several adapter boundaries:
                                │
                  ┌─────────────┴─────────────┐
                  │                           │
-        TypeScript capabilities      Retained Rust components
-        setup/doctor/orchestration    Tiber/development-discipline
+        TypeScript capabilities      External authorities
+        setup/doctor/orchestration    Beads/development-discipline
                  │                           │
-        Pi / MCP / CLI adapters        MCP / CLI subprocesses
+        Pi / CLI adapters              bd CLI / review MCP
 ```
 
 The architecture separates three concerns:
@@ -1217,8 +1218,7 @@ plugins/development-system/
 │       ├── capabilities/         # Shared TypeScript capability definitions
 │       └── adapters/             # Pi, MCP, CLI and process adapters
 ├── components/
-│   ├── development-discipline/   # Retained Rust coordinator and assets
-│   ├── tiber/                    # Retained Rust task system
+│   ├── development-discipline/   # Retained review coordinator and assets
 │   └── ...
 ├── agents/ or agent-sources/     # Canonical agent definitions
 ├── hooks/                        # Claude Code and Codex adapters
@@ -1295,12 +1295,13 @@ functional-core/imperative-shell and Step/Trampoline rules govern business
 logic. The capability-specific semantic states and yielded effect types should
 emerge from each vertical slice rather than from a speculative universal model.
 
-### 11.6 Rust component integration
+### 11.6 External component integration
 
-Tiber already has a library-oriented Rust workspace with CLI, MCP, Git, core,
-and server crates. It remains behind its existing supported interfaces.
+Beads is pinned as the supported `bd` CLI and uses Dolt as its source of truth.
+The extension consumes stable JSON output and lifecycle context from `bd prime`;
+it does not wrap Beads in MCP or copy its workflow state machine.
 
-Development-discipline currently has a larger binary-oriented implementation.
+Development-discipline has a larger binary-oriented implementation.
 The initial Pi integration should invoke its MCP server. A later refactor may
 extract a Rust library to improve internal testability and adapter reuse, but
 must preserve the external MCP contract during migration.
@@ -1314,7 +1315,7 @@ The Pi bridge acts as a client, not a semantic proxy. It is responsible for:
 - converting Pi cancellation and errors to protocol behavior;
 - bounding output and cleaning up the process.
 
-It is not responsible for duplicating Tiber or review state.
+It is not responsible for duplicating Beads or review state.
 
 ### 11.7 Pi lifecycle integration
 
@@ -1547,7 +1548,7 @@ rates.
 - Agent adapter files are generated or otherwise proven to derive from one
   canonical source.
 - CI detects metadata and generated-artifact drift.
-- No initial-release work rewrites Tiber or development-discipline behavior.
+- No work reimplements Beads or rewrites development-discipline behavior.
 
 ### 14.3 Effectiveness
 
@@ -1625,7 +1626,7 @@ black-box tests prove parity.
 ### Phase 4 — Retained component bridge
 
 - Add the supervised first-party MCP bridge and its tool-admission contract.
-- Expose enabled Tiber and development-discipline tools to Pi.
+- Integrate direct Beads lifecycle context and expose development-discipline tools to Pi.
 - Consolidate existing Claude Code and Codex agent definitions into one
   canonical source with generated or validated adapters.
 - Validate process lifecycle, errors, cancellation, collision handling, schema
@@ -1763,7 +1764,7 @@ provider-free lifecycle tests plus executable provider-backed completion cases.
   entry, `agent_settled`, pending-message, and active-tool APIs.
 - Node.js and the repository Nix development environment.
 - TypeBox/JSON Schema compatibility for shared TypeScript tools.
-- Existing development-discipline and Tiber executables and MCP contracts.
+- The pinned Beads and Dolt CLIs plus the development-discipline MCP contract.
 - Existing Claude Code and Codex marketplace/plugin formats.
 - Promptfoo custom-provider support unless a native Pi provider becomes
   available.
@@ -1828,7 +1829,7 @@ The first supported Pi release is acceptable when all of the following are true:
 7. The Pi support inventory identifies the exact package resources, and
    provider-free canaries prove extension execution provenance, project-trust
    posture, package loading, and component resolution.
-8. Every claimed Linux and macOS target has verified Tiber and
+8. Every claimed Linux and macOS target has verified Beads, Dolt, and
    development-discipline artifacts; unsupported targets fail deterministically
    without relying on Cargo fallback.
 9. Promptfoo can execute Pi no-package and targeted-package variants in an
@@ -1842,8 +1843,8 @@ The first supported Pi release is acceptable when all of the following are true:
     the primary recommended experience before its P1 gate.
 14. The package declares a tested Pi compatibility range, and canary evidence
     records the exact Pi version used for release.
-15. No mature Rust component has been rewritten merely to satisfy the initial
-    release.
+15. Beads is used directly without a custom MCP bridge or duplicate task state
+    machine.
 
 Pi becomes the primary recommended experience only after every applicable P1
 requirement enumerated in Section 9 has the evidence class specified there. This

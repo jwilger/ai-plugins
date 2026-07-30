@@ -30,7 +30,7 @@ client data, proprietary excerpts, auth material, or private transcripts.
 Use the Nix devshell — do not install global toolchains by hand.
 
 ```shell
-nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats, lefthook
+nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats, lefthook, bd, dolt
 ```
 
 **Critical convention:** anything npm would normally install "globally" must
@@ -174,11 +174,12 @@ directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
 
 ## Backlog capacity management
 
-Use Tiber as the repository task board and manage queued work as a deliberately
-bounded backlog.
+Use Beads with its Dolt backend as the repository task board and manage queued
+work as a deliberately bounded backlog. Run `bd prime` for current CLI guidance
+and use `--json` for programmatic reads.
 
-- The active ticket (`in-progress`) does not count toward backlog capacity. A
-  queued ticket is a ticket in `backlog` status.
+- The active issue (`in_progress`) does not count toward backlog capacity. A
+  queued issue is an unclaimed `open` issue that is not blocked or deferred.
 - Keep at most five queued tickets. Do not maintain an overflow, icebox, shadow
   backlog, or other hidden queue.
 - Discovery identifies a candidate; it does not create an obligation to admit
@@ -186,9 +187,11 @@ bounded backlog.
 - Compare candidates by user pain and frequency, severity, blocking impact,
   future leverage, confidence, value relative to cost, and overlap with existing
   root causes.
-- Keep queued tickets in one strict priority order with no ties. Re-rank the
-  complete queue whenever a ticket is admitted, combined, displaced, completed,
-  reopened, or materially re-scoped; do not use creation order as priority.
+- Select ready issues deterministically by priority ascending, creation time
+  ascending, then issue ID ascending. Re-rank the complete queue whenever an
+  issue is admitted, combined, displaced, completed, reopened, or materially
+  re-scoped; dependency edges represent real blocking relationships, not
+  artificial ordering.
 - When fewer than five tickets are queued, admit a worthwhile candidate
   normally. At capacity, evaluate a candidate before creating a ticket and
   choose exactly one explicit outcome: replace a lower-value queued ticket;
@@ -201,10 +204,11 @@ bounded backlog.
 - Blocking defects and in-model security issues required to complete the active
   ticket remain causal work within that ticket. Do not create separate backlog
   tickets merely to evade the cap.
-- Work on one ticket at a time. Before starting a queued ticket, move it to
-  `in-progress`; after completing it, select the highest-priority queued ticket
-  whose prerequisites are satisfied. If the highest-priority ticket is blocked,
-  keep its priority explicit and start the highest-priority unblocked ticket.
+- Work on one issue at a time. Before starting ready work, claim it atomically
+  with `bd update <id> --claim`; after completing it, choose the first issue in
+  the deterministic ready order. Use the delivery formula configured in
+  `[beads].workflow` and attach behavior, documentation, CI-workflow, or
+  validation-only slice molecules according to the changed surface.
 
 ## Adding a plugin
 

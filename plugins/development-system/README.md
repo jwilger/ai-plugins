@@ -42,8 +42,9 @@ PI_OFFLINE=1 pi install ./plugins/development-system
 ```
 
 The bootstrap restores pinned eval-tooling dependencies inside the repository,
-validates package metadata and the explicit Pi resource inventory, and verifies both
-bundled binaries for the current supported target. Pi's local-path installation
+validates package metadata and the explicit Pi resource inventory, verifies the
+bundled final-review coordinator, and requires the pinned Beads CLI with its Dolt
+backend. Pi's local-path installation
 references this package directory; it does not copy it. Pulling a package update
 therefore makes it available to the next Pi process, or to `/reload` when the
 resource is reload-safe.
@@ -71,8 +72,8 @@ by hand.
 
 - **development-system** (`./plugins/development-system`)
   - extension: `./extensions/development-system/index.ts`
-  - public skills (8): `agentic-systems`, `delivery`, `development-workflow`, `engineering-standards`, `eval-case-reporting`, `setup`, `tasks`, `worktrees`
-  - bundled component entry points: `./bin/development-discipline-mcp`, `./bin/tiber`
+  - public skills (8): `agentic-systems`, `beads`, `delivery`, `development-workflow`, `engineering-standards`, `eval-case-reporting`, `setup`, `worktrees`
+  - bundled component entry points: `./bin/development-discipline-mcp`
 
 <!-- pi-support-inventory:end -->
 
@@ -103,6 +104,17 @@ patches only explicitly requested delivery or feature fields, preserving every
 unspecified value, review route, comment, and formatting choice. Both initial
 and update paths reject linked checkouts and roll back the file and index if
 their bound commit fails.
+
+The delivery formula classifies each slice before implementation. Runtime
+behavior uses `behavior-slice`: an executable acceptance test fails first,
+scenario steps proceed one at a time, and ambiguous failures attach focused
+`unit-tdd-cycle` molecules. Focused tests run during each micro-cycle; the full
+configured local test gate runs once the behavior slice is green, immediately
+before its commit and push checkpoint. Prose-only work uses
+`documentation-slice` without invented tests. CI-only changes use
+`ci-workflow-slice`, where static checks are preflight and the pushed workflow
+run is the behavioral test. Non-runtime metadata and configuration use
+`validation-only-slice` with causal validators.
 
 When worktrees are enabled, the primary checkout remains coordination-only for
 tracked changes and commits, but ordinary Git inspection, exploration, tests,
@@ -168,9 +180,17 @@ additional options, start points, chaining, and later primary-checkout mutation
 remain blocked.
 
 `.development-system.toml` remains authoritative. The default preset is
-direct-to-trunk delivery with linked worktrees and Tiber. Optional features are
-`agentic-systems` and `eval-case-reporting`. Existing schema-version 1 files
-remain compatible. Optional Pi final-review routes use:
+direct-to-trunk delivery with linked worktrees and Beads backed by Dolt.
+Setup initializes Beads without competing Git or harness hooks, installs the
+repository-owned formulas under `.beads/formulas/`, and selects the delivery
+formula in `[beads].workflow`. Optional features are `agentic-systems` and
+`eval-case-reporting`.
+
+Schema-version 2 replaces Tiber policy with Beads policy. Legacy projects use
+`development-system migrate-tiber-to-beads --dry-run`, review the conversion,
+then apply it from the primary checkout with `--apply --yes` and optional
+`--push` for the Dolt remote. The migration preserves historical state and
+original task references. Optional Pi final-review routes use:
 
 ```toml
 [pi.review_models]
@@ -273,8 +293,8 @@ records the selected reference and supply-chain analysis.
 | Direct RPC bash                     | Unsupported for guarded execution                                     | N/A                           | N/A                           |
 | Protected metadata/secret paths     | Guarded built-in path tools; search output mediated                   | Instruction/hook limits       | Instruction/hook limits       |
 | Delivery-mode and force-push policy | Extension event-enforced                                              | Hook/command-enforced         | Hook/command-enforced         |
-| Tiber CI-recovery hold              | Extension event plus authoritative Tiber state                        | Hook/skill plus Tiber state   | Hook/skill plus Tiber state   |
-| Tiber tools                         | Feature-aware native Pi bridge                                        | Plugin MCP                    | Plugin MCP                    |
+| Beads CI-recovery hold              | Beads context plus claimed `ci-recovery` molecule and merge slot      | Same shared Beads state       | Same shared Beads state       |
+| Beads task/workflow integration     | Direct `bd` CLI, `bd prime`, formulas, and Dolt                       | Direct CLI and session hook   | Direct CLI and compact hooks  |
 | Final-review coordinator            | Native Pi bridge to authoritative Rust MCP                            | Plugin MCP                    | Plugin MCP                    |
 | Fresh final-review children         | Isolated children with redacted live progress and failure diagnostics | Harness agents                | Harness agents                |
 | Agent definitions                   | Canonical source with generated adapter                               | Generated Markdown            | Generated TOML                |
@@ -287,7 +307,7 @@ Unknown extension tools visibly downgrade the guarded-composition status.
 ## Supported targets and compatibility
 
 The package supports Pi `>=0.82.0 <0.83.0` and release canaries pin Pi `0.82.1`.
-Bundled Tiber and development-discipline binaries are verified for:
+The bundled development-discipline binary and the pinned Beads release are verified for:
 
 - x86_64 Linux;
 - aarch64 Linux;
@@ -308,7 +328,9 @@ Canonical sources are:
 - extension semantics: `extensions/development-system/core/`;
 - harness/process adapters: `extensions/development-system/adapters/`;
 - review agents: `components/development-discipline/agent-sources/review-agents.json`;
-- retained authority: the Tiber and development-discipline Rust components.
+- retained review authority: the development-discipline Rust component;
+- task and workflow authority: Beads formulas plus the external pinned `bd` CLI
+  and Dolt state.
 
 Regenerate or validate adapters with:
 

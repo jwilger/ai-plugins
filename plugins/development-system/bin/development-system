@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PACKAGE_ROOT="$(dirname "$SCRIPT_DIR")"
+
 die() {
   printf '%s\n' "$*" >&2
   exit 2
@@ -40,7 +43,7 @@ setup_command() {
   local mode=dry-run
   local confirmed=false
   local feature_worktrees=true
-  local feature_tiber=true
+  local feature_beads=true
   local feature_agentic_systems=false
   local feature_eval_case_reporting=false
   while (($#)); do
@@ -63,7 +66,7 @@ setup_command() {
           fi
           case "$2" in
             worktrees) feature_worktrees=$selected ;;
-            tiber) feature_tiber=$selected ;;
+            beads) feature_beads=$selected ;;
             agentic-systems) feature_agentic_systems=$selected ;;
             eval-case-reporting) feature_eval_case_reporting=$selected ;;
             *) die "development_system.unknown_feature feature=$2" ;;
@@ -99,8 +102,9 @@ setup_command() {
   esac
   printf 'development_system.setup_preview project=%s\n' "$project"
   printf 'delivery %s\n' "$delivery"
-  printf 'features worktrees=%s tiber=%s agentic_systems=%s eval_case_reporting=%s\n' \
-    "$feature_worktrees" "$feature_tiber" "$feature_agentic_systems" "$feature_eval_case_reporting"
+  printf 'features worktrees=%s beads=%s agentic_systems=%s eval_case_reporting=%s\n' \
+    "$feature_worktrees" "$feature_beads" "$feature_agentic_systems" "$feature_eval_case_reporting"
+  printf 'initialize Beads with the embedded Dolt backend and install development workflow formulas\n'
   printf 'write .development-system.toml\n'
   if [[ "$mode" == "dry-run" ]]; then
     return
@@ -114,34 +118,102 @@ setup_command() {
 
   local config_path=$project/.development-system.toml
   local config_tmp
+  local setup_head
+  setup_head="$(git -C "$project" rev-parse HEAD)"
+  local created_beads=false
+  local -a added_beads_formulas=()
   if [[ -e "$config_path" || -L "$config_path" ]]; then
     die "development_system.config_already_exists path=$config_path"
   fi
+  trap 'rm -f -- "${config_tmp:-}"; if [[ "${created_beads:-false}" == "true" ]]; then git -C "$project" reset -q HEAD -- .beads .gitignore 2>/dev/null || true; rm -rf -- "$project/.beads"; if git -C "$project" cat-file -e HEAD:.gitignore 2>/dev/null; then git -C "$project" checkout -q -- .gitignore; else rm -f -- "$project/.gitignore"; fi; elif ((${#added_beads_formulas[@]} > 0)); then rm -f -- "${added_beads_formulas[@]}"; fi' EXIT
+  if [[ "$feature_beads" == "true" ]]; then
+    if ! command -v bd >/dev/null 2>&1; then
+      die "development_system.beads_unavailable minimum=1.0.0 install=https://beads.gascity.com/getting-started/installation"
+    fi
+    if ! bd version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
+      die "development_system.beads_version_unsupported minimum=1.0.0"
+    fi
+    if [[ ! -d "$project/.beads" ]]; then
+      (
+        cd "$project"
+        bd init --quiet --non-interactive --skip-agents --skip-hooks
+      ) || die "development_system.beads_init_failed project=$project"
+      created_beads=true
+      local initialized_head
+      initialized_head="$(git -C "$project" rev-parse HEAD)"
+      if [[ "$initialized_head" != "$setup_head" ]]; then
+        if [[ "$(git -C "$project" rev-parse "$initialized_head^")" != "$setup_head" ]]; then
+          rm -rf -- "$project/.beads"
+          die "development_system.beads_init_history_unexpected"
+        fi
+        git -C "$project" reset --soft "$setup_head"
+      fi
+    else
+      (
+        cd "$project"
+        bd where >/dev/null
+      ) || die "development_system.beads_workspace_invalid project=$project"
+    fi
+    mkdir -p "$project/.beads/formulas"
+    local formula source_formula target_formula
+    for source_formula in "$PACKAGE_ROOT"/formulas/*.formula.toml; do
+      formula="$(basename "$source_formula")"
+      target_formula="$project/.beads/formulas/$formula"
+      if [[ -e "$target_formula" ]] && ! cmp -s "$source_formula" "$target_formula"; then
+        if [[ "$created_beads" == "true" ]]; then rm -rf -- "$project/.beads"; fi
+        die "development_system.beads_formula_conflict path=$target_formula"
+      fi
+      if [[ ! -e "$target_formula" ]]; then
+        cp -- "$source_formula" "$target_formula"
+        added_beads_formulas+=("$target_formula")
+      fi
+    done
+    (
+      cd "$project"
+      bd config set dolt.auto-commit on >/dev/null
+    ) || die "development_system.beads_config_failed project=$project"
+  fi
   config_tmp="$(mktemp "$project/.development-system.toml.tmp.XXXXXX")" ||
     die "development_system.config_temp_failed project=$project"
-  trap 'rm -f -- "$config_tmp"' EXIT
   {
-    printf 'schema_version = 1\n\n'
+    printf 'schema_version = 2\n\n'
     printf '[delivery]\n'
     printf 'mode = "%s"\n' "$delivery"
     printf 'trunk_branch = "main"\n\n'
     printf '[features]\n'
     printf 'worktrees = %s\n' "$feature_worktrees"
-    printf 'tiber = %s\n' "$feature_tiber"
+    printf 'beads = %s\n' "$feature_beads"
     printf 'agentic_systems = %s\n' "$feature_agentic_systems"
     printf 'eval_case_reporting = %s\n\n' "$feature_eval_case_reporting"
     printf '[worktrees]\n'
     printf 'root = ".worktrees"\n\n'
-    printf '[tiber]\n'
-    printf 'max_queued = 5\n'
+    printf '[beads]\n'
+    case "$delivery" in
+      direct-to-trunk) printf 'workflow = "development-change-direct"\n' ;;
+      pull-request) printf 'workflow = "development-change-pr"\n' ;;
+      local-only) printf 'workflow = "development-change-local"\n' ;;
+    esac
   } >"$config_tmp"
   mv -- "$config_tmp" "$config_path"
   git -C "$project" add -- .development-system.toml
+  if [[ "$feature_beads" == "true" ]]; then
+    git -C "$project" add -f -- .beads/.gitignore .beads/README.md .beads/config.yaml .beads/metadata.json .beads/formulas
+  fi
   if ! git -C "$project" commit \
     -m "chore: initialize development system" \
     -m "Record the project workflow and optional integrations in one authoritative configuration."; then
-    git -C "$project" reset -q HEAD -- .development-system.toml
+    git -C "$project" reset -q HEAD -- .development-system.toml .beads .gitignore 2>/dev/null || true
     rm -f -- "$config_path"
+    if [[ "$created_beads" == "true" ]]; then
+      rm -rf -- "$project/.beads"
+      if git -C "$project" cat-file -e HEAD:.gitignore 2>/dev/null; then
+        git -C "$project" checkout -q -- .gitignore
+      else
+        rm -f -- "$project/.gitignore"
+      fi
+    elif ((${#added_beads_formulas[@]} > 0)); then
+      rm -f -- "${added_beads_formulas[@]}"
+    fi
     die "development_system.setup_commit_failed"
   fi
   trap - EXIT
@@ -282,6 +354,10 @@ case "${1:-}" in
     shift
     record_eval_session_start
     doctor_command "$@"
+    ;;
+  migrate-tiber-to-beads)
+    shift
+    exec node "$SCRIPT_DIR/migrate-tiber-to-beads.mjs" "$@"
     ;;
   *)
     die "development_system.usage command=${1:-missing}"

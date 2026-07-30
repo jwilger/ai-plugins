@@ -27,7 +27,6 @@ const cacheLauncherTargets = [
   "plugins/development-system/.mcp.json",
   "plugins/development-system/components/agentic-systems-engineering/.mcp.json",
   "plugins/development-system/components/development-discipline/.mcp.json",
-  "plugins/development-system/components/tiber/.mcp.json",
 ];
 
 const write = process.argv.includes("--write");

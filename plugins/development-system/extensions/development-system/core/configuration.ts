@@ -6,16 +6,16 @@ export const DELIVERY_MODES = [
 export type DeliveryMode = (typeof DELIVERY_MODES)[number];
 
 export type ProjectPolicy = Readonly<{
-  schemaVersion: 1;
+  schemaVersion: 2;
   delivery: Readonly<{ mode: DeliveryMode; trunkBranch: string }>;
   features: Readonly<{
     worktrees: boolean;
-    tiber: boolean;
+    beads: boolean;
     agenticSystems: boolean;
     evalCaseReporting: boolean;
   }>;
   worktrees: Readonly<{ root: string }>;
-  tiber: Readonly<{ maxQueued: number }>;
+  beads: Readonly<{ workflow: string }>;
   piReviewModels: Readonly<Record<string, string>>;
 }>;
 
@@ -69,31 +69,36 @@ export function parseProjectPolicy(source: string): ProjectPolicy {
     return value;
   };
   const schemaVersion = Number(required("schema_version"));
-  if (schemaVersion !== 1)
+  if (schemaVersion === 1 && values.has("features.tiber"))
+    throw new ConfigurationError(
+      "development_system.configuration_legacy_tiber: run development-system migrate-tiber-to-beads from the primary checkout, then rerun setup",
+    );
+  if (schemaVersion !== 2)
     throw new ConfigurationError(`unsupported schema_version ${schemaVersion}`);
   const mode = unquote(required("delivery.mode"));
   if (!(DELIVERY_MODES as readonly string[]).includes(mode)) {
     throw new ConfigurationError(`unsupported delivery mode ${mode}`);
   }
-  const maxQueued = Number(required("tiber.max_queued"));
-  if (!Number.isSafeInteger(maxQueued) || maxQueued < 1) {
-    throw new ConfigurationError("tiber.max_queued must be a positive integer");
-  }
+  const workflow = unquote(required("beads.workflow"));
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(workflow))
+    throw new ConfigurationError(
+      "beads.workflow must be a lower-case kebab-case formula name",
+    );
 
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     delivery: Object.freeze({
       mode: mode as DeliveryMode,
       trunkBranch: unquote(required("delivery.trunk_branch")),
     }),
     features: Object.freeze({
       worktrees: booleanValue(required("features.worktrees")),
-      tiber: booleanValue(required("features.tiber")),
+      beads: booleanValue(required("features.beads")),
       agenticSystems: booleanValue(required("features.agentic_systems")),
       evalCaseReporting: booleanValue(required("features.eval_case_reporting")),
     }),
     worktrees: Object.freeze({ root: unquote(required("worktrees.root")) }),
-    tiber: Object.freeze({ maxQueued }),
+    beads: Object.freeze({ workflow }),
     piReviewModels: Object.freeze(
       Object.fromEntries(
         [...values.entries()]

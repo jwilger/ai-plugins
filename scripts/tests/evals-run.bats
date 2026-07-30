@@ -333,7 +333,7 @@ SH
 }
 
 @test "eval runner dry-run prepares harness-specific package conditions" {
-  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture "$RUNNER" --dry-run
+  run env EVAL_CASE_FILTER=beads-new-task-command-backlog-capture "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"prepare-codex-home.mjs"*"--plugin-mode development-system"*"--install-via-cli"* ]]
@@ -361,7 +361,7 @@ SH
     OPENAI_API_KEY=fixture \
     PROMPTFOO_BIN="$fake_promptfoo" \
     EVAL_OUT_DIR="$fixture_root/out" \
-    EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
+    EVAL_CASE_FILTER=beads-new-task-command-backlog-capture \
     EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-development-system \
     EVAL_TIMEOUT=0 \
     CODEX_EVAL_HOME="$development_system_home" \
@@ -527,7 +527,7 @@ SH
       OPENAI_API_KEY=fixture \
       PROMPTFOO_BIN="$fake_promptfoo" \
       EVAL_OUT_DIR="$fixture_root/out" \
-      EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
+      EVAL_CASE_FILTER=beads-new-task-command-backlog-capture \
       EVAL_PROVIDER_FILTER=openai:codex-sdk \
       EVAL_TIMEOUT=0 \
       CODEX_EVAL_HOME="$development_system_home" \
@@ -594,11 +594,11 @@ SH
 }
 
 @test "eval runner passes case filter to Promptfoo CLI" {
-  run env EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
+  run env EVAL_CASE_FILTER=beads "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"timeout --kill-after 30s 20m"* ]]
-  [[ "$output" == *"--filter-pattern tiber"* ]]
+  [[ "$output" == *"--filter-pattern beads"* ]]
 }
 
 @test "eval runner dry-run can disable the promptfoo timeout" {
@@ -615,7 +615,7 @@ SH
   [ "$status" -eq 0 ]
   [[ "$output" == *"timeout --kill-after 30s 30m"* ]]
 
-  run env EVAL_TIMEOUT_FULL_DEFAULT=30m EVAL_TIMEOUT_FOCUSED_DEFAULT=5m EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
+  run env EVAL_TIMEOUT_FULL_DEFAULT=30m EVAL_TIMEOUT_FOCUSED_DEFAULT=5m EVAL_CASE_FILTER=beads "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"timeout --kill-after 30s 5m"* ]]
@@ -641,7 +641,7 @@ SH
 }
 
 @test "generated eval config combines case and provider filters without expanding provider modes" {
-  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
+  run env EVAL_CASE_FILTER=beads-new-task-command-backlog-capture EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^  - id: openai:codex-sdk$')" -eq 1 ]
@@ -776,12 +776,12 @@ JSON
   [[ "$output" == *"Eval thresholds passed"* ]]
 }
 
-@test "hard guard allows whitelisted tiber command context for task files" {
+@test "hard guard accepts direct Beads CLI workflow guidance" {
   run node - <<'NODE'
 const assertHardGuards = require("./evals/promptfoo/assert-hard-guards.cjs");
 const result = assertHardGuards(
-  "Use `tiber list` to inspect the board instead of directly write order.md by hand.",
-  { vars: { case_id: "tiber-validation-discipline" } },
+  "Use `bd ready --json` to inspect the Dolt-backed board before claiming work.",
+  { vars: { case_id: "beads-documentation-slice-no-runtime-tdd" } },
 );
 if (!result.pass) {
   console.error(result.reason);
@@ -911,13 +911,13 @@ SH
     CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$fixture_bin/codex-development-system" \
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_bin/codex-none" \
     EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-no-plugins \
-    EVAL_CASE_FILTER=tiber \
+    EVAL_CASE_FILTER=beads \
     "$RUNNER"
 
   rm -rf "$fixture_bin"
   rm -f "$ROOT/evals/out/generated/runtime-options.json"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"caseFilter":"tiber"'* ]]
+  [[ "$output" == *'"caseFilter":"beads"'* ]]
 }
 
 @test "eval runner filtered samples use the runtime loader in an isolated output directory" {
@@ -949,14 +949,14 @@ SH
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-none" \
     EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-no-plugins \
     EVAL_OUT_DIR="$isolated_out" \
-    EVAL_CASE_FILTER=tiber \
+    EVAL_CASE_FILTER=beads \
     EVAL_SAMPLES=2 \
     "$RUNNER"
 
   rm -rf "$fixture_root"
   [ "$status" -eq 0 ]
   [[ "$output" == *"tests: file://$isolated_out/generated/load-harness-cases.runtime.cjs"* ]]
-  [[ "$output" == *'"caseFilter":"tiber"'* ]]
+  [[ "$output" == *'"caseFilter":"beads"'* ]]
   [[ "$output" == *'"samples":"2"'* ]]
 }
 
@@ -1392,7 +1392,7 @@ const targeted = {
   provider: 'openai:codex-sdk',
   providerVariant: 'codex-gpt-5.6-terra',
   pluginMode: 'development-system',
-  plugins: ['tiber'],
+  plugins: ['beads'],
 };
 const noPlugins = {
   ...targeted,
@@ -1430,9 +1430,9 @@ const cases = {
     },
   ],
   label_mismatch: [{ ...targeted, label: 'mismatched-label' }],
-  duplicate_plugin: [{ ...targeted, plugins: ['tiber', 'tiber'] }],
-  unsorted_plugins: [{ ...targeted, plugins: ['tiber', 'advisor'] }],
-  invalid_plugin_name: [{ ...targeted, plugins: ['Tiber'] }],
+  duplicate_plugin: [{ ...targeted, plugins: ['beads', 'beads'] }],
+  unsorted_plugins: [{ ...targeted, plugins: ['beads', 'advisor'] }],
+  invalid_plugin_name: [{ ...targeted, plugins: ['Beads'] }],
   missing_composition_label: [targeted],
   extra_composition_label: [targeted, noPlugins],
   both_missing_and_extra: [

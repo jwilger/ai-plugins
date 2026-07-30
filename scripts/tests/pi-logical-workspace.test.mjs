@@ -21,19 +21,19 @@ function repository() {
   fs.writeFileSync(path.join(root, "README.md"), "fixture\n");
   fs.writeFileSync(
     path.join(root, ".development-system.toml"),
-    `schema_version = 1
+    `schema_version = 2
 [delivery]
 mode = "direct-to-trunk"
 trunk_branch = "main"
 [features]
 worktrees = true
-tiber = false
+beads = false
 agentic_systems = false
 eval_case_reporting = false
 [worktrees]
 root = ".worktrees"
-[tiber]
-max_queued = 5
+[beads]
+workflow = "development-change-direct"
 `,
   );
   git(root, "add", ".");

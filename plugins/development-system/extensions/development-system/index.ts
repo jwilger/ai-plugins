@@ -13,7 +13,11 @@ import {
   runReviewChild,
 } from "./adapters/review-child.ts";
 import { registerGoalMode } from "./adapters/goal-mode.ts";
-import { activeCiRecoveryHold } from "./adapters/ci-hold.ts";
+import {
+  activeCiRecoveryHold,
+  beadsAvailability,
+  beadsPrime,
+} from "./adapters/beads.ts";
 import {
   createWorktree,
   listWorktrees,
@@ -253,6 +257,14 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     pi.appendEntry(customType, data),
   );
   const projectCwd = (hostCwd: string): string => workspace.path(hostCwd);
+  const primeCache = new Map<string, { checkedAt: number; value: string | null }>();
+  const currentBeadsPrime = async (cwd: string): Promise<string | null> => {
+    const cached = primeCache.get(cwd);
+    if (cached && Date.now() - cached.checkedAt < 15_000) return cached.value;
+    const value = await beadsPrime(cwd);
+    primeCache.set(cwd, { checkedAt: Date.now(), value });
+    return value;
+  };
 
   const assertLifecycleToolIsolated = (
     context: {
@@ -317,15 +329,13 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       );
   };
 
-  const bridge = async (
-    origin: "tiber" | "review",
+  const bridgeReviewTools = async (
     command: string,
     args: readonly string[],
     cwd: string,
     approvedNames: ReadonlySet<string>,
   ): Promise<readonly string[]> => {
-    const maxOutputBytes =
-      origin === "review" ? 2 * 1024 * 1024 + 64 * 1024 : 50 * 1024;
+    const maxOutputBytes = 2 * 1024 * 1024 + 64 * 1024;
     const client = new McpClient({ command, args, cwd, maxOutputBytes });
     let discovered: readonly McpTool[];
     try {
@@ -341,16 +351,16 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     const existing = new Set(pi.getAllTools().map((tool) => tool.name));
     const registrations = admitted.map((tool) => ({
       tool,
-      publicName: publicToolName(origin, tool.name),
+      publicName: publicToolName(tool.name),
     }));
     if (registrations.some(({ publicName }) => existing.has(publicName)))
-      throw new Error(`development_system.mcp_tool_collision origin=${origin}`);
+      throw new Error("development_system.mcp_tool_collision origin=review");
     for (const { tool, publicName } of registrations) {
       pi.registerTool({
         name: publicName,
-        label: `${origin === "tiber" ? "Tiber" : "Final Review"}: ${tool.name}`,
+        label: `Final Review: ${tool.name}`,
         description:
-          tool.description ?? `First-party ${origin} operation ${tool.name}`,
+          tool.description ?? `First-party final-review operation ${tool.name}`,
         parameters: tool.inputSchema as McpTool["inputSchema"],
         async execute(_toolCallId, parameters, signal, _onUpdate, context) {
           const routed = new McpClient({
@@ -1096,27 +1106,6 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           }),
         };
     }
-    if (["write", "edit", "bash"].includes(event.toolName)) {
-      const current = await guardContext(
-        logicalCwd,
-        context.mode as HarnessMode,
-      );
-      if (current.policy?.features.tiber) {
-        const hold = await activeCiRecoveryHold(packageRoot, logicalCwd);
-        if (hold)
-          return {
-            block: true,
-            reason: guardMessage({
-              code: "development_system.ci_recovery_hold",
-              boundary: "unrelated guarded work",
-              missing: `terminal success for CI incident ${hold.incidentId}`,
-              nextAction:
-                "Complete the authoritative Tiber CI-recovery transition before other guarded work.",
-            }),
-          };
-      }
-    }
-
     if (
       ["write", "edit", "read", "grep", "find", "ls"].includes(event.toolName)
     ) {
@@ -1268,18 +1257,22 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           "utf8",
         ),
       );
-      if (!policy.features.tiber) return { systemPrompt: routedSystemPrompt };
-      const hold = await activeCiRecoveryHold(packageRoot, logicalCwd);
+      if (!policy.features.beads) return { systemPrompt: routedSystemPrompt };
+      const prime = await currentBeadsPrime(logicalCwd);
+      const systemPrompt = prime
+        ? `${routedSystemPrompt}\n\n## Current Beads workflow context\n\n${prime}`
+        : routedSystemPrompt;
+      const hold = await activeCiRecoveryHold(logicalCwd);
       if (hold)
         return {
-          systemPrompt: routedSystemPrompt,
+          systemPrompt,
           message: {
             customType: "development-system-ci-hold",
-            content: `development_system.ci_recovery_hold incident=${hold.incidentId} state=${hold.state}. Do not claim readiness or start unrelated guarded work; continue authoritative Tiber recovery.`,
+            content: `development_system.ci_recovery_hold bead=${hold.incidentId} state=${hold.state}. Do not start unrelated work; continue the claimed Beads ci-recovery molecule until exact terminal-success proof releases the hold.`,
             display: true,
           },
         };
-      return { systemPrompt: routedSystemPrompt };
+      return { systemPrompt };
     } catch {
       return { systemPrompt: routedSystemPrompt };
     }
@@ -1313,6 +1306,27 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
       context.ui.notify(`${error.code}: ${error.nextAction}`, "warning");
     for (const diagnostic of status.diagnostics)
       context.ui.notify(diagnostic, "warning");
+    if (status.enabledFeatures.includes("beads")) {
+      const beads = await beadsAvailability(projectCwd(context.cwd));
+      context.ui.setStatus(
+        "development-system-beads",
+        beads.available
+          ? beads.initialized
+            ? "beads: ready"
+            : "beads: setup required"
+          : "beads: unavailable",
+      );
+      if (!beads.available)
+        context.ui.notify(
+          `${beads.error ?? "development_system.beads_unavailable"}: install bd >= 1.0.0`,
+          "warning",
+        );
+      else if (!beads.initialized)
+        context.ui.notify(
+          "development_system.beads_not_initialized: run development-system setup from the primary checkout",
+          "warning",
+        );
+    }
     const ownedOrMediated = new Set([
       "read",
       "write",
@@ -1350,8 +1364,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     }
     if (status.configured) {
       try {
-        const reviewTools = await bridge(
-          "review",
+        const reviewTools = await bridgeReviewTools(
           path.join(packageRoot, "bin/development-discipline-mcp"),
           [],
           projectCwd(context.cwd),
@@ -1365,30 +1378,8 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
             "final_review.out_of_scope_report",
           ]),
         );
-        const tiberTools = status.enabledFeatures.includes("tiber")
-          ? await bridge(
-              "tiber",
-              path.join(packageRoot, "bin/tiber"),
-              ["mcp", "stdio"],
-              projectCwd(context.cwd),
-              new Set([
-                "tiber.create",
-                "tiber.list",
-                "tiber.search",
-                "tiber.show",
-                "tiber.next",
-                "tiber.transition",
-                "tiber.prioritize",
-                "tiber.update",
-                "tiber.validate_fix",
-                "tiber.ci_recovery.claim",
-                "tiber.ci_recovery.status",
-                "tiber.ci_recovery.resolve",
-              ]),
-            )
-          : [];
         context.ui.notify(
-          `development_system.component_tools_active review=${reviewTools.length} tiber=${tiberTools.length}`,
+          `development_system.component_tools_active review=${reviewTools.length} beads=cli`,
           "info",
         );
       } catch (error) {
@@ -1417,5 +1408,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     if (!started) return;
     started = false;
     context.ui.setStatus("development-system", undefined);
+    context.ui.setStatus("development-system-beads", undefined);
+    primeCache.clear();
   });
 }

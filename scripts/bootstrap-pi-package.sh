@@ -12,19 +12,15 @@ node "$root/scripts/validate-pi-package.mjs"
 
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64)
-    tiber_target=x86_64-unknown-linux-gnu
     discipline_target=x86_64-unknown-linux-musl
     ;;
   Linux:aarch64 | Linux:arm64)
-    tiber_target=aarch64-unknown-linux-gnu
     discipline_target=aarch64-unknown-linux-musl
     ;;
   Darwin:x86_64)
-    tiber_target=x86_64-apple-darwin
     discipline_target=x86_64-apple-darwin
     ;;
   Darwin:arm64 | Darwin:aarch64)
-    tiber_target=aarch64-apple-darwin
     discipline_target=aarch64-apple-darwin
     ;;
   *)
@@ -47,8 +43,11 @@ verify_component() {
   }
 }
 
-verify_component tiber "$tiber_target" tiber
 verify_component development-discipline "$discipline_target" development-discipline-mcp
-printf 'development_system.pi_bootstrap_ready pi_compatibility=%s target=%s/%s\n' \
+if ! command -v bd >/dev/null 2>&1 || ! bd version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
+  printf 'development_system.beads_unavailable minimum=1.0.0\n' >&2
+  exit 2
+fi
+printf 'development_system.pi_bootstrap_ready pi_compatibility=%s target=%s beads=%s\n' \
   "$(jq -r .piCompatibility "$root/plugins/development-system/package.json")" \
-  "$tiber_target" "$discipline_target"
+  "$discipline_target" "$(bd version | awk '{print $3}')"

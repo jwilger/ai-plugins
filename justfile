@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace pi-extension npm-package-canary github-actions tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
+ci: validate-marketplace pi-extension npm-package-canary github-actions beads-formulas development-discipline-rust development-discipline-release-from-source development-discipline-release-complete bats
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
@@ -16,7 +16,7 @@ github-actions:
 # Deterministic Pi package and TypeScript extension gate.
 pi-extension:
     npx tsc -p plugins/development-system/tsconfig.json
-    node --experimental-strip-types --test scripts/tests/pi-extension.test.mjs scripts/tests/pi-goal-mode.test.mjs scripts/tests/pi-guards.test.mjs scripts/tests/pi-worktrees.test.mjs scripts/tests/pi-logical-workspace.test.mjs scripts/tests/pi-references.test.mjs scripts/tests/pi-mcp-bridge.test.mjs scripts/tests/pi-review-child.test.mjs scripts/tests/pi-ci-hold.test.mjs scripts/tests/pi-eval-provider.test.mjs
+    node --experimental-strip-types --test scripts/tests/beads-integration.test.mjs scripts/tests/pi-extension.test.mjs scripts/tests/pi-goal-mode.test.mjs scripts/tests/pi-guards.test.mjs scripts/tests/pi-worktrees.test.mjs scripts/tests/pi-logical-workspace.test.mjs scripts/tests/pi-references.test.mjs scripts/tests/pi-mcp-bridge.test.mjs scripts/tests/pi-review-child.test.mjs scripts/tests/pi-eval-provider.test.mjs
     node scripts/evals/run-pi-worktree-tui-scenario.mjs
     node scripts/pi-package-canary.mjs
 
@@ -28,11 +28,9 @@ pi-worktree-tui-live-eval:
 pi-clean-canary:
     node scripts/pi-package-canary.mjs --clean-checkout
 
-# Rust gates for the tiber plugin workspace.
-tiber-rust:
-    cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
-    cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
-    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml
+# Validate and cook every installed Beads workflow formula.
+beads-formulas:
+    scripts/check-beads-formulas.sh
 
 # Rust gates for the development-discipline MCP coordinator.
 development-discipline-rust:
@@ -51,31 +49,6 @@ development-discipline-release-from-source:
 # Build every bundled development-discipline MCP release target.
 development-discipline-release-all:
     scripts/build-development-discipline-release-all.sh
-
-# Browser smoke coverage for the read-only tiber dashboard.
-tiber-dashboard-smoke:
-    scripts/evals/ensure-node-deps.sh
-    node scripts/tiber/dashboard-smoke.mjs
-
-# Build the tiber release binary for the current host target.
-tiber-release-host:
-    scripts/build-tiber-host-release.sh
-
-# Build every bundled tiber v1 release target.
-tiber-release-all:
-    scripts/build-tiber-release-all.sh
-
-# Mutation gate for the pure tiber core.
-tiber-mutants:
-    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --jobs 1 --minimum-test-timeout 60 --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --package tiber-core --test-workspace true
-
-# Ensure the tiber release plan names every bundled v1 binary target.
-tiber-release-manifest:
-    bash scripts/check-tiber-release-manifest.sh
-
-# Require every listed tiber release binary to be present and executable.
-tiber-release-complete:
-    bash scripts/check-tiber-release-complete.sh
 
 # Run executable provider-backed Pi guard scenarios in disposable repositories.
 pi-guard-evals:

@@ -53,30 +53,30 @@ test("status parses the authoritative project policy once into semantic values",
   const project = fixture();
   fs.writeFileSync(
     path.join(project, ".development-system.toml"),
-    `schema_version = 1
+    `schema_version = 2
 [delivery]
 mode = "pull-request"
 trunk_branch = "main"
 [features]
 worktrees = true
-tiber = true
+beads = true
 agentic_systems = false
 eval_case_reporting = true
 [worktrees]
 root = ".worktrees"
-[tiber]
-max_queued = 5
+[beads]
+workflow = "development-change-direct"
 `,
   );
   const result = status(project, "json");
   assert.equal(result.status.configured, true);
   assert.equal(result.status.deliveryMode, "pull-request");
   assert.deepEqual(result.status.enabledFeatures, [
+    "beads",
     "eval-case-reporting",
-    "tiber",
     "worktrees",
   ]);
-  assert.equal(result.status.components.tiber.available, true);
+  assert.equal(result.status.components.beads.available, true);
   assert.equal(
     result.status.components["development-discipline"].available,
     true,
@@ -108,7 +108,7 @@ test("invalid configuration returns a typed actionable error", () => {
   const project = fixture();
   fs.writeFileSync(
     path.join(project, ".development-system.toml"),
-    'schema_version = 1\n[delivery]\nmode = "invented"\n',
+    'schema_version = 2\n[delivery]\nmode = "invented"\n',
   );
   let error;
   try {
@@ -179,19 +179,19 @@ async function loadExtension() {
   ).default;
 }
 
-const configuredPolicy = (mode, worktrees = true) => `schema_version = 1
+const configuredPolicy = (mode, worktrees = true) => `schema_version = 2
 [delivery]
 mode = "${mode}"
 trunk_branch = "main"
 [features]
 worktrees = ${worktrees}
-tiber = true
+beads = true
 agentic_systems = false
 eval_case_reporting = false
 [worktrees]
 root = ".worktrees"
-[tiber]
-max_queued = 5
+[beads]
+workflow = "development-change-direct"
 `;
 
 test("extension registers status command and tool and cleans session state on reload", async () => {
@@ -664,7 +664,7 @@ test("setup preview and apply preserve every unspecified existing policy value",
   const { createSetupPreview, applySetupPreview } = await import(
     path.join(plugin, "extensions/development-system/adapters/setup.ts")
   );
-  const source = `schema_version = 1
+  const source = `schema_version = 2
 
 [delivery]
 mode = "pull-request"
@@ -672,15 +672,15 @@ trunk_branch = "stable"
 
 [features]
 worktrees = true
-tiber = true
+beads = true
 agentic_systems = true
 eval_case_reporting = true
 
 [worktrees]
 root = ".custom-worktrees"
 
-[tiber]
-max_queued = 3
+[beads]
+workflow = "development-change-direct"
 
 [pi.review_models]
 strong_reviewer = "custom/reviewer"
@@ -700,7 +700,7 @@ strong_reviewer = "custom/reviewer"
   assert.match(preserving.preview, /agentic_systems=true/);
   assert.match(preserving.preview, /eval_case_reporting=true/);
 
-  const changing = await createSetupPreview(plugin, project, "--disable tiber");
+  const changing = await createSetupPreview(plugin, project, "--disable beads");
   await applySetupPreview(plugin, changing);
   const updated = fs.readFileSync(
     path.join(project, ".development-system.toml"),
@@ -709,12 +709,56 @@ strong_reviewer = "custom/reviewer"
   assert.match(updated, /mode = "pull-request"/);
   assert.match(updated, /trunk_branch = "stable"/);
   assert.match(updated, /worktrees = true/);
-  assert.match(updated, /tiber = false/);
+  assert.match(updated, /beads = false/);
   assert.match(updated, /agentic_systems = true/);
   assert.match(updated, /eval_case_reporting = true/);
   assert.match(updated, /root = "\.custom-worktrees"/);
-  assert.match(updated, /max_queued = 3/);
+  assert.match(updated, /workflow = "development-change-direct"/);
   assert.match(updated, /strong_reviewer = "custom\/reviewer"/);
+  assert.equal(Number(git(project, "rev-list", "--count", "HEAD")), 3);
+});
+
+test("existing setup migrates legacy Tiber policy and initializes Beads formulas", async () => {
+  const project = fixture();
+  const { createSetupPreview, applySetupPreview } = await import(
+    path.join(plugin, "extensions/development-system/adapters/setup.ts")
+  );
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    `schema_version = 1
+[delivery]
+mode = "pull-request"
+trunk_branch = "main"
+[features]
+worktrees = true
+tiber = true
+agentic_systems = false
+eval_case_reporting = false
+[worktrees]
+root = ".worktrees"
+[tiber]
+max_queued = 5
+`,
+  );
+  git(project, "add", ".development-system.toml");
+  git(project, "commit", "-m", "test: configure legacy policy");
+
+  const preview = await createSetupPreview(plugin, project, "--enable beads");
+  assert.match(preview.proposedConfig, /^schema_version = 2$/m);
+  assert.match(preview.proposedConfig, /^beads = true$/m);
+  assert.match(preview.proposedConfig, /workflow = "development-change-pr"/);
+  await applySetupPreview(plugin, preview);
+
+  const updated = fs.readFileSync(
+    path.join(project, ".development-system.toml"),
+    "utf8",
+  );
+  assert.doesNotMatch(updated, /^tiber\s*=|^\[tiber]/m);
+  assert.ok(
+    fs.existsSync(
+      path.join(project, ".beads/formulas/behavior-slice.formula.toml"),
+    ),
+  );
   assert.equal(Number(git(project, "rev-list", "--count", "HEAD")), 3);
 });
 

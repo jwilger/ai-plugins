@@ -1,6 +1,6 @@
 {
   "name": "ai-plugins",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "private": true,
   "description": "Git-installable Pi facade for the development-system multi-harness marketplace.",
   "repository": {
@@ -13,7 +13,7 @@
     "development",
     "workflow",
     "worktrees",
-    "tiber",
+    "beads",
     "quality"
   ],
   "engines": {
@@ -38,12 +38,12 @@
     ],
     "skills": [
       "./plugins/development-system/skills/agentic-systems",
+      "./plugins/development-system/skills/beads",
       "./plugins/development-system/skills/delivery",
       "./plugins/development-system/skills/development-workflow",
       "./plugins/development-system/skills/engineering-standards",
       "./plugins/development-system/skills/eval-case-reporting",
       "./plugins/development-system/skills/setup",
-      "./plugins/development-system/skills/tasks",
       "./plugins/development-system/skills/worktrees"
     ]
   }

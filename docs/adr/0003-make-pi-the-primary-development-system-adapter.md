@@ -10,12 +10,12 @@ Accepted
 
 ## Context
 
-The development system has canonical skills and mature Rust implementations for
-Tiber and final-review coordination, but it previously exposed only Claude Code
-and Codex product surfaces. Pi can load the same Agent Skills and provides
-first-party TypeScript extension events, native tools, trusted local-TUI
-interaction, and OpenAI subscription authentication. Rewriting the retained
-Rust systems or maintaining a third copy of shared behavior would add risk.
+The development system has canonical skills and a mature Rust final-review
+coordinator, but it previously exposed only Claude Code and Codex product
+surfaces. Pi can load the same Agent Skills and provides first-party TypeScript
+extension events, native tools, trusted local-TUI interaction, and OpenAI
+subscription authentication. Task and workflow state now belongs to Beads with
+Dolt rather than a package-owned tracker.
 
 ## Decision
 
@@ -27,13 +27,14 @@ or generate every harness manifest and agent adapter from canonical sources.
 Implement new orchestration in TypeScript with pure semantic cores and narrow
 imperative adapters. Domain workflows that require evidence use a `step()` /
 `resume()` boundary. Keep `.development-system.toml` authoritative and preserve
-existing valid schema version 1 files.
+schema-version 2 project policy.
 
-Retain Tiber and development-discipline in Rust. A supervised, package-owned MCP
-client dynamically discovers an approved subset of their schemas, rejects
-collisions or ambiguous provider schemas, bounds requests and output, propagates
-cancellation, and terminates its process group on session shutdown. No arbitrary
-user MCP server is admitted.
+Retain development-discipline in Rust. A supervised, package-owned MCP client
+dynamically discovers its approved final-review schemas, rejects collisions or
+ambiguous provider schemas, bounds requests and output, propagates cancellation,
+and terminates its process group on session shutdown. Use Beads directly through
+`bd`, `bd prime`, formulas, and Dolt; do not expose it through MCP when shell
+access exists. No arbitrary user MCP server is admitted.
 
 Use Pi event interception for configured coordination-checkout, path, secret,
 shell, delivery-mode, destructive-operation, and CI-recovery boundaries. Keep
@@ -62,7 +63,7 @@ Claude Code and Codex in reports.
 ### Positive
 
 - Pi gains deterministic enforcement and trusted interaction without forking
-  skill prose or rewriting mature Rust behavior.
+  skill prose or duplicating final-review or Beads behavior.
 - Local-path installation and later npm distribution use the same package root.
 - Provider-free contracts cover package, lifecycle, process, mode, and guard
   behavior; provider-backed scenarios verify actual effects.
@@ -80,10 +81,10 @@ Claude Code and Codex in reports.
 
 ## Alternatives Considered
 
-### Rewrite Tiber and development-discipline in TypeScript
+### Reimplement Beads and development-discipline in TypeScript
 
-Rejected because protocol overhead is negligible and rewrites would discard
-mature state, locking, Git, and review semantics.
+Rejected because it would duplicate mature Dolt workflow and review semantics.
+The direct Beads CLI also avoids MCP schema and lifecycle overhead.
 
 ### Rely only on skills
 

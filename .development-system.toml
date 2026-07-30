@@ -1,4 +1,4 @@
-schema_version = 1
+schema_version = 2
 
 [delivery]
 mode = "direct-to-trunk"
@@ -6,12 +6,12 @@ trunk_branch = "main"
 
 [features]
 worktrees = true
-tiber = true
+beads = true
 agentic_systems = true
 eval_case_reporting = true
 
 [worktrees]
 root = ".worktrees"
 
-[tiber]
-max_queued = 5
+[beads]
+workflow = "development-change-direct"

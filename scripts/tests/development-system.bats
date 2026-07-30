@@ -316,6 +316,21 @@ teardown() {
   [ -f "$marker" ]
 }
 
+@test "Claude and Codex hooks use the official direct Beads lifecycle" {
+  run jq -e '
+    [.hooks.SessionStart[].hooks[].command] | any(. == "bd prime --hook-json")
+  ' "$REPO_ROOT/plugins/development-system/hooks/hooks.json"
+  [ "$status" -eq 0 ]
+
+  run jq -e '
+    ([.hooks.SessionStart[].hooks[].command] | any(. == "bd codex-hook SessionStart")) and
+    ([.hooks.PreCompact[].hooks[].command] | any(. == "bd codex-hook PreCompact")) and
+    ([.hooks.PostCompact[].hooks[].command] | any(. == "bd codex-hook PostCompact")) and
+    ([.hooks.UserPromptSubmit[].hooks[].command] | any(. == "bd codex-hook UserPromptSubmit"))
+  ' "$REPO_ROOT/plugins/development-system/hooks/codex.json"
+  [ "$status" -eq 0 ]
+}
+
 @test "setup records explicit delivery and feature selections" {
   git -C "$TEST_ROOT" init --initial-branch=main project
   git -C "$TEST_ROOT/project" config user.email test@example.com
@@ -339,27 +354,4 @@ teardown() {
   grep -Fq 'worktrees = false' "$TEST_ROOT/project/.development-system.toml"
   grep -Fq 'agentic_systems = true' "$TEST_ROOT/project/.development-system.toml"
   ! grep -Fq '[mcps]' "$TEST_ROOT/project/.development-system.toml"
-}
-
-@test "tiber launcher refuses use when the project disables Tiber" {
-  git -C "$TEST_ROOT" init --initial-branch=main disabled-tiber
-  git -C "$TEST_ROOT/disabled-tiber" config user.email test@example.com
-  git -C "$TEST_ROOT/disabled-tiber" config user.name "Test User"
-  touch "$TEST_ROOT/disabled-tiber/README.md"
-  git -C "$TEST_ROOT/disabled-tiber" add README.md
-  git -C "$TEST_ROOT/disabled-tiber" commit -m "test: initialize fixture"
-  "$REPO_ROOT/plugins/development-system/bin/development-system" setup \
-    --project "$TEST_ROOT/disabled-tiber" \
-    --disable tiber \
-    --apply \
-    --yes
-
-  run bash -c \
-    'cd "$1" && "$2" list' \
-    _ \
-    "$TEST_ROOT/disabled-tiber" \
-    "$REPO_ROOT/plugins/development-system/bin/tiber"
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"development_system.feature_disabled feature=tiber"* ]]
 }

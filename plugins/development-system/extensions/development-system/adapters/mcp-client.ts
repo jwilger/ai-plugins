@@ -212,14 +212,11 @@ export function schemaIsAdmissible(
   return visit(schema);
 }
 
-export function publicToolName(
-  origin: "tiber" | "review",
-  discoveredName: string,
-): string {
+export function publicToolName(discoveredName: string): string {
   const suffix = discoveredName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
   if (!suffix) throw new Error("development_system.mcp_tool_name_invalid");
-  return `development_system_${origin}_${suffix}`;
+  return `development_system_review_${suffix}`;
 }

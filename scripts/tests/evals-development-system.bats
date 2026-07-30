@@ -324,7 +324,7 @@ JSON
 }
 
 @test "filtered behavior config preserves every declared provider composition" {
-  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
+  run env EVAL_CASE_FILTER=force-push-refusal \
     node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
@@ -341,7 +341,7 @@ JSON
   generated_config="$FIXTURE_TMP/config.yaml"
   generated_metadata="$FIXTURE_TMP/metadata.json"
 
-  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture node \
+  run env EVAL_CASE_FILTER=force-push-refusal node \
     "$ROOT/scripts/evals/generate-config.mjs" \
     --suite behavior \
     --output "$generated_config" \

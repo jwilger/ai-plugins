@@ -86,7 +86,6 @@ function safeToolLabel(value: unknown): string {
   if (KNOWN_BUILTIN_TOOLS.has(value)) return value;
   if (value.startsWith("development_system_")) return "development-system";
   if (value.startsWith("final_review.")) return "final-review";
-  if (value.startsWith("tiber.")) return "tiber";
   return "extension-tool";
 }
 

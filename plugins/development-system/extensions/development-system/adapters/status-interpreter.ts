@@ -14,18 +14,15 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-function targetFor(
-  component: "tiber" | "development-discipline",
-): string | null {
+function developmentDisciplineTarget(): string | null {
   const key = `${process.platform}:${process.arch}`;
-  const targets: Record<string, readonly [string, string]> = {
-    "linux:x64": ["x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"],
-    "linux:arm64": ["aarch64-unknown-linux-gnu", "aarch64-unknown-linux-musl"],
-    "darwin:x64": ["x86_64-apple-darwin", "x86_64-apple-darwin"],
-    "darwin:arm64": ["aarch64-apple-darwin", "aarch64-apple-darwin"],
+  const targets: Record<string, string> = {
+    "linux:x64": "x86_64-unknown-linux-musl",
+    "linux:arm64": "aarch64-unknown-linux-musl",
+    "darwin:x64": "x86_64-apple-darwin",
+    "darwin:arm64": "aarch64-apple-darwin",
   };
-  const selected = targets[key];
-  return selected?.[component === "tiber" ? 0 : 1] ?? null;
+  return targets[key] ?? null;
 }
 
 async function resolveRepository(project: string): Promise<RepositoryIdentity> {
@@ -62,12 +59,11 @@ async function resolveRepository(project: string): Promise<RepositoryIdentity> {
   });
 }
 
-async function componentStatus(
+async function developmentDisciplineStatus(
   packageRoot: string,
-  component: "tiber" | "development-discipline",
 ): Promise<ComponentStatus> {
-  const target = targetFor(component);
-  const binary = component === "tiber" ? "tiber" : "development-discipline-mcp";
+  const target = developmentDisciplineTarget();
+  const binary = "development-discipline-mcp";
   const entrypoint = path.join(packageRoot, "bin", binary);
   if (target === null)
     return Object.freeze({
@@ -79,7 +75,7 @@ async function componentStatus(
   const bundled = path.join(
     packageRoot,
     "components",
-    component,
+    "development-discipline",
     "dist",
     target,
     binary,
@@ -96,6 +92,26 @@ async function componentStatus(
       entrypoint,
       target,
       error: "development_system.component_unavailable",
+    });
+  }
+}
+
+async function beadsStatus(project: string): Promise<ComponentStatus> {
+  try {
+    const { stdout } = await execFileAsync("bd", ["version"], {
+      cwd: project,
+      timeout: 5_000,
+      maxBuffer: 50 * 1024,
+    });
+    if (!/\bbd version (?:[1-9]\d*)\./.test(stdout))
+      throw new Error("unsupported version");
+    return Object.freeze({ available: true, entrypoint: "bd", target: null });
+  } catch {
+    return Object.freeze({
+      available: false,
+      entrypoint: "bd",
+      target: null,
+      error: "development_system.beads_unavailable",
     });
   }
 }
@@ -123,11 +139,8 @@ async function perform(
       return resolveRepository(project);
     case "resolve-components":
       return Object.freeze({
-        tiber: await componentStatus(packageRoot, "tiber"),
-        "development-discipline": await componentStatus(
-          packageRoot,
-          "development-discipline",
-        ),
+        beads: await beadsStatus(project),
+        "development-discipline": await developmentDisciplineStatus(packageRoot),
       });
     case "run-doctor": {
       try {

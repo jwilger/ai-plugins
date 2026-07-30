@@ -26,7 +26,7 @@ process.stdin.on("data", chunk => {
     if (!line) continue;
     const request = JSON.parse(line);
     if (request.method === "initialize") respond(request.id, { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } });
-    if (request.method === "tools/list") respond(request.id, { tools: [{ name: "tiber.list", description: "List", inputSchema: { type: "object", properties: {} } }] });
+    if (request.method === "tools/list") respond(request.id, { tools: [{ name: "final_review.plan", description: "List", inputSchema: { type: "object", properties: {} } }] });
     if (request.method === "tools/call") respond(request.id, { content: [{ type: "text", text: "ok" }], structuredContent: { ok: true } });
   }
 });
@@ -42,11 +42,11 @@ test("first-party MCP client dynamically discovers and calls admitted tools", as
   });
   await client.start();
   const tools = await client.listTools();
-  assert.equal(tools[0].name, "tiber.list");
+  assert.equal(tools[0].name, "final_review.plan");
   assert.equal(schemaIsAdmissible(tools[0].inputSchema), true);
   assert.equal(
-    publicToolName("tiber", tools[0].name),
-    "development_system_tiber_tiber_list",
+    publicToolName(tools[0].name),
+    "development_system_review_final_review_plan",
   );
   const result = await client.callTool(tools[0].name, {});
   assert.equal(result.structuredContent.ok, true);

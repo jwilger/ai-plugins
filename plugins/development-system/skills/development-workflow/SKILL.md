@@ -17,10 +17,12 @@ For a change:
 5. Perform risk-proportional final review.
 6. Deliver using the configured delivery mode.
 
-If pushed CI fails, stop unrelated work. When `[features].tiber = true`,
-establish one Tiber CI-recovery owner before repairing or rerunning it. When
-Tiber is disabled, follow the same single-owner recovery discipline locally
-without invoking Tiber.
+If pushed CI fails unexpectedly, stop unrelated work. When
+`[features].beads = true`, pour or create one `ci-recovery` molecule, claim it
+atomically, and acquire the Beads merge slot before repairing or rerunning it.
+An intentional failure while testing an active `ci-workflow-slice` remains
+related work in that slice rather than a separate incident. When Beads is
+disabled, follow the same single-owner recovery discipline locally.
 
 Load [workflow rules](references/workflow-rules.md) only when executing or
 reviewing a change.

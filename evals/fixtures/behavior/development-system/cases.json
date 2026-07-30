@@ -868,7 +868,7 @@
   {
     "case_id": "development-system-setup-primary-checkout",
     "behavior": "Routes initialization through the consolidated setup command and requires the primary checkout.",
-    "prompt": "Set up an existing repository from scratch with my standard trunk-based, worktree, and Tiber workflow. I am currently inside one of its linked feature worktrees. Should setup run here, and what exact command and location should I use?",
+    "prompt": "Set up an existing repository from scratch with my standard trunk-based, worktree, and Beads workflow. I am currently inside one of its linked feature worktrees. Should setup run here, and what exact command and location should I use?",
     "tags": ["setup", "primary-checkout", "worktrees"],
     "plugins": ["development-system"],
     "skills": ["setup"],
@@ -890,11 +890,92 @@
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Run setup from the repository's primary checkout, never from the linked feature worktree: `<plugin-root>/bin/development-system setup --project <repo> --preset personal-trunk --dry-run`. Review the preview and obtain explicit approval before replacing `--dry-run` with `--apply --yes`; the preset initializes trunk, worktrees, and Tiber from scratch."
+        "Run setup from the repository's primary checkout, never from the linked feature worktree: `<plugin-root>/bin/development-system setup --project <repo> --preset personal-trunk --dry-run`. Review the preview and obtain explicit approval before replacing `--dry-run` with `--apply --yes`; the preset initializes trunk, worktrees, and Beads from scratch."
       ],
       "fail": [
-        "Stay in the feature worktree and install the worktrees and Tiber plugins separately before running setup."
+        "Stay in the feature worktree and install the worktrees and Beads plugins separately before running setup."
       ]
+    }
+  },
+  {
+    "plugins": ["development-system"],
+    "skills": ["beads", "development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation",
+        "workflow"
+      ]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "hardAssertions": [],
+    "case_id": "beads-behavior-slice-bdd-tdd-checkpoint",
+    "behavior": "Routes runtime behavior through BDD, focused TDD, a full slice gate, and a pushed checkpoint.",
+    "prompt": "We need to change runtime behavior. The project uses Cucumber, the acceptance failure is broad, and delivery is direct to trunk. What exact testing and checkpoint sequence will you follow?",
+    "tags": ["beads", "bdd", "tdd", "checkpoint"],
+    "semanticRubric": "Pass if it uses the Beads behavior workflow, writes and observes a failing Gherkin scenario before production code, implements one scenario step at a time, adds a focused unit red-green-refactor cycle because the failure is broad, uses focused tests during micro-cycles, runs the complete local gate once the slice is green, then commits and pushes. Wrong or passing acceptance results must be fixed before implementation. Fail for runtime-first coding, whole-scenario implementation, no focused unit cycle, or pushing before the full gate.",
+    "calibration": {
+      "pass": [
+        "Pour the behavior slice, write and run the Cucumber scenario first, fix any wrong failure, then implement one step at a time. Since the failure is broad, use a focused unit red-green-refactor cycle. Run focused tests while iterating, then the complete local gate before committing and pushing the green slice."
+      ],
+      "fail": [
+        "Implement the feature, add tests afterward, and push each edit."
+      ]
+    }
+  },
+  {
+    "plugins": ["development-system"],
+    "skills": ["beads", "development-workflow"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "workflow"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "hardAssertions": [],
+    "case_id": "beads-documentation-slice-no-runtime-tdd",
+    "behavior": "Classifies prose-only work as documentation and runs causal validation without invented runtime tests.",
+    "prompt": "Update a prose-only guide; no executable examples, scripts, generated files, configuration, or product behavior change. Must we write a failing runtime test first, and what workflow should we use?",
+    "tags": ["beads", "documentation", "scope"],
+    "semanticRubric": "Pass if it selects documentation-slice, explicitly rejects invented runtime TDD for prose-only work, and runs only causal checks such as formatting, links, or docs build before the delivery checkpoint. Fail if it requires a failing runtime test or behavior-slice.",
+    "calibration": {
+      "pass": [
+        "Use documentation-slice. Do not invent a runtime red test; run the relevant formatter, link checker, or docs build, then checkpoint according to delivery policy."
+      ],
+      "fail": ["Every change requires a failing unit test, including prose."]
+    }
+  },
+  {
+    "plugins": ["development-system"],
+    "skills": ["beads", "development-workflow"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "workflow"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "hardAssertions": [],
+    "case_id": "beads-ci-workflow-pushed-run-is-behavior-test",
+    "behavior": "Treats the authorized pushed CI workflow run as the behavioral test for CI workflow changes.",
+    "prompt": "Change a GitHub Actions workflow. Local static validation can parse the YAML but cannot execute the hosted behavior. What counts as the behavioral test and when is the slice complete?",
+    "tags": ["beads", "ci", "pushed-proof"],
+    "semanticRubric": "Pass if it selects ci-workflow-slice, runs available local static validation, pushes an authorized test SHA, treats the real hosted workflow run as the behavioral test, iterates from run evidence, and requires terminal success for the exact final SHA. Fail if local YAML validation alone is called behavioral proof or if it invents runtime unit TDD.",
+    "calibration": {
+      "pass": [
+        "Use ci-workflow-slice: validate locally, push the authorized test SHA, inspect the actual GitHub Actions run as the behavioral test, and finish only when the exact final SHA succeeds."
+      ],
+      "fail": ["A YAML parser passing locally proves the workflow behavior."]
     }
   }
 ]

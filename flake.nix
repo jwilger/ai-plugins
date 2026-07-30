@@ -20,6 +20,70 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
+          beadsRelease = {
+            "x86_64-linux" = {
+              asset = "beads_1.1.2_linux_amd64.tar.gz";
+              hash = "sha256-py1x7TdJVdyfg6D5C1S9e2oAFnCd0Wdq4uNoZR7UAcI=";
+            };
+            "aarch64-linux" = {
+              asset = "beads_1.1.2_linux_arm64.tar.gz";
+              hash = "sha256-oTQBX69L4KQ/hoGo1gLq8LfCVclX8J08kzJXyMkv3RA=";
+            };
+            "x86_64-darwin" = {
+              asset = "beads_1.1.2_darwin_amd64.tar.gz";
+              hash = "sha256-DpTekxnJ1my34AOLsX669d0v5mnjZqS5FTUotHShqPY=";
+            };
+            "aarch64-darwin" = {
+              asset = "beads_1.1.2_darwin_arm64.tar.gz";
+              hash = "sha256-mwE3qDoq/TQ+Kr0qUGvnLqAychAA92Zpws+Bcp54UB0=";
+            };
+          }.${system};
+          beads = pkgs.stdenvNoCC.mkDerivation {
+            pname = "beads";
+            version = "1.1.2";
+            src = pkgs.fetchurl {
+              url = "https://github.com/gastownhall/beads/releases/download/v1.1.2/${beadsRelease.asset}";
+              hash = beadsRelease.hash;
+            };
+            sourceRoot = ".";
+            unpackPhase = "tar -xzf $src";
+            installPhase = ''
+              mkdir -p "$out/bin"
+              install -m 0755 bd "$out/bin/bd"
+            '';
+          };
+          doltRelease = {
+            "x86_64-linux" = {
+              asset = "dolt-linux-amd64.tar.gz";
+              hash = "sha256-/6+nzBcsraX3fKP7ljBlRd2sRKERYl91+HAwbH8ZcwE=";
+            };
+            "aarch64-linux" = {
+              asset = "dolt-linux-arm64.tar.gz";
+              hash = "sha256-Xo9NvmGTHDb4NZAi7jIzfl2vZaugail5GgZuUGd8izo=";
+            };
+            "x86_64-darwin" = {
+              asset = "dolt-darwin-amd64.tar.gz";
+              hash = "sha256-GieuFVQiAgIOflqKg3PglFVDqQGd+iFW0TVzooAbQIE=";
+            };
+            "aarch64-darwin" = {
+              asset = "dolt-darwin-arm64.tar.gz";
+              hash = "sha256-itrXSTUGHxNTkHhD5MGpJviO+W3J0jOCSjbNKSy3qj8=";
+            };
+          }.${system};
+          dolt = pkgs.stdenvNoCC.mkDerivation {
+            pname = "dolt";
+            version = "2.2.3";
+            src = pkgs.fetchurl {
+              url = "https://github.com/dolthub/dolt/releases/download/v2.2.3/${doltRelease.asset}";
+              hash = doltRelease.hash;
+            };
+            sourceRoot = ".";
+            unpackPhase = "tar -xzf $src";
+            installPhase = ''
+              mkdir -p "$out/bin"
+              install -m 0755 "$(find . -type f -path '*/bin/dolt' -print -quit)" "$out/bin/dolt"
+            '';
+          };
         in
         {
           default = pkgs.mkShell {
@@ -56,6 +120,7 @@
               actionlint
               yq-go
             ])
+            ++ [ beads dolt ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               pkgs.bubblewrap
               pkgs.systemd

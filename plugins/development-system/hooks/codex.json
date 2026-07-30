@@ -1,15 +1,59 @@
 {
-  "description": "Warn about conflicting development plugins, harness settings, and user-managed MCPs.",
+  "description": "Load development-system compatibility checks and Beads workflow context.",
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "*",
+        "matcher": "startup|resume|clear",
         "hooks": [
           {
             "type": "command",
             "command": "\"${PLUGIN_ROOT}/bin/development-system\" session-start --project \"$PWD\" --harness codex --format json",
             "timeout": 10,
             "statusMessage": "Checking development system compatibility"
+          },
+          {
+            "type": "command",
+            "command": "bd codex-hook SessionStart",
+            "timeout": 15,
+            "statusMessage": "Loading Beads context"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd codex-hook PreCompact",
+            "timeout": 15,
+            "statusMessage": "Checking Beads context"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd codex-hook PostCompact",
+            "timeout": 15,
+            "statusMessage": "Scheduling Beads context refresh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd codex-hook UserPromptSubmit",
+            "timeout": 15,
+            "statusMessage": "Refreshing Beads context"
           }
         ]
       }

@@ -23,7 +23,7 @@ export type DevelopmentSystemStatus = Readonly<{
   enabledFeatures: readonly string[];
   checkout: RepositoryIdentity;
   components: Readonly<
-    Record<"tiber" | "development-discipline", ComponentStatus>
+    Record<"beads" | "development-discipline", ComponentStatus>
   >;
   enforcement: Readonly<{
     mode: HarnessMode;
@@ -149,7 +149,7 @@ export class StatusFlow {
               this.#state.policy.features.agenticSystems && "agentic-systems",
               this.#state.policy.features.evalCaseReporting &&
                 "eval-case-reporting",
-              this.#state.policy.features.tiber && "tiber",
+              this.#state.policy.features.beads && "beads",
               this.#state.policy.features.worktrees && "worktrees",
             ]
               .filter((value): value is string => Boolean(value))
