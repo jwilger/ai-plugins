@@ -324,7 +324,9 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     cwd: string,
     approvedNames: ReadonlySet<string>,
   ): Promise<readonly string[]> => {
-    const client = new McpClient({ command, args, cwd });
+    const maxOutputBytes =
+      origin === "review" ? 2 * 1024 * 1024 + 64 * 1024 : 50 * 1024;
+    const client = new McpClient({ command, args, cwd, maxOutputBytes });
     let discovered: readonly McpTool[];
     try {
       await client.start();
@@ -355,12 +357,13 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
             command,
             args,
             cwd: projectCwd(context.cwd),
+            maxOutputBytes,
           });
           await routed.start();
           try {
             const result = await routed.callTool(tool.name, parameters, signal);
             const text = JSON.stringify(result);
-            if (Buffer.byteLength(text) > 50 * 1024)
+            if (Buffer.byteLength(text) > maxOutputBytes)
               throw new Error("development_system.component_output_limit");
             return { content: [{ type: "text", text }], details: result };
           } finally {
@@ -1355,6 +1358,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
           new Set([
             "final_review.assess_risk",
             "final_review.plan",
+            "final_review.resume",
             "final_review.filter_findings",
             "final_review.advance",
             "final_review.clean_status",

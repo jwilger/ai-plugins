@@ -282,13 +282,21 @@ impl ReviewCoordinator {
                     .pointer("/params/arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                if !matches!(name, "final_review.plan" | "final_review.assess_risk") {
+                if !matches!(
+                    name,
+                    "final_review.plan" | "final_review.assess_risk" | "final_review.resume"
+                ) {
                     if let Err(error) = self.validate_authoritative_state(name, &arguments) {
                         return Ok(error_response(id, -32602, &error));
                     }
                 }
                 let now_epoch_seconds = (self.now_epoch_seconds)();
-                match call_tool_at(name, &arguments, now_epoch_seconds) {
+                let result = if name == "final_review.resume" {
+                    self.resume_authoritative_state(&arguments)
+                } else {
+                    call_tool_at(name, &arguments, now_epoch_seconds)
+                };
+                match result {
                     Ok(result) => {
                         let response =
                             json!({ "jsonrpc": "2.0", "id": id.clone(), "result": result });
@@ -330,6 +338,75 @@ impl ReviewCoordinator {
         };
 
         Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+    }
+
+    fn resume_authoritative_state(&mut self, arguments: &Value) -> Result<Value, String> {
+        let session_id = arguments
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "review_session_id_required=true".to_string())?;
+        if session_id.chars().count() > MAX_SESSION_ID_CHARS {
+            return Err(format!(
+                "session_id_too_long max_chars={MAX_SESSION_ID_CHARS}"
+            ));
+        }
+        let project_root = arguments
+            .get("project_root")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
+        let work_item_id = arguments.get("work_item_id").and_then(Value::as_str);
+        let lookup = json!({
+            "scope": { "project_root": project_root },
+            "work_item_id": work_item_id
+        });
+        if let Some(restored) = load_authoritative_session(&lookup, session_id)? {
+            self.session_revisions
+                .insert(session_id.to_string(), restored.revision);
+            self.sessions.insert(session_id.to_string(), restored.state);
+            self.pending_verifiers.remove(session_id);
+            self.pending_delta_risks.remove(session_id);
+            if let Some(pending) = restored.pending_verifier {
+                self.pending_verifiers
+                    .insert(session_id.to_string(), pending);
+            }
+            if let Some(pending) = restored.pending_delta_risk {
+                self.pending_delta_risks
+                    .insert(session_id.to_string(), pending);
+            }
+        }
+        let state = self
+            .sessions
+            .get(session_id)
+            .cloned()
+            .filter(|state| {
+                state.pointer("/scope/project_root").and_then(Value::as_str) == Some(project_root)
+                    && state.get("work_item_id").and_then(Value::as_str) == work_item_id
+            })
+            .ok_or_else(|| {
+                "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
+                    .to_string()
+            })?;
+        let revision = self.session_revisions.get(session_id).copied().unwrap_or(1);
+        let pending_transition = if self.pending_verifiers.contains_key(session_id) {
+            "verifier_required"
+        } else if self.pending_delta_risks.contains_key(session_id) {
+            "delta_risk_assessment_required"
+        } else {
+            "none"
+        };
+        self.touch_session(session_id);
+        self.enforce_active_session_limit();
+        Ok(text_content(
+            json!({
+                "session_id": session_id,
+                "revision": revision,
+                "state": state,
+                "pending_transition": pending_transition
+            })
+            .to_string(),
+        ))
     }
 
     fn validate_authoritative_state(
@@ -748,6 +825,20 @@ fn tools() -> Value {
                     "risk_assessment",
                     "shared_test_evidence"
                 ]
+            }
+        },
+        {
+            "name": "final_review.resume",
+            "description": "Return the latest server-authoritative caller-carried state for an exact persisted final-review session ID without weakening subsequent revision checks.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "session_id": { "type": "string", "minLength": 1, "maxLength": MAX_SESSION_ID_CHARS },
+                    "project_root": { "type": "string", "minLength": 1, "pattern": "\\S" },
+                    "work_item_id": { "type": "string", "maxLength": MAX_WORK_ITEM_ID_CHARS, "pattern": "^[A-Za-z0-9._:-]+$" }
+                },
+                "required": ["session_id", "project_root"]
             }
         },
         {
@@ -17951,14 +18042,19 @@ pre_filter = "project-pre"
         .expect("response");
 
         let tools = response["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 7);
-        assert_eq!(tools[3]["name"], "final_review.confirm_split");
+        assert_eq!(tools.len(), 8);
+        assert_eq!(tools[1]["name"], "final_review.resume");
         assert_eq!(
-            tools[3]["inputSchema"]["allOf"][0]["else"]["not"]["required"],
+            tools[1]["inputSchema"]["required"],
+            json!(["session_id", "project_root"])
+        );
+        assert_eq!(tools[4]["name"], "final_review.confirm_split");
+        assert_eq!(
+            tools[4]["inputSchema"]["allOf"][0]["else"]["not"]["required"],
             json!(["blocking_dependencies_reason"])
         );
-        assert_eq!(tools[5]["name"], "final_review.out_of_scope_report");
-        assert_eq!(tools[6]["name"], "final_review.assess_risk");
+        assert_eq!(tools[6]["name"], "final_review.out_of_scope_report");
+        assert_eq!(tools[7]["name"], "final_review.assess_risk");
         assert_eq!(
             tools[0]["inputSchema"]["properties"]["required_clean_iterations"]["minimum"],
             DEFAULT_CLEAN_ITERATIONS
@@ -17973,26 +18069,21 @@ pre_filter = "project-pre"
                 "shared_test_evidence"
             ])
         );
-        assert!(tools[6]["inputSchema"]["required"]
+        assert!(tools[7]["inputSchema"]["required"]
             .as_array()
             .expect("risk scout required fields")
             .contains(&json!("baseline_commit")));
         assert_eq!(
-            tools[6]["inputSchema"]["properties"]["baseline_commit"]["pattern"],
+            tools[7]["inputSchema"]["properties"]["baseline_commit"]["pattern"],
             "^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$"
-        );
-        assert_eq!(
-            tools[1]["inputSchema"]["properties"]["lens_results"]["maxItems"],
-            MAX_REVIEW_LENSES
         );
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["lens_results"]["maxItems"],
             MAX_REVIEW_LENSES
         );
         assert_eq!(
-            tools[1]["inputSchema"]["properties"]["lens_results"]["items"]["properties"]
-                ["findings"]["maxItems"],
-            MAX_FINDINGS_PER_LENS
+            tools[3]["inputSchema"]["properties"]["lens_results"]["maxItems"],
+            MAX_REVIEW_LENSES
         );
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["lens_results"]["items"]["properties"]
@@ -18000,12 +18091,17 @@ pre_filter = "project-pre"
             MAX_FINDINGS_PER_LENS
         );
         assert_eq!(
-            tools[2]["inputSchema"]["properties"]["verifier_result"]["properties"]["verdicts"]
+            tools[3]["inputSchema"]["properties"]["lens_results"]["items"]["properties"]
+                ["findings"]["maxItems"],
+            MAX_FINDINGS_PER_LENS
+        );
+        assert_eq!(
+            tools[3]["inputSchema"]["properties"]["verifier_result"]["properties"]["verdicts"]
                 ["maxItems"],
             MAX_FINDINGS_PER_ITERATION
         );
         assert_eq!(
-            tools[2]["inputSchema"]["properties"]["review_budget_decision"]["oneOf"]
+            tools[3]["inputSchema"]["properties"]["review_budget_decision"]["oneOf"]
                 .as_array()
                 .expect("exact review budget variants")
                 .len(),
@@ -22785,6 +22881,62 @@ pre_filter = "project-pre"
             advanced["state"]["deferred_findings"][0]["ticket_reference"],
             "BACKLOG-SEC-1"
         );
+    }
+
+    #[test]
+    fn json_rpc_resumes_latest_authoritative_state_by_session_id() {
+        let session_id = format!("resumable-review-{}", std::process::id());
+        let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": session_id,
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let planned = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": plan_arguments }
+            }))
+            .expect("plan response");
+        let plan: Value = serde_json::from_str(
+            planned["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.resume",
+                    "arguments": {
+                        "session_id": session_id,
+                        "project_root": plan["state"]["scope"]["project_root"]
+                    }
+                }
+            }))
+            .expect("resume response");
+        let payload: Value = serde_json::from_str(
+            resumed["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("resume text: {resumed}")),
+        )
+        .expect("resume json");
+
+        assert_eq!(payload["state"], plan["state"]);
+        assert_eq!(payload["session_id"], session_id);
+        assert_eq!(payload["revision"], 1);
     }
 
     #[test]
