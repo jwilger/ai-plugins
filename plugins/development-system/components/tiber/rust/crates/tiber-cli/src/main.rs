@@ -439,6 +439,16 @@ enum SubtaskCommand {
         /// 1-based subtask index.
         index: String,
     },
+    /// Replace a subtask's predecessor list, or clear it when --after is omitted.
+    After {
+        /// Task id, nickname, or full stem.
+        task_ref: String,
+        /// Stable subtask id.
+        index: String,
+        /// Comma-separated predecessor subtask refs.
+        #[arg(long)]
+        after: Option<CommaSeparatedValues>,
+    },
     /// Mark a subtask incomplete.
     Uncheck {
         /// Task id, nickname, or full stem.
@@ -1117,6 +1127,20 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             command: SubtaskCommand::Check { task_ref, index },
         }) => {
             tiber_git::set_subtask_checked(&task_ref, &index, true)?;
+            Ok(())
+        }
+        Command::Subtask(SubtaskArgs {
+            command:
+                SubtaskCommand::After {
+                    task_ref,
+                    index,
+                    after,
+                },
+        }) => {
+            let after = after
+                .map(CommaSeparatedValues::into_values)
+                .unwrap_or_default();
+            tiber_git::set_subtask_predecessors(&task_ref, &index, &after)?;
             Ok(())
         }
         Command::Subtask(SubtaskArgs {

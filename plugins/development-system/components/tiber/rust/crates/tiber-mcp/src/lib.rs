@@ -232,6 +232,13 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
             tiber_git::add_subtask(task_ref, title, &after_refs)?;
             Ok(text_content(format!("updated {task_ref}")))
         }
+        "tiber.subtask.after" => {
+            let task_ref = required_string(arguments, "ref")?;
+            let index = required_string(arguments, "index")?;
+            let after_refs = optional_string_array(arguments, "after")?.unwrap_or_default();
+            tiber_git::set_subtask_predecessors(task_ref, index, &after_refs)?;
+            Ok(text_content(format!("updated {task_ref}")))
+        }
         "tiber.subtask.check" => {
             let task_ref = required_string(arguments, "ref")?;
             let index = required_string(arguments, "index")?;
@@ -686,6 +693,17 @@ fn tools() -> Vec<Value> {
                 "after": { "type": "array", "items": { "type": "string" } }
             }),
             vec!["ref", "title"],
+        ),
+        tool(
+            "tiber.subtask.after",
+            "Set subtask predecessors",
+            "Replace a subtask's predecessor list, or clear it when after is omitted.",
+            json!({
+                "ref": { "type": "string" },
+                "index": { "type": "string" },
+                "after": { "type": "array", "items": { "type": "string" } }
+            }),
+            vec!["ref", "index"],
         ),
         tool(
             "tiber.subtask.check",

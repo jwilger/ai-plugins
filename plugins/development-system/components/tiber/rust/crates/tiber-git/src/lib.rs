@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
@@ -1530,6 +1531,15 @@ pub fn set_subtask_checked(task_ref: &str, index: &str, checked: bool) -> Result
     repo.with_task_workspace(|repo| repo.set_subtask_checked(task_ref, index, checked))
 }
 
+pub fn set_subtask_predecessors(
+    task_ref: &str,
+    index: &str,
+    after_refs: &[String],
+) -> Result<(), Error> {
+    let repo = GitRepository::discover()?;
+    repo.with_task_workspace(|repo| repo.set_subtask_predecessors(task_ref, index, after_refs))
+}
+
 pub fn update_task(task_ref: &str, update: TaskUpdate<'_>) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
     repo.with_task_workspace(|repo| repo.update_task(task_ref, update))
@@ -2607,22 +2617,6 @@ impl GitRepository {
         Ok(())
     }
 
-    fn update_task_section(
-        &self,
-        task_ref: &str,
-        heading: &str,
-        item: &str,
-        operation: SectionOperation,
-    ) -> Result<(), Error> {
-        let path = self.tasks_dir().join(self.resolve_task_ref(task_ref)?);
-        let task = fs::read_to_string(&path)?;
-        fs::write(
-            path,
-            update_markdown_section(&task, heading, item, operation),
-        )?;
-        Ok(())
-    }
-
     fn add_subtask(&self, task_ref: &str, title: &str, after_refs: &[String]) -> Result<(), Error> {
         self.add_subtask_unlocked(task_ref, title, after_refs)?;
         self.sync_repository_unlocked()
@@ -2638,7 +2632,7 @@ impl GitRepository {
         if title.is_empty() {
             return Err(Error::Parse("subtask_title_empty=true".to_string()));
         }
-        if title.chars().any(char::is_control) {
+        if title.chars().any(char::is_control) || title.contains(" — after:") {
             return Err(Error::Parse("subtask_title_invalid=true".to_string()));
         }
         let after_refs = after_refs
@@ -2648,21 +2642,62 @@ impl GitRepository {
         let task_path = self.resolve_task_ref(task_ref)?;
         let task = fs::read_to_string(self.tasks_dir().join(&task_path))?;
         let subtask_id = next_subtask_id(&task);
+        if after_refs.iter().any(|after_ref| after_ref == &subtask_id) {
+            return Err(Error::Parse(format!(
+                "subtask_self_dependency ref={subtask_id}"
+            )));
+        }
+        let existing_ids = parse_subtask_dependencies(&task)
+            .into_iter()
+            .map(|(subtask_id, _)| subtask_id)
+            .collect::<HashSet<_>>();
+        if let Some(missing) = after_refs
+            .iter()
+            .find(|after_ref| !existing_ids.contains(*after_ref))
+        {
+            return Err(Error::Parse(format!(
+                "subtask_predecessor_missing ref={missing}"
+            )));
+        }
         let after_suffix = if after_refs.is_empty() {
             String::new()
         } else {
             format!(" — after: {}", after_refs.join(", "))
         };
-        self.update_task_section(
-            &task_stem(&task_path)?,
+        let updated = update_markdown_section(
+            &task,
             "Subtasks",
             &format!("[ ] ({subtask_id}) {title}{after_suffix}"),
             SectionOperation::Add,
-        )
+        );
+        reject_new_subtask_cycles(&task, &updated)?;
+        fs::write(self.tasks_dir().join(task_path), updated)?;
+        Ok(())
     }
 
     fn set_subtask_checked(&self, task_ref: &str, index: &str, checked: bool) -> Result<(), Error> {
         self.set_subtask_checked_unlocked(task_ref, index, checked)?;
+        self.sync_repository_unlocked()
+    }
+
+    fn set_subtask_predecessors(
+        &self,
+        task_ref: &str,
+        index: &str,
+        after_refs: &[String],
+    ) -> Result<(), Error> {
+        let task_ref = self.resolve_task_ref(task_ref)?;
+        let subtask_ref = parse_subtask_ref(index)?;
+        let after_refs = after_refs
+            .iter()
+            .map(|after_ref| parse_subtask_ref(after_ref))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let path = self.tasks_dir().join(&task_ref);
+        let task = fs::read_to_string(&path)?;
+        fs::write(
+            path,
+            update_subtask_predecessors(&task, &subtask_ref, &after_refs)?,
+        )?;
         self.sync_repository_unlocked()
     }
 
@@ -4654,9 +4689,9 @@ fn parse_subtask_dependencies(document: &str) -> Vec<(String, Vec<String>)> {
             let after_id_end = item[after_id_start..].find(')')? + after_id_start;
             let subtask_id = item[after_id_start..after_id_end].to_string();
             let after = item
-                .find("after:")
+                .find(" — after:")
                 .map(|after_index| {
-                    item[after_index + "after:".len()..]
+                    item[after_index + " — after:".len()..]
                         .split(',')
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
@@ -4825,6 +4860,90 @@ fn update_subtask_check_state(
         sections.push(after);
     }
     Ok(format!("{}\n", sections.join("\n\n")))
+}
+
+fn update_subtask_predecessors(
+    document: &str,
+    target_ref: &str,
+    after_refs: &[String],
+) -> Result<String, Error> {
+    if after_refs.iter().any(|after_ref| after_ref == target_ref) {
+        return Err(Error::Parse(format!(
+            "subtask_self_dependency ref={target_ref}"
+        )));
+    }
+    let existing_ids = parse_subtask_dependencies(document)
+        .into_iter()
+        .map(|(subtask_id, _)| subtask_id)
+        .collect::<HashSet<_>>();
+    if !existing_ids.contains(target_ref) {
+        return Err(Error::Parse(format!("subtask_missing ref={target_ref}")));
+    }
+    if let Some(missing) = after_refs
+        .iter()
+        .find(|after_ref| !existing_ids.contains(*after_ref))
+    {
+        return Err(Error::Parse(format!(
+            "subtask_predecessor_missing ref={missing}"
+        )));
+    }
+    let target_marker = format!("({target_ref})");
+    let suffix = if after_refs.is_empty() {
+        String::new()
+    } else {
+        format!(" — after: {}", after_refs.join(", "))
+    };
+    let mut in_subtasks = false;
+    let mut found = false;
+    let mut lines = Vec::new();
+    for line in document.lines() {
+        if line == "## Subtasks" {
+            in_subtasks = true;
+            lines.push(line.to_string());
+            continue;
+        }
+        if in_subtasks && is_task_section_heading(line) {
+            in_subtasks = false;
+        }
+        if in_subtasks {
+            if let Some(item) = line
+                .strip_prefix("- [ ] ")
+                .or_else(|| line.strip_prefix("- [x] "))
+            {
+                if item.starts_with(&target_marker) {
+                    let marker_end =
+                        line.find(&target_marker).expect("matched marker") + target_marker.len();
+                    let title = line[marker_end..]
+                        .split(" — after:")
+                        .next()
+                        .unwrap_or_default();
+                    lines.push(format!("{}{}{}", &line[..marker_end], title, suffix));
+                    found = true;
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+    if !found {
+        return Err(Error::Parse(format!("subtask_missing ref={target_ref}")));
+    }
+    let updated = format!("{}\n", lines.join("\n"));
+    reject_new_subtask_cycles(document, &updated)?;
+    Ok(updated)
+}
+
+fn reject_new_subtask_cycles(before: &str, after: &str) -> Result<(), Error> {
+    let existing = subtask_cycle_messages("task", before)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let introduces_cycle = subtask_cycle_messages("task", after)
+        .into_iter()
+        .any(|cycle| !existing.contains(&cycle));
+    if introduces_cycle {
+        return Err(Error::Parse("subtask_dependency_cycle=true".to_string()));
+    }
+    Ok(())
 }
 
 fn parse_subtask_ref(subtask_ref: &str) -> Result<String, Error> {

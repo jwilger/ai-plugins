@@ -143,6 +143,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         "tiber.link",
         "tiber.unlink",
         "tiber.subtask.add",
+        "tiber.subtask.after",
         "tiber.subtask.check",
         "tiber.subtask.uncheck",
         "tiber.update",

@@ -185,6 +185,8 @@ tiber prioritize <task-ref> --before <task-ref>
 tiber link <task-ref> blocks <task-ref>
 tiber unlink <task-ref> blocks <task-ref>
 tiber subtask add <task-ref> "Subtask title" --after s1,s2
+tiber subtask after <task-ref> s3 --after s1,s2
+tiber subtask after <task-ref> s3 # clear predecessors to repair an invalid edge
 tiber update <task-ref> --summary "..."
 tiber update <task-ref> --pr-mr-url <url> --pr-mr-status checks-pending
 tiber acceptance add <task-ref> "Observable condition"

@@ -547,7 +547,7 @@ checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
 name = "tiber-cli"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "clap",
  "serde",
@@ -560,11 +560,11 @@ dependencies = [
 
 [[package]]
 name = "tiber-core"
-version = "0.9.0"
+version = "0.10.0"
 
 [[package]]
 name = "tiber-git"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "tiber-mcp"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "tiber-server"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "axum",
  "futures-util",

@@ -166,6 +166,8 @@ tiber link <task-ref> blocks <task-ref>
 tiber unlink <task-ref> blocks <task-ref>
 tiber subtask add <task-ref> "Subtask title"
 tiber subtask add <task-ref> "Dependent subtask" --after s1,s2
+tiber subtask after <task-ref> s2 --after s1 # replace predecessors
+tiber subtask after <task-ref> s2            # clear predecessors to repair a bad edge
 tiber subtask check <task-ref> s1
 tiber subtask uncheck <task-ref> s1
 tiber update <task-ref> --summary "New summary" --tags infra,docs
