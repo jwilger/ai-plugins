@@ -393,7 +393,7 @@ fn prioritize_backlog_before(
     if task.stem == before.stem {
         return Ok(());
     }
-    tiber_git::prioritize_before_at(root, &task.stem, &before.stem)
+    tiber_git::prioritize_backlog_before_at(root, &task.stem, &before.stem)
 }
 
 fn status_sort_key(status: &str) -> usize {

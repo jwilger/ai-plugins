@@ -372,6 +372,31 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
 
     write_message(
         &mut stdin,
+        r#"{"jsonrpc":"2.0","id":121,"method":"tools/call","params":{"name":"tiber.prioritize","arguments":{"ref":"created-through-mcp","before":"expose-mcp-task"}}}"#,
+    );
+    let prioritized = read_message(&mut stdout);
+    assert!(prioritized.contains(r#""id":121"#));
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":122,"method":"tools/call","params":{"name":"tiber.list","arguments":{"status":"backlog"}}}"#,
+    );
+    let prioritized_list = read_message(&mut stdout);
+    let created_position = prioritized_list
+        .find(&created_through_mcp)
+        .expect("MCP list should contain prioritized task");
+    let expose_position = prioritized_list
+        .find(&expose_mcp_task)
+        .expect("MCP list should contain before task");
+    assert!(created_position < expose_position);
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":123,"method":"tools/call","params":{"name":"tiber.next","arguments":{}}}"#,
+    );
+    let prioritized_next = read_message(&mut stdout);
+    assert!(prioritized_next.contains(&created_through_mcp));
+
+    write_message(
+        &mut stdin,
         r#"{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"tiber.subtask.add","arguments":{"ref":"created-through-mcp","title":"Write MCP mirror tests"}}}"#,
     );
     let subtask_add = read_message(&mut stdout);

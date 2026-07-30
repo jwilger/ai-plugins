@@ -105,6 +105,7 @@ async fn dashboard_reprioritizes_backlog_cards_with_post_guard() {
     assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
 
     let response = app
+        .clone()
         .oneshot(
             Request::post(format!("/tasks/{second}/prioritize-before/{first}"))
                 .header("x-tiber-dashboard-action", "prioritize-before")
@@ -115,7 +116,18 @@ async fn dashboard_reprioritizes_backlog_cards_with_post_guard() {
         .expect("prioritize response");
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    assert_eq!(repo.order_entries(), vec![second, first]);
+    assert_eq!(repo.order_entries(), vec![second.clone(), first.clone()]);
+    let board = body_text(
+        app.oneshot(
+            Request::get("/")
+                .body(Body::empty())
+                .expect("board request"),
+        )
+        .await
+        .expect("board response"),
+    )
+    .await;
+    assert!(board.find(&second).expect("second card") < board.find(&first).expect("first card"));
 }
 
 #[tokio::test]

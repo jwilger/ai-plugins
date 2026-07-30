@@ -46,6 +46,58 @@ fn next_show_transition_and_prioritize_follow_order_md() {
 }
 
 #[test]
+fn filtered_list_and_next_follow_prioritized_backlog_order() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "First task"]));
+    assert_success(repo.tiber(["create", "Second task"]));
+    assert_success(repo.tiber(["create", "Third task"]));
+    let first = task_stem(&repo, "backlog", "first-task");
+    let second = task_stem(&repo, "backlog", "second-task");
+    let third = task_stem(&repo, "backlog", "third-task");
+
+    assert_success(repo.tiber(["prioritize", "third-task", "--before", "first-task"]));
+
+    let listed = repo.tiber(["list", "--status", "backlog"]);
+    assert_success_ref(&listed);
+    assert_eq!(
+        String::from_utf8(listed.stdout).expect("list output should be utf8"),
+        format!("{third}\tThird task\n{first}\tFirst task\n{second}\tSecond task\n")
+    );
+    let next = repo.tiber(["next"]);
+    assert_success_ref(&next);
+    assert_eq!(
+        String::from_utf8(next.stdout).expect("next output should be utf8"),
+        format!("{third}\tThird task\n")
+    );
+}
+
+#[test]
+fn every_ordered_read_reconciles_a_missing_open_task_in_memory() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Listed task"]));
+    assert_success(repo.tiber(["create", "Recovered task"]));
+    let listed = task_stem(&repo, "backlog", "listed-task");
+    let recovered = task_stem(&repo, "backlog", "recovered-task");
+    repo.insert_tasks_tree_file("order.md", &format!("{listed}\n"));
+
+    let unfiltered = repo.tiber(["list"]);
+    assert_success_ref(&unfiltered);
+    let expected = format!("{listed}\tListed task\n{recovered}\tRecovered task\n");
+    assert_eq!(
+        String::from_utf8(unfiltered.stdout).expect("list output should be utf8"),
+        expected
+    );
+    let filtered = repo.tiber(["list", "--status", "backlog"]);
+    assert_success_ref(&filtered);
+    assert_eq!(
+        String::from_utf8(filtered.stdout).expect("filtered list should be utf8"),
+        expected
+    );
+}
+
+#[test]
 fn transition_releases_claim_when_leaving_in_progress() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

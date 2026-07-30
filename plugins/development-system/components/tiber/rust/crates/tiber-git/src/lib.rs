@@ -204,6 +204,15 @@ pub fn prioritize_before_at(
     repo.with_task_workspace(|repo| repo.prioritize_before(task_ref, before_ref))
 }
 
+pub fn prioritize_backlog_before_at(
+    root: impl Into<PathBuf>,
+    task_ref: &str,
+    before_ref: &str,
+) -> Result<(), Error> {
+    let repo = GitRepository::at(root);
+    repo.with_task_workspace(|repo| repo.prioritize_backlog_before(task_ref, before_ref))
+}
+
 pub fn task_documents_at(root: impl Into<PathBuf>) -> Result<Vec<TaskDocument>, Error> {
     let repo = GitRepository::at(root);
     repo.with_task_snapshot_workspace(|repo| repo.task_documents_snapshot())
@@ -2326,9 +2335,19 @@ impl GitRepository {
     fn list_tasks_by_status(&self, status: &str) -> Result<Vec<TaskSummary>, Error> {
         let status = parse_status(status)?;
         self.read_sync()?;
-        self.task_documents_snapshot()?
+        let mut documents = self
+            .task_documents_snapshot()?
             .into_iter()
             .filter(|task| task.status == status)
+            .collect::<Vec<_>>();
+        documents.sort_by(|left, right| {
+            left.rank
+                .unwrap_or(usize::MAX)
+                .cmp(&right.rank.unwrap_or(usize::MAX))
+                .then_with(|| left.stem.cmp(&right.stem))
+        });
+        documents
+            .into_iter()
             .map(|task| {
                 Ok(TaskSummary {
                     path: task.stem,
@@ -2365,7 +2384,7 @@ impl GitRepository {
     fn board_snapshot(&self) -> Result<BoardSnapshot, Error> {
         self.read_sync()?;
         let ordered_tasks = self
-            .order_entries()?
+            .authoritative_order_entries()?
             .into_iter()
             .map(|stem| {
                 let path = self.resolve_task_ref(&stem)?;
@@ -2399,7 +2418,7 @@ impl GitRepository {
 
     fn task_documents_snapshot(&self) -> Result<Vec<TaskDocument>, Error> {
         let ranks = self
-            .order_entries()?
+            .authoritative_order_entries()?
             .into_iter()
             .enumerate()
             .map(|(index, stem)| (stem, index + 1))
@@ -2458,7 +2477,7 @@ impl GitRepository {
 
     fn next_task(&self) -> Result<Option<TaskSummary>, Error> {
         self.read_sync()?;
-        for stem in self.order_entries()? {
+        for stem in self.authoritative_order_entries()? {
             let path = self.resolve_task_ref(&stem)?;
             let task = fs::read_to_string(self.tasks_dir().join(&path))?;
             if self.task_is_ready(&task)? {
@@ -2550,9 +2569,31 @@ impl GitRepository {
         Ok((TaskPath { path: new_entry }, admits_to_backlog))
     }
 
+    fn prioritize_backlog_before(&self, task_ref: &str, before_ref: &str) -> Result<(), Error> {
+        let task_path = self.resolve_task_ref(task_ref)?;
+        let before_path = self.resolve_task_ref(before_ref)?;
+        if !task_path.starts_with("backlog") || !before_path.starts_with("backlog") {
+            return Err(Error::Parse(
+                "dashboard_prioritize_scope status=backlog".to_string(),
+            ));
+        }
+        self.prioritize_before(task_ref, before_ref)
+    }
+
     fn prioritize_before(&self, task_ref: &str, before_ref: &str) -> Result<(), Error> {
+        let target_stem = task_stem(&self.resolve_task_ref(task_ref)?)?;
+        let before_stem = task_stem(&self.resolve_task_ref(before_ref)?)?;
         self.prioritize_before_unlocked(task_ref, before_ref)?;
-        self.sync_repository_unlocked()
+        self.sync_repository_unlocked()?;
+        let order = self.authoritative_order_entries()?;
+        let task_index = order.iter().position(|entry| entry == &target_stem);
+        let before_index = order.iter().position(|entry| entry == &before_stem);
+        if !matches!((task_index, before_index), (Some(task), Some(before)) if task + 1 == before) {
+            return Err(Error::Parse(format!(
+                "prioritize_postcondition_failed ref={target_stem} before={before_stem}"
+            )));
+        }
+        Ok(())
     }
 
     fn prioritize_before_unlocked(&self, task_ref: &str, before_ref: &str) -> Result<(), Error> {
@@ -3448,6 +3489,24 @@ impl GitRepository {
                 matches.join(",")
             ))),
         }
+    }
+
+    fn authoritative_order_entries(&self) -> Result<Vec<String>, Error> {
+        let open_tasks = self
+            .task_file_refs()?
+            .into_iter()
+            .filter(|task_ref| {
+                OPEN_STATUS_DIRS
+                    .iter()
+                    .any(|status| task_ref.starts_with(&format!("{status}/")))
+            })
+            .map(|task_ref| task_stem(Path::new(&task_ref)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(
+            OrderReconciliation::reconcile(self.order_entries()?, open_tasks)
+                .entries()
+                .to_vec(),
+        )
     }
 
     fn order_entries(&self) -> Result<Vec<String>, Error> {
