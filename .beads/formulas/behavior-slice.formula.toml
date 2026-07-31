@@ -1,0 +1,47 @@
+formula = "behavior-slice"
+description = "One independently deliverable behavior slice driven from an executable acceptance failure to a fully green pushed checkpoint"
+version = 1
+type = "workflow"
+
+[vars.behavior]
+description = "User-observable behavior delivered by this slice"
+required = true
+
+[vars.checkpoint_target]
+description = "Checkpoint destination: main, feature branch, or local-only"
+required = true
+
+[[steps]]
+id = "write-acceptance-test"
+title = "Describe behavior: {{behavior}}"
+description = "Write the smallest executable BDD-style acceptance scenario. Prefer Gherkin when the project supports it; otherwise follow the established acceptance-test convention without adding a framework solely for syntax."
+
+[[steps]]
+id = "prove-acceptance-red"
+title = "Prove the acceptance test fails for the expected reason"
+needs = ["write-acceptance-test"]
+description = "Run the focused acceptance test before production implementation. Record the command and expected missing-behavior failure. If it passes or fails for setup or an unrelated reason, revise the test and rerun before closing this step."
+
+[[steps]]
+id = "implement-scenario-steps"
+title = "Implement scenario steps one at a time"
+needs = ["prove-acceptance-red"]
+description = "For the first undefined or failing scenario step, attach and complete one bdd-step-cycle molecule. Repeat sequentially until every scenario step works. Do not implement later steps speculatively."
+
+[[steps]]
+id = "prove-acceptance-green"
+title = "Prove the complete behavior is green"
+needs = ["implement-scenario-steps"]
+description = "Run the focused acceptance scenario and its focused unit tests. Refactor only while they remain green and record the fresh result."
+
+[[steps]]
+id = "run-complete-test-gate"
+title = "Run the complete configured local test gate"
+needs = ["prove-acceptance-green"]
+description = "Run the repository's full configured local test gate after the slice is green. Run only causally relevant provider-backed evaluations. Any failure reopens the appropriate implementation cycle."
+
+[[steps]]
+id = "checkpoint"
+title = "Commit and checkpoint the fully green slice to {{checkpoint_target}}"
+needs = ["run-complete-test-gate"]
+description = "Create a rationale-bearing commit and push it to main or the feature branch according to delivery policy; local-only work commits without pushing. Record the commit SHA, destination, test commands, and outcomes."

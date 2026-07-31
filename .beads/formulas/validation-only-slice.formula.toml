@@ -1,0 +1,35 @@
+formula = "validation-only-slice"
+description = "A non-runtime configuration, metadata, dependency, or generated-artifact change verified by its causal validators"
+version = 1
+type = "workflow"
+
+[vars.change]
+description = "Non-runtime outcome delivered by this slice"
+required = true
+
+[vars.checkpoint_target]
+description = "Checkpoint destination: main, feature branch, or local-only"
+required = true
+
+[[steps]]
+id = "justify-validation-route"
+title = "Confirm validation-only scope: {{change}}"
+description = "Record why this slice does not alter executable product or tooling behavior. Dependency changes, executable configuration defaults, scripts, and generators require behavioral coverage when they can change runtime outcomes."
+
+[[steps]]
+id = "make-change"
+title = "Make the validation-only change"
+needs = ["justify-validation-route"]
+description = "Make the smallest change that satisfies the non-runtime contract."
+
+[[steps]]
+id = "run-causal-validators"
+title = "Run causal validators"
+needs = ["make-change"]
+description = "Run the exact schema, manifest, lockfile, package, formatting, build, integrity, or generation checks that can detect an incorrect change. Do not invent unrelated unit tests."
+
+[[steps]]
+id = "checkpoint"
+title = "Commit the validated slice to {{checkpoint_target}}"
+needs = ["run-causal-validators"]
+description = "Create a rationale-bearing commit and push according to delivery policy; local-only work commits without pushing. Record the commit SHA and validator evidence."

@@ -1,0 +1,37 @@
+formula = "unit-tdd-cycle"
+description = "One tightly scoped red-green-refactor unit cycle used when an acceptance failure is too broad or ambiguous"
+version = 1
+type = "workflow"
+
+[vars.unit_behavior]
+description = "One small semantic unit of behavior, normally a single small function or equivalent boundary"
+required = true
+
+[[steps]]
+id = "write-unit-test"
+title = "Write one focused unit test: {{unit_behavior}}"
+description = "Name one semantic behavior and write the smallest test that demonstrates it. Avoid primitive-oriented tests of private implementation details."
+
+[[steps]]
+id = "prove-unit-red"
+title = "Prove the unit test fails for the expected reason"
+needs = ["write-unit-test"]
+description = "Run the focused test and record the expected failure. If it passes or fails for setup or an unrelated reason, revise the test before production implementation."
+
+[[steps]]
+id = "minimal-green"
+title = "Write the minimum implementation"
+needs = ["prove-unit-red"]
+description = "Implement only enough production code to satisfy this one unit behavior. Do not anticipate later acceptance steps."
+
+[[steps]]
+id = "prove-unit-green"
+title = "Prove the focused unit test is green"
+needs = ["minimal-green"]
+description = "Rerun the focused unit test and record its fresh successful result."
+
+[[steps]]
+id = "refactor"
+title = "Refactor under green tests"
+needs = ["prove-unit-green"]
+description = "Improve structure without changing behavior, then rerun the focused unit test before returning to the acceptance scenario."
