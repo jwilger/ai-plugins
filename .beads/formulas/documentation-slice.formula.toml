@@ -1,0 +1,35 @@
+formula = "documentation-slice"
+description = "A prose-only documentation change verified without inventing executable tests"
+version = 1
+type = "workflow"
+
+[vars.change]
+description = "Documentation outcome delivered by this slice"
+required = true
+
+[vars.checkpoint_target]
+description = "Checkpoint destination: main, feature branch, or local-only"
+required = true
+
+[[steps]]
+id = "confirm-docs-only"
+title = "Confirm prose-only scope: {{change}}"
+description = "Confirm the slice changes documentation rather than executable examples, generators, scripts, runtime configuration, or product behavior. Reclassify those surfaces instead of using this no-test route."
+
+[[steps]]
+id = "edit-documentation"
+title = "Make the documentation change"
+needs = ["confirm-docs-only"]
+description = "Make the smallest clear and internally consistent prose change, preserving project terminology and cross-references."
+
+[[steps]]
+id = "validate-documentation"
+title = "Validate documentation surfaces"
+needs = ["edit-documentation"]
+description = "Run applicable formatting, link, spelling, schema, generated-doc consistency, or documentation build checks. Do not add or run unrelated software tests merely to satisfy a ritual gate."
+
+[[steps]]
+id = "checkpoint"
+title = "Commit the validated documentation slice to {{checkpoint_target}}"
+needs = ["validate-documentation"]
+description = "Create a rationale-bearing commit and push according to delivery policy; local-only work commits without pushing. Record the commit SHA and applicable validation evidence."

@@ -1,0 +1,37 @@
+formula = "bdd-step-cycle"
+description = "Implement one Gherkin or project-standard acceptance-test step without speculatively implementing later steps"
+version = 1
+type = "workflow"
+
+[vars.scenario_step]
+description = "The single acceptance-test step being implemented"
+required = true
+
+[[steps]]
+id = "wire-step"
+title = "Wire step: {{scenario_step}}"
+description = "Add only the minimum step definition, fixture adapter, or acceptance-test boundary needed to execute this one step. Do not implement later scenario steps."
+
+[[steps]]
+id = "observe-next-failure"
+title = "Run the scenario and classify the next failure"
+needs = ["wire-step"]
+description = "Run the focused scenario. Confirm the failure is the expected next missing behavior. Revise test setup if the failure is unrelated. If it identifies one tightly scoped semantic unit, it may serve as the current red test; otherwise attach a unit-tdd-cycle before production implementation."
+
+[[steps]]
+id = "drive-implementation"
+title = "Drive the smallest implementation"
+needs = ["observe-next-failure"]
+description = "Complete every required unit-tdd-cycle, then write only enough production code to make this scenario step advance. A pure fixture or Given step may require no production change."
+
+[[steps]]
+id = "focused-green"
+title = "Prove focused unit and acceptance tests are green"
+needs = ["drive-implementation"]
+description = "Run focused unit tests and the acceptance scenario. Record fresh evidence that this step passes and that the next failure, if any, belongs to a later scenario step."
+
+[[steps]]
+id = "refactor"
+title = "Refactor while focused tests remain green"
+needs = ["focused-green"]
+description = "Remove duplication and improve names or structure without broadening behavior. Rerun focused tests after refactoring."
