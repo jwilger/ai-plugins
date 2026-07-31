@@ -426,14 +426,16 @@ heuristics or Claude/Codex manifests.
 
 The initial bundled-component support matrix is:
 
-- x86_64 Linux with the pinned Beads and Dolt CLIs;
-- aarch64 Linux with the pinned Beads and Dolt CLIs;
+- x86_64 Linux with the pinned Beads CLI and embedded Dolt engine;
+- aarch64 Linux with the pinned Beads CLI and embedded Dolt engine;
 - x86_64 macOS; and
 - Apple-silicon macOS.
 
-Beads, Dolt, and development-discipline may use different target-specific
-artifacts internally, but all required binaries must be present, executable, and
-verified for every claimed product target. Windows and other OS/architecture combinations
+Beads and development-discipline may use different target-specific artifacts
+internally, but all required binaries must be present, executable, and verified
+for every claimed product target. A standalone Dolt CLI is not a default runtime
+dependency; it is required only by an explicit server-mode or direct-database
+feature. Windows and other OS/architecture combinations
 are unsupported initially and must receive a deterministic unsupported-platform
 result before a component is invoked.
 
@@ -1297,9 +1299,14 @@ emerge from each vertical slice rather than from a speculative universal model.
 
 ### 11.6 External component integration
 
-Beads is pinned as the supported `bd` CLI and uses Dolt as its source of truth.
-The extension consumes stable JSON output and lifecycle context from `bd prime`;
-it does not wrap Beads in MCP or copy its workflow state machine.
+Beads is pinned as the supported `bd` CLI and uses its embedded Dolt engine as
+its source of truth. The release manifest is authoritative for managed versions
+and artifacts. When Beads is enabled, startup and setup reconcile missing or
+outdated `bd` after an explicit local-TUI confirmation and install the verified
+binary user-globally in `~/.local/bin` without sudo. A config no-op must not skip
+that reconciliation or create a tools-only repository commit. The extension
+consumes stable JSON output and lifecycle context from `bd prime`; it does not
+wrap Beads in MCP or copy its workflow state machine.
 
 Development-discipline has a larger binary-oriented implementation.
 The initial Pi integration should invoke its MCP server. A later refactor may
@@ -1764,7 +1771,9 @@ provider-free lifecycle tests plus executable provider-backed completion cases.
   entry, `agent_settled`, pending-message, and active-tool APIs.
 - Node.js and the repository Nix development environment.
 - TypeBox/JSON Schema compatibility for shared TypeScript tools.
-- The pinned Beads and Dolt CLIs plus the development-discipline MCP contract.
+- The manifest-pinned Beads CLI with its embedded Dolt engine, plus the
+  development-discipline MCP contract. Git and `tar` are host prerequisites;
+  standalone Dolt is not a managed default dependency.
 - Existing Claude Code and Codex marketplace/plugin formats.
 - Promptfoo custom-provider support unless a native Pi provider becomes
   available.
@@ -1829,9 +1838,10 @@ The first supported Pi release is acceptable when all of the following are true:
 7. The Pi support inventory identifies the exact package resources, and
    provider-free canaries prove extension execution provenance, project-trust
    posture, package loading, and component resolution.
-8. Every claimed Linux and macOS target has verified Beads, Dolt, and
+8. Every claimed Linux and macOS target has verified Beads and
    development-discipline artifacts; unsupported targets fail deterministically
-   without relying on Cargo fallback.
+   without relying on Cargo fallback. Default Beads operation proves embedded
+   Dolt needs no standalone CLI.
 9. Promptfoo can execute Pi no-package and targeted-package variants in an
    isolated eval environment.
 10. The eval dashboard reports Pi first and records the actual package

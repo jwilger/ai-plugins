@@ -9,10 +9,14 @@ Require `[features].beads = true` in `.development-system.toml`. Use the `bd`
 CLI directly with `--json`; do not add an MCP layer when shell access exists.
 Run `bd prime` for the installed version's canonical workflow guidance.
 
-Beads uses the Dolt backend. Initialize only from the primary checkout through
-the development-system setup flow. Normal linked worktrees share that Beads
+Beads uses its embedded Dolt backend by default; normal operation does not need
+a standalone `dolt` CLI. Initialize only from the primary checkout through the
+development-system setup flow. Normal linked worktrees share that Beads
 workspace. Commit task changes through Dolt and push them with `bd dolt push`
-when a remote is configured; JSONL is migration/interchange data, not sync.
+when a remote is configured; JSONL is migration/interchange data, not sync. If
+`bd` is missing or outdated, use `/development-system-setup --enable beads` to
+reopen the explicit user-global installation offer rather than adding Beads to
+a project devshell.
 
 For ready work, filter blocked issues first and choose deterministically by:
 priority ascending, creation time ascending, then issue ID ascending. Claim the

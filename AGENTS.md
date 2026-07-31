@@ -30,7 +30,7 @@ client data, proprietary excerpts, auth material, or private transcripts.
 Use the Nix devshell — do not install global toolchains by hand.
 
 ```shell
-nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats, lefthook, bd, dolt
+nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats, lefthook, bd
 ```
 
 **Critical convention:** anything npm would normally install "globally" must

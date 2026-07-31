@@ -43,9 +43,10 @@ PI_OFFLINE=1 pi install ./plugins/development-system
 
 The bootstrap restores pinned eval-tooling dependencies inside the repository,
 validates package metadata and the explicit Pi resource inventory, verifies the
-bundled final-review coordinator, and uses compatible Beads and Dolt tools from
-the Nix shell or provisions the package-pinned releases when they are absent.
-Pi's local-path installation
+bundled final-review coordinator, and uses a compatible Beads CLI from the Nix
+shell or provisions the package-pinned release user-globally when it is absent.
+Beads includes its embedded Dolt engine; the default workflow does not install a
+standalone Dolt CLI. Pi's local-path installation
 references this package directory; it does not copy it. Pulling a package update
 therefore makes it available to the next Pi process, or to `/reload` when the
 resource is reload-safe.
@@ -181,16 +182,36 @@ additional options, start points, chaining, and later primary-checkout mutation
 remain blocked.
 
 `.development-system.toml` remains authoritative. The default preset is
-direct-to-trunk delivery with linked worktrees and Beads backed by Dolt.
-Setup prefers compatible Beads and Dolt executables already on `PATH`. When
-either tool is unavailable or unsupported, the package launchers download the
-pinned release for Linux or macOS on x86_64 or arm64, verify its SHA-256 digest,
-and atomically install it under
-`${XDG_CACHE_HOME:-$HOME/.cache}/development-system/tools/`. Setup then
-initializes Beads without competing Git or harness hooks, installs the
-repository-owned formulas under `.beads/formulas/`, and selects the delivery
-formula in `[beads].workflow`. Unsupported host targets fail before tool-cache
-or project mutation. Optional features are `agentic-systems` and
+direct-to-trunk delivery with linked worktrees and Beads backed by its embedded
+Dolt engine. `bin/tool-releases.json` is the single policy for every
+external binary managed on behalf of enabled capabilities; Git and `tar` remain
+host prerequisites. The current managed dependency is Beads `bd 1.1.2`.
+Standalone Dolt is unnecessary unless the user explicitly configures server
+mode or direct database administration.
+
+At startup and during setup, a missing, invalid, or outdated managed dependency
+produces an explicit local-TUI offer. The confirmation shows current status,
+target version, `~/.local/bin`, user-global scope, and that no sudo is required.
+Approval downloads only the pinned HTTPS archive, enforces time and size bounds,
+verifies SHA-256, installs with executable permissions and atomic replacement,
+and verifies the installed version. This follows Beads' official release and
+checksum semantics while pinning the digest in the package manifest. It never
+pipes a mutable installer into a shell, invokes Dolt's root-only installer, or
+uses sudo. A failed update preserves the previous working binary. Declining
+leaves the capability unavailable; rerun
+`/development-system-setup --enable beads` to reopen the offer.
+
+Dependency reconciliation runs even when the requested project policy is
+unchanged. A tools-only setup reports configuration and installation outcomes
+separately and makes no repository commit. The running extension immediately
+prepends the user-global directory for child processes. If the inherited shell
+`PATH` omitted it, setup reports the exact
+`export PATH="$HOME/.local/bin:$PATH"` action and asks the user to restart the
+shell. Package launchers remain fail-closed adapters to a compatible ambient or
+user-global binary; they do not make a cache-private installation satisfy setup.
+After tool reconciliation, setup initializes Beads without competing Git or
+harness hooks, installs repository formulas under `.beads/formulas/`, and
+selects `[beads].workflow`. Optional features are `agentic-systems` and
 `eval-case-reporting`.
 
 Schema-version 2 replaces Tiber policy with Beads policy. Legacy projects use

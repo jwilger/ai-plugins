@@ -24,8 +24,12 @@ prefers direct CLI use over MCP when agents have shell access.
 
 Adopt Beads as the sole task and workflow authority for development-system.
 Use its embedded Dolt backend by default and Dolt remotes for synchronization.
-Pin the supported CLI in the repository devshell while treating `bd >= 1.0.0`
-as the downstream prerequisite.
+Treat the release manifest as the supported CLI/version authority. When an
+enabled capability lacks a compatible managed binary, offer an explicit
+user-global, no-sudo installation into `~/.local/bin`. The current Beads
+minimum and target is `bd 1.1.2`. Do not require a standalone `dolt` CLI for
+embedded mode; reserve it for an explicit server-mode or direct-database use
+case.
 
 Package declarative formulas for delivery, behavior-driven development,
 documentation, CI-workflow testing, validation-only changes, focused BDD and
@@ -44,9 +48,11 @@ surface.
 - Formula dependencies replace custom development phase state machines.
 - The Pi extension becomes smaller and retains only safety, worktree, delivery,
   goal, and final-review responsibilities.
-- Downstream users must install a supported `bd` binary.
-- Formula semantics and Beads release compatibility become explicit validation
-  surfaces.
+- Downstream users explicitly approve installation or updates of a supported
+  `bd` binary, and a config no-op still reconciles that enabled dependency.
+- Tools-only reconciliation does not create a repository commit.
+- Formula semantics, managed-tool installation, and Beads release compatibility
+  become explicit validation surfaces.
 
 ## Alternatives
 

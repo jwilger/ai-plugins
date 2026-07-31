@@ -253,8 +253,11 @@ evaluate.
 If Codex reports `No such file or directory` for the optional `promptfoo` MCP
 client at startup, upgrade or reinstall the marketplace plugin so Codex loads a
 current `agentic-systems-engineering` component. Beads is intentionally not an
-MCP server in this marketplace: install `bd >= 1.0.0` and let the plugin hooks
-load `bd prime` directly.
+MCP server in this marketplace. When Beads is enabled, development-system checks
+the manifest-pinned `bd` version and offers a confirmed, no-sudo installation or
+update in `~/.local/bin`; plugin hooks then load `bd prime` directly. Beads uses
+its embedded Dolt engine by default, so a standalone `dolt` CLI is unnecessary
+unless the user explicitly configures server mode or direct database work.
 
 ## Reporting eval cases
 
