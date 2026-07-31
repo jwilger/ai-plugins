@@ -23,6 +23,7 @@ printf '%s\n' "$0 $*" >>"$DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS/__TOOL_NAME__"
 case "${1:-}" in
   version|--version)
     if [[ "__TOOL_NAME__" == bd ]]; then
+      command -v dolt >"$DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS/bd-dolt-path"
       printf 'bd version %s\n' "__TOOL_VERSION__"
     else
       printf 'dolt version %s\n' "__TOOL_VERSION__"
@@ -114,6 +115,8 @@ JSON
   [[ "$output" == *"dolt version 2.2.3"* ]]
   [ -x "$TEST_ROOT/tools/bd/1.1.2/x86_64-linux/bd" ]
   [ -x "$TEST_ROOT/tools/dolt/2.2.3/x86_64-linux/dolt" ]
+  grep -Fq "$TEST_ROOT/tools/dolt/2.2.3/x86_64-linux/dolt" \
+    "$TEST_ROOT/markers/bd-dolt-path"
 }
 
 @test "tool installation rejects a release whose checksum does not match" {

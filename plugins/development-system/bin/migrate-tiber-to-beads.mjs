@@ -26,13 +26,15 @@ function executableOnPath(project, name) {
 
 function configureTools(project) {
   const ambientBd = executableOnPath(project, "bd");
-  const bdVersion = ambientBd && spawnSync(ambientBd, ["version"], { encoding: "utf8" });
+  const bdVersion =
+    ambientBd && spawnSync(ambientBd, ["version"], { encoding: "utf8", timeout: 5_000 });
   bdExecutable =
     bdVersion?.status === 0 && /^bd version ([1-9][0-9]*)\./.test(bdVersion.stdout)
       ? ambientBd
       : path.join(packageBin, "bd");
   const ambientDolt = executableOnPath(project, "dolt");
-  const doltVersion = ambientDolt && spawnSync(ambientDolt, ["version"], { encoding: "utf8" });
+  const doltVersion =
+    ambientDolt && spawnSync(ambientDolt, ["version"], { encoding: "utf8", timeout: 5_000 });
   const doltExecutable =
     doltVersion?.status === 0 && /^dolt version /.test(doltVersion.stdout)
       ? ambientDolt
@@ -40,6 +42,7 @@ function configureTools(project) {
   const provisionedDolt = spawnSync(doltExecutable, ["version"], {
     cwd: project,
     encoding: "utf8",
+    timeout: 180_000,
   });
   if (provisionedDolt.status !== 0)
     throw new Error("development_system.dolt_install_failed");

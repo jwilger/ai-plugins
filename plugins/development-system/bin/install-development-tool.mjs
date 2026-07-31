@@ -8,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rename,
   rm,
 } from "node:fs/promises";
@@ -26,6 +27,18 @@ const defaultManifest = path.join(packageBin, "tool-releases.json");
 const supportedTools = new Set(["bd", "dolt"]);
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
+
+async function systemExecutable(name) {
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!path.isAbsolute(directory)) continue;
+    const candidate = path.join(directory, name);
+    if (await executable(candidate)) return await realpath(candidate);
+  }
+  throw new ToolInstallError(
+    "development_system.tool_extract_tool_missing",
+    `tool=${name}`,
+  );
+}
 
 class ToolInstallError extends Error {
   constructor(code, details = "") {
@@ -146,11 +159,13 @@ async function download(url, target, expectedHash, environment) {
               );
             })();
     const contentLength = Number(input.headers?.["content-length"]);
-    if (Number.isFinite(contentLength) && contentLength > maxBytes)
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      input.destroy();
       throw new ToolInstallError(
         "development_system.tool_download_size_exceeded",
         `maximum=${maxBytes} observed=${contentLength}`,
       );
+    }
     const digest = createHash("sha256");
     let observedBytes = 0;
     const observe = new Transform({
@@ -240,7 +255,8 @@ export async function ensureTool(tool, environment = process.env) {
     await download(release.url, archive, release.sha256, environment);
     const extracted = path.join(temporary, "extracted");
     await mkdir(extracted, { mode: 0o700 });
-    const tar = spawn("tar", ["-xzf", archive, "-C", extracted], {
+    const tarExecutable = await systemExecutable("tar");
+    const tar = spawn(tarExecutable, ["-xzf", archive, "-C", extracted], {
       stdio: ["ignore", "ignore", "pipe"],
     });
     let stderr = "";
@@ -272,9 +288,14 @@ export async function ensureTool(tool, environment = process.env) {
 
 async function execute(tool, arguments_) {
   const binary = await ensureTool(tool);
+  const dolt = tool === "bd" ? await ensureTool("dolt") : binary;
+  const environment = {
+    ...process.env,
+    PATH: `${path.dirname(dolt)}${path.delimiter}${process.env.PATH ?? ""}`,
+  };
   const child = spawn(binary, arguments_, {
     stdio: "inherit",
-    env: process.env,
+    env: environment,
   });
   const result = await new Promise((resolve, reject) => {
     child.once("error", reject);

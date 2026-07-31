@@ -345,7 +345,13 @@ async function setupTool(
 async function ensureBeadsWorkspace(
   packageRoot: string,
   project: string,
-): Promise<Readonly<{ created: boolean; addedFormulas: readonly string[] }>> {
+): Promise<
+  Readonly<{
+    created: boolean;
+    addedFormulas: readonly string[];
+    rollbackAutoCommit: () => Promise<void>;
+  }>
+> {
   const [bd, dolt] = await Promise.all([
     setupTool(packageRoot, project, "bd"),
     setupTool(packageRoot, project, "dolt"),
@@ -355,88 +361,129 @@ async function ensureBeadsWorkspace(
     PATH: `${path.dirname(dolt)}${path.delimiter}${process.env.PATH ?? ""}`,
   };
   let created = false;
-  const { stdout: initialHeadOutput } = await execFileAsync("git", [
-    "-C",
-    project,
-    "rev-parse",
-    "HEAD",
-  ]);
-  const initialHead = initialHeadOutput.trim();
+  const addedFormulas: string[] = [];
+  let rollbackAutoCommit = async (): Promise<void> => {};
   try {
-    const stat = await lstat(path.join(project, ".beads"));
-    if (!stat.isDirectory())
-      throw new Error("development_system.beads_workspace_invalid");
-    await execFileAsync(bd, ["where"], {
-      cwd: project,
-      env: toolEnvironment,
-      timeout: 5_000,
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    await execFileAsync(
-      bd,
-      ["init", "--quiet", "--non-interactive", "--skip-agents", "--skip-hooks"],
-      { cwd: project, env: toolEnvironment, timeout: 30_000 },
-    );
-    created = true;
-    const { stdout: initializedHeadOutput } = await execFileAsync("git", [
+    const { stdout: initialHeadOutput } = await execFileAsync("git", [
       "-C",
       project,
       "rev-parse",
       "HEAD",
     ]);
-    const initializedHead = initializedHeadOutput.trim();
-    if (initializedHead !== initialHead) {
-      const { stdout: parentOutput } = await execFileAsync("git", [
+    const initialHead = initialHeadOutput.trim();
+    try {
+      const stat = await lstat(path.join(project, ".beads"));
+      if (!stat.isDirectory())
+        throw new Error("development_system.beads_workspace_invalid");
+      await execFileAsync(bd, ["where"], {
+        cwd: project,
+        env: toolEnvironment,
+        timeout: 5_000,
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await execFileAsync(
+        bd,
+        [
+          "init",
+          "--quiet",
+          "--non-interactive",
+          "--skip-agents",
+          "--skip-hooks",
+        ],
+        { cwd: project, env: toolEnvironment, timeout: 30_000 },
+      );
+      created = true;
+      const { stdout: initializedHeadOutput } = await execFileAsync("git", [
         "-C",
         project,
         "rev-parse",
-        `${initializedHead}^`,
+        "HEAD",
       ]);
-      if (parentOutput.trim() !== initialHead)
-        throw new Error("development_system.beads_init_history_unexpected");
-      await execFileAsync("git", [
-        "-C",
-        project,
-        "reset",
-        "--soft",
-        initialHead,
-      ]);
+      const initializedHead = initializedHeadOutput.trim();
+      if (initializedHead !== initialHead) {
+        const { stdout: parentOutput } = await execFileAsync("git", [
+          "-C",
+          project,
+          "rev-parse",
+          `${initializedHead}^`,
+        ]);
+        if (parentOutput.trim() !== initialHead)
+          throw new Error("development_system.beads_init_history_unexpected");
+        await execFileAsync("git", [
+          "-C",
+          project,
+          "reset",
+          "--soft",
+          initialHead,
+        ]);
+      }
     }
-  }
-  const sourceDirectory = path.join(packageRoot, "formulas");
-  const targetDirectory = path.join(project, ".beads", "formulas");
-  await mkdir(targetDirectory, { recursive: true });
-  const addedFormulas: string[] = [];
-  for (const name of (await readdir(sourceDirectory)).filter((entry) =>
-    entry.endsWith(".formula.toml"),
-  )) {
-    const source = path.join(sourceDirectory, name);
-    const target = path.join(targetDirectory, name);
+    const sourceDirectory = path.join(packageRoot, "formulas");
+    const targetDirectory = path.join(project, ".beads", "formulas");
+    await mkdir(targetDirectory, { recursive: true });
+    for (const name of (await readdir(sourceDirectory)).filter((entry) =>
+      entry.endsWith(".formula.toml"),
+    )) {
+      const source = path.join(sourceDirectory, name);
+      const target = path.join(targetDirectory, name);
+      try {
+        const [expected, current] = await Promise.all([
+          readFile(source),
+          readFile(target),
+        ]);
+        if (!expected.equals(current))
+          throw new Error(
+            `development_system.beads_formula_conflict path=${target}`,
+          );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        await copyFile(source, target, constants.COPYFILE_EXCL);
+        addedFormulas.push(target);
+      }
+    }
+    let previousAutoCommit: string | null = null;
     try {
-      const [expected, current] = await Promise.all([
-        readFile(source),
-        readFile(target),
-      ]);
-      if (!expected.equals(current))
-        throw new Error(
-          `development_system.beads_formula_conflict path=${target}`,
-        );
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await copyFile(source, target, constants.COPYFILE_EXCL);
-      addedFormulas.push(target);
+      const { stdout } = await execFileAsync(
+        bd,
+        ["config", "get", "dolt.auto-commit"],
+        { cwd: project, env: toolEnvironment, timeout: 10_000 },
+      );
+      previousAutoCommit = stdout.trim();
+    } catch {
+      // Missing configuration is restored by unsetting the key.
     }
+    rollbackAutoCommit = async () => {
+      const arguments_ = previousAutoCommit
+        ? ["config", "set", "dolt.auto-commit", previousAutoCommit]
+        : ["config", "unset", "dolt.auto-commit"];
+      await execFileAsync(bd, arguments_, {
+        cwd: project,
+        env: toolEnvironment,
+        timeout: 10_000,
+      });
+    };
+    await execFileAsync(bd, ["config", "set", "dolt.auto-commit", "on"], {
+      cwd: project,
+      env: toolEnvironment,
+      timeout: 10_000,
+    });
+    return Object.freeze({
+      created,
+      addedFormulas: Object.freeze(addedFormulas),
+      rollbackAutoCommit,
+    });
+  } catch (error) {
+    if (error instanceof Error)
+      Object.assign(error, {
+        beadsSetup: Object.freeze({
+          created,
+          addedFormulas: Object.freeze(addedFormulas),
+          rollbackAutoCommit,
+        }),
+      });
+    throw error;
   }
-  await execFileAsync(bd, ["config", "set", "dolt.auto-commit", "on"], {
-    cwd: project,
-    env: toolEnvironment,
-    timeout: 10_000,
-  });
-  return Object.freeze({
-    created,
-    addedFormulas: Object.freeze(addedFormulas),
-  });
 }
 
 export async function applySetupPreview(
@@ -501,7 +548,21 @@ export async function applySetupPreview(
       "-m",
       "Preserve existing project policy while applying explicitly requested setup changes.",
     ]);
-  } catch {
+  } catch (error) {
+    const rollbackSetup =
+      beadsSetup ??
+      (error instanceof Error && "beadsSetup" in error
+        ? (
+            error as Error & {
+              beadsSetup: Awaited<ReturnType<typeof ensureBeadsWorkspace>>;
+            }
+          ).beadsSetup
+        : null);
+    try {
+      await rollbackSetup?.rollbackAutoCommit();
+    } catch {
+      // Source rollback still proceeds when Beads configuration recovery fails.
+    }
     await atomicWrite(configPath, original);
     await execFileAsync("git", [
       "-C",
@@ -514,7 +575,7 @@ export async function applySetupPreview(
       ".beads",
       ".gitignore",
     ]);
-    if (beadsSetup?.created) {
+    if (rollbackSetup?.created) {
       await rm(path.join(approved.project, ".beads"), {
         recursive: true,
         force: true,
@@ -531,9 +592,9 @@ export async function applySetupPreview(
       } catch {
         await rm(path.join(approved.project, ".gitignore"), { force: true });
       }
-    } else if (beadsSetup)
+    } else if (rollbackSetup)
       await Promise.all(
-        beadsSetup.addedFormulas.map((file) => rm(file, { force: true })),
+        rollbackSetup.addedFormulas.map((file) => rm(file, { force: true })),
       );
     throw new Error("development_system.setup_commit_failed");
   }

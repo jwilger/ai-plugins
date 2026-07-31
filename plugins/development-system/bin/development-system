@@ -13,6 +13,12 @@ warn() {
   printf 'development_system.warning %s\n' "$*"
 }
 
+canonical_executable() {
+  local executable=$1 directory
+  directory="$(cd "$(dirname "$executable")" && pwd -P)"
+  printf '%s/%s\n' "$directory" "$(basename "$executable")"
+}
+
 primary_checkout() {
   local project=$1
   local common_dir
@@ -132,10 +138,12 @@ setup_command() {
     if [[ -z "$bd_bin" ]] || ! "$bd_bin" version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
       bd_bin="$PACKAGE_ROOT/bin/bd"
     fi
+    bd_bin="$(canonical_executable "$bd_bin")"
     dolt_bin="$(command -v dolt 2>/dev/null || true)"
     if [[ -z "$dolt_bin" ]] || ! "$dolt_bin" version >/dev/null 2>&1; then
       dolt_bin="$PACKAGE_ROOT/bin/dolt"
     fi
+    dolt_bin="$(canonical_executable "$dolt_bin")"
     if ! "$dolt_bin" version >/dev/null; then
       die "development_system.dolt_install_failed"
     fi

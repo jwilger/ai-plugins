@@ -27,7 +27,7 @@ user-managed MCPs for the harness that is starting.
 
 | Plugin                                                     | Harnesses              | Description                                                         | Version |
 | ---------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.13.1  |
+| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.13.2  |
 
 ## Using the package (Pi — primary)
 
