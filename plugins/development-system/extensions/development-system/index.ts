@@ -257,7 +257,10 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     pi.appendEntry(customType, data),
   );
   const projectCwd = (hostCwd: string): string => workspace.path(hostCwd);
-  const primeCache = new Map<string, { checkedAt: number; value: string | null }>();
+  const primeCache = new Map<
+    string,
+    { checkedAt: number; value: string | null }
+  >();
   const currentBeadsPrime = async (cwd: string): Promise<string | null> => {
     const cached = primeCache.get(cwd);
     if (cached && Date.now() - cached.checkedAt < 15_000) return cached.value;
@@ -1263,15 +1266,20 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         ? `${routedSystemPrompt}\n\n## Current Beads workflow context\n\n${prime}`
         : routedSystemPrompt;
       const hold = await activeCiRecoveryHold(logicalCwd);
-      if (hold)
+      if (hold) {
+        const content =
+          hold.state === "in_progress"
+            ? `development_system.ci_recovery_hold bead=${hold.incidentId} state=${hold.state}. Do not start unrelated work; continue the claimed Beads ci-recovery molecule until exact terminal-success proof releases the hold.`
+            : `development_system.ci_recovery_coordination_${hold.state} state=${hold.state}. Do not start unrelated work or delivery until Beads coordination is restored and the active recovery incident set is unambiguous.`;
         return {
           systemPrompt,
           message: {
             customType: "development-system-ci-hold",
-            content: `development_system.ci_recovery_hold bead=${hold.incidentId} state=${hold.state}. Do not start unrelated work; continue the claimed Beads ci-recovery molecule until exact terminal-success proof releases the hold.`,
+            content,
             display: true,
           },
         };
+      }
       return { systemPrompt };
     } catch {
       return { systemPrompt: routedSystemPrompt };

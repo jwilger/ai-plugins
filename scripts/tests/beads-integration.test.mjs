@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  failClosedCiRecoveryHold,
   parseBeadsIssueList,
   parseBeadsVersion,
   selectActiveCiRecovery,
@@ -104,7 +105,10 @@ test("Beads adapter accepts the stable JSON envelope and validates versions", ()
     ],
   );
   assert.deepEqual(parseBeadsVersion("bd version 1.1.2 (abc)"), [1, 1, 2]);
-  assert.throws(() => parseBeadsVersion("bd version 0.59.0"), /beads_version_unsupported/);
+  assert.throws(
+    () => parseBeadsVersion("bd version 1.1.1"),
+    /beads_version_unsupported/,
+  );
 });
 
 test("an open claimed CI recovery bead is the repository-wide hold", () => {
@@ -137,6 +141,36 @@ test("an open claimed CI recovery bead is the repository-wide hold", () => {
     ]),
     null,
   );
+});
+
+test("CI recovery coordination failures and ambiguity fail closed", () => {
+  assert.deepEqual(failClosedCiRecoveryHold(new Error("backend unavailable")), {
+    incidentId: "coordination-unavailable",
+    state: "unavailable",
+  });
+  let ambiguity;
+  try {
+    selectActiveCiRecovery([
+      {
+        id: "ai-first",
+        title: "First recovery",
+        status: "in_progress",
+        labels: ["development-system:ci-recovery"],
+      },
+      {
+        id: "ai-second",
+        title: "Second recovery",
+        status: "in_progress",
+        labels: ["development-system:ci-recovery"],
+      },
+    ]);
+  } catch (error) {
+    ambiguity = error;
+  }
+  assert.deepEqual(failClosedCiRecoveryHold(ambiguity), {
+    incidentId: "ambiguous-active-incidents",
+    state: "ambiguous",
+  });
 });
 
 const taskSource = `---
@@ -200,13 +234,9 @@ test("Tiber conversion is deterministic, preserves history, and reconstructs dep
       ),
       parseTiberTask(
         "backlog/20260730-bbbb-follow-up.md",
-        taskSource.replace(
-          "Repair release flow",
-          "Follow up after release repair",
-        ).replace(
-          "blocks: [20260730-bbbb-follow-up]",
-          "blocks: []",
-        ),
+        taskSource
+          .replace("Repair release flow", "Follow up after release repair")
+          .replace("blocks: [20260730-bbbb-follow-up]", "blocks: []"),
       ),
       parseTiberTask(
         "abandoned/20260729-cccc-old-idea.md",

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const MINIMUM_VERSION = [1, 0, 0] as const;
+const MINIMUM_VERSION = [1, 1, 2] as const;
 const CI_RECOVERY_LABEL = "development-system:ci-recovery";
 
 export type BeadsIssue = Readonly<{
@@ -14,10 +14,28 @@ export type BeadsIssue = Readonly<{
 
 export type CiRecoveryHold = Readonly<{ incidentId: string; state: string }>;
 
-export function parseBeadsVersion(output: string): readonly [number, number, number] {
+export function failClosedCiRecoveryHold(error: unknown): CiRecoveryHold {
+  const ambiguous =
+    error instanceof Error &&
+    error.message.startsWith("development_system.beads_ci_recovery_ambiguous");
+  return Object.freeze({
+    incidentId: ambiguous
+      ? "ambiguous-active-incidents"
+      : "coordination-unavailable",
+    state: ambiguous ? "ambiguous" : "unavailable",
+  });
+}
+
+export function parseBeadsVersion(
+  output: string,
+): readonly [number, number, number] {
   const match = output.match(/\bbd version (\d+)\.(\d+)\.(\d+)\b/);
   if (!match) throw new Error("development_system.beads_version_invalid");
-  const version = [Number(match[1]), Number(match[2]), Number(match[3])] as const;
+  const version = [
+    Number(match[1]),
+    Number(match[2]),
+    Number(match[3]),
+  ] as const;
   for (let index = 0; index < MINIMUM_VERSION.length; index += 1) {
     if (version[index] > MINIMUM_VERSION[index]) return version;
     if (version[index] < MINIMUM_VERSION[index])
@@ -75,7 +93,8 @@ export function selectActiveCiRecovery(
   const active = issues
     .filter(
       (issue) =>
-        issue.status === "in_progress" && issue.labels.includes(CI_RECOVERY_LABEL),
+        issue.status === "in_progress" &&
+        issue.labels.includes(CI_RECOVERY_LABEL),
     )
     .sort((left, right) => left.id.localeCompare(right.id));
   if (active.length === 0) return null;
@@ -112,8 +131,9 @@ export async function beadsPrime(cwd: string): Promise<string | null> {
 export async function activeCiRecoveryHold(
   cwd: string,
 ): Promise<CiRecoveryHold | null> {
+  let output: string;
   try {
-    const output = await runBd(cwd, [
+    output = await runBd(cwd, [
       "list",
       "--status",
       "in_progress",
@@ -121,15 +141,21 @@ export async function activeCiRecoveryHold(
       CI_RECOVERY_LABEL,
       "--json",
     ]);
+  } catch (error) {
+    return failClosedCiRecoveryHold(error);
+  }
+  try {
     return selectActiveCiRecovery(parseBeadsIssueList(output));
-  } catch {
-    return null;
+  } catch (error) {
+    return failClosedCiRecoveryHold(error);
   }
 }
 
 export async function beadsAvailability(
   cwd: string,
-): Promise<Readonly<{ available: boolean; initialized: boolean; error?: string }>> {
+): Promise<
+  Readonly<{ available: boolean; initialized: boolean; error?: string }>
+> {
   try {
     parseBeadsVersion(await runBd(cwd, ["version"]));
   } catch (error) {
