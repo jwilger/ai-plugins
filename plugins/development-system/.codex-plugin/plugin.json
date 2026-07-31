@@ -23,10 +23,7 @@
     "longDescription": "Use Development System for John's consolidated development discipline, Beads and Dolt workflow coordination, engineering standards, worktree isolation, final review, and optional agentic-system workflows.",
     "developerName": "John Wilger",
     "category": "Developer Tools",
-    "capabilities": [
-      "Read",
-      "Write"
-    ],
+    "capabilities": ["Read", "Write"],
     "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
     "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
     "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
