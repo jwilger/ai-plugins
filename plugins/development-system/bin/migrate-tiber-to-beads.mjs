@@ -8,15 +8,46 @@ import { pathToFileURL } from "node:url";
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "..");
 const packageBin = path.join(PACKAGE_ROOT, "bin");
-const systemBdVersion = spawnSync("bd", ["version"], { encoding: "utf8" });
-const bdExecutable =
-  systemBdVersion.status === 0 && /^bd version ([1-9][0-9]*)\./.test(systemBdVersion.stdout)
-    ? "bd"
-    : path.join(packageBin, "bd");
-const bdEnvironment =
-  bdExecutable === "bd"
-    ? process.env
-    : { ...process.env, PATH: `${packageBin}${path.delimiter}${process.env.PATH ?? ""}` };
+let bdExecutable = path.join(packageBin, "bd");
+let bdEnvironment = process.env;
+
+function executableOnPath(project, name) {
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    const candidate = path.resolve(project, directory || ".", name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return fs.realpathSync(candidate);
+    } catch {
+      // Continue through PATH until an executable candidate is found.
+    }
+  }
+  return null;
+}
+
+function configureTools(project) {
+  const ambientBd = executableOnPath(project, "bd");
+  const bdVersion = ambientBd && spawnSync(ambientBd, ["version"], { encoding: "utf8" });
+  bdExecutable =
+    bdVersion?.status === 0 && /^bd version ([1-9][0-9]*)\./.test(bdVersion.stdout)
+      ? ambientBd
+      : path.join(packageBin, "bd");
+  const ambientDolt = executableOnPath(project, "dolt");
+  const doltVersion = ambientDolt && spawnSync(ambientDolt, ["version"], { encoding: "utf8" });
+  const doltExecutable =
+    doltVersion?.status === 0 && /^dolt version /.test(doltVersion.stdout)
+      ? ambientDolt
+      : path.join(packageBin, "dolt");
+  const provisionedDolt = spawnSync(doltExecutable, ["version"], {
+    cwd: project,
+    encoding: "utf8",
+  });
+  if (provisionedDolt.status !== 0)
+    throw new Error("development_system.dolt_install_failed");
+  bdEnvironment = {
+    ...process.env,
+    PATH: `${path.dirname(doltExecutable)}${path.delimiter}${process.env.PATH ?? ""}`,
+  };
+}
 
 function scalar(value) {
   const trimmed = value.trim();
@@ -353,6 +384,7 @@ function main(argv) {
   const beadsDirectory = path.join(project, ".beads");
   if (fs.existsSync(beadsDirectory))
     throw new Error("development_system.migration_beads_workspace_exists");
+  configureTools(project);
   let sourceCommitted = false;
   try {
     runBd(project, [

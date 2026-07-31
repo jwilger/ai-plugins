@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import {
+  access,
   copyFile,
   lstat,
   mkdir,
@@ -292,16 +293,33 @@ async function resolvesVersion(
   arguments_: readonly string[],
   pattern: RegExp,
   project: string,
+  timeout: number,
 ): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync(executable, [...arguments_], {
       cwd: project,
-      timeout: 5_000,
+      timeout,
     });
     return pattern.test(stdout);
   } catch {
     return false;
   }
+}
+
+async function executableOnPath(
+  tool: "bd" | "dolt",
+  project: string,
+): Promise<string | null> {
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    const candidate = path.resolve(project, directory || ".", tool);
+    try {
+      await access(candidate, constants.X_OK);
+      return await realpath(candidate);
+    } catch {
+      // Continue through PATH until an executable candidate is found.
+    }
+  }
+  return null;
 }
 
 async function setupTool(
@@ -312,9 +330,14 @@ async function setupTool(
   const arguments_ = ["version"];
   const pattern =
     tool === "bd" ? /^bd version ([1-9][0-9]*)\./ : /^dolt version /;
-  if (await resolvesVersion(tool, arguments_, pattern, project)) return tool;
+  const ambient = await executableOnPath(tool, project);
+  if (
+    ambient &&
+    (await resolvesVersion(ambient, arguments_, pattern, project, 5_000))
+  )
+    return ambient;
   const launcher = path.join(packageRoot, "bin", tool);
-  if (await resolvesVersion(launcher, arguments_, pattern, project))
+  if (await resolvesVersion(launcher, arguments_, pattern, project, 180_000))
     return launcher;
   throw new Error(`development_system.${tool}_install_failed`);
 }

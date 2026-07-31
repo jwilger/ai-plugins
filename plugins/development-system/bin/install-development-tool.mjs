@@ -24,6 +24,8 @@ import { Transform } from "node:stream";
 const packageBin = path.dirname(fileURLToPath(import.meta.url));
 const defaultManifest = path.join(packageBin, "tool-releases.json");
 const supportedTools = new Set(["bd", "dolt"]);
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 120_000;
+const DEFAULT_MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 
 class ToolInstallError extends Error {
   constructor(code, details = "") {
@@ -65,9 +67,21 @@ async function manifest(environment = process.env) {
   return parsed;
 }
 
-function request(url, redirects = 0) {
+function positiveInteger(environment, name, fallback) {
+  const raw = environment[name];
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0)
+    throw new ToolInstallError(
+      "development_system.tool_limit_invalid",
+      `name=${name}`,
+    );
+  return parsed;
+}
+
+function request(url, signal, redirects = 0) {
   return new Promise((resolve, reject) => {
-    const operation = httpsGet(url, (response) => {
+    const operation = httpsGet(url, { signal }, (response) => {
       if (
         response.statusCode >= 300 &&
         response.statusCode < 400 &&
@@ -81,7 +95,11 @@ function request(url, redirects = 0) {
           return;
         }
         resolve(
-          request(new URL(response.headers.location, url), redirects + 1),
+          request(
+            new URL(response.headers.location, url),
+            signal,
+            redirects + 1,
+          ),
         );
         return;
       }
@@ -101,37 +119,78 @@ function request(url, redirects = 0) {
   });
 }
 
-async function download(url, target, expectedHash) {
-  const sourceUrl = new URL(url);
-  const input =
-    sourceUrl.protocol === "file:"
-      ? createReadStream(fileURLToPath(sourceUrl))
-      : sourceUrl.protocol === "https:"
-        ? await request(sourceUrl)
-        : (() => {
-            throw new ToolInstallError(
-              "development_system.tool_url_unsupported",
-              `protocol=${sourceUrl.protocol}`,
-            );
-          })();
-  const digest = createHash("sha256");
-  const observe = new Transform({
-    transform(chunk, _encoding, callback) {
-      digest.update(chunk);
-      callback(null, chunk);
-    },
-  });
-  await pipeline(
-    input,
-    observe,
-    createWriteStream(target, { flags: "wx", mode: 0o600 }),
+async function download(url, target, expectedHash, environment) {
+  const timeoutMs = positiveInteger(
+    environment,
+    "DEVELOPMENT_SYSTEM_TOOL_DOWNLOAD_TIMEOUT_MS",
+    DEFAULT_DOWNLOAD_TIMEOUT_MS,
   );
-  const actualHash = digest.digest("hex");
-  if (actualHash !== expectedHash)
-    throw new ToolInstallError(
-      "development_system.tool_checksum_failed",
-      `expected=${expectedHash} actual=${actualHash}`,
+  const maxBytes = positiveInteger(
+    environment,
+    "DEVELOPMENT_SYSTEM_TOOL_MAX_ARCHIVE_BYTES",
+    DEFAULT_MAX_ARCHIVE_BYTES,
+  );
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const sourceUrl = new URL(url);
+    const input =
+      sourceUrl.protocol === "file:"
+        ? createReadStream(fileURLToPath(sourceUrl))
+        : sourceUrl.protocol === "https:"
+          ? await request(sourceUrl, controller.signal)
+          : (() => {
+              throw new ToolInstallError(
+                "development_system.tool_url_unsupported",
+                `protocol=${sourceUrl.protocol}`,
+              );
+            })();
+    const contentLength = Number(input.headers?.["content-length"]);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes)
+      throw new ToolInstallError(
+        "development_system.tool_download_size_exceeded",
+        `maximum=${maxBytes} observed=${contentLength}`,
+      );
+    const digest = createHash("sha256");
+    let observedBytes = 0;
+    const observe = new Transform({
+      transform(chunk, _encoding, callback) {
+        observedBytes += chunk.length;
+        if (observedBytes > maxBytes) {
+          callback(
+            new ToolInstallError(
+              "development_system.tool_download_size_exceeded",
+              `maximum=${maxBytes} observed=${observedBytes}`,
+            ),
+          );
+          return;
+        }
+        digest.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    await pipeline(
+      input,
+      observe,
+      createWriteStream(target, { flags: "wx", mode: 0o600 }),
+      { signal: controller.signal },
     );
+    const actualHash = digest.digest("hex");
+    if (actualHash !== expectedHash)
+      throw new ToolInstallError(
+        "development_system.tool_checksum_failed",
+        `expected=${expectedHash} actual=${actualHash}`,
+      );
+  } catch (error) {
+    if (controller.signal.aborted)
+      throw new ToolInstallError(
+        "development_system.tool_download_timeout",
+        `milliseconds=${timeoutMs}`,
+      );
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function executable(file) {
@@ -178,7 +237,7 @@ export async function ensureTool(tool, environment = process.env) {
   );
   try {
     const archive = path.join(temporary, "release.tar.gz");
-    await download(release.url, archive, release.sha256);
+    await download(release.url, archive, release.sha256, environment);
     const extracted = path.join(temporary, "extracted");
     await mkdir(extracted, { mode: 0o700 });
     const tar = spawn("tar", ["-xzf", archive, "-C", extracted], {

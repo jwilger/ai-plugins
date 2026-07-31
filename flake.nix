@@ -41,7 +41,7 @@
             unpackPhase = "tar -xzf $src";
             installPhase = ''
               mkdir -p "$out/bin"
-              install -m 0755 bd "$out/bin/bd"
+              install -m 0755 "${beadsRelease.binaryPath}" "$out/bin/bd"
             '';
           };
           doltDefinition = toolReleases.tools.dolt;
@@ -56,7 +56,7 @@
             unpackPhase = "tar -xzf $src";
             installPhase = ''
               mkdir -p "$out/bin"
-              install -m 0755 "$(find . -type f -path '*/bin/dolt' -print -quit)" "$out/bin/dolt"
+              install -m 0755 "${doltRelease.binaryPath}" "$out/bin/dolt"
             '';
           };
         in
