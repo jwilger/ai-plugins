@@ -5,29 +5,34 @@ setup() {
   export REPO_ROOT
   TEST_ROOT="$(mktemp -d)"
   export TEST_ROOT
-  mkdir -p "$TEST_ROOT/releases" "$TEST_ROOT/tools" "$TEST_ROOT/markers"
+  mkdir -p "$TEST_ROOT/releases" "$TEST_ROOT/markers" "$TEST_ROOT/home" "$TEST_ROOT/system-bin"
+  printf '#!/bin/sh\nexit 127\n' >"$TEST_ROOT/system-bin/bd"
+  chmod +x "$TEST_ROOT/system-bin/bd"
+  NODE="$(command -v node)"
+  export NODE
 }
 
 teardown() {
   rm -rf -- "$TEST_ROOT"
 }
 
-make_release() {
-  local tool=$1 version=$2 archive_path=$3
-  local release_root="$TEST_ROOT/release-$tool"
+make_bd_release() {
+  local version=$1 archive_path=$2 mode=${3:-normal}
+  local release_root="$TEST_ROOT/release-bd-$mode"
+  rm -rf "$release_root"
   mkdir -p "$release_root"
-  cat >"$release_root/$tool" <<'SH'
+  cat >"$release_root/bd" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$0 $*" >>"$DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS/__TOOL_NAME__"
+if [[ -n "${DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS:-}" ]]; then
+  printf '%s\n' "$0 $*" >>"$DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS/bd"
+fi
 case "${1:-}" in
   version|--version)
-    if [[ "__TOOL_NAME__" == bd ]]; then
-      command -v dolt >"$DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS/bd-dolt-path"
-      printf 'bd version %s\n' "__TOOL_VERSION__"
-    else
-      printf 'dolt version %s\n' "__TOOL_VERSION__"
+    if [[ "__MODE__" == fail-after-replace && "$0" == */.local/bin/bd ]]; then
+      exit 86
     fi
+    printf 'bd version %s\n' "__TOOL_VERSION__"
     ;;
   init)
     mkdir -p .beads
@@ -37,52 +42,42 @@ case "${1:-}" in
     printf '.dolt\n' >.beads/.gitignore
     ;;
   where)
+    test -d .beads
     printf '%s/.beads\n' "$PWD"
     ;;
   config)
     ;;
   *)
-    printf '%s %s\n' "__TOOL_NAME__" "$*"
+    printf 'bd %s\n' "$*"
     ;;
 esac
 SH
-  chmod +x "$release_root/$tool"
-  sed -e "s/__TOOL_NAME__/$tool/g" -e "s/__TOOL_VERSION__/$version/g" \
-    "$release_root/$tool" >"$release_root/$tool.expanded"
-  mv "$release_root/$tool.expanded" "$release_root/$tool"
-  chmod +x "$release_root/$tool"
-  tar -C "$release_root" -czf "$archive_path" "$tool"
+  sed -e "s/__TOOL_VERSION__/$version/g" -e "s/__MODE__/$mode/g" \
+    "$release_root/bd" >"$release_root/bd.expanded"
+  mv "$release_root/bd.expanded" "$release_root/bd"
+  chmod +x "$release_root/bd"
+  tar -C "$release_root" -czf "$archive_path" bd
 }
 
 write_manifest() {
-  local bd_archive="$TEST_ROOT/releases/bd.tar.gz"
-  local dolt_archive="$TEST_ROOT/releases/dolt.tar.gz"
-  make_release bd 1.1.2 "$bd_archive"
-  make_release dolt 2.2.3 "$dolt_archive"
-  local bd_hash dolt_hash
-  bd_hash="$(sha256sum "$bd_archive" | awk '{print $1}')"
-  dolt_hash="$(sha256sum "$dolt_archive" | awk '{print $1}')"
+  local version=${1:-1.1.2} archive=${2:-$TEST_ROOT/releases/bd.tar.gz}
+  make_bd_release "$version" "$archive"
+  local hash
+  hash="$(sha256sum "$archive" | awk '{print $1}')"
   cat >"$TEST_ROOT/releases.json" <<JSON
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "tools": {
     "bd": {
-      "version": "1.1.2",
+      "version": "$version",
+      "requiredFor": ["beads"],
+      "versionCommand": ["version"],
+      "versionPattern": "\\\\bbd version (\\\\d+\\\\.\\\\d+\\\\.\\\\d+)\\\\b",
       "releases": {
         "x86_64-linux": {
-          "url": "file://$bd_archive",
-          "sha256": "$bd_hash",
+          "url": "file://$archive",
+          "sha256": "$hash",
           "binaryPath": "bd"
-        }
-      }
-    },
-    "dolt": {
-      "version": "2.2.3",
-      "releases": {
-        "x86_64-linux": {
-          "url": "file://$dolt_archive",
-          "sha256": "$dolt_hash",
-          "binaryPath": "dolt"
         }
       }
     }
@@ -91,281 +86,299 @@ write_manifest() {
 JSON
 }
 
-@test "plugin launchers install verified pinned Beads and Dolt releases on first use" {
-  write_manifest
-
-  run env \
+install_environment() {
+  env \
+    HOME="$TEST_ROOT/home" \
+    PATH="$TEST_ROOT/system-bin:$PATH" \
     DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
-    DEVELOPMENT_SYSTEM_TOOLS_DIR="$TEST_ROOT/tools" \
+    DEVELOPMENT_SYSTEM_TOOL_ALLOW_FILE_URLS=1 \
     DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
     DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
     DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS="$TEST_ROOT/markers" \
-    "$REPO_ROOT/plugins/development-system/bin/bd" version
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"bd version 1.1.2"* ]]
-
-  run env \
-    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
-    DEVELOPMENT_SYSTEM_TOOLS_DIR="$TEST_ROOT/tools" \
-    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
-    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
-    DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS="$TEST_ROOT/markers" \
-    "$REPO_ROOT/plugins/development-system/bin/dolt" version
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"dolt version 2.2.3"* ]]
-  [ -x "$TEST_ROOT/tools/bd/1.1.2/x86_64-linux/bd" ]
-  [ -x "$TEST_ROOT/tools/dolt/2.2.3/x86_64-linux/dolt" ]
-  grep -Fq "$TEST_ROOT/tools/dolt/2.2.3/x86_64-linux/dolt" \
-    "$TEST_ROOT/markers/bd-dolt-path"
+    "$@"
 }
 
-@test "tool installation rejects a release whose checksum does not match" {
-  write_manifest
-  jq '.tools.bd.releases["x86_64-linux"].sha256 = ("0" * 64)' \
-    "$TEST_ROOT/releases.json" >"$TEST_ROOT/bad-releases.json"
-
-  run env \
-    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/bad-releases.json" \
-    DEVELOPMENT_SYSTEM_TOOLS_DIR="$TEST_ROOT/tools" \
-    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
-    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
-    "$REPO_ROOT/plugins/development-system/bin/bd" version
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"development_system.tool_checksum_failed"* ]]
-  [ ! -e "$TEST_ROOT/tools/bd/1.1.2/x86_64-linux/bd" ]
-}
-
-@test "tool installation aborts a stalled archive download at its deadline" {
-  write_manifest
-  mkfifo "$TEST_ROOT/stalled-release"
-  jq --arg url "file://$TEST_ROOT/stalled-release" '
-    .tools.bd.releases["x86_64-linux"].url = $url |
-    .tools.bd.releases["x86_64-linux"].sha256 = ("0" * 64)
-  ' "$TEST_ROOT/releases.json" >"$TEST_ROOT/stalled-releases.json"
-  (exec 3>"$TEST_ROOT/stalled-release"; sleep 5) &
-  local writer=$!
-
-  run env \
-    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/stalled-releases.json" \
-    DEVELOPMENT_SYSTEM_TOOLS_DIR="$TEST_ROOT/tools" \
-    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
-    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
-    DEVELOPMENT_SYSTEM_TOOL_DOWNLOAD_TIMEOUT_MS=50 \
-    "$REPO_ROOT/plugins/development-system/bin/bd" version
-  kill "$writer" 2>/dev/null || true
-  wait "$writer" 2>/dev/null || true
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"development_system.tool_download_timeout"* ]]
-  [ ! -e "$TEST_ROOT/tools/bd/1.1.2/x86_64-linux/bd" ]
-}
-
-@test "tool installation rejects an archive above the configured size bound" {
-  write_manifest
-
-  run env \
-    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
-    DEVELOPMENT_SYSTEM_TOOLS_DIR="$TEST_ROOT/tools" \
-    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
-    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
-    DEVELOPMENT_SYSTEM_TOOL_MAX_ARCHIVE_BYTES=8 \
-    "$REPO_ROOT/plugins/development-system/bin/bd" version
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"development_system.tool_download_size_exceeded"* ]]
-  [ ! -e "$TEST_ROOT/tools/bd/1.1.2/x86_64-linux/bd" ]
-}
-
-@test "tool installation rejects unsupported host targets without downloading" {
-  write_manifest
-
-  run env \
-    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
-    DEVELOPMENT_SYSTEM_TOOLS_DIR="$TEST_ROOT/tools" \
-    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=freebsd \
-    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
-    "$REPO_ROOT/plugins/development-system/bin/bd" version
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"development_system.tool_platform_unsupported"* ]]
-  [ ! -e "$TEST_ROOT/tools/bd" ]
-}
-
-@test "failed setup provisioning leaves the project unchanged" {
+initialize_project_with_enabled_beads() {
   git -C "$TEST_ROOT" init -q --initial-branch=main project
   git -C "$TEST_ROOT/project" config user.email test@example.com
   git -C "$TEST_ROOT/project" config user.name "Test User"
   touch "$TEST_ROOT/project/README.md"
   git -C "$TEST_ROOT/project" add README.md
   git -C "$TEST_ROOT/project" commit -qm "test: initialize fixture"
-  local before_head
-  before_head="$(git -C "$TEST_ROOT/project" rev-parse HEAD)"
-  mkdir -p "$TEST_ROOT/system-bin"
-  printf '#!/bin/sh\nexit 127\n' >"$TEST_ROOT/system-bin/bd"
-  printf '#!/bin/sh\nexit 127\n' >"$TEST_ROOT/system-bin/dolt"
-  chmod +x "$TEST_ROOT/system-bin/bd" "$TEST_ROOT/system-bin/dolt"
+  cat >"$TEST_ROOT/project/.development-system.toml" <<'TOML'
+schema_version = 2
 
-  run env PATH="$TEST_ROOT/system-bin:$PATH" \
+[delivery]
+mode = "direct-to-trunk"
+trunk_branch = "main"
+
+[features]
+worktrees = true
+beads = true
+agentic_systems = false
+eval_case_reporting = false
+
+[worktrees]
+root = ".worktrees"
+
+[beads]
+workflow = "development-change-direct"
+TOML
+  mkdir -p "$TEST_ROOT/project/.beads/formulas"
+  printf '{}\n' >"$TEST_ROOT/project/.beads/metadata.json"
+  printf '# generated\n' >"$TEST_ROOT/project/.beads/README.md"
+  printf 'backend: dolt\n' >"$TEST_ROOT/project/.beads/config.yaml"
+  printf '.dolt\n' >"$TEST_ROOT/project/.beads/.gitignore"
+  cp "$REPO_ROOT/plugins/development-system/formulas/"*.formula.toml \
+    "$TEST_ROOT/project/.beads/formulas/"
+  git -C "$TEST_ROOT/project" add .development-system.toml .beads
+  git -C "$TEST_ROOT/project" commit -qm "test: configure development system"
+}
+
+@test "verified pinned bd is installed user-globally and no standalone Dolt is installed" {
+  write_manifest
+
+  run install_environment "$NODE" \
+    "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" \
+    install --json
+
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | jq -e '
+    .installationScope == "user-global" and
+    .requiresSudo == false and
+    .installed == ["bd"] and
+    (.tools | map({name, targetVersion, status})) ==
+      [{name:"bd", targetVersion:"1.1.2", status:"compatible"}]
+  ' >/dev/null
+  [ -x "$TEST_ROOT/home/.local/bin/bd" ]
+  [ ! -e "$TEST_ROOT/home/.local/bin/dolt" ]
+  [ -z "$(find "$TEST_ROOT/home/.local/bin" -maxdepth 1 -name '.development-system-*' -print -quit)" ]
+}
+
+@test "checksum failure preserves an existing working bd" {
+  write_manifest
+  mkdir -p "$TEST_ROOT/home/.local/bin"
+  make_bd_release 1.1.1 "$TEST_ROOT/releases/old.tar.gz"
+  tar -xzf "$TEST_ROOT/releases/old.tar.gz" -C "$TEST_ROOT/home/.local/bin"
+  local before
+  before="$(sha256sum "$TEST_ROOT/home/.local/bin/bd")"
+  jq '.tools.bd.releases["x86_64-linux"].sha256 = ("0" * 64)' \
+    "$TEST_ROOT/releases.json" >"$TEST_ROOT/bad-releases.json"
+  mv "$TEST_ROOT/bad-releases.json" "$TEST_ROOT/releases.json"
+
+  run install_environment "$NODE" \
+    "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.tool_checksum_failed"* ]]
+  [ "$(sha256sum "$TEST_ROOT/home/.local/bin/bd")" = "$before" ]
+  [ "$(HOME="$TEST_ROOT/home" "$TEST_ROOT/home/.local/bin/bd" version)" = "bd version 1.1.1" ]
+}
+
+@test "download failure leaves the user-global destination unchanged" {
+  write_manifest
+  jq --arg url "file://$TEST_ROOT/releases/missing.tar.gz" \
+    '.tools.bd.releases["x86_64-linux"].url = $url' \
+    "$TEST_ROOT/releases.json" >"$TEST_ROOT/missing-releases.json"
+  mv "$TEST_ROOT/missing-releases.json" "$TEST_ROOT/releases.json"
+
+  run install_environment "$NODE" \
+    "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"ENOENT"* || "$output" == *"tool_download_failed"* ]]
+  [ ! -e "$TEST_ROOT/home/.local/bin/bd" ]
+}
+
+@test "mutable non-HTTPS release URLs are rejected outside the explicit fixture mode" {
+  write_manifest
+
+  run env \
+    HOME="$TEST_ROOT/home" \
+    PATH="$TEST_ROOT/system-bin:$PATH" \
+    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
+    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
+    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
+    "$NODE" "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.tool_url_unsupported protocol=file:"* ]]
+  [ ! -e "$TEST_ROOT/home/.local/bin/bd" ]
+}
+
+@test "malformed release archive fails extraction without replacing bd" {
+  printf 'not a tar archive\n' >"$TEST_ROOT/releases/bd.tar.gz"
+  local hash
+  hash="$(sha256sum "$TEST_ROOT/releases/bd.tar.gz" | awk '{print $1}')"
+  write_manifest
+  printf 'not a tar archive\n' >"$TEST_ROOT/releases/bd.tar.gz"
+  hash="$(sha256sum "$TEST_ROOT/releases/bd.tar.gz" | awk '{print $1}')"
+  jq --arg hash "$hash" '.tools.bd.releases["x86_64-linux"].sha256 = $hash' \
+    "$TEST_ROOT/releases.json" >"$TEST_ROOT/malformed.json"
+  mv "$TEST_ROOT/malformed.json" "$TEST_ROOT/releases.json"
+
+  run install_environment "$NODE" \
+    "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.tool_extract_failed"* ]]
+  [ ! -e "$TEST_ROOT/home/.local/bin/bd" ]
+}
+
+@test "post-replacement verification failure atomically restores the previous bd" {
+  local archive="$TEST_ROOT/releases/bd.tar.gz"
+  make_bd_release 1.1.2 "$archive" fail-after-replace
+  local hash
+  hash="$(sha256sum "$archive" | awk '{print $1}')"
+  write_manifest
+  make_bd_release 1.1.2 "$archive" fail-after-replace
+  hash="$(sha256sum "$archive" | awk '{print $1}')"
+  jq --arg hash "$hash" '.tools.bd.releases["x86_64-linux"].sha256 = $hash' \
+    "$TEST_ROOT/releases.json" >"$TEST_ROOT/failing.json"
+  mv "$TEST_ROOT/failing.json" "$TEST_ROOT/releases.json"
+  mkdir -p "$TEST_ROOT/home/.local/bin"
+  make_bd_release 1.1.1 "$TEST_ROOT/releases/old.tar.gz"
+  tar -xzf "$TEST_ROOT/releases/old.tar.gz" -C "$TEST_ROOT/home/.local/bin"
+
+  run install_environment "$NODE" \
+    "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.tool_installed_version_invalid"* ]]
+  [ "$(HOME="$TEST_ROOT/home" "$TEST_ROOT/home/.local/bin/bd" version)" = "bd version 1.1.1" ]
+}
+
+@test "archive size and download time are bounded" {
+  write_manifest
+
+  run env \
+    HOME="$TEST_ROOT/home" \
+    PATH="$TEST_ROOT/system-bin:$PATH" \
+    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
+    DEVELOPMENT_SYSTEM_TOOL_ALLOW_FILE_URLS=1 \
+    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
+    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
+    DEVELOPMENT_SYSTEM_TOOL_MAX_ARCHIVE_BYTES=8 \
+    "$NODE" "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.tool_download_size_exceeded"* ]]
+
+  mkfifo "$TEST_ROOT/releases/stalled"
+  jq --arg url "file://$TEST_ROOT/releases/stalled" '
+    .tools.bd.releases["x86_64-linux"].url = $url |
+    .tools.bd.releases["x86_64-linux"].sha256 = ("0" * 64)
+  ' "$TEST_ROOT/releases.json" >"$TEST_ROOT/stalled.json"
+  (exec 3>"$TEST_ROOT/releases/stalled"; sleep 5) &
+  local writer=$!
+  run env \
+    HOME="$TEST_ROOT/home" \
+    PATH="$TEST_ROOT/system-bin:$PATH" \
+    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/stalled.json" \
+    DEVELOPMENT_SYSTEM_TOOL_ALLOW_FILE_URLS=1 \
+    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
+    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
+    DEVELOPMENT_SYSTEM_TOOL_DOWNLOAD_TIMEOUT_MS=50 \
+    "$NODE" "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
+  kill "$writer" 2>/dev/null || true
+  wait "$writer" 2>/dev/null || true
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.tool_download_timeout"* ]]
+}
+
+@test "unsupported host targets fail before downloading or writing a tool" {
+  write_manifest
+
+  run env \
+    HOME="$TEST_ROOT/home" \
+    PATH="$TEST_ROOT/system-bin:$PATH" \
+    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
+    DEVELOPMENT_SYSTEM_TOOL_ALLOW_FILE_URLS=1 \
     DEVELOPMENT_SYSTEM_TOOL_PLATFORM=freebsd \
     DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
-    "$REPO_ROOT/plugins/development-system/bin/development-system" \
-    setup --project "$TEST_ROOT/project" --apply --yes
+    "$NODE" "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
 
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
   [[ "$output" == *"development_system.tool_platform_unsupported"* ]]
-  [ ! -e "$TEST_ROOT/project/.development-system.toml" ]
-  [ ! -e "$TEST_ROOT/project/.beads" ]
+  [ ! -e "$TEST_ROOT/home/.local/bin/bd" ]
+}
+
+@test "unchanged enabled Beads policy still installs missing bd user-globally without a repository commit" {
+  write_manifest
+  initialize_project_with_enabled_beads
+  printf '#!/bin/sh\nexit 127\n' >"$TEST_ROOT/system-bin/bd"
+  chmod +x "$TEST_ROOT/system-bin/bd"
+  local before_head
+  before_head="$(git -C "$TEST_ROOT/project" rev-parse HEAD)"
+
+  run install_environment env \
+    PACKAGE_ROOT="$REPO_ROOT/plugins/development-system" \
+    PROJECT="$TEST_ROOT/project" \
+    "$NODE" --experimental-strip-types --input-type=module -e '
+      const { applySetupPreview, createSetupPreview } = await import(`${process.env.PACKAGE_ROOT}/extensions/development-system/adapters/setup.ts`);
+      const preview = await createSetupPreview(process.env.PACKAGE_ROOT, process.env.PROJECT, "--enable beads");
+      process.stdout.write(await applySetupPreview(process.env.PACKAGE_ROOT, preview));
+    '
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"development_system.setup_configuration_unchanged"* ]]
+  [[ "$output" == *"development_system.setup_tools_installed bd=1.1.2"* ]]
+  [ -x "$TEST_ROOT/home/.local/bin/bd" ]
+  [ ! -e "$TEST_ROOT/home/.local/bin/dolt" ]
   [ "$(git -C "$TEST_ROOT/project" rev-parse HEAD)" = "$before_head" ]
   [ -z "$(git -C "$TEST_ROOT/project" status --porcelain)" ]
 }
 
-@test "approved setup provisions both plugin-owned tools before initializing Beads" {
-  write_manifest
-  git -C "$TEST_ROOT" init -q --initial-branch=main project
-  git -C "$TEST_ROOT/project" config user.email test@example.com
-  git -C "$TEST_ROOT/project" config user.name "Test User"
-  touch "$TEST_ROOT/project/README.md"
-  git -C "$TEST_ROOT/project" add README.md
-  git -C "$TEST_ROOT/project" commit -qm "test: initialize fixture"
-  mkdir -p "$TEST_ROOT/system-bin"
-  printf '#!/bin/sh\nexit 127\n' >"$TEST_ROOT/system-bin/bd"
-  printf '#!/bin/sh\nexit 127\n' >"$TEST_ROOT/system-bin/dolt"
-  chmod +x "$TEST_ROOT/system-bin/bd" "$TEST_ROOT/system-bin/dolt"
-
-  run env \
-    PATH="$TEST_ROOT/system-bin:$PATH" \
-    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
-    DEVELOPMENT_SYSTEM_TOOLS_DIR="$TEST_ROOT/tools" \
-    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
-    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
-    DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS="$TEST_ROOT/markers" \
-    "$REPO_ROOT/plugins/development-system/bin/development-system" \
-    setup --project "$TEST_ROOT/project" --apply --yes
-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"development_system.setup_applied"* ]]
-  grep -Fq -- "version" "$TEST_ROOT/markers/dolt"
-  grep -Fq -- "version" "$TEST_ROOT/markers/bd"
-  grep -Fq -- "init" "$TEST_ROOT/markers/bd"
-  [ -f "$TEST_ROOT/project/.beads/formulas/behavior-slice.formula.toml" ]
-  [ "$(git -C "$TEST_ROOT/project" rev-list --count HEAD)" -eq 2 ]
-}
-
-@test "existing-policy setup uses absolute identities for validated ambient tools" {
-  git -C "$TEST_ROOT" init -q --initial-branch=main project
-  git -C "$TEST_ROOT/project" config user.email test@example.com
-  git -C "$TEST_ROOT/project" config user.name "Test User"
-  touch "$TEST_ROOT/project/README.md"
-  git -C "$TEST_ROOT/project" add README.md
-  git -C "$TEST_ROOT/project" commit -qm "test: initialize fixture"
-  cat >"$TEST_ROOT/project/.development-system.toml" <<'TOML'
-schema_version = 2
-[delivery]
-mode = "direct-to-trunk"
-trunk_branch = "main"
-[features]
-worktrees = true
-beads = false
-agentic_systems = false
-eval_case_reporting = false
-[worktrees]
-root = ".worktrees"
-[beads]
-workflow = "development-change-direct"
-TOML
-  git -C "$TEST_ROOT/project" add .development-system.toml
-  git -C "$TEST_ROOT/project" commit -qm "test: configure development system"
-  cat >"$TEST_ROOT/project/bd" <<'SH'
-#!/bin/sh
-printf 'project-shadow\n' >project-shadow.marker
-exit 91
-SH
-  chmod +x "$TEST_ROOT/project/bd"
-  mkdir -p "$TEST_ROOT/system-bin"
+@test "compatible ambient bd is used without a user-global installation" {
+  initialize_project_with_enabled_beads
   cat >"$TEST_ROOT/system-bin/bd" <<'SH'
 #!/bin/sh
-set -eu
-printf '%s\n' "$*" >>"$TEST_ROOT/system-bd.marker"
 case "${1:-}" in
   version) printf 'bd version 1.1.2\n' ;;
-  init) mkdir -p .beads; printf '{}\n' >.beads/metadata.json; printf '# generated\n' >.beads/README.md; printf 'backend: dolt\n' >.beads/config.yaml; printf '.dolt\n' >.beads/.gitignore ;;
-  where) printf '%s/.beads\n' "$PWD" ;;
+  where) test -d .beads ;;
   config) ;;
 esac
 SH
-  cat >"$TEST_ROOT/system-bin/dolt" <<'SH'
-#!/bin/sh
-printf 'dolt version 2.2.3\n'
-SH
-  chmod +x "$TEST_ROOT/system-bin/bd" "$TEST_ROOT/system-bin/dolt"
+  chmod +x "$TEST_ROOT/system-bin/bd"
 
-  run env PATH="$TEST_ROOT/system-bin:$PATH" TEST_ROOT="$TEST_ROOT" \
+  run env HOME="$TEST_ROOT/home" PATH="$TEST_ROOT/system-bin:$PATH" \
     PACKAGE_ROOT="$REPO_ROOT/plugins/development-system" PROJECT="$TEST_ROOT/project" \
-    node --experimental-strip-types --input-type=module -e '
+    "$NODE" --experimental-strip-types --input-type=module -e '
       const { applySetupPreview, createSetupPreview } = await import(`${process.env.PACKAGE_ROOT}/extensions/development-system/adapters/setup.ts`);
       const preview = await createSetupPreview(process.env.PACKAGE_ROOT, process.env.PROJECT, "--enable beads");
       process.stdout.write(await applySetupPreview(process.env.PACKAGE_ROOT, preview));
     '
 
   [ "$status" -eq 0 ]
-  [ ! -e "$TEST_ROOT/project/project-shadow.marker" ]
-  grep -Fq init "$TEST_ROOT/system-bd.marker"
+  [[ "$output" == *"development_system.setup_tools_compatible bd=1.1.2"* ]]
+  [ ! -e "$TEST_ROOT/home/.local/bin/bd" ]
 }
 
-@test "existing-policy setup uses the same provisioning fallback" {
+@test "outdated ambient bd is updated in the user-global destination" {
   write_manifest
-  git -C "$TEST_ROOT" init -q --initial-branch=main project
-  git -C "$TEST_ROOT/project" config user.email test@example.com
-  git -C "$TEST_ROOT/project" config user.name "Test User"
-  touch "$TEST_ROOT/project/README.md"
-  git -C "$TEST_ROOT/project" add README.md
-  git -C "$TEST_ROOT/project" commit -qm "test: initialize fixture"
-  cat >"$TEST_ROOT/project/.development-system.toml" <<'TOML'
-schema_version = 2
+  printf '#!/bin/sh\nprintf "bd version 1.1.1\\n"\n' >"$TEST_ROOT/system-bin/bd"
+  chmod +x "$TEST_ROOT/system-bin/bd"
 
-[delivery]
-mode = "direct-to-trunk"
-trunk_branch = "main"
-
-[features]
-worktrees = true
-beads = false
-agentic_systems = false
-eval_case_reporting = false
-
-[worktrees]
-root = ".worktrees"
-
-[beads]
-workflow = "development-change-direct"
-TOML
-  git -C "$TEST_ROOT/project" add .development-system.toml
-  git -C "$TEST_ROOT/project" commit -qm "test: configure development system"
-  mkdir -p "$TEST_ROOT/system-bin"
-  printf '#!/bin/sh\nexit 127\n' >"$TEST_ROOT/system-bin/bd"
-  printf '#!/bin/sh\nexit 127\n' >"$TEST_ROOT/system-bin/dolt"
-  chmod +x "$TEST_ROOT/system-bin/bd" "$TEST_ROOT/system-bin/dolt"
-
-  run env \
-    PATH="$TEST_ROOT/system-bin:$PATH" \
-    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
-    DEVELOPMENT_SYSTEM_TOOLS_DIR="$TEST_ROOT/tools" \
-    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
-    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
-    DEVELOPMENT_SYSTEM_TOOL_TEST_MARKERS="$TEST_ROOT/markers" \
-    PACKAGE_ROOT="$REPO_ROOT/plugins/development-system" \
-    PROJECT="$TEST_ROOT/project" \
-    node --experimental-strip-types --input-type=module -e '
-      const { applySetupPreview, createSetupPreview } = await import(`${process.env.PACKAGE_ROOT}/extensions/development-system/adapters/setup.ts`);
-      const preview = await createSetupPreview(process.env.PACKAGE_ROOT, process.env.PROJECT, "--enable beads");
-      process.stdout.write(await applySetupPreview(process.env.PACKAGE_ROOT, preview));
-    '
+  run install_environment "$NODE" \
+    "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install --json
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"development_system.setup_applied"* ]]
-  grep -Fq -- "version" "$TEST_ROOT/markers/dolt"
-  grep -Fq -- "init" "$TEST_ROOT/markers/bd"
-  grep -Fq 'beads = true' "$TEST_ROOT/project/.development-system.toml"
-  [ "$(git -C "$TEST_ROOT/project" rev-list --count HEAD)" -eq 3 ]
+  printf '%s\n' "$output" | jq -e '.installed == ["bd"]' >/dev/null
+  [ "$(HOME="$TEST_ROOT/home" "$TEST_ROOT/home/.local/bin/bd" version)" = "bd version 1.1.2" ]
+}
+
+@test "package bd wrapper fails closed with the manifest minimum and setup retry when bd is unavailable" {
+  write_manifest
+
+  run env \
+    HOME="$TEST_ROOT/home" \
+    PATH="$TEST_ROOT/system-bin:$PATH" \
+    DEVELOPMENT_SYSTEM_TOOL_RELEASES="$TEST_ROOT/releases.json" \
+    DEVELOPMENT_SYSTEM_TOOL_PLATFORM=linux \
+    DEVELOPMENT_SYSTEM_TOOL_ARCH=x64 \
+    "$REPO_ROOT/plugins/development-system/bin/bd" version
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.tool_unavailable tool=bd minimum=1.1.2"* ]]
+  [[ "$output" == *"development-system setup"* ]]
+  [ ! -e "$TEST_ROOT/home/.cache/development-system/tools" ]
 }

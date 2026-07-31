@@ -19,6 +19,12 @@ import {
   beadsPrime,
 } from "./adapters/beads.ts";
 import {
+  inspectManagedTools,
+  managedToolOffer,
+  managedToolResult,
+  reconcileManagedTools,
+} from "./adapters/tools.ts";
+import {
   createWorktree,
   listWorktrees,
   removeWorktree,
@@ -1315,25 +1321,68 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
     for (const diagnostic of status.diagnostics)
       context.ui.notify(diagnostic, "warning");
     if (status.enabledFeatures.includes("beads")) {
-      const beads = await beadsAvailability(projectCwd(context.cwd));
-      context.ui.setStatus(
-        "development-system-beads",
-        beads.available
-          ? beads.initialized
-            ? "beads: ready"
-            : "beads: setup required"
-          : "beads: unavailable",
-      );
-      if (!beads.available)
-        context.ui.notify(
-          `${beads.error ?? "development_system.beads_unavailable"}: install bd >= 1.0.0`,
-          "warning",
+      try {
+        let tools = await inspectManagedTools(packageRoot, ["beads"]);
+        const incompatible = tools.tools.filter(
+          (tool) => tool.status !== "compatible",
         );
-      else if (!beads.initialized)
-        context.ui.notify(
-          "development_system.beads_not_initialized: run development-system setup from the primary checkout",
-          "warning",
+        if (incompatible.length > 0) {
+          let approved = false;
+          if (context.mode === "tui" && context.hasUI) {
+            approved = await context.ui.confirm(
+              "Install or update required development-system tools?",
+              `${managedToolOffer(tools)}\n\nInstall verified pinned releases now?`,
+            );
+          }
+          if (approved) {
+            tools = await reconcileManagedTools(packageRoot, ["beads"]);
+            context.ui.notify(managedToolResult(tools), "info");
+          } else {
+            context.ui.notify(
+              `${context.mode === "tui" && context.hasUI ? "development_system.required_tools_declined" : "development_system.required_tools_confirmation_required"}\n${managedToolOffer(tools)}\nRetry in the local Pi TUI: /development-system-setup --enable beads`,
+              "warning",
+            );
+          }
+        } else {
+          tools = await reconcileManagedTools(packageRoot, ["beads"]);
+          if (
+            tools.tools.some((tool) => tool.source === "user-global") &&
+            !tools.inheritedPathIncludesDestination &&
+            tools.pathAction
+          )
+            context.ui.notify(managedToolResult(tools), "warning");
+        }
+        const toolsReady = tools.tools.every(
+          (tool) => tool.status === "compatible",
         );
+        const beads = toolsReady
+          ? await beadsAvailability(projectCwd(context.cwd))
+          : { available: false, initialized: false };
+        context.ui.setStatus(
+          "development-system-beads",
+          beads.available
+            ? beads.initialized
+              ? "beads: ready"
+              : "beads: setup required"
+            : "beads: unavailable",
+        );
+        if (!beads.available && toolsReady)
+          context.ui.notify(
+            "development_system.beads_unavailable_after_reconciliation: rerun /development-system-setup --enable beads",
+            "warning",
+          );
+        else if (!beads.initialized && beads.available)
+          context.ui.notify(
+            "development_system.beads_not_initialized: run development-system setup from the primary checkout",
+            "warning",
+          );
+      } catch (error) {
+        context.ui.setStatus("development-system-beads", "beads: unavailable");
+        context.ui.notify(
+          `development_system.required_tools_check_failed detail=${JSON.stringify(terminalSafe(error instanceof Error ? error.message : String(error)))} retry="/development-system-setup --enable beads"`,
+          "error",
+        );
+      }
     }
     const ownedOrMediated = new Set([
       "read",

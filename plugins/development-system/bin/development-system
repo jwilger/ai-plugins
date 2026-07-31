@@ -13,12 +13,6 @@ warn() {
   printf 'development_system.warning %s\n' "$*"
 }
 
-canonical_executable() {
-  local executable=$1 directory
-  directory="$(cd "$(dirname "$executable")" && pwd -P)"
-  printf '%s/%s\n' "$directory" "$(basename "$executable")"
-}
-
 primary_checkout() {
   local project=$1
   local common_dir
@@ -110,7 +104,22 @@ setup_command() {
   printf 'delivery %s\n' "$delivery"
   printf 'features worktrees=%s beads=%s agentic_systems=%s eval_case_reporting=%s\n' \
     "$feature_worktrees" "$feature_beads" "$feature_agentic_systems" "$feature_eval_case_reporting"
-  printf 'install verified pinned Beads and Dolt tools, initialize the Dolt backend, and install development workflow formulas\n'
+  local tool_status_json=
+  if [[ "$feature_beads" == "true" ]]; then
+    tool_status_json="$(node "$PACKAGE_ROOT/bin/install-development-tool.mjs" status --json)" ||
+      die "development_system.tool_status_failed"
+    TOOL_STATUS_JSON="$tool_status_json" node - <<'NODE'
+const policy = JSON.parse(process.env.TOOL_STATUS_JSON);
+console.log("required user-global tools:");
+for (const tool of policy.tools.filter((candidate) => candidate.requiredFor.includes("beads"))) {
+  console.log(`${tool.name}: current=${tool.currentVersion ?? tool.status} status=${tool.status} target=${tool.targetVersion}`);
+}
+console.log(`destination: ${policy.destination}`);
+console.log("scope: user-global for the current user across projects");
+console.log("sudo: not required");
+NODE
+    printf 'install or update required tools only after this setup is approved; use Beads embedded Dolt storage; initialize Beads and install workflow formulas\n'
+  fi
   printf 'write .development-system.toml\n'
   if [[ "$mode" == "dry-run" ]]; then
     return
@@ -132,28 +141,30 @@ setup_command() {
     die "development_system.config_already_exists path=$config_path"
   fi
   trap 'rm -f -- "${config_tmp:-}"; if [[ "${created_beads:-false}" == "true" ]]; then git -C "$project" reset -q HEAD -- .beads .gitignore 2>/dev/null || true; rm -rf -- "$project/.beads"; if git -C "$project" cat-file -e HEAD:.gitignore 2>/dev/null; then git -C "$project" checkout -q -- .gitignore; else rm -f -- "$project/.gitignore"; fi; elif ((${#added_beads_formulas[@]} > 0)); then rm -f -- "${added_beads_formulas[@]}"; fi' EXIT
+  local tool_install_json=
   if [[ "$feature_beads" == "true" ]]; then
-    local bd_bin dolt_bin
-    bd_bin="$(command -v bd 2>/dev/null || true)"
-    if [[ -z "$bd_bin" ]] || ! "$bd_bin" version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
-      bd_bin="$PACKAGE_ROOT/bin/bd"
-    fi
-    bd_bin="$(canonical_executable "$bd_bin")"
-    dolt_bin="$(command -v dolt 2>/dev/null || true)"
-    if [[ -z "$dolt_bin" ]] || ! "$dolt_bin" version >/dev/null 2>&1; then
-      dolt_bin="$PACKAGE_ROOT/bin/dolt"
-    fi
-    dolt_bin="$(canonical_executable "$dolt_bin")"
-    if ! "$dolt_bin" version >/dev/null; then
-      die "development_system.dolt_install_failed"
-    fi
-    if ! "$bd_bin" version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
-      die "development_system.beads_install_failed minimum=1.0.0"
-    fi
+    local bd_bin
+    local -a required_tools=()
+    while IFS= read -r tool; do
+      [[ -n "$tool" ]] && required_tools+=("$tool")
+    done < <(TOOL_STATUS_JSON="$tool_status_json" node -e '
+      const policy = JSON.parse(process.env.TOOL_STATUS_JSON);
+      for (const tool of policy.tools.filter((candidate) => candidate.requiredFor.includes("beads"))) console.log(tool.name);
+    ')
+    ((${#required_tools[@]} > 0)) || die "development_system.required_tools_missing feature=beads"
+    tool_install_json="$(node "$PACKAGE_ROOT/bin/install-development-tool.mjs" install --json "${required_tools[@]}")" ||
+      die "development_system.beads_install_failed"
+    bd_bin="$(TOOL_INSTALL_JSON="$tool_install_json" node -e '
+      const policy = JSON.parse(process.env.TOOL_INSTALL_JSON);
+      const bd = policy.tools.find((tool) => tool.name === "bd");
+      if (!bd?.executable || bd.status !== "compatible") process.exit(2);
+      process.stdout.write(bd.executable);
+    ')" || die "development_system.beads_install_failed"
+    export PATH="$(dirname "$bd_bin"):$PATH"
     if [[ ! -d "$project/.beads" ]]; then
       (
         cd "$project"
-        PATH="$(dirname "$dolt_bin"):$PATH" "$bd_bin" init --quiet --non-interactive --skip-agents --skip-hooks
+        "$bd_bin" init --quiet --non-interactive --skip-agents --skip-hooks
       ) || die "development_system.beads_init_failed project=$project"
       created_beads=true
       local initialized_head
@@ -168,7 +179,7 @@ setup_command() {
     else
       (
         cd "$project"
-        PATH="$(dirname "$dolt_bin"):$PATH" "$bd_bin" where >/dev/null
+        "$bd_bin" where >/dev/null
       ) || die "development_system.beads_workspace_invalid project=$project"
     fi
     mkdir -p "$project/.beads/formulas"
@@ -187,7 +198,7 @@ setup_command() {
     done
     (
       cd "$project"
-      PATH="$(dirname "$dolt_bin"):$PATH" "$bd_bin" config set dolt.auto-commit on >/dev/null
+      "$bd_bin" config set dolt.auto-commit on >/dev/null
     ) || die "development_system.beads_config_failed project=$project"
   fi
   config_tmp="$(mktemp "$project/.development-system.toml.tmp.XXXXXX")" ||
@@ -235,6 +246,20 @@ setup_command() {
   fi
   trap - EXIT
   printf 'development_system.setup_applied commit=%s\n' "$(git -C "$project" rev-parse HEAD)"
+  if [[ -n "$tool_install_json" ]]; then
+    TOOL_INSTALL_JSON="$tool_install_json" node - <<'NODE'
+const policy = JSON.parse(process.env.TOOL_INSTALL_JSON);
+const versions = policy.tools.map((tool) => `${tool.name}=${tool.targetVersion}`).join(" ");
+if (policy.installed.length > 0) {
+  console.log(`development_system.setup_tools_installed ${versions} destination=${policy.destination}`);
+} else {
+  console.log(`development_system.setup_tools_compatible ${versions}`);
+}
+if (policy.installed.length > 0 && !policy.inheritedPathIncludesDestination && policy.pathAction) {
+  console.log(`development_system.user_global_bin_not_in_inherited_path action=${JSON.stringify(policy.pathAction)}`);
+}
+NODE
+  fi
 }
 
 inspect_conflicts() {

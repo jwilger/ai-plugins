@@ -3,6 +3,7 @@ import { access, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { inspectManagedTools } from "./tools.ts";
 import {
   StatusFlow,
   type ComponentStatus,
@@ -96,16 +97,29 @@ async function developmentDisciplineStatus(
   }
 }
 
-async function beadsStatus(project: string): Promise<ComponentStatus> {
+async function beadsStatus(packageRoot: string): Promise<ComponentStatus> {
   try {
-    const { stdout } = await execFileAsync("bd", ["version"], {
-      cwd: project,
-      timeout: 5_000,
-      maxBuffer: 50 * 1024,
+    const policy = await inspectManagedTools(packageRoot, ["beads"]);
+    const bd = policy.tools.find((tool) => tool.name === "bd");
+    if (!bd || bd.status !== "compatible" || !bd.executable)
+      return Object.freeze({
+        available: false,
+        entrypoint: "bd",
+        target: null,
+        error: `development_system.tool_${bd?.status ?? "missing"} tool=bd minimum=${bd?.targetVersion ?? "unknown"}`,
+      });
+    return Object.freeze({
+      available: true,
+      entrypoint: bd.executable,
+      target: bd.targetVersion,
+      ...(!policy.inheritedPathIncludesDestination &&
+      bd.source === "user-global" &&
+      policy.pathAction
+        ? {
+            error: `development_system.user_global_bin_not_in_inherited_path action=${JSON.stringify(policy.pathAction)}`,
+          }
+        : {}),
     });
-    if (!/\bbd version (?:[1-9]\d*)\./.test(stdout))
-      throw new Error("unsupported version");
-    return Object.freeze({ available: true, entrypoint: "bd", target: null });
   } catch {
     return Object.freeze({
       available: false,
@@ -139,8 +153,9 @@ async function perform(
       return resolveRepository(project);
     case "resolve-components":
       return Object.freeze({
-        beads: await beadsStatus(project),
-        "development-discipline": await developmentDisciplineStatus(packageRoot),
+        beads: await beadsStatus(packageRoot),
+        "development-discipline":
+          await developmentDisciplineStatus(packageRoot),
       });
     case "run-doctor": {
       try {

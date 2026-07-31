@@ -4,7 +4,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import {
-  access,
   copyFile,
   lstat,
   mkdir,
@@ -16,6 +15,13 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { parseProjectPolicy } from "../core/configuration.ts";
+import {
+  inspectManagedTools,
+  managedToolOffer,
+  managedToolResult,
+  reconcileManagedTools,
+  type ManagedToolPolicy,
+} from "./tools.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -226,18 +232,24 @@ function proposeExistingConfig(source: string, arguments_: readonly string[]) {
   return { proposed, policy };
 }
 
-function existingPreview(
+async function existingPreview(
+  packageRoot: string,
   project: string,
   source: string,
   arguments_: string[],
 ) {
   const { proposed, policy } = proposeExistingConfig(source, arguments_);
+  const tools = policy.features.beads
+    ? await inspectManagedTools(packageRoot, ["beads"])
+    : null;
   const preview = [
     `development_system.setup_preview project=${project}`,
     `delivery ${policy.delivery.mode}`,
     `features worktrees=${policy.features.worktrees} beads=${policy.features.beads} agentic_systems=${policy.features.agenticSystems} eval_case_reporting=${policy.features.evalCaseReporting}`,
+    ...(tools ? ["required user-global tools:", managedToolOffer(tools)] : []),
     "preserve unspecified existing configuration",
-    "update .development-system.toml",
+    "reconcile enabled dependencies even when configuration is unchanged",
+    "update .development-system.toml only when policy changes",
     "",
   ].join("\n");
   return { proposed, preview };
@@ -269,7 +281,8 @@ export async function createSetupPreview(
     );
     preview = result.stdout;
   } else {
-    const existing = existingPreview(
+    const existing = await existingPreview(
+      packageRoot,
       state.project,
       state.configSource,
       arguments_,
@@ -288,63 +301,10 @@ export async function createSetupPreview(
   });
 }
 
-async function resolvesVersion(
-  executable: string,
-  arguments_: readonly string[],
-  pattern: RegExp,
-  project: string,
-  timeout: number,
-): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync(executable, [...arguments_], {
-      cwd: project,
-      timeout,
-    });
-    return pattern.test(stdout);
-  } catch {
-    return false;
-  }
-}
-
-async function executableOnPath(
-  tool: "bd" | "dolt",
-  project: string,
-): Promise<string | null> {
-  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
-    const candidate = path.resolve(project, directory || ".", tool);
-    try {
-      await access(candidate, constants.X_OK);
-      return await realpath(candidate);
-    } catch {
-      // Continue through PATH until an executable candidate is found.
-    }
-  }
-  return null;
-}
-
-async function setupTool(
-  packageRoot: string,
-  project: string,
-  tool: "bd" | "dolt",
-): Promise<string> {
-  const arguments_ = ["version"];
-  const pattern =
-    tool === "bd" ? /^bd version ([1-9][0-9]*)\./ : /^dolt version /;
-  const ambient = await executableOnPath(tool, project);
-  if (
-    ambient &&
-    (await resolvesVersion(ambient, arguments_, pattern, project, 5_000))
-  )
-    return ambient;
-  const launcher = path.join(packageRoot, "bin", tool);
-  if (await resolvesVersion(launcher, arguments_, pattern, project, 180_000))
-    return launcher;
-  throw new Error(`development_system.${tool}_install_failed`);
-}
-
 async function ensureBeadsWorkspace(
   packageRoot: string,
   project: string,
+  bd: string,
 ): Promise<
   Readonly<{
     created: boolean;
@@ -352,14 +312,7 @@ async function ensureBeadsWorkspace(
     rollbackAutoCommit: () => Promise<void>;
   }>
 > {
-  const [bd, dolt] = await Promise.all([
-    setupTool(packageRoot, project, "bd"),
-    setupTool(packageRoot, project, "dolt"),
-  ]);
-  const toolEnvironment = {
-    ...process.env,
-    PATH: `${path.dirname(dolt)}${path.delimiter}${process.env.PATH ?? ""}`,
-  };
+  const toolEnvironment = { ...process.env };
   let created = false;
   const addedFormulas: string[] = [];
   let rollbackAutoCommit = async (): Promise<void> => {};
@@ -516,38 +469,75 @@ export async function applySetupPreview(
   const state = await preconditions(approved.project);
   if (state.trackedStatus)
     throw new Error("development_system.setup_tracked_changes_present");
-  if (state.configSource === approved.proposedConfig)
-    return "development_system.setup_no_changes\n";
   if (state.configSource === null)
     throw new Error("development_system.setup_confirmation_stale");
+  const policy = parseProjectPolicy(approved.proposedConfig);
+  let tools: ManagedToolPolicy | null = null;
+  let bd: string | null = null;
+  if (policy.features.beads) {
+    tools = await reconcileManagedTools(packageRoot, ["beads"]);
+    const bdStatus = tools.tools.find((tool) => tool.name === "bd");
+    bd = bdStatus?.executable ?? null;
+    if (!bd)
+      throw new Error(
+        `development_system.beads_install_failed minimum=${bdStatus?.targetVersion ?? "unknown"}`,
+      );
+  }
   const configPath = path.join(approved.project, ".development-system.toml");
   const original = state.configSource;
+  const configurationChanged = original !== approved.proposedConfig;
   let beadsSetup: Awaited<ReturnType<typeof ensureBeadsWorkspace>> | null =
     null;
-  await atomicWrite(configPath, approved.proposedConfig);
+  if (configurationChanged)
+    await atomicWrite(configPath, approved.proposedConfig);
   try {
-    const policy = parseProjectPolicy(approved.proposedConfig);
-    if (policy.features.beads)
-      beadsSetup = await ensureBeadsWorkspace(packageRoot, approved.project);
-    await execFileAsync("git", [
-      "-C",
-      approved.project,
-      "add",
-      "-f",
-      "--",
-      ".development-system.toml",
-      ...(policy.features.beads ? [".beads"] : []),
-    ]);
-    await execFileAsync("git", [
-      "-C",
-      approved.project,
-      "commit",
-      "--no-verify",
-      "-m",
-      "chore: update development system",
-      "-m",
-      "Preserve existing project policy while applying explicitly requested setup changes.",
-    ]);
+    if (policy.features.beads && bd)
+      beadsSetup = await ensureBeadsWorkspace(
+        packageRoot,
+        approved.project,
+        bd,
+      );
+    const repositoryChanged =
+      configurationChanged ||
+      Boolean(beadsSetup?.created) ||
+      Boolean(beadsSetup?.addedFormulas.length);
+    if (repositoryChanged) {
+      await execFileAsync("git", [
+        "-C",
+        approved.project,
+        "add",
+        "-f",
+        "--",
+        ...(configurationChanged ? [".development-system.toml"] : []),
+        ...(policy.features.beads ? [".beads"] : []),
+      ]);
+      await execFileAsync("git", [
+        "-C",
+        approved.project,
+        "commit",
+        "--no-verify",
+        "-m",
+        "chore: update development system",
+        "-m",
+        "Preserve existing project policy while reconciling explicitly enabled capabilities.",
+      ]);
+    }
+    const lines = [
+      configurationChanged
+        ? "development_system.setup_configuration_updated"
+        : "development_system.setup_configuration_unchanged",
+    ];
+    if (repositoryChanged) {
+      const { stdout: head } = await execFileAsync("git", [
+        "-C",
+        approved.project,
+        "rev-parse",
+        "HEAD",
+      ]);
+      lines.push(`development_system.setup_applied commit=${head.trim()}`);
+    }
+    if (tools) lines.push(managedToolResult(tools));
+    return `${lines.join("\n")}\n`;
   } catch (error) {
     const rollbackSetup =
       beadsSetup ??
@@ -561,9 +551,9 @@ export async function applySetupPreview(
     try {
       await rollbackSetup?.rollbackAutoCommit();
     } catch {
-      // Source rollback still proceeds when Beads configuration recovery fails.
+      // Repository rollback still proceeds when Beads config recovery fails.
     }
-    await atomicWrite(configPath, original);
+    if (configurationChanged) await atomicWrite(configPath, original);
     await execFileAsync("git", [
       "-C",
       approved.project,
@@ -598,11 +588,4 @@ export async function applySetupPreview(
       );
     throw new Error("development_system.setup_commit_failed");
   }
-  const { stdout: head } = await execFileAsync("git", [
-    "-C",
-    approved.project,
-    "rev-parse",
-    "HEAD",
-  ]);
-  return `development_system.setup_applied commit=${head.trim()}\n`;
 }

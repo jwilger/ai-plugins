@@ -898,6 +898,37 @@
     }
   },
   {
+    "case_id": "development-system-setup-noop-reconciles-missing-beads",
+    "behavior": "Reconciles an enabled but unavailable Beads dependency even when project policy is unchanged.",
+    "prompt": "Beads is already enabled in .development-system.toml, but a fresh Pi session says `beads: unavailable` and `spawn bd ENOENT`. `/development-system-setup --enable beads` previously returned `development_system.setup_no_changes`. The project devshell no longer supplies Beads. What should happen now, where should the binary go, and is a standalone Dolt install required?",
+    "tags": ["setup", "beads", "dependency-reconciliation", "regression"],
+    "plugins": ["development-system"],
+    "skills": ["setup", "beads"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response says an unchanged project policy must still reconcile enabled dependencies; Pi should show an explicit TUI install/update confirmation with current status, target version, ~/.local/bin destination, user-global scope, and no-sudo statement; approval installs the verified pinned bd executable without creating a tools-only repository commit; decline keeps Beads unavailable and the same setup command can retry. It must say Beads' default embedded Dolt engine does not require a standalone dolt CLI. Fail if setup_no_changes skips reconciliation, it recommends reinstalling a project devshell dependency, writes only to a private cache, installs to /usr/local/bin or uses sudo, auto-installs without approval, or requires standalone Dolt for default embedded mode.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Even though the TOML is unchanged, setup must still offer to reconcile the enabled Beads dependency. In the local TUI it should show bd's current state, pinned target, ~/.local/bin destination, user-global/no-sudo scope, then install only after approval and avoid a repository commit when only the tool changed. Declining leaves Beads unavailable; rerun `/development-system-setup --enable beads` to retry. Beads uses embedded Dolt by default, so no standalone dolt CLI is required."
+      ],
+      "fail": [
+        "Because Beads is already enabled, setup has nothing to do. Add bd and dolt back to the project's Nix devshell or run the package's cache launcher."
+      ]
+    }
+  },
+  {
     "plugins": ["development-system"],
     "skills": ["beads", "development-workflow"],
     "coverage": {

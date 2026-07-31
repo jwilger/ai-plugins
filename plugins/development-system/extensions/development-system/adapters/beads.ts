@@ -1,8 +1,17 @@
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const MINIMUM_VERSION = [1, 1, 2] as const;
+const releasePolicy = JSON.parse(
+  readFileSync(
+    new URL("../../../bin/tool-releases.json", import.meta.url),
+    "utf8",
+  ),
+) as { tools: { bd: { version: string } } };
+const MINIMUM_VERSION = Object.freeze(
+  releasePolicy.tools.bd.version.split(".").map(Number),
+);
 const CI_RECOVERY_LABEL = "development-system:ci-recovery";
 
 export type BeadsIssue = Readonly<{
@@ -26,6 +35,10 @@ export function failClosedCiRecoveryHold(error: unknown): CiRecoveryHold {
   });
 }
 
+export function beadsMinimumVersion(): string {
+  return releasePolicy.tools.bd.version;
+}
+
 export function parseBeadsVersion(
   output: string,
 ): readonly [number, number, number] {
@@ -36,7 +49,7 @@ export function parseBeadsVersion(
     Number(match[2]),
     Number(match[3]),
   ] as const;
-  for (let index = 0; index < MINIMUM_VERSION.length; index += 1) {
+  for (let index = 0; index < 3; index += 1) {
     if (version[index] > MINIMUM_VERSION[index]) return version;
     if (version[index] < MINIMUM_VERSION[index])
       throw new Error(

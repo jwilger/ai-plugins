@@ -44,21 +44,6 @@
               install -m 0755 "${beadsRelease.binaryPath}" "$out/bin/bd"
             '';
           };
-          doltDefinition = toolReleases.tools.dolt;
-          doltRelease = doltDefinition.releases.${toolTarget};
-          dolt = pkgs.stdenvNoCC.mkDerivation {
-            pname = "dolt";
-            version = doltDefinition.version;
-            src = pkgs.fetchurl {
-              inherit (doltRelease) url sha256;
-            };
-            sourceRoot = ".";
-            unpackPhase = "tar -xzf $src";
-            installPhase = ''
-              mkdir -p "$out/bin"
-              install -m 0755 "${doltRelease.binaryPath}" "$out/bin/dolt"
-            '';
-          };
         in
         {
           default = pkgs.mkShell {
@@ -95,7 +80,7 @@
               actionlint
               yq-go
             ])
-            ++ [ beads dolt ]
+            ++ [ beads ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               pkgs.bubblewrap
               pkgs.systemd

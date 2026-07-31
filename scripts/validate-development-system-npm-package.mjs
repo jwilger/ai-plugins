@@ -41,7 +41,6 @@ for (const formula of fs
   required.add(`formulas/${formula}`);
 for (const toolFile of [
   "bin/bd",
-  "bin/dolt",
   "bin/install-development-tool.mjs",
   "bin/tool-releases.json",
   "bin/migrate-tiber-to-beads.mjs",

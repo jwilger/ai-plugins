@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  beadsMinimumVersion,
   failClosedCiRecoveryHold,
   parseBeadsIssueList,
   parseBeadsVersion,
@@ -78,6 +79,14 @@ max_queued = 5
   assert.match(migrated, /^beads = true$/m);
   assert.match(migrated, /\[beads\]\nworkflow = "development-change-pr"/);
   assert.doesNotMatch(migrated, /^tiber\s*=|^\[tiber]/m);
+});
+
+test("Beads adapter and diagnostics use the release manifest minimum", () => {
+  assert.equal(beadsMinimumVersion(), "1.1.2");
+  assert.throws(
+    () => parseBeadsVersion("bd version 1.1.1"),
+    /beads_version_unsupported minimum=1\.1\.2/,
+  );
 });
 
 test("Beads adapter accepts the stable JSON envelope and validates versions", () => {

@@ -26,6 +26,84 @@ function fixture() {
   return directory;
 }
 
+function managedBdFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "development-system-bd-"));
+  const home = path.join(root, "home");
+  const systemBin = path.join(root, "system-bin");
+  const release = path.join(root, "release");
+  fs.mkdirSync(home);
+  fs.mkdirSync(systemBin);
+  fs.mkdirSync(release);
+  fs.symlinkSync(
+    execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim(),
+    path.join(systemBin, "git"),
+  );
+  fs.symlinkSync(
+    execFileSync("sh", ["-c", "command -v tar"], { encoding: "utf8" }).trim(),
+    path.join(systemBin, "tar"),
+  );
+  const bd = path.join(release, "bd");
+  fs.writeFileSync(
+    bd,
+    `#!/bin/sh
+case "\${1:-}" in
+  version) printf 'bd version 1.1.2\\n' ;;
+  where) exit 0 ;;
+  config) exit 0 ;;
+esac
+`,
+    { mode: 0o755 },
+  );
+  const archive = path.join(root, "bd.tar.gz");
+  execFileSync("tar", ["-C", release, "-czf", archive, "bd"]);
+  const sha256 = execFileSync("sha256sum", [archive], {
+    encoding: "utf8",
+  }).split(/\s+/)[0];
+  const manifest = path.join(root, "releases.json");
+  fs.writeFileSync(
+    manifest,
+    JSON.stringify({
+      schemaVersion: 2,
+      tools: {
+        bd: {
+          version: "1.1.2",
+          requiredFor: ["beads"],
+          versionCommand: ["version"],
+          versionPattern: "\\bbd version (\\d+\\.\\d+\\.\\d+)\\b",
+          releases: {
+            "x86_64-linux": {
+              url: `file://${archive}`,
+              sha256,
+              binaryPath: "bd",
+            },
+          },
+        },
+      },
+    }),
+  );
+  return { root, home, systemBin, manifest };
+}
+
+function withManagedBdEnvironment(state, t) {
+  const saved = { ...process.env };
+  process.env.HOME = state.home;
+  const withoutBd = (saved.PATH ?? "")
+    .split(path.delimiter)
+    .filter((directory) => !fs.existsSync(path.join(directory, "bd")));
+  process.env.PATH = [state.systemBin, ...withoutBd].join(path.delimiter);
+  process.env.DEVELOPMENT_SYSTEM_TOOL_RELEASES = state.manifest;
+  process.env.DEVELOPMENT_SYSTEM_TOOL_ALLOW_FILE_URLS = "1";
+  process.env.DEVELOPMENT_SYSTEM_TOOL_PLATFORM = "linux";
+  process.env.DEVELOPMENT_SYSTEM_TOOL_ARCH = "x64";
+  t.after(() => {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in saved)) delete process.env[key];
+    }
+    Object.assign(process.env, saved);
+    fs.rmSync(state.root, { recursive: true, force: true });
+  });
+}
+
 function status(project, mode = "json") {
   return JSON.parse(
     execFileSync(cli, ["status", "--project", project, "--mode", mode], {
@@ -237,6 +315,123 @@ test("extension registers status command and tool and cleans session state on re
   await registrations.events.get("session_shutdown")(
     { reason: "reload" },
     context,
+  );
+});
+
+test("startup offers and installs missing managed tools after explicit TUI approval", async (t) => {
+  const tools = managedBdFixture();
+  withManagedBdEnvironment(tools, t);
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk"),
+  );
+  const confirmations = [];
+  const notifications = [];
+  const statuses = [];
+  const context = {
+    cwd: project,
+    mode: "tui",
+    hasUI: true,
+    ui: {
+      confirm: async (title, message) => {
+        confirmations.push({ title, message });
+        return true;
+      },
+      notify: (...arguments_) => notifications.push(arguments_),
+      setStatus: (...arguments_) => statuses.push(arguments_),
+    },
+    sessionManager: { getBranch: () => [] },
+  };
+
+  await registrations.events.get("session_start")(
+    { reason: "startup" },
+    context,
+  );
+
+  assert.equal(confirmations.length, 1);
+  assert.match(confirmations[0].title, /install.*required.*tool/i);
+  assert.match(
+    confirmations[0].message,
+    /bd: current=missing status=missing target=1\.1\.2/,
+  );
+  assert.match(
+    confirmations[0].message,
+    new RegExp(`${tools.home}/\\.local/bin`),
+  );
+  assert.match(confirmations[0].message, /user-global/i);
+  assert.match(confirmations[0].message, /sudo: not required/i);
+  assert.equal(
+    fs.existsSync(path.join(tools.home, ".local", "bin", "bd")),
+    true,
+    JSON.stringify(notifications),
+  );
+  assert.ok(
+    statuses.some(
+      ([name, value]) =>
+        name === "development-system-beads" && value === "beads: ready",
+    ),
+  );
+  assert.ok(
+    notifications.some(([message]) =>
+      message.includes("development_system.setup_tools_installed bd=1.1.2"),
+    ),
+  );
+  assert.ok(
+    notifications.some(
+      ([message]) =>
+        message.includes(
+          "development_system.user_global_bin_not_in_inherited_path",
+        ) && message.includes('export PATH=\\"$HOME/.local/bin:$PATH\\"'),
+    ),
+  );
+});
+
+test("declining the startup offer leaves Beads unavailable and gives an exact retry", async (t) => {
+  const tools = managedBdFixture();
+  withManagedBdEnvironment(tools, t);
+  const { pi, registrations } = extensionHarness();
+  (await loadExtension())(pi);
+  const project = fixture();
+  fs.writeFileSync(
+    path.join(project, ".development-system.toml"),
+    configuredPolicy("direct-to-trunk"),
+  );
+  const notifications = [];
+  const statuses = [];
+  const context = {
+    cwd: project,
+    mode: "tui",
+    hasUI: true,
+    ui: {
+      confirm: async () => false,
+      notify: (...arguments_) => notifications.push(arguments_),
+      setStatus: (...arguments_) => statuses.push(arguments_),
+    },
+    sessionManager: { getBranch: () => [] },
+  };
+
+  await registrations.events.get("session_start")(
+    { reason: "startup" },
+    context,
+  );
+
+  assert.equal(
+    fs.existsSync(path.join(tools.home, ".local", "bin", "bd")),
+    false,
+  );
+  assert.ok(
+    statuses.some(
+      ([name, value]) =>
+        name === "development-system-beads" && value === "beads: unavailable",
+    ),
+  );
+  assert.ok(
+    notifications.some(([message]) =>
+      message.includes("/development-system-setup --enable beads"),
+    ),
   );
 });
 
