@@ -324,17 +324,18 @@ SH
   [ -f "$marker" ]
 }
 
-@test "Claude and Codex hooks use the official direct Beads lifecycle" {
+@test "Claude and Codex hooks use the verified package Beads launcher" {
   run jq -e '
-    [.hooks.SessionStart[].hooks[].command] | any(. == "bd prime --hook-json")
+    [.hooks.SessionStart[].hooks[].command] |
+      any(. == "\"${CLAUDE_PLUGIN_ROOT}/bin/bd\" prime --hook-json")
   ' "$REPO_ROOT/plugins/development-system/hooks/hooks.json"
   [ "$status" -eq 0 ]
 
   run jq -e '
-    ([.hooks.SessionStart[].hooks[].command] | any(. == "bd codex-hook SessionStart")) and
-    ([.hooks.PreCompact[].hooks[].command] | any(. == "bd codex-hook PreCompact")) and
-    ([.hooks.PostCompact[].hooks[].command] | any(. == "bd codex-hook PostCompact")) and
-    ([.hooks.UserPromptSubmit[].hooks[].command] | any(. == "bd codex-hook UserPromptSubmit"))
+    ([.hooks.SessionStart[].hooks[].command] | any(. == "\"${PLUGIN_ROOT}/bin/bd\" codex-hook SessionStart")) and
+    ([.hooks.PreCompact[].hooks[].command] | any(. == "\"${PLUGIN_ROOT}/bin/bd\" codex-hook PreCompact")) and
+    ([.hooks.PostCompact[].hooks[].command] | any(. == "\"${PLUGIN_ROOT}/bin/bd\" codex-hook PostCompact")) and
+    ([.hooks.UserPromptSubmit[].hooks[].command] | any(. == "\"${PLUGIN_ROOT}/bin/bd\" codex-hook UserPromptSubmit"))
   ' "$REPO_ROOT/plugins/development-system/hooks/codex.json"
   [ "$status" -eq 0 ]
 }

@@ -44,10 +44,19 @@ verify_component() {
 }
 
 verify_component development-discipline "$discipline_target" development-discipline-mcp
-if ! command -v bd >/dev/null 2>&1 || ! bd version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
-  printf 'development_system.beads_unavailable minimum=1.0.0\n' >&2
+bd_bin="$(command -v bd 2>/dev/null || true)"
+if [[ -z "$bd_bin" ]] || ! "$bd_bin" version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
+  bd_bin="$root/plugins/development-system/bin/bd"
+fi
+dolt_bin="$(command -v dolt 2>/dev/null || true)"
+if [[ -z "$dolt_bin" ]] || ! "$dolt_bin" version >/dev/null 2>&1; then
+  dolt_bin="$root/plugins/development-system/bin/dolt"
+fi
+if ! "$dolt_bin" version >/dev/null || ! "$bd_bin" version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
+  printf 'development_system.tool_install_failed tools=bd,dolt\n' >&2
   exit 2
 fi
-printf 'development_system.pi_bootstrap_ready pi_compatibility=%s target=%s beads=%s\n' \
+printf 'development_system.pi_bootstrap_ready pi_compatibility=%s target=%s beads=%s dolt=%s\n' \
   "$(jq -r .piCompatibility "$root/plugins/development-system/package.json")" \
-  "$discipline_target" "$(bd version | awk '{print $3}')"
+  "$discipline_target" "$("$bd_bin" version | awk '{print $3}')" \
+  "$("$dolt_bin" version | awk '{print $3}')"

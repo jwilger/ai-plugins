@@ -1,6 +1,6 @@
 {
   "name": "@jwilger/development-system-pi",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "private": true,
   "description": "A disciplined development workflow for Pi, Claude Code, and Codex.",
   "repository": {
@@ -50,6 +50,8 @@
     "components/development-discipline/release-binaries.sha256"
   ],
   "bin": {
+    "bd": "./bin/bd",
+    "dolt": "./bin/dolt",
     "development-system": "./bin/development-system",
     "development-system-pi": "./bin/development-system-pi",
     "development-discipline-mcp": "./bin/development-discipline-mcp"

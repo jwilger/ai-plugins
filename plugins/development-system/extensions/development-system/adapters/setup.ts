@@ -162,7 +162,8 @@ function deliveryWorkflow(mode: string): string {
 function migrateLegacyTiberPolicy(source: string): string {
   if (!/^schema_version\s*=\s*1\s*$/m.test(source)) return source;
   if (!/^tiber\s*=\s*(?:true|false)\s*$/m.test(source)) return source;
-  const delivery = source.match(/^mode\s*=\s*"([^"]+)"\s*$/m)?.[1] ?? "direct-to-trunk";
+  const delivery =
+    source.match(/^mode\s*=\s*"([^"]+)"\s*$/m)?.[1] ?? "direct-to-trunk";
   const lines = source.split("\n");
   const output: string[] = [];
   let section = "";
@@ -177,12 +178,7 @@ function migrateLegacyTiberPolicy(source: string): string {
     );
   }
   while (output.at(-1) === "") output.pop();
-  output.push(
-    "",
-    "[beads]",
-    `workflow = "${deliveryWorkflow(delivery)}"`,
-    "",
-  );
+  output.push("", "[beads]", `workflow = "${deliveryWorkflow(delivery)}"`, "");
   return output.join("\n");
 }
 
@@ -291,48 +287,98 @@ export async function createSetupPreview(
   });
 }
 
+async function resolvesVersion(
+  executable: string,
+  arguments_: readonly string[],
+  pattern: RegExp,
+  project: string,
+): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync(executable, [...arguments_], {
+      cwd: project,
+      timeout: 5_000,
+    });
+    return pattern.test(stdout);
+  } catch {
+    return false;
+  }
+}
+
+async function setupTool(
+  packageRoot: string,
+  project: string,
+  tool: "bd" | "dolt",
+): Promise<string> {
+  const arguments_ = ["version"];
+  const pattern =
+    tool === "bd" ? /^bd version ([1-9][0-9]*)\./ : /^dolt version /;
+  if (await resolvesVersion(tool, arguments_, pattern, project)) return tool;
+  const launcher = path.join(packageRoot, "bin", tool);
+  if (await resolvesVersion(launcher, arguments_, pattern, project))
+    return launcher;
+  throw new Error(`development_system.${tool}_install_failed`);
+}
+
 async function ensureBeadsWorkspace(
   packageRoot: string,
   project: string,
 ): Promise<Readonly<{ created: boolean; addedFormulas: readonly string[] }>> {
-  const { stdout: version } = await execFileAsync("bd", ["version"], {
-    cwd: project,
-    timeout: 5_000,
-  });
-  if (!/^bd version ([1-9][0-9]*)\./.test(version))
-    throw new Error("development_system.beads_version_unsupported minimum=1.0.0");
+  const [bd, dolt] = await Promise.all([
+    setupTool(packageRoot, project, "bd"),
+    setupTool(packageRoot, project, "dolt"),
+  ]);
+  const toolEnvironment = {
+    ...process.env,
+    PATH: `${path.dirname(dolt)}${path.delimiter}${process.env.PATH ?? ""}`,
+  };
   let created = false;
-  const { stdout: initialHeadOutput } = await execFileAsync(
-    "git",
-    ["-C", project, "rev-parse", "HEAD"],
-  );
+  const { stdout: initialHeadOutput } = await execFileAsync("git", [
+    "-C",
+    project,
+    "rev-parse",
+    "HEAD",
+  ]);
   const initialHead = initialHeadOutput.trim();
   try {
     const stat = await lstat(path.join(project, ".beads"));
     if (!stat.isDirectory())
       throw new Error("development_system.beads_workspace_invalid");
-    await execFileAsync("bd", ["where"], { cwd: project, timeout: 5_000 });
+    await execFileAsync(bd, ["where"], {
+      cwd: project,
+      env: toolEnvironment,
+      timeout: 5_000,
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     await execFileAsync(
-      "bd",
+      bd,
       ["init", "--quiet", "--non-interactive", "--skip-agents", "--skip-hooks"],
-      { cwd: project, timeout: 30_000 },
+      { cwd: project, env: toolEnvironment, timeout: 30_000 },
     );
     created = true;
-    const { stdout: initializedHeadOutput } = await execFileAsync(
-      "git",
-      ["-C", project, "rev-parse", "HEAD"],
-    );
+    const { stdout: initializedHeadOutput } = await execFileAsync("git", [
+      "-C",
+      project,
+      "rev-parse",
+      "HEAD",
+    ]);
     const initializedHead = initializedHeadOutput.trim();
     if (initializedHead !== initialHead) {
-      const { stdout: parentOutput } = await execFileAsync(
-        "git",
-        ["-C", project, "rev-parse", `${initializedHead}^`],
-      );
+      const { stdout: parentOutput } = await execFileAsync("git", [
+        "-C",
+        project,
+        "rev-parse",
+        `${initializedHead}^`,
+      ]);
       if (parentOutput.trim() !== initialHead)
         throw new Error("development_system.beads_init_history_unexpected");
-      await execFileAsync("git", ["-C", project, "reset", "--soft", initialHead]);
+      await execFileAsync("git", [
+        "-C",
+        project,
+        "reset",
+        "--soft",
+        initialHead,
+      ]);
     }
   }
   const sourceDirectory = path.join(packageRoot, "formulas");
@@ -350,18 +396,24 @@ async function ensureBeadsWorkspace(
         readFile(target),
       ]);
       if (!expected.equals(current))
-        throw new Error(`development_system.beads_formula_conflict path=${target}`);
+        throw new Error(
+          `development_system.beads_formula_conflict path=${target}`,
+        );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       await copyFile(source, target, constants.COPYFILE_EXCL);
       addedFormulas.push(target);
     }
   }
-  await execFileAsync("bd", ["config", "set", "dolt.auto-commit", "on"], {
+  await execFileAsync(bd, ["config", "set", "dolt.auto-commit", "on"], {
     cwd: project,
+    env: toolEnvironment,
     timeout: 10_000,
   });
-  return Object.freeze({ created, addedFormulas: Object.freeze(addedFormulas) });
+  return Object.freeze({
+    created,
+    addedFormulas: Object.freeze(addedFormulas),
+  });
 }
 
 export async function applySetupPreview(
@@ -400,15 +452,13 @@ export async function applySetupPreview(
     throw new Error("development_system.setup_confirmation_stale");
   const configPath = path.join(approved.project, ".development-system.toml");
   const original = state.configSource;
-  let beadsSetup: Awaited<ReturnType<typeof ensureBeadsWorkspace>> | null = null;
+  let beadsSetup: Awaited<ReturnType<typeof ensureBeadsWorkspace>> | null =
+    null;
   await atomicWrite(configPath, approved.proposedConfig);
   try {
     const policy = parseProjectPolicy(approved.proposedConfig);
     if (policy.features.beads)
-      beadsSetup = await ensureBeadsWorkspace(
-        packageRoot,
-        approved.project,
-      );
+      beadsSetup = await ensureBeadsWorkspace(packageRoot, approved.project);
     await execFileAsync("git", [
       "-C",
       approved.project,
@@ -458,9 +508,10 @@ export async function applySetupPreview(
       } catch {
         await rm(path.join(approved.project, ".gitignore"), { force: true });
       }
-    }
-    else if (beadsSetup)
-      await Promise.all(beadsSetup.addedFormulas.map((file) => rm(file, { force: true })));
+    } else if (beadsSetup)
+      await Promise.all(
+        beadsSetup.addedFormulas.map((file) => rm(file, { force: true })),
+      );
     throw new Error("development_system.setup_commit_failed");
   }
   const { stdout: head } = await execFileAsync("git", [

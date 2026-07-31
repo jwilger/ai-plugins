@@ -7,6 +7,20 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "..");
+const packageBin = path.join(PACKAGE_ROOT, "bin");
+const systemBdVersion = spawnSync("bd", ["version"], { encoding: "utf8" });
+const bdExecutable =
+  systemBdVersion.status === 0 &&
+  /^bd version ([1-9][0-9]*)\./.test(systemBdVersion.stdout)
+    ? "bd"
+    : path.join(packageBin, "bd");
+const bdEnvironment =
+  bdExecutable === "bd"
+    ? process.env
+    : {
+        ...process.env,
+        PATH: `${packageBin}${path.delimiter}${process.env.PATH ?? ""}`,
+      };
 
 function scalar(value) {
   const trimmed = value.trim();
@@ -55,17 +69,21 @@ export function parseTiberTask(file, source) {
   const match = file.match(
     /^(backlog|in-progress|done|abandoned)\/([^/]+)\.md$/,
   );
-  if (!match) throw new Error(`development_system.tiber_task_path_invalid path=${file}`);
+  if (!match)
+    throw new Error(`development_system.tiber_task_path_invalid path=${file}`);
   const frontmatter = source.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
   if (!frontmatter)
-    throw new Error(`development_system.tiber_frontmatter_missing path=${file}`);
+    throw new Error(
+      `development_system.tiber_frontmatter_missing path=${file}`,
+    );
   const fields = new Map();
   for (const line of frontmatter[1].split("\n")) {
     const assignment = line.match(/^([a-z_]+):\s?(.*)$/);
     if (assignment) fields.set(assignment[1], assignment[2]);
   }
   const title = scalar(fields.get("title") ?? "");
-  if (!title) throw new Error(`development_system.tiber_title_missing path=${file}`);
+  if (!title)
+    throw new Error(`development_system.tiber_title_missing path=${file}`);
   return Object.freeze({
     id: match[2],
     status: match[1],
@@ -106,9 +124,11 @@ function issueStatus(status) {
 }
 
 function issueType(tags) {
-  return ["bug", "feature", "epic", "chore", "task"].find((type) =>
-    tags.includes(type),
-  ) ?? "task";
+  return (
+    ["bug", "feature", "epic", "chore", "task"].find((type) =>
+      tags.includes(type),
+    ) ?? "task"
+  );
 }
 
 function issueDescription(task) {
@@ -151,11 +171,15 @@ export function convertTiberBoard({ prefix, orderedOpenIds, tasks }) {
 
   return tasks.map((task) => {
     const id = issueId(prefix, task.id);
-    const labels = [...new Set([
-      ...task.tags,
-      "migrated-from-tiber",
-      task.status === "abandoned" ? "legacy-tiber:abandoned" : null,
-    ].filter(Boolean))];
+    const labels = [
+      ...new Set(
+        [
+          ...task.tags,
+          "migrated-from-tiber",
+          task.status === "abandoned" ? "legacy-tiber:abandoned" : null,
+        ].filter(Boolean),
+      ),
+    ];
     const metadata = {
       legacy_tiber: {
         id: task.id,
@@ -186,9 +210,13 @@ export function convertTiberBoard({ prefix, orderedOpenIds, tasks }) {
 }
 
 export function migrateTiberPolicy(source) {
-  if (!/^schema_version\s*=\s*1\s*$/m.test(source) || !/^tiber\s*=\s*(true|false)\s*$/m.test(source))
+  if (
+    !/^schema_version\s*=\s*1\s*$/m.test(source) ||
+    !/^tiber\s*=\s*(true|false)\s*$/m.test(source)
+  )
     return source;
-  const delivery = source.match(/^mode\s*=\s*"([^"]+)"\s*$/m)?.[1] ?? "direct-to-trunk";
+  const delivery =
+    source.match(/^mode\s*=\s*"([^"]+)"\s*$/m)?.[1] ?? "direct-to-trunk";
   const workflow =
     delivery === "pull-request"
       ? "development-change-pr"
@@ -217,12 +245,16 @@ function installFormulas(project) {
   const targetDirectory = path.join(project, ".beads", "formulas");
   fs.mkdirSync(targetDirectory, { recursive: true });
   const added = [];
-  for (const name of fs.readdirSync(sourceDirectory).filter((entry) => entry.endsWith(".formula.toml"))) {
+  for (const name of fs
+    .readdirSync(sourceDirectory)
+    .filter((entry) => entry.endsWith(".formula.toml"))) {
     const source = path.join(sourceDirectory, name);
     const target = path.join(targetDirectory, name);
     if (fs.existsSync(target)) {
       if (!fs.readFileSync(source).equals(fs.readFileSync(target)))
-        throw new Error(`development_system.beads_formula_conflict path=${target}`);
+        throw new Error(
+          `development_system.beads_formula_conflict path=${target}`,
+        );
       continue;
     }
     fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL);
@@ -242,7 +274,9 @@ function git(project, args, options = {}) {
 function loadBoard(project) {
   const files = git(project, ["ls-tree", "-r", "--name-only", "tasks"])
     .split("\n")
-    .filter((file) => /^(backlog|in-progress|done|abandoned)\/.+\.md$/.test(file));
+    .filter((file) =>
+      /^(backlog|in-progress|done|abandoned)\/.+\.md$/.test(file),
+    );
   const tasks = files.map((file) =>
     parseTiberTask(file, git(project, ["show", `tasks:${file}`])),
   );
@@ -272,14 +306,19 @@ function options(argv) {
     if (["--project", "--prefix", "--output"].includes(token)) {
       const value = argv[index + 1];
       if (!value || value.startsWith("--"))
-        throw new Error(`development_system.migration_option_missing option=${token}`);
+        throw new Error(
+          `development_system.migration_option_missing option=${token}`,
+        );
       result[token.slice(2)] = value;
       index += 1;
     } else if (token === "--dry-run") result.mode = "dry-run";
     else if (token === "--apply") result.mode = "apply";
     else if (token === "--yes") result.confirmed = true;
     else if (token === "--push") result.push = true;
-    else throw new Error(`development_system.migration_option_unknown option=${token}`);
+    else
+      throw new Error(
+        `development_system.migration_option_unknown option=${token}`,
+      );
   }
   if (result.mode === "apply" && !result.confirmed)
     throw new Error("development_system.migration_requires_confirmation");
@@ -287,12 +326,16 @@ function options(argv) {
 }
 
 function runBd(project, args, { input } = {}) {
-  const result = spawnSync("bd", args, {
+  const result = spawnSync(bdExecutable, args, {
     cwd: project,
     encoding: "utf8",
     input,
     maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, BD_JSON_ENVELOPE: "1", BD_NON_INTERACTIVE: "1" },
+    env: {
+      ...bdEnvironment,
+      BD_JSON_ENVELOPE: "1",
+      BD_NON_INTERACTIVE: "1",
+    },
   });
   if (result.status !== 0)
     throw new Error(
@@ -304,7 +347,9 @@ function runBd(project, args, { input } = {}) {
 function main(argv) {
   const selected = options(argv);
   const project = fs.realpathSync(selected.project);
-  const gitDir = fs.realpathSync(git(project, ["rev-parse", "--path-format=absolute", "--git-dir"]));
+  const gitDir = fs.realpathSync(
+    git(project, ["rev-parse", "--path-format=absolute", "--git-dir"]),
+  );
   const commonDir = fs.realpathSync(
     git(project, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
   );
@@ -320,7 +365,11 @@ function main(argv) {
     .slice(0, 20)
     .replace(/-+$/g, "");
   const prefix = selected.prefix ?? (inferredPrefix || "beads");
-  const trackedStatus = git(project, ["status", "--porcelain=v1", "--untracked-files=no"]);
+  const trackedStatus = git(project, [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=no",
+  ]);
   if (selected.mode === "apply" && trackedStatus)
     throw new Error("development_system.migration_tracked_changes_present");
   const board = loadBoard(project);
@@ -329,9 +378,11 @@ function main(argv) {
   const configSource = fs.existsSync(configPath)
     ? fs.readFileSync(configPath, "utf8")
     : null;
-  const migratedConfig = configSource === null ? null : migrateTiberPolicy(configSource);
+  const migratedConfig =
+    configSource === null ? null : migrateTiberPolicy(configSource);
   const jsonl = `${issues.map((issue) => JSON.stringify(issue)).join("\n")}\n`;
-  if (selected.output) fs.writeFileSync(selected.output, jsonl, { flag: "wx", mode: 0o600 });
+  if (selected.output)
+    fs.writeFileSync(selected.output, jsonl, { flag: "wx", mode: 0o600 });
 
   if (selected.mode === "dry-run") {
     process.stdout.write(
@@ -367,9 +418,19 @@ function main(argv) {
     const inputFile = path.join(temporary, "issues.jsonl");
     try {
       fs.writeFileSync(inputFile, jsonl, { mode: 0o600 });
-      const preview = runBd(project, ["import", inputFile, "--dry-run", "--json"]);
+      const preview = runBd(project, [
+        "import",
+        inputFile,
+        "--dry-run",
+        "--json",
+      ]);
       const imported = runBd(project, ["import", inputFile, "--json"]);
-      runBd(project, ["dolt", "commit", "-m", "Migrate legacy Tiber task history"]);
+      runBd(project, [
+        "dolt",
+        "commit",
+        "-m",
+        "Migrate legacy Tiber task history",
+      ]);
       git(project, [
         "add",
         "-f",
@@ -416,11 +477,16 @@ function main(argv) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   try {
     main(process.argv.slice(2));
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `${error instanceof Error ? error.message : String(error)}\n`,
+    );
     process.exitCode = 2;
   }
 }

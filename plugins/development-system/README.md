@@ -43,8 +43,9 @@ PI_OFFLINE=1 pi install ./plugins/development-system
 
 The bootstrap restores pinned eval-tooling dependencies inside the repository,
 validates package metadata and the explicit Pi resource inventory, verifies the
-bundled final-review coordinator, and requires the pinned Beads CLI with its Dolt
-backend. Pi's local-path installation
+bundled final-review coordinator, and uses compatible Beads and Dolt tools from
+the Nix shell or provisions the package-pinned releases when they are absent.
+Pi's local-path installation
 references this package directory; it does not copy it. Pulling a package update
 therefore makes it available to the next Pi process, or to `/reload` when the
 resource is reload-safe.
@@ -181,9 +182,15 @@ remain blocked.
 
 `.development-system.toml` remains authoritative. The default preset is
 direct-to-trunk delivery with linked worktrees and Beads backed by Dolt.
-Setup initializes Beads without competing Git or harness hooks, installs the
+Setup prefers compatible Beads and Dolt executables already on `PATH`. When
+either tool is unavailable or unsupported, the package launchers download the
+pinned release for Linux or macOS on x86_64 or arm64, verify its SHA-256 digest,
+and atomically install it under
+`${XDG_CACHE_HOME:-$HOME/.cache}/development-system/tools/`. Setup then
+initializes Beads without competing Git or harness hooks, installs the
 repository-owned formulas under `.beads/formulas/`, and selects the delivery
-formula in `[beads].workflow`. Optional features are `agentic-systems` and
+formula in `[beads].workflow`. Unsupported host targets fail before tool-cache
+or project mutation. Optional features are `agentic-systems` and
 `eval-case-reporting`.
 
 Schema-version 2 replaces Tiber policy with Beads policy. Legacy projects use

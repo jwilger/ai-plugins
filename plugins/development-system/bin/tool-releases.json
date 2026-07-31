@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "tools": {
+    "bd": {
+      "version": "1.1.2",
+      "releases": {
+        "x86_64-linux": {
+          "url": "https://github.com/gastownhall/beads/releases/download/v1.1.2/beads_1.1.2_linux_amd64.tar.gz",
+          "sha256": "a72d71ed374955dc9f83a0f90b54bd7b6a0016709dd1676ae2e368651ed401c2",
+          "binaryPath": "bd"
+        },
+        "aarch64-linux": {
+          "url": "https://github.com/gastownhall/beads/releases/download/v1.1.2/beads_1.1.2_linux_arm64.tar.gz",
+          "sha256": "a134015faf4be0a43f8681a8d602eaf0b7c255c957f09d3c933257c8c92fdd10",
+          "binaryPath": "bd"
+        },
+        "x86_64-darwin": {
+          "url": "https://github.com/gastownhall/beads/releases/download/v1.1.2/beads_1.1.2_darwin_amd64.tar.gz",
+          "sha256": "0e94de9319c9d66cb7e0038bb17ebaf5dd2fe669e366a4b9153528b474a1a8f6",
+          "binaryPath": "bd"
+        },
+        "aarch64-darwin": {
+          "url": "https://github.com/gastownhall/beads/releases/download/v1.1.2/beads_1.1.2_darwin_arm64.tar.gz",
+          "sha256": "9b0137a83a2afd343e2abd2a506be72ea032721000f76669c2cf81729e78501d",
+          "binaryPath": "bd"
+        }
+      }
+    },
+    "dolt": {
+      "version": "2.2.3",
+      "releases": {
+        "x86_64-linux": {
+          "url": "https://github.com/dolthub/dolt/releases/download/v2.2.3/dolt-linux-amd64.tar.gz",
+          "sha256": "ffafa7cc172cada5f77ca3fb96306545ddac44a111625f75f870306c7f197301",
+          "binaryPath": "dolt-linux-amd64/bin/dolt"
+        },
+        "aarch64-linux": {
+          "url": "https://github.com/dolthub/dolt/releases/download/v2.2.3/dolt-linux-arm64.tar.gz",
+          "sha256": "5e8f4dbe61931c36f8359022ee32337e5daf65aba06a29791a066e50677c8b3a",
+          "binaryPath": "dolt-linux-arm64/bin/dolt"
+        },
+        "x86_64-darwin": {
+          "url": "https://github.com/dolthub/dolt/releases/download/v2.2.3/dolt-darwin-amd64.tar.gz",
+          "sha256": "1a27ae15542202020e7e5a8a8373e0945543a9019dfa2156d13573a2801b4081",
+          "binaryPath": "dolt-darwin-amd64/bin/dolt"
+        },
+        "aarch64-darwin": {
+          "url": "https://github.com/dolthub/dolt/releases/download/v2.2.3/dolt-darwin-arm64.tar.gz",
+          "sha256": "8adad74935061f1353907843e4c1a926f88ef96dc9d233824a36cd292cb7aa3f",
+          "binaryPath": "dolt-darwin-arm64/bin/dolt"
+        }
+      }
+    }
+  }
+}

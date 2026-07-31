@@ -13,8 +13,8 @@
           },
           {
             "type": "command",
-            "command": "bd codex-hook SessionStart",
-            "timeout": 15,
+            "command": "\"${PLUGIN_ROOT}/bin/bd\" codex-hook SessionStart",
+            "timeout": 60,
             "statusMessage": "Loading Beads context"
           }
         ]
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bd codex-hook PreCompact",
+            "command": "\"${PLUGIN_ROOT}/bin/bd\" codex-hook PreCompact",
             "timeout": 15,
             "statusMessage": "Checking Beads context"
           }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bd codex-hook PostCompact",
+            "command": "\"${PLUGIN_ROOT}/bin/bd\" codex-hook PostCompact",
             "timeout": 15,
             "statusMessage": "Scheduling Beads context refresh"
           }
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bd codex-hook UserPromptSubmit",
+            "command": "\"${PLUGIN_ROOT}/bin/bd\" codex-hook UserPromptSubmit",
             "timeout": 15,
             "statusMessage": "Refreshing Beads context"
           }

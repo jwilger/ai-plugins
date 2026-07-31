@@ -39,7 +39,14 @@ for (const formula of fs
   .readdirSync(path.join(packageRoot, "formulas"))
   .filter((name) => name.endsWith(".formula.toml")))
   required.add(`formulas/${formula}`);
-required.add("bin/migrate-tiber-to-beads.mjs");
+for (const toolFile of [
+  "bin/bd",
+  "bin/dolt",
+  "bin/install-development-tool.mjs",
+  "bin/tool-releases.json",
+  "bin/migrate-tiber-to-beads.mjs",
+])
+  required.add(toolFile);
 for (const component of ["development-discipline"]) {
   const release = JSON.parse(
     fs.readFileSync(
@@ -66,7 +73,8 @@ for (const [file, metadata] of files) {
   )
     throw new Error(`development_system.npm_forbidden_file path=${file}`);
   if (
-    (file.startsWith("bin/") || file.includes("/dist/")) &&
+    ((file.startsWith("bin/") && !file.endsWith(".json")) ||
+      file.includes("/dist/")) &&
     (metadata.mode & 0o111) === 0
   )
     throw new Error(

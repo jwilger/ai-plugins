@@ -26,9 +26,14 @@ enabled. Select features with repeatable options:
 --disable worktrees|beads|agentic-systems|eval-case-reporting
 ```
 
-When Beads is enabled, require `bd >= 1.0.0`, initialize its embedded Dolt
-backend without installing competing Git or harness hooks, set Dolt auto-commit,
-and install the development-system workflow formulas under `.beads/formulas/`.
+When Beads is enabled, setup prefers compatible `bd >= 1.0.0` and `dolt`
+executables already on `PATH`. If either is unavailable or unsupported, it
+automatically downloads the package-pinned release for Linux or macOS on
+x86_64 or arm64, verifies its SHA-256 digest, and atomically installs it under
+the user's development-system cache. Setup then initializes the Dolt backend
+without installing competing Git or harness hooks, sets Dolt auto-commit, and
+installs the development-system workflow formulas under `.beads/formulas/`.
+Unsupported host platforms fail without writing the tool cache or project.
 The delivery mode selects `development-change-direct`,
 `development-change-pr`, or `development-change-local` in project policy.
 

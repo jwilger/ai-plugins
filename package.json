@@ -1,6 +1,6 @@
 {
   "name": "ai-plugins",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "private": true,
   "description": "Git-installable Pi facade for the development-system multi-harness marketplace.",
   "repository": {
@@ -22,6 +22,11 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
+  },
+  "bin": {
+    "bd": "./plugins/development-system/bin/bd",
+    "dolt": "./plugins/development-system/bin/dolt",
+    "development-system": "./plugins/development-system/bin/development-system"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {

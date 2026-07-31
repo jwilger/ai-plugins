@@ -104,7 +104,7 @@ setup_command() {
   printf 'delivery %s\n' "$delivery"
   printf 'features worktrees=%s beads=%s agentic_systems=%s eval_case_reporting=%s\n' \
     "$feature_worktrees" "$feature_beads" "$feature_agentic_systems" "$feature_eval_case_reporting"
-  printf 'initialize Beads with the embedded Dolt backend and install development workflow formulas\n'
+  printf 'install verified pinned Beads and Dolt tools, initialize the Dolt backend, and install development workflow formulas\n'
   printf 'write .development-system.toml\n'
   if [[ "$mode" == "dry-run" ]]; then
     return
@@ -127,16 +127,25 @@ setup_command() {
   fi
   trap 'rm -f -- "${config_tmp:-}"; if [[ "${created_beads:-false}" == "true" ]]; then git -C "$project" reset -q HEAD -- .beads .gitignore 2>/dev/null || true; rm -rf -- "$project/.beads"; if git -C "$project" cat-file -e HEAD:.gitignore 2>/dev/null; then git -C "$project" checkout -q -- .gitignore; else rm -f -- "$project/.gitignore"; fi; elif ((${#added_beads_formulas[@]} > 0)); then rm -f -- "${added_beads_formulas[@]}"; fi' EXIT
   if [[ "$feature_beads" == "true" ]]; then
-    if ! command -v bd >/dev/null 2>&1; then
-      die "development_system.beads_unavailable minimum=1.0.0 install=https://beads.gascity.com/getting-started/installation"
+    local bd_bin dolt_bin
+    bd_bin="$(command -v bd 2>/dev/null || true)"
+    if [[ -z "$bd_bin" ]] || ! "$bd_bin" version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
+      bd_bin="$PACKAGE_ROOT/bin/bd"
     fi
-    if ! bd version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
-      die "development_system.beads_version_unsupported minimum=1.0.0"
+    dolt_bin="$(command -v dolt 2>/dev/null || true)"
+    if [[ -z "$dolt_bin" ]] || ! "$dolt_bin" version >/dev/null 2>&1; then
+      dolt_bin="$PACKAGE_ROOT/bin/dolt"
+    fi
+    if ! "$dolt_bin" version >/dev/null; then
+      die "development_system.dolt_install_failed"
+    fi
+    if ! "$bd_bin" version | grep -Eq '^bd version ([1-9][0-9]*)\.'; then
+      die "development_system.beads_install_failed minimum=1.0.0"
     fi
     if [[ ! -d "$project/.beads" ]]; then
       (
         cd "$project"
-        bd init --quiet --non-interactive --skip-agents --skip-hooks
+        PATH="$(dirname "$dolt_bin"):$PATH" "$bd_bin" init --quiet --non-interactive --skip-agents --skip-hooks
       ) || die "development_system.beads_init_failed project=$project"
       created_beads=true
       local initialized_head
@@ -151,7 +160,7 @@ setup_command() {
     else
       (
         cd "$project"
-        bd where >/dev/null
+        PATH="$(dirname "$dolt_bin"):$PATH" "$bd_bin" where >/dev/null
       ) || die "development_system.beads_workspace_invalid project=$project"
     fi
     mkdir -p "$project/.beads/formulas"
@@ -170,7 +179,7 @@ setup_command() {
     done
     (
       cd "$project"
-      bd config set dolt.auto-commit on >/dev/null
+      PATH="$(dirname "$dolt_bin"):$PATH" "$bd_bin" config set dolt.auto-commit on >/dev/null
     ) || die "development_system.beads_config_failed project=$project"
   fi
   config_tmp="$(mktemp "$project/.development-system.toml.tmp.XXXXXX")" ||

@@ -11,8 +11,8 @@
           },
           {
             "type": "command",
-            "command": "bd prime --hook-json",
-            "timeout": 15
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/bd\" prime --hook-json",
+            "timeout": 60
           }
         ]
       }
