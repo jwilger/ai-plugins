@@ -114,3 +114,27 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'"source_system": "tiber"'* ]]
 }
+
+@test "migration rolls back source and Dolt initialization when its source commit fails" {
+  before_head="$(git -C "$PROJECT" rev-parse HEAD)"
+  real_git="$(command -v git)"
+  mkdir -p "$PROJECT/test-bin"
+  cat >"$PROJECT/test-bin/git" <<'SH'
+#!/bin/sh
+case "$*" in
+  *"chore: migrate task workflows to Beads"*) exit 87 ;;
+esac
+exec "$REAL_GIT" "$@"
+SH
+  chmod +x "$PROJECT/test-bin/git"
+
+  run env REAL_GIT="$real_git" PATH="$PROJECT/test-bin:$PATH" \
+    "$ROOT/plugins/development-system/bin/development-system" \
+    migrate-tiber-to-beads --project "$PROJECT" --prefix ai --apply --yes
+
+  [ "$status" -ne 0 ]
+  [ "$(git -C "$PROJECT" rev-parse HEAD)" = "$before_head" ]
+  [ ! -e "$PROJECT/.beads" ]
+  grep -Fq 'schema_version = 1' "$PROJECT/.development-system.toml"
+  [ -z "$(git -C "$PROJECT" status --porcelain=v1 --untracked-files=no)" ]
+}

@@ -199,7 +199,7 @@ setup_command() {
   if [[ "$feature_beads" == "true" ]]; then
     git -C "$project" add -f -- .beads/.gitignore .beads/README.md .beads/config.yaml .beads/metadata.json .beads/formulas
   fi
-  if ! git -C "$project" commit \
+  if ! git -C "$project" commit --no-verify \
     -m "chore: initialize development system" \
     -m "Record the project workflow and optional integrations in one authoritative configuration."; then
     git -C "$project" reset -q HEAD -- .development-system.toml .beads .gitignore 2>/dev/null || true

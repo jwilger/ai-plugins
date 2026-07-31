@@ -147,12 +147,20 @@ teardown() {
   touch "$TEST_ROOT/project/README.md"
   git -C "$TEST_ROOT/project" add README.md
   git -C "$TEST_ROOT/project" commit -m "test: initialize fixture"
-  mkdir -p "$TEST_ROOT/project/.git/hooks"
-  printf '#!/usr/bin/env bash\nexit 1\n' >"$TEST_ROOT/project/.git/hooks/pre-commit"
-  chmod +x "$TEST_ROOT/project/.git/hooks/pre-commit"
+  real_git="$(command -v git)"
+  mkdir -p "$TEST_ROOT/test-bin"
+  cat >"$TEST_ROOT/test-bin/git" <<'SH'
+#!/bin/sh
+case "$*" in
+  *"chore: initialize development system"*) exit 87 ;;
+esac
+exec "$REAL_GIT" "$@"
+SH
+  chmod +x "$TEST_ROOT/test-bin/git"
   before_head="$(git -C "$TEST_ROOT/project" rev-parse HEAD)"
 
-  run "$REPO_ROOT/plugins/development-system/bin/development-system" \
+  run env REAL_GIT="$real_git" PATH="$TEST_ROOT/test-bin:$PATH" \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
     setup \
     --project "$TEST_ROOT/project" \
     --preset personal-trunk \

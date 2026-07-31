@@ -776,14 +776,29 @@ test("existing setup update rolls back file and index when its commit fails", as
     project,
     "--enable agentic-systems",
   );
-  const hook = path.join(project, ".git", "hooks", "pre-commit");
-  fs.writeFileSync(hook, "#!/usr/bin/env bash\nexit 1\n");
-  fs.chmodSync(hook, 0o755);
-
-  await assert.rejects(
-    () => applySetupPreview(plugin, preview),
-    /setup_commit_failed/,
+  const realGit = execFileSync("sh", ["-c", "command -v git"], {
+    encoding: "utf8",
+  }).trim();
+  const wrapperDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "setup-git-"));
+  const wrapper = path.join(wrapperDirectory, "git");
+  fs.writeFileSync(
+    wrapper,
+    '#!/bin/sh\ncase "$*" in *"chore: update development system"*) exit 87 ;; esac\nexec "$REAL_GIT" "$@"\n',
   );
+  fs.chmodSync(wrapper, 0o755);
+  const originalPath = process.env.PATH;
+  process.env.REAL_GIT = realGit;
+  process.env.PATH = `${wrapperDirectory}:${originalPath}`;
+  try {
+    await assert.rejects(
+      () => applySetupPreview(plugin, preview),
+      /setup_commit_failed/,
+    );
+  } finally {
+    process.env.PATH = originalPath;
+    delete process.env.REAL_GIT;
+    fs.rmSync(wrapperDirectory, { recursive: true, force: true });
+  }
 
   assert.equal(
     fs.readFileSync(path.join(project, ".development-system.toml"), "utf8"),

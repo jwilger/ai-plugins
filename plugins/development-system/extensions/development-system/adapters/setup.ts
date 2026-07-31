@@ -422,6 +422,7 @@ export async function applySetupPreview(
       "-C",
       approved.project,
       "commit",
+      "--no-verify",
       "-m",
       "chore: update development system",
       "-m",

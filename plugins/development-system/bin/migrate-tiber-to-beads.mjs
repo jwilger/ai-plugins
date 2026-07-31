@@ -340,9 +340,11 @@ function main(argv) {
     return;
   }
   const sourceHead = git(project, ["rev-parse", "HEAD"]);
+  const beadsDirectory = path.join(project, ".beads");
+  if (fs.existsSync(beadsDirectory))
+    throw new Error("development_system.migration_beads_workspace_exists");
+  let sourceCommitted = false;
   try {
-    runBd(project, ["where"]);
-  } catch {
     runBd(project, [
       "init",
       "--non-interactive",
@@ -357,31 +359,60 @@ function main(argv) {
         throw new Error("development_system.beads_init_history_unexpected");
       git(project, ["reset", "--soft", sourceHead]);
     }
-  }
-  if (migratedConfig !== null && migratedConfig !== configSource)
-    fs.writeFileSync(configPath, migratedConfig, { mode: 0o600 });
-  installFormulas(project);
-  runBd(project, ["config", "set", "dolt.auto-commit", "on"]);
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "tiber-to-beads-"));
-  const inputFile = path.join(temporary, "issues.jsonl");
-  try {
-    fs.writeFileSync(inputFile, jsonl, { mode: 0o600 });
-    const preview = runBd(project, ["import", inputFile, "--dry-run", "--json"]);
-    const imported = runBd(project, ["import", inputFile, "--json"]);
-    runBd(project, ["dolt", "commit", "-m", "Migrate legacy Tiber task history"]);
-    if (selected.push) runBd(project, ["dolt", "push"]);
-    git(project, ["add", "-f", "--", ...(migratedConfig !== null ? [".development-system.toml"] : []), ".beads/.gitignore", ".beads/README.md", ".beads/config.yaml", ".beads/metadata.json", ".beads/formulas"]);
-    const staged = git(project, ["diff", "--cached", "--name-only"]);
-    let commit = null;
-    if (staged) {
-      git(project, ["commit", "-m", "chore: migrate task workflows to Beads", "-m", "Replace the retired tracker with Dolt-backed Beads state and install the repository workflow formulas."]);
-      commit = git(project, ["rev-parse", "HEAD"]);
+    if (migratedConfig !== null && migratedConfig !== configSource)
+      fs.writeFileSync(configPath, migratedConfig, { mode: 0o600 });
+    installFormulas(project);
+    runBd(project, ["config", "set", "dolt.auto-commit", "on"]);
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "tiber-to-beads-"));
+    const inputFile = path.join(temporary, "issues.jsonl");
+    try {
+      fs.writeFileSync(inputFile, jsonl, { mode: 0o600 });
+      const preview = runBd(project, ["import", inputFile, "--dry-run", "--json"]);
+      const imported = runBd(project, ["import", inputFile, "--json"]);
+      runBd(project, ["dolt", "commit", "-m", "Migrate legacy Tiber task history"]);
+      git(project, [
+        "add",
+        "-f",
+        "--",
+        ...(migratedConfig !== null ? [".development-system.toml"] : []),
+        ".beads/.gitignore",
+        ".beads/README.md",
+        ".beads/config.yaml",
+        ".beads/metadata.json",
+        ".beads/formulas",
+      ]);
+      const staged = git(project, ["diff", "--cached", "--name-only"]);
+      let commit = null;
+      if (staged) {
+        git(project, [
+          "commit",
+          "--no-verify",
+          "-m",
+          "chore: migrate task workflows to Beads",
+          "-m",
+          "Replace the retired tracker with Dolt-backed Beads state and install the repository workflow formulas.",
+        ]);
+        commit = git(project, ["rev-parse", "HEAD"]);
+      }
+      sourceCommitted = true;
+      if (selected.push) runBd(project, ["dolt", "push"]);
+      process.stdout.write(
+        `${JSON.stringify({ mode: "applied", project, prefix, issues: issues.length, preview: JSON.parse(preview), imported: JSON.parse(imported), commit, pushedDolt: selected.push })}\n`,
+      );
+    } finally {
+      fs.rmSync(temporary, { recursive: true, force: true });
     }
-    process.stdout.write(
-      `${JSON.stringify({ mode: "applied", project, prefix, issues: issues.length, preview: JSON.parse(preview), imported: JSON.parse(imported), commit, pushedDolt: selected.push })}\n`,
-    );
-  } finally {
-    fs.rmSync(temporary, { recursive: true, force: true });
+  } catch (error) {
+    if (!sourceCommitted) {
+      try {
+        runBd(project, ["dolt", "stop"]);
+      } catch {}
+      try {
+        git(project, ["reset", "--hard", sourceHead]);
+      } catch {}
+      fs.rmSync(beadsDirectory, { recursive: true, force: true });
+    }
+    throw error;
   }
 }
 
