@@ -20,6 +20,7 @@ export type ManagedToolPolicy = Readonly<{
   installationScope: "user-global";
   requiresSudo: false;
   inheritedPathIncludesDestination: boolean;
+  usesUserGlobal: boolean;
   pathAction: string | null;
   tools: readonly ManagedToolStatus[];
   installed?: readonly string[];
@@ -41,6 +42,7 @@ function parsePolicy(output: string): ManagedToolPolicy {
     policy.installationScope !== "user-global" ||
     policy.requiresSudo !== false ||
     typeof policy.inheritedPathIncludesDestination !== "boolean" ||
+    typeof policy.usesUserGlobal !== "boolean" ||
     !Array.isArray(policy.tools)
   )
     throw new Error("development_system.tool_status_invalid");
@@ -157,10 +159,7 @@ export function managedToolResult(policy: ManagedToolPolicy): string {
     installed.length > 0
       ? `development_system.setup_tools_installed ${versions} destination=${policy.destination}`
       : `development_system.setup_tools_compatible ${versions}`;
-  const usesUserGlobal =
-    installed.length > 0 ||
-    policy.tools.some((tool) => tool.source === "user-global");
-  return !usesUserGlobal ||
+  return !policy.usesUserGlobal ||
     policy.inheritedPathIncludesDestination ||
     !policy.pathAction
     ? outcome

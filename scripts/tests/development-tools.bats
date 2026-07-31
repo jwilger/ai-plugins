@@ -248,6 +248,39 @@ TOML
   [ "$(HOME="$TEST_ROOT/home" "$TEST_ROOT/home/.local/bin/bd" version)" = "bd version 1.1.1" ]
 }
 
+@test "post-replacement failure preserves symlink topology and non-executable targets" {
+  local archive="$TEST_ROOT/releases/bd.tar.gz"
+  write_manifest
+  make_bd_release 1.1.2 "$archive" fail-after-replace
+  local hash
+  hash="$(sha256sum "$archive" | awk '{print $1}')"
+  jq --arg hash "$hash" '.tools.bd.releases["x86_64-linux"].sha256 = $hash' \
+    "$TEST_ROOT/releases.json" >"$TEST_ROOT/failing.json"
+  mv "$TEST_ROOT/failing.json" "$TEST_ROOT/releases.json"
+  mkdir -p "$TEST_ROOT/home/.local/bin" "$TEST_ROOT/previous"
+  printf '#!/bin/sh\nprintf "bd version 1.1.1\\n"\n' >"$TEST_ROOT/previous/bd"
+  chmod +x "$TEST_ROOT/previous/bd"
+  ln -s "$TEST_ROOT/previous/bd" "$TEST_ROOT/home/.local/bin/bd"
+
+  run install_environment "$NODE" \
+    "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
+
+  [ "$status" -eq 2 ]
+  [ -L "$TEST_ROOT/home/.local/bin/bd" ]
+  [ "$(readlink "$TEST_ROOT/home/.local/bin/bd")" = "$TEST_ROOT/previous/bd" ]
+
+  rm "$TEST_ROOT/home/.local/bin/bd"
+  printf 'reserved by user\n' >"$TEST_ROOT/home/.local/bin/bd"
+  chmod 0644 "$TEST_ROOT/home/.local/bin/bd"
+
+  run install_environment "$NODE" \
+    "$REPO_ROOT/plugins/development-system/bin/install-development-tool.mjs" install
+
+  [ "$status" -eq 2 ]
+  [ "$(cat "$TEST_ROOT/home/.local/bin/bd")" = "reserved by user" ]
+  [ ! -x "$TEST_ROOT/home/.local/bin/bd" ]
+}
+
 @test "archive size and download time are bounded" {
   write_manifest
 
@@ -351,6 +384,27 @@ SH
   [ "$status" -eq 0 ]
   [[ "$output" == *"development_system.setup_tools_compatible bd=1.1.2"* ]]
   [ ! -e "$TEST_ROOT/home/.local/bin/bd" ]
+}
+
+@test "initial CLI setup warns when compatible user-global bd is absent from inherited PATH" {
+  write_manifest
+  mkdir -p "$TEST_ROOT/home/.local/bin"
+  tar -xzf "$TEST_ROOT/releases/bd.tar.gz" -C "$TEST_ROOT/home/.local/bin"
+  git -C "$TEST_ROOT" init -q --initial-branch=main cli-project
+  git -C "$TEST_ROOT/cli-project" config user.email test@example.com
+  git -C "$TEST_ROOT/cli-project" config user.name "Test User"
+  touch "$TEST_ROOT/cli-project/README.md"
+  git -C "$TEST_ROOT/cli-project" add README.md
+  git -C "$TEST_ROOT/cli-project" commit -qm "test: initialize fixture"
+
+  run install_environment \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    setup --project "$TEST_ROOT/cli-project" --apply --yes
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"development_system.setup_tools_compatible bd=1.1.2"* ]]
+  [[ "$output" == *"development_system.user_global_bin_not_in_inherited_path"* ]]
+  [[ "$output" == *'export PATH=\"$HOME/.local/bin:$PATH\"'* ]]
 }
 
 @test "outdated ambient bd is updated in the user-global destination" {

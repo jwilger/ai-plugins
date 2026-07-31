@@ -6,6 +6,7 @@ import {
   access,
   chmod,
   copyFile,
+  link,
   lstat,
   mkdir,
   mkdtemp,
@@ -281,6 +282,7 @@ export async function inspectToolPolicy(
     installationScope: "user-global",
     requiresSudo: false,
     inheritedPathIncludesDestination,
+    usesUserGlobal: tools.some((tool) => tool.source === "user-global"),
     pathAction: inheritedPathIncludesDestination
       ? null
       : `Add ${destination} to PATH (for example: export PATH=\"$HOME/.local/bin:$PATH\") and restart the shell.`,
@@ -536,13 +538,16 @@ async function installOne(name, definition, release, environment) {
         "development_system.tool_version_mismatch",
         `tool=${name} expected=${definition.version} actual=${candidateVersion ?? "invalid"}`,
       );
-    if (await executable(target)) {
+    const targetStat = await lstat(target).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (targetStat && !targetStat.isDirectory()) {
       backup = path.join(temporary, `${name}.previous`);
-      await copyFile(target, backup, constants.COPYFILE_EXCL);
-      await chmod(backup, 0o755);
+      await link(target, backup);
     }
-    replacementStarted = true;
     await rename(candidate, target);
+    replacementStarted = true;
     const installedVersion = await observedVersion(
       target,
       definition,
@@ -623,6 +628,13 @@ export async function installUserGlobalTools(
   return Object.freeze({
     ...after,
     inheritedPathIncludesDestination: before.inheritedPathIncludesDestination,
+    usesUserGlobal:
+      installed.length > 0 ||
+      requested.some(
+        (name) =>
+          before.tools.find((tool) => tool.name === name)?.source ===
+          "user-global",
+      ),
     pathAction: before.pathAction,
     installed: Object.freeze(installed),
   });

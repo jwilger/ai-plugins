@@ -255,7 +255,7 @@ if (policy.installed.length > 0) {
 } else {
   console.log(`development_system.setup_tools_compatible ${versions}`);
 }
-if (policy.installed.length > 0 && !policy.inheritedPathIncludesDestination && policy.pathAction) {
+if (policy.usesUserGlobal && !policy.inheritedPathIncludesDestination && policy.pathAction) {
   console.log(`development_system.user_global_bin_not_in_inherited_path action=${JSON.stringify(policy.pathAction)}`);
 }
 NODE

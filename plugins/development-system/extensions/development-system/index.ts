@@ -1346,7 +1346,7 @@ export default function developmentSystemExtension(pi: ExtensionAPI): void {
         } else {
           tools = await reconcileManagedTools(packageRoot, ["beads"]);
           if (
-            tools.tools.some((tool) => tool.source === "user-global") &&
+            tools.usesUserGlobal &&
             !tools.inheritedPathIncludesDestination &&
             tools.pathAction
           )
