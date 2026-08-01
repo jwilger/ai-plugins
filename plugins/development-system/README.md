@@ -170,44 +170,49 @@ those settings.
 
 ## Advisor, content authoring, and capability routing
 
-Advisor provides read-only challenge and planning support for fuzzy tradeoffs,
-scope, specifications, and ticket plans. It also runs proactively before a plan
-with two or more dependent implementation steps is finalized, unless an
-existing executable BDD-style scenario already covers both observable behavior
-and its material failure boundary.
+These are normative routing contracts for agents: they define required and
+forbidden behavior, not proof that every stochastic run will comply. Use
+provider-backed evals and review to establish observed compliance.
 
-Codex selects Advisor's model at dispatch time from authoritative
-harness-advertised eligibility and capability or upgrade metadata. The agent
-file deliberately omits a fixed model identifier, while retaining read-only
-execution and `xhigh` reasoning. If the harness cannot rank eligible models,
-select the highest-capability route explicitly, or launch it, Advisor fails
-visibly instead of guessing or falling back.
+The Advisor contract requires read-only challenge and planning support for fuzzy
+tradeoffs, scope, specifications, and ticket plans. It must run before a plan
+with two or more dependent implementation steps is finalized unless an existing
+executable BDD-style scenario already covers both observable behavior and its
+material failure boundary.
 
-Claude Code uses its moving `opus` alias with the highest supported effort. In
-both harnesses, stronger model selection changes capability only; it grants no
-additional authority.
+Dispatch must use authoritative harness-advertised eligibility and capability
+or upgrade metadata to select the highest-capability eligible model without a
+version-specific model pin. On Codex, it must explicitly request and confirm
+`xhigh` reasoning plus read-only execution. Claude Code uses its moving `opus`
+alias and must explicitly request and confirm its configured highest-supported
+effort (currently `max`) plus read-only execution; Codex's literal effort label
+does not carry across harnesses. Model selection changes capability only and
+grants no additional authority. The contract is fail-closed: if required
+ranking, selection, effort or read-only confirmation, or launch is unavailable,
+report a visible blocked route without guessing or silently falling back.
 
-Substantive human-consumable prose, documentation, instructions, imagery, and
-UI/UX route through the public `content-authoring` skill. It delegates artifact
-creation to the highest-capability eligible writable agent at high effort,
-selected explicitly from authoritative current-harness capability or upgrade
-metadata rather than a pinned model or guesses based on names, list order,
-price, or date. Routine status updates, ticket metadata, commit messages, and
-mechanical summaries are excluded. The author may use an authorized specialized
-image tool when appropriate, but model and tool selection grant no additional
-authority. If the required ranking, selection, high-effort writable launch, or
-specialized tool is unavailable, the route blocks visibly instead of silently
-falling back.
+The `content-authoring` contract requires substantive human-consumable prose,
+documentation, instructions, imagery, and UI/UX to route through its public
+skill. Dispatch must explicitly select the highest-capability eligible writable
+agent from authoritative current-harness metadata and launch it at high effort,
+without inferring capability from names, list order, price, or date. Routine
+status updates, ticket metadata, commit messages, and mechanical summaries stay
+on their normal routes. An authorized specialized image tool may be used, but
+neither model nor tool choice expands authority. If ranking, selection,
+high-effort writable launch, or a required specialized tool is unavailable, the
+contract requires a visible bounded block without drafting or silent fallback.
 
 ## Plan sharpening
 
-`sharpen-plan` improves exactly one load-bearing assumption or plan-level
-specification per pass without pre-deciding implementation details. It asks one
-harness-native question only for a genuine user decision, applies the answer to
-the active plan state, and re-presents the complete plan through the native
-approval flow. Another pass begins only after approval; the skill stops plainly
-at diminishing returns. In read-only Plan Mode it updates conversational plan
-state without writing files, and it never invokes Advisor recursively.
+The `sharpen-plan` contract requires exactly one load-bearing assumption or
+plan-level specification per pass without pre-deciding implementation details.
+For a genuine user decision, it must ask exactly one harness-native question,
+wait for the answer, apply it to active plan state, and re-present the complete
+plan through the native approval flow. It must not begin another pass before
+approval and must stop plainly at diminishing returns. In read-only Plan Mode,
+it may update only conversational plan state; it must not write files or invoke
+Advisor recursively. Missing required question, approval, or read-only
+capability must be surfaced rather than bypassed.
 
 ## Included surfaces
 

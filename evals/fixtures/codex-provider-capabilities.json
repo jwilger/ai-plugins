@@ -1,0 +1,13 @@
+{
+  "openai:codex-sdk": {
+    "0.144.5": {
+      "spawnAgentInputFields": [
+        "task_name",
+        "model",
+        "reasoning_effort",
+        "fork_turns"
+      ],
+      "spawnAgentEvidenceFields": []
+    }
+  }
+}

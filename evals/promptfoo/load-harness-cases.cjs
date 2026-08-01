@@ -59,12 +59,21 @@ module.exports = function generateTests() {
         hard_guard_status:
           (testCase.hardAssertions || []).length > 0 ? "configured" : "none",
         tags: (testCase.tags || []).join(","),
+        codex_spawn_capability: runtime.codexSpawnCapability,
       },
       assert: [
         {
           type: "javascript",
           value: fileUrl("assert-hard-guards.cjs", __dirname),
         },
+        ...(testCase.dispatchEvidence
+          ? [
+              {
+                type: "javascript",
+                value: fileUrl("assert-installed-dispatch.cjs", __dirname),
+              },
+            ]
+          : []),
         {
           type: "llm-rubric",
           value: testCase.semanticRubric,

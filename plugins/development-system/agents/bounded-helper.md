@@ -1,5 +1,5 @@
 ---
-name: model-routing-bounded-helper
+name: bounded-helper
 description: Read-only helper for bounded inventory, extraction, classification, and mechanical transformation tasks with an independently verifiable result.
 model: haiku
 tools: Read,Grep,Glob

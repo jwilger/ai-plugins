@@ -1,4 +1,4 @@
-name = "model-routing-substantive-worker"
+name = "substantive-worker"
 description = "Writable worker for clearly scoped substantive implementation that does not activate a strong-model responsibility."
 model = "gpt-5.6-terra"
 model_reasoning_effort = "medium"

@@ -19,22 +19,52 @@ accountable for decisions and user communication.
 3. Inspect the harness-advertised eligible models and any authoritative
    capability or upgrade metadata. Select the highest-capability eligible model
    explicitly. Never infer capability from a model name, lexical order, list
-   order, price, or release date.
-4. Spawn the custom `advisor` agent with that explicit model selection. Preserve
-   its read-only sandbox and configured reasoning effort.
-5. If authoritative ranking is unavailable, the model cannot be selected
-   explicitly, or launch fails, report the route failure visibly. Do not use an
-   unranked model, a default agent, or silent fallback.
+   order, price, or release date, and do not pin a version-specific model.
+4. Dispatch by harness:
+   - On Claude Code, launch the exact named public `advisor` Agent with the
+     explicit model selection and its configured highest-supported effort
+     (currently `max`).
+   - On Codex, inspect the exposed `spawn_agent` contract before invoking it.
+     Proceed only if it accepts explicit `model` and `reasoning_effort` inputs
+     and exposes a reliable way to confirm their effective values. Otherwise
+     return exactly `Blocked: development-system:advisor cannot verify required Codex spawn_agent evidence fields: <comma-separated missing fields in task_name, model, reasoning_effort, fork_turns order>. No artifact was produced.` immediately: do not invoke
+     `spawn_agent`, wait or poll, or perform or draft the advisory analysis in
+     the parent. When supported, call the generic `spawn_agent` mechanism with
+     `fork_turns: "none"` or the smallest bounded turn count that carries
+     necessary context, the explicitly selected highest-capability model, and
+     `xhigh` reasoning effort. After launch, confirm that exact model and effort
+     before any wait or poll; if confirmation fails, stop without waiting or
+     substituting parent-authored analysis. Supply the full Advisor role
+     instructions and task context in the spawn message. Treat `task_name` only
+     as an operational label, never as a role selector or evidence that the
+     Advisor contract was loaded.
+
+   For either harness, confirm that the effective child sandbox is read-only
+   and that the required harness-specific effort is active before relying on
+   the analysis. Never merely preserve or assume configured effort, and never
+   impose Codex's literal effort label on another harness.
+
+5. If authoritative ranking is unavailable, the model or required
+   harness-specific effort cannot be selected and confirmed explicitly, the
+   read-only boundary cannot be confirmed, or launch fails, report the route
+   failure visibly. Do not use an unranked model, a default agent, a different
+   or unconfirmed effort, or silent fallback.
 6. Pass the user's goal, relevant repository context, known constraints, and the
    exact decision or artifact needed. Do not pass a preferred conclusion.
 7. Wait when the recommendation blocks the plan. Otherwise continue only
-   independent work.
-8. Apply the recommendation with your own judgment. Present the decisions,
-   pushback, risks, scope cuts, and recommended path that affect the user.
+   independent work. Accept the route only after the child completes and its
+   substantive recommendation is visible to the parent. Empty waits, launch or
+   background metadata, pending status, and a parent-authored substitute are
+   not Advisor results.
+8. Apply the completed recommendation with your own judgment. Present the
+   decisions, pushback, risks, scope cuts, and recommended path that affect the
+   user.
 
 Keep the Advisor read-only: allow inspection and targeted current research, but
 forbid edits, commits, installs, service mutations, and other persistent-state
-changes. Model choice grants no additional authority.
+changes. If the parent cannot confirm that the effective child sandbox enforces
+that boundary, block the advisory route visibly. Instructions alone are not a
+read-only sandbox. Model choice grants no additional authority.
 
 ## Advisory work
 

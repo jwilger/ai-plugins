@@ -42,6 +42,28 @@ PY
 
   run grep -F 'allow_implicit_invocation: true' "$metadata"
   [ "$status" -eq 0 ]
+
+  run python3 - "$skill" <<'PY'
+import pathlib
+import sys
+
+text = " ".join(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").split())
+for phrase in (
+    "On Claude Code, launch the exact named public read-only `strong-reviewer`",
+    "inspect the exposed `spawn_agent` contract before invoking it",
+    'generic `spawn_agent` mechanism with `fork_turns: "none"`',
+    "the explicitly selected highest-capability model, and high reasoning effort",
+    "do not invoke `spawn_agent`, wait or poll, ask the sharpening question, or author or revise any plan content in the parent",
+    "Treat `task_name` only as an operational label",
+    "explicit selection, high-effort configuration",
+    "return a visible bounded blocked result",
+    "Do not substitute a weaker or default route, make the judgment in the parent",
+    "Wait for the child to complete",
+    "parent-authored substitute is not a sharpening result",
+):
+    assert phrase in text, phrase
+PY
+  [ "$status" -eq 0 ]
 }
 
 @test "sharpen-plan is public and has an all-five behavior fixture" {
@@ -59,6 +81,42 @@ PY
         "adversarial-safety",
         "baseline-ablation"
       ]
+  ' "$ROOT/evals/fixtures/behavior/development-system/cases.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "sharpen-plan delegated-dispatch fixture requires exact Claude and Codex evidence contracts" {
+  run jq -e '
+    map(select(.case_id == "sharpen-plan-installed-delegated-dispatch"))
+    | length == 1
+      and .[0].plugins == ["development-system"]
+      and .[0].skills == ["sharpen-plan"]
+      and .[0].dispatchEvidence == {
+        "skill": "sharpen-plan",
+        "claude": {
+          "agent": "strong-reviewer"
+        },
+        "codex": {
+          "taskName": "sharpen_plan_author",
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "high",
+          "forkTurns": "none",
+          "allowVisibleBlock": true
+        }
+      }
+      and .[0].coverage.kinds == [
+        "core-behavior",
+        "baseline-ablation"
+      ]
+      and .[0].valueGate == {
+        "mode": "standard",
+        "baselineLiftThreshold": 0.1
+      }
+      and .[0].minPassRate == 1
+      and (.[0].semanticRubric | contains("completed foreground reviewer result"))
+      and (.[0].semanticRubric | contains("empty wait or self-authored revision"))
+      and (.[0].semanticRubric | contains("visible fail-closed response"))
+      and (.[0].semanticRubric | contains("refrain from self-authoring a revised plan"))
   ' "$ROOT/evals/fixtures/behavior/development-system/cases.json"
   [ "$status" -eq 0 ]
 }

@@ -96,7 +96,9 @@ Pass the capability-ranked model explicitly when spawning the role. Advisor's
 own role retains `xhigh` effort. For Claude Code, use the moving `opus` alias
 with `high` effort for normal strong roles; use Advisor's dedicated highest
 supported effort where its role requires it. Treat the alias as a
-harness-maintained capability route, not a version pin.
+harness-maintained capability route, not a version pin. A moving harness family
+alias is permitted and must not be rejected as a static model name; reject a
+concrete version identifier chosen as a permanent strongest-model pin.
 
 Keep read-only roles read-only and writable roles writable only within their
 existing authorization boundary. Model or effort selection grants no additional

@@ -14,11 +14,22 @@ copy_plugin() {
   cp -R "$ROOT/plugins/development-system" "$TMPROOT/development-system"
 }
 
-@test "Advisor is public, capability-selected, read-only, and xhigh" {
+@test "Advisor is public and uses each harness's strongest supported effort" {
   run "$CHECK"
 
   [ "$status" -eq 0 ]
   [ "$output" = "advisor-agent-config: ok" ]
+}
+
+@test "Advisor check rejects reduced Claude effort" {
+  copy_plugin
+  sed -i 's/effort: max/effort: high/' \
+    "$TMPROOT/development-system/agents/advisor.md"
+
+  run "$CHECK" "$TMPROOT/development-system"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"claude-advisor-must-use-highest-supported-effort"* ]]
 }
 
 @test "Advisor check rejects a fixed Codex model" {

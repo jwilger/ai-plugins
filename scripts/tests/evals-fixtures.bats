@@ -35,6 +35,1031 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "loader emits installed-dispatch assertions only for declared cases" {
+  run node - <<'NODE'
+const { loadBehaviorCases } = require('./evals/promptfoo/fixtures.cjs');
+const generateTests = require('./evals/promptfoo/load-harness-cases.cjs');
+
+const expected = loadBehaviorCases()
+  .filter((testCase) => testCase.dispatchEvidence)
+  .map((testCase) => testCase.case_id)
+  .sort();
+const actual = generateTests()
+  .filter((testCase) =>
+    testCase.assert?.some(
+      (assertion) =>
+        assertion.type === 'javascript' &&
+        String(assertion.value).includes('assert-installed-dispatch.cjs'),
+    ),
+  )
+  .map((testCase) => testCase.vars.case_id)
+  .sort();
+
+if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+  throw new Error(
+    `installed-dispatch assertion mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+  );
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
+@test "installed-dispatch assertion accepts successful Claude and Codex provider evidence" {
+  run node - <<'NODE'
+const assertInstalledDispatch = require('./evals/promptfoo/assert-installed-dispatch.cjs');
+
+function assertPass(label, result) {
+  if (result.pass !== true || result.score !== 1) {
+    throw new Error(`${label} should pass: ${result.reason}`);
+  }
+}
+
+function assertFail(label, result) {
+  if (result.pass !== false || result.score !== 0) {
+    throw new Error(`${label} should fail`);
+  }
+}
+
+function claudeContext(caseId, toolCalls) {
+  return {
+    vars: { case_id: caseId },
+    provider: { id: () => 'anthropic:claude-agent-sdk' },
+    providerResponse: { metadata: { toolCalls } },
+  };
+}
+
+function codexContext(caseId, items) {
+  return {
+    vars: {
+      case_id: caseId,
+      codex_spawn_capability: {
+        provider: 'openai:codex-sdk',
+        source: 'versioned-provider-contract',
+        version: '0.144.5',
+        verifiedVersion: '0.144.5',
+        spawnAgentInputFields: [
+          'task_name',
+          'model',
+          'reasoning_effort',
+          'fork_turns',
+        ],
+        spawnAgentEvidenceFields: [],
+      },
+    },
+    provider: { id: () => 'openai:codex-sdk' },
+    providerResponse: { raw: JSON.stringify({ items }) },
+  };
+}
+
+assertPass(
+  'Claude Skill and Agent evidence',
+  assertInstalledDispatch(
+    'The prose is irrelevant.',
+    claudeContext('advisor-installed-delegated-dispatch', [
+      {
+        name: 'Skill',
+        input: { skill: 'development-system:advisor' },
+        output: 'Advisor loaded',
+        is_error: false,
+      },
+      {
+        name: 'Agent',
+        input: {
+          subagent_type: 'development-system:advisor',
+          run_in_background: false,
+        },
+        output: 'Advisor result',
+        is_error: false,
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Claude installed Read and legacy Task evidence',
+  assertInstalledDispatch(
+    '',
+    claudeContext('sharpen-plan-installed-delegated-dispatch', [
+      {
+        name: 'Read',
+        input: {
+          file_path:
+            '/tmp/claude/plugin-cache/cache/ai-plugins/development-system/2.1.0/skills/sharpen-plan/SKILL.md',
+        },
+        output: 'skill contents',
+        is_error: false,
+      },
+      {
+        name: 'Task',
+        input: {
+          subagent_type: 'strong-reviewer',
+          run_in_background: false,
+        },
+        output: 'review result',
+        is_error: false,
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Codex normalized collaboration evidence',
+  assertInstalledDispatch(
+    '',
+    codexContext('advisor-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          "sed -n '1,220p' /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md",
+        status: 'completed',
+        exit_code: 0,
+      },
+      {
+        type: 'collab_tool_call',
+        tool: 'spawn_agent',
+        arguments: {
+          task_name: 'advisor',
+          model: 'gpt-5.6-sol',
+          reasoning_effort: 'xhigh',
+          fork_turns: 'none',
+          message: 'Perform the complete read-only Advisor review.',
+        },
+        receiver_thread_ids: ['thread-1'],
+        status: 'completed',
+      },
+      {
+        type: 'collab_tool_call',
+        tool: 'wait',
+        receiver_thread_ids: ['thread-1'],
+        agents_states: {
+          'thread-1': { status: 'completed', output: 'Advisor result' },
+        },
+        status: 'completed',
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Codex collaboration tool-call evidence',
+  assertInstalledDispatch(
+    '',
+    codexContext('content-authoring-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/content-authoring/SKILL.md',
+        status: 'completed',
+        exit_code: 0,
+      },
+      {
+        type: 'collaboration_tool_call',
+        tool: 'spawn_agent',
+        arguments: {
+          task_name: 'content_author',
+          model: 'gpt-5.6-sol',
+          reasoning_effort: 'high',
+          fork_turns: 'none',
+          sandbox_mode: 'workspace-write',
+          message: 'Author the complete bounded human-facing artifact.',
+        },
+        result: { receiver_thread_id: 'thread-2' },
+        status: 'completed',
+      },
+      {
+        type: 'collaboration_tool_call',
+        tool: 'wait_agent',
+        arguments: { receiver_thread_ids: ['thread-2'] },
+        result: {
+          agents_states: {
+            'thread-2': { status: 'completed', output: 'Authored artifact' },
+          },
+        },
+        status: 'completed',
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Codex completed command without exit code and collab_tool_call shape',
+  assertInstalledDispatch(
+    '',
+    codexContext('sharpen-plan-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          'head -n 80 /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/sharpen-plan/SKILL.md',
+        status: 'completed',
+      },
+      {
+        type: 'collab_tool_call',
+        tool: 'spawn_agent',
+        arguments: {
+          task_name: 'sharpen_plan_author',
+          model: 'gpt-5.6-sol',
+          reasoning_effort: 'high',
+          fork_turns: 'none',
+          message: 'Perform one complete read-only sharpening pass.',
+        },
+        thread_id: 'thread-3',
+        status: 'completed',
+      },
+      {
+        type: 'collab_tool_call',
+        tool: 'wait',
+        agents_states: {
+          'thread-3': { status: 'completed', output: 'Sharpened plan' },
+        },
+        status: 'completed',
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Claude implicit Advisor activation with exact foreground Agent evidence',
+  assertInstalledDispatch(
+    'The final response does not establish the dispatch.',
+    claudeContext('advisor-installed-delegated-dispatch', [
+      {
+        name: 'Skill',
+        input: { skill: 'development-system:advisor' },
+        output: 'loaded',
+        is_error: false,
+      },
+      {
+        name: 'Agent',
+        input: {
+          subagent_type: 'development-system:advisor',
+          run_in_background: false,
+        },
+        output: 'Advisor result',
+        is_error: false,
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Claude implicit content skill activation with exact foreground Agent evidence',
+  assertInstalledDispatch(
+    'Finished card.',
+    claudeContext('content-authoring-installed-delegated-dispatch', [
+      {
+        name: 'Skill',
+        input: { skill: 'development-system:content-authoring' },
+        output: 'loaded',
+        is_error: false,
+      },
+      {
+        name: 'Agent',
+        input: {
+          subagent_type: 'development-system:strong-worker',
+          run_in_background: false,
+        },
+        output: 'Authored card',
+        is_error: false,
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Claude implicit sharpen skill activation with exact foreground Task evidence',
+  assertInstalledDispatch(
+    'Revised plan.',
+    claudeContext('sharpen-plan-installed-delegated-dispatch', [
+      {
+        name: 'Skill',
+        input: { skill: 'development-system:sharpen-plan' },
+        output: 'loaded',
+        is_error: false,
+      },
+      {
+        name: 'Task',
+        input: {
+          subagent_type: 'strong-reviewer',
+          run_in_background: false,
+        },
+        output: 'Reviewed plan',
+        is_error: false,
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Codex bounded visible capability block',
+  assertInstalledDispatch(
+    'Blocked: development-system:advisor cannot verify required Codex spawn_agent evidence fields: task_name, model, reasoning_effort, fork_turns. No artifact was produced.',
+    codexContext('advisor-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md',
+        status: 'completed',
+        exit_code: 0,
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Codex content-authoring live capability block wording',
+  assertInstalledDispatch(
+    'Blocked: development-system:content-authoring cannot verify required Codex spawn_agent evidence fields: task_name, model, reasoning_effort, fork_turns, sandbox_mode. No artifact was produced.',
+    codexContext('content-authoring-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/content-authoring/SKILL.md',
+        status: 'completed',
+        exit_code: 0,
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Codex sharpen-plan live capability block wording',
+  assertInstalledDispatch(
+    'Blocked: development-system:sharpen-plan cannot verify required Codex spawn_agent evidence fields: task_name, model, reasoning_effort, fork_turns. No artifact was produced.',
+    codexContext('sharpen-plan-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/sharpen-plan/SKILL.md',
+        status: 'completed',
+        exit_code: 0,
+      },
+    ]),
+  ),
+);
+
+assertFail(
+  'Codex Advisor alternate live capability block wording',
+  assertInstalledDispatch(
+    "I can’t produce the plan under the required development-system:advisor route. The installed Advisor skill requires Codex’s spawn_agent to explicitly accept and confirm model and reasoning_effort; this harness exposes neither. Therefore it forbids spawning, waiting, or substituting a parent-authored plan. The requested gpt-5.6-sol / xhigh delegation cannot be verified here.",
+    codexContext('advisor-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md',
+        status: 'completed',
+        exit_code: 0,
+      },
+    ]),
+  ),
+);
+
+assertFail(
+  'Codex content alternate live capability block wording',
+  assertInstalledDispatch(
+    "Blocked: the required generic spawn controls for explicit gpt-5.6-sol selection and high reasoning effort are unavailable in this Codex harness, so development-system:content-authoring forbids a substitute draft.",
+    codexContext('content-authoring-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/content-authoring/SKILL.md',
+        status: 'completed',
+        exit_code: 0,
+      },
+    ]),
+  ),
+);
+
+assertFail(
+  'Codex sharpen alternate live capability block wording',
+  assertInstalledDispatch(
+    "Unable to perform the required development-system:sharpen-plan pass: Codex’s exposed spawn_agent contract does not accept model or reasoning_effort, nor can it confirm their effective values. The skill requires stopping in this case—without spawning a substitute reviewer or parent-authoring a revision.",
+    codexContext('sharpen-plan-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/sharpen-plan/SKILL.md',
+        status: 'completed',
+        exit_code: 0,
+      },
+    ]),
+  ),
+);
+
+assertPass(
+  'Codex zsh-wrapped installed skill read',
+  assertInstalledDispatch(
+    '',
+    codexContext('content-authoring-installed-delegated-dispatch', [
+      {
+        type: 'command_execution',
+        command:
+          `/nix/store/example-zsh/bin/zsh -lc "sed -n '1,220p' /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/content-authoring/SKILL.md"`,
+        status: 'completed',
+        exit_code: 0,
+      },
+      {
+        type: 'collab_tool_call',
+        tool: 'spawn_agent',
+        arguments: {
+          task_name: 'content_author',
+          model: 'gpt-5.6-sol',
+          reasoning_effort: 'high',
+          fork_turns: 'none',
+          sandbox_mode: 'workspace-write',
+          message: 'Author the complete bounded human-facing artifact.',
+        },
+        receiver_thread_id: 'thread-4',
+        status: 'completed',
+      },
+      {
+        type: 'collab_tool_call',
+        tool: 'wait_agent',
+        receiver_thread_ids: ['thread-4'],
+        agents_states: {
+          'thread-4': { status: 'completed', output: 'Authored artifact' },
+        },
+        status: 'completed',
+      },
+    ]),
+  ),
+);
+NODE
+
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&2
+  fi
+  [ "$status" -eq 0 ]
+}
+
+@test "installed-dispatch assertion rejects prose, wrong routes, missing reads, background agents, and errors" {
+  run node - <<'NODE'
+const assertInstalledDispatch = require('./evals/promptfoo/assert-installed-dispatch.cjs');
+
+function assertFail(label, result) {
+  if (result.pass !== false || result.score !== 0) {
+    throw new Error(`${label} should fail`);
+  }
+}
+
+function claudeContext(toolCalls) {
+  return {
+    vars: { case_id: 'advisor-installed-delegated-dispatch' },
+    provider: { id: () => 'anthropic:claude-agent-sdk' },
+    providerResponse: { metadata: { toolCalls } },
+  };
+}
+
+function codexContext(items, caseId = 'advisor-installed-delegated-dispatch') {
+  return {
+    vars: {
+      case_id: caseId,
+      codex_spawn_capability: {
+        provider: 'openai:codex-sdk',
+        source: 'versioned-provider-contract',
+        version: '0.144.5',
+        verifiedVersion: '0.144.5',
+        spawnAgentInputFields: [
+          'task_name',
+          'model',
+          'reasoning_effort',
+          'fork_turns',
+        ],
+        spawnAgentEvidenceFields: [],
+      },
+    },
+    provider: { id: () => 'openai:codex-sdk' },
+    providerResponse: { raw: JSON.stringify({ items }) },
+  };
+}
+
+const successfulSkill = {
+  name: 'Skill',
+  input: { skill: 'advisor' },
+  output: 'loaded',
+  is_error: false,
+};
+const foregroundAdvisor = {
+  name: 'Agent',
+  input: { subagent_type: 'advisor', run_in_background: false },
+  output: 'result',
+  is_error: false,
+};
+const successfulRead = {
+  type: 'command_execution',
+  command:
+    'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md',
+  status: 'completed',
+  exit_code: 0,
+};
+const successfulSpawn = {
+  type: 'collab_tool_call',
+  tool: 'spawn_agent',
+  receiver_thread_ids: ['thread-1'],
+  status: 'completed',
+};
+const successfulWait = {
+  type: 'collab_tool_call',
+  tool: 'wait',
+  receiver_thread_ids: ['thread-1'],
+  agents_states: { 'thread-1': { status: 'completed' } },
+  status: 'completed',
+};
+const exactAdvisorSpawn = {
+  ...successfulSpawn,
+  arguments: {
+    task_name: 'advisor',
+    model: 'gpt-5.6-sol',
+    reasoning_effort: 'xhigh',
+    fork_turns: 'none',
+    message: 'Perform the complete read-only Advisor review.',
+  },
+};
+
+assertFail(
+  'model prose without provider evidence',
+  assertInstalledDispatch(
+    'I loaded development-system:advisor and invoked the Advisor agent.',
+    claudeContext([]),
+  ),
+);
+assertFail(
+  'Claude agent call without installed skill access',
+  assertInstalledDispatch('', claudeContext([foregroundAdvisor])),
+);
+assertFail(
+  'wrong Claude agent route',
+  assertInstalledDispatch(
+    '',
+    claudeContext([
+      successfulSkill,
+      {
+        ...foregroundAdvisor,
+        input: {
+          subagent_type: 'strong-reviewer',
+          run_in_background: false,
+        },
+      },
+    ]),
+  ),
+);
+assertFail(
+  'background Claude agent',
+  assertInstalledDispatch(
+    '',
+    claudeContext([
+      successfulSkill,
+      {
+        ...foregroundAdvisor,
+        input: { subagent_type: 'advisor', run_in_background: true },
+      },
+    ]),
+  ),
+);
+assertFail(
+  'errored Claude agent call',
+  assertInstalledDispatch(
+    '',
+    claudeContext([
+      successfulSkill,
+      { ...foregroundAdvisor, is_error: true },
+    ]),
+  ),
+);
+assertFail(
+  'empty Claude agent result',
+  assertInstalledDispatch(
+    '',
+    claudeContext([
+      successfulSkill,
+      { ...foregroundAdvisor, output: '   ' },
+    ]),
+  ),
+);
+assertFail(
+  'Codex prose and role label without completion evidence',
+  assertInstalledDispatch(
+    'Read the installed advisor skill and spawned advisor.',
+    codexContext([
+      successfulRead,
+      { ...successfulSpawn, role: 'strong-worker' },
+    ]),
+  ),
+);
+assertFail(
+  'Codex missing installed skill read',
+  assertInstalledDispatch('', codexContext([successfulSpawn])),
+);
+assertFail(
+  'Codex unrelated read beside a printed skill path',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      {
+        ...successfulRead,
+        command:
+          'echo /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md; cat /tmp/README.md',
+      },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex reader name printed beside a skill path',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      {
+        ...successfulRead,
+        command:
+          'echo cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md',
+      },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex skill path present only in a shell comment',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      {
+        ...successfulRead,
+        command:
+          'cat /tmp/README.md # /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md',
+      },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex quoted separator cannot synthesize a skill read command',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      {
+        ...successfulRead,
+        command:
+          `printf '%s\\n' "note; cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md"`,
+      },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex heredoc body cannot synthesize a skill read command',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      {
+        ...successfulRead,
+        command:
+          `node - <<'NODE'\ncat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md\nNODE`,
+      },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex zsh wrapper that only prints a reader and skill path',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      {
+        ...successfulRead,
+        command:
+          `/nix/store/example-zsh/bin/zsh -lc "echo cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md"`,
+      },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex zsh wrapper with skill path only in a shell comment',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      {
+        ...successfulRead,
+        command:
+          `/nix/store/example-zsh/bin/zsh -lc "cat /tmp/README.md # /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md"`,
+      },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex reader help mode that ignores the skill operand',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      {
+        ...successfulRead,
+        command:
+          'cat --help /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md',
+      },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex wrapped reader help mode that ignores the skill operand',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      {
+        ...successfulRead,
+        command:
+          `/nix/store/example-zsh/bin/zsh -lc "sed --help /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/advisor/SKILL.md"`,
+      },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex failed installed skill read',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      { ...successfulRead, status: 'failed', exit_code: 1 },
+      successfulSpawn,
+    ]),
+  ),
+);
+assertFail(
+  'Codex failed subsequent wait',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      successfulRead,
+      successfulSpawn,
+      {
+        type: 'collab_tool_call',
+        tool: 'wait',
+        receiver_thread_ids: ['thread-1'],
+        status: 'failed',
+        error: 'timeout',
+      },
+    ]),
+  ),
+);
+assertFail(
+  'Codex timed-out subsequent wait',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      successfulRead,
+      successfulSpawn,
+      {
+        type: 'collab_tool_call',
+        tool: 'wait',
+        receiver_thread_ids: ['thread-1'],
+        status: 'timed_out',
+      },
+    ]),
+  ),
+);
+assertFail(
+  'Codex in-progress spawn',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      successfulRead,
+      { ...successfulSpawn, status: 'in_progress' },
+    ]),
+  ),
+);
+assertFail(
+  'Codex statusless collaboration labels do not prove success',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      successfulRead,
+      { ...successfulSpawn, status: undefined },
+      { ...successfulWait, status: undefined },
+    ]),
+  ),
+);
+assertFail(
+  'Codex legacy role-only spawn and wait labels',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      successfulRead,
+      { type: 'spawn_agent', role: 'advisor', status: 'completed' },
+      { type: 'agent_wait', status: 'completed' },
+    ]),
+  ),
+);
+assertFail(
+  'Codex collaboration spawn without receiver or thread evidence',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      successfulRead,
+      {
+        type: 'collab_tool_call',
+        tool: 'spawn_agent',
+        arguments: { role: 'advisor' },
+        status: 'completed',
+      },
+      successfulWait,
+    ]),
+  ),
+);
+assertFail(
+  'Codex empty wait does not prove completion',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      successfulRead,
+      successfulSpawn,
+      {
+        type: 'collab_tool_call',
+        tool: 'wait',
+        receiver_thread_ids: [],
+        agents_states: {},
+        status: 'completed',
+      },
+    ]),
+  ),
+);
+for (const status of ['failed', 'cancelled', 'in_progress']) {
+  assertFail(
+    `Codex ${status} child state does not prove completion`,
+    assertInstalledDispatch(
+      '',
+      codexContext([
+        successfulRead,
+        exactAdvisorSpawn,
+        {
+          ...successfulWait,
+          agents_states: {
+            'thread-1': { status, output: 'partial result' },
+          },
+        },
+      ]),
+    ),
+  );
+}
+assertFail(
+  'Codex completed child with empty output is not substantive',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      successfulRead,
+      exactAdvisorSpawn,
+      {
+        ...successfulWait,
+        agents_states: {
+          'thread-1': { status: 'completed', output: '   ' },
+        },
+      },
+    ]),
+  ),
+);
+assertFail(
+  'Codex content worker without writable sandbox',
+  assertInstalledDispatch(
+    '',
+    codexContext(
+      [
+        {
+          ...successfulRead,
+          command:
+            'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/content-authoring/SKILL.md',
+        },
+        {
+          ...successfulSpawn,
+          arguments: {
+            task_name: 'content_author',
+            model: 'gpt-5.6-sol',
+            reasoning_effort: 'high',
+            fork_turns: 'none',
+            message: 'Author the complete bounded human-facing artifact.',
+          },
+        },
+        {
+          ...successfulWait,
+          agents_states: {
+            'thread-1': { status: 'completed', output: 'Authored artifact' },
+          },
+        },
+      ],
+      'content-authoring-installed-delegated-dispatch',
+    ),
+  ),
+);
+assertFail(
+  'Codex completion for a different thread',
+  assertInstalledDispatch(
+    '',
+    codexContext([
+      successfulRead,
+      successfulSpawn,
+      {
+        type: 'collaboration_tool_call',
+        tool: 'wait_agent',
+        receiver_thread_ids: ['thread-2'],
+        status: 'completed',
+      },
+    ]),
+  ),
+);
+const capabilityBlock =
+  'Blocked: development-system:advisor cannot verify required Codex spawn_agent evidence fields: task_name, model, reasoning_effort, fork_turns. No artifact was produced.';
+assertFail(
+  'Codex visible block requires verified structured capability evidence',
+  assertInstalledDispatch(
+    capabilityBlock,
+    {
+      ...codexContext([successfulRead]),
+      vars: {
+        case_id: 'advisor-installed-delegated-dispatch',
+        codex_spawn_capability: {
+          provider: 'openai:codex-sdk',
+          source: 'versioned-provider-contract',
+          version: '0.144.5',
+          verifiedVersion: '0.144.4',
+          spawnAgentEvidenceFields: [],
+        },
+      },
+    },
+  ),
+);
+assertFail(
+  'Codex visible block cannot accompany an attempted spawn',
+  assertInstalledDispatch(
+    capabilityBlock,
+    codexContext([
+      successfulRead,
+      {
+        type: 'collab_tool_call',
+        tool: 'spawn_agent',
+        status: 'failed',
+        error: 'unsupported controls',
+      },
+    ]),
+  ),
+);
+assertFail(
+  'Codex visible block must name all unavailable controls',
+  assertInstalledDispatch(
+    'spawn_agent is unavailable. I cannot substitute self-authored work.',
+    codexContext([successfulRead]),
+  ),
+);
+assertFail(
+  'Codex visible block cannot self-author Advisor artifact',
+  assertInstalledDispatch(
+    `${capabilityBlock}\n1. Write the outbox record.\n2. Deploy the worker.\n3. Retire synchronous delivery.`,
+    codexContext([successfulRead]),
+  ),
+);
+assertFail(
+  'Codex visible block cannot hide an inline Advisor artifact',
+  assertInstalledDispatch(
+    `${capabilityBlock} 1. Write the outbox record. 2. Deploy the worker. 3. Retire synchronous delivery.`,
+    codexContext([successfulRead]),
+  ),
+);
+assertFail(
+  'Codex visible block cannot self-author content card',
+  assertInstalledDispatch(
+    `${capabilityBlock}\nRoll Out Safely\n1. Enable internally.\n2. Expand gradually.\n3. Roll back on errors.`,
+    codexContext(
+      [
+        {
+          ...successfulRead,
+          command:
+            'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/content-authoring/SKILL.md',
+        },
+      ],
+      'content-authoring-installed-delegated-dispatch',
+    ),
+  ),
+);
+assertFail(
+  'Codex visible block cannot self-author sharpened plan',
+  assertInstalledDispatch(
+    `${capabilityBlock}\nRevised plan:\n1. Dual write.\n2. Backfill.\n3. Switch reads.\n4. Retire v1.`,
+    codexContext(
+      [
+        {
+          ...successfulRead,
+          command:
+            'cat /tmp/codex/plugins/cache/ai-plugins/development-system/2.1.0/skills/sharpen-plan/SKILL.md',
+        },
+      ],
+      'sharpen-plan-installed-delegated-dispatch',
+    ),
+  ),
+);
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
 @test "loader honors generated runtime case filter options" {
   mkdir -p "$ROOT/evals/out/generated"
   cat >"$ROOT/evals/out/generated/runtime-options.json" <<'JSON'

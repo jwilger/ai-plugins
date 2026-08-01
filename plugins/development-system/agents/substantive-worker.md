@@ -1,5 +1,5 @@
 ---
-name: model-routing-substantive-worker
+name: substantive-worker
 description: Writable worker for clearly scoped substantive implementation that does not activate a strong-model responsibility.
 model: sonnet
 tools: Read,Grep,Glob,Bash,Write,Edit

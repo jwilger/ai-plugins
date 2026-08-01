@@ -19,7 +19,7 @@ write_codex_agent() {
   local sandbox="$4"
 
   cat >"$PLUGIN/agents/$name.toml" <<EOF
-name = "model-routing-$name"
+name = "$name"
 description = "Fixture route."
 model = "$model"
 model_reasoning_effort = "$effort"
@@ -34,7 +34,7 @@ write_dynamic_codex_agent() {
   local sandbox="$3"
 
   cat >"$PLUGIN/agents/$name.toml" <<EOF
-name = "model-routing-$name"
+name = "$name"
 description = "Fixture route."
 model_reasoning_effort = "$effort"
 sandbox_mode = "$sandbox"
@@ -49,7 +49,7 @@ write_claude_agent() {
 
   cat >"$PLUGIN/agents/$name.md" <<EOF
 ---
-name: model-routing-$name
+name: $name
 description: Fixture route.
 model: $model
 tools: $tools
@@ -65,7 +65,7 @@ write_strong_claude_agent() {
 
   cat >"$PLUGIN/agents/$name.md" <<EOF
 ---
-name: model-routing-$name
+name: $name
 description: Fixture route.
 model: opus
 effort: high
@@ -146,7 +146,7 @@ EOF
   write_valid_routes
   cat >"$PLUGIN/agents/bounded-helper.md" <<'EOF'
 ---
-name: model-routing-bounded-helper
+name: bounded-helper
 description: Fixture route.
 model: haiku
 tools: Read,Grep,Glob
@@ -162,9 +162,11 @@ EOF
   local mutation
 
   for mutation in \
+    'bounded-helper.toml|name = "bounded-helper"|name = "wrong-helper"' \
     'bounded-helper.toml|model = "gpt-5.6-luna"|model = "gpt-5.6-terra"' \
     'bounded-helper.toml|model_reasoning_effort = "low"|model_reasoning_effort = "high"' \
     'bounded-helper.toml|sandbox_mode = "read-only"|sandbox_mode = "workspace-write"' \
+    'bounded-helper.md|name: bounded-helper|name: wrong-helper' \
     'bounded-helper.md|model: haiku|model: sonnet' \
     'bounded-helper.md|tools: Read,Grep,Glob|tools: Read,Grep,Glob,Write'; do
     write_valid_routes
@@ -183,9 +185,11 @@ EOF
   local mutation
 
   for mutation in \
+    'bounded-helper.toml|name = "bounded-helper"' \
     'bounded-helper.toml|model = "gpt-5.6-luna"' \
     'bounded-helper.toml|model_reasoning_effort = "low"' \
     'bounded-helper.toml|sandbox_mode = "read-only"' \
+    'bounded-helper.md|name: bounded-helper' \
     'bounded-helper.md|model: haiku' \
     'bounded-helper.md|tools: Read,Grep,Glob'; do
     write_valid_routes
@@ -204,9 +208,11 @@ EOF
   local mutation
 
   for mutation in \
+    'bounded-helper.toml|name = "bounded-helper"' \
     'bounded-helper.toml|model = "gpt-5.6-luna"' \
     'bounded-helper.toml|model_reasoning_effort = "low"' \
     'bounded-helper.toml|sandbox_mode = "read-only"' \
+    'bounded-helper.md|name: bounded-helper' \
     'bounded-helper.md|model: haiku' \
     'bounded-helper.md|tools: Read,Grep,Glob'; do
     write_valid_routes
@@ -228,7 +234,7 @@ EOF
   run "$CHECK" "$PLUGIN"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"bounded-helper.toml:model"* ]]
+  [[ "$output" == *"invalid-toml-field: "*"bounded-helper.toml:name"* ]]
 
   write_valid_routes
   sed -i '/^model: haiku$/a\\model : sonnet' "$PLUGIN/agents/bounded-helper.md"
@@ -242,7 +248,7 @@ EOF
 @test "model routing config ignores protected-key text outside root configuration" {
   write_valid_routes
   cat >"$PLUGIN/agents/bounded-helper.toml" <<'EOF'
-name = "model-routing-bounded-helper"
+name = "bounded-helper"
 description = "Fixture route."
 model = "gpt-5.6-luna"
 model_reasoning_effort = "low"
@@ -271,5 +277,5 @@ EOF
   run "$CHECK" "$PLUGIN"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"invalid-toml-field: "*"bounded-helper.toml:model"* ]]
+  [[ "$output" == *"invalid-toml-field: "*"bounded-helper.toml:name"* ]]
 }

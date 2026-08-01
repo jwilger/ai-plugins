@@ -10207,7 +10207,7 @@ fn harness_model_defaults(harness: &str) -> toml::value::Table {
         "claude" => {
             defaults.insert(
                 "pre_filter".to_string(),
-                toml::Value::String("opus".to_string()),
+                toml::Value::String("strong-reviewer".to_string()),
             );
             defaults.insert(
                 "lens_review".to_string(),
@@ -10219,7 +10219,7 @@ fn harness_model_defaults(harness: &str) -> toml::value::Table {
             );
             defaults.insert(
                 "verifier".to_string(),
-                toml::Value::String("opus".to_string()),
+                toml::Value::String("strong-reviewer".to_string()),
             );
         }
         _ => {}
@@ -12274,10 +12274,10 @@ lens_review = "gpt-5.6-sol"
         assert_eq!(
             parsed["model_roles"],
             json!({
-                "pre_filter": "opus",
+                "pre_filter": "strong-reviewer",
                 "lens_review": "sonnet",
                 "post_filter": "haiku",
-                "verifier": "opus"
+                "verifier": "strong-reviewer"
             })
         );
         assert!(parsed["model_role_sources"]

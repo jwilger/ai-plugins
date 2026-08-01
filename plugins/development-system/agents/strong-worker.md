@@ -1,5 +1,5 @@
 ---
-name: model-routing-strong-worker
+name: strong-worker
 description: Writable strongest-model worker for ambiguity, architecture, security, human-safety, and explicitly authorized destructive implementation.
 model: opus
 effort: high

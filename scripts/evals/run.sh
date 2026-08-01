@@ -15,6 +15,7 @@ generated_dir="$out_dir/generated"
 runtime_options_file="$generated_dir/runtime-options.json"
 runtime_loader_file="$generated_dir/load-harness-cases.runtime.cjs"
 export EVAL_RUNTIME_LOADER_FILE="$runtime_loader_file"
+export EVAL_RUNTIME_OPTIONS_FILE="$runtime_options_file"
 max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-8}"
 case "$max_concurrency" in
   1 | 2 | 3 | 4 | 5 | 6 | 7 | 8) ;;
@@ -101,9 +102,12 @@ USAGE
 
 write_runtime_options() {
   mkdir -p "$generated_dir"
-  node - "$runtime_options_file" <<'NODE'
+  node - "$runtime_options_file" "$root/tooling/evals/package.json" "$root/tooling/evals/node_modules/@openai/codex-sdk/package.json" "$root/evals/fixtures/codex-provider-capabilities.json" <<'NODE'
 const fs = require('fs');
 const file = process.argv[2];
+const packageFile = process.argv[3];
+const installedPackageFile = process.argv[4];
+const capabilitiesFile = process.argv[5];
 const options = {};
 if (process.env.EVAL_CASE_FILTER) {
   options.caseFilter = process.env.EVAL_CASE_FILTER;
@@ -111,6 +115,24 @@ if (process.env.EVAL_CASE_FILTER) {
 if (process.env.EVAL_SAMPLES) {
   options.samples = process.env.EVAL_SAMPLES;
 }
+const packageJson = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
+const version = packageJson.devDependencies['@openai/codex-sdk'];
+const verifiedVersion = JSON.parse(fs.readFileSync(installedPackageFile, 'utf8')).version;
+if (verifiedVersion !== version) {
+  throw new Error(`Installed @openai/codex-sdk ${verifiedVersion} does not match pinned ${version}`);
+}
+const registry = JSON.parse(fs.readFileSync(capabilitiesFile, 'utf8'));
+const capability = registry['openai:codex-sdk']?.[version];
+if (!capability) {
+  throw new Error(`No versioned Codex provider capability contract for @openai/codex-sdk ${version}`);
+}
+options.codexSpawnCapability = {
+  provider: 'openai:codex-sdk',
+  source: 'versioned-provider-contract',
+  version,
+  verifiedVersion,
+  ...capability,
+};
 fs.writeFileSync(file, JSON.stringify(options));
 NODE
 }

@@ -165,15 +165,15 @@ function claudeProvider(variant, pluginMode, plugins) {
       skills: all
       setting_sources: []
       persist_session: false
+      append_allowed_tools:
+        - Agent
+        - Skill
       env:
         CLAUDE_CONFIG_DIR: "{{ env.CLAUDE_EVAL_RUNTIME_CONFIG_DIR_${envSuffix} | default('${path.join(evalHome, "config")}') }}"
         CLAUDE_CODE_PLUGIN_CACHE_DIR: "{{ env.CLAUDE_EVAL_PLUGIN_CACHE_DIR_${envSuffix} | default('${path.join(evalHome, "plugin-cache")}') }}"
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
 ${pluginMode.id === "development-system" ? `        DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER: "{{ env.CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE | default('${path.join(root, ".evals/session-start-claude-development-system")}') }}"\n` : ""}      disallowed_tools:
         - Bash
-        - Write
-        - Edit
-        - MultiEdit
 ${pluginLines}`.trimEnd();
 }
 
@@ -192,6 +192,13 @@ function codexProvider(variant, pluginMode) {
       enable_streaming: true
       deep_tracing: false
       skip_git_repo_check: true
+      collaboration_mode: coding
+      cli_config:
+        features:
+          expose_spawn_agent_model_overrides: true
+          multi_agent_v2:
+            enabled: true
+            max_concurrent_threads_per_session: 8
 ${pluginMode.id === "development-system" ? `      codex_path_override: "${path.join(root, "scripts/evals/codex-with-trusted-hooks.sh")}"\n` : ""}      cli_env:
         CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.evals/codex-home-${homeSuffix}`)}') }}"${
           pluginMode.id === "development-system"

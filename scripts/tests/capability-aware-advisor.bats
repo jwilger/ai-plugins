@@ -28,6 +28,27 @@ PY
   [ "$status" -eq 0 ]
   run grep -F "two or more dependent implementation steps" "$PLUGIN/skills/advisor/SKILL.md"
   [ "$status" -eq 0 ]
+
+  run python3 - "$PLUGIN/skills/advisor/SKILL.md" <<'PY'
+import pathlib
+import sys
+
+text = " ".join(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").split())
+for phrase in (
+    "On Claude Code, launch the exact named public `advisor` Agent",
+    "inspect the exposed `spawn_agent` contract before invoking it",
+    'generic `spawn_agent` mechanism with `fork_turns: "none"`',
+    "the explicitly selected highest-capability model, and `xhigh` reasoning effort",
+    "do not invoke `spawn_agent`, wait or poll, or perform or draft the advisory analysis in the parent",
+    "Treat `task_name` only as an operational label",
+    "the model or required harness-specific effort cannot be selected and confirmed explicitly",
+    "report the route failure visibly",
+    "Accept the route only after the child completes",
+    "a parent-authored substitute are not Advisor results",
+):
+    assert phrase in text, phrase
+PY
+  [ "$status" -eq 0 ]
 }
 
 @test "given future model upgrades strong routes defer model selection to current harness capability metadata" {
@@ -71,4 +92,40 @@ PY
     run grep -F "material failure boundary" "$file"
     [ "$status" -eq 0 ]
   done
+}
+
+@test "Advisor delegated-dispatch fixture requires exact Claude and Codex evidence contracts" {
+  run jq -e '
+    map(select(.case_id == "advisor-installed-delegated-dispatch"))
+    | length == 1
+      and .[0].plugins == ["development-system"]
+      and .[0].skills == ["advisor"]
+      and .[0].dispatchEvidence == {
+        "skill": "advisor",
+        "claude": {
+          "agent": "advisor"
+        },
+        "codex": {
+          "taskName": "advisor",
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "xhigh",
+          "forkTurns": "none",
+          "allowVisibleBlock": true
+        }
+      }
+      and .[0].coverage.kinds == [
+        "core-behavior",
+        "baseline-ablation"
+      ]
+      and .[0].valueGate == {
+        "mode": "standard",
+        "baselineLiftThreshold": 0.1
+      }
+      and .[0].minPassRate == 1
+      and (.[0].semanticRubric | contains("completed foreground Advisor result"))
+      and (.[0].semanticRubric | contains("empty wait or self-authored prose"))
+      and (.[0].semanticRubric | contains("visible fail-closed response"))
+      and (.[0].semanticRubric | contains("refrain from self-authoring the plan"))
+  ' "$ROOT/evals/fixtures/behavior/development-system/cases.json"
+  [ "$status" -eq 0 ]
 }

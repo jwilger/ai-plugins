@@ -84,6 +84,7 @@ check_codex() {
   local sandbox="$4"
   local file="$agents/$route.toml"
 
+  require_equal "$(quoted_value "$file" name)" "$route" "$route.codex.name"
   require_equal "$(quoted_value "$file" model)" "$model" "$route.codex.model"
   require_equal "$(quoted_value "$file" model_reasoning_effort)" "$reasoning" "$route.codex.reasoning"
   require_equal "$(quoted_value "$file" sandbox_mode)" "$sandbox" "$route.codex.sandbox"
@@ -95,6 +96,7 @@ check_dynamic_codex() {
   local sandbox="$3"
   local file="$agents/$route.toml"
 
+  require_equal "$(quoted_value "$file" name)" "$route" "$route.codex.name"
   python3 - "$file" <<'PY' || fail "$route.codex.model-must-be-selected-at-dispatch"
 import pathlib
 import sys
@@ -113,6 +115,7 @@ check_claude() {
   local tools="$3"
   local file="$agents/$route.md"
 
+  require_equal "$(yaml_value "$file" name)" "$route" "$route.claude.name"
   require_equal "$(yaml_value "$file" model)" "$model" "$route.claude.model"
   require_equal "$(yaml_value "$file" tools)" "$tools" "$route.claude.tools"
 }

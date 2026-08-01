@@ -28,12 +28,15 @@ assert agent.get("sandbox_mode") == "read-only"
 PY
 
 grep -Fq 'model: opus' "$claude_agent" || fail "claude-advisor-must-use-moving-opus-alias"
-grep -Eq '^effort: (high|max)$' "$claude_agent" || fail "claude-advisor-must-use-highest-supported-effort"
+grep -Fq 'effort: max' "$claude_agent" || fail "claude-advisor-must-use-highest-supported-effort"
 grep -Fq 'highest-capability eligible model' "$skill" || fail "skill-must-select-by-capability"
+skill_flat="$(tr -s '[:space:]' ' ' <"$skill")"
+[[ "$skill_flat" == *'the explicitly selected highest-capability model, and `xhigh` reasoning effort'* ]] || fail "skill-must-name-codex-xhigh-effort"
+[[ "$skill_flat" == *'On Claude Code, launch the exact named public `advisor` Agent with the explicit model selection and its configured highest-supported effort'* ]] || fail "skill-must-name-claude-highest-effort"
 grep -Fq 'two or more dependent implementation steps' "$skill" || fail "skill-must-trigger-for-multi-step-plans"
 grep -Fq 'executable BDD-style scenario' "$skill" || fail "skill-must-define-bdd-exemption"
 grep -Fq 'Do not invoke Advisor again' "$skill" || fail "skill-must-prevent-recursion"
-grep -Fq 'report the route failure visibly' "$skill" || fail "skill-must-fail-visibly"
+grep -Fq 'failure visibly' "$skill" || fail "skill-must-fail-visibly"
 
 if grep -Eq 'gpt-[0-9]+\.[0-9]+-(sol|pro)|agent_type: default' "$skill" "$agent"; then
   fail "static-model-or-fallback-configured"

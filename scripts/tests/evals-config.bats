@@ -121,6 +121,21 @@ MD
   [[ "$output" == *"load-harness-cases.cjs"* ]]
 }
 
+@test "generated Claude providers append dispatch tools without stripping worker writability" {
+  run node "$GENERATOR" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^      append_allowed_tools:$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^        - Agent$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^        - Skill$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^      disallowed_tools:$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^        - Bash$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^        - Write$')" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^        - Edit$')" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^        - MultiEdit$')" -eq 0 ]
+  [[ "$output" != *"custom_allowed_tools:"* ]]
+}
+
 @test "behavior eval matrix keeps isolated Claude Code and Codex conditions" {
   run jq -e '
     [.pluginModes[].id] == ["no-plugins", "development-system"] and
@@ -176,12 +191,32 @@ MD
   [[ "$output" == *"model_reasoning_effort: \"{{ env.CODEX_GRADER_REASONING_EFFORT | default('high') }}\""* ]]
 }
 
+@test "generated Codex providers enable coding collaboration with eight agent threads" {
+  run node "$GENERATOR" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^      collaboration_mode: coding$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^      cli_config:$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^        features:$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^          expose_spawn_agent_model_overrides: true$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^          multi_agent_v2:$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^            enabled: true$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^            max_concurrent_threads_per_session: 8$')" -eq 2 ]
+}
+
 @test "generated behavior config uses runtime loader when case filter is set" {
   run env EVAL_CASE_FILTER=beads node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
   [[ "$output" != *"tests: file://$ROOT/evals/promptfoo/load-harness-cases.cjs"* ]]
+}
+
+@test "eval runner exports capability options for static and generated loaders" {
+  run grep -F 'export EVAL_RUNTIME_OPTIONS_FILE="$runtime_options_file"' \
+    "$ROOT/scripts/evals/run.sh"
+
+  [ "$status" -eq 0 ]
 }
 
 @test "generated Claude provider config excludes Codex-only marketplace plugins" {
@@ -446,7 +481,11 @@ SH
   printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
   printf '%s\n' '{"token":"revoked"}' >"$eval_home/auth.json"
 
-  run env CODEX_EVAL_AUTH_HOME="$auth_home" node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$eval_home" --plugin-mode no-plugins
+  run env -u OPENAI_API_KEY -u CODEX_API_KEY \
+    CODEX_EVAL_AUTH_HOME="$auth_home" \
+    node "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+    "$eval_home" \
+    --plugin-mode no-plugins
 
   [ "$status" -eq 0 ]
   cmp "$auth_home/auth.json" "$eval_home/auth.json"
