@@ -98,43 +98,6 @@ install_environment() {
     "$@"
 }
 
-initialize_project_with_enabled_beads() {
-  git -C "$TEST_ROOT" init -q --initial-branch=main project
-  git -C "$TEST_ROOT/project" config user.email test@example.com
-  git -C "$TEST_ROOT/project" config user.name "Test User"
-  touch "$TEST_ROOT/project/README.md"
-  git -C "$TEST_ROOT/project" add README.md
-  git -C "$TEST_ROOT/project" commit -qm "test: initialize fixture"
-  cat >"$TEST_ROOT/project/.development-system.toml" <<'TOML'
-schema_version = 2
-
-[delivery]
-mode = "direct-to-trunk"
-trunk_branch = "main"
-
-[features]
-worktrees = true
-beads = true
-agentic_systems = false
-eval_case_reporting = false
-
-[worktrees]
-root = ".worktrees"
-
-[beads]
-workflow = "development-change-direct"
-TOML
-  mkdir -p "$TEST_ROOT/project/.beads/formulas"
-  printf '{}\n' >"$TEST_ROOT/project/.beads/metadata.json"
-  printf '# generated\n' >"$TEST_ROOT/project/.beads/README.md"
-  printf 'backend: dolt\n' >"$TEST_ROOT/project/.beads/config.yaml"
-  printf '.dolt\n' >"$TEST_ROOT/project/.beads/.gitignore"
-  cp "$REPO_ROOT/plugins/development-system/formulas/"*.formula.toml \
-    "$TEST_ROOT/project/.beads/formulas/"
-  git -C "$TEST_ROOT/project" add .development-system.toml .beads
-  git -C "$TEST_ROOT/project" commit -qm "test: configure development system"
-}
-
 @test "verified pinned bd is installed user-globally and no standalone Dolt is installed" {
   write_manifest
 
@@ -332,57 +295,6 @@ TOML
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"development_system.tool_platform_unsupported"* ]]
-  [ ! -e "$TEST_ROOT/home/.local/bin/bd" ]
-}
-
-@test "unchanged enabled Beads policy still installs missing bd user-globally without a repository commit" {
-  write_manifest
-  initialize_project_with_enabled_beads
-  printf '#!/bin/sh\nexit 127\n' >"$TEST_ROOT/system-bin/bd"
-  chmod +x "$TEST_ROOT/system-bin/bd"
-  local before_head
-  before_head="$(git -C "$TEST_ROOT/project" rev-parse HEAD)"
-
-  run install_environment env \
-    PACKAGE_ROOT="$REPO_ROOT/plugins/development-system" \
-    PROJECT="$TEST_ROOT/project" \
-    "$NODE" --experimental-strip-types --input-type=module -e '
-      const { applySetupPreview, createSetupPreview } = await import(`${process.env.PACKAGE_ROOT}/extensions/development-system/adapters/setup.ts`);
-      const preview = await createSetupPreview(process.env.PACKAGE_ROOT, process.env.PROJECT, "--enable beads");
-      process.stdout.write(await applySetupPreview(process.env.PACKAGE_ROOT, preview));
-    '
-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"development_system.setup_configuration_unchanged"* ]]
-  [[ "$output" == *"development_system.setup_tools_installed bd=1.1.2"* ]]
-  [ -x "$TEST_ROOT/home/.local/bin/bd" ]
-  [ ! -e "$TEST_ROOT/home/.local/bin/dolt" ]
-  [ "$(git -C "$TEST_ROOT/project" rev-parse HEAD)" = "$before_head" ]
-  [ -z "$(git -C "$TEST_ROOT/project" status --porcelain)" ]
-}
-
-@test "compatible ambient bd is used without a user-global installation" {
-  initialize_project_with_enabled_beads
-  cat >"$TEST_ROOT/system-bin/bd" <<'SH'
-#!/bin/sh
-case "${1:-}" in
-  version) printf 'bd version 1.1.2\n' ;;
-  where) test -d .beads ;;
-  config) ;;
-esac
-SH
-  chmod +x "$TEST_ROOT/system-bin/bd"
-
-  run env HOME="$TEST_ROOT/home" PATH="$TEST_ROOT/system-bin:$PATH" \
-    PACKAGE_ROOT="$REPO_ROOT/plugins/development-system" PROJECT="$TEST_ROOT/project" \
-    "$NODE" --experimental-strip-types --input-type=module -e '
-      const { applySetupPreview, createSetupPreview } = await import(`${process.env.PACKAGE_ROOT}/extensions/development-system/adapters/setup.ts`);
-      const preview = await createSetupPreview(process.env.PACKAGE_ROOT, process.env.PROJECT, "--enable beads");
-      process.stdout.write(await applySetupPreview(process.env.PACKAGE_ROOT, preview));
-    '
-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"development_system.setup_tools_compatible bd=1.1.2"* ]]
   [ ! -e "$TEST_ROOT/home/.local/bin/bd" ]
 }
 

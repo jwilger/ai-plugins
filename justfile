@@ -7,26 +7,19 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace pi-extension npm-package-canary github-actions beads-formulas development-discipline-rust development-discipline-release-from-source development-discipline-release-complete bats
+ci: validate-marketplace bootstrap-development-system node-tests github-actions beads-formulas development-discipline-rust development-discipline-release-from-source development-discipline-release-complete bats
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
     actionlint
 
-# Deterministic Pi package and TypeScript extension gate.
-pi-extension:
-    npx tsc -p plugins/development-system/tsconfig.json
-    node --experimental-strip-types --test scripts/tests/beads-integration.test.mjs scripts/tests/pi-extension.test.mjs scripts/tests/pi-goal-mode.test.mjs scripts/tests/pi-guards.test.mjs scripts/tests/pi-worktrees.test.mjs scripts/tests/pi-logical-workspace.test.mjs scripts/tests/pi-references.test.mjs scripts/tests/pi-mcp-bridge.test.mjs scripts/tests/pi-review-child.test.mjs scripts/tests/pi-eval-provider.test.mjs
-    node scripts/evals/run-pi-worktree-tui-scenario.mjs
-    node scripts/pi-package-canary.mjs
+# Verify the remaining harness-neutral bootstrap, including the managed Beads tool.
+bootstrap-development-system:
+    scripts/bootstrap-development-system.sh
 
-# Provider-backed real local-TUI semantic worktree trajectory.
-pi-worktree-tui-live-eval:
-    node scripts/evals/run-pi-worktree-tui-scenario.mjs --live-tool
-
-# Clean-checkout Pi release canary (runs the documented bootstrap exactly).
-pi-clean-canary:
-    node scripts/pi-package-canary.mjs --clean-checkout
+# Node-level behavior checks for managed tool and Tiber-to-Beads migration logic.
+node-tests:
+    node --test scripts/tests/development-tool-policy.test.mjs scripts/tests/tiber-migration.test.mjs
 
 # Validate and cook every installed Beads workflow formula.
 beads-formulas:
@@ -50,12 +43,9 @@ development-discipline-release-from-source:
 development-discipline-release-all:
     scripts/build-development-discipline-release-all.sh
 
-# Run executable provider-backed Pi guard scenarios in disposable repositories.
-pi-guard-evals:
-    node scripts/evals/run-pi-guard-scenarios.mjs
-
 # Run only provider-backed evals mapped to behavior affected since origin/main,
-# then upload/share fresh Promptfoo artifacts when the scope produced them.
+# with a global cap of eight target calls, then upload/share fresh Promptfoo
+# artifacts when the scope produced them.
 evals:
     #!/usr/bin/env bash
     set +e
@@ -63,7 +53,7 @@ evals:
     trap 'rm -f "$marker"' EXIT
     touch "$marker"
 
-    scripts/evals/run-changed.sh
+    PROMPTFOO_MAX_CONCURRENCY=8 scripts/evals/run-changed.sh
     status=$?
     if [ "$status" -eq 124 ] || [ "$status" -ge 128 ]; then
       exit "$status"
@@ -90,9 +80,10 @@ evals:
     exit "$share_status"
 
 # Explicit, expensive research run across every case, condition, and harness.
-# This is never the default validation path.
+# This is never the default validation path, but uses the same one-process
+# global cap of eight target calls as `just evals`.
 evals-all:
-    scripts/evals/run.sh
+    PROMPTFOO_MAX_CONCURRENCY=8 scripts/evals/run.sh
 
 # Run the plugin-instruction improvement loop with a plugin-only diff guard.
 improve-plugins:
@@ -110,26 +101,14 @@ bats:
 emc-check:
     bats tests/emc-devshell.bats
 
-# Install Lefthook-managed hooks for worktree bootstrap and main-checkout enforcement.
+# Install the Lefthook-managed post-checkout worktree bootstrap hook.
 worktree-hooks:
     scripts/install-worktree-hooks.sh
 
-# Fail unless the current checkout is a linked worktree suitable for agent edits.
-agent-checkout-guard:
-    scripts/agent-checkout-guard.sh
-
 # Tear down generated runtime state before removing a linked worktree.
 worktree-teardown path:
-    scripts/worktree-teardown.sh "{{path}}"
-    git worktree remove "{{path}}"
-
-# Validate the exact local npm-format package payload without registry publication.
-npm-package:
-    node scripts/validate-development-system-npm-package.mjs
-
-# Pack, extract, install, and load the local package through the pinned Pi canary.
-npm-package-canary:
-    node scripts/development-system-npm-canary.mjs
+    scripts/worktree-teardown.sh "{{ path }}"
+    git worktree remove "{{ path }}"
 
 # Marketplace manifest + formatting validation.
 validate-marketplace:
@@ -138,9 +117,7 @@ validate-marketplace:
     find plugins -name plugin.json -exec jq empty {} \;
     bash scripts/validate-manifests.sh
     node scripts/sync-development-system-metadata.mjs --check
-    node scripts/validate-pi-package.mjs
-    node scripts/generate-pi-support-docs.mjs --check
-    node scripts/validate-development-system-npm-package.mjs
+    bash scripts/check-no-pi-support.sh
     bash scripts/check-advisor-agent-config.sh
     bash scripts/check-model-routing-config.sh
     node scripts/generate-development-system-agents.mjs --check

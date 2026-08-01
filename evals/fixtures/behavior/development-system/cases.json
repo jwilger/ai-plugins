@@ -223,9 +223,9 @@
   },
   {
     "case_id": "worktrees-setup-natural-trigger",
-    "behavior": "Creates or verifies an isolated linked worktree before feature work.",
-    "prompt": "Start a feature that edits this repository. We appear to be in the main checkout, but do not rely on that claim. Give the complete worktree preflight before implementation, including how to detect and handle an already-linked checkout.",
-    "tags": ["worktrees", "isolation", "setup"],
+    "behavior": "Uses a linked worktree only when concurrent mutable tickets need isolation.",
+    "prompt": "Start one small feature that edits this repository. Its worktree policy is `concurrent-tickets`; no other mutable ticket is active across sessions or agents, and applicable AGENTS.md does not reserve the primary checkout for coordination. We appear to be in the main checkout, but do not rely on that claim. What checkout preflight and routing should happen before implementation, including how to handle an already-linked checkout?",
+    "tags": ["worktrees", "isolation", "concurrent-tickets"],
     "plugins": ["development-system"],
     "skills": ["worktrees"],
     "coverage": {
@@ -242,19 +242,21 @@
       "baselineLiftThreshold": 0
     },
     "minPassRate": 1,
-    "semanticRubric": "Pass if the response detects whether it is already in a linked worktree, avoids nested worktrees, uses the repo-local ignored .worktrees directory when needed, verifies ignore safety before creating one, and runs baseline setup/tests before editing. Fail if it edits the main checkout directly or creates a worktree without checking current isolation and ignored paths.",
+    "semanticRubric": "Pass if the response recognizes that this single mutable ticket may use its current checkout and does not create a linked worktree merely because the checkout is primary. It should inspect the target checkout (top level, branch, and status), detect an already-linked checkout by comparing `git-dir` with `git-common-dir` when checkout identity matters, and avoid nesting a worktree. It should explain that only a separate concurrent mutable ticket needs the repository-supported linked-worktree workflow, including the ignored repo-local `.worktrees/` path when a new worktree is needed. Fail if it treats every primary checkout as coordination-only, creates an unnecessary worktree, nests one, ignores stricter applicable repository-local instructions, or edits without checking the selected target.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Check git-dir versus common-dir first; if this is the main checkout, use the ignored .worktrees directory, create a branch worktree, then run setup and baseline tests before edits."
+        "Read the worktree policy and applicable AGENTS instructions. With one mutable ticket and no coordination reservation, keep the current checkout rather than creating .worktrees/feature. Inspect its top level, branch, and status; git-dir versus common-dir identifies an existing linked checkout, which must not be nested. Create an ignored linked worktree through the repository workflow only if another mutable ticket needs isolation."
       ],
-      "fail": ["Edit main directly and make the branch later."]
+      "fail": [
+        "We are probably on main, so immediately create .worktrees/feature even though no other mutable ticket is active."
+      ]
     }
   },
   {
     "case_id": "worktrees-coordination-clean-route",
     "behavior": "Diagnoses a clean policy-declared coordination checkout after fetching and starts feature work from the fetched upstream tip in a linked worktree.",
-    "prompt": "This repository's AGENTS.md explicitly reserves its main checkout for coordination and requires feature edits in linked worktrees. We are in that main checkout. Its configured upstream has advanced beyond stale local HEAD, and after fetching that upstream, `git status --short` is empty. Start a new feature without editing the coordination checkout. What exact diagnosis and remediation should the agent use before editing?",
+    "prompt": "For this hypothetical repository, the applicable repository-local policy explicitly reserves its main checkout for coordination and requires feature edits in linked worktrees. We are in that main checkout. Its configured upstream has advanced beyond stale local HEAD, and after fetching that upstream, `git status --short` is empty. Start a new feature without editing the coordination checkout. What exact diagnosis and remediation should the agent use before editing?",
     "tags": [
       "worktrees",
       "coordination-checkout",
@@ -271,11 +273,11 @@
       "baselineLiftThreshold": 0
     },
     "minPassRate": 1,
-    "semanticRubric": "Pass if the response applies the workflow because repository policy advertises it; proves main-checkout identity by comparing the absolute paths from `git rev-parse --git-dir` and `git rev-parse --git-common-dir`; resolves and fetches the configured upstream before classifying status; explicitly diagnoses the empty post-fetch status as Clean; verifies the repo-local `.worktrees/` path is ignored; creates the new feature branch and linked worktree from the fetched upstream tip rather than stale local HEAD; and runs setup plus baseline tests in that linked worktree before editing. Fail if it classifies before fetching, treats stale local HEAD as the branch base, edits the coordination checkout, skips the identity or ignore-safety checks, nests a worktree, or edits before entering and validating the linked worktree.",
+    "semanticRubric": "Pass if the response applies the workflow because the supplied repository policy advertises it; proves main-checkout identity by comparing the absolute paths from `git rev-parse --git-dir` and `git rev-parse --git-common-dir`; resolves and fetches the configured upstream before classifying status; explicitly diagnoses the empty post-fetch status as Clean / no genuine local work (it may call the stale-HEAD condition upstream-equivalent); proves the repo-local `.worktrees/` path is ignored (for example with `git check-ignore -q -- .worktrees`); creates the new feature branch and linked worktree from the fetched upstream tip rather than stale local HEAD; and requires the repository-defined setup plus baseline tests in that linked worktree before editing. The hypothetical prompt does not provide command names, so do not require invented commands. Fail if it classifies before fetching, treats stale local HEAD as the branch base, edits the coordination checkout, skips the identity or ignore-safety checks, nests a worktree, or edits before entering and validating the linked worktree.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Because AGENTS.md advertises the policy, compare the absolute git-dir and common-dir paths to prove this is the main checkout, resolve and fetch its configured upstream, then classify the empty post-fetch status as Clean. Verify .worktrees is ignored, create the feature branch and linked worktree from the fetched upstream tip rather than stale local HEAD, and run setup and baseline tests there before editing."
+        "Because the supplied local policy advertises the restriction, compare the absolute git-dir and common-dir paths to prove this is the main checkout, resolve and fetch its configured upstream, then classify the empty post-fetch status as Clean with no genuine local work (or upstream-equivalent). Prove .worktrees is ignored with `git check-ignore -q -- .worktrees`, create the feature branch and linked worktree from the fetched upstream tip rather than stale local HEAD, and require the repository-defined setup and baseline tests there before editing without inventing commands the hypothetical policy did not name."
       ],
       "fail": [
         "The checkout is clean, so branch from local HEAD and edit it directly; fetch can happen later."
@@ -285,7 +287,7 @@
   {
     "case_id": "worktrees-coordination-upstream-equivalent-no-op",
     "behavior": "Recognizes upstream-equivalent apparent changes in a policy-declared coordination checkout and moves feature work to a linked worktree without compounding them.",
-    "prompt": "This repository's AGENTS.md explicitly reserves its main checkout for coordination and requires feature edits in linked worktrees. We are in the main checkout, whose real index still matches stale local HEAD, and `core.filemode` is false. After fetching the configured upstream, `git status --short` still shows a modified tracked file plus a local-untracked executable that was actually added by that newer upstream commit. The effective local bytes, path types, and executable modes all match the fetched upstream tip exactly; the local main branch is merely behind. Start a new feature without losing or compounding any user work. What exact diagnosis and remediation should the agent use before editing?",
+    "prompt": "For this hypothetical repository, the applicable repository-local policy explicitly reserves its main checkout for coordination and requires feature edits in linked worktrees. We are in the main checkout, whose real index still matches stale local HEAD, and `core.filemode` is false. After fetching the configured upstream, `git status --short` still shows a modified tracked file plus a local-untracked executable that was actually added by that newer upstream commit. The effective local bytes, path types, and executable modes all match the fetched upstream tip exactly; the local main branch is merely behind. Start a new feature without losing or compounding any user work. What exact diagnosis and remediation should the agent use before editing?",
     "tags": [
       "worktrees",
       "coordination-checkout",
@@ -306,7 +308,7 @@
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Because AGENTS.md reserves the checkout, compare git-dir and common-dir, fetch the configured upstream, load its tree into a disposable alternate index, refresh that index, then force core.filemode=true for diff-files and check NUL-delimited extras against the same alternate index. This compares the upstream-added executable as tracked without touching the real stale-HEAD index. With no differences, classify the status as an upstream-equivalent no-op: do not rewrite, stage, revert, clean, or commit it. Create the feature branch and ignored linked worktree from the fetched upstream tip, then edit only there."
+        "Because the supplied local policy reserves the checkout, compare git-dir and common-dir, fetch the configured upstream, load its tree into a disposable alternate index, refresh that index, then force core.filemode=true for diff-files and check NUL-delimited extras against the same alternate index. This compares the upstream-added executable as tracked without touching the real stale-HEAD index. With no differences, classify the status as an upstream-equivalent no-op: do not rewrite, stage, revert, clean, or commit it. Create the feature branch and ignored linked worktree from the fetched upstream tip, then edit only there."
       ],
       "fail": [
         "Commit the existing changes on main first, then branch from local main and move the commit into a worktree."
@@ -316,7 +318,7 @@
   {
     "case_id": "worktrees-coordination-genuinely-dirty-preserve",
     "behavior": "Distinguishes genuine local work from fetched upstream state and routes new feature work elsewhere without altering either state.",
-    "prompt": "This repository's AGENTS.md reserves its main checkout for coordination and requires feature edits in linked worktrees. We are in that main checkout. After fetching its configured upstream, status is nonempty: one tracked executable's local mode differs from the fetched upstream tree even though `core.filemode` is false, and an extra untracked file whose name contains whitespace does not exist in that fetched tree. Start an unrelated feature. Give the complete diagnosis and remediation procedure, including the fetch step, before editing.",
+    "prompt": "For this hypothetical repository, the applicable repository-local policy reserves its main checkout for coordination and requires feature edits in linked worktrees. We are in that main checkout. After fetching its configured upstream, status is nonempty: one tracked executable's local mode differs from the fetched upstream tree even though `core.filemode` is false, and an extra untracked file whose name contains whitespace does not exist in that fetched tree. Start an unrelated feature. Give the complete diagnosis and remediation procedure, including the fetch step, before editing.",
     "tags": [
       "worktrees",
       "coordination-checkout",
@@ -337,7 +339,7 @@
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Because AGENTS.md advertises the policy, prove this is the main checkout and fetch its configured upstream. Load the fetched tree into a disposable alternate index, refresh it, force core.filemode=true for diff-files, and inspect NUL-delimited extras against that index. The mode mismatch and extra path prove genuine local work. Preserve the real index and all paths exactly; do not stage, stash, reset, clean, revert, rewrite, or include them. Create an ignored linked worktree from the fetched upstream tip and edit only there."
+        "Because the supplied local policy advertises the restriction, prove this is the main checkout and fetch its configured upstream. Load the fetched tree into a disposable alternate index, refresh it, force core.filemode=true for diff-files, and inspect NUL-delimited extras against that index. The mode mismatch and extra path prove genuine local work. Preserve the real index and all paths exactly; do not stage, stash, reset, clean, revert, rewrite, or include them. Create an ignored linked worktree from the fetched upstream tip and edit only there."
       ],
       "fail": [
         "Because core.filemode is false, ignore the mode change; stash the untracked file and create the feature branch from local HEAD."
@@ -900,7 +902,7 @@
   {
     "case_id": "development-system-setup-noop-reconciles-missing-beads",
     "behavior": "Reconciles an enabled but unavailable Beads dependency even when project policy is unchanged.",
-    "prompt": "Beads is already enabled in .development-system.toml, but a fresh Pi session says `beads: unavailable` and `spawn bd ENOENT`. `/development-system-setup --enable beads` previously returned `development_system.setup_no_changes`. The project devshell no longer supplies Beads. What should happen now, where should the binary go, and is a standalone Dolt install required?",
+    "prompt": "Beads is already enabled in .development-system.toml, but a fresh agent session says `beads: unavailable` and `spawn bd ENOENT`. `development-system setup --enable beads` previously returned `development_system.setup_no_changes`. The project devshell no longer supplies Beads. What should happen now, where should the binary go, and is a standalone Dolt install required?",
     "tags": ["setup", "beads", "dependency-reconciliation", "regression"],
     "plugins": ["development-system"],
     "skills": ["setup", "beads"],
@@ -917,11 +919,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response says an unchanged project policy must still reconcile enabled dependencies; Pi should show an explicit TUI install/update confirmation with current status, target version, ~/.local/bin destination, user-global scope, and no-sudo statement; approval installs the verified pinned bd executable without creating a tools-only repository commit; decline keeps Beads unavailable and the same setup command can retry. It must say Beads' default embedded Dolt engine does not require a standalone dolt CLI. Fail if setup_no_changes skips reconciliation, it recommends reinstalling a project devshell dependency, writes only to a private cache, installs to /usr/local/bin or uses sudo, auto-installs without approval, or requires standalone Dolt for default embedded mode.",
+    "semanticRubric": "Pass if the response says an unchanged project policy must still reconcile enabled dependencies; the setup flow should show an explicit install/update confirmation with current status, target version, ~/.local/bin destination, user-global scope, and no-sudo statement; approval installs the verified pinned bd executable without creating a tools-only repository commit; decline keeps Beads unavailable and the same setup command can retry. It must say Beads' default embedded Dolt engine does not require a standalone dolt CLI. Fail if setup_no_changes skips reconciliation, it recommends reinstalling a project devshell dependency, writes only to a private cache, installs to /usr/local/bin or uses sudo, auto-installs without approval, or requires standalone Dolt for default embedded mode.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Even though the TOML is unchanged, setup must still offer to reconcile the enabled Beads dependency. In the local TUI it should show bd's current state, pinned target, ~/.local/bin destination, user-global/no-sudo scope, then install only after approval and avoid a repository commit when only the tool changed. Declining leaves Beads unavailable; rerun `/development-system-setup --enable beads` to retry. Beads uses embedded Dolt by default, so no standalone dolt CLI is required."
+        "Even though the TOML is unchanged, setup must still offer to reconcile the enabled Beads dependency. It should show bd's current state, pinned target, ~/.local/bin destination, user-global/no-sudo scope, then install only after approval and avoid a repository commit when only the tool changed. Declining leaves Beads unavailable; rerun `development-system setup --enable beads` to retry. Beads uses embedded Dolt by default, so no standalone dolt CLI is required."
       ],
       "fail": [
         "Because Beads is already enabled, setup has nothing to do. Add bd and dolt back to the project's Nix devshell or run the package's cache launcher."

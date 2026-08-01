@@ -8,7 +8,7 @@ setup() {
   cp "$ROOT/justfile" "$TMPROOT/justfile"
   cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
-echo run >> eval-order.log
+printf 'run:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
 mkdir -p evals/out
 : > evals/out/results.json
 SH
@@ -17,7 +17,11 @@ SH
 echo share >> eval-order.log
 echo "Promptfoo share URL: https://promptfoo.example/eval/abc123"
 SH
-  chmod +x "$TMPROOT/scripts/evals/run-changed.sh" "$TMPROOT/scripts/evals/share.sh"
+  cat >"$TMPROOT/scripts/evals/run.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'all:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
+SH
+  chmod +x "$TMPROOT/scripts/evals/run-changed.sh" "$TMPROOT/scripts/evals/share.sh" "$TMPROOT/scripts/evals/run.sh"
 }
 
 teardown() {
@@ -28,14 +32,21 @@ teardown() {
   run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
 
   [ "$status" -eq 0 ]
-  [ "$(cat "$TMPROOT/eval-order.log")" = $'run\nshare' ]
+  [ "$(cat "$TMPROOT/eval-order.log")" = $'run:8\nshare' ]
   [[ "$output" == *"Promptfoo share URL: https://promptfoo.example/eval/abc123"* ]]
+}
+
+@test "just evals-all uses one provider process with the global eight-call cap" {
+  run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals-all
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TMPROOT/eval-order.log")" = "all:8" ]
 }
 
 @test "just evals shares the report before returning a failed eval status" {
   cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
-echo run >> eval-order.log
+printf 'run:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
 mkdir -p evals/out
 : > evals/out/results.json
 exit 100
@@ -45,14 +56,14 @@ SH
   run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
 
   [ "$status" -eq 100 ]
-  [ "$(cat "$TMPROOT/eval-order.log")" = $'run\nshare' ]
+  [ "$(cat "$TMPROOT/eval-order.log")" = $'run:8\nshare' ]
   [[ "$output" == *"Promptfoo share URL: https://promptfoo.example/eval/abc123"* ]]
 }
 
 @test "just evals skips share when a failed run produced no fresh artifacts" {
   cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
-echo run >> eval-order.log
+printf 'run:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
 exit 100
 SH
   chmod +x "$TMPROOT/scripts/evals/run-changed.sh"
@@ -60,14 +71,14 @@ SH
   run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
 
   [ "$status" -eq 100 ]
-  [ "$(cat "$TMPROOT/eval-order.log")" = "run" ]
+  [ "$(cat "$TMPROOT/eval-order.log")" = "run:8" ]
   [[ "$output" == *"Skipping promptfoo share because no fresh eval artifacts were generated."* ]]
 }
 
 @test "just evals does not share after user interrupt" {
   cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
-echo run >> eval-order.log
+printf 'run:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
 exit 130
 SH
   chmod +x "$TMPROOT/scripts/evals/run-changed.sh"
@@ -75,13 +86,13 @@ SH
   run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
 
   [ "$status" -eq 130 ]
-  [ "$(cat "$TMPROOT/eval-order.log")" = "run" ]
+  [ "$(cat "$TMPROOT/eval-order.log")" = "run:8" ]
 }
 
 @test "just evals does not share after eval timeout" {
   cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
-echo run >> eval-order.log
+printf 'run:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
 mkdir -p evals/out
 : > evals/out/results.json
 exit 124
@@ -91,5 +102,5 @@ SH
   run just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
 
   [ "$status" -eq 124 ]
-  [ "$(cat "$TMPROOT/eval-order.log")" = "run" ]
+  [ "$(cat "$TMPROOT/eval-order.log")" = "run:8" ]
 }

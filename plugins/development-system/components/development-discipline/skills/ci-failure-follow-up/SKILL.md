@@ -21,23 +21,62 @@ If Beads or its Dolt remote is unavailable, preserve the hold and restore shared
 coordination before pushing or rerunning. Local notes do not grant ownership.
 Never force-push task or Dolt state.
 
+Before choosing an action, inspect the exact failed job, failed step, and
+relevant logs; do not infer the cause from a workflow or job title. Record only
+a bounded, sanitized summary or authoritative-log reference, never raw logs or
+secrets.
+
 There are exactly two recovery actions:
 
-1. Push one tested causal repair whose commit message explains the diagnosed
-   failure or risk.
-2. When evidence shows the failure is unrelated or transient, rerun the exact
-   unchanged SHA without an intervening or no-op commit.
+1. Push one tested causal repair whose commit message body explains the
+   diagnosed failure or risk. If the failure is unrelated to the active ticket,
+   pause that ticket and make the repair a separate recovery scope.
+2. When concrete evidence shows the failure is unrelated or transient, rerun
+   the exact unchanged SHA without an intervening or no-op commit. Keep a
+   separate checker defect outside the active ticket; a classification or a
+   rerun request is not recovery proof.
 
-The recovery molecule records the failed SHA and run, exact job and step,
-bounded sanitized log evidence, causal explanation, classification
-(`caused`, `unrelated`, or `transient`), selected action, replacement SHA/run,
-and terminal outcome. Never persist raw logs or secrets.
+There is no diagnostic-commit path. Never push instrumentation, investigation,
+no-op, speculative, or unrelated changes while the hold exists.
 
-A failed replacement remains in the same recovery molecule and requires a new
-diagnosis and selected action. Queued, pending, running, canceled, and failed do
-not release the hold. Resolve the workflow's CI gate only for the exact
-replacement run's terminal success; then close the recovery issue, release the
-merge slot, and push Dolt state before unrelated work resumes.
+## Durable recovery record
+
+In advice, status, or handoff output, reproduce and complete this record in the
+claimed Beads `ci-recovery` molecule; do not collapse or omit a field:
+
+```text
+Recovery: <Beads ci-recovery ID>; owner=<claimed|waiting>; merge slot=<held|unavailable>
+Failure record: <failed commit SHA>; <run ID or URL>; <exact failed job>;
+  <failed step>; <bounded sanitized log summary or authoritative-log reference>
+Diagnosis: <causal explanation>; classification=<caused|unrelated|transient>;
+  <supporting evidence>
+Next action: <tested causal repair whose next pushed commit body explains the
+  diagnosis | rerun the unchanged revision without a no-op or intervening
+  commit>
+Release proof: <replacement run ID>; terminal status=<success>;
+  queued|pending|running=<still blocked>
+```
+
+Persist the record through Beads comments and the configured Dolt remote before
+ending a session or handing it off. At session entry, restart, and before later
+work or pushes, pull the shared record and inspect pushed CI runs for the active
+ticket since its first pushed commit. Any failed run without a recorded
+terminal-success replacement reconstructs the unresolved hold, even when a
+newer run is green or running. Local notes and a newer or running build never
+mask an earlier hold.
+
+If an unchanged-SHA rerun fails, it becomes the new failure record. Diagnose it
+again; its diagnosed, tested causal repair is the only permitted next push. If
+the rerun exposes a separate checker defect, make that repair a separate
+recovery scope rather than folding it into the paused active ticket. Keep the
+same claimed recovery molecule and its evidence trail; do not open a parallel
+hold merely to bypass its gate.
+
+Queued, pending, running, canceled, and failed outcomes do not release the
+hold. Resolve the workflow's CI gate only for terminal success of the exact
+final authorized replacement SHA, not a different or later revision. Then close
+the recovery issue, release the merge slot, and push Dolt state before unrelated
+work resumes.
 
 An intentional failure produced while testing an active `ci-workflow-slice` is
 related implementation evidence, not a separate recovery incident. Keep that

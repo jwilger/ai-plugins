@@ -8,7 +8,6 @@ if [[ "${DEVELOPMENT_SYSTEM_BOOTSTRAP_SKIP_NPM:-0}" != 1 ]]; then
 fi
 
 node "$root/scripts/sync-development-system-metadata.mjs" --check
-node "$root/scripts/validate-pi-package.mjs"
 
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64)
@@ -57,6 +56,5 @@ bd_bin="$(TOOL_POLICY="$tool_policy" node -e '
   printf 'development_system.tool_install_failed tools=bd\n' >&2
   exit 2
 }
-printf 'development_system.pi_bootstrap_ready pi_compatibility=%s target=%s beads=%s\n' \
-  "$(jq -r .piCompatibility "$root/plugins/development-system/package.json")" \
+printf 'development_system.bootstrap_ready target=%s beads=%s\n' \
   "$discipline_target" "$("$bd_bin" version | awk '{print $3}')"

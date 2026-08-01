@@ -4,15 +4,10 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const supportedProviders = new Set([
-  "file://scripts/evals/pi-provider.mjs",
   "anthropic:claude-agent-sdk",
   "openai:codex-sdk",
 ]);
-const supportedPluginModes = new Set([
-  "no-plugins",
-  "development-system",
-  "full-marketplace",
-]);
+const supportedPluginModes = new Set(["no-plugins", "development-system"]);
 const pluginModeOrder = ["development-system", "no-plugins"];
 const pluginNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

@@ -91,15 +91,6 @@ function manifestPlugins(file) {
     );
 }
 
-function piSupportedPlugins() {
-  const inventory = readJson(".agents/plugins/pi-support.json");
-  return inventory.packages.map((entry) => {
-    const plugin = normalizePlugin({ name: entry.name, path: entry.path });
-    const manifest = readJson(path.join(entry.path, "package.json"));
-    return { ...plugin, version: manifest.version };
-  });
-}
-
 function allMarketplacePlugins() {
   const byName = new Map();
 
@@ -211,25 +202,7 @@ ${pluginMode.id === "development-system" ? `      codex_path_override: "${path.j
         }`;
 }
 
-function piProvider(variant, pluginMode) {
-  const suffix = pluginMode.id.replaceAll("-", "_").toUpperCase();
-  return `  - id: "file://${path.join(root, "scripts/evals/pi-provider.mjs")}"
-    label: ${variant.id}-${pluginMode.id}
-    pluginMode: ${pluginMode.id}
-    providerVariant: ${variant.id}
-    config:
-      provider: openai-codex
-      model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
-      thinking: ${providerEnv(variant.reasoningEffortEnv, variant.defaultReasoningEffort)}
-      working_dir: ${quote(evalWorkspace)}
-      package_mode: ${pluginMode.id}
-      agent_dir: "{{ env.PI_EVAL_HOME_${suffix} | default('${path.join(root, `.evals/pi-home-${pluginMode.id}`)}') }}"`;
-}
-
 function providerFor(variant, pluginMode, plugins) {
-  if (variant.provider === "file://scripts/evals/pi-provider.mjs") {
-    return piProvider(variant, pluginMode);
-  }
   if (variant.provider === "anthropic:claude-agent-sdk") {
     return claudeProvider(variant, pluginMode, plugins);
   }
@@ -255,13 +228,11 @@ function pluginsForProvider(variant, pluginMode, pluginSets) {
   }
 
   const harness =
-    variant.provider === "file://scripts/evals/pi-provider.mjs"
-      ? pluginSets.pi
-      : variant.provider === "anthropic:claude-agent-sdk"
-        ? pluginSets.claude
-        : variant.provider === "openai:codex-sdk"
-          ? pluginSets.codex
-          : null;
+    variant.provider === "anthropic:claude-agent-sdk"
+      ? pluginSets.claude
+      : variant.provider === "openai:codex-sdk"
+        ? pluginSets.codex
+        : null;
   if (!harness) {
     throw new Error(`unsupported provider variant: ${variant.id}`);
   }
@@ -270,12 +241,6 @@ function pluginsForProvider(variant, pluginMode, pluginSets) {
     return harness.filter(
       (plugin) => plugin.name === developmentSystemPluginName,
     );
-  }
-  if (
-    pluginMode.id === "full-marketplace" &&
-    variant.provider === "file://scripts/evals/pi-provider.mjs"
-  ) {
-    return harness;
   }
   throw new Error(`unsupported plugin mode: ${pluginMode.id}`);
 }
@@ -339,11 +304,6 @@ function configFor(suite) {
     return selected;
   };
   const pluginSets = {
-    pi: matrix.providerVariants.some(
-      (variant) => variant.provider === "file://scripts/evals/pi-provider.mjs",
-    )
-      ? developmentSystemPlugin(piSupportedPlugins(), "Pi")
-      : [],
     claude: developmentSystemPlugin(claudePlugins, "Claude Code"),
     codex: developmentSystemPlugin(codexPlugins, "Codex"),
   };

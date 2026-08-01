@@ -10,7 +10,7 @@
 - Final review is required before a readiness claim.
 - Verification output must be fresh and relevant to the changed surfaces.
 - Commit messages explain why the change exists and use Conventional Commits.
-- After terminal delivery from a clean linked worktree, use the semantic worktree finish tool to return to primary and remove the worktree without deleting its branch.
+- Create a linked worktree only when concurrent mutable tickets need isolation. After terminal delivery, cleanup of an unused clean worktree is optional housekeeping; run repository teardown before removal and never force it.
 - Never add `Co-Authored-By` trailers.
 - An unexpected terminal pushed-CI failure creates a repository-wide Beads
   hold. One atomically claimed `ci-recovery` molecule and the project merge slot

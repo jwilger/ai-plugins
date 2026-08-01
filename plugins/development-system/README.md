@@ -1,378 +1,200 @@
 # Development System
 
-The development system is one configured development workflow for **Pi
-(primary)**, **Claude Code (secondary)**, and **Codex (tertiary)**. All harnesses
-load the same eight canonical public skills. Pi additionally loads a first-party
-TypeScript extension for deterministic status, setup, path, worktree, delivery,
-CI-recovery, retained-component, and final-review behavior.
+Development System is a configurable engineering workflow for **Codex
+(primary)** and **Claude Code (supported)**. It combines shared skills, Beads
+and Dolt task coordination, worktree guidance, final-review support, and
+optional agentic-system and eval-reporting capabilities without creating a
+separate task tracker or goal runtime.
 
-## Install in Pi
+In shell examples below, `development-system` means the plugin executable. If a
+harness does not expose it on `PATH`, use
+`<plugin-root>/bin/development-system` instead.
 
-Pi packages execute trusted code with the user's full operating-system
-permissions. Review this package and trust only a source you control.
+## Install
 
-The repository does not publish this package to npmjs.org. Existing registry
-releases are historical and are not a supported installation or update path.
-Install a reviewed repository revision directly from Git:
+### Codex
 
-```shell
-pi install git:github.com/jwilger/ai-plugins@<reviewed-commit>
-```
-
-The pinned form stays on the selected commit until its source is changed
-explicitly. The unpinned
-`pi install git:github.com/jwilger/ai-plugins` form instead opts into following
-future default-branch revisions without reviewing each one first. Update all
-unpinned Git packages, replace a pin, or remove this package with:
+Install from the GitHub marketplace source with:
 
 ```shell
-pi update --extensions
-pi install git:github.com/jwilger/ai-plugins@<new-commit>
-pi remove git:github.com/jwilger/ai-plugins
+codex plugin marketplace add jwilger/ai-plugins
+codex plugin add development-system@ai-plugins
 ```
 
-### Local checkout
+For a local checkout, use its marketplace root instead, for example
+`codex plugin marketplace add ./ai-plugins`. Codex reads this plugin's
+`.codex-plugin/plugin.json`, hooks, MCP configuration, and skills. Start a new
+thread after installation so those resources load for the target repository.
+Then open `/hooks`, inspect, and explicitly trust the current Development
+System hook definition. Repeat that review after a hook-definition or plugin
+update. Do not use `--dangerously-bypass-hook-trust` merely to skip the review.
 
-From a clean local checkout, run the reproducible bootstrap and install the
-local package:
+### Claude Code
 
-```shell
-nix develop -c scripts/bootstrap-pi-package.sh
-PI_OFFLINE=1 pi install ./plugins/development-system
+From Claude Code, add the marketplace and install the plugin:
+
+```text
+/plugin marketplace add jwilger/ai-plugins
+/plugin install development-system@ai-plugins
 ```
 
-The bootstrap restores pinned eval-tooling dependencies inside the repository,
-validates package metadata and the explicit Pi resource inventory, verifies the
-bundled final-review coordinator, and uses a compatible Beads CLI from the Nix
-shell or provisions the package-pinned release user-globally when it is absent.
-Beads includes its embedded Dolt engine; the default workflow does not install a
-standalone Dolt CLI. Pi's local-path installation
-references this package directory; it does not copy it. Pulling a package update
-therefore makes it available to the next Pi process, or to `/reload` when the
-resource is reload-safe.
-
-On first use in a project, approve Pi's project-trust prompt only after reviewing
-project-local settings and resources. Noninteractive callers must use an
-explicit trust decision; the repository eval runner uses `--approve` only for
-its owned disposable fixtures. The extension itself has full code-execution
-privileges.
-
-Remove a local-path installation with:
-
-```shell
-pi remove ./plugins/development-system
-```
-
-Use `pi list` and `pi config` to inspect or disable installed resources.
-
-### Canonical Pi support inventory
-
-This block is generated from `.agents/plugins/pi-support.json`; do not edit it
-by hand.
-
-<!-- pi-support-inventory:start -->
-
-- **development-system** (`./plugins/development-system`)
-  - extension: `./extensions/development-system/index.ts`
-  - public skills (8): `agentic-systems`, `beads`, `delivery`, `development-workflow`, `engineering-standards`, `eval-case-reporting`, `setup`, `worktrees`
-  - bundled component entry points: `./bin/development-discipline-mcp`
-
-<!-- pi-support-inventory:end -->
+For a local checkout, replace the marketplace source with the local path. See
+the repository [README](../../README.md) for the shared installation and
+integration overview.
 
 ## Configure a project
 
-Run trusted setup from the repository's primary checkout in the local Pi TUI:
-
-```text
-/development-system-setup
-/development-system-setup --delivery pull-request --enable agentic-systems
-```
-
-The command resolves the primary checkout, shows the complete dry-run preview,
-binds approval to repository identity, HEAD, tracked state, config identity,
-arguments, and preview, then rechecks that binding immediately before applying.
-Only local-TUI confirmation can mutate. RPC, print, and JSON modes stop after the
-preview with `development_system.setup_confirmation_required`.
-
-The compatible direct CLI remains:
+Setup is an explicit repository mutation. Start from the primary checkout and
+request a preview before approval:
 
 ```shell
-development-system setup --project . --preset personal-trunk --dry-run
-development-system setup --project . --preset personal-trunk --apply --yes
+development-system setup --project <repo> --preset personal-trunk --dry-run
 ```
 
-Initial setup delegates to the compatible CLI. Updating an existing policy
-patches only explicitly requested delivery or feature fields, preserving every
-unspecified value, review route, comment, and formatting choice. Both initial
-and update paths reject linked checkouts and roll back the file and index if
-their bound commit fails.
+After the owner reviews the preview, repeat with `--apply --yes` to write the
+policy and initialize enabled capabilities. The default is direct-to-trunk
+delivery with `worktrees` and `beads` enabled. Configuration lives in
+`.development-system.toml`.
 
-The delivery formula classifies each slice before implementation. Runtime
-behavior uses `behavior-slice`: an executable acceptance test fails first,
-scenario steps proceed one at a time, and ambiguous failures attach focused
-`unit-tdd-cycle` molecules. Focused tests run during each micro-cycle; the full
-configured local test gate runs once the behavior slice is green, immediately
-before its commit and push checkpoint. Prose-only work uses
-`documentation-slice` without invented tests. CI-only changes use
-`ci-workflow-slice`, where static checks are preflight and the pushed workflow
-run is the behavioral test. Non-runtime metadata and configuration use
-`validation-only-slice` with causal validators.
-
-When worktrees are enabled, the primary checkout remains coordination-only for
-tracked changes and commits, but ordinary Git inspection, exploration, tests,
-and builds remain available there. Direct `read`, `write`, and `edit` boundaries
-still protect metadata, secrets, outside paths, and primary-checkout writes;
-obvious filesystem mutation and Git index/history mutation remain blocked from
-primary-checkout shell calls. Worktree mutation is blocked except for the
-narrowly parsed repository-local `git worktree add <root>/<name> -b <branch>`
-compatibility form documented below.
-
-Use `development_system_worktree_list` to inspect canonical paths and branches,
-`development_system_worktree_create` with a repository-local name and new branch
-to bootstrap work, and `development_system_worktree_switch` for an existing
-worktree. These tools persist a session-level logical workspace while Pi's host
-cwd and conversation remain in the coordination checkout. The supported mutable
-`tool_call` event resolves relative read/write/edit/grep/find/ls paths inside the
-logical workspace and prefixes every built-in shell call with an independently
-quoted `cd -- <logical-workspace> &&`. Status, policy, guards, review children,
-and bridged component tools use the same authority. TUI, JSON, print, and RPC
-modes therefore need no relaunch or private slash-command handoff. The manual
-commands remain available for interactive selection:
-
-```text
-/development-system-worktree-switch
-/development-system-worktree-switch feat/my-change
+```shell
+development-system setup --project <repo> --preset personal-trunk \
+  --delivery direct-to-trunk \
+  --enable worktrees --enable beads
 ```
 
-After verified delivery is complete, call
-`development_system_worktree_finish`. It verifies that the current logical
-linked worktree is clean, persists primary logical routing before teardown,
-runs an executable repository `scripts/worktree-teardown.sh` when present, and
-removes the worktree without deleting its branch. Dirty worktrees, detached or
-changed Git identities, and ignored state outside known generated cache paths
-are preserved with an actionable error. Generated cache roots are excluded at
-the Git pathspec boundary and the first remaining ignored path is streamed with
-strict output bounds, so multi-gigabyte caches cannot overflow child-process
-buffers. The corresponding manual command is
-`/development-system-worktree-finish`.
-
-The operating-system process cwd remains unchanged. Session state restores the
-latest logical workspace only while its canonical repository registration and
-branch identity still match; stale state falls back safely and reports a typed
-warning. Absolute file paths outside the logical workspace remain blocked.
-Shell routing establishes the starting directory and retains the existing
-observable mutation/delivery guards, but it is not presented as a sandbox
-against deliberately hostile same-UID programs. Sessions launched by the older
-session-replacement design from inside a linked worktree must start Pi from
-primary once before removing that host worktree; finish reports
-`development_system.worktree_finish_host_checkout_migration_required` and
-preserves it rather than deleting the process's configured cwd.
-
-The semantic worktree tools reject malformed refs, option-like values,
-traversal, control characters, configured-root and target symlink escapes, and
-path or branch collisions. Activation revalidates canonical registration and
-branch identity. Failure leaves the prior logical authority active and emits no
-model-visible private transition command.
-
-Creation is queued per repository and reconciles external races without
-deleting existing branches, directories, worktrees, or user content. A narrowly
-parsed compatibility
-`git worktree add <root>/<name> -b <branch>` form remains available, but
-additional options, start points, chaining, and later primary-checkout mutation
-remain blocked.
-
-`.development-system.toml` remains authoritative. The default preset is
-direct-to-trunk delivery with linked worktrees and Beads backed by its embedded
-Dolt engine. `bin/tool-releases.json` is the single policy for every
-external binary managed on behalf of enabled capabilities; Git and `tar` remain
-host prerequisites. The current managed dependency is Beads `bd 1.1.2`.
-Standalone Dolt is unnecessary unless the user explicitly configures server
-mode or direct database administration.
-
-At startup and during setup, a missing, invalid, or outdated managed dependency
-produces an explicit local-TUI offer. The confirmation shows current status,
-target version, `~/.local/bin`, user-global scope, and that no sudo is required.
-Approval downloads only the pinned HTTPS archive, enforces time and size bounds,
-verifies SHA-256, installs with executable permissions and atomic replacement,
-and verifies the installed version. This follows Beads' official release and
-checksum semantics while pinning the digest in the package manifest. It never
-pipes a mutable installer into a shell, invokes Dolt's root-only installer, or
-uses sudo. A failed update preserves the previous working binary. Declining
-leaves the capability unavailable; rerun
-`/development-system-setup --enable beads` to reopen the offer.
-
-Dependency reconciliation runs even when the requested project policy is
-unchanged. A tools-only setup reports configuration and installation outcomes
-separately and makes no repository commit. The running extension immediately
-prepends the user-global directory for child processes. If the inherited shell
-`PATH` omitted it, setup reports the exact
-`export PATH="$HOME/.local/bin:$PATH"` action and asks the user to restart the
-shell. Package launchers remain fail-closed adapters to a compatible ambient or
-user-global binary; they do not make a cache-private installation satisfy setup.
-After tool reconciliation, setup initializes Beads without competing Git or
-harness hooks, installs repository formulas under `.beads/formulas/`, and
-selects `[beads].workflow`. Optional features are `agentic-systems` and
+Available delivery modes are `direct-to-trunk`, `pull-request`, and
+`local-only`. Optional capabilities are `agentic-systems` and
 `eval-case-reporting`.
 
-Schema-version 2 replaces Tiber policy with Beads policy. Legacy projects use
-`development-system migrate-tiber-to-beads --dry-run`, review the conversion,
-then apply it from the primary checkout with `--apply --yes` and optional
-`--push` for the Dolt remote. The migration preserves historical state and
-original task references. Optional Pi final-review routes use:
+When Beads is enabled, setup handles the plugin's supported `bd` dependency
+only after explicit approval. It uses Beads' embedded Dolt store by default, so
+a standalone `dolt` CLI is unnecessary unless the owner deliberately chooses
+server-mode or direct database administration.
 
-```toml
-[pi.review_models]
-bounded_helper = "openai-codex/gpt-5.6-luna"
-substantive_worker = "openai-codex/gpt-5.6-terra"
-strong_reviewer = "openai-codex/gpt-5.6-sol"
-strong_worker = "openai-codex/gpt-5.6-sol"
-```
+## Work types, tickets, goals, and worktrees
 
-## Autonomous goals
+Questions and read-only investigation require neither a ticket nor a worktree.
+Do not create workflow state just to answer, inspect, explain, or review.
 
-Pi owns one session-branch-scoped autonomous goal at a time:
+For planned mutable delivery work, Beads is the sole task and workflow
+authority:
 
-```text
-/goal
-/goal status
-/goal [--tokens 200k] [--turns 25|unlimited] <objective>
-/goal pause
-/goal resume [--tokens 300k] [--turns 10|unlimited]
-/goal clear
-```
+1. Find ready work deterministically and claim it atomically.
+2. Pour and follow the delivery formula selected by `[beads].workflow`.
+3. Classify each slice as behavior, documentation, CI-workflow, or
+   validation-only, and collect the causal evidence for that slice.
+4. Record durable delivery evidence in Beads before closing the relevant work.
 
-The default is 25 automatic responses. `unlimited` must be explicit; an optional
-token budget uses provider-reported usage and may overshoot by one call. Goals
-pause rather than claim success at response, token, repeated-output, provider,
-interruption, restricted-terminal-tool, or collision boundaries. Resume rotates
-the goal ID and safety epoch while retaining consumed token usage. State is
-stored only in Pi custom entries on the current session branch, so reopening that
-session restores it while a new session does not inherit it.
+Goals are native to the active harness. Development System does not add an
+independent goal command, session store, or automatic continuation loop. Use
+the harness' own goal handling and create Beads work only when the task needs
+durable mutable-delivery coordination.
 
-Only `goal_complete` with the exact current goal ID and direct completion and
-verification evidence can complete a goal. `goal_blocked` requires the same
-external blocker across at least three attempts and concrete evidence that user
-or external action is required. Plain assistant text, stale turns, delayed
-continuations, difficulty, incomplete work, and recoverable failures cannot
-terminate successfully. A stale terminal call reports the current non-secret
-goal ID, guard epoch, state, consumed bounds, and
-`development_system_goal_status` refresh/retry path instead of creating a stale
-loop. Continuations are extension-authored custom messages dispatched only
-after Pi's settled and idle boundary.
+One mutable ticket may use its current checkout. Create a linked worktree only
+when separate mutable tickets are active concurrently across sessions, agents,
+or subagents. Do not create a worktree for ordinary read-only work, and do not
+create nested worktrees.
 
-## Status and diagnostics
+The active harness owns worktree creation, switching, and cleanup. This
+repository still supplies the worktree bootstrap and teardown boundary: its
+post-checkout hook bootstraps a linked checkout, and a clean, no-longer-needed
+checkout can be prepared with `just worktree-teardown <path>` before the owner
+or harness removes it. Cleanup is housekeeping, not a delivery condition; never
+force removal of a dirty, detached, identity-changed, or valuable worktree.
 
-Use `/development-system-status` in Pi. Headless callers use the deterministic
-non-model entry point:
+## Optional integrations
+
+Use the integration guide before discussing any user-scoped installation:
 
 ```shell
-plugins/development-system/bin/development-system-pi status \
-  --project . --mode json
+development-system integrations --harness <all|codex|claude>
 ```
 
-Status reports configuration presence, delivery mode, enabled features, primary
-or linked checkout identity, bundled component availability, active mode
-limitations, and actionable typed errors. Startup runs the same compatibility
-doctor used by the existing harness hooks, scoped to the harness that is
-starting so another harness's configuration cannot produce warnings. A
-model-callable read-only status tool returns only a concise task-facing summary
-by default.
+The command is read-only. It reports the integration contract and owner
+handoff; it does not execute installers, modify harness settings, or read or
+write credentials.
 
-`development_system_policy_read` is the narrow reader for the authoritative
-protected policy. `development_system_pi_reference` pages through an allowlist
-of installed Pi references without opening arbitrary outside-path reads.
-Registered-worktree status commands and the checkout guard script are admitted
-as bounded discovery. When a linked logical workspace is active, repository
-mutations, status, guards, review children, and bridged component tools are all
-routed through that authority rather than Pi's immutable host cwd.
-Fresh review children stream a bounded, redacted progress projection while they
-run. Parent tool rows show lifecycle state, heartbeat-updated elapsed time,
-aggregate turn/tool counts, active-tool count, and a known built-in tool name or
-a generic first-party/extension category. Parallel tools remain active until
-their matching completion event. The projection retains at most 20 synthetic
-events and never includes the assignment, model text, thinking, arbitrary tool
-names, tool arguments, paths, tool results, stderr, environment, auth state, or
-a raw child transcript. Event-driven parent updates are coalesced to at most
-four per second, with a final forced snapshot at process close.
-Final results and structured cancellation, timeout, provider, output-limit,
-spawn, or malformed-result failures include the same bounded progress snapshot.
-Pressing Escape interrupts the parent tool call. Cancellation and timeout send
-`SIGTERM`, escalate a resistant process group to `SIGKILL`, and wait for the
-child close boundary before reporting failure. Successful and provider-failed
-root exits also check the process group and close any retained descendants
-before returning or attesting closure. The default timeout remains ten minutes.
+### Beads
 
-The implementation uses Pi's JSON lifecycle stream and adds no third-party
-runtime dependency. The repository's
-[sourced design comparison](https://github.com/jwilger/ai-plugins/blob/main/docs/research/pi-subagent-observability.md)
-records the selected reference and supply-chain analysis.
+Beads hooks are plugin-owned and run only when the target project explicitly
+enables Beads. Do not add duplicate user hooks. Claude Code loads Beads context
+at session start, while Codex uses the plugin-owned lifecycle hooks to preserve
+and refresh it. After Codex installation or an update, inspect and explicitly
+trust the current plugin hook definition through `/hooks`.
 
-## Capability matrix
+### Context7
 
-| Capability                          | Pi (primary)                                                          | Claude Code (secondary)       | Codex (tertiary)              |
-| ----------------------------------- | --------------------------------------------------------------------- | ----------------------------- | ----------------------------- |
-| Eight shared public skills          | Canonical files                                                       | Same canonical files          | Same canonical files          |
-| Setup/doctor core                   | Native command/tool and CLI                                           | Hook/CLI adapter              | Hook/CLI adapter              |
-| Trusted consequential approval      | Local TUI, preview-bound                                              | Unavailable                   | Unavailable                   |
-| Bounded autonomous goal mode        | Session-scoped `/goal` with guarded terminal tools                    | Unavailable                   | Unavailable                   |
-| Worktree discovery/bootstrap        | Semantic list/create plus session-persistent logical routing          | Hook/skill adapter            | Hook/skill adapter            |
-| Generic write/edit worktree guard   | Extension event-enforced                                              | Hook-enforced where supported | Hook-enforced where supported |
-| Default model bash guard            | Extension event-enforced in TUI/print/JSON model-tool paths           | Instruction/hook boundary     | Instruction/hook boundary     |
-| Direct RPC bash                     | Unsupported for guarded execution                                     | N/A                           | N/A                           |
-| Protected metadata/secret paths     | Guarded built-in path tools; search output mediated                   | Instruction/hook limits       | Instruction/hook limits       |
-| Delivery-mode and force-push policy | Extension event-enforced                                              | Hook/command-enforced         | Hook/command-enforced         |
-| Beads CI-recovery hold              | Beads context plus claimed `ci-recovery` molecule and merge slot      | Same shared Beads state       | Same shared Beads state       |
-| Beads task/workflow integration     | Direct `bd` CLI, `bd prime`, formulas, and Dolt                       | Direct CLI and session hook   | Direct CLI and compact hooks  |
-| Final-review coordinator            | Native Pi bridge to authoritative Rust MCP                            | Plugin MCP                    | Plugin MCP                    |
-| Fresh final-review children         | Isolated children with redacted live progress and failure diagnostics | Harness agents                | Harness agents                |
-| Agent definitions                   | Canonical source with generated adapter                               | Generated Markdown            | Generated TOML                |
+Install Context7 only through the official marketplace commands for the
+selected harness, after the owner reviews and approves the adjunct plugin. No
+Context7 key is bundled or written by Development System. If the chosen Context7
+configuration requires a key, the owner supplies `CONTEXT7_API_KEY` privately
+through their environment or the official configuration flow.
 
-The populated-secret claim covers the characterized built-in guarded tool
-composition. It does not claim protection from an intentionally unmediated
-shell command, third-party tool, owner bypass, or malicious same-UID process.
-Unknown extension tools visibly downgrade the guarded-composition status.
+### Hindsight
 
-## Supported targets and compatibility
+For Claude Code, the owner may install Hindsight through its official
+marketplace listing. For Codex, Hindsight requires its official interactive
+installer or manual configuration because the owner must choose the storage
+mode and configure credentials. Upstream publishes it as
+`curl -fsSL https://hindsight.vectorize.io/get-codex | bash`, but do not execute
+that direct pipeline: fetch it to a temporary file, inspect it, and separately
+approve its execution. An agent must not run the installer on the owner's
+behalf.
 
-The package supports Pi `>=0.82.0 <0.83.0` and release canaries pin Pi `0.82.1`.
-The bundled development-discipline binary and the pinned Beads release are verified for:
+The Codex installer overwrites `~/.codex/hooks.json`, and its `--uninstall`
+mode deletes that file. Before installing it, back up any existing hooks file,
+then review the generated replacement and merge the Hindsight hooks with
+backed-up non-Beads shared hooks into a combined file. Omit legacy `bd`/Beads
+lifecycle entries: Development System is their sole owner. Review and
+explicitly trust the resulting Hindsight user-hook definitions through
+`/hooks`. Do not run Hindsight's uninstaller when the file contains Beads or
+other shared hooks; preserve the backup and manually remove only the Hindsight
+entries instead.
 
-- x86_64 Linux;
-- aarch64 Linux;
-- x86_64 macOS; and
-- Apple-silicon macOS.
+Before installing either Hindsight integration, make an explicit decision about
+what session material may be retained, the memory-bank scope, retention policy,
+and any cloud-versus-local storage choice. Development System embeds no
+Hindsight key, token, configuration, retention setting, or memory bank.
 
-Other targets return `development_system.unsupported_platform` before component
-invocation. Cargo fallback is development-only and is not part of installed
-package behavior.
+## Diagnostics
+
+The plugin's compatibility check is scoped to the selected harness:
+
+```shell
+development-system doctor --project <repo> --harness <all|codex|claude>
+```
+
+It can identify conflicting enabled plugins, incompatible hook settings, and
+user-managed MCP configuration that needs review. It does not silently alter
+those settings.
+
+## Included surfaces
+
+The shared public skills are:
+
+- `agentic-systems`
+- `beads`
+- `delivery`
+- `development-workflow`
+- `engineering-standards`
+- `eval-case-reporting`
+- `setup`
+- `worktrees`
+
+The plugin also carries the development-discipline review component, advisor,
+agentic-systems-engineering, eval-case reporting, delivery formulas, and the
+Codex and Claude Code adapter metadata needed to expose those surfaces.
 
 ## Contributor sources and validation
 
-Canonical sources are:
-
-- package version and Pi resources: `package.json` and
-  `.agents/plugins/pi-support.json`;
-- shared skill prose: `skills/*/SKILL.md`;
-- extension semantics: `extensions/development-system/core/`;
-- harness/process adapters: `extensions/development-system/adapters/`;
-- review agents: `components/development-discipline/agent-sources/review-agents.json`;
-- retained review authority: the development-discipline Rust component;
-- task and workflow authority: Beads formulas plus the external pinned `bd` CLI
-  and Dolt state.
-
-Regenerate or validate adapters with:
+The Codex plugin manifest is the canonical version source. Run
+`node scripts/sync-development-system-metadata.mjs --write` after a required
+version bump to synchronize the Claude manifest, marketplace entries, cache
+launchers, and catalog row. Validate the resulting marketplace and Markdown
+before delivery:
 
 ```shell
-node scripts/sync-development-system-metadata.mjs --write
-node scripts/generate-development-system-agents.mjs --write
-node scripts/generate-pi-support-docs.mjs --write
 node scripts/sync-development-system-metadata.mjs --check
-node scripts/generate-development-system-agents.mjs --check
-node scripts/generate-pi-support-docs.mjs --check
-just pi-extension
-just pi-worktree-tui-live-eval
-just pi-clean-canary
+prettier --check "**/*.{json,md}"
+just ci
 ```
-
-Generated agent Markdown/TOML files carry no independent semantic authority.
-Do not edit them without regenerating their canonical source.

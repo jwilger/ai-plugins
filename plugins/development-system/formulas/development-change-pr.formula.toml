@@ -80,6 +80,6 @@ timeout = "1h"
 
 [[steps]]
 id = "finish"
-title = "Close work and clean the linked worktree"
+title = "Close work"
 needs = ["prove-post-merge-ci"]
-description = "Close the work item with evidence, commit and push Dolt state, then use the development-system semantic worktree finish operation."
+description = "Close the work item with evidence and commit and push Dolt state. A linked worktree is only needed for concurrent mutable tickets; clean one up separately only when it was created solely for that isolation and is no longer in use."

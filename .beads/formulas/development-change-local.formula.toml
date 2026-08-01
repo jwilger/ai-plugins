@@ -46,4 +46,4 @@ description = "Record the final local commit SHA and explicitly state that no br
 id = "finish"
 title = "Close local work"
 needs = ["record-local-delivery"]
-description = "Close the work item with evidence and commit local Dolt state. Preserve the linked worktree unless the user explicitly authorizes its cleanup under local-only policy."
+description = "Close the work item with evidence and commit local Dolt state. A linked worktree is only needed for concurrent mutable tickets; clean one up separately only when it was created solely for that isolation and is no longer in use."

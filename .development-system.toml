@@ -11,6 +11,7 @@ agentic_systems = true
 eval_case_reporting = true
 
 [worktrees]
+mode = "concurrent-tickets"
 root = ".worktrees"
 
 [beads]

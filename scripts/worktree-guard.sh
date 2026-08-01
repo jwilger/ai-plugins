@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
-# Block commits and pushes from the main checkout. Linked worktrees are allowed.
+# Retired compatibility shim for previously installed managed Git hooks.
+#
+# Linked worktrees are now used only to isolate concurrent mutable tickets, so
+# the primary checkout is no longer universally guarded. The hook installer
+# removes the old managed pre-commit and pre-push launchers on its next run.
 set -euo pipefail
 
-[ "${AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN:-}" != worktree-guard ] || exit 0
-
-git_dir="$(cd "$(git rev-parse --git-dir)" && pwd -P)"
-common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
-
-if [ "$git_dir" = "$common_dir" ]; then
-  echo "worktrees: commits and pushes from the main checkout are blocked; use a linked worktree." >&2
-  exit 1
-fi
+# Deliberately do nothing: this file keeps a checkout usable between upgrading
+# tracked files and rerunning `just worktree-hooks`.

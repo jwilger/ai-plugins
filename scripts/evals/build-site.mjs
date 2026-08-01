@@ -35,14 +35,9 @@ function readArtifact(file) {
         const providerVariant =
           testCase.provider_variant ||
           testCase.providerVariant ||
-          String(provider).replace(
-            /-(no-plugins|development-system|full-marketplace)$/,
-            "",
-          );
+          String(provider).replace(/-(no-plugins|development-system)$/, "");
         const pluginMode =
-          String(provider).match(
-            /(no-plugins|development-system|full-marketplace)$/,
-          )?.[1] ||
+          String(provider).match(/(no-plugins|development-system)$/)?.[1] ||
           testCase.plugin_mode ||
           testCase.pluginMode ||
           "unknown";
@@ -170,10 +165,9 @@ function isProviderUnavailable(reason) {
 }
 
 function providerOrder(providerVariant) {
-  if (String(providerVariant).startsWith("pi-")) return 0;
-  if (String(providerVariant).startsWith("claude-")) return 1;
-  if (String(providerVariant).startsWith("codex-")) return 2;
-  return 3;
+  if (String(providerVariant).startsWith("claude-")) return 0;
+  if (String(providerVariant).startsWith("codex-")) return 1;
+  return 2;
 }
 
 function providerSort(left, right, leftSuffix = "", rightSuffix = "") {

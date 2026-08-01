@@ -4,13 +4,14 @@ import path from "node:path";
 import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "..");
-const packageFile = path.join(root, "plugins/development-system/package.json");
-const packageMetadata = JSON.parse(fs.readFileSync(packageFile, "utf8"));
-const expectedVersion = packageMetadata.version;
+const canonicalManifestFile = path.join(
+  root,
+  "plugins/development-system/.codex-plugin/plugin.json",
+);
+const canonicalManifest = JSON.parse(fs.readFileSync(canonicalManifestFile, "utf8"));
+const expectedVersion = canonicalManifest.version;
 const targets = [
-  ["package.json", (value) => value],
   ["plugins/development-system/.claude-plugin/plugin.json", (value) => value],
-  ["plugins/development-system/.codex-plugin/plugin.json", (value) => value],
   [
     ".claude-plugin/marketplace.json",
     (value) =>

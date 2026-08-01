@@ -309,9 +309,7 @@ JSON
   run node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-no-plugins"* ]]
-  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-development-system"* ]]
-  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-full-marketplace"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 4 ]
   [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
   [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]
@@ -319,7 +317,8 @@ JSON
   [[ "$output" == *"pluginMode: no-plugins"* ]]
   [[ "$output" == *"pluginMode: development-system"* ]]
   [[ "$output" != *"targeted-plugins"* ]]
-  [[ "$output" == *"pluginMode: full-marketplace"* ]]
+  [[ "$output" != *"pi-provider.mjs"* ]]
+  [[ "$output" != *"pluginMode: full-marketplace"* ]]
   [[ "$output" == *"load-harness-cases.cjs?pluginMode={{ provider.pluginMode }}"* ]]
 }
 
@@ -328,12 +327,12 @@ JSON
     node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 7 ]
-  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-full-marketplace"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 4 ]
   [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
   [[ "$output" == *"CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM"* ]]
   [[ "$output" != *"targeted-plugins"* ]]
-  [[ "$output" == *"pluginMode: full-marketplace"* ]]
+  [[ "$output" != *"pi-provider.mjs"* ]]
+  [[ "$output" != *"pluginMode: full-marketplace"* ]]
 }
 
 @test "generated metadata records exact filtered provider plugin compositions" {

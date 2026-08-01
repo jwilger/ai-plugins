@@ -13,8 +13,6 @@ changed files between REF and HEAD. The default REF is origin/main.
 
 Selection rules:
   shared skill prose     matching behavior cases, all supported harnesses, k=1
-  Pi package/runtime     targeted Pi installed-package canary
-  Pi guard/runtime       executable Pi guard outcome scenarios
   docs/tests/other code  no provider-backed eval
 
 Use scripts/evals/run.sh directly with explicit case/provider filters for a
@@ -58,43 +56,40 @@ if [ "${#changed[@]}" -eq 0 ]; then
 fi
 
 skill_names=()
-pi_package=0
-pi_guards=0
-pi_goal=0
-pi_worktree_tui=0
 for file in "${changed[@]}"; do
   case "$file" in
     plugins/development-system/skills/*/SKILL.md)
       skill="${file#plugins/development-system/skills/}"
       skill_names+=("${skill%%/*}")
       ;;
-    package.json | .agents/plugins/pi-support.json | plugins/development-system/package.json | plugins/development-system/extensions/* | plugins/development-system/bin/development-system-pi | scripts/bootstrap-pi-package.sh | scripts/pi-package-canary.mjs | scripts/validate-pi-package.mjs | scripts/evals/pi-provider.mjs | scripts/evals/prepare-pi-home.mjs | scripts/evals/provider-compositions.mjs | scripts/evals/generate-config.mjs)
-      pi_package=1
-      ;;
-  esac
-  case "$file" in
-    plugins/development-system/extensions/development-system/core/guards.ts | plugins/development-system/extensions/development-system/adapters/ci-hold.ts)
-      pi_guards=1
-      ;;
-    plugins/development-system/extensions/development-system/index.ts | plugins/development-system/extensions/development-system/adapters/logical-workspace.ts | plugins/development-system/extensions/development-system/adapters/worktrees.ts | plugins/development-system/extensions/development-system/core/worktrees.ts | plugins/development-system/skills/worktrees/SKILL.md | plugins/development-system/skills/delivery/SKILL.md | scripts/evals/run-pi-worktree-tui-scenario.mjs)
-      pi_worktree_tui=1
-      ;;
-    plugins/development-system/extensions/development-system/core/goal.ts | plugins/development-system/extensions/development-system/adapters/goal-mode.ts)
-      pi_goal=1
-      ;;
-    scripts/evals/run-pi-guard-scenarios.mjs)
-      pi_guards=1
-      pi_goal=1
-      ;;
   esac
 done
 
 ran=0
 if [ "${#skill_names[@]}" -gt 0 ]; then
-  skills_json="$(printf '%s\n' "${skill_names[@]}" | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))')"
-  mapfile -t case_ids < <(jq -r --argjson skills "$skills_json" '
-    .[] | select(any(.skills[]?; . as $skill | $skills | index($skill))) | .case_id
-  ' evals/fixtures/agentic-systems-engineering/cases.json)
+  mapfile -t skill_names < <(printf '%s\n' "${skill_names[@]}" | LC_ALL=C sort -u)
+  skills_json="$(printf '%s\n' "${skill_names[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+
+  behavior_fixture_files=()
+  if [ -d evals/fixtures/behavior ]; then
+    mapfile -t behavior_fixture_files < <(
+      find evals/fixtures/behavior -type f -name '*.json' -print | LC_ALL=C sort
+    )
+  fi
+
+  case_ids=()
+  if [ "${#behavior_fixture_files[@]}" -gt 0 ]; then
+    mapfile -t case_ids < <(
+      jq -r --argjson skills "$skills_json" '
+        (if type == "array" then . else .cases end)[]?
+        | select(
+            any(.plugins[]?; . == "development-system")
+            and any(.skills[]?; . as $skill | $skills | index($skill))
+          )
+        | .case_id
+      ' "${behavior_fixture_files[@]}" | LC_ALL=C sort -u
+    )
+  fi
   if [ "${#case_ids[@]}" -gt 0 ]; then
     case_filter="^($(IFS='|'; echo "${case_ids[*]}"))$"
     echo "eval scope: shared skills [$(IFS=,; echo "${skill_names[*]}")] -> cases [$(( ${#case_ids[@]} ))], all supported harnesses, one sample"
@@ -105,38 +100,6 @@ if [ "${#skill_names[@]}" -gt 0 ]; then
   else
     echo "eval scope: changed shared skills have no mapped provider-backed behavior cases"
   fi
-fi
-
-if [ "$pi_package" -eq 1 ]; then
-  echo "eval scope: Pi package/runtime -> installed development-system canary, one sample"
-  if [ "$dry_run" -eq 0 ]; then
-    EVAL_PROVIDER_FILTER=pi-openai-gpt-5.6-terra EVAL_SAMPLES=1 scripts/evals/run.sh --suite canary
-  fi
-  ran=1
-fi
-
-if [ "$pi_guards" -eq 1 ]; then
-  echo "eval scope: Pi guard/runtime -> executable baseline, worktree, and delivery outcomes"
-  if [ "$dry_run" -eq 0 ]; then
-    node scripts/evals/run-pi-guard-scenarios.mjs --scenario guards
-  fi
-  ran=1
-fi
-
-if [ "$pi_worktree_tui" -eq 1 ]; then
-  echo "eval scope: Pi logical workspace -> provider-backed real local-TUI trajectory"
-  if [ "$dry_run" -eq 0 ]; then
-    node scripts/evals/run-pi-worktree-tui-scenario.mjs --live-tool
-  fi
-  ran=1
-fi
-
-if [ "$pi_goal" -eq 1 ]; then
-  echo "eval scope: Pi autonomous goal -> settled continuation and guarded completion outcome"
-  if [ "$dry_run" -eq 0 ]; then
-    node scripts/evals/run-pi-guard-scenarios.mjs --scenario goal
-  fi
-  ran=1
 fi
 
 if [ "$ran" -eq 0 ]; then

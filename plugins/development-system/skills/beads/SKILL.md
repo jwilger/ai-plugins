@@ -9,14 +9,31 @@ Require `[features].beads = true` in `.development-system.toml`. Use the `bd`
 CLI directly with `--json`; do not add an MCP layer when shell access exists.
 Run `bd prime` for the installed version's canonical workflow guidance.
 
+When this plugin is installed, it owns the harness lifecycle hooks. Do not add
+duplicates through `bd setup` or user configuration: Claude Code runs
+`bd prime --hook-json` at `SessionStart`; Codex runs `bd codex-hook` at
+`SessionStart`, `PreCompact`, `PostCompact`, and `UserPromptSubmit`. Inspect
+`development-system integrations --harness claude|codex` to verify the exact
+contract without changing either harness.
+
 Beads uses its embedded Dolt backend by default; normal operation does not need
 a standalone `dolt` CLI. Initialize only from the primary checkout through the
 development-system setup flow. Normal linked worktrees share that Beads
 workspace. Commit task changes through Dolt and push them with `bd dolt push`
 when a remote is configured; JSONL is migration/interchange data, not sync. If
-`bd` is missing or outdated, use `/development-system-setup --enable beads` to
+`bd` is missing or outdated, use `development-system setup --enable beads` to
 reopen the explicit user-global installation offer rather than adding Beads to
-a project devshell.
+a project devshell. That offer must show the current status, pinned target,
+`~/.local/bin` user-global destination, and no-sudo guarantee; install only
+after approval, verify the pinned executable, keep a tools-only result free of
+repository commits, and leave Beads unavailable when declined so the same
+command can retry. When answering that unavailable-enabled regression, state
+both outcomes rather than only giving the setup command: approval installs the
+verified pinned executable with unchanged project policy; decline changes
+nothing and the same command reopens the offer. Do not compress the offer to
+"a pinned executable": enumerate `bd: unavailable`, the target version
+(currently `1.1.2`), `~/.local/bin`, `user-global` scope, and `no sudo` in the
+answer so the owner can audit the proposed user-scoped change.
 
 For ready work, filter blocked issues first and choose deterministically by:
 priority ascending, creation time ascending, then issue ID ascending. Claim the
@@ -62,7 +79,14 @@ and push its checkpoint according to delivery policy.
 Documentation and validation-only slices do not invent tests. They run only
 causal format, schema, link, build, package, integrity, or generation checks.
 A CI workflow slice runs available static validation, pushes an authorized test
-SHA, and treats the resulting CI run as the behavioral test.
+SHA, and treats the resulting CI run as the behavioral test. Only terminal
+success for the exact final authorized SHA closes the slice; an earlier test
+SHA, another revision, or a queued, pending, running, canceled, or failed run
+does not satisfy its gate.
+
+An intentionally failing hosted run is intermediate evidence: iterate from its
+run evidence, push a new authorized test SHA for each causal correction, and
+close only after the exact final authorized SHA reaches terminal success.
 
 Record commands, outcomes, commit SHAs, and run URLs in Beads comments before
 closing workflow steps. Formula dependencies define the ready phase; do not

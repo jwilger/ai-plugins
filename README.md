@@ -1,305 +1,205 @@
 # ai-plugins
 
-A **multi-harness marketplace of AI coding-assistant plugins** for
-[Pi](https://pi.dev), [Claude Code](https://code.claude.com), and
-[Codex](https://openai.com/codex/) from one canonical package tree.
+A multi-harness marketplace of AI coding-assistant plugins, with **Codex as the
+primary harness** and **Claude Code supported** from the same plugin tree.
 
-## Personal development system
+## Development system
 
-This marketplace has one audience and one installable plugin:
-[`development-system`](plugins/development-system/README.md). Pi is the primary
-recommended surface, Claude Code is secondary, and Codex is tertiary. They use
-one project configuration and the same eight physical skill files.
+This marketplace currently ships one installable plugin:
+[`development-system`](plugins/development-system/README.md). It provides a
+configured development workflow, engineering standards, review support, Beads
+task coordination, and optional agentic-system and eval-reporting capabilities.
+Codex and Claude Code load the same public skills and project policy.
 
-The default preset is direct-to-trunk delivery with linked worktrees and Beads
-using its Dolt backend. Development-system installs delivery, behavior-driven
-testing, documentation, CI-workflow, validation-only, and CI-recovery formulas.
-Optional agentic-system and eval-reporting capabilities are selected in
-`.development-system.toml`; the plugin owns its final-review MCP surface while
-Beads is driven directly through `bd`.
+The default preset is direct-to-trunk delivery with Beads backed by its embedded
+Dolt store. The plugin supplies delivery, behavior, documentation, CI-workflow,
+validation-only, and CI-recovery formulas; `.development-system.toml` selects
+the enabled capabilities and delivery mode.
 
-The strong recommendation is to install only `development-system`. Additional
-plugin marketplaces expand the supply-chain trust surface. Each SessionStart
-hook warns only about conflicting plugins, incompatible settings, and
-user-managed MCPs for the harness that is starting.
+### Workflow at a glance
+
+- Questions and read-only investigation need neither a Beads ticket nor a
+  worktree.
+- For planned mutable delivery work, use Beads as the task and workflow
+  authority. Claim work atomically and follow the configured delivery formula.
+- One mutable ticket may use its existing checkout. Create a linked worktree
+  only when concurrent mutable tickets need isolation across sessions, agents,
+  or subagents.
+- Goals remain native to the active harness. Development-system does not create
+  a second cross-harness goal state or continuation driver.
+- The active harness owns worktree creation, switching, and cleanup. Repository
+  bootstrap and teardown scripts remain available around a linked worktree when
+  it is used.
 
 ## Plugin catalog
 
-| Plugin                                                     | Harnesses              | Description                                                         | Version |
-| ---------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Pi, Claude Code, Codex | One configurable development workflow with deterministic Pi guards. | 1.14.0  |
+| Plugin                                                     | Harnesses          | Description                                                | Version |
+| ---------------------------------------------------------- | ------------------ | ---------------------------------------------------------- | ------- |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with Beads and Dolt. | 2.0.0   |
 
-## Using the package (Pi — primary)
+## Install development-system
 
-Pi packages execute trusted extension code with the user's full permissions.
-Review an exact repository commit, then install that reviewed revision directly
-from Git:
+### Codex (primary)
+
+Codex-facing marketplace metadata is in
+[`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json), and the
+plugin manifest is at
+[`plugins/development-system/.codex-plugin/plugin.json`](plugins/development-system/.codex-plugin/plugin.json).
+To install from the GitHub marketplace source, run:
 
 ```shell
-pi install git:github.com/jwilger/ai-plugins@<reviewed-commit>
+codex plugin marketplace add jwilger/ai-plugins
+codex plugin add development-system@ai-plugins
 ```
 
-To opt into following future default-branch revisions without reviewing each
-one first, use `pi install git:github.com/jwilger/ai-plugins`. For development
-from a local checkout, run the clean bootstrap and install the package
-subdirectory:
+For a local checkout, replace the first source with its marketplace root, for
+example `codex plugin marketplace add ./ai-plugins`. Start a new Codex thread
+after installation so its hooks and skills load for the target repository. Then
+open `/hooks`, inspect, and explicitly trust the current Development System
+hook definition. Repeat that review after a hook-definition or plugin update.
+Do not use `--dangerously-bypass-hook-trust` merely to skip the review.
 
-```shell
-nix develop -c scripts/bootstrap-pi-package.sh
-pi install ./plugins/development-system
-```
+### Claude Code
 
-See the [development-system guide](plugins/development-system/README.md) for
-local installation, project trust, setup, updates, status, target support,
-capability differences, and removal.
+Add the marketplace, then install the plugin from inside Claude Code:
 
-## Validating the Pi package
-
-This repository does not publish `@jwilger/development-system-pi` to npmjs.org.
-Registry releases, publication tags, and automated release-version commits are
-not part of the supported lifecycle. The checked-in package remains an
-npm-format artifact because Pi uses its manifest and resource inventory for
-local installation.
-
-CI validates both the package payload and an exact pack, extract, and load
-canary. Run the same provider-free checks locally:
-
-```shell
-nix develop -c just npm-package
-nix develop -c just npm-package-canary
-```
-
-## Using the marketplace (Claude Code — secondary)
-
-Add this repository as a marketplace, then install a plugin from it:
-
-```shell
-# From inside Claude Code:
-/plugin marketplace add jwilger/ai-plugins      # GitHub owner/repo shorthand
-# ...or a local checkout:
-/plugin marketplace add ./ai-plugins
-
+```text
+/plugin marketplace add jwilger/ai-plugins
 /plugin install development-system@ai-plugins
 ```
 
-The marketplace is referenced by its **name** (`ai-plugins`) in install
-commands, regardless of the URL you added it from. List and manage with
-`/plugin list`, `/plugin marketplace update ai-plugins`, and
-`/plugin marketplace remove ai-plugins`.
+For a local checkout, use its path in the marketplace-add command. The
+marketplace name remains `ai-plugins` in the install command.
 
-## Using the marketplace (Codex — tertiary)
+After either installation, begin from the target repository's primary checkout
+and use the setup skill or a dry-run setup preview before approving repository
+mutations. The plugin guide describes the workflow in detail.
 
-Codex-facing marketplace metadata lives in
-[`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json), and each
-plugin has a `.codex-plugin/plugin.json` manifest. In a local checkout, install
-or sync the plugin from the matching directory under [`plugins/`](plugins/)
-using the Codex plugin flow available in your Codex environment.
+## Optional integrations are owner-operated
 
-Install `development-system` from the local marketplace, then start a new
-thread and run its setup skill from the target repository's primary checkout.
-
-## Developing in this repo
-
-A [Nix flake](flake.nix) provides a reproducible devshell with Node, npm, `jq`,
-`prettier`, `ripgrep`, `fd`, `just`, and `bats`.
+Before considering adjunct integrations, use the read-only handoff guide:
 
 ```shell
-nix develop        # enter the devshell
-# or, with direnv:
-echo "use flake" > .envrc && direnv allow
+development-system integrations --harness <all|codex|claude>
 ```
 
-Any **globally installed** npm tooling (`npm install -g …`) is redirected into a
-git-ignored `./.dependencies/` directory by the devshell, so it never pollutes
-your home directory. Delete that directory any time for a clean slate.
+If the harness does not expose the plugin executable on `PATH`, invoke the same
+command as `<plugin-root>/bin/development-system integrations …`.
 
-The root `package.json` is the lightweight Pi Git-package facade. Promptfoo and
-its optional coding-harness provider SDKs are pinned separately in
-`tooling/evals/package.json` and `tooling/evals/package-lock.json`. Their
-`node_modules/` tree is ignored and exposed through a generated root symlink so
-existing module-resolution paths remain stable; the eval scripts restore it
-automatically when dependencies are missing.
+It reports the ownership boundaries and the official installation path; it does
+not download software, run an installer, alter harness configuration, or read
+or write credentials.
 
-See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
+- **Beads:** lifecycle hooks are plugin-owned and only run for a project that
+  explicitly enables Beads. Do not add duplicate user hooks. On Codex, trust
+  the plugin's current hook definition through `/hooks` after installation or
+  an update.
+- **Context7:** install it only through its official marketplace commands for
+  the selected harness. Where Context7 asks for a key, the owner supplies
+  `CONTEXT7_API_KEY` through their private environment or official
+  configuration; no key is embedded in this marketplace.
+- **Hindsight for Claude Code:** the owner may install the official Hindsight
+  marketplace plugin after reviewing it.
+- **Hindsight for Codex:** use Hindsight's official interactive installer or
+  manual configuration. Upstream publishes `curl -fsSL
+https://hindsight.vectorize.io/get-codex | bash`, but do not execute that
+  direct pipeline: fetch the installer to a temporary file, inspect it, and
+  separately approve execution. The installer overwrites
+  `~/.codex/hooks.json`, so first back up any existing file, then merge the
+  generated Hindsight hooks with backed-up non-Beads shared hooks. Omit legacy
+  `bd`/Beads lifecycle entries: Development System is their sole owner. Review
+  and explicitly trust the resulting Hindsight user-hook definitions through
+  `/hooks`. Do not use its `--uninstall` mode when shared hooks exist because
+  it deletes the file; preserve the backup and manually remove only Hindsight's
+  entries. Do not have an agent execute the installer. The owner chooses cloud
+  or local storage and supplies credentials privately.
+
+No integration keys, tokens, retention settings, or memory-bank configuration
+are embedded in development-system. Before enabling Hindsight, the owner must
+make explicit decisions about what may be retained, the memory-bank scope, and
+the retention policy.
+
+## Developing in this repository
+
+A [Nix flake](flake.nix) provides a reproducible devshell with Node, npm, `jq`,
+`prettier`, `ripgrep`, `fd`, `just`, `bats`, Lefthook, and `bd`.
+
+```shell
+nix develop
+```
+
+Any npm tooling installed globally inside the devshell goes to the ignored
+`./.dependencies/` directory rather than the user's home directory. Promptfoo
+and the optional Codex and Claude evaluation SDKs are pinned in
+[`tooling/evals/package.json`](tooling/evals/package.json) and its lockfile.
+The eval scripts restore their ignored dependency tree when needed.
+
+See [`AGENTS.md`](AGENTS.md) for repository workflow, plugin authoring,
+validation, and delivery guidance.
 
 ## Eval reports
 
-The repo-owned eval dashboard is generated under `site/evals/` by
-`node scripts/evals/build-site.mjs`. It is a local/static artifact for review
-and workflow uploads; the durable record is repo-owned and does not depend on
-promptfoo-hosted sharing.
+The repository-owned evaluation dashboard is generated under `site/evals/` by
+`node scripts/evals/build-site.mjs`. It records the latest provider, case,
+sample, installed composition, and target plugin/skill results without relying
+on hosted report storage.
 
-Local runs reuse existing Pi/OpenAI, Claude Code/Anthropic, and Codex/ChatGPT
-subscription sessions. They do not require provider API keys or fresh approval for the
-repository-owned evals authorized in [`AGENTS.md`](AGENTS.md). Unattended trusted
-automation may instead use protected provider credentials when interactive
-harness sessions are unavailable; untrusted pull-request checks remain
-secret-free and validate only the eval configuration and dry-run wiring.
-
-The dashboard includes latest-run status, provider/case/sample pass rates,
-threshold status, exact installed provider compositions, and separate
-case-target plugin/skill summaries so regressions can be traced back to both the
-loaded marketplace surface and the behavior each scenario exercises.
-
-The canonical Promptfoo behavior evals use a repository-owned Pi JSON provider,
-`anthropic:claude-agent-sdk` for Claude Code, and `openai:codex-sdk` for Codex.
-Pi has no-package, targeted development-system, and inventory-derived full
-marketplace conditions. Claude Code and Codex retain no-plugin and installed
-`development-system` conditions. Claude's
-condition is prepared through the real marketplace installer and then loaded
-from its installed cache path; Codex also uses the real marketplace installer
-to populate an isolated generated home and plugin cache. Claude subscription
-authentication reads the current access token into the eval process while
-leaving the rotating refresh token in the owner's normal config. Neither
-condition copies credentials, and both use disposable runtime config; API-key
-or explicit-token runs use the same isolation. The live
-runner also requires the plugin's SessionStart hook to execute.
-The generated config records each provider's installed composition separately
-from the plugins and skills targeted by an individual case.
-Pi is pinned at `0.82.1` and Promptfoo is pinned at `0.121.19`;
-the Promptfoo, Codex SDK, and Claude Agent SDK packages are pinned in
-`tooling/evals/package.json` and `tooling/evals/package-lock.json`. The runner disables prompt response
-caching and hosted sharing so a behavior run is a fresh local record.
-
-Default eval harness posture:
-
-- Pi: `openai-codex/gpt-5.6-terra` at medium reasoning through the owner's
-  ChatGPT subscription. Each package condition has a disposable, single-writer
-  Pi home; only the OpenAI auth entry is copied with mode 0600, extension source
-  provenance is required, source auth integrity is checked, and copied stores
-  are deleted after execution.
-- Claude Code: `anthropic:claude-agent-sdk`, Sonnet 5 via the `sonnet` alias,
-  local Claude Code authentication via `apiKeyRequired: false`, and all local
-  `development-system` skills via `skills: all`. The intended human-facing Claude Code posture
-  remains Sonnet high effort with Opus 4.8 advisor where that harness exposes
-  those controls; Promptfoo's current Claude Agent SDK provider does not expose
-  those knobs in this repo's generated config.
-- Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with
-  `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
-  deep tracing disabled, and isolated generated homes containing either no
-  plugins or the installed `development-system` plugin.
-  Model-graded assertions independently default to
-  `gpt-5.6-sol` with high reasoning through the same SDK, so OpenAI model access
-  goes through local Codex auth rather than `OPENAI_API_KEY`. Override the two
-  roles separately with `CODEX_EVAL_MODEL` / `CODEX_EVAL_REASONING_EFFORT` and
-  `CODEX_GRADER_MODEL` / `CODEX_GRADER_REASONING_EFFORT`.
-
-The focused [GPT-5.6 model-family benchmark](evals/benchmarks/gpt-5.6-model-family/README.md)
-compares Sol, Terra, and Luna without running the full behavior eval suite.
-Its trace-enforced Codex app-server wrapper and installed-development-system /
-no-plugin homes are benchmark controls; the canonical behavior runner above
-continues to use the native Codex SDK provider and the configured behavior-mode
-matrix.
-
-The canary suite is separate from behavior evals. Canaries may explicitly ask
-the harness to prove plugin and skill loading. Behavior prompts stay natural and
-do not tell the model to use this repository's plugins.
-
-Repeated samples are a deliberate measurement choice, not a blanket rule. Use
-more distinct cases when estimating population quality; use repeated samples
-when measuring per-input reliability, pass@k capability, pass^k reliability, or
-small stochastic differences. Changed-surface release evidence defaults to one
-sample; increase `EVAL_SAMPLES` only when a named reliability or variance metric
-requires repetition. PR dry-runs do not run live samples.
-
-Pull-request CI validates the eval configuration with `--dry-run` but does not
-claim behavior evidence. Provider-backed behavior evidence comes from trusted
-runs where Pi, Claude Code, and Codex subscription authentication is available.
+Canonical behavior evaluation uses the Claude Agent SDK and Codex SDK with
+isolated no-plugin and installed-development-system conditions. The runner
+reuses an existing Claude Code or Codex subscription session when available;
+untrusted pull-request checks remain secret-free and run only configuration and
+dry-run validation.
 
 Provider-backed evaluation is change-scoped by default:
 
 ```shell
-just evals  # maps the origin/main diff to affected cases/harnesses, then shares
-EVAL_BASE_REF=<ref> nix develop -c scripts/evals/run-changed.sh
-EVAL_CASE_FILTER='<case>' EVAL_PROVIDER_FILTER='<provider>' EVAL_SAMPLES=1 \
-  nix develop -c scripts/evals/run.sh
+just evals
+EVAL_BASE_REF=<ref> scripts/evals/run-changed.sh
+EVAL_CASE_FILTER='<case-regex>' EVAL_PROVIDER_FILTER='<provider>' EVAL_SAMPLES=1 \
+  scripts/evals/run.sh
 nix develop -c node scripts/evals/build-site.mjs
 ```
 
-Shared skill changes select only mapped cases across supported harnesses. Pi
-package changes select the Pi installed-package canary; Pi guard changes also
-run executable tool/outcome scenarios. Documentation and unrelated code select
-no live eval. `just evals-all` is an explicit exhaustive research experiment,
-never the normal completion gate.
+Shared skill changes select only their mapped cases across Codex and Claude
+Code. Plugin, hook, or harness behavior selects the relevant installed-plugin
+canary or outcome scenario; documentation and unrelated implementation changes
+select no live evaluation. `just evals-all` is an explicit research experiment,
+not a routine completion gate.
 
-Eval runs are time-bounded by default: 90 minutes for an explicitly exhaustive
-behavior suite and 20 minutes for focused, filtered, or canary runs. Override with
-`EVAL_TIMEOUT`, or adjust the default classes with `EVAL_TIMEOUT_FULL_DEFAULT`
-and `EVAL_TIMEOUT_FOCUSED_DEFAULT`. Timed-out or interrupted runs write
-`evals/out/status.json` so the dashboard can show why no fresh result completed.
+`just evals` runs its change-selected scope in one Promptfoo process with a
+global cap of eight target calls. It preserves the existing Claude Code and
+Codex condition-specific homes, writes the normal one-report artifact set under
+`evals/out/`, and shares that report after a completed or non-interrupted run.
+The cap is global rather than a guaranteed four-per-provider split, and semantic
+rubric grading still uses Codex as additional provider traffic.
 
-`just evals` uploads a fresh selected Promptfoo result through `promptfoo share`.
-For a local-only report, run the selected `scripts/evals/run.sh` command and then
-`nix develop -c node_modules/.bin/promptfoo view`. If a behavior eval exits
-with Promptfoo's normal failure status after writing artifacts, `just evals`
-still attempts to share the report and then returns the original eval status. If
-the eval run is interrupted, terminated, or times out, `just evals` stops
-without sharing. Interrupted, terminated, and timed-out runs all retain any
-partial artifacts under
-`evals/out/timeout-artifacts/` for debugging.
-
-Codex users who install `agentic-systems-engineering` also get an optional
-Promptfoo MCP server (`promptfoo mcp --transport stdio`). Consuming projects
-must provide `promptfoo@0.121.18` on `PATH`; when the project uses `flake.nix`,
-prefer `pkgs.promptfoo` when nixpkgs provides the required version so updates
-flow through the flake lockfile, otherwise use the project's local
-package-manager sandbox. Use it for agent-assisted config validation, focused
-eval runs, result inspection, and fixture development. It supplements the
-canonical runner; it does not replace the repo-owned artifact path above.
-Promptfoo's separate `mcp` provider is for testing MCP servers as systems under
-test and should be added only when a plugin or project exposes an MCP server to
-evaluate.
-
-If Codex reports `No such file or directory` for the optional `promptfoo` MCP
-client at startup, upgrade or reinstall the marketplace plugin so Codex loads a
-current `agentic-systems-engineering` component. Beads is intentionally not an
-MCP server in this marketplace. When Beads is enabled, development-system checks
-the manifest-pinned `bd` version and offers a confirmed, no-sudo installation or
-update in `~/.local/bin`; plugin hooks then load `bd prime` directly. Beads uses
-its embedded Dolt engine by default, so a standalone `dolt` CLI is unnecessary
-unless the user explicitly configures server mode or direct database work.
+Use repeated samples only for a named reliability, pass@k, pass^k, or judge
+variance metric. Prefer more distinct cases when measuring population quality.
 
 ## Reporting eval cases
 
-When a plugin, skill, prompt, or workflow behaves incorrectly or only partially
-works, file an **Eval case** issue in this repository. Eval cases are the intake
-path for future regression fixtures in `evals/fixtures/`.
-
-Include the sanitized input, actual behavior, expected behavior, expected eval
-outcome (`pass`, `fail`, `partial`, `adversarial`, or `unsure`), and the
-assertion or rubric that would catch the behavior. Do not include secrets,
-credentials, auth headers, cookies, session ids, private keys, private client
-data, private repository names, internal hostnames, or raw proprietary source
-excerpts.
+When a plugin, skill, prompt, or workflow behaves incorrectly or only partly
+works, file an **Eval case** issue for a future regression fixture. Include
+sanitized input, actual and expected behavior, expected outcome, and the
+assertion or rubric that would detect it. Never include credentials, session
+material, private client data, private repository names, internal hostnames, or
+raw proprietary excerpts.
 
 ## Repository layout
 
 ```text
 .
-├── .agents/
-│   └── plugins/
-│       └── marketplace.json  # Codex-facing marketplace manifest
-├── .claude-plugin/
-│   └── marketplace.json      # Claude Code marketplace manifest
-├── .github/
-│   ├── ISSUE_TEMPLATE/       # eval-case intake form
-│   └── workflows/            # CI and eval workflows
-├── docs/
-│   └── superpowers/plans/    # implementation plans for larger changes
-├── evals/
-│   ├── fixtures/             # behavior eval scenarios
-│   └── promptfoo/            # promptfoo loaders and assertions
-├── plugins/                  # one subdirectory per plugin
-├── scripts/
-│   ├── evals/                # eval config generator, runner, and dashboard builder
-│   └── tests/                # Bats tests
-├── site/
-│   └── evals/                # generated dashboard target, ignored except .gitkeep
-├── flake.nix                 # Nix devshell
-├── AGENTS.md                 # guidance for AI agents working in this repo
+├── .agents/plugins/          # Codex marketplace metadata
+├── .claude-plugin/           # Claude Code marketplace metadata
+├── docs/                     # ADRs, research, and plans
+├── evals/                    # behavior fixtures and promptfoo support
+├── plugins/                  # one directory per plugin
+├── scripts/                  # validation, worktree, and eval helpers
+├── tooling/evals/            # pinned eval dependencies
+├── AGENTS.md                 # repository guidance
 └── README.md                 # this file
 ```
 
 ## License
 
-See the plugin for its license.
+See the plugin manifest for its license.

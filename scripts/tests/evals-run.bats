@@ -20,6 +20,46 @@ copy_eval_runner() {
     "${destination%/*}/provider-compositions.mjs"
 }
 
+make_fake_codex_cli() {
+  local fake_codex="$1"
+  cat >"$fake_codex" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "$*" in
+  "plugin marketplace add "*" --json")
+    mkdir -p "$CODEX_HOME"
+    printf '%s\n' \
+      '[marketplaces.ai-plugins]' \
+      'source_type = "local"' \
+      "source = \"$CODEX_CLI_PLUGIN_ROOT\"" \
+      >"$CODEX_HOME/config.toml"
+    printf '{"marketplaceName":"ai-plugins"}\n'
+    ;;
+  "plugin add development-system@ai-plugins --json")
+    version="$(jq -r '.version' "$CODEX_CLI_PLUGIN_ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+    installed="$CODEX_HOME/plugins/cache/ai-plugins/development-system/$version"
+    mkdir -p "$installed"
+    cp -R "$CODEX_CLI_PLUGIN_ROOT/plugins/development-system/." "$installed/"
+    printf '%s\n' \
+      '' \
+      '[plugins."development-system@ai-plugins"]' \
+      'enabled = true' \
+      >>"$CODEX_HOME/config.toml"
+    printf '{"pluginId":"development-system@ai-plugins","installedPath":"%s"}\n' "$installed"
+    ;;
+  "plugin list --json")
+    printf '{"installed":[{"pluginId":"development-system@ai-plugins","installed":true,"enabled":true}],"available":[]}\n'
+    ;;
+  *)
+    printf 'unexpected fake Codex CLI arguments: %s\n' "$*" >&2
+    exit 64
+    ;;
+esac
+SH
+  chmod +x "$fake_codex"
+}
+
 teardown() {
   [ -z "$SIGNAL_EVAL_PGID" ] || kill -KILL -- "-$SIGNAL_EVAL_PGID" 2>/dev/null || true
   if [ -n "$SIGNAL_RUNNER_PID" ]; then
@@ -41,16 +81,18 @@ teardown() {
   [[ "$output" == *"Codex:       provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium"* ]]
   [[ "$output" == *"CODEX_GRADER_MODEL            (default: gpt-5.6-sol)"* ]]
   [[ "$output" == *"CODEX_GRADER_REASONING_EFFORT (default: high)"* ]]
-  [[ "$output" == *"Pi is tested with no package, development-system, and the full Pi support inventory"* ]]
+  [[ "$output" == *"Claude Code and Codex retain isolated no-plugin and development-system conditions"* ]]
   [[ "$output" == *"Pinned eval packages are managed by tooling/evals/package.json"* ]]
   [[ "$output" == *"tooling/evals/package-lock.json"* ]]
   [[ "$output" == *"@openai/codex-sdk"* ]]
   [[ "$output" == *"@anthropic-ai/claude-agent-sdk"* ]]
-  [[ "$output" == *"Local runs reuse existing Pi/OpenAI, Claude Code/Anthropic, and Codex/ChatGPT subscription sessions"* ]]
+  [[ "$output" == *"Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"* ]]
+  [[ "$output" != *"PI_EVAL"* ]]
+  [[ "$output" != *"openai-codex auth is copied"* ]]
   [[ "$output" == *"They do not require provider API keys or fresh approval for repository-owned evals"* ]]
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
   [[ "$output" == *"EVAL_PROVIDER_FILTER"* ]]
-  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-2; default: 1)"* ]]
+  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-8; default: 1; global target-call cap)"* ]]
   [[ "$output" == *"EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)"* ]]
@@ -85,11 +127,16 @@ teardown() {
   [[ "$output" == *"$ROOT/.evals/codex-home-development-system"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
 }
 
-@test "eval runner rejects concurrency above the canonical cap before printing a Promptfoo launch" {
-  run env PROMPTFOO_MAX_CONCURRENCY=3 "$RUNNER" --dry-run
+@test "eval runner permits eight concurrent target calls and rejects values above that cap" {
+  run env PROMPTFOO_MAX_CONCURRENCY=8 "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--max-concurrency 8"* ]]
+
+  run env PROMPTFOO_MAX_CONCURRENCY=9 "$RUNNER" --dry-run
 
   [ "$status" -eq 2 ]
-  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY must be 1 or 2; got 3"* ]]
+  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY must be an integer from 1 through 8; got 9"* ]]
   [[ "$output" != *"promptfoo eval"* ]]
 }
 
@@ -340,15 +387,14 @@ SH
   [[ "$output" == *"prepare-codex-home.mjs"*"--plugin-mode no-plugins"* ]]
   [[ "$output" == *"prepare-claude-home.mjs"*"--plugin-mode development-system"* ]]
   [[ "$output" == *"prepare-claude-home.mjs"*"--plugin-mode no-plugins"* ]]
-  [[ "$output" == *"prepare-pi-home.mjs"*"no-plugins"* ]]
-  [[ "$output" == *"prepare-pi-home.mjs"*"development-system"* ]]
-  [[ "$output" == *"prepare-pi-home.mjs"*"full-marketplace"* ]]
+  [[ "$output" != *"prepare-pi-home.mjs"* ]]
   [[ "$output" != *"targeted-plugins"* ]]
 }
 
 @test "eval runner prepares a focused Codex development-system home" {
   fixture_root="$(mktemp -d)"
   fake_promptfoo="$fixture_root/promptfoo"
+  fake_codex="$fixture_root/codex"
   development_system_home="$fixture_root/codex-development-system"
   cat >"$fake_promptfoo" <<'SH'
 #!/usr/bin/env bash
@@ -356,6 +402,7 @@ set -euo pipefail
 touch "$CODEX_EVAL_SESSION_START_MARKER"
 SH
   chmod +x "$fake_promptfoo"
+  make_fake_codex_cli "$fake_codex"
 
   run env \
     OPENAI_API_KEY=fixture \
@@ -368,6 +415,9 @@ SH
     CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-none" \
     CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
+    CODEX_EVAL_REAL_BIN="$fake_codex" \
+    CODEX_EVAL_CODEX_BIN="$fake_codex" \
+    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
     "$RUNNER"
 
   [ "$status" -eq 0 ]
@@ -384,6 +434,7 @@ SH
   auth_home="$fixture_root/auth"
   claude_home="$fixture_root/claude-development-system"
   fake_claude="$fixture_root/claude"
+  fake_codex="$fixture_root/codex"
   fake_promptfoo="$fixture_root/promptfoo"
   mkdir -p "$auth_home"
   expires_at_ms="$((($(date +%s) + 3600) * 1000))"
@@ -425,6 +476,7 @@ set -euo pipefail
 touch "$CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE"
 SH
   chmod +x "$fake_claude" "$fake_promptfoo"
+  make_fake_codex_cli "$fake_codex"
   plugin_version="$(jq -r '.version' "$ROOT/plugins/development-system/.claude-plugin/plugin.json")"
 
   run env \
@@ -439,6 +491,9 @@ SH
     EVAL_OUT_DIR="$fixture_root/out" \
     EVAL_PROVIDER_FILTER=claude-code-sonnet-development-system \
     EVAL_TIMEOUT=0 \
+    CODEX_EVAL_REAL_BIN="$fake_codex" \
+    CODEX_EVAL_CODEX_BIN="$fake_codex" \
+    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
     "$RUNNER"
 
   [ "$status" -eq 0 ]
@@ -451,6 +506,7 @@ SH
 @test "eval runner preserves a missing SessionStart marker failure after thresholds pass" {
   fixture_root="$(mktemp -d)"
   fake_promptfoo="$fixture_root/promptfoo"
+  fake_codex="$fixture_root/codex"
   development_system_home="$fixture_root/codex-development-system"
   cat >"$fake_promptfoo" <<'SH'
 #!/usr/bin/env bash
@@ -474,6 +530,7 @@ cat >"$EVAL_OUT_DIR/results.json" <<'JSON'
 JSON
 SH
   chmod +x "$fake_promptfoo"
+  make_fake_codex_cli "$fake_codex"
 
   run env \
     OPENAI_API_KEY=fixture \
@@ -484,6 +541,9 @@ SH
     CODEX_EVAL_HOME="$development_system_home" \
     CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
     CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
+    CODEX_EVAL_REAL_BIN="$fake_codex" \
+    CODEX_EVAL_CODEX_BIN="$fake_codex" \
+    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
     "$RUNNER"
 
   [ "$status" -ne 0 ]
@@ -550,10 +610,12 @@ SH
 @test "eval runner ignores overlapping homes for unselected Codex modes" {
   fixture_root="$(mktemp -d)"
   fake_promptfoo="$fixture_root/promptfoo"
+  fake_codex="$fixture_root/codex"
   shared_home="$fixture_root/shared-home"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_promptfoo"
   printf '#!/usr/bin/env bash\nset -euo pipefail\ntouch "$CODEX_EVAL_SESSION_START_MARKER"\n' >"$fake_promptfoo"
   chmod +x "$fake_promptfoo"
+  make_fake_codex_cli "$fake_codex"
 
   run env \
     OPENAI_API_KEY=fixture \
@@ -565,6 +627,9 @@ SH
     CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$shared_home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$shared_home" \
     CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
+    CODEX_EVAL_REAL_BIN="$fake_codex" \
+    CODEX_EVAL_CODEX_BIN="$fake_codex" \
+    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
     "$RUNNER"
 
   [ "$status" -eq 0 ]
@@ -897,6 +962,7 @@ SH
 
 @test "eval runner writes generated runtime filter options for real generated runs" {
   fixture_bin="$(mktemp -d)"
+  fake_codex="$fixture_bin/codex"
   mkdir -p "$fixture_bin"
   cat >"$fixture_bin/promptfoo" <<'SH'
 #!/usr/bin/env bash
@@ -904,6 +970,7 @@ set -euo pipefail
 cat evals/out/generated/runtime-options.json
 SH
   chmod +x "$fixture_bin/promptfoo"
+  make_fake_codex_cli "$fake_codex"
 
   run env \
     PROMPTFOO_BIN="$fixture_bin/promptfoo" \
@@ -912,6 +979,9 @@ SH
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_bin/codex-none" \
     EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-no-plugins \
     EVAL_CASE_FILTER=beads \
+    CODEX_EVAL_REAL_BIN="$fake_codex" \
+    CODEX_EVAL_CODEX_BIN="$fake_codex" \
+    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
     "$RUNNER"
 
   rm -rf "$fixture_bin"
@@ -923,6 +993,7 @@ SH
 @test "eval runner filtered samples use the runtime loader in an isolated output directory" {
   fixture_root="$(mktemp -d)"
   isolated_out="$fixture_root/isolated-output"
+  fake_codex="$fixture_root/codex"
   mkdir -p "$fixture_root/bin"
   cat >"$fixture_root/bin/promptfoo" <<'SH'
 #!/usr/bin/env bash
@@ -941,6 +1012,7 @@ grep -F "tests: file://$runtime_loader" "$config"
 cat "$EVAL_OUT_DIR/generated/runtime-options.json"
 SH
   chmod +x "$fixture_root/bin/promptfoo"
+  make_fake_codex_cli "$fake_codex"
 
   run env \
     PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
@@ -951,6 +1023,9 @@ SH
     EVAL_OUT_DIR="$isolated_out" \
     EVAL_CASE_FILTER=beads \
     EVAL_SAMPLES=2 \
+    CODEX_EVAL_REAL_BIN="$fake_codex" \
+    CODEX_EVAL_CODEX_BIN="$fake_codex" \
+    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
     "$RUNNER"
 
   rm -rf "$fixture_root"
@@ -1078,6 +1153,40 @@ SH
   [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "interrupted" ]
   [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval was interrupted before completion with status 130" ]
   [[ "$output" != *"Eval thresholds passed"* ]]
+  rm -rf "$fixture_root"
+}
+
+@test "eval runner does not report missing SessionStart hooks after an interrupted generated eval" {
+  fixture_root="$(mktemp -d)"
+  fake_promptfoo="$fixture_root/promptfoo"
+  fake_codex="$fixture_root/codex"
+  cat >"$fake_promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 130
+SH
+  chmod +x "$fake_promptfoo"
+  make_fake_codex_cli "$fake_codex"
+
+  run env \
+    OPENAI_API_KEY=fixture \
+    PROMPTFOO_BIN="$fake_promptfoo" \
+    EVAL_OUT_DIR="$fixture_root/out" \
+    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-development-system \
+    EVAL_TIMEOUT=0 \
+    CODEX_EVAL_HOME="$fixture_root/codex-development-system" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$fixture_root/codex-development-system" \
+    CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-no-plugins" \
+    CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
+    CODEX_EVAL_REAL_BIN="$fake_codex" \
+    CODEX_EVAL_CODEX_BIN="$fake_codex" \
+    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
+    "$RUNNER"
+
+  [ "$status" -eq 130 ]
+  [[ "$output" == *"promptfoo eval was interrupted before completion with status 130"* ]]
+  [[ "$output" != *"SessionStart hook did not run"* ]]
+
   rm -rf "$fixture_root"
 }
 

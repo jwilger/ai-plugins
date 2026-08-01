@@ -69,8 +69,27 @@ function loadBehaviorCases(options = {}) {
 function selectedBehaviorCases(options = {}) {
   const cases = loadBehaviorCases(options);
   const caseFilter = options.caseFilter;
-  const selected = caseFilter
-    ? cases.filter((testCase) => testCase.case_id.includes(caseFilter))
+  let caseFilterPattern;
+
+  if (caseFilter) {
+    if (typeof caseFilter !== "string") {
+      throw new Error(
+        `behavior case filter must be a string, received ${JSON.stringify(caseFilter)}`,
+      );
+    }
+
+    try {
+      caseFilterPattern = new RegExp(caseFilter);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `invalid behavior case filter regex ${JSON.stringify(caseFilter)}: ${reason}`,
+      );
+    }
+  }
+
+  const selected = caseFilterPattern
+    ? cases.filter((testCase) => caseFilterPattern.test(testCase.case_id))
     : cases;
 
   if (selected.length === 0) {

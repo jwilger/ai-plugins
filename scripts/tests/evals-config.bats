@@ -121,11 +121,12 @@ MD
   [[ "$output" == *"load-harness-cases.cjs"* ]]
 }
 
-@test "behavior eval matrix adds full marketplace only for Pi" {
+@test "behavior eval matrix keeps isolated Claude Code and Codex conditions" {
   run jq -e '
-    [.pluginModes[].id] == ["no-plugins", "development-system", "full-marketplace"] and
-    (.providerVariants[] | select(.id | startswith("pi-")) | .pluginModes) == ["no-plugins", "development-system", "full-marketplace"] and
-    all(.providerVariants[] | select(.id | startswith("pi-") | not); .pluginModes == ["no-plugins", "development-system"])
+    [.pluginModes[].id] == ["no-plugins", "development-system"] and
+    [.providerVariants[].id] == ["claude-code-sonnet", "codex-gpt-5.6-terra"] and
+    all(.providerVariants[]; .pluginModes == ["no-plugins", "development-system"]) and
+    all(.providerVariants[]; .provider == "anthropic:claude-agent-sdk" or .provider == "openai:codex-sdk")
   ' "$ROOT/evals/matrix.json"
 
   [ "$status" -eq 0 ]
@@ -135,16 +136,14 @@ MD
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 7 ]
-  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-no-plugins"* ]]
-  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-development-system"* ]]
-  [[ "$output" == *"label: pi-openai-gpt-5.6-terra-full-marketplace"* ]]
+  [ "$(printf '%s\n' "$output" | grep -c '^    label: ')" -eq 4 ]
   [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
   [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-development-system"* ]]
   [[ "$output" != *"targeted-plugins"* ]]
-  [[ "$output" == *"full-marketplace"* ]]
+  [[ "$output" != *"pi-provider.mjs"* ]]
+  [[ "$output" != *"full-marketplace"* ]]
   [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/"* ]]
   [[ "$output" != *"path: \"$ROOT/plugins/development-system\""* ]]
 }
@@ -250,7 +249,7 @@ JSON
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  version="$(jq -r '.version' "$ROOT/plugins/development-system/package.json")"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.claude-plugin/plugin.json")"
   [[ "$output" == *"path: \"{{ env.CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM"* ]]
   [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/$version"* ]]
   [[ "$output" != *"path: \"./plugins/"* ]]

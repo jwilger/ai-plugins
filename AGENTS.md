@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI agents (Claude Code, Codex, etc.) working in this repository.
+Guidance for AI agents (Codex, Claude Code, etc.) working in this repository.
 
 ## What this repo is
 
@@ -8,6 +8,9 @@ Guidance for AI agents (Claude Code, Codex, etc.) working in this repository.
 [Claude Code marketplace](https://code.claude.com/docs/en/plugin-marketplaces)
 format and carries Codex-facing marketplace metadata and plugin manifests for
 Codex and other harnesses that adopt the plugin concept.
+
+Codex is the primary supported harness; Claude Code is supported from the same
+plugin tree.
 
 When this repository's marketplace plugins are installed in an agent harness,
 use the relevant installed skills for matching work rather than treating plugin
@@ -44,105 +47,46 @@ point inside `./.dependencies/` and prepending the local npm `bin/` dir to
 Never commit `./.dependencies/`. If the environment looks broken, `rm -rf
 .dependencies` and re-enter the devshell.
 
-The root `package.json` is a lightweight Pi Git-package facade and must not gain
-the repository's eval dependencies. Promptfoo and its optional coding-harness
-provider SDKs are pinned in `tooling/evals/package.json` and
-`tooling/evals/package-lock.json`. `scripts/evals/ensure-node-deps.sh` installs
-them there and maintains the git-ignored root `node_modules` symlink required by
-existing module-resolution paths; `scripts/evals/run.sh` and
-`scripts/evals/share.sh` restore them automatically when missing.
+Promptfoo and the optional Claude and Codex evaluation SDKs are pinned in
+`tooling/evals/package.json` and `tooling/evals/package-lock.json`.
+`scripts/evals/ensure-node-deps.sh` installs them there and maintains the
+git-ignored root `node_modules` symlink required by the evaluation tooling;
+`scripts/evals/run.sh` and `scripts/evals/share.sh` restore it when missing.
 
 `.envrc` (`use flake`) is git-ignored here per the maintainer's global config;
 recreate it locally if you use direnv.
 
 ## Worktree workflow
 
-This repo is configured for parallel development from linked worktrees. The main
-checkout is the coordination checkout; feature work should happen in worktrees
-created under the ignored repo-local `.worktrees/` directory:
+Linked worktrees isolate **concurrent mutable tickets**, not ordinary work.
+Questions and read-only investigation require neither a ticket nor a worktree.
+One mutable ticket may use its current checkout. Create a linked worktree only
+when separate mutable tickets are active concurrently across sessions, agents,
+or subagents; never create a nested worktree merely for another task.
 
-```shell
-git worktree add .worktrees/<branch-name> -b <branch-name>
-```
+The active harness owns worktree creation, switching, and cleanup. Use its
+normal linked-worktree workflow, then let this repository's bootstrap and
+teardown helpers supply repository-specific environment setup and cleanup. A
+worktree is optional isolation, not a delivery precondition.
 
-Before making edits, agents should run:
-
-```shell
-scripts/agent-checkout-guard.sh
-```
-
-In Pi with `development-system` active, a primary-checkout session should call
-`development_system_worktree_list` and
-`development_system_worktree_create` rather than improvising mutation. Pi keeps
-its host cwd and conversation in the coordination checkout while the extension
-persists a session-level logical workspace. Creation and
-`development_system_worktree_switch` activate a registered linked worktree;
-each shell and relative file/search tool call is independently routed there in
-TUI and headless modes, so no relaunch or private slash-command handoff is
-needed. After verified delivery from a clean logical worktree, call
-`development_system_worktree_finish` to route back to primary, run repository
-teardown, and remove the worktree while preserving its branch.
-
-The guard exits successfully only from a linked worktree. In the main checkout
-it blocks feature work, points to the linked-worktree command above, and
-distinguishes ordinary local changes from the common case where the dirty
-worktree already matches the upstream branch after a fetch.
-
-Install the committed Lefthook configuration from the main checkout:
+Install or refresh the committed post-checkout bootstrap hook from the primary
+checkout:
 
 ```shell
 just worktree-hooks
 ```
 
-Existing clones that installed the former direct shell hooks must rerun this
-command after updating to the Lefthook migration. Rerun it after any
-behavior-affecting change to `lefthook.yml` or
-`scripts/install-worktree-hooks.sh`, and whenever `flake.nix` or `flake.lock`
-changes the exported Lefthook runtime—even when its displayed version is
-unchanged. Normal installation is deliberately refused from a linked worktree
-because the installed runtime and configuration are shared by every worktree.
+The managed Lefthook configuration owns `post-checkout` and runs
+`scripts/worktree-bootstrap.sh` for linked worktrees. It leaves ordinary
+checkouts inert. The installer preserves foreign hooks and only removes its
+own recognized legacy launchers. Rerun it after a behavior-affecting change to
+`lefthook.yml`, `scripts/install-worktree-hooks.sh`, `flake.nix`, or
+`flake.lock`.
 
-The Lefthook-managed hooks do two things:
-
-- `pre-commit` and `pre-push` run `scripts/worktree-guard.sh`, which blocks
-  commits and pushes from the main checkout while allowing linked worktrees.
-- `post-checkout` runs `scripts/worktree-bootstrap.sh`, which is inert in the
-  main checkout and bootstraps linked worktrees once.
-
-The installer serializes concurrent runs with `flock`, registers the
-flake-selected Lefthook store path as a repository-local Nix garbage-collection
-root, validates and snapshots `lefthook.yml`, and replaces each launcher with an
-atomic rename. Before replacing a foreign regular-file or symlink hook, it
-copies that hook to the next unique `*.worktrees-backup` path. It does not
-execute or chain those archival backups: inspect each reported backup and
-migrate behavior that must remain active into `lefthook.yml` before deleting it.
-If installation stops partway through, every hook path is still either the
-complete old hook or the complete new launcher; fix the reported failure and
-rerun `just worktree-hooks` to converge. `flock` releases automatically after
-normal exit or a crash, and the next run removes abandoned staging directories.
-
-`LEFTHOOK_CONFIG` pins the main snapshot, but Lefthook still merges a
-checkout-local `lefthook-local.yml` into delegated jobs. Treat that file as an
-intentional local override, not as part of the installed snapshot. The mandatory
-worktree safety pass runs before Lefthook. Every launcher also passes
-`--no-auto-install`, so an ordinary local `no_auto_install: false` override
-cannot replace the repository-owned launcher.
-
-Launchers derive Git's common directory at runtime and contain no checkout-path
-literals. If a clone is moved, rerun `just worktree-hooks` from its new location
-to repair the indirect Nix GC-root registration before the old auto-root is
-garbage-collected.
-
-The mandatory safety scripts themselves remain checkout-relative: a hook invokes
-`scripts/worktree-guard.sh` or `scripts/worktree-bootstrap.sh` from the worktree
-where Git ran it. A revision that predates or removes those scripts is not
-hook-compatible and fails closed; do not treat runtime pinning as a promise that
-arbitrary historical revisions can commit or push without the safety scripts.
-
-Each launcher runs its mandatory worktree safety check once before delegating
-to Lefthook, and the matching Lefthook job suppresses only that duplicate pass.
-This keeps normal main-checkout enforcement and linked-worktree bootstrap
-independent of Lefthook job selection while avoiding duplicate work.
+`scripts/worktree-guard.sh` remains only as a no-op compatibility shim for
+already-installed legacy pre-commit and pre-push launchers. It is not a
+checkout-location policy and must not be used to decide whether work may
+proceed.
 
 For each linked worktree, the bootstrap:
 
@@ -162,21 +106,24 @@ package-manager scripts, another runner, or no wrapper at all.
 There are no long-running services or containers in this repo today, so
 `scripts/worktree-teardown.sh` only loads `.env.worktree` and performs a Docker
 Compose shutdown if a future workflow adds `COMPOSE_PROJECT_NAME`-scoped
-services. Remove worktrees through:
+services. When optional cleanup is appropriate, prepare it through:
 
 ```shell
 just worktree-teardown .worktrees/<branch-name>
 ```
 
-Port allocation is stable per worktree and recorded under Git's common
-directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
+Then let the owner or active harness remove a clean worktree while preserving
+its branch. Port allocation is stable per worktree and recorded under Git's
+common directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
 `WORKTREE_PORT_BASE_PG`, and `WORKTREE_PORT_STRIDE` before bootstrap if needed.
 
 ## Backlog capacity management
 
-Use Beads with its Dolt backend as the repository task board and manage queued
-work as a deliberately bounded backlog. Run `bd prime` for current CLI guidance
-and use `--json` for programmatic reads.
+Use Beads with its Dolt backend as the repository task board for planned mutable
+delivery work, and manage queued work as a deliberately bounded backlog. Run
+`bd prime` for current CLI guidance and use `--json` for programmatic reads.
+Questions, read-only investigation, and ordinary explanation do not require a
+ticket, a claim, or a worktree.
 
 - The active issue (`in_progress`) does not count toward backlog capacity. A
   queued issue is an unclaimed `open` issue that is not blocked or deferred.
@@ -262,11 +209,11 @@ Run provider-backed evals only for behavior that changed files could plausibly
 affect. Case, condition, and harness selection are causal engineering choices,
 not a ritual full-suite gate. `just evals` compares the branch with
 `origin/main` and applies the repository mapping: shared skill prose selects
-only cases targeting those skills across the harnesses that load them; Pi
-package/runtime work selects the installed Pi canary; Pi guard work selects the
-executable Pi outcome scenarios; documentation, tests, and unrelated
-implementation details select no live eval. Every selected case defaults to one
-sample unless the named metric requires repetition.
+only cases targeting those skills across Codex and Claude Code; plugin, hook,
+or harness behavior selects the relevant installed-plugin canary or outcome
+scenario; documentation, tests, and unrelated implementation details select no
+live eval. Every selected case defaults to one sample unless the named metric
+requires repetition.
 
 ```shell
 just evals
@@ -304,6 +251,12 @@ server in the `agentic-systems-engineering` Codex manifest is for
 agent-assisted validation, focused runs, and result inspection; it does not
 replace the canonical runner.
 
+`just evals` runs its change-selected scope in one Promptfoo process with up to
+eight target calls globally. The existing Claude Code and Codex condition-specific
+homes remain isolated within that process, and it writes the normal one-report
+artifact set under `evals/out/` before sharing it. The cap is global, so it does
+not guarantee a four-per-provider split.
+
 The static dashboard summarizes latest-run status by provider, case, sample,
 plugin, and skill so PR notes can point to both aggregate quality and the
 marketplace surface exercised by a scenario.
@@ -327,9 +280,8 @@ unless that automation is explicitly requested and secrets are protected.
 ### Standing authorization for repository-owned live evals
 
 The repository owner grants standing approval to run repository-owned
-provider-backed evals and benchmarks through all supported coding harnesses:
+provider-backed evals and benchmarks through the supported coding harnesses:
 
-- Pi using the owner's existing ChatGPT/OpenAI subscription authentication.
 - Claude Code using the owner's existing Claude/Anthropic subscription authentication.
 - Codex CLI using the owner's existing ChatGPT/OpenAI subscription authentication.
 
@@ -355,12 +307,6 @@ nix develop -c scripts/evals/run-code-quality-benchmark.sh
 
 It does not authorize broad `nix develop` execution rules or other external
 destinations.
-
-For Pi, live evals must use disposable `PI_CODING_AGENT_DIR` and session locations,
-copy only the `openai-codex` authentication entry with restrictive permissions,
-serialize each mutable copied store to one writer, remove the copied stores after
-the run, and prove the source Pi login did not change. This authorization does not
-permit uploading Pi authentication state.
 
 This applies across all marketplace plugins, not only the plugin currently being
 edited. Do not blanket-ignore `.plugin-eval/`. Stable benchmark configs and
@@ -399,17 +345,16 @@ Skip this for Codex-only plugins.
 
 ## Multi-harness notes
 
-- Claude Code reads `.claude-plugin/marketplace.json` and per-plugin
-  `.claude-plugin/plugin.json`. Keep these the source of truth.
 - Codex reads `.agents/plugins/marketplace.json` and per-plugin
-  `.codex-plugin/plugin.json`. Codex-only plugins are allowed when a harness
-  already provides equivalent built-in behavior; keep them out of Claude Code
-  marketplace metadata and Claude behavior eval coverage.
-- When adding Codex (or other-harness) support, do not break the Claude Code
-  manifest. Prefer additive, harness-namespaced metadata and a parallel
-  manifest if a harness needs a different format, rather than overloading
-  `marketplace.json`. Always note a plugin's supported harnesses in its README
-  and the `README.md` catalog tables.
+  `.codex-plugin/plugin.json`. Treat the Codex manifest as the canonical version
+  source for a plugin supported in both harnesses.
+- Claude Code reads `.claude-plugin/marketplace.json` and per-plugin
+  `.claude-plugin/plugin.json`. Keep shared Claude and Codex metadata versions
+  synchronized.
+- Codex-only plugins are allowed when Claude Code already provides equivalent
+  built-in behavior; keep them out of Claude marketplace metadata and Claude
+  behavior evaluation coverage. Prefer additive, harness-namespaced metadata
+  rather than overloading either marketplace format.
 
 ## Engineering standards (harness-agnostic)
 
@@ -429,17 +374,17 @@ rules apply to **both Claude Code and Codex**;
 
 ## CI/CD and package lifecycle
 
-The development-system Pi package is not published to npm. Do not add a
-publication workflow, registry credential, trusted-publisher binding,
-publication-only version commit, or package tag. The checked-in npm-format
-package exists for local Pi installation and marketplace consumption.
+Development-system is distributed through the Codex and Claude Code marketplace
+manifests, not as an npm package. Do not add an npm publication workflow,
+registry credential, trusted-publisher binding, publication-only version commit,
+or package tag.
 
-`plugins/development-system/package.json` remains the canonical package version.
-For a required version bump, update that one source and run
+`plugins/development-system/.codex-plugin/plugin.json` is the canonical version
+source. For a required version bump, update it and run
 `node scripts/sync-development-system-metadata.mjs --write` to synchronize the
-harness manifests, marketplaces, cache launchers, and catalog. Validate the
-packed payload with `just npm-package` and its Pi load behavior with `just
-npm-package-canary`; both checks run in `just ci` without publishing.
+Claude manifest, marketplace entries, cache launchers, and catalog. Validate
+the resulting plugin manifests and installed-harness behavior through the
+causal checks selected by `just ci`.
 
 CI runs on GitHub Actions (`.github/workflows/ci.yml`):
 

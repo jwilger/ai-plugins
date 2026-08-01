@@ -1,5 +1,10 @@
 # Pi subagent observability research
 
+> **Historical research.** Pi support was retired by
+> [ADR-0009](../adr/0009-retire-pi-and-adopt-native-harness-workflows.md).
+> This document is retained as decision evidence only; it does not describe a
+> supported development-system runtime or current harness workflow.
+
 Date: 2026-07-30
 
 ## Question and method

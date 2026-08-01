@@ -1,5 +1,5 @@
 {
-  "description": "Load development-system compatibility checks and Beads workflow context.",
+  "description": "Run development-system compatibility checks and plugin-managed Beads lifecycle context.",
   "hooks": {
     "SessionStart": [
       {
@@ -13,9 +13,9 @@
           },
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/bd\" codex-hook SessionStart",
+            "command": "\"${PLUGIN_ROOT}/bin/run-beads-hook\" --project \"$PWD\" -- codex-hook SessionStart",
             "timeout": 60,
-            "statusMessage": "Loading Beads context"
+            "statusMessage": "Loading Beads SessionStart context"
           }
         ]
       }
@@ -26,9 +26,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/bd\" codex-hook PreCompact",
+            "command": "\"${PLUGIN_ROOT}/bin/run-beads-hook\" --project \"$PWD\" -- codex-hook PreCompact",
             "timeout": 15,
-            "statusMessage": "Checking Beads context"
+            "statusMessage": "Preserving Beads context before compaction"
           }
         ]
       }
@@ -39,9 +39,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/bd\" codex-hook PostCompact",
+            "command": "\"${PLUGIN_ROOT}/bin/run-beads-hook\" --project \"$PWD\" -- codex-hook PostCompact",
             "timeout": 15,
-            "statusMessage": "Scheduling Beads context refresh"
+            "statusMessage": "Refreshing Beads context after compaction"
           }
         ]
       }
@@ -51,9 +51,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/bd\" codex-hook UserPromptSubmit",
+            "command": "\"${PLUGIN_ROOT}/bin/run-beads-hook\" --project \"$PWD\" -- codex-hook UserPromptSubmit",
             "timeout": 15,
-            "statusMessage": "Refreshing Beads context"
+            "statusMessage": "Refreshing Beads context for the prompt"
           }
         ]
       }

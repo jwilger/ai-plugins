@@ -1,5 +1,12 @@
 # Development System Pi Extension — Product Requirements Document
 
+> [!WARNING]
+> **Withdrawn historical proposal.** This Pi-first PRD is superseded by
+> [ADR 0009](adr/0009-retire-pi-and-adopt-native-harness-workflows.md) and is
+> retained only as historical design evidence. The status and requirements below
+> do not define current installation, runtime, goal, worktree, authentication,
+> evaluation, or release behavior.
+
 - **Status:** Proposed
 - **Primary product surface:** Pi
 - **Secondary product surface:** Claude Code
