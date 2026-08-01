@@ -15,7 +15,7 @@ generated_dir="$out_dir/generated"
 runtime_options_file="$generated_dir/runtime-options.json"
 runtime_loader_file="$generated_dir/load-harness-cases.runtime.cjs"
 export EVAL_RUNTIME_LOADER_FILE="$runtime_loader_file"
-max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-1}"
+max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-8}"
 case "$max_concurrency" in
   1 | 2 | 3 | 4 | 5 | 6 | 7 | 8) ;;
   *)
@@ -71,7 +71,7 @@ Environment overrides:
                                 provider id, plugin mode, or substring;
                                 an exact variant id selects development-system only;
                                 semantic grading still uses CODEX_GRADER_MODEL)
-  PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-8; default: 1; global target-call cap)
+  PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-8; default: 8; global target-call cap)
   EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;
                                 set to 0 to disable)
   EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)

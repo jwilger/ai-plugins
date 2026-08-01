@@ -242,8 +242,15 @@ Claude subscription runs read the current access token into the eval process
 while leaving the rotating refresh token in the source Claude config; both
 plugin conditions therefore use disposable runtime config without copying
 credentials or invalidating the source login. API-key or explicit-token runs
-use the same isolated runtime config. The
-runner uses Codex as the default model-graded assertion provider and disables
+use the same isolated runtime config.
+
+If an intended eval harness reports missing, invalid, or expiring
+authentication, pause the eval workflow and tell the user which harness needs
+authentication. Give the user an opportunity to authenticate before narrowing
+the eval scope, skipping that harness, or declaring it unavailable. After the
+user authenticates, retry the intended harness. Never silently skip it.
+
+The runner uses Codex as the default model-graded assertion provider and disables
 prompt response caching and hosted sharing so generated artifacts are fresh and repo-owned. Run
 `scripts/evals/run.sh --suite canary` to prove installed `development-system`
 loading and SessionStart execution before relying on behavior results. The optional Promptfoo MCP
@@ -255,7 +262,10 @@ replace the canonical runner.
 eight target calls globally. The existing Claude Code and Codex condition-specific
 homes remain isolated within that process, and it writes the normal one-report
 artifact set under `evals/out/` before sharing it. The cap is global, so it does
-not guarantee a four-per-provider split.
+not guarantee a four-per-provider split. When no explicit concurrency is
+supplied, repository-owned provider evals use global target-call concurrency 8
+by default; use a lower explicit concurrency only for a named causal reason or
+experiment.
 
 The static dashboard summarizes latest-run status by provider, case, sample,
 plugin, and skill so PR notes can point to both aggregate quality and the
