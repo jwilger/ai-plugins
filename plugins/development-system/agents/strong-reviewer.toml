@@ -1,6 +1,5 @@
 name = "model-routing-strong-reviewer"
 description = "Read-only strongest-model reviewer for architecture, security, human-safety, ambiguous debugging, disputed verification, and completion/readiness decisions."
-model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """

@@ -1,5 +1,5 @@
 [final_review.models.codex]
-pre_filter = "gpt-5.6-sol"
+pre_filter = "strong-reviewer"
 lens_review = "gpt-5.6-terra"
 post_filter = "gpt-5.6-luna"
-verifier = "gpt-5.6-sol"
+verifier = "strong-reviewer"

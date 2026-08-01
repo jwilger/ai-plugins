@@ -168,20 +168,64 @@ It can identify conflicting enabled plugins, incompatible hook settings, and
 user-managed MCP configuration that needs review. It does not silently alter
 those settings.
 
+## Advisor, content authoring, and capability routing
+
+Advisor provides read-only challenge and planning support for fuzzy tradeoffs,
+scope, specifications, and ticket plans. It also runs proactively before a plan
+with two or more dependent implementation steps is finalized, unless an
+existing executable BDD-style scenario already covers both observable behavior
+and its material failure boundary.
+
+Codex selects Advisor's model at dispatch time from authoritative
+harness-advertised eligibility and capability or upgrade metadata. The agent
+file deliberately omits a fixed model identifier, while retaining read-only
+execution and `xhigh` reasoning. If the harness cannot rank eligible models,
+select the highest-capability route explicitly, or launch it, Advisor fails
+visibly instead of guessing or falling back.
+
+Claude Code uses its moving `opus` alias with the highest supported effort. In
+both harnesses, stronger model selection changes capability only; it grants no
+additional authority.
+
+Substantive human-consumable prose, documentation, instructions, imagery, and
+UI/UX route through the public `content-authoring` skill. It delegates artifact
+creation to the highest-capability eligible writable agent at high effort,
+selected explicitly from authoritative current-harness capability or upgrade
+metadata rather than a pinned model or guesses based on names, list order,
+price, or date. Routine status updates, ticket metadata, commit messages, and
+mechanical summaries are excluded. The author may use an authorized specialized
+image tool when appropriate, but model and tool selection grant no additional
+authority. If the required ranking, selection, high-effort writable launch, or
+specialized tool is unavailable, the route blocks visibly instead of silently
+falling back.
+
+## Plan sharpening
+
+`sharpen-plan` improves exactly one load-bearing assumption or plan-level
+specification per pass without pre-deciding implementation details. It asks one
+harness-native question only for a genuine user decision, applies the answer to
+the active plan state, and re-presents the complete plan through the native
+approval flow. Another pass begins only after approval; the skill stops plainly
+at diminishing returns. In read-only Plan Mode it updates conversational plan
+state without writing files, and it never invokes Advisor recursively.
+
 ## Included surfaces
 
 The shared public skills are:
 
+- `advisor`
 - `agentic-systems`
 - `beads`
+- `content-authoring`
 - `delivery`
 - `development-workflow`
 - `engineering-standards`
 - `eval-case-reporting`
+- `sharpen-plan`
 - `setup`
 - `worktrees`
 
-The plugin also carries the development-discipline review component, advisor,
+The plugin also carries the development-discipline review component,
 agentic-systems-engineering, eval-case reporting, delivery formulas, and the
 Codex and Claude Code adapter metadata needed to expose those surfaces.
 

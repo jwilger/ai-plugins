@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-plugin_root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/development-system/components/advisor" && pwd)"}"
+plugin_root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/development-system" && pwd)"}"
 agent="$plugin_root/agents/advisor.toml"
+claude_agent="$plugin_root/agents/advisor.md"
 skill="$plugin_root/skills/advisor/SKILL.md"
 
 fail() {
@@ -11,50 +12,31 @@ fail() {
 }
 
 [ -f "$agent" ] || fail "missing-agent: $agent"
+[ -f "$claude_agent" ] || fail "missing-claude-agent: $claude_agent"
 [ -f "$skill" ] || fail "missing-skill: $skill"
+[ ! -e "$plugin_root/components/advisor" ] || fail "nested-advisor-component-must-be-removed"
 
-[ "$(grep -Fxc 'model = "gpt-5.6-sol"' "$agent")" -eq 1 ] ||
-  fail "model-must-be-gpt-5.6-sol"
-[ "$(grep -Fxc 'model_reasoning_effort = "high"' "$agent")" -eq 1 ] ||
-  fail "reasoning-effort-must-be-high"
-[ "$(grep -Fxc 'sandbox_mode = "read-only"' "$agent")" -eq 1 ] ||
-  fail "sandbox-must-be-read-only"
+python3 - "$agent" <<'PY' || fail "invalid-codex-advisor-route"
+import pathlib
+import sys
+import tomllib
 
-if grep -Eqi '(^|_)(fallback|override)(_|[[:space:]]*=)' "$agent"; then
-  fail "fallback-or-override-configured"
+agent = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert "model" not in agent
+assert agent.get("model_reasoning_effort") == "xhigh"
+assert agent.get("sandbox_mode") == "read-only"
+PY
+
+grep -Fq 'model: opus' "$claude_agent" || fail "claude-advisor-must-use-moving-opus-alias"
+grep -Eq '^effort: (high|max)$' "$claude_agent" || fail "claude-advisor-must-use-highest-supported-effort"
+grep -Fq 'highest-capability eligible model' "$skill" || fail "skill-must-select-by-capability"
+grep -Fq 'two or more dependent implementation steps' "$skill" || fail "skill-must-trigger-for-multi-step-plans"
+grep -Fq 'executable BDD-style scenario' "$skill" || fail "skill-must-define-bdd-exemption"
+grep -Fq 'Do not invoke Advisor again' "$skill" || fail "skill-must-prevent-recursion"
+grep -Fq 'report the route failure visibly' "$skill" || fail "skill-must-fail-visibly"
+
+if grep -Eq 'gpt-[0-9]+\.[0-9]+-(sol|pro)|agent_type: default' "$skill" "$agent"; then
+  fail "static-model-or-fallback-configured"
 fi
-
-if grep -Fq 'agent_type: default' "$skill"; then
-  fail "skill-configures-default-agent-fallback"
-fi
-
-expected_unavailable_lines='   - If the custom agent is unavailable, stop and report the unavailable advisor agent. Do not silently substitute a different agent or model.'
-actual_unavailable_lines="$(grep -Ei 'unavailable|substitut' "$skill")"
-
-if [ "$actual_unavailable_lines" != "$expected_unavailable_lines" ]; then
-  fail "skill-configures-agent-fallback"
-fi
-
-grep -Fq '`gpt-5.6-sol` with `model_reasoning_effort: high`' "$skill" ||
-  fail "skill-must-document-pinned-model-and-effort"
-
-expected_effort_lines='   - Use the custom `advisor` agent when available. Its agent file is the single routing source and pins read-only `gpt-5.6-sol` with `model_reasoning_effort: high`.
-6. footer: `effort=high; playbook=<yes|no>; context=<repo/docs/web/none checked>`. `high` is the effort pinned by the custom agent file. For context, report only sources actually inspected; if you did not inspect repo files, docs, or web sources, use `none checked`.'
-actual_effort_lines="$(grep -Ei 'effort|reasoning' "$skill")"
-
-if [ "$actual_effort_lines" != "$expected_effort_lines" ]; then
-  fail "skill-reports-unpinned-reasoning-effort"
-fi
-
-grep -Fq 'footer: `effort=high;' "$skill" ||
-  fail "skill-must-report-pinned-reasoning-effort"
-
-grep -Fq 'stop and report the unavailable advisor agent' "$skill" ||
-  fail "skill-must-require-visible-unavailable-agent-failure"
-
-expected_skill_sha256="3e5f67c0732dfabcda77da821258169ffe0acc56fa3c6c40d8425e12343a5c93"
-actual_skill_sha256="$(sha256sum "$skill" | awk '{print $1}')"
-[ "$actual_skill_sha256" = "$expected_skill_sha256" ] ||
-  fail "skill-contract-drift"
 
 echo "advisor-agent-config: ok"

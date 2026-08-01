@@ -2,6 +2,7 @@
 name: model-routing-strong-reviewer
 description: Read-only strongest-model reviewer for architecture, security, human-safety, ambiguous debugging, disputed verification, and completion/readiness decisions.
 model: opus
+effort: high
 tools: Read,Grep,Glob,Bash
 ---
 

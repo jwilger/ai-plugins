@@ -499,10 +499,10 @@ install_promptfoo_cache_launcher() {
   [[ "$output" == *"clean_streak"* ]]
   [[ "$output" == *"completed_iteration"* ]]
   routing="$(printf '%s\n' "$output" | jq -r 'select(.id == 12) | .result.content[0].text | fromjson | .model_roles')"
-  [ "$(jq -r '.pre_filter' <<<"$routing")" = "gpt-5.6-sol" ]
+  [ "$(jq -r '.pre_filter' <<<"$routing")" = "strong-reviewer" ]
   [ "$(jq -r '.lens_review' <<<"$routing")" = "gpt-5.6-terra" ]
   [ "$(jq -r '.post_filter' <<<"$routing")" = "gpt-5.6-luna" ]
-  [ "$(jq -r '.verifier' <<<"$routing")" = "gpt-5.6-sol" ]
+  [ "$(jq -r '.verifier' <<<"$routing")" = "strong-reviewer" ]
 }
 
 @test "development-discipline MCP manifest prefers Claude plugin root when both harness markers are present" {

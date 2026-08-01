@@ -9,26 +9,27 @@ Apply `model-routing` to every review assignment. Ordinary lens review uses the
 substantive route; activated architecture, security, human-safety, ambiguity,
 or disputed-verification work and the accountable readiness decision use the
 strong route defined by that canonical matrix. The coordinator assigns
-architecture, security, and human-safety lenses through the resolved strong
-model role used for verification while ordinary lenses use the substantive
-review role. An unavailable or inherited route follows the canonical bounded
-handoff or blocked-result protocol, never an implicit downgrade.
+architecture, security, and human-safety lenses through the resolved public
+strong-review role used for verification while ordinary lenses use the
+substantive review role. An unavailable or inherited route follows the
+canonical bounded handoff or blocked-result protocol, never an implicit
+downgrade.
 
-For Codex, bind those responsibilities in the project-local final-review TOML;
-do not put Codex identifiers in universal defaults:
+Bind strong review responsibilities to the public `strong-reviewer` role in the
+project-local final-review TOML. Lower Codex routes may remain exact:
 
 ```toml
 [final_review.models.codex]
-pre_filter = "gpt-5.6-sol"
+pre_filter = "strong-reviewer"
 lens_review = "gpt-5.6-terra"
 post_filter = "gpt-5.6-luna"
-verifier = "gpt-5.6-sol"
+verifier = "strong-reviewer"
 ```
 
 `pre_filter` owns the all-dimension broad risk scout. `lens_review` is Terra for
 ordinary risk-selected substantive lenses, while the coordinator routes an
-assigned architecture, security, or human-safety lens through the strong Sol
-role. `post_filter` labels the normally deterministic
+assigned architecture, security, or human-safety lens through the public
+`strong-reviewer` role. `post_filter` labels the normally deterministic
 `final_review.filter_findings` path; deterministic relevance and path filtering
 normally make no model call. `verifier` owns blocking, disputed, or materially
 uncertain batched verification. These roles are part of the review contract,
@@ -36,6 +37,15 @@ not permission for the MCP to spawn agents. The caller starts every assignment
 as a fresh-context subagent, closes it immediately after receiving the result,
 and submits the required caller attestation naming the assigned model role plus
 `fresh_context: true` and `closed_after_result: true`.
+
+For every `strong-reviewer` assignment, inspect the eligible models advertised
+by the current harness and its authoritative capability or upgrade metadata,
+then launch that public read-only role with the highest-capability eligible
+model selected explicitly. Never infer capability from model names, lexical or
+list order, price, or release date. The Codex role omits a model and retains
+`high` effort; the Claude role uses the moving `opus` alias with `high` effort.
+If authoritative ranking, explicit selection, or launch is unavailable, return
+a visible bounded blocked result and do not silently substitute another model.
 
 Run a local, fresh-context review cycle before creating a pull request, merging,
 or claiming a change is ready.
@@ -401,8 +411,16 @@ policy.
    push only when the selected mode calls for those actions, confirm any
    resulting latest pushed build is running or green, then submit exactly one
    diff-bound delta risk assessment. Resume only the assignments it returns; do
-   not restart unaffected lenses. On the initial advancing call
-   that records each disposition, send `caller_decisions` in this shape:
+   not restart unaffected lenses.
+   Route ordinary remediation through the normal substantive worker. When
+   architecture, security, human-safety, ambiguity, or separately authorized
+   destructive implementation makes remediation a strong responsibility, use
+   the public writable `strong-worker` role and the same explicit
+   highest-capability eligible model dispatch. Model choice never supplies the
+   separate authorization required for destructive work.
+
+   On the initial advancing call that records each disposition, send
+   `caller_decisions` in this shape:
 
    ```json
    [

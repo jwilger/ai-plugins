@@ -281,22 +281,33 @@ post_filter = "bounded-helper"
 verifier = "strong-reviewer"
 
 [final_review.models.codex]
-pre_filter = "gpt-5.6-sol"
+pre_filter = "strong-reviewer"
 lens_review = "gpt-5.6-terra"
 post_filter = "gpt-5.6-luna"
-verifier = "gpt-5.6-sol"
+verifier = "strong-reviewer"
 
 [final_review.models.claude]
-pre_filter = "opus"
+pre_filter = "strong-reviewer"
 lens_review = "sonnet"
 post_filter = "haiku"
-verifier = "opus"
+verifier = "strong-reviewer"
 ```
 
 Top-level phase values are harness-neutral. Optional `codex` or `claude`
-tables override them one phase at a time for that harness. This lets a shared
-repository use concrete Codex model IDs without routing Claude reviewers to
-unsupported models.
+tables override them one phase at a time for that harness. Keep strong phases
+on the public `strong-reviewer` role while retaining exact lower routes where
+the harness supports them.
+
+The caller resolves every returned `strong-reviewer` assignment at dispatch
+time. Inspect the eligible models advertised by the current harness and its
+authoritative capability or upgrade metadata, select the highest-capability
+eligible model explicitly, and launch the public role. Never infer capability
+from model names, lexical or list order, price, or release date. The Codex role
+configuration omits a model and retains `high` effort; Claude uses the moving
+`opus` alias with `high` effort. If authoritative ranking, explicit selection,
+or launch is unavailable, report a visible bounded blocked result. Never
+silently substitute another model or claim that an unconfirmed route satisfied
+the review contract.
 
 Legacy non-risk-planned sessions can add
 `[final_review.dispositions.<SEVERITY>]` tables for `CRITICAL`, `MAJOR`,
@@ -333,8 +344,9 @@ both conditional batched verification and the architecture, security, and
 human-safety lens assignments that require the strong route. Projects that
 override `verifier` therefore change all of those strong responsibilities
 together; the current schema does not expose an independently configurable
-strong-lens model. This keeps one source of truth for the Sol route and avoids
-an apparently independent setting that could silently drift.
+strong-lens role. This keeps one source of truth for the public
+`strong-reviewer` route and avoids an apparently independent setting that could
+silently drift.
 
 - `pre_filter` owns the mandatory all-dimension broad risk scout and any
   optional assistance for a large or noisy scope. Because the scout assesses

@@ -10189,7 +10189,7 @@ fn harness_model_defaults(harness: &str) -> toml::value::Table {
         "codex" => {
             defaults.insert(
                 "pre_filter".to_string(),
-                toml::Value::String("gpt-5.6-sol".to_string()),
+                toml::Value::String("strong-reviewer".to_string()),
             );
             defaults.insert(
                 "lens_review".to_string(),
@@ -10201,7 +10201,7 @@ fn harness_model_defaults(harness: &str) -> toml::value::Table {
             );
             defaults.insert(
                 "verifier".to_string(),
-                toml::Value::String("gpt-5.6-sol".to_string()),
+                toml::Value::String("strong-reviewer".to_string()),
             );
         }
         "claude" => {
@@ -12186,10 +12186,10 @@ verifier = "config-verify"
             "harness": "codex"
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
-        assert_eq!(parsed["model_roles"]["pre_filter"], "gpt-5.6-sol");
+        assert_eq!(parsed["model_roles"]["pre_filter"], "strong-reviewer");
         assert_eq!(parsed["model_roles"]["lens_review"], "gpt-5.6-terra");
         assert_eq!(parsed["model_roles"]["post_filter"], "gpt-5.6-luna");
-        assert_eq!(parsed["model_roles"]["verifier"], "gpt-5.6-sol");
+        assert_eq!(parsed["model_roles"]["verifier"], "strong-reviewer");
         assert_eq!(
             parsed["model_role_sources"]["pre_filter"],
             "harness_default"

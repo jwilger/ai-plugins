@@ -9,6 +9,7 @@ const component = path.join(
   root,
   "plugins/development-system/components/development-discipline",
 );
+const outputDirectory = path.join(root, "plugins/development-system/agents");
 const sourceFile = path.join(component, "agent-sources/review-agents.json");
 const source = JSON.parse(fs.readFileSync(sourceFile, "utf8"));
 const write = process.argv.includes("--write");
@@ -22,7 +23,10 @@ if (source.schemaVersion !== 1 || !Array.isArray(source.agents))
   throw new Error("invalid review agent source schema");
 
 function markdown(agent, file) {
-  const raw = `---\nname: ${agent.name}\ndescription: ${agent.description}\nmodel: ${agent.claude.model}\ntools: ${agent.claude.tools}\n---\n\n${agent.instructions}${agent.claude.addendum ? `\n\n${agent.claude.addendum}` : ""}\n`;
+  const effort = agent.claude.effort
+    ? `effort: ${agent.claude.effort}\n`
+    : "";
+  const raw = `---\nname: ${agent.name}\ndescription: ${agent.description}\nmodel: ${agent.claude.model}\n${effort}tools: ${agent.claude.tools}\n---\n\n${agent.instructions}${agent.claude.addendum ? `\n\n${agent.claude.addendum}` : ""}\n`;
   const formatted = spawnSync("prettier", ["--stdin-filepath", file], {
     input: raw,
     encoding: "utf8",
@@ -39,7 +43,12 @@ function tomlString(value) {
 }
 
 function codex(agent) {
-  return `name = ${JSON.stringify(agent.name)}\ndescription = ${JSON.stringify(agent.description)}\nmodel = ${JSON.stringify(agent.codex.model)}\nmodel_reasoning_effort = ${JSON.stringify(agent.codex.reasoning)}\nsandbox_mode = ${JSON.stringify(agent.codex.sandbox)}\ndeveloper_instructions = ${tomlString(agent.instructions + (agent.codex.addendum ? `\n\n${agent.codex.addendum}` : ""))}\n`;
+  const model = agent.codex.model
+    ? `model = ${JSON.stringify(agent.codex.model)}\n`
+    : "";
+  if (!agent.codex.model && agent.codex.modelStrategy !== "highest-capability-eligible")
+    throw new Error(`missing Codex model strategy for ${agent.id}`);
+  return `name = ${JSON.stringify(agent.name)}\ndescription = ${JSON.stringify(agent.description)}\n${model}model_reasoning_effort = ${JSON.stringify(agent.codex.reasoning)}\nsandbox_mode = ${JSON.stringify(agent.codex.sandbox)}\ndeveloper_instructions = ${tomlString(agent.instructions + (agent.codex.addendum ? `\n\n${agent.codex.addendum}` : ""))}\n`;
 }
 
 let drift = false;
@@ -50,7 +59,7 @@ for (const agent of source.agents) {
     ["md", markdown(agent, `${agent.id}.md`)],
     ["toml", codex(agent)],
   ]) {
-    const file = path.join(component, "agents", `${agent.id}.${extension}`);
+    const file = path.join(outputDirectory, `${agent.id}.${extension}`);
     const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
     if (current === content) continue;
     drift = true;

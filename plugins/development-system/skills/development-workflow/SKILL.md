@@ -48,6 +48,26 @@ When `[features].beads = true`, load the `beads` skill and use the configured
 Beads delivery formula rather than treating this checklist as a separate state
 machine.
 
+Before finalizing a plan with two or more dependent implementation steps,
+invoke the public `advisor` skill unless an existing executable BDD-style
+scenario already covers the observable behavior and material failure boundary.
+If already running as Advisor or `sharpen-plan`, perform the check directly and
+do not invoke Advisor recursively. Apply the resulting recommendation before
+presenting the complete plan.
+
+Before creating or substantially revising human-consumable prose,
+documentation, instructions, imagery, or UI/UX, route the artifact through the
+public `content-authoring` skill. It delegates creation to the
+highest-capability eligible writable agent at high effort, selected explicitly
+from authoritative current-harness capability or upgrade metadata. Do not pin
+a strongest model or infer capability from names, list order, price, or date.
+Routine status updates, ticket metadata, commit messages, and mechanical
+summaries stay on their normal routes. A content author may use an authorized
+specialized image tool, but model or tool selection grants no additional
+authority. If capability ranking, explicit selection, high-effort writable
+launch, or the required specialized tool is unavailable, report the blocked
+route visibly rather than drafting on a weaker route or silently falling back.
+
 For a change:
 
 1. Classify each slice as runtime behavior, documentation, CI workflow, or

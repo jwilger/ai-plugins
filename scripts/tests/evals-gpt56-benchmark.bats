@@ -1154,7 +1154,7 @@ const advisorCaseIds = cases
   .map((entry) => entry.vars.case_id)
   .sort();
 const expectedAdvisorCaseIds = [
-  'advisor-like-ticket-plan-outline',
+  'advisor-like-proactive-uncovered-plan',
   'advisor-like-tradeoff-recommendation',
 ];
 if (JSON.stringify(advisorCaseIds) !== JSON.stringify(expectedAdvisorCaseIds)) {

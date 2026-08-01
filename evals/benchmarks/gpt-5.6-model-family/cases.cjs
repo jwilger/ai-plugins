@@ -13,8 +13,10 @@ const standardCaseIds = new Set([
   "agentic-tool-contracts-and-loops",
   "development-discipline-review-feedback-skepticism",
 ]);
-const advisorRoutingPrefix =
-  'Use the local Codex skill "advisor" if it helps. ';
+const advisorRoutingPrefixes = [
+  'Use the local Codex skill "advisor" if it helps. ',
+  "Use the installed Advisor if it helps. ",
+];
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
@@ -38,23 +40,23 @@ function standardCases() {
 }
 
 function advisorLikeCases() {
-  const selected = new Set(["tradeoff-recommendation", "ticket-plan-outline"]);
+  const selected = new Set([
+    "tradeoff-recommendation",
+    "proactive-uncovered-plan",
+  ]);
   const benchmark = readJson(
-    "plugins/development-system/components/advisor/skills/advisor/.plugin-eval/benchmark.json",
+    "plugins/development-system/skills/advisor/.plugin-eval/benchmark.json",
   );
 
   return benchmark.scenarios
     .filter((scenario) => selected.has(scenario.id))
     .map((scenario) => {
-      if (!scenario.userInput.startsWith(advisorRoutingPrefix)) {
-        throw new Error(
-          `${scenario.id}: advisor benchmark input lacks the expected routing prefix`,
-        );
-      }
-
-      const sanitizedUserInput = scenario.userInput.slice(
-        advisorRoutingPrefix.length,
+      const routingPrefix = advisorRoutingPrefixes.find((prefix) =>
+        scenario.userInput.startsWith(prefix),
       );
+      const sanitizedUserInput = routingPrefix
+        ? scenario.userInput.slice(routingPrefix.length)
+        : scenario.userInput;
       return {
         id: `advisor-like-${scenario.id}`,
         behavior: scenario.purpose,

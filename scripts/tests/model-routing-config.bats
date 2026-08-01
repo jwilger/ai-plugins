@@ -28,6 +28,20 @@ developer_instructions = "Return the requested result."
 EOF
 }
 
+write_dynamic_codex_agent() {
+  local name="$1"
+  local effort="$2"
+  local sandbox="$3"
+
+  cat >"$PLUGIN/agents/$name.toml" <<EOF
+name = "model-routing-$name"
+description = "Fixture route."
+model_reasoning_effort = "$effort"
+sandbox_mode = "$sandbox"
+developer_instructions = "Return the requested result."
+EOF
+}
+
 write_claude_agent() {
   local name="$1"
   local model="$2"
@@ -45,15 +59,32 @@ Return the requested result.
 EOF
 }
 
+write_strong_claude_agent() {
+  local name="$1"
+  local tools="$2"
+
+  cat >"$PLUGIN/agents/$name.md" <<EOF
+---
+name: model-routing-$name
+description: Fixture route.
+model: opus
+effort: high
+tools: $tools
+---
+
+Return the requested result.
+EOF
+}
+
 write_valid_routes() {
   write_codex_agent bounded-helper gpt-5.6-luna low read-only
   write_codex_agent substantive-worker gpt-5.6-terra medium workspace-write
-  write_codex_agent strong-reviewer gpt-5.6-sol high read-only
-  write_codex_agent strong-worker gpt-5.6-sol high workspace-write
+  write_dynamic_codex_agent strong-reviewer high read-only
+  write_dynamic_codex_agent strong-worker high workspace-write
   write_claude_agent bounded-helper haiku Read,Grep,Glob
   write_claude_agent substantive-worker sonnet Read,Grep,Glob,Bash,Write,Edit
-  write_claude_agent strong-reviewer opus Read,Grep,Glob,Bash
-  write_claude_agent strong-worker opus Read,Grep,Glob,Bash,Write,Edit
+  write_strong_claude_agent strong-reviewer Read,Grep,Glob,Bash
+  write_strong_claude_agent strong-worker Read,Grep,Glob,Bash,Write,Edit
 }
 
 @test "model routing config reports exact task-local routes for both harnesses" {
@@ -62,7 +93,25 @@ write_valid_routes() {
   run "$CHECK" "$PLUGIN"
 
   [ "$status" -eq 0 ]
-  [ "$(jq -c . <<<"$output")" = '{"codex":{"bounded-helper":{"model":"gpt-5.6-luna","reasoning":"low","sandbox":"read-only"},"substantive-worker":{"model":"gpt-5.6-terra","reasoning":"medium","sandbox":"workspace-write"},"strong-reviewer":{"model":"gpt-5.6-sol","reasoning":"high","sandbox":"read-only"},"strong-worker":{"model":"gpt-5.6-sol","reasoning":"high","sandbox":"workspace-write"}},"claude":{"bounded-helper":{"model":"haiku","tools":"Read,Grep,Glob"},"substantive-worker":{"model":"sonnet","tools":"Read,Grep,Glob,Bash,Write,Edit"},"strong-reviewer":{"model":"opus","tools":"Read,Grep,Glob,Bash"},"strong-worker":{"model":"opus","tools":"Read,Grep,Glob,Bash,Write,Edit"}}}' ]
+  [ "$(jq -c . <<<"$output")" = '{"codex":{"bounded-helper":{"model":"gpt-5.6-luna","reasoning":"low","sandbox":"read-only"},"substantive-worker":{"model":"gpt-5.6-terra","reasoning":"medium","sandbox":"workspace-write"},"strong-reviewer":{"modelStrategy":"highest-capability-eligible","reasoning":"high","sandbox":"read-only"},"strong-worker":{"modelStrategy":"highest-capability-eligible","reasoning":"high","sandbox":"workspace-write"}},"claude":{"bounded-helper":{"model":"haiku","tools":"Read,Grep,Glob"},"substantive-worker":{"model":"sonnet","tools":"Read,Grep,Glob,Bash,Write,Edit"},"strong-reviewer":{"model":"opus","effort":"high","tools":"Read,Grep,Glob,Bash"},"strong-worker":{"model":"opus","effort":"high","tools":"Read,Grep,Glob,Bash,Write,Edit"}}}' ]
+}
+
+@test "strong Codex routes reject a fixed model and strong Claude routes require high effort" {
+  write_valid_routes
+  sed -i '/^description =/a model = "gpt-5.6-sol"' "$PLUGIN/agents/strong-reviewer.toml"
+
+  run "$CHECK" "$PLUGIN"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"model-must-be-selected-at-dispatch"* ]]
+
+  write_valid_routes
+  sed -i '/^effort: high$/d' "$PLUGIN/agents/strong-worker.md"
+
+  run "$CHECK" "$PLUGIN"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"strong-worker.md:effort"* ]]
 }
 
 @test "model routing config ignores Claude route fields outside frontmatter" {
