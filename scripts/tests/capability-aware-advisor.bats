@@ -37,18 +37,37 @@ text = " ".join(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").split())
 for phrase in (
     "On Claude Code, launch the exact named public `advisor` Agent",
     "inspect the exposed `spawn_agent` contract before invoking it",
-    'generic `spawn_agent` mechanism with `fork_turns: "none"`',
+    '`fork_turns: "none"`',
     "the explicitly selected highest-capability model, and `xhigh` reasoning effort",
-    "do not invoke `spawn_agent`, wait or poll, or perform or draft the advisory analysis in the parent",
+    "block only when a required input control is absent",
+    "the tool rejects the explicit controls or launch fails",
     "Treat `task_name` only as an operational label",
-    "the model or required harness-specific effort cannot be selected and confirmed explicitly",
-    "report the route failure visibly",
-    "Accept the route only after the child completes",
+    "lack of a per-spawn read-only sandbox control is not itself a route failure",
+    "Accept the route only after the child reaches terminal completion",
     "a parent-authored substitute are not Advisor results",
 ):
     assert phrase in text, phrase
 PY
   [ "$status" -eq 0 ]
+}
+
+@test "Codex routes trust accepted explicit spawn controls without requiring echoed effective settings" {
+  for skill in advisor content-authoring sharpen-plan; do
+    run grep -F "Treat accepted explicit Codex spawn controls as authoritative" \
+      "$PLUGIN/skills/$skill/SKILL.md"
+    [ "$status" -eq 0 ]
+
+    run grep -F "Do not require the spawn result to echo effective configuration" \
+      "$PLUGIN/skills/$skill/SKILL.md"
+    [ "$status" -eq 0 ]
+
+    run grep -F "failed or empty child result" "$PLUGIN/skills/$skill/SKILL.md"
+    [ "$status" -eq 0 ]
+
+    run grep -F "cannot verify required Codex spawn_agent evidence fields" \
+      "$PLUGIN/skills/$skill/SKILL.md"
+    [ "$status" -ne 0 ]
+  done
 }
 
 @test "given future model upgrades strong routes defer model selection to current harness capability metadata" {
@@ -109,8 +128,7 @@ PY
           "taskName": "advisor",
           "model": "gpt-5.6-sol",
           "reasoningEffort": "xhigh",
-          "forkTurns": "none",
-          "allowVisibleBlock": true
+          "forkTurns": "none"
         }
       }
       and .[0].coverage.kinds == [
@@ -123,9 +141,9 @@ PY
       }
       and .[0].minPassRate == 1
       and (.[0].semanticRubric | contains("completed foreground Advisor result"))
-      and (.[0].semanticRubric | contains("empty wait or self-authored prose"))
-      and (.[0].semanticRubric | contains("visible fail-closed response"))
-      and (.[0].semanticRubric | contains("refrain from self-authoring the plan"))
+      and (.[0].semanticRubric | contains("empty wait"))
+      and (.[0].semanticRubric | contains("self-authored prose"))
+      and (.[0].semanticRubric | contains("visible capability block"))
   ' "$ROOT/evals/fixtures/behavior/development-system/cases.json"
   [ "$status" -eq 0 ]
 }

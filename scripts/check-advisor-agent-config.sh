@@ -36,7 +36,11 @@ skill_flat="$(tr -s '[:space:]' ' ' <"$skill")"
 grep -Fq 'two or more dependent implementation steps' "$skill" || fail "skill-must-trigger-for-multi-step-plans"
 grep -Fq 'executable BDD-style scenario' "$skill" || fail "skill-must-define-bdd-exemption"
 grep -Fq 'Do not invoke Advisor again' "$skill" || fail "skill-must-prevent-recursion"
-grep -Fq 'failure visibly' "$skill" || fail "skill-must-fail-visibly"
+grep -Fq 'Treat accepted explicit Codex spawn controls as authoritative' "$skill" || fail "skill-must-trust-accepted-controls"
+grep -Fq 'failed or empty child result' "$skill" || fail "skill-must-reject-failed-or-empty-child"
+if grep -Fq 'cannot verify required Codex spawn_agent evidence fields' "$skill"; then
+  fail "skill-must-not-require-echoed-spawn-evidence"
+fi
 
 if grep -Eq 'gpt-[0-9]+\.[0-9]+-(sol|pro)|agent_type: default' "$skill" "$agent"; then
   fail "static-model-or-fallback-configured"

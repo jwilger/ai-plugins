@@ -24,48 +24,47 @@ parent accountable for scope, authority, user questions, and approval.
      Agent in the foreground, explicitly setting `run_in_background=false` when
      that control exists.
    - On Codex, inspect the exposed `spawn_agent` contract before invoking it.
-     Proceed only if it accepts explicit `model` and `reasoning_effort` inputs
-     and exposes a reliable way to confirm their effective values. Otherwise
-     return exactly `Blocked: development-system:sharpen-plan cannot verify required Codex spawn_agent evidence fields: <comma-separated missing fields in task_name, model, reasoning_effort, fork_turns order>. No artifact was produced.` immediately: do not invoke
-     `spawn_agent`, wait or poll, ask the sharpening question, or author or
-     revise any plan content in the parent. When supported, call the generic
-     `spawn_agent` mechanism with `fork_turns: "none"` or the smallest bounded
-     turn count that carries necessary context, the explicitly selected
-     highest-capability model, and high reasoning effort. After launch, confirm
-     that exact model and effort before any wait or poll; if confirmation fails,
-     stop without waiting or substituting parent-authored plan content. Put the
-     complete sharpening-author role instructions and task context in the spawn
-     message. Treat `task_name` only as an operational label, not as a role
-     selector or evidence that the role contract was loaded.
+     Proceed only if it accepts explicit `model`, `reasoning_effort`, and
+     `fork_turns` inputs. Call the generic mechanism with `fork_turns: "none"`
+     or the smallest bounded turn count that carries necessary context, the
+     explicitly selected highest-capability model, and high reasoning effort.
 
-   For either harness, confirm the selected model, high effort, effective
-   read-only child sandbox, and non-background dispatch before relying on the
-   result. Instructions alone are not a read-only sandbox. Wait for the child to
-   complete and expose its substantive result to the parent; an empty wait,
-   agent identifier, async or background launch metadata, pending status, or
-   parent-authored substitute is not a sharpening result. Model choice supplies
-   neither write authority nor approval to implement the plan.
+     Treat accepted explicit Codex spawn controls as authoritative.
+     Do not require the spawn result to echo effective configuration.
+     Do not require a per-spawn sandbox override. Put the complete
+     sharpening-author role, read-only behavioral contract, and task context in
+     the spawn message. Treat `task_name` only as an operational label, not as a
+     role selector or evidence that the role contract was loaded.
+
+   For Claude Code, rely on the effective read-only Agent boundary and
+   foreground dispatch. For Codex, wait for terminal child completion; the
+   child must obey the no-write contract, and observed repository or
+   persistent-state mutation makes the child completion failed. Under the
+   trusted local-tool threat model, lack of a per-spawn read-only sandbox
+   control is not itself a route failure. An agent identifier, async or
+   background launch metadata, pending status, or parent-authored substitute is
+   not a sharpening result. Model choice supplies neither write authority nor
+   approval to implement the plan.
 
 4. Give the author the complete current plan, the user's goal, relevant source
    facts, constraints, prior answers, and the contract below. Ask it to choose
    exactly one highest-leverage clarification and author the complete revised
    plan, not merely a patch or commentary. Supply the active plan artifact or
    conversational plan state without converting one into the other.
-5. If authoritative ranking, explicit selection, high-effort configuration,
-   the effective read-only child sandbox, foreground launch, or a completed
-   substantive result cannot be confirmed, name the failed step and return a
-   visible bounded blocked result. Treat a background launch or missing
-   completed result as a route failure even if the harness returned successful
-   launch metadata. Stop the sharpening pass. Do not substitute a weaker or
-   default route, make the judgment in the parent, present pending output, or
-   silently reuse unconfirmed output.
+5. On Codex, block only when a required input control is absent, the tool
+   rejects the explicit controls or launch fails, or completion produces a
+   failed or empty child result. Stop the sharpening pass. Do not substitute a
+   weaker or default route, make the judgment in the parent, present pending
+   output, or silently reuse unconfirmed output.
 
 The assignment remains read-only even outside Plan Mode: it may inspect the
 plan and relevant evidence and return plan text, but it may not edit files,
 commit, install software, mutate services, or begin implementation. If an
 authorized plan artifact must be updated outside Plan Mode, the parent may
 place the strong author's returned plan into that artifact without changing
-its substance. No other write or scope expansion follows from the assignment.
+its substance. On Codex, this no-write rule is a behavioral child contract;
+reject observed mutation without requiring a per-spawn sandbox mode. No other
+write or scope expansion follows from the assignment.
 
 ## Author one pass
 

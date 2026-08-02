@@ -18,8 +18,21 @@ function successfulClaudeCall(call) {
     typeof call === "object" &&
     call.is_error !== true &&
     Object.hasOwn(call, "output") &&
-    nonemptyString(call.output)
+    nonemptyClaudeOutput(call.output)
   );
+}
+
+function nonemptyClaudeOutput(value) {
+  if (nonemptyString(value)) return true;
+  if (Array.isArray(value)) return value.some(nonemptyClaudeOutput);
+  if (!value || typeof value !== "object") return false;
+  if (Object.hasOwn(value, "text")) {
+    return nonemptyClaudeOutput(value.text);
+  }
+  if (Object.hasOwn(value, "content")) {
+    return nonemptyClaudeOutput(value.content);
+  }
+  return false;
 }
 
 function normalizedPath(value) {
@@ -43,16 +56,7 @@ function claudeSkillEvidence(toolCalls, skill) {
   return toolCalls.some((call) => {
     if (!successfulClaudeCall(call)) return false;
     const name = String(call.name || "").toLowerCase();
-    if (name === "skill") {
-      return exactPublicName(call.input?.skill, skill);
-    }
-    if (name === "read") {
-      return isInstalledSkillPath(
-        call.input?.file_path ?? call.input?.path,
-        skill,
-      );
-    }
-    return false;
+    return name === "skill" && exactPublicName(call.input?.skill, skill);
   });
 }
 
@@ -79,9 +83,7 @@ function assertClaudeDispatch(context, expected) {
   const failures = [];
   const hasExpectedAgent = claudeAgentEvidence(toolCalls, expected.agent);
   if (!claudeSkillEvidence(toolCalls, expected.skill)) {
-    failures.push(
-      `no successful installed ${expected.skill} Skill or SKILL.md Read call`,
-    );
+    failures.push(`no successful installed ${expected.skill} Skill call`);
   }
   if (!hasExpectedAgent) {
     failures.push(
@@ -314,16 +316,13 @@ function isCodexSpawn(item) {
 
 function codexSpawnContract(item, expected) {
   const input = item?.arguments ?? item?.input ?? {};
-  const exactDispatch =
+  return (
     input.task_name === expected.codex?.taskName &&
     input.model === expected.codex?.model &&
     input.reasoning_effort === expected.codex?.reasoningEffort &&
     input.fork_turns === expected.codex?.forkTurns &&
-    nonemptyString(input.message);
-  const exactSandbox = expected.codex?.sandboxMode
-    ? input.sandbox_mode === expected.codex.sandboxMode
-    : true;
-  return exactDispatch && exactSandbox;
+    nonemptyString(input.message)
+  );
 }
 
 function isCodexWait(item) {
@@ -378,34 +377,6 @@ function completedSubstantiveThreadIds(item) {
     .map(([thread]) => thread);
 }
 
-function visibleCapabilityBlock(output, expected, runtimeCapability) {
-  if (
-    expected.codex?.allowVisibleBlock !== true ||
-    runtimeCapability?.provider !== "openai:codex-sdk" ||
-    runtimeCapability?.source !== "versioned-provider-contract" ||
-    runtimeCapability?.version !== runtimeCapability?.verifiedVersion ||
-    !Array.isArray(runtimeCapability?.spawnAgentEvidenceFields) ||
-    typeof output !== "string"
-  ) {
-    return false;
-  }
-
-  const requiredFields = [
-    "task_name",
-    "model",
-    "reasoning_effort",
-    "fork_turns",
-    ...(expected.codex?.sandboxMode ? ["sandbox_mode"] : []),
-  ];
-  const missingFields = requiredFields.filter(
-    (field) => !runtimeCapability.spawnAgentEvidenceFields.includes(field),
-  );
-  if (missingFields.length === 0) return false;
-
-  const exactBlock = `Blocked: development-system:${expected.skill} cannot verify required Codex spawn_agent evidence fields: ${missingFields.join(", ")}. No artifact was produced.`;
-  return output.trim() === exactBlock;
-}
-
 function assertCodexDispatch(output, context, expected) {
   const items = parseCodexItems(context);
   if (!items) {
@@ -426,24 +397,9 @@ function assertCodexDispatch(output, context, expected) {
       codexSpawnContract(item, expected) &&
       receiverThreadIds(item).length > 0,
   );
-  const hasAnySpawn = items.some(isCodexSpawn);
   if (spawnIndex < 0) {
-    if (
-      failures.length === 0 &&
-      !hasAnySpawn &&
-      visibleCapabilityBlock(
-        output,
-        expected,
-        context?.vars?.codex_spawn_capability,
-      )
-    ) {
-      return result(
-        true,
-        `Codex provider evidence confirms installed ${expected.skill} access and a bounded visible capability block without artifact substitution`,
-      );
-    }
     failures.push(
-      "no successful collaboration spawn_agent call with the exact task/model/effort/fork contract and receiver/thread evidence, or valid visible capability block",
+      "no successful collaboration spawn_agent call with the exact task/model/effort/fork contract and receiver/thread evidence",
     );
   } else {
     const spawnedThreads = new Set(receiverThreadIds(items[spawnIndex]));

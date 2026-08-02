@@ -51,14 +51,14 @@ text = " ".join(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").split())
 for phrase in (
     "On Claude Code, launch the exact named public read-only `strong-reviewer`",
     "inspect the exposed `spawn_agent` contract before invoking it",
-    'generic `spawn_agent` mechanism with `fork_turns: "none"`',
+    '`fork_turns: "none"`',
     "the explicitly selected highest-capability model, and high reasoning effort",
-    "do not invoke `spawn_agent`, wait or poll, ask the sharpening question, or author or revise any plan content in the parent",
+    "block only when a required input control is absent",
+    "the tool rejects the explicit controls or launch fails",
     "Treat `task_name` only as an operational label",
-    "explicit selection, high-effort configuration",
-    "return a visible bounded blocked result",
+    "lack of a per-spawn read-only sandbox control is not itself a route failure",
     "Do not substitute a weaker or default route, make the judgment in the parent",
-    "Wait for the child to complete",
+    "wait for terminal child completion",
     "parent-authored substitute is not a sharpening result",
 ):
     assert phrase in text, phrase
@@ -100,8 +100,7 @@ PY
           "taskName": "sharpen_plan_author",
           "model": "gpt-5.6-sol",
           "reasoningEffort": "high",
-          "forkTurns": "none",
-          "allowVisibleBlock": true
+          "forkTurns": "none"
         }
       }
       and .[0].coverage.kinds == [
@@ -114,9 +113,9 @@ PY
       }
       and .[0].minPassRate == 1
       and (.[0].semanticRubric | contains("completed foreground reviewer result"))
-      and (.[0].semanticRubric | contains("empty wait or self-authored revision"))
-      and (.[0].semanticRubric | contains("visible fail-closed response"))
-      and (.[0].semanticRubric | contains("refrain from self-authoring a revised plan"))
+      and (.[0].semanticRubric | contains("empty wait"))
+      and (.[0].semanticRubric | contains("self-authored revision"))
+      and (.[0].semanticRubric | contains("visible capability block"))
   ' "$ROOT/evals/fixtures/behavior/development-system/cases.json"
   [ "$status" -eq 0 ]
 }

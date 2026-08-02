@@ -42,10 +42,10 @@ for phrase in (
     'generic `spawn_agent` mechanism with `fork_turns: "none"`',
     "the explicitly selected model, and high reasoning effort",
     "`task_name` is only an operational label",
-    "the required spawn controls, explicit model selection, explicit high effort",
-    "the parent must return only `Blocked: development-system:content-authoring cannot verify required Codex spawn_agent evidence fields:",
+    "block only when a required `model`, `reasoning_effort`, or `fork_turns` input control is absent",
+    "the tool rejects the explicit controls or launch fails",
     "The parent must not draft, outline, exemplify, template, partially create, or otherwise substitute",
-    "Accept the route only after the child completes",
+    "Accept the route only after the child reaches terminal completion",
     "a parent-authored substitute are not authored results",
 ):
     assert phrase in text, phrase
@@ -92,9 +92,7 @@ PY
           "taskName": "content_author",
           "model": "gpt-5.6-sol",
           "reasoningEffort": "high",
-          "forkTurns": "none",
-          "sandboxMode": "workspace-write",
-          "allowVisibleBlock": true
+          "forkTurns": "none"
         }
       }
       and .[0].coverage.kinds == [
@@ -107,9 +105,9 @@ PY
       }
       and .[0].minPassRate == 1
       and (.[0].semanticRubric | contains("finished quick-start card itself"))
-      and (.[0].semanticRubric | contains("empty wait or self-authored copy"))
-      and (.[0].semanticRubric | contains("visible fail-closed response"))
-      and (.[0].semanticRubric | contains("refrain from self-authoring any version of the card"))
+      and (.[0].semanticRubric | contains("empty wait"))
+      and (.[0].semanticRubric | contains("self-authored copy"))
+      and (.[0].semanticRubric | contains("visible capability block"))
   ' "$ROOT/evals/fixtures/behavior/development-system/cases.json"
   [ "$status" -eq 0 ]
 }

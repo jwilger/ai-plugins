@@ -137,7 +137,34 @@ assertPass(
 );
 
 assertPass(
-  'Claude installed Read and legacy Task evidence',
+  'Claude structured Agent content evidence',
+  assertInstalledDispatch(
+    'The prose is irrelevant.',
+    claudeContext('advisor-installed-delegated-dispatch', [
+      {
+        name: 'Skill',
+        input: { skill: 'development-system:advisor' },
+        output: [{ type: 'text', text: 'Advisor loaded' }],
+        is_error: false,
+      },
+      {
+        name: 'Agent',
+        input: {
+          subagent_type: 'development-system:advisor',
+          run_in_background: false,
+        },
+        output: [
+          { type: 'text', text: 'Advisor result' },
+          { type: 'text', text: 'agentId: agent-1' },
+        ],
+        is_error: false,
+      },
+    ]),
+  ),
+);
+
+assertFail(
+  'Claude installed Read without public Skill invocation',
   assertInstalledDispatch(
     '',
     claudeContext('sharpen-plan-installed-delegated-dispatch', [
@@ -350,8 +377,8 @@ assertPass(
   ),
 );
 
-assertPass(
-  'Codex bounded visible capability block',
+assertFail(
+  'Codex bounded visible capability block is not dispatch evidence',
   assertInstalledDispatch(
     'Blocked: development-system:advisor cannot verify required Codex spawn_agent evidence fields: task_name, model, reasoning_effort, fork_turns. No artifact was produced.',
     codexContext('advisor-installed-delegated-dispatch', [
@@ -366,8 +393,8 @@ assertPass(
   ),
 );
 
-assertPass(
-  'Codex content-authoring live capability block wording',
+assertFail(
+  'Codex content-authoring capability block is not dispatch evidence',
   assertInstalledDispatch(
     'Blocked: development-system:content-authoring cannot verify required Codex spawn_agent evidence fields: task_name, model, reasoning_effort, fork_turns, sandbox_mode. No artifact was produced.',
     codexContext('content-authoring-installed-delegated-dispatch', [
@@ -382,8 +409,8 @@ assertPass(
   ),
 );
 
-assertPass(
-  'Codex sharpen-plan live capability block wording',
+assertFail(
+  'Codex sharpen-plan capability block is not dispatch evidence',
   assertInstalledDispatch(
     'Blocked: development-system:sharpen-plan cannot verify required Codex spawn_agent evidence fields: task_name, model, reasoning_effort, fork_turns. No artifact was produced.',
     codexContext('sharpen-plan-installed-delegated-dispatch', [
@@ -499,6 +526,12 @@ const assertInstalledDispatch = require('./evals/promptfoo/assert-installed-disp
 function assertFail(label, result) {
   if (result.pass !== false || result.score !== 0) {
     throw new Error(`${label} should fail`);
+  }
+}
+
+function assertPass(label, result) {
+  if (result.pass !== true || result.score !== 1) {
+    throw new Error(`${label} should pass: ${result.reason}`);
   }
 }
 
@@ -633,6 +666,19 @@ assertFail(
     claudeContext([
       successfulSkill,
       { ...foregroundAdvisor, output: '   ' },
+    ]),
+  ),
+);
+assertFail(
+  'structured Claude agent result with metadata but no text',
+  assertInstalledDispatch(
+    '',
+    claudeContext([
+      successfulSkill,
+      {
+        ...foregroundAdvisor,
+        output: [{ type: 'text', text: '   ' }],
+      },
     ]),
   ),
 );
@@ -918,8 +964,8 @@ assertFail(
     ]),
   ),
 );
-assertFail(
-  'Codex content worker without writable sandbox',
+assertPass(
+  'Codex content worker accepted controls do not require a per-spawn sandbox field',
   assertInstalledDispatch(
     '',
     codexContext(

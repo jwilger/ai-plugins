@@ -25,46 +25,48 @@ accountable for decisions and user communication.
      explicit model selection and its configured highest-supported effort
      (currently `max`).
    - On Codex, inspect the exposed `spawn_agent` contract before invoking it.
-     Proceed only if it accepts explicit `model` and `reasoning_effort` inputs
-     and exposes a reliable way to confirm their effective values. Otherwise
-     return exactly `Blocked: development-system:advisor cannot verify required Codex spawn_agent evidence fields: <comma-separated missing fields in task_name, model, reasoning_effort, fork_turns order>. No artifact was produced.` immediately: do not invoke
-     `spawn_agent`, wait or poll, or perform or draft the advisory analysis in
-     the parent. When supported, call the generic `spawn_agent` mechanism with
-     `fork_turns: "none"` or the smallest bounded turn count that carries
-     necessary context, the explicitly selected highest-capability model, and
-     `xhigh` reasoning effort. After launch, confirm that exact model and effort
-     before any wait or poll; if confirmation fails, stop without waiting or
-     substituting parent-authored analysis. Supply the full Advisor role
-     instructions and task context in the spawn message. Treat `task_name` only
-     as an operational label, never as a role selector or evidence that the
-     Advisor contract was loaded.
+     Proceed only if it accepts explicit `model`, `reasoning_effort`, and
+     `fork_turns` inputs. Call the generic mechanism with `fork_turns: "none"`
+     or the smallest bounded turn count that carries necessary context, the
+     explicitly selected highest-capability model, and `xhigh` reasoning
+     effort.
 
-   For either harness, confirm that the effective child sandbox is read-only
-   and that the required harness-specific effort is active before relying on
-   the analysis. Never merely preserve or assume configured effort, and never
-   impose Codex's literal effort label on another harness.
+     Treat accepted explicit Codex spawn controls as authoritative.
+     Do not require the spawn result to echo effective configuration.
+     Do not require a per-spawn sandbox override. Supply the full Advisor role,
+     read-only behavioral contract, and task context in the spawn message. Treat
+     `task_name` only as an operational label, never as a role selector or
+     evidence that the Advisor contract was loaded.
 
-5. If authoritative ranking is unavailable, the model or required
-   harness-specific effort cannot be selected and confirmed explicitly, the
-   read-only boundary cannot be confirmed, or launch fails, report the route
-   failure visibly. Do not use an unranked model, a default agent, a different
-   or unconfirmed effort, or silent fallback.
+   For Claude Code, rely on its effective read-only Agent boundary and required
+   harness-specific effort. For Codex, require the child to obey the no-write
+   contract and reject a result if observed repository or persistent-state
+   evidence shows that the child mutated anything. Under the trusted local-tool
+   threat model, lack of a per-spawn read-only sandbox control is not itself a
+   route failure. Never impose Codex's literal effort label on another harness.
+
+5. On Codex, block only when a required input control is absent, the tool
+   rejects the explicit controls or launch fails, or completion produces a
+   failed or empty child result. Treat observed mutation as a failed child
+   completion. Do not use an unranked model, a default agent, a different
+   effort, or silent fallback.
 6. Pass the user's goal, relevant repository context, known constraints, and the
    exact decision or artifact needed. Do not pass a preferred conclusion.
 7. Wait when the recommendation blocks the plan. Otherwise continue only
-   independent work. Accept the route only after the child completes and its
-   substantive recommendation is visible to the parent. Empty waits, launch or
-   background metadata, pending status, and a parent-authored substitute are
-   not Advisor results.
+   independent work. Accept the route only after the child reaches terminal
+   completion and its substantive recommendation is visible to the parent. An
+   agent identifier, launch or background metadata, pending status, and a
+   parent-authored substitute are not Advisor results.
 8. Apply the completed recommendation with your own judgment. Present the
    decisions, pushback, risks, scope cuts, and recommended path that affect the
    user.
 
 Keep the Advisor read-only: allow inspection and targeted current research, but
 forbid edits, commits, installs, service mutations, and other persistent-state
-changes. If the parent cannot confirm that the effective child sandbox enforces
-that boundary, block the advisory route visibly. Instructions alone are not a
-read-only sandbox. Model choice grants no additional authority.
+changes. On Codex this is a behavioral child contract within the trusted
+local-tool threat model; reject the result if observed evidence shows a
+mutation, without requiring a per-spawn sandbox mode. Model choice grants no
+additional authority.
 
 ## Advisory work
 

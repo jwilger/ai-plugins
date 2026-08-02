@@ -1,6 +1,6 @@
 {
   "name": "development-system",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "John's consolidated development workflow with Beads and Dolt, engineering standards, worktrees, review, and agentic-system tooling.",
   "author": {
     "name": "John Wilger",
