@@ -60,6 +60,9 @@ dolt-pprof/
 # Backup data (auto-exported JSONL, local-only)
 backup/
 
+# Audit exports (migration/interchange data, not Dolt sync state)
+interactions.jsonl
+
 # Per-project environment file (Dolt connection config, GH#2520)
 .env
 
