@@ -6,10 +6,20 @@ import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const require = createRequire(import.meta.url);
-const evalWorkspace = path.join(root, ".evals/agent-workspace");
+const evalRuntimeRoot = path.resolve(
+  process.env.EVAL_RUNTIME_ROOT ||
+    path.join(
+      "/tmp",
+      `ai-plugins-provider-eval-${process.getuid?.() ?? "user"}`,
+    ),
+);
+const providerBoundary = path.join(
+  root,
+  "scripts/evals/behavior-provider-boundary.sh",
+);
 const developmentSystemPluginName = "development-system";
 const advisoryPromptPrefix =
-  "Answer the scenario as an advisory behavior question. Treat each scenario as stateless: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Use installed marketplace plugin and skill guidance when it is relevant, naming the relevant plugin or skill in the answer. You may read installed skill instruction files through the harness. When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording. Apply plugin-specific safety gates and documented commands exactly instead of replacing them with generic setup or validation advice. Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands.";
+  "Answer the scenario as a stateless advisory question. Use only context made available inside this evaluation condition. Do not rely on prior conversations, user memory, session memory, earlier runs, or host-machine state. Do not mutate files, start evaluations, or run unrelated commands.";
 
 function usage() {
   console.log(`Usage: node scripts/evals/generate-config.mjs [--suite behavior|canary] [--output path] [--metadata-output path] [--stdout]
@@ -132,11 +142,34 @@ function providerEnv(value, fallback) {
   return `"{{ env.${value} | default('${fallback}') }}"`;
 }
 
+function conditionWorkspace(label) {
+  return path.join(evalRuntimeRoot, "workspaces", label);
+}
+
+function conditionIsolation(pluginMode) {
+  return {
+    boundary: "mount-namespace",
+    failClosed: true,
+    workspace: "outside-repository",
+    repository: "hidden",
+    globalGuidance: "hidden",
+    globalHomes: "hidden",
+    globalCaches: "hidden",
+    globalCatalogs: "hidden",
+    conditionHome: "owned",
+    pluginMounts:
+      pluginMode.id === "development-system"
+        ? [developmentSystemPluginName]
+        : [],
+    leakagePolicy: "reject",
+  };
+}
+
 function claudeProvider(variant, pluginMode, plugins) {
   const evalHome = path.join(root, `.evals/claude-home-${pluginMode.id}`);
   const envSuffix = pluginMode.id.replaceAll("-", "_").toUpperCase();
   const plugin = plugins[0];
-  const pluginPath = plugin
+  const hostPluginPath = plugin
     ? path.join(
         evalHome,
         "plugin-cache/cache/ai-plugins",
@@ -149,7 +182,7 @@ function claudeProvider(variant, pluginMode, plugins) {
       ? ""
       : `      plugins:
         - type: local
-          path: "{{ env.CLAUDE_EVAL_PLUGIN_PATH_${envSuffix} | default('${pluginPath}') }}"
+          path: "/runtime/plugin"
       include_hook_events: true
 `;
 
@@ -160,7 +193,8 @@ function claudeProvider(variant, pluginMode, plugins) {
     config:
       apiKeyRequired: false
       model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
-      working_dir: ${quote(evalWorkspace)}
+      working_dir: ${quote(conditionWorkspace(`${variant.id}-${pluginMode.id}`))}
+      path_to_claude_code_executable: ${quote(providerBoundary)}
       permission_mode: dontAsk
       skills: all
       setting_sources: []
@@ -169,16 +203,25 @@ function claudeProvider(variant, pluginMode, plugins) {
         - Agent
         - Skill
       env:
-        CLAUDE_CONFIG_DIR: "{{ env.CLAUDE_EVAL_RUNTIME_CONFIG_DIR_${envSuffix} | default('${path.join(evalHome, "config")}') }}"
-        CLAUDE_CODE_PLUGIN_CACHE_DIR: "{{ env.CLAUDE_EVAL_PLUGIN_CACHE_DIR_${envSuffix} | default('${path.join(evalHome, "plugin-cache")}') }}"
+        EVAL_PROVIDER_HARNESS: "claude"
+        EVAL_PLUGIN_MODE: "${pluginMode.id}"
+        EVAL_PROVIDER_HOME: "{{ env.CLAUDE_EVAL_HOME_${envSuffix} | default('${evalHome}') }}"
+        EVAL_PROVIDER_WORKSPACE: ${quote(conditionWorkspace(`${variant.id}-${pluginMode.id}`))}
+        EVAL_PROVIDER_REAL_BIN: "{{ env.CLAUDE_EVAL_REAL_BIN }}"
+        EVAL_PROVIDER_BWRAP_BIN: "{{ env.EVAL_PROVIDER_BWRAP_BIN }}"
+        CLAUDE_CONFIG_DIR: "/runtime/home/config"
+        CLAUDE_CODE_PLUGIN_CACHE_DIR: "/runtime/home/plugin-cache"
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
-${pluginMode.id === "development-system" ? `        DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER: "{{ env.CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE | default('${path.join(root, ".evals/session-start-claude-development-system")}') }}"\n` : ""}      disallowed_tools:
+${pluginMode.id === "development-system" ? `        EVAL_PROVIDER_PLUGIN_SNAPSHOT: "{{ env.CLAUDE_EVAL_PLUGIN_PATH_${envSuffix} | default('${hostPluginPath}') }}"\n        EVAL_PROVIDER_SESSION_START_EVIDENCE: "{{ env.CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE }}"\n        DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER: "/runtime/home/session-start-marker"\n` : ""}      disallowed_tools:
         - Bash
+        - WebSearch
+        - WebFetch
 ${pluginLines}`.trimEnd();
 }
 
 function codexProvider(variant, pluginMode) {
   const homeSuffix = pluginMode.id;
+  const envSuffix = pluginMode.id.replaceAll("-", "_").toUpperCase();
   return `  - id: ${variant.provider}
     label: ${variant.id}-${pluginMode.id}
     pluginMode: ${pluginMode.id}
@@ -186,7 +229,7 @@ function codexProvider(variant, pluginMode) {
     config:
       model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
       model_reasoning_effort: ${providerEnv(variant.reasoningEffortEnv, variant.defaultReasoningEffort)}
-      working_dir: ${quote(evalWorkspace)}
+      working_dir: ${quote(conditionWorkspace(`${variant.id}-${pluginMode.id}`))}
       sandbox_mode: read-only
       approval_policy: never
       enable_streaming: true
@@ -199,12 +242,21 @@ function codexProvider(variant, pluginMode) {
           multi_agent_v2:
             enabled: true
             max_concurrent_threads_per_session: 8
-${pluginMode.id === "development-system" ? `      codex_path_override: "${path.join(root, "scripts/evals/codex-with-trusted-hooks.sh")}"\n` : ""}      cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.evals/codex-home-${homeSuffix}`)}') }}"${
+      codex_path_override: ${quote(providerBoundary)}
+      cli_env:
+        EVAL_PROVIDER_HARNESS: "codex"
+        EVAL_PLUGIN_MODE: "${pluginMode.id}"
+        EVAL_PROVIDER_HOME: "{{ env.CODEX_EVAL_HOME_${envSuffix} | default('${path.join(root, `.evals/codex-home-${homeSuffix}`)}') }}"
+        EVAL_PROVIDER_WORKSPACE: ${quote(conditionWorkspace(`${variant.id}-${pluginMode.id}`))}
+        EVAL_PROVIDER_BWRAP_BIN: "{{ env.EVAL_PROVIDER_BWRAP_BIN }}"
+        EVAL_PROVIDER_NODE_BIN: "{{ env.EVAL_PROVIDER_NODE_BIN }}"
+        EVAL_PROVIDER_CODEX_RUNTIME: "{{ env.EVAL_PROVIDER_CODEX_RUNTIME }}"
+        CODEX_HOME: "/runtime/home"${
           pluginMode.id === "development-system"
             ? `
-        CODEX_EVAL_REAL_BIN: "{{ env.CODEX_EVAL_REAL_BIN | default('${path.join(root, "node_modules/.bin/codex")}') }}"
-        DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER: "{{ env.CODEX_EVAL_SESSION_START_MARKER | default('${path.join(root, ".evals/session-start-codex-development-system")}') }}"`
+        EVAL_PROVIDER_PLUGIN_SNAPSHOT: "{{ env.CODEX_EVAL_SANITIZED_MARKETPLACE | default('${path.join(root, `.evals/codex-home-${homeSuffix}/sanitized-marketplace`)}') }}"
+        EVAL_PROVIDER_SESSION_START_EVIDENCE: "{{ env.CODEX_EVAL_SESSION_START_MARKER }}"
+        DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER: "/runtime/home/session-start-marker"`
             : ""
         }`;
 }
@@ -360,6 +412,7 @@ function configFor(suite) {
     providerVariant: entry.variant.id,
     pluginMode: entry.pluginMode.id,
     plugins: entry.plugins.map((plugin) => plugin.name),
+    filesystemIsolation: conditionIsolation(entry.pluginMode),
   }));
   const metadata = {
     suite,
@@ -390,14 +443,22 @@ defaultTest:
         config:
           model: "{{ env.CODEX_GRADER_MODEL | default('gpt-5.6-sol') }}"
           model_reasoning_effort: "{{ env.CODEX_GRADER_REASONING_EFFORT | default('high') }}"
-          working_dir: ${quote(evalWorkspace)}
+          working_dir: ${quote(conditionWorkspace("codex-grader"))}
           sandbox_mode: read-only
           approval_policy: never
           enable_streaming: true
           deep_tracing: false
           skip_git_repo_check: true
+          codex_path_override: ${quote(providerBoundary)}
           cli_env:
-            CODEX_HOME: "{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM | default(env.CODEX_EVAL_HOME) | default('${path.join(root, ".evals/codex-home-development-system")}') }}"
+            EVAL_PROVIDER_HARNESS: "codex"
+            EVAL_PLUGIN_MODE: "no-plugins"
+            EVAL_PROVIDER_HOME: "{{ env.CODEX_EVAL_HOME_GRADER | default('${path.join(root, ".evals/codex-home-grader")}') }}"
+            EVAL_PROVIDER_WORKSPACE: ${quote(conditionWorkspace("codex-grader"))}
+            EVAL_PROVIDER_BWRAP_BIN: "{{ env.EVAL_PROVIDER_BWRAP_BIN }}"
+            EVAL_PROVIDER_NODE_BIN: "{{ env.EVAL_PROVIDER_NODE_BIN }}"
+            EVAL_PROVIDER_CODEX_RUNTIME: "{{ env.EVAL_PROVIDER_CODEX_RUNTIME }}"
+            CODEX_HOME: "/runtime/home"
 
 tracing:
   enabled: false
@@ -416,7 +477,7 @@ ${indentedList(providerVariants, 6, (variant) => `- id: ${variant.id}\n${" ".rep
 ${indentedList(allPlugins, 4, (plugin) => `- name: ${plugin.name}\n${" ".repeat(6)}sourcePath: ${quote(plugin.path)}`)}
 
 commandLineOptions:
-  maxConcurrency: 1
+  maxConcurrency: 8
   share: false
   cache: false
   write: true

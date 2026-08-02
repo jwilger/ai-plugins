@@ -545,7 +545,7 @@ const fs = require('node:fs');
 fs.writeFileSync(
   process.argv[2],
   `#!/usr/bin/env bash
-printf '%s\\n%s\\n' "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM" "$CODEX_EVAL_HOME_NO_PLUGINS" > "$CAPTURED_ENV"
+	printf '%s\\n%s\\n' "$GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM" "$GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS" > "$CAPTURED_ENV"
 exit 42
 `,
   { mode: 0o755 },

@@ -6,9 +6,9 @@ setup() {
   mkdir -p "$FIXTURE_ROOT/evals/fixtures/behavior"
   cat >"$FIXTURE_ROOT/evals/fixtures/behavior/cases.json" <<'JSON'
 [
-  {"case_id":"alpha","plugins":["alpha-plugin"]},
-  {"case_id":"beta","plugins":["beta-plugin"]},
-  {"case_id":"alphabet","plugins":["alphabet-plugin"]}
+  {"case_id":"alpha","plugins":["alpha-plugin"],"valueGate":{"mode":"none"},"providerEval":{"unresolvedStochasticQuestion":"Will alpha be selected?","deterministicVerificationFullyDecides":false,"deterministicInsufficiency":"Provider selection remains probabilistic.","evidencePurpose":"absolute-reliability","baselineAuditDisposition":"Retain as an absolute reliability selection case; baseline lift is not the hypothesis."}},
+  {"case_id":"beta","plugins":["beta-plugin"],"valueGate":{"mode":"none"},"providerEval":{"unresolvedStochasticQuestion":"Will beta be selected?","deterministicVerificationFullyDecides":false,"deterministicInsufficiency":"Provider selection remains probabilistic.","evidencePurpose":"absolute-reliability","baselineAuditDisposition":"Retain as an absolute reliability selection case; baseline lift is not the hypothesis."}},
+  {"case_id":"alphabet","plugins":["alphabet-plugin"],"valueGate":{"mode":"none"},"providerEval":{"unresolvedStochasticQuestion":"Will alphabet be selected?","deterministicVerificationFullyDecides":false,"deterministicInsufficiency":"Provider selection remains probabilistic.","evidencePurpose":"absolute-reliability","baselineAuditDisposition":"Retain as an absolute reliability selection case; baseline lift is not the hypothesis."}}
 ]
 JSON
 }

@@ -8,6 +8,8 @@ import process from "node:process";
 const root = path.resolve(import.meta.dirname, "../..");
 const evalHomeMarker = ".ai-plugins-eval-home";
 const evalHomeMarkerContents = "ai-plugins Codex eval home\n";
+const sensitiveAuthKeyPattern =
+  /(?:^|[_-])(?:access[_-]?token|id[_-]?token|refresh[_-]?token|token|api[_-]?key|private[_-]?key|client[_-]?secret|secret|password|authorization|credential)(?:$|[_-])/i;
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -19,6 +21,7 @@ function parseArgs(argv) {
     pluginMode: "development-system",
     seedAuth: true,
     installViaCli: false,
+    artifactSecretOutput: null,
   };
 
   for (let index = 1; index < argv.length; index += 1) {
@@ -29,6 +32,11 @@ function parseArgs(argv) {
       args.seedAuth = false;
     } else if (arg === "--install-via-cli") {
       args.installViaCli = true;
+    } else if (arg === "--artifact-secret-output") {
+      args.artifactSecretOutput = argv[++index];
+      if (!args.artifactSecretOutput) {
+        throw new Error("--artifact-secret-output requires a path");
+      }
     } else {
       throw new Error(`unknown argument: ${arg}`);
     }
@@ -36,7 +44,7 @@ function parseArgs(argv) {
 
   if (!args.codexHome) {
     throw new Error(
-      "Usage: node scripts/evals/prepare-codex-home.mjs <codex-home> [--plugin-mode no-plugins|development-system] [--no-seed-auth] [--install-via-cli]",
+      "Usage: node scripts/evals/prepare-codex-home.mjs <codex-home> [--plugin-mode no-plugins|development-system] [--no-seed-auth] [--install-via-cli] [--artifact-secret-output path]",
     );
   }
   if (!["no-plugins", "development-system"].includes(args.pluginMode)) {
@@ -99,13 +107,17 @@ function escapeToml(value) {
 }
 
 function writeConfig(codexHome, plugins) {
-  const lines = [
-    "[marketplaces.ai-plugins]",
-    `last_updated = "${new Date().toISOString()}"`,
-    'source_type = "local"',
-    `source = "${escapeToml(root)}"`,
-    "",
-  ];
+  const lines = [];
+
+  if (plugins.length > 0) {
+    lines.push(
+      "[marketplaces.ai-plugins]",
+      `last_updated = "${new Date().toISOString()}"`,
+      'source_type = "local"',
+      'source = "/runtime/marketplace"',
+      "",
+    );
+  }
 
   for (const plugin of plugins) {
     lines.push(`[plugins."${escapeToml(plugin.name)}@ai-plugins"]`);
@@ -114,6 +126,52 @@ function writeConfig(codexHome, plugins) {
   }
 
   fs.writeFileSync(path.join(codexHome, "config.toml"), lines.join("\n"));
+}
+
+function materializeSanitizedState(codexHome, plugins) {
+  fs.rmSync(path.join(codexHome, "plugins"), { recursive: true, force: true });
+  fs.rmSync(path.join(codexHome, "sanitized-marketplace"), {
+    recursive: true,
+    force: true,
+  });
+
+  writeConfig(codexHome, plugins);
+  if (plugins.length === 0) return;
+
+  const marketplaceRoot = path.join(codexHome, "sanitized-marketplace");
+  const manifestPlugins = [];
+  for (const plugin of plugins) {
+    const marketplacePlugin = path.join(
+      marketplaceRoot,
+      "plugins",
+      plugin.name,
+    );
+    copyDir(plugin.path, marketplacePlugin);
+    copyDir(
+      plugin.path,
+      path.join(
+        codexHome,
+        "plugins/cache/ai-plugins",
+        plugin.name,
+        plugin.version,
+      ),
+    );
+    manifestPlugins.push({
+      name: plugin.name,
+      version: plugin.version,
+      source: {
+        source: "local",
+        path: `./plugins/${plugin.name}`,
+      },
+    });
+  }
+
+  const manifestDir = path.join(marketplaceRoot, ".agents/plugins");
+  fs.mkdirSync(manifestDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(manifestDir, "marketplace.json"),
+    `${JSON.stringify({ name: "ai-plugins-eval", plugins: manifestPlugins }, null, 2)}\n`,
+  );
 }
 
 function runCodex(codexHome, args) {
@@ -178,22 +236,125 @@ function installDevelopmentSystemWithCli(codexHome) {
       "Codex CLI did not materialize the development-system plugin cache",
     );
   }
+
+  return installedPath;
+}
+
+function stageInstalledPlugin(codexHome, installedPath) {
+  const stagedPath = path.join(codexHome, "plugin-snapshot.tmp");
+  fs.rmSync(stagedPath, { recursive: true, force: true });
+  fs.renameSync(installedPath, stagedPath);
+  return stagedPath;
+}
+
+function isSensitiveAuthKey(key) {
+  const normalized = String(key).replaceAll(/([a-z0-9])([A-Z])/g, "$1_$2");
+  return sensitiveAuthKeyPattern.test(normalized);
+}
+
+function discoverSensitiveAuthScalars(value) {
+  const secrets = new Set();
+
+  function visit(current) {
+    if (Array.isArray(current)) {
+      for (const entry of current) visit(entry);
+      return;
+    }
+    if (!current || typeof current !== "object") return;
+
+    for (const [key, entry] of Object.entries(current)) {
+      if (
+        isSensitiveAuthKey(key) &&
+        entry !== null &&
+        !Array.isArray(entry) &&
+        typeof entry !== "object"
+      ) {
+        const scalar = String(entry);
+        if (scalar.length > 0) secrets.add(scalar);
+      }
+      visit(entry);
+    }
+  }
+
+  visit(value);
+  return [...secrets].sort();
+}
+
+function writeArtifactSecretManifest(output, secrets) {
+  if (!output) return;
+  const resolved = path.resolve(output);
+  const parent = path.dirname(resolved);
+  if (!fs.existsSync(parent)) {
+    fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+  }
+  const parentStat = fs.lstatSync(parent);
+  if (
+    !parentStat.isDirectory() ||
+    parentStat.isSymbolicLink() ||
+    (parentStat.mode & 0o077) !== 0
+  ) {
+    throw new Error("artifact secret manifest parent is not private");
+  }
+  const combinedSecrets = new Set(secrets);
+  if (fs.existsSync(resolved)) {
+    const stat = fs.lstatSync(resolved);
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      stat.nlink !== 1 ||
+      (stat.mode & 0o077) !== 0
+    ) {
+      throw new Error("existing artifact secret manifest is not private");
+    }
+    const existing = readJson(resolved);
+    if (
+      existing?.version !== 1 ||
+      !Array.isArray(existing.secrets) ||
+      existing.secrets.some(
+        (secret) => typeof secret !== "string" || secret.length === 0,
+      )
+    ) {
+      throw new Error("existing artifact secret manifest is invalid");
+    }
+    for (const secret of existing.secrets) combinedSecrets.add(secret);
+  }
+  const temporary = path.join(
+    parent,
+    `.${path.basename(resolved)}.${process.pid}.tmp`,
+  );
+  try {
+    fs.writeFileSync(
+      temporary,
+      `${JSON.stringify({ version: 1, secrets: [...combinedSecrets].sort() })}\n`,
+      { mode: 0o600 },
+    );
+    fs.chmodSync(temporary, 0o600);
+    fs.renameSync(temporary, resolved);
+    fs.chmodSync(resolved, 0o600);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
 }
 
 function seedAuth(codexHome) {
-  if (process.env.OPENAI_API_KEY) return;
+  if (process.env.OPENAI_API_KEY) return [];
 
   const authHome = authSourceHome();
+  const authSecrets = new Set();
 
   for (const filename of ["auth.json", ".credentials.json"]) {
     const source = path.join(authHome, filename);
     const target = path.join(codexHome, filename);
 
     if (fs.existsSync(source)) {
+      for (const secret of discoverSensitiveAuthScalars(readJson(source))) {
+        authSecrets.add(secret);
+      }
       fs.copyFileSync(source, target);
       fs.chmodSync(target, 0o600);
     }
   }
+  return [...authSecrets].sort();
 }
 
 function authSourceHome() {
@@ -341,23 +502,38 @@ function main() {
     evalHomeMarkerContents,
     { mode: 0o600 },
   );
-  if (args.seedAuth) seedAuth(resolvedHome);
+  const seededAuthSecrets = args.seedAuth ? seedAuth(resolvedHome) : [];
+  writeArtifactSecretManifest(args.artifactSecretOutput, seededAuthSecrets);
 
+  let stagedPluginPath = null;
   if (args.installViaCli) {
-    installDevelopmentSystemWithCli(resolvedHome);
-  } else {
-    writeConfig(resolvedHome, plugins);
+    const installedPath = installDevelopmentSystemWithCli(resolvedHome);
+    stagedPluginPath = stageInstalledPlugin(resolvedHome, installedPath);
+    plugins[0] = { ...plugins[0], path: stagedPluginPath };
+  }
+  try {
+    materializeSanitizedState(resolvedHome, plugins);
+  } finally {
+    if (stagedPluginPath) {
+      fs.rmSync(stagedPluginPath, { recursive: true, force: true });
+    }
+  }
 
-    for (const plugin of plugins) {
-      copyDir(
-        plugin.path,
-        path.join(
-          resolvedHome,
-          "plugins/cache/ai-plugins",
-          plugin.name,
-          plugin.version,
-        ),
-      );
+  for (const entry of fs.readdirSync(resolvedHome)) {
+    if (
+      ![
+        evalHomeMarker,
+        "auth.json",
+        ".credentials.json",
+        "config.toml",
+        "plugins",
+        "sanitized-marketplace",
+      ].includes(entry)
+    ) {
+      fs.rmSync(path.join(resolvedHome, entry), {
+        recursive: true,
+        force: true,
+      });
     }
   }
 

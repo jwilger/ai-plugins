@@ -20,7 +20,7 @@ providers:
         features:
           plugins: true
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM }}"
+        CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM }}"
   - id: file://trace-enforced-codex-provider.mjs
     label: codex-gpt-5.6-terra-standard
     config:
@@ -33,7 +33,7 @@ providers:
         features:
           plugins: true
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM }}"
+        CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM }}"
   - id: file://trace-enforced-codex-provider.mjs
     label: codex-gpt-5.6-luna-standard
     config:
@@ -46,7 +46,7 @@ providers:
         features:
           plugins: true
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM }}"
+        CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM }}"
   - id: file://trace-enforced-codex-provider.mjs
     label: codex-gpt-5.6-sol-advisor-like
     config:
@@ -59,7 +59,7 @@ providers:
         features:
           plugins: false
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+        CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS }}"
   - id: file://trace-enforced-codex-provider.mjs
     label: codex-gpt-5.6-terra-advisor-like
     config:
@@ -72,7 +72,7 @@ providers:
         features:
           plugins: false
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+        CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS }}"
   - id: file://trace-enforced-codex-provider.mjs
     label: codex-gpt-5.6-luna-advisor-like
     config:
@@ -85,7 +85,7 @@ providers:
         features:
           plugins: false
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+        CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS }}"
 
 tests: file://cases.cjs
 
@@ -105,7 +105,7 @@ defaultTest:
             features:
               plugins: false
           cli_env:
-            CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+            CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS }}"
 
 commandLineOptions:
   maxConcurrency: 2

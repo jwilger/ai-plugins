@@ -189,10 +189,31 @@ function main() {
     mode: 0o600,
   });
 
-  const pluginPath =
+  const installedPluginPath =
     args.pluginMode === "development-system"
       ? installDevelopmentSystem(configDir, pluginCacheDir)
       : null;
+  let pluginPath = null;
+
+  if (installedPluginPath) {
+    const temporarySnapshot = path.join(evalHome, "plugin-snapshot.tmp");
+    const version = path.basename(installedPluginPath);
+    fs.renameSync(installedPluginPath, temporarySnapshot);
+    fs.rmSync(configDir, { recursive: true, force: true });
+    fs.rmSync(pluginCacheDir, { recursive: true, force: true });
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(pluginCacheDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, "settings.json"), "{}\n");
+    pluginPath = path.join(
+      pluginCacheDir,
+      "cache/ai-plugins/development-system",
+      version,
+    );
+    fs.mkdirSync(path.dirname(pluginPath), { recursive: true });
+    fs.renameSync(temporarySnapshot, pluginPath);
+  } else {
+    fs.writeFileSync(path.join(configDir, "settings.json"), "{}\n");
+  }
 
   process.stdout.write(
     `${JSON.stringify({

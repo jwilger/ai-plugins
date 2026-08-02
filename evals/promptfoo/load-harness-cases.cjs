@@ -4,6 +4,7 @@ const {
   fileUrl,
   loadMatrix,
   selectedBehaviorCases,
+  stableContextLeakMarkers,
   valueGateMode,
 } = require("./fixtures.cjs");
 const fs = require("fs");
@@ -54,6 +55,7 @@ module.exports = function generateTests() {
         plugins: testCase.plugins || [],
         skills: testCase.skills || [],
         coverage_kinds: coverageKinds(testCase),
+        context_leak_markers: stableContextLeakMarkers(),
         value_gate_mode: valueGateMode(testCase),
         baseline_lift_threshold: baselineLiftThreshold(testCase, evalMatrix),
         hard_guard_status:

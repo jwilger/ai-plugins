@@ -12,7 +12,7 @@ Runs only provider-backed evals whose measured behavior can be affected by the
 changed files between REF and HEAD. The default REF is origin/main.
 
 Selection rules:
-  shared skill prose     matching behavior cases, all supported harnesses, k=1
+  shared skill prose     only mapped cases with an explicit unresolved stochastic question
   docs/tests/other code  no provider-backed eval
 
 Use scripts/evals/run.sh directly with explicit case/provider filters for a
@@ -58,9 +58,35 @@ fi
 skill_names=()
 for file in "${changed[@]}"; do
   case "$file" in
-    plugins/development-system/skills/*/SKILL.md)
+    plugins/development-system/skills/*/SKILL.md | plugins/development-system/skills/*/references/*)
       skill="${file#plugins/development-system/skills/}"
       skill_names+=("${skill%%/*}")
+      ;;
+    plugins/development-system/components/*/skills/*/SKILL.md | plugins/development-system/components/*/skills/*/references/*)
+      component_path="${file#plugins/development-system/components/}"
+      component="${component_path%%/*}"
+      component_skill_path="${component_path#*/skills/}"
+      component_skill="${component_skill_path%%/*}"
+      case "$component/$component_skill" in
+        agentic-systems-engineering/*)
+          skill_names+=("agentic-systems")
+          ;;
+        babysit-pr/*)
+          skill_names+=("delivery")
+          ;;
+        development-discipline/delivery-workflow | development-discipline/ci-failure-follow-up | development-discipline/final-review | development-discipline/rationale-commit-messages | development-discipline/verification-before-completion)
+          skill_names+=("delivery" "development-workflow")
+          ;;
+        development-discipline/*)
+          skill_names+=("development-workflow")
+          ;;
+        engineering-standards/*)
+          skill_names+=("engineering-standards")
+          ;;
+        eval-case-reporter/*)
+          skill_names+=("eval-case-reporting")
+          ;;
+      esac
       ;;
   esac
 done
@@ -85,6 +111,9 @@ if [ "${#skill_names[@]}" -gt 0 ]; then
         | select(
             any(.plugins[]?; . == "development-system")
             and any(.skills[]?; . as $skill | $skills | index($skill))
+            and .providerEval.deterministicVerificationFullyDecides == false
+            and (.providerEval.unresolvedStochasticQuestion | type == "string" and length > 0)
+            and (.providerEval.deterministicInsufficiency | type == "string" and length > 0)
           )
         | .case_id
       ' "${behavior_fixture_files[@]}" | LC_ALL=C sort -u

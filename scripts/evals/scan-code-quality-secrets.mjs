@@ -44,6 +44,7 @@ class ScanFailure extends Error {
 
 function parseArguments(argv) {
   const environmentNames = [];
+  const secretFiles = [];
   const inputs = [];
   let exactOnly = false;
   let positionalOnly = false;
@@ -69,6 +70,11 @@ function parseArguments(argv) {
       }
       environmentNames.push(name);
       index += 1;
+    } else if (!positionalOnly && argument === "--secret-file") {
+      const value = argv[index + 1];
+      if (!value) throw new ScanFailure("invalid-arguments");
+      secretFiles.push(value);
+      index += 1;
     } else if (!positionalOnly && argument.startsWith("-")) {
       throw new ScanFailure("invalid-arguments");
     } else {
@@ -79,6 +85,7 @@ function parseArguments(argv) {
     inputs.length === 0 ||
     inputs.length > 32 ||
     environmentNames.length > 32 ||
+    secretFiles.length > 32 ||
     new Set(environmentNames).size !== environmentNames.length
   ) {
     throw new ScanFailure("invalid-arguments");
@@ -86,10 +93,55 @@ function parseArguments(argv) {
   if (profile && (!exactOnly || inputs.length !== 1)) {
     throw new ScanFailure("invalid-arguments");
   }
-  return { environmentNames, exactOnly, inputs, profile };
+  return { environmentNames, exactOnly, inputs, profile, secretFiles };
 }
 
-function exactSecrets(environmentNames) {
+function secretsFromPrivateFile(file) {
+  if (!path.isAbsolute(file) || path.resolve(file) !== file) {
+    throw new ScanFailure("invalid-secret-file");
+  }
+  const stat = fs.lstatSync(file, { throwIfNoEntry: false });
+  if (
+    !stat ||
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.nlink !== 1 ||
+    stat.size > maximumFileBytes
+  ) {
+    throw new ScanFailure("invalid-secret-file");
+  }
+  assertPrivateMode(stat);
+  const { descriptor, stat: pinnedStat } = openPinned(file, false, stat);
+  try {
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(descriptor, "utf8"));
+    } catch {
+      throw new ScanFailure("invalid-secret-file");
+    }
+    if (
+      parsed?.version !== 1 ||
+      !Array.isArray(parsed.secrets) ||
+      parsed.secrets.length > 256 ||
+      parsed.secrets.some(
+        (secret) =>
+          typeof secret !== "string" ||
+          secret.length === 0 ||
+          Buffer.byteLength(secret) > maximumExactSecretBytes,
+      )
+    ) {
+      throw new ScanFailure("invalid-secret-file");
+    }
+    if (!sameSnapshot(pinnedStat, fs.fstatSync(descriptor))) {
+      throw new ScanFailure("input-changed");
+    }
+    return parsed.secrets.map((secret) => Buffer.from(secret));
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function exactSecrets(environmentNames, secretFiles) {
   const secrets = [];
   for (const name of environmentNames) {
     const value = process.env[name];
@@ -101,7 +153,14 @@ function exactSecrets(environmentNames) {
     }
     secrets.push(bytes);
   }
-  return secrets;
+  for (const file of secretFiles) {
+    secrets.push(...secretsFromPrivateFile(file));
+  }
+  return [
+    ...new Map(
+      secrets.map((secret) => [secret.toString("base64"), secret]),
+    ).values(),
+  ];
 }
 
 function assertPrivateMode(stat) {
@@ -409,10 +468,14 @@ function scanInputs(inputs, secrets, exactOnly, profile) {
 
 function main() {
   try {
-    const { environmentNames, exactOnly, inputs, profile } = parseArguments(
-      process.argv.slice(2),
+    const { environmentNames, exactOnly, inputs, profile, secretFiles } =
+      parseArguments(process.argv.slice(2));
+    scanInputs(
+      inputs,
+      exactSecrets(environmentNames, secretFiles),
+      exactOnly,
+      profile,
     );
-    scanInputs(inputs, exactSecrets(environmentNames), exactOnly, profile);
     process.stdout.write("secret-scan:clean\n");
   } catch (error) {
     const failure =

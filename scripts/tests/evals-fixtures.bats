@@ -2,6 +2,7 @@
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  export CODEX_MODEL_CAPABILITIES_FILE="$ROOT/scripts/tests/fixtures/codex-model-capabilities.json"
 }
 
 @test "loader emits per-test llm rubric and hard-guard assertions" {
@@ -207,7 +208,7 @@ assertPass(
         tool: 'spawn_agent',
         arguments: {
           task_name: 'advisor',
-          model: 'gpt-5.6-sol',
+          model: 'codex-strong-current',
           reasoning_effort: 'xhigh',
           fork_turns: 'none',
           message: 'Perform the complete read-only Advisor review.',
@@ -245,7 +246,7 @@ assertPass(
         tool: 'spawn_agent',
         arguments: {
           task_name: 'content_author',
-          model: 'gpt-5.6-sol',
+          model: 'codex-strong-current',
           reasoning_effort: 'high',
           fork_turns: 'none',
           sandbox_mode: 'workspace-write',
@@ -285,7 +286,7 @@ assertPass(
         tool: 'spawn_agent',
         arguments: {
           task_name: 'sharpen_plan_author',
-          model: 'gpt-5.6-sol',
+          model: 'codex-strong-current',
           reasoning_effort: 'high',
           fork_turns: 'none',
           message: 'Perform one complete read-only sharpening pass.',
@@ -428,7 +429,7 @@ assertFail(
 assertFail(
   'Codex Advisor alternate live capability block wording',
   assertInstalledDispatch(
-    "I can’t produce the plan under the required development-system:advisor route. The installed Advisor skill requires Codex’s spawn_agent to explicitly accept and confirm model and reasoning_effort; this harness exposes neither. Therefore it forbids spawning, waiting, or substituting a parent-authored plan. The requested gpt-5.6-sol / xhigh delegation cannot be verified here.",
+    "I can’t produce the plan under the required development-system:advisor route. The installed Advisor skill requires Codex’s spawn_agent to explicitly accept and confirm model and reasoning_effort; this harness exposes neither. Therefore it forbids spawning, waiting, or substituting a parent-authored plan. The requested highest-capability route at xhigh cannot be verified here.",
     codexContext('advisor-installed-delegated-dispatch', [
       {
         type: 'command_execution',
@@ -444,7 +445,7 @@ assertFail(
 assertFail(
   'Codex content alternate live capability block wording',
   assertInstalledDispatch(
-    "Blocked: the required generic spawn controls for explicit gpt-5.6-sol selection and high reasoning effort are unavailable in this Codex harness, so development-system:content-authoring forbids a substitute draft.",
+    "Blocked: the required generic spawn controls for explicit highest-capability selection and high reasoning effort are unavailable in this Codex harness, so development-system:content-authoring forbids a substitute draft.",
     codexContext('content-authoring-installed-delegated-dispatch', [
       {
         type: 'command_execution',
@@ -490,7 +491,7 @@ assertPass(
         tool: 'spawn_agent',
         arguments: {
           task_name: 'content_author',
-          model: 'gpt-5.6-sol',
+          model: 'codex-strong-current',
           reasoning_effort: 'high',
           fork_turns: 'none',
           sandbox_mode: 'workspace-write',
@@ -602,7 +603,7 @@ const exactAdvisorSpawn = {
   ...successfulSpawn,
   arguments: {
     task_name: 'advisor',
-    model: 'gpt-5.6-sol',
+    model: 'codex-strong-current',
     reasoning_effort: 'xhigh',
     fork_turns: 'none',
     message: 'Perform the complete read-only Advisor review.',
@@ -979,7 +980,7 @@ assertPass(
           ...successfulSpawn,
           arguments: {
             task_name: 'content_author',
-            model: 'gpt-5.6-sol',
+            model: 'codex-strong-current',
             reasoning_effort: 'high',
             fork_turns: 'none',
             message: 'Author the complete bounded human-facing artifact.',

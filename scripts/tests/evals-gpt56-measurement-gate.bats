@@ -18,6 +18,8 @@ run_expected_benchmark_checker() {
   run env \
     CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="${RESULTS}.development-system-home" \
     CODEX_EVAL_HOME_NO_PLUGINS="${RESULTS}.no-plugins-home" \
+    GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM="${RESULTS}.development-system-home" \
+    GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS="${RESULTS}.no-plugins-home" \
     GPT56_BENCHMARK_WORKSPACE="${RESULTS}.workspace" \
     GPT56_BENCHMARK_SAMPLES="${EXPECTED_BENCHMARK_SAMPLES:-1}" \
     PROMPTFOO_MAX_CONCURRENCY="${EXPECTED_MAX_CONCURRENCY:-2}" \
@@ -44,6 +46,10 @@ const benchmarkDir = path.dirname(configPath);
 
 process.env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM = `${resultsPath}.development-system-home`;
 process.env.CODEX_EVAL_HOME_NO_PLUGINS = `${resultsPath}.no-plugins-home`;
+process.env.GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM =
+  `${resultsPath}.development-system-home`;
+process.env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS =
+  `${resultsPath}.no-plugins-home`;
 process.env.GPT56_BENCHMARK_WORKSPACE = `${resultsPath}.workspace`;
 process.env.GPT56_BENCHMARK_SAMPLES = String(samples);
 const source = parse(fs.readFileSync(configPath, 'utf8'));

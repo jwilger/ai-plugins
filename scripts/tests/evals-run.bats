@@ -15,9 +15,15 @@ setup() {
 copy_eval_runner() {
   destination="$1"
   cp "$RUNNER" "$destination"
+  mkdir -p "$(dirname "$(dirname "${destination%/*}")")/evals/promptfoo"
   cp \
+    "$ROOT/scripts/evals/artifact-scan-receipt.mjs" \
+    "$ROOT/scripts/evals/scan-behavior-artifacts.sh" \
+    "$ROOT/scripts/evals/scan-code-quality-secrets.mjs" \
     "$ROOT/scripts/evals/provider-compositions.mjs" \
-    "${destination%/*}/provider-compositions.mjs"
+    "${destination%/*}/"
+  cp "$ROOT/evals/promptfoo/fixtures.cjs" \
+    "$(dirname "$(dirname "${destination%/*}")")/evals/promptfoo/fixtures.cjs"
 }
 
 make_fake_codex_cli() {
@@ -626,6 +632,7 @@ SH
     CODEX_EVAL_HOME="$shared_home" \
     CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$shared_home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$shared_home" \
+    CODEX_EVAL_HOME_GRADER="$fixture_root/codex-grader" \
     CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
     CODEX_EVAL_REAL_BIN="$fake_codex" \
     CODEX_EVAL_CODEX_BIN="$fake_codex" \
@@ -645,7 +652,9 @@ SH
   [[ "$output" == *"generate-config.mjs"* ]]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-claude-home.mjs')" -eq 2 ]
-  [[ "$output" == *"--plugin-mode development-system"* ]]
+  [[ "$output" == *".evals/codex-home-grader"*"--plugin-mode no-plugins"* ]]
+  ! printf '%s\n' "$output" | grep -q \
+    'prepare-codex-home.mjs.*--plugin-mode development-system'
   [[ "$output" == *"promptfoo eval"* ]]
 }
 
@@ -653,9 +662,31 @@ SH
   run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
+  [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 2 ]
   [[ "$output" == *"--plugin-mode development-system"* ]]
-  [[ "$output" != *"--plugin-mode no-plugins"* ]]
+  [[ "$output" == *".evals/codex-home-grader"*"--plugin-mode no-plugins"* ]]
+}
+
+@test "eval runner rejects a grader home shared with a treatment before preparation" {
+  fixture_root="$(mktemp -d)"
+  shared_home="$fixture_root/shared-home"
+  mkdir -p "$shared_home"
+  printf 'ai-plugins Codex eval home\n' >"$shared_home/.ai-plugins-eval-home"
+  printf 'preserve me\n' >"$shared_home/sentinel"
+
+  run env \
+    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-development-system \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$shared_home" \
+    CODEX_EVAL_HOME_GRADER="$shared_home" \
+    "$RUNNER" --dry-run
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Codex eval homes overlap for incompatible compositions"* ]]
+  [[ "$output" == *"development-system"* ]]
+  [[ "$output" == *"grader"* ]]
+  [ -f "$shared_home/sentinel" ]
+
+  rm -rf "$fixture_root"
 }
 
 @test "eval runner passes case filter to Promptfoo CLI" {
@@ -718,7 +749,10 @@ SH
 
 @test "eval runner uses project-local Promptfoo state for real runs" {
   fixture_root="$(mktemp -d)"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  mkdir -p \
+    "$fixture_root/scripts/evals" \
+    "$fixture_root/bin" \
+    "$fixture_root/tooling/evals/node_modules/@openai"
   copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
@@ -730,17 +764,22 @@ SH
   cat >"$fixture_root/bin/promptfoo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'PROMPTFOO_CONFIG_DIR=%s\n' "${PROMPTFOO_CONFIG_DIR:-}"
-printf 'ARGS=%s\n' "$*"
+printf 'PROMPTFOO_CONFIG_DIR=%s\n' "${PROMPTFOO_CONFIG_DIR:-}" \
+  >"$PROMPTFOO_STATE_FILE"
 SH
   chmod +x "$fixture_root/bin/promptfoo"
   touch "$fixture_root/promptfooconfig.yaml"
 
-  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    PROMPTFOO_STATE_FILE="$fixture_root/promptfoo-state" \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
 
-  rm -rf "$fixture_root"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"PROMPTFOO_CONFIG_DIR=$fixture_root/.dependencies/promptfoo"* ]]
+  grep -Fxq \
+    "PROMPTFOO_CONFIG_DIR=$fixture_root/.dependencies/promptfoo" \
+    "$fixture_root/promptfoo-state"
+  [[ "$output" != *"$fixture_root"* ]]
+  rm -rf "$fixture_root"
 }
 
 @test "eval threshold checker honors case min pass rates" {
@@ -841,12 +880,93 @@ JSON
   [[ "$output" == *"Eval thresholds passed"* ]]
 }
 
+@test "absolute reliability gates every evaluated condition including no-plugin baseline" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
+        "testCase": { "vars": { "case_id": "absolute-reliability", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "none" } },
+        "gradingResult": { "pass": true, "score": 1 }
+      },
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
+        "testCase": { "vars": { "case_id": "absolute-reliability", "plugin_mode": "no-plugins", "min_pass_rate": 1, "value_gate_mode": "none" } },
+        "gradingResult": { "pass": false, "score": 0, "reason": "Absolute reliability miss" }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no-plugins"* ]]
+  [[ "$output" == *"0/1 passed"* ]]
+}
+
+@test "treatment-only provider outage fails closed with zero evaluated evidence" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
+        "testCase": { "vars": { "case_id": "focused-treatment", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
+        "gradingResult": { "pass": false, "score": 0, "reason": "provider unavailable" }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"focused-treatment"* ]]
+  [[ "$output" == *"no evaluated provider evidence"* ]]
+}
+
+@test "eval threshold checker rejects unsupported value gate modes in artifacts" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
+        "testCase": { "vars": { "case_id": "misspelled-mode", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "standrad" } },
+        "gradingResult": { "pass": true, "score": 1 }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Value gate configuration failures"* ]]
+  [[ "$output" == *"unsupported value gate mode"* ]]
+  [[ "$output" == *"standrad"* ]]
+}
+
 @test "hard guard accepts direct Beads CLI workflow guidance" {
   run node - <<'NODE'
 const assertHardGuards = require("./evals/promptfoo/assert-hard-guards.cjs");
 const result = assertHardGuards(
   "Use `bd ready --json` to inspect the Dolt-backed board before claiming work.",
-  { vars: { case_id: "beads-documentation-slice-no-runtime-tdd" } },
+  { vars: { case_id: "beads-behavior-slice-bdd-tdd-checkpoint" } },
 );
 if (!result.pass) {
   console.error(result.reason);
@@ -912,6 +1032,305 @@ SH
   rm -rf "$fixture_root"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Eval thresholds passed"* ]]
+}
+
+@test "eval runner fails when a focused treatment provider outage leaves only blocked results" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+cat >evals/out/results.json <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
+        "testCase": { "vars": { "case_id": "focused-treatment", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
+        "gradingResult": { "pass": false, "score": 0, "reason": "provider unavailable" }
+      }
+    ]
+  }
+}
+JSON
+exit 100
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no evaluated provider evidence"* ]]
+  [[ "$output" != *"Eval thresholds passed"* ]]
+}
+
+@test "eval runner discards exact credential leaks before printing successful evidence" {
+  fixture_root="$(mktemp -d)"
+  secret="codex-fixture-secret-that-must-not-escape"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+printf '{"results":{"results":[]}}\n' >evals/out/results.json
+printf '<html>%s</html>\n' "$CODEX_API_KEY" >evals/out/report.html
+printf 'provider output: %s\n' "$CODEX_API_KEY"
+SH
+  chmod +x \
+    "$fixture_root/scripts/evals/run.sh" \
+    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
+    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
+    "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env CODEX_API_KEY="$secret" PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ "$status" -eq 86 ]
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ ! -e "$fixture_root/evals/out/report.html" ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
+  [[ "$output" == *"provider eval artifacts were discarded after secret scanning failed"* ]]
+  [[ "$output" != *"$secret"* ]]
+  rm -rf "$fixture_root"
+}
+
+@test "eval runner discards seeded Codex auth leaks without putting values in scanner arguments" {
+  fixture_root="$(mktemp -d)"
+  access_secret="codex-seeded-access-that-must-not-escape"
+  id_secret="codex-seeded-identity-that-must-not-escape"
+  refresh_secret="codex-seeded-refresh-that-must-not-escape"
+  private_key_secret="codex-seeded-private-key-that-must-not-escape"
+  secret_manifest="$fixture_root/codex-auth-artifact-secrets.json"
+  scanner_argv="$fixture_root/scanner-argv"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  jq -n \
+    --arg access "$access_secret" \
+    --arg id "$id_secret" \
+    --arg refresh "$refresh_secret" \
+    --arg private_key "$private_key_secret" \
+    '{version:1,secrets:[$access,$id,$refresh,$private_key]}' \
+    >"$secret_manifest"
+  chmod 600 "$secret_manifest"
+  mv "$fixture_root/scripts/evals/scan-code-quality-secrets.mjs" \
+    "$fixture_root/scripts/evals/scan-code-quality-secrets.real.mjs"
+  cat >"$fixture_root/scripts/evals/scan-code-quality-secrets.mjs" <<'SH'
+#!/usr/bin/env node
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+fs.writeFileSync(process.env.SCANNER_ARGV_LOG, JSON.stringify(process.argv.slice(2)), { mode: 0o600 });
+const result = spawnSync(process.execPath, [new URL("./scan-code-quality-secrets.real.mjs", import.meta.url).pathname, ...process.argv.slice(2)], { stdio: "inherit" });
+process.exit(result.status ?? 2);
+SH
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+printf '{"results":{"results":[]},"raw":"%s"}\n' "$SEEDED_CODEX_ACCESS" >evals/out/results.json
+printf '<html>%s %s</html>\n' "$SEEDED_CODEX_ID" "$SEEDED_CODEX_REFRESH" >evals/out/report.html
+printf '<testsuite detail="%s"/>\n' "$SEEDED_CODEX_PRIVATE_KEY" >evals/out/results.junit.xml
+printf 'provider output: %s %s %s %s\n' \
+  "$SEEDED_CODEX_ACCESS" "$SEEDED_CODEX_ID" \
+  "$SEEDED_CODEX_REFRESH" "$SEEDED_CODEX_PRIVATE_KEY"
+SH
+  chmod +x \
+    "$fixture_root/scripts/evals/run.sh" \
+    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
+    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
+    "$fixture_root/scripts/evals/scan-code-quality-secrets.mjs" \
+    "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env SEEDED_CODEX_ACCESS="$access_secret" \
+    SEEDED_CODEX_ID="$id_secret" \
+    SEEDED_CODEX_REFRESH="$refresh_secret" \
+    SEEDED_CODEX_PRIVATE_KEY="$private_key_secret" \
+    EVAL_CODEX_ARTIFACT_SECRET_FILE="$secret_manifest" \
+    SCANNER_ARGV_LOG="$scanner_argv" \
+    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ "$status" -eq 86 ]
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ ! -e "$fixture_root/evals/out/report.html" ]
+  [ ! -e "$fixture_root/evals/out/results.junit.xml" ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
+  [[ "$output" == *"provider eval artifacts were discarded after secret scanning failed"* ]]
+  for secret in \
+    "$access_secret" "$id_secret" "$refresh_secret" "$private_key_secret"; do
+    [[ "$output" != *"$secret"* ]]
+    ! rg -Fq "$secret" "$scanner_argv"
+  done
+  jq -e --arg path "$secret_manifest" '
+    index("--secret-file") != null and index($path) != null
+  ' "$scanner_argv" >/dev/null
+  rm -rf "$fixture_root"
+}
+
+@test "eval runner fails closed when Codex auth scan metadata is unreadable" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+printf '{"results":{"results":[]}}\n' >evals/out/results.json
+SH
+  chmod +x \
+    "$fixture_root/scripts/evals/run.sh" \
+    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
+    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
+    "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env EVAL_CODEX_ARTIFACT_SECRET_FILE="$fixture_root/missing-secrets.json" \
+    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ "$status" -eq 86 ]
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
+  [[ "$output" != *"missing-secrets.json"* ]]
+  rm -rf "$fixture_root"
+}
+
+@test "eval runner discards evidence when the artifact scan receipt cannot be written" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  cat >"$fixture_root/scripts/evals/artifact-scan-receipt.mjs" <<'JS'
+#!/usr/bin/env node
+process.exit(42);
+JS
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+printf '{"results":{"results":[]}}\n' >evals/out/results.json
+printf 'provider output that must remain buffered\n'
+SH
+  chmod +x \
+    "$fixture_root/scripts/evals/run.sh" \
+    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
+    "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ "$status" -eq 86 ]
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ ! -e "$fixture_root/evals/out/artifact-scan-receipt.json" ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
+  [[ "$output" != *"provider output that must remain buffered"* ]]
+  rm -rf "$fixture_root"
+}
+
+@test "eval runner discards a dynamic host path printed only in provider output" {
+  fixture_root="$(mktemp -d)"
+  host_workspace="$fixture_root/private-provider-workspace"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+printf '{"results":{"results":[]}}\n' >evals/out/results.json
+printf 'provider inspected %s/private-guidance\n' "$EVAL_PROVIDER_WORKSPACE"
+SH
+  chmod +x \
+    "$fixture_root/scripts/evals/run.sh" \
+    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
+    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
+    "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env EVAL_PROVIDER_WORKSPACE="$host_workspace" \
+    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ "$status" -eq 86 ]
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
+  [[ "$output" != *"$host_workspace"* ]]
+  rm -rf "$fixture_root"
+}
+
+@test "eval runner discards generic secret patterns before retaining failed evidence" {
+  fixture_root="$(mktemp -d)"
+  secret="ghp_FAKEPROVIDERARTIFACTSECRET1234567890"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+printf '{"results":{"results":[]}}\n' >evals/out/results.json
+printf '<testsuite token="%s"/>\n' "$SYNTHETIC_PROVIDER_TOKEN" >evals/out/results.junit.xml
+exit 100
+SH
+  chmod +x \
+    "$fixture_root/scripts/evals/run.sh" \
+    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
+    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
+    "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env SYNTHETIC_PROVIDER_TOKEN="$secret" PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ "$status" -eq 86 ]
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ ! -e "$fixture_root/evals/out/results.junit.xml" ]
+  [ ! -d "$fixture_root/evals/out/timeout-artifacts" ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
+  [[ "$output" != *"$secret"* ]]
+  rm -rf "$fixture_root"
 }
 
 @test "eval runner clears stale timeout status before a successful run" {
@@ -1259,6 +1678,80 @@ SH
   [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval was interrupted before completion with status 130" ]
   [ ! -e "$fixture_root/evals/out/results.json" ]
   [ -f "$fixture_root/evals/out/timeout-artifacts/"*/results.json ]
+}
+
+@test "eval runner discards unverified artifacts when scanning is interrupted" {
+  SIGNAL_FIXTURE_ROOT="$(mktemp -d)"
+  fixture_root="$SIGNAL_FIXTURE_ROOT"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  cat >"$fixture_root/scripts/evals/scan-behavior-artifacts.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+on_interrupt() {
+  printf 'interrupted\n' >"$PROCESS_FIXTURE_DIR/scan.interrupted"
+  exit 130
+}
+trap on_interrupt INT
+printf 'ready\n' >"$PROCESS_FIXTURE_DIR/scan.ready"
+while true; do sleep 1; done
+SH
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p evals/out
+printf '{"results":{"results":[]}}\n' >evals/out/results.json
+printf '<html>unverified</html>\n' >evals/out/report.html
+SH
+  chmod +x \
+    "$fixture_root/scripts/evals/run.sh" \
+    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
+    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
+    "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  setsid env --default-signal=INT \
+    PROCESS_FIXTURE_DIR="$fixture_root" \
+    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    EVAL_TIMEOUT=0 \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml" \
+    >"$fixture_root/runner.log" 2>&1 &
+  SIGNAL_RUNNER_PID="$!"
+
+  for _ in $(seq 1 200); do
+    [ ! -s "$fixture_root/scan.ready" ] || break
+    sleep 0.05
+  done
+  [ -s "$fixture_root/scan.ready" ]
+
+  kill -INT -- "-$SIGNAL_RUNNER_PID"
+  runner_exited=0
+  for _ in $(seq 1 200); do
+    if ! kill -0 "$SIGNAL_RUNNER_PID" 2>/dev/null; then
+      runner_exited=1
+      break
+    fi
+    sleep 0.05
+  done
+  [ "$runner_exited" -eq 1 ]
+
+  runner_status=0
+  wait "$SIGNAL_RUNNER_PID" || runner_status="$?"
+  SIGNAL_RUNNER_PID=""
+
+  [ "$runner_status" -eq 130 ]
+  [ -f "$fixture_root/scan.interrupted" ]
+  [ ! -e "$fixture_root/evals/out/results.json" ]
+  [ ! -e "$fixture_root/evals/out/report.html" ]
+  [ ! -e "$fixture_root/evals/out/artifact-scan-receipt.json" ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "interrupted" ]
+  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = \
+    "provider eval artifact scanning was interrupted with status 130" ]
 }
 
 @test "eval runner forwards SIGINT received before publishing the eval pid" {

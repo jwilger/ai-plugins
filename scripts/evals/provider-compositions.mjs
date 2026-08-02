@@ -217,10 +217,6 @@ export function validateCodexHomeLayout({
   const requiredModes = new Set(
     codexPluginSelections.map((selection) => selection.pluginMode),
   );
-  if (usesCodexGrader) {
-    requiredModes.add("development-system");
-  }
-
   const requiredHomes = pluginModeOrder
     .filter((pluginMode) => requiredModes.has(pluginMode))
     .map((pluginMode) => ({
@@ -231,6 +227,14 @@ export function validateCodexHomeLayout({
       ...home,
       comparisonPath: pathComparisonKey(home.path),
     }));
+  if (usesCodexGrader) {
+    const graderPath = canonicalProspectivePath(codexHomes.grader, cwd);
+    requiredHomes.push({
+      pluginMode: "grader",
+      path: graderPath,
+      comparisonPath: pathComparisonKey(graderPath),
+    });
+  }
 
   for (let leftIndex = 0; leftIndex < requiredHomes.length; leftIndex += 1) {
     for (
@@ -273,13 +277,14 @@ function printCodexPluginSelections(metadataFile, codexHomes) {
 const invokedPath =
   process.argv[1] && pathToFileURL(path.resolve(process.argv[1]));
 if (invokedPath?.href === import.meta.url) {
-  if (process.argv.length < 5) {
+  if (process.argv.length < 6) {
     throw new Error("provider composition metadata file is required");
   }
   try {
     printCodexPluginSelections(process.argv[2], {
       "development-system": process.argv[3],
       "no-plugins": process.argv[4],
+      grader: process.argv[5],
     });
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

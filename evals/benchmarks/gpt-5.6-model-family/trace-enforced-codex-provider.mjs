@@ -1,5 +1,5 @@
 import { loadApiProvider } from "promptfoo";
-import { isAbsolute } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   allowedNormalizedItemTypes,
@@ -116,7 +116,20 @@ export default class TraceEnforcedCodexProvider {
   #innerProviderPromise;
 
   constructor(options = {}, providerLoader = loadApiProvider) {
-    this.options = options;
+    const configuredBasePath = options.config?.basePath;
+    const persistedBasePath =
+      typeof configuredBasePath === "string" && isAbsolute(configuredBasePath)
+        ? relative(process.cwd(), configuredBasePath) || "."
+        : configuredBasePath;
+    this.options = {
+      ...options,
+      config: {
+        ...options.config,
+        ...(persistedBasePath === undefined
+          ? {}
+          : { basePath: persistedBasePath }),
+      },
+    };
     this.providerLoader = providerLoader;
   }
 
@@ -150,7 +163,7 @@ export default class TraceEnforcedCodexProvider {
       label: "trace-enforced Codex provider working_dir",
     });
     const inner = await this.providerLoader("openai:codex-app-server", {
-      basePath,
+      basePath: typeof basePath === "string" ? resolve(basePath) : basePath,
       env: this.options.env,
       options: {
         id: this.id(),

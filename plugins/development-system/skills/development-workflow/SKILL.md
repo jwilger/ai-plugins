@@ -83,6 +83,18 @@ For a change:
 6. Only after the slice gate passes, commit and push using the configured
    delivery mode.
 
+Choose verification from the release claim, not from the fact that prose or a
+skill changed. Retirement, deletion, exact file or routing state, schemas,
+formatting, metadata, and mechanical transformations are deterministic
+contracts and do not warrant provider evals when deterministic checks fully
+decide them. Before any provider eval, name the unresolved stochastic question
+and record why deterministic evidence is insufficient. Require clean,
+fail-closed isolation between baseline and treatment and an explicit
+incremental-value hypothesis for any lift gate. An unexpectedly successful
+baseline triggers an isolation, context, prompt, and rubric audit followed by a
+deliberate case retirement or documented absolute-reliability disposition;
+never bypass that diagnosis by blindly selecting `valueGate.mode: none`.
+
 For each intermediate green checkpoint, run fast unit tests and directly
 relevant quick checks plus lightweight review, then commit and push as the
 selected delivery mode allows. Long-running integration, mutation, exhaustive,

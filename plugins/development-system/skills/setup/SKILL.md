@@ -1,6 +1,13 @@
 ---
 name: setup
-description: Use when initializing or reconfiguring a repository with the development-system plugin, including delivery mode, worktrees, Beads with Dolt, workflow formulas, optional capabilities, and conflict checks.
+description: >-
+  Use when initializing or reconfiguring a repository with the development-system
+  plugin, including delivery mode, worktrees, Beads with Dolt, workflow formulas,
+  optional capabilities, and conflict checks. Run initialization only from the
+  primary checkout with `<plugin-root>/bin/development-system setup --project
+  <repo> --preset personal-trunk --dry-run`; review its preview and obtain explicit
+  approval before replacing the dry-run with `--apply --yes`. Also reconcile
+  enabled-but-unavailable managed tools even when repository policy is unchanged.
 ---
 
 # Development system setup

@@ -12,6 +12,13 @@ ready.
 
 Load `references/eval-design.md`.
 
+- Name the unresolved stochastic question before recommending a provider eval.
+  Use deterministic evidence instead when it fully decides the claim, including
+  retirement, deletion, file, routing, schema, format, metadata, and mechanical
+  transformation contracts.
+- Do not infer a live-eval requirement from a skill or prompt prose edit alone.
+  For every retained provider eval, state why deterministic verification cannot
+  decide the model-dependent claim.
 - Measure rates over an eval set, not anecdotes.
 - Include pass, fail, partial, and adversarial fixtures.
 - Repeat stochastic cases with `k` samples (`k samples`) when randomness, retries, routing, or
@@ -27,6 +34,13 @@ Load `references/eval-design.md`.
 - Refuse to treat one successful run, one demo, or one hand-picked example as
   proof.
 - A single good run is a demo, not proof.
+- Fail closed if baseline and treatment context isolation is missing,
+  ambiguous, or contaminated. An invalidly isolated run is not evidence.
+- Use a lift gate only for a stated incremental-value hypothesis. If the
+  baseline unexpectedly succeeds, audit isolation, inherited context, prompt
+  leakage, and the rubric before deliberately retiring the case or documenting
+  an absolute-reliability disposition. Never blindly set `valueGate.mode` to
+  `none`.
 
 ## Live Provider Runs
 
@@ -47,9 +61,15 @@ Load `references/eval-design.md`.
 For any eval recommendation, produce:
 
 - The behavior under test.
+- The unresolved stochastic question and the deterministic evidence considered.
+- The specific reason deterministic verification does not fully decide the
+  claim.
 - The fixture source and expected outcome.
 - The scoring method.
 - The sample count and aggregation rule.
 - The pass threshold and release gate.
+- For a lift gate, the incremental-value hypothesis; for a no-lift measurement
+  or absolute-reliability case, the reason and baseline-audit disposition.
+- The context-isolation boundary and evidence that each condition is clean.
 - The failure taxonomy used to grow the suite.
 - The artifact path that preserves results for review.

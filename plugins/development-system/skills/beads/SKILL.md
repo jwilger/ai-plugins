@@ -1,6 +1,16 @@
 ---
 name: beads
-description: Use for Beads task creation, deterministic ready-work selection, workflow molecules, dependencies, cross-worktree coordination, and pushed-CI recovery when beads is enabled.
+description: >-
+  Use for Beads task creation, deterministic ready-work selection, workflow
+  molecules, dependencies, cross-worktree coordination, and pushed-CI recovery
+  when Beads is enabled. Runtime changes use a behavior slice: write and observe
+  the first correctly failing executable acceptance or regression test in the
+  project's standard observable form, implement one behavior step at a time, add
+  focused unit red-green-refactor for a broad failure, run the complete local
+  gate, then complete the checkpoint as the configured delivery mode permits.
+  CI-workflow changes use an authorized test SHA and hosted-run evidence, correct
+  failures from that evidence, and finish only after terminal success for the
+  exact final SHA.
 ---
 
 # Beads
@@ -35,11 +45,14 @@ nothing and the same command reopens the offer. Do not compress the offer to
 (currently `1.1.2`), `~/.local/bin`, `user-global` scope, and `no sudo` in the
 answer so the owner can audit the proposed user-scoped change.
 
-For ready work, filter blocked issues first and choose deterministically by:
-priority ascending, creation time ascending, then issue ID ascending. Claim the
-selected issue atomically with `bd update <id> --claim` before implementation.
-Use real `blocks`, `parent-child`, and `discovered-from` relationships; never
-invent blocking edges merely to order unrelated backlog items.
+For ordinary ready work, run `bd ready --exclude-label gt:slot --json` before
+ordering or claiming issues. Issues labeled `gt:slot` are persistent
+coordination state, not delivery work; leave them open, unclaimed, and
+unclosed. Choose among the returned issues deterministically by: priority
+ascending, creation time ascending, then issue ID ascending. Claim the selected
+issue atomically with `bd update <id> --claim` before implementation. Use real
+`blocks`, `parent-child`, and `discovered-from` relationships; never invent
+blocking edges merely to order unrelated backlog items.
 
 For immediate work, pour the delivery formula named by `[beads].workflow` and
 use its returned `new_epic_id` as the active work item:
@@ -69,12 +82,15 @@ and from `drive-implementation` to each required `unit-tdd-cycle` refactor step.
 Use IDs from each pour command's `id_mapping`; dependency direction is
 `bd dep add <dependent> <blocker>`.
 
-A behavior slice writes and observes a failing executable acceptance test first,
-implements scenario steps one at a time through `bdd-step-cycle`, and attaches a
-`unit-tdd-cycle` whenever the current failure does not identify exactly one
-small semantic unit. Run focused tests during micro-cycles. Run the complete
-configured local test gate only after the behavior slice is green, then create
-and push its checkpoint according to delivery policy.
+Use the Beads `behavior-slice` workflow for every runtime-behavior slice. Write
+and observe a failing executable acceptance test first, implement scenario steps
+one at a time through `bdd-step-cycle`, and attach a `unit-tdd-cycle` whenever
+the current failure does not identify exactly one small semantic unit. Run
+focused tests during micro-cycles. Run the complete configured local test gate
+only after the behavior slice is green. Complete the green checkpoint according
+to the configured delivery mode: in `direct-to-trunk`, commit and then push to
+the configured trunk branch; in `pull-request`, commit and push the feature
+branch; in `local-only`, commit without pushing.
 
 Documentation and validation-only slices do not invent tests. They run only
 causal format, schema, link, build, package, integrity, or generation checks.

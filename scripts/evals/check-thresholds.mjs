@@ -22,6 +22,50 @@ if (!Array.isArray(results) || results.length === 0) {
   process.exit(1);
 }
 
+function privateContextLeakMarkers() {
+  const markerFile = process.env.EVAL_CONTEXT_LEAK_MARKERS_FILE;
+  if (!markerFile) {
+    if (process.env.EVAL_REQUIRE_CONTEXT_LEAK_SIDECAR === "1") {
+      throw new Error(
+        "required private context-leak marker sidecar is missing",
+      );
+    }
+    return [];
+  }
+  const stat = fs.lstatSync(markerFile, { throwIfNoEntry: false });
+  if (
+    !stat ||
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.nlink !== 1 ||
+    (stat.mode & 0o077) !== 0
+  ) {
+    throw new Error("private context-leak marker sidecar is invalid");
+  }
+  const parsed = JSON.parse(fs.readFileSync(markerFile, "utf8"));
+  if (
+    parsed?.version !== 1 ||
+    !Array.isArray(parsed.markers) ||
+    parsed.markers.length === 0 ||
+    parsed.markers.some(
+      (marker) => typeof marker !== "string" || marker.trim().length === 0,
+    )
+  ) {
+    throw new Error("private context-leak marker sidecar is invalid");
+  }
+  return parsed.markers;
+}
+
+let sidecarLeakMarkers;
+try {
+  sidecarLeakMarkers = privateContextLeakMarkers();
+} catch {
+  console.error(
+    "invalid eval isolation evidence: context-leak markers unavailable",
+  );
+  process.exit(1);
+}
+
 function resultVars(result) {
   return result.testCase?.vars || result.testCase || result.vars || {};
 }
@@ -78,6 +122,15 @@ function isProviderBlocked(reason) {
 
 const groups = new Map();
 const hardGuardFailures = [];
+const contextLeakFailures = [];
+const contextLeakConfigurationFailures = [];
+const valueGateConfigurationFailures = [];
+const supportedValueGateModes = new Set([
+  "measurement",
+  "none",
+  "safety-critical",
+  "standard",
+]);
 
 for (const result of results) {
   const vars = resultVars(result);
@@ -88,10 +141,51 @@ for (const result of results) {
   const reason = resultReason(result);
   const pass = resultPass(result);
   const blocked = !pass && isProviderBlocked(reason);
+  const artifactLeakMarkers = Array.isArray(vars.context_leak_markers)
+    ? vars.context_leak_markers
+        .filter((marker) => typeof marker === "string")
+        .map((marker) => marker.trim())
+        .filter(Boolean)
+    : [];
+  const leakMarkers = [
+    ...new Set(
+      [...artifactLeakMarkers, ...sidecarLeakMarkers]
+        .filter((marker) => typeof marker === "string")
+        .map((marker) => marker.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (
+    String(vars.fixture_file || "").includes("evals/fixtures/behavior/") &&
+    artifactLeakMarkers.length === 0
+  ) {
+    contextLeakConfigurationFailures.push(
+      `${key}: behavior case has no context-leak markers`,
+    );
+  }
+  const observableResult = JSON.stringify({
+    response: result.response,
+    output: result.output,
+    metadata: result.metadata,
+    trace: result.trace,
+  });
+  const leakedMarker = leakMarkers.find((marker) =>
+    observableResult.includes(marker),
+  );
+  if (leakedMarker) {
+    contextLeakFailures.push(
+      `${key}: context-leak marker appeared in provider output or trace`,
+    );
+  }
 
   const valueGateMode = String(
     vars.value_gate_mode ?? vars.valueGateMode ?? "standard",
   );
+  if (!supportedValueGateModes.has(valueGateMode)) {
+    valueGateConfigurationFailures.push(
+      `${key}: unsupported value gate mode ${JSON.stringify(valueGateMode)}`,
+    );
+  }
   if (
     valueGateMode !== "measurement" &&
     mode !== "no-plugins" &&
@@ -140,13 +234,14 @@ function groupThresholdMet(group) {
 }
 
 for (const group of groups.values()) {
-  if (group.pluginMode === "no-plugins") {
+  if (group.evaluated === 0) {
+    failures.push(`${group.key}: no evaluated provider evidence`);
     continue;
   }
   if (group.valueGateMode === "measurement") {
     continue;
   }
-  if (group.evaluated === 0) {
+  if (group.pluginMode === "no-plugins" && group.valueGateMode !== "none") {
     continue;
   }
 
@@ -234,7 +329,34 @@ if (failures.length > 0) {
   }
 }
 
-if (hardGuardFailures.length > 0 || failures.length > 0) {
+if (contextLeakFailures.length > 0) {
+  console.error("Context leak failures:");
+  for (const failure of contextLeakFailures) {
+    console.error(`- ${failure}`);
+  }
+}
+
+if (contextLeakConfigurationFailures.length > 0) {
+  console.error("Context leak configuration failures:");
+  for (const failure of contextLeakConfigurationFailures) {
+    console.error(`- ${failure}`);
+  }
+}
+
+if (valueGateConfigurationFailures.length > 0) {
+  console.error("Value gate configuration failures:");
+  for (const failure of valueGateConfigurationFailures) {
+    console.error(`- ${failure}`);
+  }
+}
+
+if (
+  hardGuardFailures.length > 0 ||
+  failures.length > 0 ||
+  contextLeakFailures.length > 0 ||
+  contextLeakConfigurationFailures.length > 0 ||
+  valueGateConfigurationFailures.length > 0
+) {
   process.exit(1);
 }
 

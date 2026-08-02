@@ -189,6 +189,8 @@ const configPath = process.argv[2];
 const artifact = process.argv[3];
 process.env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM = process.argv[4];
 process.env.CODEX_EVAL_HOME_NO_PLUGINS = process.argv[5];
+process.env.GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM = process.argv[4];
+process.env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS = process.argv[5];
 process.env.GPT56_BENCHMARK_WORKSPACE = process.argv[6];
 const persistedResultsPath = process.argv[7];
 const benchmarkDir = path.dirname(configPath);
@@ -210,7 +212,10 @@ const grader = source.defaultTest.options.provider.text;
 const resolvedGrader = {
   options: {
     id: grader.id,
-    config: { ...grader.config, basePath: benchmarkDir },
+    config: {
+      ...grader.config,
+      basePath: path.relative(process.cwd(), benchmarkDir),
+    },
   },
   label: grader.label,
 };
@@ -771,10 +776,10 @@ NODE
   [ "$preparation_invoked" -eq 0 ]
 }
 
-@test "GPT-5.6 benchmark runner rejects concurrency outside the canonical one-to-two range" {
+@test "GPT-5.6 benchmark runner keeps its explicit concurrency-two measurement constraint" {
   temp_root="$(mktemp -d)"
 
-  for concurrency in 0 -1 3 99 01 1.5 malformed ' 2'; do
+  for concurrency in 0 -1 1 3 8 99 01 1.5 malformed ' 2'; do
     run env \
       PROMPTFOO_MAX_CONCURRENCY="$concurrency" \
       CODEX_EVAL_HOME_NO_PLUGINS="$temp_root/no-plugins-home" \
@@ -783,8 +788,19 @@ NODE
       "$BENCHMARK_RUNNER" --dry-run --phase grader-calibration
 
     [ "$status" -eq 2 ]
-    [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY must be 1 or 2"* ]]
+    [[ "$output" == *"benchmark fixes PROMPTFOO_MAX_CONCURRENCY at 2"* ]]
+    [[ "$output" == *"repository default of 8"* ]]
   done
+
+  run env \
+    PROMPTFOO_MAX_CONCURRENCY=2 \
+    CODEX_EVAL_HOME_NO_PLUGINS="$temp_root/no-plugins-home" \
+    GPT56_BENCHMARK_WORKSPACE="$temp_root/workspace" \
+    GPT56_BENCHMARK_OUT_ROOT="$temp_root/out" \
+    "$BENCHMARK_RUNNER" --dry-run --phase grader-calibration
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--max-concurrency 2"* ]]
 
   rm -rf "$temp_root"
 }
@@ -1092,11 +1108,11 @@ NODE
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
-    'grep -q "\\[plugins\\.\\\"${EXPECTED_PLUGIN}@ai-plugins\\\"\\]" "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/config.toml"' \
-    '[ "$(grep -c "^\\[plugins\\." "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/config.toml")" -eq 1 ]' \
-    '[ -d "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/plugins/cache/ai-plugins/$EXPECTED_PLUGIN" ]' \
-    '[ -e "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/plugins/cache/ai-plugins/development-system/$AGENTIC_VERSION/.mcp.json" ]' \
-    '! grep -q "^\\[plugins\\." "$CODEX_EVAL_HOME_NO_PLUGINS/config.toml"' \
+    'grep -q "\\[plugins\\.\\\"${EXPECTED_PLUGIN}@ai-plugins\\\"\\]" "$GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM/config.toml"' \
+    '[ "$(grep -c "^\\[plugins\\." "$GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM/config.toml")" -eq 1 ]' \
+    '[ -d "$GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM/plugins/cache/ai-plugins/$EXPECTED_PLUGIN" ]' \
+    '[ -e "$GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM/plugins/cache/ai-plugins/development-system/$AGENTIC_VERSION/.mcp.json" ]' \
+    '! grep -q "^\\[plugins\\." "$GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS/config.toml"' \
     '[ -d "$GPT56_BENCHMARK_WORKSPACE" ]' \
     'mkdir -p "$EVAL_OUT_DIR"' \
     'cp "$EXECUTION_ARTIFACT" "$EVAL_OUT_DIR/results.json"' \

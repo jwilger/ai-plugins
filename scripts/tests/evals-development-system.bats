@@ -24,8 +24,12 @@ teardown() {
 }
 
 @test "behavior loader reads recursive development-system fixtures with coverage metadata" {
-  run node - <<NODE
-const generateTests = require('$ROOT/evals/promptfoo/load-harness-cases.cjs');
+  run env EVAL_RUNTIME_OPTIONS_FILE="$BATS_TEST_TMPDIR/no-runtime-options.json" \
+    EVAL_PROVIDER_WORKSPACE="$BATS_TEST_TMPDIR/host-provider-workspace" \
+    EVAL_PROVIDER_PLUGIN_SNAPSHOT="$BATS_TEST_TMPDIR/host-plugin-snapshot" \
+    node - "$ROOT" <<'NODE'
+const path = require('node:path');
+const generateTests = require(path.join(process.argv[2], 'evals/promptfoo/load-harness-cases.cjs'));
 const tests = generateTests();
 const failures = [];
 const caseIds = new Set(tests.map((testCase) => testCase.vars?.case_id));
@@ -47,8 +51,34 @@ for (const testCase of tests) {
   if (!Array.isArray(vars.coverage_kinds) || vars.coverage_kinds.length === 0) {
     failures.push(`${vars.case_id}: missing coverage_kinds`);
   }
-  if (!['safety-critical', 'standard'].includes(vars.value_gate_mode)) {
+  if (!['safety-critical', 'standard', 'none'].includes(vars.value_gate_mode)) {
     failures.push(`${vars.case_id}: invalid value_gate_mode`);
+  }
+  if (!Array.isArray(vars.context_leak_markers) || vars.context_leak_markers.length === 0) {
+    failures.push(`${vars.case_id}: missing context_leak_markers`);
+  } else {
+    const unique = new Set(vars.context_leak_markers);
+    for (const required of [
+      'AI_PLUGINS_PRIVATE_CONTEXT_CANARY',
+      'PRIVATE_PLUGIN_GUIDANCE_CANARY',
+    ]) {
+      if (!unique.has(required)) {
+        failures.push(`${vars.case_id}: missing canonical context leak marker ${required}`);
+      }
+    }
+    if (unique.size !== vars.context_leak_markers.length) {
+      failures.push(`${vars.case_id}: context leak markers are not deduplicated`);
+    }
+    for (const forbidden of [
+      path.resolve(process.argv[2]),
+      path.resolve(process.env.HOME),
+      path.resolve(process.env.EVAL_PROVIDER_WORKSPACE),
+      path.resolve(process.env.EVAL_PROVIDER_PLUGIN_SNAPSHOT),
+    ]) {
+      if (JSON.stringify(vars).includes(forbidden)) {
+        failures.push(`${vars.case_id}: shareable vars contain host path ${forbidden}`);
+      }
+    }
   }
   if ('plugin_mode' in vars || 'pluginMode' in vars) {
     failures.push(`${vars.case_id}: plugin mode should be inferred from provider label`);
@@ -81,7 +111,15 @@ NODE
     "coverage": {"kinds": ["natural-trigger", "hard-guard"]},
     "minPassRate": 1,
     "semanticRubric": "Pass if the output is ok.",
-    "hardAssertions": []
+    "hardAssertions": [],
+    "valueGate": {"mode": "none"},
+    "providerEval": {
+      "unresolvedStochasticQuestion": "Will the target preserve list-valued metadata?",
+      "deterministicVerificationFullyDecides": false,
+      "deterministicInsufficiency": "The provider call path must be observed.",
+      "evidencePurpose": "absolute-reliability",
+      "baselineAuditDisposition": "Retain as an absolute reliability metadata case; baseline lift is not the hypothesis."
+    }
   }
 ]
 JSON
@@ -174,10 +212,10 @@ YAML
   FIXTURE_TMP="$(mktemp -d)"
   mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior/one" "$FIXTURE_TMP/evals/fixtures/behavior/two"
   cat >"$FIXTURE_TMP/evals/fixtures/behavior/one/cases.json" <<'JSON'
-[{"case_id":"duplicate","behavior":"one","prompt":"one"}]
+[{"case_id":"duplicate","behavior":"one","prompt":"one","valueGate":{"mode":"none"},"providerEval":{"unresolvedStochasticQuestion":"Will duplicate one be selected?","deterministicVerificationFullyDecides":false,"deterministicInsufficiency":"Provider selection remains probabilistic.","evidencePurpose":"absolute-reliability","baselineAuditDisposition":"Retain as an absolute reliability duplicate-detection case; baseline lift is not the hypothesis."}}]
 JSON
   cat >"$FIXTURE_TMP/evals/fixtures/behavior/two/cases.json" <<'JSON'
-[{"case_id":"duplicate","behavior":"two","prompt":"two"}]
+[{"case_id":"duplicate","behavior":"two","prompt":"two","valueGate":{"mode":"none"},"providerEval":{"unresolvedStochasticQuestion":"Will duplicate two be selected?","deterministicVerificationFullyDecides":false,"deterministicInsufficiency":"Provider selection remains probabilistic.","evidencePurpose":"absolute-reliability","baselineAuditDisposition":"Retain as an absolute reliability duplicate-detection case; baseline lift is not the hypothesis."}}]
 JSON
 
   run node - "$FIXTURE_TMP" <<NODE
@@ -189,14 +227,203 @@ NODE
   [[ "$output" == *'Duplicate case_id "duplicate"'* ]]
 }
 
+@test "provider fixtures reject retirement contracts fully decided by deterministic verification" {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior"
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "retired-command-is-absent",
+    "behavior": "A retired command is absent from help, routing, and distributed files.",
+    "prompt": "Confirm that the retired command is gone.",
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "providerEval": {
+      "unresolvedStochasticQuestion": null,
+      "deterministicVerificationFullyDecides": true,
+      "deterministicContracts": [
+        "public-help",
+        "command-routing",
+        "distributed-file-absence"
+      ]
+    }
+  }
+]
+JSON
+
+  run node - "$FIXTURE_TMP" <<NODE
+const { loadBehaviorCases } = require('$ROOT/evals/promptfoo/fixtures.cjs');
+loadBehaviorCases({ root: process.argv[2] });
+NODE
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"retired-command-is-absent"* ]]
+  [[ "$output" == *"deterministic"* ]]
+}
+
+@test "baseline-lift fixtures require an explicit incremental-value hypothesis" {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior"
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "unexplained-baseline-lift",
+    "behavior": "Choose an appropriate workflow under ambiguous evidence.",
+    "prompt": "What should the implementation agent do next?",
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "providerEval": {
+      "unresolvedStochasticQuestion": "Will the agent choose the causal workflow under ambiguous evidence?",
+      "deterministicVerificationFullyDecides": false
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    }
+  }
+]
+JSON
+
+  run node - "$FIXTURE_TMP" <<NODE
+const { loadBehaviorCases } = require('$ROOT/evals/promptfoo/fixtures.cjs');
+loadBehaviorCases({ root: process.argv[2] });
+NODE
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unexplained-baseline-lift"* ]]
+  [[ "$output" == *"incremental"*"hypothesis"* ]]
+}
+
+@test "unexpected baseline success cannot be waived without isolation and utility audit evidence" {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior"
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "blind-value-gate-waiver",
+    "behavior": "Choose an appropriate workflow under ambiguous evidence.",
+    "prompt": "What should the implementation agent do next?",
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "providerEval": {
+      "unresolvedStochasticQuestion": "Will the agent choose the causal workflow under ambiguous evidence?",
+      "deterministicVerificationFullyDecides": false
+    },
+    "baselineOutcome": "unexpected-pass",
+    "valueGate": {
+      "mode": "none"
+    }
+  }
+]
+JSON
+
+  run node - "$FIXTURE_TMP" <<NODE
+const { loadBehaviorCases } = require('$ROOT/evals/promptfoo/fixtures.cjs');
+loadBehaviorCases({ root: process.argv[2] });
+NODE
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blind-value-gate-waiver"* ]]
+  [[ "$output" == *"audit"* ]]
+  [[ "$output" == *"isolation"* ]]
+  [[ "$output" == *"utility"* ]]
+}
+
+@test "valueGate none always requires an absolute reliability purpose and disposition" {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior"
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "blind-unconditional-value-gate-waiver",
+    "valueGate": {"mode": "none"},
+    "providerEval": {
+      "unresolvedStochasticQuestion": "Will the model choose the correct semantic action?",
+      "deterministicVerificationFullyDecides": false,
+      "deterministicInsufficiency": "The model response remains probabilistic."
+    }
+  }
+]
+JSON
+
+  run node - "$FIXTURE_TMP" <<NODE
+const { loadBehaviorCases } = require('$ROOT/evals/promptfoo/fixtures.cjs');
+loadBehaviorCases({ root: process.argv[2] });
+NODE
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blind-unconditional-value-gate-waiver"* ]]
+  [[ "$output" == *"absolute-reliability"* ]]
+  [[ "$output" == *"disposition"* ]]
+}
+
+@test "standard lift gates reject zero thresholds" {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior"
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "zero-lift-standard-gate",
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0,
+      "incrementalValueHypothesis": "Installed guidance should improve the semantic decision over baseline."
+    },
+    "providerEval": {
+      "unresolvedStochasticQuestion": "Will the model choose the correct semantic action?",
+      "deterministicVerificationFullyDecides": false,
+      "deterministicInsufficiency": "The model response remains probabilistic."
+    }
+  }
+]
+JSON
+
+  run node - "$FIXTURE_TMP" <<NODE
+const { loadBehaviorCases } = require('$ROOT/evals/promptfoo/fixtures.cjs');
+loadBehaviorCases({ root: process.argv[2] });
+NODE
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"zero-lift-standard-gate"* ]]
+  [[ "$output" == *"positive"* ]]
+}
+
+@test "provider eval fixtures reject unsupported valueGate modes before policy checks" {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior"
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "misspelled-value-gate",
+    "valueGate": {"mode": "standrad"},
+    "providerEval": {
+      "unresolvedStochasticQuestion": "Will the model choose the correct semantic action?",
+      "deterministicVerificationFullyDecides": false,
+      "deterministicInsufficiency": "The model response remains probabilistic."
+    }
+  }
+]
+JSON
+
+  run node - "$FIXTURE_TMP" <<NODE
+const { loadBehaviorCases } = require('$ROOT/evals/promptfoo/fixtures.cjs');
+loadBehaviorCases({ root: process.argv[2] });
+NODE
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"misspelled-value-gate"* ]]
+  [[ "$output" == *"unsupported valueGate mode"* ]]
+  [[ "$output" == *"standrad"* ]]
+}
+
 @test "selected behavior plugins are deduplicated in canonical order" {
   FIXTURE_TMP="$(mktemp -d)"
   mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior"
   cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
 [
-  {"case_id":"selected-one","plugins":["zeta-plugin","alpha-plugin"]},
-  {"case_id":"selected-two","plugins":["middle-plugin","alpha-plugin"]},
-  {"case_id":"excluded","plugins":["excluded-plugin"]}
+  {"case_id":"selected-one","plugins":["zeta-plugin","alpha-plugin"],"valueGate":{"mode":"none"},"providerEval":{"unresolvedStochasticQuestion":"Will selected one run?","deterministicVerificationFullyDecides":false,"deterministicInsufficiency":"Provider selection remains probabilistic.","evidencePurpose":"absolute-reliability","baselineAuditDisposition":"Retain as an absolute reliability plugin-selection case; baseline lift is not the hypothesis."}},
+  {"case_id":"selected-two","plugins":["middle-plugin","alpha-plugin"],"valueGate":{"mode":"none"},"providerEval":{"unresolvedStochasticQuestion":"Will selected two run?","deterministicVerificationFullyDecides":false,"deterministicInsufficiency":"Provider selection remains probabilistic.","evidencePurpose":"absolute-reliability","baselineAuditDisposition":"Retain as an absolute reliability plugin-selection case; baseline lift is not the hypothesis."}},
+  {"case_id":"excluded","plugins":["excluded-plugin"],"valueGate":{"mode":"none"},"providerEval":{"unresolvedStochasticQuestion":"Will excluded run?","deterministicVerificationFullyDecides":false,"deterministicInsufficiency":"Provider selection remains probabilistic.","evidencePurpose":"absolute-reliability","baselineAuditDisposition":"Retain as an absolute reliability plugin-selection case; baseline lift is not the hypothesis."}}
 ]
 JSON
 
@@ -256,6 +483,14 @@ MD
     "minPassRate": 1,
     "semanticRubric": "Pass if alpha is used.",
     "hardAssertions": [],
+    "valueGate": {"mode": "none"},
+    "providerEval": {
+      "unresolvedStochasticQuestion": "Will the model naturally trigger alpha?",
+      "deterministicVerificationFullyDecides": false,
+      "deterministicInsufficiency": "Natural model triggering cannot be decided statically.",
+      "evidencePurpose": "absolute-reliability",
+      "baselineAuditDisposition": "Retain as an absolute reliability trigger case; baseline lift is not the hypothesis."
+    },
     "calibration": {"pass": ["ok"], "fail": ["bad"]}
   }
 ]
@@ -382,6 +617,7 @@ NODE
 
   [ "$status" -eq 0 ]
   [ -f "$no_plugins_home/config.toml" ]
+  ! grep -q '\[marketplaces\.' "$no_plugins_home/config.toml"
   ! grep -q '\[plugins\."' "$no_plugins_home/config.toml"
   [ ! -d "$no_plugins_home/plugins/cache/ai-plugins/development-system" ]
 

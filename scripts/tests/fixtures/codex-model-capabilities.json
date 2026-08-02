@@ -1,0 +1,46 @@
+{
+  "client_version": "test",
+  "fetched_at": "2026-08-02T00:00:00Z",
+  "models": [
+    {
+      "slug": "codex-strong-current",
+      "visibility": "list",
+      "priority": 1,
+      "upgrade": null,
+      "supported_reasoning_levels": [
+        { "effort": "high" },
+        { "effort": "xhigh" }
+      ]
+    },
+    {
+      "slug": "codex-balanced-current",
+      "visibility": "list",
+      "priority": 2,
+      "upgrade": null,
+      "supported_reasoning_levels": [
+        { "effort": "high" },
+        { "effort": "xhigh" }
+      ]
+    },
+    {
+      "slug": "codex-retired-strong",
+      "visibility": "list",
+      "priority": 0,
+      "upgrade": { "model": "codex-strong-current" },
+      "supported_reasoning_levels": [
+        { "effort": "high" },
+        { "effort": "xhigh" }
+      ]
+    },
+    {
+      "slug": "codex-hidden-route",
+      "visibility": "hide",
+      "priority": 0,
+      "upgrade": null,
+      "supported_reasoning_levels": [
+        { "effort": "high" },
+        { "effort": "xhigh" }
+      ]
+    }
+  ]
+}

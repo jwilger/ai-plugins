@@ -117,40 +117,21 @@ its branch. Port allocation is stable per worktree and recorded under Git's
 common directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
 `WORKTREE_PORT_BASE_PG`, and `WORKTREE_PORT_STRIDE` before bootstrap if needed.
 
-## Backlog capacity management
+## Beads workflow
 
 Use Beads with its Dolt backend as the repository task board for planned mutable
-delivery work, and manage queued work as a deliberately bounded backlog. Run
-`bd prime` for current CLI guidance and use `--json` for programmatic reads.
+delivery work. Run `bd prime` for current CLI guidance and use `--json` for
+programmatic reads.
 Questions, read-only investigation, and ordinary explanation do not require a
 ticket, a claim, or a worktree.
 
-- The active issue (`in_progress`) does not count toward backlog capacity. A
-  queued issue is an unclaimed `open` issue that is not blocked or deferred.
-- Keep at most five queued tickets. Do not maintain an overflow, icebox, shadow
-  backlog, or other hidden queue.
-- Discovery identifies a candidate; it does not create an obligation to admit
-  or retain a ticket.
-- Compare candidates by user pain and frequency, severity, blocking impact,
-  future leverage, confidence, value relative to cost, and overlap with existing
-  root causes.
-- Select ready issues deterministically by priority ascending, creation time
-  ascending, then issue ID ascending. Re-rank the complete queue whenever an
-  issue is admitted, combined, displaced, completed, reopened, or materially
-  re-scoped; dependency edges represent real blocking relationships, not
+- For ordinary ready-work selection, run
+  `bd ready --exclude-label gt:slot --json` before ordering or claiming issues.
+  Issues labeled `gt:slot` are persistent coordination state, not delivery
+  work; leave them open, unclaimed, and unclosed. Select the returned issues
+  deterministically by priority ascending, creation time ascending, then issue
+  ID ascending. Dependency edges represent real blocking relationships, not
   artificial ordering.
-- When fewer than five tickets are queued, admit a worthwhile candidate
-  normally. At capacity, evaluate a candidate before creating a ticket and
-  choose exactly one explicit outcome: replace a lower-value queued ticket;
-  combine genuinely overlapping tickets; or reject the candidate without
-  creating a ticket. Record a concise reason for every combination,
-  displacement, or rejection.
-- When the backlog falls to two or fewer queued tickets, perform a replenishment
-  review. Inspect durable memories, recent usage friction, eval failures, and
-  recurring workarounds for worthwhile candidates. It is valid to add nothing.
-- Blocking defects and in-model security issues required to complete the active
-  ticket remain causal work within that ticket. Do not create separate backlog
-  tickets merely to evade the cap.
 - Work on one issue at a time. Before starting ready work, claim it atomically
   with `bd update <id> --claim`; after completing it, choose the first issue in
   the deterministic ready order. Use the delivery formula configured in
@@ -208,12 +189,15 @@ prettier --check "**/*.{json,md}"                 # formatting (use --write to f
 Run provider-backed evals only for behavior that changed files could plausibly
 affect. Case, condition, and harness selection are causal engineering choices,
 not a ritual full-suite gate. `just evals` compares the branch with
-`origin/main` and applies the repository mapping: shared skill prose selects
-only cases targeting those skills across Codex and Claude Code; plugin, hook,
-or harness behavior selects the relevant installed-plugin canary or outcome
-scenario; documentation, tests, and unrelated implementation details select no
-live eval. Every selected case defaults to one sample unless the named metric
-requires repetition.
+`origin/main` and applies the repository mapping: a shared skill prose edit
+selects only mapped cases that name an unresolved stochastic question and why
+deterministic verification is insufficient; prose alone is not a live-eval
+requirement. Plugin, hook, or harness behavior selects the relevant
+installed-plugin canary or outcome scenario. Deterministically decidable
+retirement, deletion, file, routing, schema, format, metadata, and
+transformation contracts—along with documentation, tests, and unrelated
+implementation details—select no provider eval. Every selected case defaults
+to one sample unless the named metric requires repetition.
 
 ```shell
 just evals

@@ -60,14 +60,29 @@ evals:
     fi
 
     fresh_artifacts=0
+    fresh_artifact_paths=()
     for artifact in evals/out/results.json evals/out/report.html evals/out/results.junit.xml; do
       if [ -f "$artifact" ] && [ "$artifact" -nt "$marker" ]; then
         fresh_artifacts=1
+        fresh_artifact_paths+=("$artifact")
       fi
     done
 
     share_status=0
     if [ "$fresh_artifacts" -eq 1 ]; then
+      scan_args=(--private-root evals/out)
+      metadata=evals/out/generated/agentic-systems-engineering.behavior.metadata.json
+      if [ -f "$metadata" ]; then
+        scan_args+=(--metadata "$metadata")
+      fi
+      scan_status=0
+      scripts/evals/scan-behavior-artifacts.sh \
+        "${scan_args[@]}" -- "${fresh_artifact_paths[@]}" || scan_status=$?
+      if [ "$scan_status" -ne 0 ]; then
+        rm -f -- "${fresh_artifact_paths[@]}"
+        echo "Skipping promptfoo share because artifact secret scanning failed." >&2
+        exit "$scan_status"
+      fi
       scripts/evals/share.sh
       share_status=$?
     else

@@ -90,7 +90,7 @@ PY
         },
         "codex": {
           "taskName": "content_author",
-          "model": "gpt-5.6-sol",
+          "modelStrategy": "highest-capability-eligible",
           "reasoningEffort": "high",
           "forkTurns": "none"
         }
@@ -99,10 +99,9 @@ PY
         "core-behavior",
         "baseline-ablation"
       ]
-      and .[0].valueGate == {
-        "mode": "standard",
-        "baselineLiftThreshold": 0.1
-      }
+      and .[0].valueGate.mode == "standard"
+      and .[0].valueGate.baselineLiftThreshold == 0.1
+      and (.[0].valueGate.incrementalValueHypothesis | length > 0)
       and .[0].minPassRate == 1
       and (.[0].semanticRubric | contains("finished quick-start card itself"))
       and (.[0].semanticRubric | contains("empty wait"))

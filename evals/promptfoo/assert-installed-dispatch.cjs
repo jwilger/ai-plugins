@@ -1,4 +1,7 @@
 const { caseById } = require("./fixtures.cjs");
+const {
+  strongestEligibleCodexModel,
+} = require("./model-routing-capabilities.cjs");
 
 function result(pass, reason) {
   return { pass, score: pass ? 1 : 0, reason };
@@ -314,11 +317,11 @@ function isCodexSpawn(item) {
   return matchesCollaborationTool(item, "spawn_agent");
 }
 
-function codexSpawnContract(item, expected) {
+function codexSpawnContract(item, expected, expectedModel) {
   const input = item?.arguments ?? item?.input ?? {};
   return (
     input.task_name === expected.codex?.taskName &&
-    input.model === expected.codex?.model &&
+    input.model === expectedModel &&
     input.reasoning_effort === expected.codex?.reasoningEffort &&
     input.fork_turns === expected.codex?.forkTurns &&
     nonemptyString(input.message)
@@ -384,6 +387,21 @@ function assertCodexDispatch(output, context, expected) {
   }
 
   const failures = [];
+  let expectedModel;
+  if (expected.codex?.modelStrategy !== "highest-capability-eligible") {
+    failures.push(
+      "Codex dispatch contract does not require highest-capability eligible model selection",
+    );
+  } else {
+    try {
+      expectedModel = strongestEligibleCodexModel(
+        expected.codex.reasoningEffort,
+      ).model;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      failures.push(`cannot resolve strongest eligible Codex model: ${detail}`);
+    }
+  }
   if (!codexSkillEvidence(items, expected.skill)) {
     failures.push(
       `no successful installed ${expected.skill} SKILL.md read command`,
@@ -394,7 +412,7 @@ function assertCodexDispatch(output, context, expected) {
     (item) =>
       isCodexSpawn(item) &&
       successfulCollaborationItem(item) &&
-      codexSpawnContract(item, expected) &&
+      codexSpawnContract(item, expected, expectedModel) &&
       receiverThreadIds(item).length > 0,
   );
   if (spawnIndex < 0) {

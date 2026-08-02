@@ -9,6 +9,14 @@
 - Debug from observed evidence and repair the causal defect.
 - Final review is required before a readiness claim.
 - Verification output must be fresh and relevant to the changed surfaces.
+- Use provider evals only for a named stochastic question that deterministic
+  verification cannot decide. Deterministic retirement, deletion, file,
+  routing, schema, format, metadata, and transformation contracts—and skill
+  prose edits that change only such contracts—need no live eval. Fail closed on
+  uncertain baseline/treatment isolation. Lift gates require an explicit
+  incremental-value hypothesis; unexpected baseline success requires an
+  isolation/context/prompt/rubric audit and deliberate retirement or
+  absolute-reliability disposition, never a blind `valueGate.mode: none`.
 - Commit messages explain why the change exists and use Conventional Commits.
 - Create a linked worktree only when concurrent mutable tickets need isolation. After terminal delivery, cleanup of an unused clean worktree is optional housekeeping; run repository teardown before removal and never force it.
 - Never add `Co-Authored-By` trailers.

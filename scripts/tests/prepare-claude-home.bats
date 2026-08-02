@@ -94,7 +94,7 @@ teardown() {
     --plugin-mode development-system
 
   [ "$status" -eq 0 ]
-  grep -q '"stale":"installer-state"' "$EVAL_HOME/config/.credentials.json"
+  [ ! -e "$EVAL_HOME/config/.credentials.json" ]
   grep -q '"accessToken":"fixture"' "$AUTH_HOME/.credentials.json"
 }
 

@@ -101,23 +101,25 @@ MD
   [ "$status" -eq 0 ]
   [[ "$output" == *"openai:codex-sdk"* ]]
   [[ "$output" == *"anthropic:claude-agent-sdk"* ]]
-  [[ "$output" == *"Use installed marketplace plugin and skill guidance when it is relevant"* ]]
-  [[ "$output" == *"When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording."* ]]
-  [[ "$output" == *"You may read installed skill instruction files through the harness."* ]]
-  [[ "$output" == *"Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands."* ]]
+  [[ "$output" == *"Use only context made available inside this evaluation condition."* ]]
+  [[ "$output" == *"Do not rely on prior conversations, user memory, session memory, earlier runs, or host-machine state."* ]]
+  [[ "$output" != *"installed marketplace plugin"* ]]
+  [[ "$output" != *"exact command name"* ]]
   [[ "$output" != *"deep_tracing: true"* ]]
   [[ "$output" == *"deep_tracing: false"* ]]
   [[ "$output" == *"tracing:"*$'\n'"  enabled: false"* ]]
-  [[ "$output" == *"Treat each scenario as stateless"* ]]
+  [[ "$output" == *"stateless advisory question"* ]]
   [[ "$output" == *"sandbox_mode: read-only"* ]]
   [[ "$output" == *"skip_git_repo_check: true"* ]]
-  [[ "$output" == *"codex_path_override: \"$ROOT/scripts/evals/codex-with-trusted-hooks.sh\""* ]]
-  [[ "$output" == *"CODEX_EVAL_REAL_BIN:"* ]]
-  [[ "$output" == *"working_dir: \"$ROOT/.evals/agent-workspace\""* ]]
+  [[ "$output" == *"codex_path_override: \"$ROOT/scripts/evals/behavior-provider-boundary.sh\""* ]]
+  [[ "$output" == *"EVAL_PROVIDER_CODEX_RUNTIME:"* ]]
+  [[ "$output" == *"working_dir: \"/tmp/ai-plugins-provider-eval-"* ]]
   [[ "$output" == *"skills: all"* ]]
   [[ "$output" == *"setting_sources: []"* ]]
   [[ "$output" == *"persist_session: false"* ]]
   [[ "$output" == *"disallowed_tools:"*$'\n'"        - Bash"* ]]
+  [[ "$output" == *"        - WebSearch"* ]]
+  [[ "$output" == *"        - WebFetch"* ]]
   [[ "$output" == *"load-harness-cases.cjs"* ]]
 }
 
@@ -130,6 +132,8 @@ MD
   [ "$(printf '%s\n' "$output" | grep -c '^        - Skill$')" -eq 2 ]
   [ "$(printf '%s\n' "$output" | grep -c '^      disallowed_tools:$')" -eq 2 ]
   [ "$(printf '%s\n' "$output" | grep -c '^        - Bash$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^        - WebSearch$')" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^        - WebFetch$')" -eq 2 ]
   [ "$(printf '%s\n' "$output" | grep -c '^        - Write$')" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^        - Edit$')" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^        - MultiEdit$')" -eq 0 ]
@@ -147,6 +151,235 @@ MD
   [ "$status" -eq 0 ]
 }
 
+@test "native behavior providers use neutral prompts and fail-closed filesystem isolation with leak rejection" {
+  FIXTURE_TMP="$(mktemp -d)"
+  generated_config="$FIXTURE_TMP/config.yaml"
+  generated_metadata="$FIXTURE_TMP/metadata.json"
+
+  run node "$GENERATOR" \
+    --suite behavior \
+    --output "$generated_config" \
+    --metadata-output "$generated_metadata"
+
+  [ "$status" -eq 0 ]
+
+  run node - "$ROOT" "$generated_config" "$generated_metadata" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+
+const [root, configPath, metadataPath] = process.argv.slice(2);
+const config = fs.readFileSync(configPath, 'utf8');
+const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+const prompt = config.slice(config.indexOf('prompts:'), config.indexOf('\nproviders:'));
+const leaksExpectedAnswer = [
+  /installed marketplace plugin/i,
+  /skill guidance/i,
+  /exact command name/i,
+  /plugin-specific/i,
+].some((pattern) => pattern.test(prompt));
+if (leaksExpectedAnswer) {
+  throw new Error('baseline prompt reveals plugin-specific guidance or expected-answer shape');
+}
+
+const providerSections = config
+  .split(/^  - id: /m)
+  .slice(1)
+  .map((section) => `  - id: ${section}`);
+if (providerSections.length !== 4) {
+  throw new Error(`expected four native provider conditions, found ${providerSections.length}`);
+}
+for (const section of providerSections) {
+  const label = section.match(/^\s*label:\s*(\S+)\s*$/m)?.[1];
+  if (!label) {
+    throw new Error('native provider condition lacks a label');
+  }
+  const workingDir = section.match(/^\s*working_dir:\s*"([^"]+)"\s*$/m)?.[1];
+  if (!workingDir || !path.isAbsolute(workingDir)) {
+    throw new Error(`${label} working_dir is not absolute`);
+  }
+  const relative = path.relative(root, workingDir);
+  if (relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..')) {
+    throw new Error(`${label} working_dir remains beneath repository instructions: ${workingDir}`);
+  }
+  const executable = section.match(
+    /^\s*(?:codex_path_override|path_to_claude_code_executable|executable(?:_path)?):\s*"([^"]+)"\s*$/m,
+  )?.[1];
+  if (!executable || !path.isAbsolute(executable)) {
+    throw new Error(`${label} lacks an absolute executable boundary override`);
+  }
+}
+
+if (metadata.providerCompositions.length !== 4) {
+  throw new Error(`expected four provider compositions, found ${metadata.providerCompositions.length}`);
+}
+for (const composition of metadata.providerCompositions) {
+  const isolation = composition.filesystemIsolation;
+  const expectedPluginMounts =
+    composition.pluginMode === 'development-system' ? ['development-system'] : [];
+  if (
+    isolation?.boundary !== 'mount-namespace' ||
+    isolation?.failClosed !== true ||
+    isolation?.workspace !== 'outside-repository' ||
+    isolation?.repository !== 'hidden' ||
+    isolation?.globalGuidance !== 'hidden' ||
+    isolation?.globalHomes !== 'hidden' ||
+    isolation?.globalCaches !== 'hidden' ||
+    isolation?.globalCatalogs !== 'hidden' ||
+    isolation?.conditionHome !== 'owned' ||
+    !Array.isArray(isolation?.pluginMounts) ||
+    JSON.stringify(isolation.pluginMounts) !== JSON.stringify(expectedPluginMounts) ||
+    isolation?.leakagePolicy !== 'reject'
+  ) {
+    throw new Error(`incomplete ${composition.label} filesystem isolation: ${JSON.stringify(isolation)}`);
+  }
+}
+NODE
+  [ "$status" -eq 0 ]
+}
+
+@test "behavior thresholds reject output or traces containing isolation leak markers" {
+  FIXTURE_TMP="$(mktemp -d)"
+  results="$FIXTURE_TMP/results.json"
+  cat >"$results" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": {"label": "codex-gpt-5.6-terra-no-plugins"},
+        "testCase": {
+          "vars": {
+            "case_id": "context-leak-canary",
+            "plugin_mode": "no-plugins",
+            "min_pass_rate": 1,
+            "value_gate_mode": "measurement",
+            "context_leak_markers": ["PRIVATE_PLUGIN_GUIDANCE_CANARY"]
+          }
+        },
+        "gradingResult": {"pass": true, "score": 1},
+        "response": {"output": "Use PRIVATE_PLUGIN_GUIDANCE_CANARY exactly."},
+        "metadata": {
+          "trace": "read /host/repository/plugins/development-system/skills/setup/SKILL.md"
+        }
+      }
+    ]
+  }
+}
+
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"context leak"* || "$output" == *"context-leak"* ]]
+  [[ "$output" == *"context-leak-canary"* ]]
+}
+
+@test "behavior loader feeds canonical host-only markers into threshold rejection" {
+  FIXTURE_TMP="$(mktemp -d)"
+  results="$FIXTURE_TMP/results.json"
+  marker_file="$FIXTURE_TMP/context-leak-markers.json"
+
+  env EVAL_RUNTIME_OPTIONS_FILE="$FIXTURE_TMP/no-runtime-options.json" \
+    EVAL_PROVIDER_WORKSPACE="$FIXTURE_TMP/host-workspace" \
+    node - "$ROOT" "$results" "$marker_file" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [root, resultsPath, markerFile] = process.argv.slice(2);
+const generateTests = require(path.join(root, 'evals/promptfoo/load-harness-cases.cjs'));
+const { contextLeakMarkers } = require(path.join(root, 'evals/promptfoo/fixtures.cjs'));
+const generated = generateTests()[0];
+const markers = contextLeakMarkers();
+const marker = markers.find(
+  (candidate) => candidate === path.resolve(process.env.EVAL_PROVIDER_WORKSPACE),
+);
+if (!marker) throw new Error('private sidecar omitted the generated host workspace marker');
+if (JSON.stringify(generated.vars).includes(marker)) {
+  throw new Error('loader embedded a host workspace marker in shareable vars');
+}
+fs.writeFileSync(
+  markerFile,
+  JSON.stringify({ version: 1, markers, secrets: [marker] }),
+  { mode: 0o600 },
+);
+
+fs.writeFileSync(
+  resultsPath,
+  JSON.stringify({
+    results: {
+      results: [
+        {
+          provider: { label: 'codex-gpt-5.6-terra-no-plugins' },
+          testCase: { vars: generated.vars },
+          gradingResult: { pass: true, score: 1 },
+          metadata: { trace: `provider read ${marker}/private-guidance` },
+        },
+      ],
+    },
+  }),
+);
+NODE
+
+  run env EVAL_CONTEXT_LEAK_MARKERS_FILE="$marker_file" \
+    EVAL_REQUIRE_CONTEXT_LEAK_SIDECAR=1 \
+    node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Context leak failures"* ]]
+}
+
+@test "behavior loader keeps dynamic host paths out of shareable result variables" {
+  FIXTURE_TMP="$(mktemp -d)"
+  host_workspace="$FIXTURE_TMP/private-host-workspace"
+
+  run env EVAL_RUNTIME_OPTIONS_FILE="$FIXTURE_TMP/no-runtime-options.json" \
+    EVAL_PROVIDER_WORKSPACE="$host_workspace" \
+    node - "$ROOT" "$host_workspace" <<'NODE'
+const path = require('node:path');
+const [root, hostWorkspace] = process.argv.slice(2);
+const generateTests = require(path.join(root, 'evals/promptfoo/load-harness-cases.cjs'));
+const serialized = JSON.stringify(generateTests().map((testCase) => testCase.vars));
+for (const privatePath of [path.resolve(root), path.resolve(process.env.HOME), path.resolve(hostWorkspace)]) {
+  if (serialized.includes(privatePath)) {
+    throw new Error(`shareable fixture variables contain host path: ${privatePath}`);
+  }
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
+@test "behavior thresholds fail closed when fixture leak markers are missing" {
+  FIXTURE_TMP="$(mktemp -d)"
+  results="$FIXTURE_TMP/results.json"
+  cat >"$results" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": {"label": "codex-gpt-5.6-terra-no-plugins"},
+        "testCase": {
+          "vars": {
+            "case_id": "missing-context-leak-markers",
+            "fixture_file": "evals/fixtures/behavior/example/cases.json",
+            "plugin_mode": "no-plugins",
+            "min_pass_rate": 1,
+            "value_gate_mode": "measurement"
+          }
+        },
+        "gradingResult": {"pass": true, "score": 1}
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Context leak configuration failures"* ]]
+  [[ "$output" == *"missing-context-leak-markers"* ]]
+}
+
 @test "generated behavior providers compare no plugins with installed development-system" {
   run node "$GENERATOR" --suite behavior --stdout
 
@@ -159,7 +392,8 @@ MD
   [[ "$output" != *"targeted-plugins"* ]]
   [[ "$output" != *"pi-provider.mjs"* ]]
   [[ "$output" != *"full-marketplace"* ]]
-  [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/"* ]]
+  [[ "$output" == *'path: "/runtime/plugin"'* ]]
+  [[ "$output" == *"EVAL_PROVIDER_PLUGIN_SNAPSHOT:"* ]]
   [[ "$output" != *"path: \"$ROOT/plugins/development-system\""* ]]
 }
 
@@ -175,10 +409,24 @@ MD
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"apiKeyRequired: false"* ]]
-  [[ "$output" == *"CLAUDE_CONFIG_DIR: \"{{ env.CLAUDE_EVAL_RUNTIME_CONFIG_DIR_DEVELOPMENT_SYSTEM | default('$ROOT/.evals/claude-home-development-system/config') }}\""* ]]
+  [[ "$output" == *'CLAUDE_CONFIG_DIR: "/runtime/home/config"'* ]]
   [[ "$output" == *"provider:"*$'\n'"      text:"*$'\n'"        id: openai:codex-sdk"* ]]
-  [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM | default(env.CODEX_EVAL_HOME)"* ]]
+  [[ "$output" == *'CODEX_HOME: "/runtime/home"'* ]]
   [[ "$output" != *"openai:gpt-5-mini"* ]]
+}
+
+@test "generated semantic grader uses a dedicated sanitized no-plugin condition" {
+  run node "$GENERATOR" --suite behavior --stdout
+
+  [ "$status" -eq 0 ]
+  grader="${output#*defaultTest:}"
+  [[ "$grader" == *'EVAL_PLUGIN_MODE: "no-plugins"'* ]]
+  [[ "$grader" == *'EVAL_PROVIDER_HOME: "{{ env.CODEX_EVAL_HOME_GRADER'* ]]
+  [[ "$grader" == *"$ROOT/.evals/codex-home-grader"* ]]
+  [[ "$grader" == *"workspaces/codex-grader"* ]]
+  [[ "$grader" != *"EVAL_PROVIDER_PLUGIN_SNAPSHOT"* ]]
+  [[ "$grader" != *"codex-home-development-system"* ]]
+  [[ "$grader" != *"sanitized-marketplace"* ]]
 }
 
 @test "generated Codex config defaults execution to Terra and grading to independent Sol" {
@@ -280,12 +528,13 @@ JSON
   [[ "$output" != *$'\nproviders:\n'* ]]
 }
 
-@test "generated Claude plugin path points at the isolated installed cache" {
+@test "generated Claude plugin path exposes only the boundary-mounted snapshot" {
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
   version="$(jq -r '.version' "$ROOT/plugins/development-system/.claude-plugin/plugin.json")"
-  [[ "$output" == *"path: \"{{ env.CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM"* ]]
+  [[ "$output" == *'path: "/runtime/plugin"'* ]]
+  [[ "$output" == *"EVAL_PROVIDER_PLUGIN_SNAPSHOT:"* ]]
   [[ "$output" == *"$ROOT/.evals/claude-home-development-system/plugin-cache/cache/ai-plugins/development-system/$version"* ]]
   [[ "$output" != *"path: \"./plugins/"* ]]
 }
@@ -436,6 +685,7 @@ EOF
     installed="$CODEX_HOME/plugins/cache/ai-plugins/development-system/$version"
     mkdir -p "$installed"
     cp -R "$CODEX_CLI_PLUGIN_ROOT/plugins/development-system/." "$installed/"
+    printf 'installed-by-codex-cli\n' >"$installed/cli-install-artifact"
     cat >>"$CODEX_HOME/config.toml" <<'EOF'
 
 [plugins."development-system@ai-plugins"]
@@ -470,6 +720,12 @@ SH
   [ "$(sed -n '3p' "$invocation_log")" = "plugin list --json" ]
   grep -q '\[plugins\."development-system@ai-plugins"\]' "$eval_home/config.toml"
   [ -d "$eval_home/plugins/cache/ai-plugins/development-system" ]
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  grep -q '^installed-by-codex-cli$' \
+    "$eval_home/plugins/cache/ai-plugins/development-system/$version/cli-install-artifact"
+  grep -q '^installed-by-codex-cli$' \
+    "$eval_home/sanitized-marketplace/plugins/development-system/cli-install-artifact"
+  [ ! -e "$ROOT/plugins/development-system/cli-install-artifact" ]
 }
 
 @test "codex eval home preparation refreshes stale seeded auth" {
@@ -489,6 +745,110 @@ SH
 
   [ "$status" -eq 0 ]
   cmp "$auth_home/auth.json" "$eval_home/auth.json"
+}
+
+@test "codex eval home preparation records seeded auth scalars for artifact scanning" {
+  FIXTURE_TMP="$(mktemp -d)"
+  auth_home="$FIXTURE_TMP/auth-source"
+  eval_home="$FIXTURE_TMP/eval-home"
+  secret_manifest="$FIXTURE_TMP/artifact-secrets.json"
+  mkdir -p "$auth_home" "$eval_home"
+  printf '%s\n' '{
+    "auth_mode":"chatgpt",
+    "tokens":{
+      "access_token":"fixture-codex-access-value",
+      "id_token":"fixture-codex-id-value",
+      "refresh_token":"fixture-codex-refresh-value"
+    },
+    "agent_identity":{
+      "agent_private_key":"fixture-agent-private-key-value"
+    },
+    "future_auth":{
+      "session_secret":"fixture-future-session-secret",
+      "display_name":"not-sensitive"
+    }
+  }' >"$auth_home/auth.json"
+  printf '%s\n' '{
+    "legacyCredential":"fixture-legacy-credential-value",
+    "label":"not-sensitive-either"
+  }' >"$auth_home/.credentials.json"
+
+  run env -u OPENAI_API_KEY -u CODEX_API_KEY \
+    CODEX_EVAL_AUTH_HOME="$auth_home" \
+    node "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+    "$eval_home" \
+    --plugin-mode no-plugins \
+    --artifact-secret-output "$secret_manifest"
+
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%a' "$secret_manifest")" = 600 ]
+  jq -e '
+    .version == 1 and
+    (.secrets | sort) == ([
+      "fixture-codex-access-value",
+      "fixture-codex-id-value",
+      "fixture-codex-refresh-value",
+      "fixture-agent-private-key-value",
+      "fixture-future-session-secret",
+      "fixture-legacy-credential-value"
+    ] | sort)
+  ' "$secret_manifest" >/dev/null
+  ! rg -Fq 'not-sensitive' "$secret_manifest"
+}
+
+@test "codex auth scan metadata unions secrets across repeated home preparation" {
+  FIXTURE_TMP="$(mktemp -d)"
+  auth_home="$FIXTURE_TMP/auth-source"
+  first_home="$FIXTURE_TMP/first-home"
+  second_home="$FIXTURE_TMP/second-home"
+  secret_manifest="$FIXTURE_TMP/artifact-secrets.json"
+  mkdir -p "$auth_home" "$first_home" "$second_home"
+  printf '%s\n' '{"tokens":{"access_token":"first-preparation-secret"}}' \
+    >"$auth_home/auth.json"
+
+  run env -u OPENAI_API_KEY -u CODEX_API_KEY \
+    CODEX_EVAL_AUTH_HOME="$auth_home" \
+    node "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+    "$first_home" --plugin-mode no-plugins \
+    --artifact-secret-output "$secret_manifest"
+
+  [ "$status" -eq 0 ]
+  printf '%s\n' '{"tokens":{"access_token":"second-preparation-secret"}}' \
+    >"$auth_home/auth.json"
+
+  run env -u OPENAI_API_KEY -u CODEX_API_KEY \
+    CODEX_EVAL_AUTH_HOME="$auth_home" \
+    node "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+    "$second_home" --plugin-mode no-plugins \
+    --artifact-secret-output "$secret_manifest"
+
+  [ "$status" -eq 0 ]
+  jq -e '
+    (.secrets | sort) == ([
+      "first-preparation-secret",
+      "second-preparation-secret"
+    ] | sort)
+  ' "$secret_manifest" >/dev/null
+}
+
+@test "codex eval home preparation fails closed when seeded auth cannot produce scan metadata" {
+  FIXTURE_TMP="$(mktemp -d)"
+  auth_home="$FIXTURE_TMP/auth-source"
+  eval_home="$FIXTURE_TMP/eval-home"
+  secret_manifest="$FIXTURE_TMP/artifact-secrets.json"
+  mkdir -p "$auth_home" "$eval_home"
+  printf '%s\n' '{not-json' >"$auth_home/auth.json"
+
+  run env -u OPENAI_API_KEY -u CODEX_API_KEY \
+    CODEX_EVAL_AUTH_HOME="$auth_home" \
+    node "$ROOT/scripts/evals/prepare-codex-home.mjs" \
+    "$eval_home" \
+    --plugin-mode no-plugins \
+    --artifact-secret-output "$secret_manifest"
+
+  [ "$status" -eq 2 ]
+  [ ! -e "$secret_manifest" ]
+  [[ "$output" != *"fixture"* ]]
 }
 
 @test "codex eval home preparation can omit all copied auth material" {

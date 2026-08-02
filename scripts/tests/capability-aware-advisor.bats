@@ -126,7 +126,7 @@ PY
         },
         "codex": {
           "taskName": "advisor",
-          "model": "gpt-5.6-sol",
+          "modelStrategy": "highest-capability-eligible",
           "reasoningEffort": "xhigh",
           "forkTurns": "none"
         }
@@ -135,10 +135,9 @@ PY
         "core-behavior",
         "baseline-ablation"
       ]
-      and .[0].valueGate == {
-        "mode": "standard",
-        "baselineLiftThreshold": 0.1
-      }
+      and .[0].valueGate.mode == "standard"
+      and .[0].valueGate.baselineLiftThreshold == 0.1
+      and (.[0].valueGate.incrementalValueHypothesis | length > 0)
       and .[0].minPassRate == 1
       and (.[0].semanticRubric | contains("completed foreground Advisor result"))
       and (.[0].semanticRubric | contains("empty wait"))

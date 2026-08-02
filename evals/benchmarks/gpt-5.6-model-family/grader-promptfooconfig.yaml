@@ -20,7 +20,7 @@ providers:
         features:
           plugins: false
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+        CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS }}"
 
   - id: file://trace-enforced-codex-provider.mjs
     label: grader-gpt-5.6-terra-high
@@ -34,7 +34,7 @@ providers:
         features:
           plugins: false
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+        CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS }}"
 
   - id: file://trace-enforced-codex-provider.mjs
     label: grader-gpt-5.6-luna-high
@@ -48,7 +48,7 @@ providers:
         features:
           plugins: false
       cli_env:
-        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_NO_PLUGINS }}"
+        CODEX_HOME: "{{ env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS }}"
 
 tests: file://grader-cases.cjs
 

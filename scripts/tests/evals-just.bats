@@ -6,8 +6,11 @@ setup() {
   export JUST_TEMPDIR="$TMPROOT"
   mkdir -p "$TMPROOT/scripts/evals"
   cp "$ROOT/justfile" "$TMPROOT/justfile"
+  cp "$ROOT/scripts/evals/scan-behavior-artifacts.sh" "$TMPROOT/scripts/evals/scan-behavior-artifacts.sh"
+  cp "$ROOT/scripts/evals/scan-code-quality-secrets.mjs" "$TMPROOT/scripts/evals/scan-code-quality-secrets.mjs"
   cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
+umask 077
 printf 'run:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
 mkdir -p evals/out
 : > evals/out/results.json
@@ -22,6 +25,7 @@ SH
 printf 'all:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
 SH
   chmod +x "$TMPROOT/scripts/evals/run-changed.sh" "$TMPROOT/scripts/evals/share.sh" "$TMPROOT/scripts/evals/run.sh"
+  chmod +x "$TMPROOT/scripts/evals/scan-behavior-artifacts.sh"
 }
 
 teardown() {
@@ -46,6 +50,7 @@ teardown() {
 @test "just evals shares the report before returning a failed eval status" {
   cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
 #!/usr/bin/env bash
+umask 077
 printf 'run:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
 mkdir -p evals/out
 : > evals/out/results.json
@@ -73,6 +78,28 @@ SH
   [ "$status" -eq 100 ]
   [ "$(cat "$TMPROOT/eval-order.log")" = "run:8" ]
   [[ "$output" == *"Skipping promptfoo share because no fresh eval artifacts were generated."* ]]
+}
+
+@test "just evals never shares or prints a secret-bearing fresh artifact" {
+  secret="codex-fixture-secret-that-must-not-escape"
+  cat >"$TMPROOT/scripts/evals/run-changed.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+printf 'run:%s\n' "$PROMPTFOO_MAX_CONCURRENCY" >> eval-order.log
+mkdir -p evals/out
+printf '{"response":"%s"}\n' "$CODEX_API_KEY" >evals/out/results.json
+SH
+  chmod +x "$TMPROOT/scripts/evals/run-changed.sh"
+
+  run env CODEX_API_KEY="$secret" \
+    just --justfile "$TMPROOT/justfile" --working-directory "$TMPROOT" evals
+
+  [ "$status" -eq 86 ]
+  [ "$(cat "$TMPROOT/eval-order.log")" = "run:8" ]
+  [ ! -e "$TMPROOT/evals/out/results.json" ]
+  [[ "$output" == *"Skipping promptfoo share because artifact secret scanning failed."* ]]
+  [[ "$output" != *"$secret"* ]]
 }
 
 @test "just evals does not share after user interrupt" {

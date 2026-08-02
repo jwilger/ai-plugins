@@ -28,6 +28,11 @@ two advisor-like cases. Grader calibration compares all three models at high
 effort against eight frozen human-labelled answers in one run, including two
 hostile tool-use prompt-injection cases.
 
+This benchmark fixes global target-call concurrency at two as a measurement
+input so latency and resource evidence remain comparable. That benchmark-only
+constraint is explicit and does not replace the repository provider-eval
+default of eight.
+
 GPT56_BENCHMARK_SAMPLES controls execution repetitions (default 1; supported range 1-10).
 4 cases x 3 execution providers x 1 grader per output means 24 model turns per sample
 (12 execution turns plus 12 grading turns).
@@ -72,11 +77,12 @@ if [[ ! "$samples" =~ ^([1-9]|10)$ ]]; then
 fi
 export GPT56_BENCHMARK_SAMPLES="$samples"
 
-max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-2}"
-if [[ ! "$max_concurrency" =~ ^[12]$ ]]; then
-  printf 'PROMPTFOO_MAX_CONCURRENCY must be 1 or 2; got %q\n' "$max_concurrency" >&2
+benchmark_max_concurrency=2
+if [ -n "${PROMPTFOO_MAX_CONCURRENCY+x}" ] && [ "$PROMPTFOO_MAX_CONCURRENCY" != "$benchmark_max_concurrency" ]; then
+  printf 'GPT-5.6 benchmark fixes PROMPTFOO_MAX_CONCURRENCY at 2 as an explicit measurement constraint; the repository default of 8 does not apply to this benchmark; got %q\n' "$PROMPTFOO_MAX_CONCURRENCY" >&2
   exit 2
 fi
+max_concurrency="$benchmark_max_concurrency"
 
 development_system_home="${CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-development-system}}"
 no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
@@ -108,9 +114,35 @@ esac
 
 export CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home"
 export CODEX_EVAL_HOME_NO_PLUGINS="$no_plugins_home"
+export GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM="$development_system_home"
+export GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS="$no_plugins_home"
 export GPT56_BENCHMARK_WORKSPACE="$workspace"
 export PROMPTFOO_MAX_CONCURRENCY="$max_concurrency"
 export EVAL_OUT_DIR="${EVAL_OUT_DIR:-$out_root/$output_suffix}"
+
+run_canonical_eval() {
+  local marker_root="$workspace/.canonical-runner-context-markers"
+  env \
+    CODEX_EVAL_HOME="$marker_root/default" \
+    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$marker_root/development-system" \
+    CODEX_EVAL_HOME_NO_PLUGINS="$marker_root/no-plugins" \
+    CODEX_EVAL_HOME_GRADER="$marker_root/grader" \
+    "$root/scripts/evals/run.sh" "$config"
+}
+
+verify_artifact_scan_receipt() {
+  local artifact
+  local -a artifacts=()
+  for artifact in \
+    "$EVAL_OUT_DIR/results.json" \
+    "$EVAL_OUT_DIR/report.html" \
+    "$EVAL_OUT_DIR/results.junit.xml"; do
+    [ ! -f "$artifact" ] || artifacts+=("$artifact")
+  done
+  [ "${#artifacts[@]}" -gt 0 ] || return 0
+  node "$root/scripts/evals/artifact-scan-receipt.mjs" verify \
+    "$EVAL_OUT_DIR/artifact-scan-receipt.json" "${artifacts[@]}"
+}
 
 workspace_prepare=(
   node "$root/scripts/evals/prepare-gpt56-workspace.mjs" "$workspace"
@@ -169,7 +201,8 @@ fi
 node "$root/scripts/evals/prepare-codex-home.mjs" "$no_plugins_home" --plugin-mode no-plugins >/dev/null
 
 if [ "$phase" = "execution" ]; then
-  "$root/scripts/evals/run.sh" "$config"
+  run_canonical_eval
+  verify_artifact_scan_receipt
   node "$root/scripts/evals/check-gpt56-measurement.mjs" \
     "$EVAL_OUT_DIR/results.json" \
     --expected-measurement-config "$config"
@@ -177,12 +210,13 @@ if [ "$phase" = "execution" ]; then
 else
   runner_status=0
   checker_status=0
-  "$root/scripts/evals/run.sh" "$config" || runner_status="$?"
+  run_canonical_eval || runner_status="$?"
   case "$runner_status" in
     124 | 130 | 137 | 143)
       exit "$runner_status"
       ;;
   esac
+  verify_artifact_scan_receipt
   node "$root/scripts/evals/check-gpt56-grader-calibration.mjs" "$EVAL_OUT_DIR/results.json" || checker_status="$?"
   if [ "$runner_status" -ne 0 ]; then
     exit "$runner_status"
