@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+component_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+marketplace_root="$(cd -- "$component_root/../../../.." && pwd -P)"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$marketplace_root/.dependencies/cargo-target/tiber}"
+
+exec cargo run --quiet --manifest-path "$component_root/rust/Cargo.toml" -- "$@"

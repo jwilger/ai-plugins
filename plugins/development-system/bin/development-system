@@ -19,6 +19,7 @@ usage() {
     '' \
     'commands:' \
     '  setup --project <repo> --preset personal-trunk [--dry-run|--apply --yes]' \
+    '  tiber <command> [options]' \
     '  integrations --harness all|claude|codex' \
     '  doctor --project <repo> [--harness all|claude|codex]'
 }
@@ -599,6 +600,10 @@ record_eval_session_start() {
 }
 
 case "${1:-}" in
+  tiber)
+    shift
+    exec "$PACKAGE_ROOT/components/tiber/bin/tiber" "$@"
+    ;;
   setup)
     shift
     setup_command "$@"

@@ -5,24 +5,14 @@ setup() {
   CLI="$PLUGIN_ROOT/bin/development-system"
 }
 
-@test "installed development-system neither ships nor advertises retired Tiber migration compatibility" {
-  run "$CLI" --help
+@test "installed development-system exposes its bundled Tiber tracker" {
+  run "$CLI" tiber --help
 
   [ "$status" -eq 0 ]
-  [[ "${output,,}" != *"tiber"* ]]
+  [[ "$output" == *"Repository-local task board"* ]]
 
-  run "$CLI" migrate-tiber-to-beads
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"development_system.usage command=migrate-tiber-to-beads"* ]]
-
-  run find "$PLUGIN_ROOT" -iname '*tiber*' -print
+  run find "$PLUGIN_ROOT" -path '*/components/tiber/bin/tiber' -type f -print
 
   [ "$status" -eq 0 ]
-  [ -z "$output" ]
-
-  run rg --hidden --ignore-case --files-with-matches 'tiber' "$PLUGIN_ROOT"
-
-  [ "$status" -eq 1 ]
-  [ -z "$output" ]
+  [ -n "$output" ]
 }
