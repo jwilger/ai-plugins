@@ -27,3 +27,15 @@ setup() {
   [ -d "$project/.development-system/tiber/store/events" ]
   [ -z "$(find "$project/.development-system/tiber/store/events" -name '*.md' -print -quit)" ]
 }
+
+@test "Tiber creates a functional ticket as an immutable Eventcore transaction" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Restore deterministic workflow"' _ "$project" "$CLI"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Restore deterministic workflow"* ]]
+  [ -n "$(find "$project/.development-system/tiber/store/events" -name '*.jsonl' -print -quit)" ]
+  [ -z "$(find "$project" -name '*.md' -print -quit)" ]
+}

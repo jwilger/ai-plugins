@@ -5,7 +5,10 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+eventcore = "1.0.1"
 eventcore-fs = "1.0.1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [[bin]]
 name = "tiber"
