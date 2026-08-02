@@ -17,9 +17,9 @@ github-actions:
 bootstrap-development-system:
     scripts/bootstrap-development-system.sh
 
-# Node-level behavior checks for managed tool and Tiber-to-Beads migration logic.
+# Node-level behavior checks for managed development tools.
 node-tests:
-    node --test scripts/tests/development-tool-policy.test.mjs scripts/tests/tiber-migration.test.mjs
+    node --test scripts/tests/development-tool-policy.test.mjs
 
 # Validate and cook every installed Beads workflow formula.
 beads-formulas:

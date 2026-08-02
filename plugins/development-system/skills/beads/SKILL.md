@@ -1,6 +1,6 @@
 ---
 name: beads
-description: Use for Beads task creation, deterministic ready-work selection, workflow molecules, dependencies, cross-worktree coordination, Tiber migration, and pushed-CI recovery when beads is enabled.
+description: Use for Beads task creation, deterministic ready-work selection, workflow molecules, dependencies, cross-worktree coordination, and pushed-CI recovery when beads is enabled.
 ---
 
 # Beads
@@ -99,10 +99,3 @@ unrelated work. Release the hold and merge slot only after terminal success of
 either the exact tested causal-repair revision or the authorized rerun of the
 exact unchanged failed SHA. An intentionally failing run inside the active
 `ci-workflow-slice` is related test work, not a separate recovery incident.
-
-To retire an existing Tiber board, run
-`development-system migrate-tiber-to-beads --dry-run` from the primary checkout,
-review the count/export, then rerun with `--apply --yes` and optionally `--push`
-for the Dolt remote. The migration preserves historical states, labels,
-acceptance criteria, notes, dependency links, board order metadata, and original
-IDs as external references.

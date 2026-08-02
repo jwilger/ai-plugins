@@ -164,9 +164,3 @@ embedded Dolt storage without competing Git or harness hooks, sets Dolt
 auto-commit, and installs formulas under `.beads/formulas/`.
 The delivery mode selects `development-change-direct`,
 `development-change-pr`, or `development-change-local` in project policy.
-
-For a legacy Tiber project, preview
-`development-system migrate-tiber-to-beads --dry-run` from the primary checkout.
-After approval, apply with `--apply --yes`; add `--push` only when the Dolt remote
-should be updated immediately. Then run setup to converge project policy and
-formula files. Never retain or reinstall the Tiber runtime.
