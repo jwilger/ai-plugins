@@ -674,6 +674,7 @@ version = "1.0.0"
 dependencies = [
  "eventcore",
  "eventcore-fs",
+ "eventcore-types",
  "serde",
  "tokio",
 ]

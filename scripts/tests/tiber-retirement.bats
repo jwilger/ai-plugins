@@ -42,3 +42,16 @@ setup() {
   [ "$status" -eq 0 ]
   [ -z "$(find "$project" -name '*.md' -print -quit)" ]
 }
+
+@test "Tiber lists ticket titles by replaying Eventcore transactions" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Replay this ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Replay this ticket"* ]]
+}

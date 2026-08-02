@@ -6,6 +6,7 @@ use eventcore::{
     StreamDeclarations, StreamId,
 };
 use eventcore_fs::FileEventStore;
+use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader};
 use serde::{Deserialize, Serialize};
 
 fn main() -> ExitCode {
@@ -22,9 +23,43 @@ fn main() -> ExitCode {
         }
         Some("init") => initialize_store(),
         Some("create") => create_ticket(&arguments[1..]),
+        Some("list") => list_tickets(),
         Some(command) => {
             eprintln!("tiber.usage command={command}");
             ExitCode::from(2)
+        }
+    }
+}
+
+fn list_tickets() -> ExitCode {
+    let store_root = match std::env::current_dir() {
+        Ok(directory) => directory.join(".development-system/tiber/store"),
+        Err(error) => {
+            eprintln!("tiber.list unable_to_resolve_repository error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let store = match FileEventStore::open(store_root) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("tiber.list unable_to_open_store error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match runtime.block_on(
+        store.read_events::<TicketEvent>(EventFilter::all(), EventPage::first(BatchSize::new(100))),
+    ) {
+        Ok(events) => {
+            for (event, _) in events {
+                let TicketEvent::TicketCreatedV1 { title, .. } = event;
+                println!("tiber.ticket title={title}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("tiber.list unable_to_replay_tickets error={error}");
+            ExitCode::FAILURE
         }
     }
 }
