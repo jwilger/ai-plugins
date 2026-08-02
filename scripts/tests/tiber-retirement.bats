@@ -36,6 +36,9 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Restore deterministic workflow"* ]]
-  [ -n "$(find "$project/.development-system/tiber/store/events" -name '*.jsonl' -print -quit)" ]
+  event_file="$(find "$project/.development-system/tiber/store/events" -name '*.jsonl' -print -quit)"
+  [ -n "$event_file" ]
+  run rg --fixed-strings 'Restore deterministic workflow' "$event_file"
+  [ "$status" -eq 0 ]
   [ -z "$(find "$project" -name '*.md' -print -quit)" ]
 }
