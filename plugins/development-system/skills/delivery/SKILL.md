@@ -30,7 +30,16 @@ When the configured value is unavailable, do not choose a mode. State that
 the user knows what evidence is missing.
 
 - `direct-to-trunk`: commit verified semantic increments and push the configured
-  trunk branch. Treat failed pushed CI as blocking recovery work.
+  trunk branch. The most recent completed CI run for that branch that reached a
+  pass/fail outcome must have passed, and no unresolved failure hold may exist.
+  Newer queued, pending, or running runs do not replace that watermark. A
+  canceled run is non-evidence: it neither passes nor fails, does not replace
+  the watermark, and does not create or release a hold. An unexpected completed
+  failure for the configured trunk branch immediately blocks unrelated work and
+  permits only causal CI recovery until terminal success of either the exact
+  tested causal-repair revision or the authorized rerun of the exact unchanged
+  failed SHA. Ticket completion still requires terminal success for the exact
+  final pushed SHA.
 - `pull-request`: publish a branch, create or update one PR/MR, monitor required
   checks and review feedback, and finish only at the repository's configured
   terminal state.

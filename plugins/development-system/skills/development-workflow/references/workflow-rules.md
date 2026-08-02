@@ -12,7 +12,16 @@
 - Commit messages explain why the change exists and use Conventional Commits.
 - Create a linked worktree only when concurrent mutable tickets need isolation. After terminal delivery, cleanup of an unused clean worktree is optional housekeeping; run repository teardown before removal and never force it.
 - Never add `Co-Authored-By` trailers.
+- In direct-to-trunk mode, a verified semantic checkpoint may be pushed when
+  the most recent completed run for the configured trunk branch that reached a
+  pass/fail outcome passed and no unresolved failure hold exists. Newer queued,
+  pending, or running runs do not replace that watermark. A canceled run is
+  non-evidence: it neither passes nor fails, does not replace the watermark, and
+  does not create or release a hold. Ticket completion is a separate gate and
+  requires terminal success for the exact final pushed SHA.
 - An unexpected terminal pushed-CI failure creates a repository-wide Beads
-  hold. One atomically claimed `ci-recovery` molecule and the project merge slot
-  identify the owner. Release both only after exact terminal-success proof. An
-  intentional failure inside a `ci-workflow-slice` is related test work.
+  hold immediately. One atomically claimed `ci-recovery` molecule and the
+  project merge slot identify the owner. Stop unrelated work and permit only
+  causal recovery until terminal success of either the exact tested
+  causal-repair revision or the authorized rerun of the exact unchanged failed
+  SHA. An intentional failure inside a `ci-workflow-slice` is related test work.

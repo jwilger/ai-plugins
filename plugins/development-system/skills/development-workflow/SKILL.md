@@ -79,17 +79,39 @@ For a change:
 3. Use focused tests during micro-cycles. Run the complete configured local gate
    after the behavior slice is green, not after every tiny edit.
 4. Keep diagnosis causal and implementation scoped.
-5. Verify with fresh evidence and perform risk-proportional final review.
+5. Verify the current increment with fresh evidence proportional to its claim.
 6. Only after the slice gate passes, commit and push using the configured
    delivery mode.
 
-If pushed CI fails unexpectedly, stop unrelated work and route immediately to
+For each intermediate green checkpoint, run fast unit tests and directly
+relevant quick checks plus lightweight review, then commit and push as the
+selected delivery mode allows. Long-running integration, mutation, exhaustive,
+and full-suite evidence belongs in CI unless a local run is needed to diagnose
+a failure. Start full review only after the actual acceptance criteria are
+implemented. If full review requires an edit, first recheck checkpoint
+eligibility, make the edit test-first, repeat the fast checks, lightweight
+review, commit, and permitted push, then submit one delta risk assessment and
+resume only affected or guard assignments.
+
+In direct-to-trunk mode, another verified semantic checkpoint may be pushed
+when the most recent completed run for the configured trunk branch that reached
+a pass/fail outcome passed and no unresolved failure hold exists. Newer queued,
+pending, or running runs do not replace that watermark. A canceled run is
+non-evidence: it neither passes nor fails, does not replace the watermark, and
+does not create or release a hold. Do not confuse checkpoint eligibility with
+ticket completion, which requires terminal success for the exact final pushed
+SHA.
+
+The instant a completed run for the configured trunk branch fails unexpectedly,
+stop unrelated work and route immediately to
 `development-discipline:ci-failure-follow-up`; do not use this checklist as a
-recovery procedure. When `[features].beads = true`, that specialist owns the
-atomically claimed `ci-recovery` molecule and Beads merge slot. An intentional
-failure while testing an active `ci-workflow-slice` remains related work in that
-slice rather than a separate incident. When Beads is disabled, preserve the
-same single-owner hold and recovery evidence locally.
+recovery procedure. The hold permits only causal recovery until terminal
+success of either the exact tested causal-repair revision or the authorized
+rerun of the exact unchanged failed SHA. When `[features].beads = true`, that
+specialist owns the atomically claimed `ci-recovery` molecule and Beads merge
+slot. An intentional failure while testing an active `ci-workflow-slice`
+remains related work in that slice rather than a separate incident. When Beads
+is disabled, preserve the same single-owner hold and recovery evidence locally.
 
 Load [workflow rules](references/workflow-rules.md) only when executing or
 reviewing a change.

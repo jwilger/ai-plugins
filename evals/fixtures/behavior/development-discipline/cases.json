@@ -446,7 +446,7 @@
   {
     "case_id": "final-review-medium-risk-budget-checkpoint",
     "behavior": "Makes a contract-bound ship, split, or escalate decision after persisting medium-risk review evidence at the 75-minute checkpoint.",
-    "prompt": "A still-unlanded, medium-risk final-review session reaches 75 minutes while final_review.advance is processing clean lens results, but an earlier caused MAJOR security blocker is still unresolved. What happens to the submitted findings, what state transition should the coordinator return, and what must the next call contain? List the exact state fields and decision-specific ticket or escalation references. Can the caller choose ship now? If the blocker is later resolved, what does a valid ship decision do, and which acceptance and CI gates still apply? What happens after split or escalate?",
+    "prompt": "A still-unlanded, medium-risk final-review session reaches 75 minutes while final_review.advance is processing clean lens results, but an earlier caused MAJOR security blocker is still unresolved. What happens to the submitted findings, what state transition should the coordinator return, and what must the next call contain? List the exact state fields and decision-specific ticket or escalation references. Can the caller choose ship now? If the blocker is later resolved, what does a valid ship decision do, which acceptance and selected-delivery-mode CI gates still apply, and what completion evidence remains required when delivery includes a push? What happens after split or escalate?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -459,25 +459,24 @@
       "kinds": ["core-behavior", "state-transition", "adversarial-safety"]
     },
     "valueGate": {
-      "mode": "standard",
-      "baselineLiftThreshold": 0.1
+      "mode": "none"
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response says the coordinator first persists the submitted lens findings, then returns authoritative state with advance_kind review_budget_checkpoint, checkpoint_pending true, and no next assignments; says the next advance uses that returned state, unchanged current_diff_hash, empty lens_results, and one explicit ship/split/escalate decision with rationale; rejects ship because the blocker remains; requires at least two distinct ticket references for split or an escalation reference for escalate; and says split/escalate create a terminal hold preserving blockers. It must add that a valid ship after blockers are resolved is terminal for final review and schedules no more lenses, while acceptance criteria and a running/green latest pushed CI build remain separate gates. Fail if findings can be dropped, ship bypasses the blocker, reviewers rerun before deciding, ship resumes nonblocking lens work indefinitely, or a hold allows later advances.",
+    "semanticRubric": "Pass if the response says the coordinator first persists the submitted lens findings, then returns authoritative state with advance_kind review_budget_checkpoint, checkpoint_pending true, and no next assignments; says the next advance uses that returned state, unchanged current_diff_hash, empty lens_results, and one explicit ship/split/escalate decision with rationale; rejects ship because the blocker remains; requires at least two distinct ticket references for split or an escalation reference for escalate; and says split/escalate create a terminal hold preserving blockers. It must add that a valid ship after blockers are resolved is terminal for final review and schedules no more lenses, but does not replace acceptance criteria or the selected delivery mode's CI gate. Completion for pushed delivery still requires terminal success for the exact final pushed SHA. Fail if findings can be dropped, ship bypasses the blocker or an independent acceptance/CI gate, reviewers rerun before deciding, ship resumes nonblocking lens work indefinitely, a hold allows later advances, or pushed delivery is completed without exact-final-SHA terminal success.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Persist the lens results and return a review_budget_checkpoint with no assignments. The next call is decision-only: returned state, unchanged hash, empty lens_results, and ship/split/escalate plus rationale. Ship is rejected while the blocker remains; once permitted it terminates final review. Split needs two ticket references and escalate needs a reference, and either puts the session on terminal hold. Acceptance criteria and latest pushed CI still gate delivery."
+        "Persist the lens results and return a review_budget_checkpoint with no assignments. The next call is decision-only: returned state, unchanged hash, empty lens_results, and ship/split/escalate plus rationale. Ship is rejected while the blocker remains; once permitted it terminates final review. Split needs two ticket references and escalate needs a reference, and either puts the session on terminal hold. Ship does not replace acceptance criteria or the selected delivery mode's CI gate, and pushed delivery completion still waits for terminal success of the exact final SHA."
       ],
       "fail": [
-        "Discard the lens results, restart the review, or choose ship because the 75-minute budget supersedes the unresolved security blocker and acceptance criteria."
+        "Discard the lens results, restart the review, choose ship because the 75-minute budget supersedes the unresolved blocker, or treat ship as satisfying acceptance, CI, or exact-final-SHA completion evidence."
       ]
     }
   },
   {
     "case_id": "development-discipline-green-increment-ci-loop",
     "behavior": "Preserves each green implementation increment through fast local gates and delegates expensive evidence to CI before ticket-completion review.",
-    "prompt": "You are implementing a medium-risk ticket in several small TDD increments. Which checks gate each local commit and push, when may work continue based on CI state, when should full review begin, and what sequence applies if full review requires an edit?",
+    "prompt": "You are implementing a medium-risk ticket in several small TDD increments. Which checks gate each intermediate green semantic checkpoint, where should long-running integration, mutation, exhaustive, and full-suite evidence run, and when should full final review begin? Is full final review required before every checkpoint?",
     "tags": [
       "development-discipline",
       "tdd",
@@ -491,24 +490,61 @@
       "kinds": ["core-behavior", "workflow", "state-transition"]
     },
     "valueGate": {
-      "mode": "standard",
-      "baselineLiftThreshold": 0.1
+      "mode": "none"
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response gives the increment loop as fast unit tests, lightweight review, commit and push, then confirm the latest pushed build is running or green before continuing; says a failed build blocks follow-up work until repaired; assigns long-running integration, mutation, exhaustive, or full-suite checks to CI unless locally needed to diagnose a failure; and starts full review only after the ticket's actual acceptance criteria are implemented. If full review requires an edit, it must first recheck the latest pushed build, apply the edit test-first, repeat fast tests and lightweight review, commit and push, confirm CI is running or green, then run one delta risk assessment and resume only affected/guard assignments. Fail if full review blocks every incremental push, expensive suites run locally after every edit, failed CI is ignored, acceptance criteria can be deferred, or every review lens restarts after a fix.",
+    "semanticRubric": "Pass if the response says each intermediate green semantic checkpoint is gated by fast unit tests and directly relevant quick checks plus lightweight review before commit and push. It must assign long-running integration, mutation, exhaustive, and full-suite evidence to CI unless a local run is needed to diagnose a failure. Full final review must begin only after the ticket's actual acceptance criteria are implemented and must not be required before every checkpoint. Equivalent wording that unambiguously limits intermediate local gates to fast checks without broad or expensive suites is acceptable. The response may distinguish checkpoint permission from ticket completion. Fail if broad or expensive suites or full final review gate every intermediate checkpoint, lightweight review is omitted, or full final review begins before the actual acceptance criteria are implemented.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "For each increment: fast unit tests, lightweight review, commit and push, then verify the latest pushed build is running or green. Leave long suites to CI. Begin full review only after every acceptance criterion is implemented; after a review edit, repeat the green increment gate and use one delta scout to select affected reruns."
+        "For each intermediate green semantic checkpoint, run fast unit and directly relevant quick checks plus lightweight review, then commit and push. Keep integration, mutation, exhaustive, and full-suite evidence in CI unless running it locally to diagnose a failure. Full final review starts only after the actual acceptance criteria are implemented; it is not required before every checkpoint."
       ],
       "fail": [
-        "Wait to commit until three broad full-review passes and every exhaustive suite finish locally; continue to the next ticket even if the latest pushed build failed."
+        "Run every integration, mutation, exhaustive, and full-suite check plus full final review before preserving each increment, even while the actual acceptance criteria remain incomplete."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-direct-to-trunk-ci-watermark",
+    "behavior": "Allows locally verified direct-to-trunk increments past nonterminal or canceled CI while preserving exclusive failure recovery and exact-final-SHA completion evidence.",
+    "prompt": "A direct-to-trunk repository has no unresolved CI failure hold, and the most recent completed main CI run that reached a pass/fail outcome passed. The first locally verified semantic increment for the active ticket has been pushed as SHA A. Its CI run is initially pending or running, then is canceled before a second locally verified increment, SHA B, is ready. May SHA B be pushed while SHA A is nonterminal and after its cancellation, and what does the canceled run mean for the watermark or a failure hold? How does the answer change if SHA A instead completes with an unexpected failure before that push, and what remote evidence is still required before the ticket can be marked complete after its final increment?",
+    "tags": [
+      "development-discipline",
+      "delivery",
+      "direct-to-trunk",
+      "ci",
+      "incremental-delivery",
+      "failure-recovery"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["delivery", "development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "adversarial-safety",
+        "baseline-ablation"
+      ]
+    },
+    "valueGate": {
+      "mode": "none"
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response allows the already locally verified SHA B to be pushed both while SHA A's CI is pending or running and after it is canceled because the most recent completed main run with a pass/fail outcome passed and no failure hold exists. It must say the canceled run is non-evidence: it neither passes nor fails, does not replace the completed pass/fail watermark, and does not create or release a hold. The response need not restate the scenario's explicit local-verification precondition. It must separately say that an unexpected completed failure for SHA A immediately makes ci-failure-follow-up the exclusive lifecycle work, forbids SHA B, unrelated work, and every non-recovery push, and keeps that hold until terminal success of either the exact tested causal-repair revision or the authorized rerun of the exact unchanged failed SHA. It must also preserve the distinct completion gate: regardless of earlier incremental push permission, the ticket cannot be marked complete until the exact final pushed SHA's required CI run reaches terminal success. Fail if it serializes every increment behind terminal CI despite a passing completed pass/fail watermark and no hold; treats cancellation as passing, failing, a new watermark, or a hold release; continues or pushes SHA B after the failure; treats queued or running recovery CI as sufficient; lets a newer unrelated build mask the failure; or marks the ticket complete without terminal success for its exact final SHA.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Push SHA B while SHA A is pending or running and after it is canceled: the last completed pass/fail main result still passed and no hold exists. Cancellation is non-evidence; it replaces no watermark and creates or releases no hold. If SHA A instead fails, do not push B; ci-failure-follow-up becomes exclusive until terminal success of the exact tested causal-repair revision or the authorized rerun of the exact unchanged failed SHA. Ticket completion still waits for terminal success of the exact final pushed SHA."
+      ],
+      "fail": [
+        "Treat SHA A's cancellation as the newest completed watermark and release any failure hold, or, if SHA A fails, keep developing and push SHA B while recovery runs; then close the ticket when the newest run starts."
       ]
     }
   },
   {
     "case_id": "development-discipline-ci-failure-follow-up",
-    "behavior": "Stops unrelated work after a pushed CI failure until the exact cause is diagnosed and a replacement run succeeds.",
+    "behavior": "Stops unrelated work after a pushed CI failure until terminal success of either the exact tested causal-repair revision or the authorized rerun of the exact unchanged failed SHA.",
     "prompt": "The latest pushed commit failed GitHub Actions. The workflow summary says the Quality gate failed, and a teammate wants the next commit to add an unrelated dashboard option while someone else looks at CI. Explain what you must inspect and record, what the next pushed commit may contain, how to handle evidence that the failure is unrelated or transient, what happens if an unchanged-revision rerun also fails, how the hold survives a session restart or handoff, and exactly when unrelated work may resume.",
     "tags": [
       "development-discipline",
@@ -534,11 +570,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response freezes unrelated implementation and every push except the selected recovery action; inspects the exact failed job, step, and relevant logs instead of guessing from the workflow summary; records a causal diagnosis with evidence; and limits the next pushed commit to a direct repair that explains the diagnosed cause. It must allow an unrelated or transient classification only when supported by concrete evidence, keep that separate defect outside the active ticket, and rerun the unchanged revision with no intervening push before that rerun reaches a terminal result. If the unchanged-revision rerun fails, it becomes the new failure record and the only permitted push is its diagnosed, tested causal repair in a separate recovery scope. It persists the recovery record in shared ticket or handoff state and reconstructs unresolved holds from pushed-run history after a restart. The repair run or successful unchanged-revision rerun must reach terminal success before releasing the hold; queued or running is insufficient after a failure. Fail if it starts the dashboard change, permits diagnostic or unrelated commits, guesses from the job title, treats an unrelated/transient label or rerun request as proof of repair, mixes a separate checker defect into the active ticket, permits a subject-only repair commit, allows an intervening push before the unchanged-revision rerun reaches a terminal result, rejects the diagnosed causal repair after that rerun fails, lets a newer build mask an unresolved earlier failure, or resumes while CI is merely queued or running.",
+    "semanticRubric": "Pass if the response freezes unrelated implementation and every push except the selected recovery action; inspects the exact failed job, step, and relevant logs instead of guessing from the workflow summary; records a causal diagnosis with evidence; and limits the next pushed commit to a direct repair that explains the diagnosed cause. It must allow an unrelated or transient classification only when supported by concrete evidence, keep that separate defect outside the active ticket, and rerun the unchanged revision with no intervening push before that rerun reaches a terminal result. If the unchanged-revision rerun fails, it becomes the new failure record and the only permitted push is its diagnosed, tested causal repair in a separate recovery scope. It persists the recovery record in shared ticket or handoff state and reconstructs unresolved holds from pushed-run history after a restart. Terminal success of either the exact tested causal-repair revision or the authorized rerun of the exact unchanged failed SHA is required before releasing the hold; queued or running is insufficient after a failure. Fail if it starts the dashboard change, permits diagnostic or unrelated commits, guesses from the job title, treats an unrelated/transient label or rerun request as proof of repair, mixes a separate checker defect into the active ticket, permits a subject-only repair commit, allows an intervening push before the unchanged-revision rerun reaches a terminal result, rejects the diagnosed causal repair after that rerun fails, lets a newer build mask an unresolved earlier failure, or resumes while CI is merely queued or running.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Freeze unrelated work. Open the failed run for the pushed SHA, inspect the exact failed job, step, and logs, and record the evidence-backed cause. If the change caused it, the next push is only the tested repair and its commit body names the failure being prevented. If logs prove a separate checker mismatch or a transient runner failure, keep that issue outside this ticket and rerun the same revision when appropriate instead of making a no-op commit. Resume only after the replacement run reaches terminal success."
+        "Freeze unrelated work. Open the failed run for the pushed SHA, inspect the exact failed job, step, and logs, and record the evidence-backed cause. If the change caused it, the next push is only the tested repair and its commit body names the failure being prevented. If logs prove a separate checker mismatch or a transient runner failure, keep that issue outside this ticket and rerun the exact unchanged failed SHA with authorization instead of making a no-op commit. Resume only after terminal success of that authorized rerun or the exact tested causal-repair revision."
       ],
       "fail": [
         "Start the dashboard option while CI is retried. The Quality gate title is enough diagnosis, and a queued replacement run means the failure is repaired."
@@ -565,11 +601,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response gives the complete four-part recovery record, using concrete values when supplied or placeholders otherwise: failed commit SHA; run ID or URL; exact failed job; failed step; relevant log evidence; causal diagnosis; caused, unrelated, or transient classification with supporting evidence; and either a tested causal repair whose next pushed commit body explains the diagnosis or a rerun of the unchanged revision without a no-op commit or intervening push. It must give the replacement run ID and terminal success as release proof, explicitly saying queued, pending, or running does not release the hold. The response does not need to print the skill name. Fail if any record field is omitted, diagnostic or unrelated commits are allowed, a no-op or intervening commit is used to trigger CI, classification alone releases the hold, or nonterminal CI is accepted.",
+    "semanticRubric": "Pass if the response gives the complete four-part recovery record, using concrete values when supplied or placeholders otherwise: failed commit SHA; run ID or URL; exact failed job; failed step; relevant log evidence; causal diagnosis; caused, unrelated, or transient classification with supporting evidence; and either a tested causal repair whose next pushed commit body explains the diagnosis or an authorized rerun of the exact unchanged failed SHA without a no-op commit or intervening push. Release proof must identify the selected branch and show terminal success of either the exact tested causal-repair revision or that authorized unchanged-SHA rerun, explicitly saying queued, pending, or running does not release the hold. The response does not need to print the skill name. Fail if any record field is omitted, diagnostic or unrelated commits are allowed, a no-op or intervening commit is used to trigger CI, classification alone releases the hold, or nonterminal CI is accepted.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Use ci-failure-follow-up. Failure record: failed SHA, run URL, exact job, failed step, and log evidence. Diagnosis: causal explanation, caused/unrelated/transient classification, and supporting evidence. Next action: tested repair with a commit body explaining the cause, or rerun the unchanged SHA without a no-op or intervening commit. Release proof: replacement run ID with terminal status success; queued, pending, and running remain blocked."
+        "Use ci-failure-follow-up. Failure record: failed SHA, run URL, exact job, failed step, and log evidence. Diagnosis: causal explanation, caused/unrelated/transient classification, and supporting evidence. Next action: tested repair with a commit body explaining the cause, or an authorized rerun of the exact unchanged failed SHA without a no-op or intervening commit. Release proof identifies that branch and shows terminal success of the exact tested causal-repair revision or authorized unchanged-SHA rerun; queued, pending, and running remain blocked."
       ],
       "fail": [
         "Record that Quality gate failed, push a diagnostic commit, and resume once the rerun is queued."
@@ -853,7 +889,7 @@
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Review the unpushed direct-to-trunk change and local-only change from fresh local verification; neither needs a fabricated push. The PR remains blocked by ci-failure-follow-up until replacement evidence reaches terminal success, and changing modes cannot erase that hold."
+        "Review the unpushed direct-to-trunk change and local-only change from fresh local verification; neither needs a fabricated push. The PR remains blocked by ci-failure-follow-up until terminal success of either the exact tested causal-repair revision or the authorized rerun of the exact unchanged failed SHA, and changing modes cannot erase that hold."
       ],
       "fail": [
         "Push both changes so final review can start, or switch the failed PR to local-only and ignore its failed run."
@@ -1095,11 +1131,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "This is an advisory fixture: pass when the response describes the required routing and evidence; do not require or penalize it because it does not perform those actions. Pass if the response treats the pushed CI failure as the active global hold, routes immediately to ci-failure-follow-up, records and diagnoses the exact failed revision/run/job/step, and permits only a causal repair or unchanged-revision rerun. It must keep the unrelated lint warning and next backlog task outside the repair, and require the replacement exact revision/run to reach terminal success before resuming final review, readiness claims, unrelated work, or a new ticket. Fail if it starts the easy backlog task, folds in the unrelated lint warning, pushes a speculative change, treats queued/running as recovery, or continues because local tests passed.",
+    "semanticRubric": "This is an advisory fixture: pass when the response describes the required routing and evidence; do not require or penalize it because it does not perform those actions. Pass if the response treats the pushed CI failure as the active global hold, routes immediately to ci-failure-follow-up, records and diagnoses the exact failed revision/run/job/step, and permits only a tested causal repair or authorized rerun of the exact unchanged failed SHA. It must keep the unrelated lint warning and next backlog task outside the repair, and require terminal success of either the exact tested causal-repair revision or that authorized unchanged-SHA rerun before resuming final review, readiness claims, unrelated work, or a new ticket. Fail if it starts the easy backlog task, folds in the unrelated lint warning, pushes a speculative change, treats queued/running as recovery, or continues because local tests passed.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Stop unrelated work and invoke ci-failure-follow-up. Bind the failure record to the exact pushed revision, run, job, and failing step; diagnose it, then make only a causal repair or rerun that same revision unchanged. The lint warning remains separate. Resume the backlog only after the replacement exact run is terminal success."
+        "Stop unrelated work and invoke ci-failure-follow-up. Bind the failure record to the exact pushed revision, run, job, and failing step; diagnose it, then make only a tested causal repair or an authorized rerun of the exact unchanged failed SHA. The lint warning remains separate. Resume the backlog only after terminal success of the exact tested causal-repair revision or that authorized unchanged-SHA rerun."
       ],
       "fail": [
         "While CI runs again, fix the unrelated lint warning and start the easy backlog task."

@@ -95,8 +95,9 @@ close a step merely to bypass its evidence contract.
 For an unexpected terminal pushed-CI failure, create or pour one P0
 `ci-recovery` issue labeled `development-system:ci-recovery`, claim it
 atomically, and acquire the project merge slot. Every other session pauses
-unrelated work. Release the hold and merge slot only after the exact replacement
-run reaches terminal success. An intentionally failing run inside the active
+unrelated work. Release the hold and merge slot only after terminal success of
+either the exact tested causal-repair revision or the authorized rerun of the
+exact unchanged failed SHA. An intentionally failing run inside the active
 `ci-workflow-slice` is related test work, not a separate recovery incident.
 
 To retire an existing Tiber board, run

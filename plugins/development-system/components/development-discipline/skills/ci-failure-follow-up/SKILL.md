@@ -5,9 +5,17 @@ description: Use when an unexpected pushed CI run fails; coordinate one Beads ci
 
 # CI Failure Follow-up
 
-An unexpected terminal pushed-CI failure creates a repository-wide hold. Stop
-unrelated implementation, review remediation, task work, and pushes until the
-replacement reaches terminal success.
+An unexpected terminal pushed-CI failure creates a repository-wide hold. In
+direct-to-trunk mode, the incremental watermark is the most recent completed run
+for the configured trunk branch that reached a pass/fail outcome; outside a
+hold, it must have passed. The hold starts the instant any completed run for
+that branch fails unexpectedly. Queued, pending, or running runs neither replace
+the watermark nor create a hold. A canceled run is non-evidence: it neither
+passes nor fails, does not replace the watermark, and does not create or release
+a hold. Stop unrelated implementation, review remediation, task work, and
+pushes; do only causal recovery until the terminal success of either the exact
+tested causal-repair revision or the authorized rerun of the exact unchanged
+failed SHA.
 
 Create or pour one P0 `ci-recovery` issue labeled
 `development-system:ci-recovery`, atomically claim it, and acquire the Beads
@@ -53,7 +61,8 @@ Diagnosis: <causal explanation>; classification=<caused|unrelated|transient>;
 Next action: <tested causal repair whose next pushed commit body explains the
   diagnosis | rerun the unchanged revision without a no-op or intervening
   commit>
-Release proof: <replacement run ID>; terminal status=<success>;
+Release proof: <exact tested causal-repair revision and run ID | authorized
+  rerun of exact unchanged failed SHA and run ID>; terminal status=<success>;
   queued|pending|running=<still blocked>
 ```
 
@@ -61,9 +70,9 @@ Persist the record through Beads comments and the configured Dolt remote before
 ending a session or handing it off. At session entry, restart, and before later
 work or pushes, pull the shared record and inspect pushed CI runs for the active
 ticket since its first pushed commit. Any failed run without a recorded
-terminal-success replacement reconstructs the unresolved hold, even when a
-newer run is green or running. Local notes and a newer or running build never
-mask an earlier hold.
+terminal-success result from either authorized recovery branch reconstructs the
+unresolved hold, even when a newer run is green or running. Local notes and a
+newer or running build never mask an earlier hold.
 
 If an unchanged-SHA rerun fails, it becomes the new failure record. Diagnose it
 again; its diagnosed, tested causal repair is the only permitted next push. If
@@ -72,11 +81,11 @@ recovery scope rather than folding it into the paused active ticket. Keep the
 same claimed recovery molecule and its evidence trail; do not open a parallel
 hold merely to bypass its gate.
 
-Queued, pending, running, canceled, and failed outcomes do not release the
-hold. Resolve the workflow's CI gate only for terminal success of the exact
-final authorized replacement SHA, not a different or later revision. Then close
-the recovery issue, release the merge slot, and push Dolt state before unrelated
-work resumes.
+Queued, pending, running, canceled, and failed outcomes do not release the hold.
+Resolve the workflow's CI gate only upon terminal success of either the exact
+tested causal-repair revision or the authorized rerun of the exact unchanged
+failed SHA, not a different or later revision. Then close the recovery issue,
+release the merge slot, and push Dolt state before unrelated work resumes.
 
 An intentional failure produced while testing an active `ci-workflow-slice` is
 related implementation evidence, not a separate recovery incident. Keep that

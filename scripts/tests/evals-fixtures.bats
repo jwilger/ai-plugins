@@ -36,7 +36,7 @@ NODE
 }
 
 @test "loader emits installed-dispatch assertions only for declared cases" {
-  run node - <<'NODE'
+  run env EVAL_RUNTIME_OPTIONS_FILE="$BATS_TEST_TMPDIR/runtime-options.json" node - <<'NODE'
 const { loadBehaviorCases } = require('./evals/promptfoo/fixtures.cjs');
 const generateTests = require('./evals/promptfoo/load-harness-cases.cjs');
 

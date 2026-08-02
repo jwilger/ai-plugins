@@ -223,9 +223,20 @@ blocking finding remains and never substitutes for acceptance criteria or CI.
 A valid `ship` decision is terminal for final review: it clears remaining
 nonblocking lens work, returns `complete: true`, and schedules no reviewers.
 The calling workflow must still satisfy the ticket's acceptance criteria and
-confirm the latest pushed CI build is running or green before release or new
-work. If that build failed, `ci-failure-follow-up` takes precedence and
-requires exact diagnosis plus terminal success before release or new work.
+apply the selected delivery mode's CI evidence. For direct-to-trunk incremental
+checkpoints, the most recent completed CI run for the configured trunk branch
+that reached a pass/fail outcome is the watermark: it must have passed, and no
+unresolved failure hold may exist. Newer queued, pending, or running runs do not
+replace that watermark. A canceled run is non-evidence: it neither passes nor
+fails, does not replace the watermark, and does not create or release a hold.
+Any unexpected completed failure immediately makes `ci-failure-follow-up` the
+exclusive lifecycle work; unrelated work and non-recovery pushes remain
+forbidden until terminal success of either the exact tested causal-repair
+revision or the authorized rerun of the exact unchanged failed SHA. PR/MR
+workflows may instead require the latest in-scope pushed build to be running or
+green where applicable, while local-only workflows use fresh local evidence.
+Ticket completion for pushed delivery separately requires terminal success for
+the exact final pushed SHA.
 `split` and `escalate` persist a contract-bound terminal hold, preserve
 every completion blocker, schedule no reviewers, and reject any later advance
 for that session.
