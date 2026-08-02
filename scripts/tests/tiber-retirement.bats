@@ -69,3 +69,24 @@ setup() {
   [[ "$output" == *"id=ticket-"* ]]
   [[ "$output" == *"title=Addressable ticket"* ]]
 }
+
+@test "Tiber claims an addressable ticket through Eventcore" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Claimable ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  ticket_id="$(sed -n 's/.*id=\([^ ]*\).*/\1/p' <<<"$output")"
+  [ -n "$ticket_id" ]
+
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$ticket_id"* ]]
+  [[ "$output" == *"owner=alice"* ]]
+}
