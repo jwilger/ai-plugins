@@ -55,3 +55,17 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Replay this ticket"* ]]
 }
+
+@test "Tiber list exposes stable ticket identifiers from Eventcore streams" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Addressable ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=ticket-"* ]]
+  [[ "$output" == *"title=Addressable ticket"* ]]
+}

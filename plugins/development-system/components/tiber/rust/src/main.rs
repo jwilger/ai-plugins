@@ -52,8 +52,8 @@ fn list_tickets() -> ExitCode {
     ) {
         Ok(events) => {
             for (event, _) in events {
-                let TicketEvent::TicketCreatedV1 { title, .. } = event;
-                println!("tiber.ticket title={title}");
+                let TicketEvent::TicketCreatedV1 { ticket_id, title } = event;
+                println!("tiber.ticket id={ticket_id} title={title}");
             }
             ExitCode::SUCCESS
         }
