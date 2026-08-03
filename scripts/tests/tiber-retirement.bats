@@ -10,6 +10,9 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Repository-local task board"* ]]
+  expected_commands=$'commands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>'
+  actual_commands="$(sed -n '/^commands:/,$p' <<<"$output")"
+  [ "$actual_commands" = "$expected_commands" ]
 
   run find "$PLUGIN_ROOT" -path '*/components/tiber/bin/tiber' -type f -print
 
