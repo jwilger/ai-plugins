@@ -482,10 +482,14 @@ impl ReviewCoordinator {
                 {
                     return Err("pending_delta_risk_assignment_mismatch=true".to_string());
                 }
-                let _ = pending_delta_risk_core_arguments(arguments)?;
-                // A changed scope invalidates the pending scout assignment. The lower
-                // transition replaces it with a newly bound assignment instead of
-                // trapping the caller behind the stale authoritative record.
+                let resubmission = pending_delta_risk_non_scope_arguments(arguments)?;
+                let pending_arguments = pending_delta_risk_non_scope_arguments(&pending.arguments)?;
+                if resubmission != pending_arguments {
+                    return Err("pending_delta_risk_resubmission_mismatch=true".to_string());
+                }
+                // A changed scope or its test evidence invalidates the pending scout
+                // assignment. The lower transition replaces it with a newly bound
+                // assignment while every other pending argument remains frozen.
             }
         }
         self.touch_session(session_id);
@@ -673,6 +677,21 @@ fn pending_delta_risk_core_arguments(arguments: &Value) -> Result<Value, String>
         .as_object_mut()
         .ok_or_else(|| "pending_delta_risk_arguments_object_required=true".to_string())?;
     fields.remove("delta_risk_assessment");
+    Ok(core)
+}
+
+fn pending_delta_risk_non_scope_arguments(arguments: &Value) -> Result<Value, String> {
+    let mut core = pending_delta_risk_core_arguments(arguments)?;
+    let fields = core
+        .as_object_mut()
+        .ok_or_else(|| "pending_delta_risk_arguments_object_required=true".to_string())?;
+    for field in [
+        "current_diff_hash",
+        "current_changed_files",
+        "current_shared_test_evidence",
+    ] {
+        fields.remove(field);
+    }
     Ok(core)
 }
 
@@ -20922,13 +20941,32 @@ pre_filter = "project-pre"
             json!([]),
         );
 
+        let mut altered_resubmission = base_arguments.clone();
+        altered_resubmission["delta_risk_assessment"] = assessment.clone();
+        altered_resubmission["caller_decisions"] = json!([]);
+        let altered_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": altered_resubmission
+                }
+            }))
+            .expect("altered resubmission response");
+        assert_eq!(
+            altered_response["error"]["message"],
+            "pending_delta_risk_resubmission_mismatch=true"
+        );
+
         let mut changed_resubmission = base_arguments.clone();
         changed_resubmission["current_changed_files"] = json!(["src/lib.rs"]);
         changed_resubmission["delta_risk_assessment"] = assessment.clone();
         let changed_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
-                "id": 3,
+                "id": 4,
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.advance",
@@ -20962,7 +21000,7 @@ pre_filter = "project-pre"
         let advanced_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
-                "id": 4,
+                "id": 5,
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.advance",
