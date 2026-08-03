@@ -57,6 +57,25 @@ setup() {
   [ "$events_after_second_status" -eq "$events_before" ]
 }
 
+@test "Tiber records discovery evidence and advances its deterministic workflow" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  events_before="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --expected-frontier 0 --observation "Customer interviews show the manual handoff blocks delivery"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [ "$output" = "tiber.workflow recorded=DiscoveryEvidenceRecorded frontier=1 next=FormProductHypothesis evidence=derived events=ProductHypothesisFormed" ]
+  events_after="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$events_after" -eq $((events_before + 1)) ]
+
+  run bash -c 'cd "$1" && "$2" tiber workflow status' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [ "$output" = "tiber.workflow frontier=1 next=FormProductHypothesis evidence=derived events=ProductHypothesisFormed" ]
+}
+
 @test "Tiber creates a functional ticket as an immutable Eventcore transaction" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
