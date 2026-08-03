@@ -7,8 +7,10 @@ use eventcore::{
 };
 use eventcore_fs::FileEventStore;
 use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStoreError};
+mod application;
 mod domain;
 
+use application::PrioritizeTicket;
 use domain::{apply_claim_state, ClaimState, TicketEvent};
 
 fn main() -> ExitCode {
@@ -302,12 +304,6 @@ struct ReleaseTicket {
     owner: String,
 }
 
-struct PrioritizeTicket {
-    ticket_id: StreamId,
-    board_id: StreamId,
-    priority: u8,
-}
-
 impl CommandStreams for ClaimTicket {
     fn stream_declarations(&self) -> StreamDeclarations {
         StreamDeclarations::try_from_streams(vec![self.ticket_id.clone(), self.board_id.clone()])
@@ -319,13 +315,6 @@ impl CommandStreams for ReleaseTicket {
     fn stream_declarations(&self) -> StreamDeclarations {
         StreamDeclarations::try_from_streams(vec![self.ticket_id.clone(), self.board_id.clone()])
             .expect("valid release streams")
-    }
-}
-
-impl CommandStreams for PrioritizeTicket {
-    fn stream_declarations(&self) -> StreamDeclarations {
-        StreamDeclarations::try_from_streams(vec![self.ticket_id.clone(), self.board_id.clone()])
-            .expect("valid priority streams")
     }
 }
 
@@ -381,25 +370,6 @@ impl CommandLogic for ReleaseTicket {
                 owner: self.owner.clone(),
             },
         ]
-        .into())
-    }
-}
-
-impl CommandLogic for PrioritizeTicket {
-    type Event = TicketEvent;
-    type State = ClaimState;
-    fn apply(&self, state: ClaimState, event: &TicketEvent) -> ClaimState {
-        apply_claim_state(state, &self.ticket_id, event)
-    }
-    fn handle(&self, state: ClaimState) -> Result<NewEvents<TicketEvent>, CommandError> {
-        if !state.exists {
-            return Err(CommandError::from("ticket does not exist"));
-        }
-        Ok(vec![TicketEvent::BoardTicketPrioritySetV1 {
-            board_id: self.board_id.clone(),
-            ticket_id: self.ticket_id.clone(),
-            priority: self.priority,
-        }]
         .into())
     }
 }
