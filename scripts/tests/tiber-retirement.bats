@@ -389,3 +389,43 @@ setup() {
   dependency_events_after_cycle="$(rg --fixed-strings 'BoardTicketDependencyAddedV1' "$project/.development-system/tiber/store/events" | wc -l)"
   [ "$dependency_events_after_cycle" -eq "$dependency_events_before_cycle" ]
 }
+
+@test "Tiber rejects invalid dependency graph changes without writing events" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  for title in "Ticket A" "Ticket B" "Ticket C"; do
+    run bash -c 'cd "$1" && "$2" tiber create --title "$3"' _ "$project" "$CLI" "$title"
+    [ "$status" -eq 0 ]
+  done
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  ticket_a="$(sed -n 's/.*id=\([^ ]*\).*title=Ticket A.*/\1/p' <<<"$output")"
+  ticket_b="$(sed -n 's/.*id=\([^ ]*\).*title=Ticket B.*/\1/p' <<<"$output")"
+  ticket_c="$(sed -n 's/.*id=\([^ ]*\).*title=Ticket C.*/\1/p' <<<"$output")"
+  [ -n "$ticket_a" ]
+  [ -n "$ticket_b" ]
+  [ -n "$ticket_c" ]
+
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$ticket_a" "$ticket_b"
+  [ "$status" -eq 0 ]
+  dependency_events_before_invalid="$(rg --fixed-strings 'BoardTicketDependencyAddedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$ticket_a" ticket-missing
+  [ "$status" -ne 0 ]
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$ticket_a" "$ticket_a"
+  [ "$status" -ne 0 ]
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$ticket_a" "$ticket_b"
+  [ "$status" -ne 0 ]
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$ticket_b" "$ticket_a"
+  [ "$status" -ne 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$ticket_b" "$ticket_c"
+  [ "$status" -eq 0 ]
+  dependency_events_before_transitive_cycle="$(rg --fixed-strings 'BoardTicketDependencyAddedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$ticket_c" "$ticket_a"
+  [ "$status" -ne 0 ]
+  dependency_events_after_invalid="$(rg --fixed-strings 'BoardTicketDependencyAddedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$dependency_events_after_invalid" -eq "$dependency_events_before_transitive_cycle" ]
+  [ "$dependency_events_before_transitive_cycle" -eq $((dependency_events_before_invalid + 1)) ]
+}
