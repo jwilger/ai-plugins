@@ -45,6 +45,11 @@ pub enum TicketEvent {
         ticket_id: StreamId,
         dependency_id: StreamId,
     },
+    BoardTicketDependencyRemovedV1 {
+        board_id: StreamId,
+        ticket_id: StreamId,
+        dependency_id: StreamId,
+    },
 }
 
 impl Event for TicketEvent {
@@ -58,7 +63,8 @@ impl Event for TicketEvent {
             | Self::BoardTicketClaimReleasedV1 { board_id, .. }
             | Self::BoardTicketCompletedV1 { board_id, .. }
             | Self::BoardTicketPrioritySetV1 { board_id, .. }
-            | Self::BoardTicketDependencyAddedV1 { board_id, .. } => board_id,
+            | Self::BoardTicketDependencyAddedV1 { board_id, .. }
+            | Self::BoardTicketDependencyRemovedV1 { board_id, .. } => board_id,
         }
     }
 
@@ -133,6 +139,15 @@ pub fn apply_board_dependency_state(
                 .entry(ticket_id.to_string())
                 .or_default()
                 .insert(dependency_id.to_string());
+        }
+        TicketEvent::BoardTicketDependencyRemovedV1 {
+            ticket_id,
+            dependency_id,
+            ..
+        } => {
+            if let Some(dependencies) = state.dependencies.get_mut(ticket_id.as_str()) {
+                dependencies.remove(dependency_id.as_str());
+            }
         }
         _ => {}
     }

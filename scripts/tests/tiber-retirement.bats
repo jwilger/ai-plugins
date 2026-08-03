@@ -10,7 +10,7 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Repository-local task board"* ]]
-  expected_commands=$'commands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next\n  depend <ticket-id> --on <dependency-id>'
+  expected_commands=$'commands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next\n  depend <ticket-id> --on <dependency-id>\n  undepend <ticket-id> --on <dependency-id>'
   actual_commands="$(sed -n '/^commands:/,$p' <<<"$output")"
   [ "$actual_commands" = "$expected_commands" ]
 
@@ -428,4 +428,51 @@ setup() {
   dependency_events_after_invalid="$(rg --fixed-strings 'BoardTicketDependencyAddedV1' "$project/.development-system/tiber/store/events" | wc -l)"
   [ "$dependency_events_after_invalid" -eq "$dependency_events_before_transitive_cycle" ]
   [ "$dependency_events_before_transitive_cycle" -eq $((dependency_events_before_invalid + 1)) ]
+}
+
+@test "Tiber removes a direct dependency and restores ticket eligibility" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Dependent ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  dependent_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Dependent ticket.*/\1/p' <<<"$output")"
+  [ -n "$dependent_ticket_id" ]
+  run bash -c 'cd "$1" && "$2" tiber prioritize "$3" --priority 0' _ "$project" "$CLI" "$dependent_ticket_id"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Blocking ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  blocker_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Blocking ticket.*/\1/p' <<<"$output")"
+  [ -n "$blocker_ticket_id" ]
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$dependent_ticket_id" "$blocker_ticket_id"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$blocker_ticket_id"* ]]
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$dependent_ticket_id"
+  [ "$status" -ne 0 ]
+
+  removal_events_before="$(rg --fixed-strings 'BoardTicketDependencyRemovedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber undepend "$3" --on "$4"' _ "$project" "$CLI" "$dependent_ticket_id" "$blocker_ticket_id"
+  [ "$status" -eq 0 ]
+  removal_events_after="$(rg --fixed-strings 'BoardTicketDependencyRemovedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$removal_events_after" -eq $((removal_events_before + 1)) ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$dependent_ticket_id"*"blocked_by=none"* ]]
+  run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$dependent_ticket_id"* ]]
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$dependent_ticket_id"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber undepend "$3" --on "$4"' _ "$project" "$CLI" "$dependent_ticket_id" "$blocker_ticket_id"
+  [ "$status" -ne 0 ]
+  removal_events_final="$(rg --fixed-strings 'BoardTicketDependencyRemovedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$removal_events_final" -eq "$removal_events_after" ]
 }

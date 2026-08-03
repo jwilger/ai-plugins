@@ -74,6 +74,49 @@ pub struct AddTicketDependency {
     pub board_id: StreamId,
 }
 
+pub struct RemoveTicketDependency {
+    pub ticket_id: StreamId,
+    pub dependency_id: StreamId,
+    pub board_id: StreamId,
+}
+
+impl CommandStreams for RemoveTicketDependency {
+    fn stream_declarations(&self) -> StreamDeclarations {
+        StreamDeclarations::try_from_streams(vec![
+            self.ticket_id.clone(),
+            self.dependency_id.clone(),
+            self.board_id.clone(),
+        ])
+        .expect("valid dependency streams")
+    }
+}
+
+impl CommandLogic for RemoveTicketDependency {
+    type Event = TicketEvent;
+    type State = BoardDependencyState;
+
+    fn apply(&self, state: BoardDependencyState, event: &TicketEvent) -> BoardDependencyState {
+        apply_board_dependency_state(state, event)
+    }
+
+    fn handle(&self, state: BoardDependencyState) -> Result<NewEvents<TicketEvent>, CommandError> {
+        let ticket_id = self.ticket_id.as_str();
+        let dependency_id = self.dependency_id.as_str();
+        if !state.tickets.contains(ticket_id) || !state.tickets.contains(dependency_id) {
+            return Err(CommandError::from("ticket does not exist"));
+        }
+        if !state.has_dependency(ticket_id, dependency_id) {
+            return Err(CommandError::from("dependency does not exist"));
+        }
+        Ok(vec![TicketEvent::BoardTicketDependencyRemovedV1 {
+            board_id: self.board_id.clone(),
+            ticket_id: self.ticket_id.clone(),
+            dependency_id: self.dependency_id.clone(),
+        }]
+        .into())
+    }
+}
+
 impl CommandStreams for AddTicketDependency {
     fn stream_declarations(&self) -> StreamDeclarations {
         StreamDeclarations::try_from_streams(vec![

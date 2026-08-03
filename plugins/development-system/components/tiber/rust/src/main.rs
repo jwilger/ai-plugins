@@ -10,7 +10,9 @@ use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader};
 mod application;
 mod domain;
 
-use application::{AddTicketDependency, ClaimTicket, CompleteTicket, PrioritizeTicket};
+use application::{
+    AddTicketDependency, ClaimTicket, CompleteTicket, PrioritizeTicket, RemoveTicketDependency,
+};
 use domain::{
     apply_board_dependency_state, apply_ticket_state, BoardDependencyState, TicketEvent,
     TicketState,
@@ -24,7 +26,7 @@ fn main() -> ExitCode {
             println!("\nEventcore-backed Tiber is being initialized by development-system.");
             println!("\nusage: tiber <command> [options]");
             println!(
-                "\ncommands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next\n  depend <ticket-id> --on <dependency-id>"
+                "\ncommands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next\n  depend <ticket-id> --on <dependency-id>\n  undepend <ticket-id> --on <dependency-id>"
             );
             ExitCode::SUCCESS
         }
@@ -37,6 +39,7 @@ fn main() -> ExitCode {
         Some("complete") => complete_ticket(&arguments[1..]),
         Some("next") => next_ticket(),
         Some("depend") => depend_ticket(&arguments[1..]),
+        Some("undepend") => undepend_ticket(&arguments[1..]),
         Some(command) => {
             eprintln!("tiber.usage command={command}");
             ExitCode::from(2)
@@ -137,7 +140,8 @@ fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
                         TicketEvent::BoardTicketClaimedV1 { .. }
                         | TicketEvent::BoardTicketClaimReleasedV1 { .. }
                         | TicketEvent::BoardTicketCompletedV1 { .. }
-                        | TicketEvent::BoardTicketDependencyAddedV1 { .. } => {}
+                        | TicketEvent::BoardTicketDependencyAddedV1 { .. }
+                        | TicketEvent::BoardTicketDependencyRemovedV1 { .. } => {}
                     }
                 }
                 let Some(next_page) = next_page else {
@@ -376,6 +380,58 @@ fn depend_ticket(arguments: &[String]) -> ExitCode {
         }
         Err(error) => {
             eprintln!("tiber.depend failed error={error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn undepend_ticket(arguments: &[String]) -> ExitCode {
+    let Some(ticket_id) = arguments
+        .first()
+        .and_then(|value| StreamId::try_new(value.clone()).ok())
+    else {
+        eprintln!("tiber.undepend missing_ticket_id");
+        return ExitCode::from(2);
+    };
+    let Some(dependency_id) = arguments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--on").then(|| StreamId::try_new(pair[1].clone()).ok()))
+        .flatten()
+    else {
+        eprintln!("tiber.undepend missing_dependency_id");
+        return ExitCode::from(2);
+    };
+    let store_root = match std::env::current_dir() {
+        Ok(directory) => directory.join(".development-system/tiber/store"),
+        Err(error) => {
+            eprintln!("tiber.undepend unable_to_resolve_repository error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let store = match FileEventStore::open(store_root) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("tiber.undepend unable_to_open_store error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let board_id = StreamId::try_new("board-local".to_owned()).expect("valid board stream");
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match runtime.block_on(execute(
+        &store,
+        RemoveTicketDependency {
+            ticket_id,
+            dependency_id,
+            board_id,
+        },
+        RetryPolicy::new(),
+    )) {
+        Ok(_) => {
+            println!("tiber.undepend removed=true");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("tiber.undepend failed error={error}");
             ExitCode::FAILURE
         }
     }
