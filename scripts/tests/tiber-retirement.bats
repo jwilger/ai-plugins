@@ -89,6 +89,19 @@ setup() {
   [ "$after" -eq "$before" ]
 }
 
+@test "Tiber rejects empty discovery observations without appending workflow events" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  before="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --expected-frontier 0 --observation ""' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid_observation"* ]]
+  after="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$after" -eq "$before" ]
+}
+
 @test "Tiber creates a functional ticket as an immutable Eventcore transaction" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
