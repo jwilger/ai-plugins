@@ -6,7 +6,7 @@ use eventcore::{
     StreamDeclarations, StreamId,
 };
 use eventcore_fs::FileEventStore;
-use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStoreError};
+use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader};
 mod application;
 mod domain;
 
@@ -21,7 +21,7 @@ fn main() -> ExitCode {
             println!("\nEventcore-backed Tiber is being initialized by development-system.");
             println!("\nusage: tiber <command> [options]");
             println!(
-                "\ncommands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>"
+                "\ncommands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next"
             );
             ExitCode::SUCCESS
         }
@@ -32,6 +32,7 @@ fn main() -> ExitCode {
         Some("release") => release_ticket(&arguments[1..]),
         Some("prioritize") => prioritize_ticket(&arguments[1..]),
         Some("complete") => complete_ticket(&arguments[1..]),
+        Some("next") => next_ticket(),
         Some(command) => {
             eprintln!("tiber.usage command={command}");
             ExitCode::from(2)
@@ -39,126 +40,166 @@ fn main() -> ExitCode {
     }
 }
 
-fn list_tickets() -> ExitCode {
+struct BoardTicketRow {
+    priority: u8,
+    creation_position: u64,
+    ticket_id: String,
+    title: String,
+    state: TicketState,
+}
+
+fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
     let store_root = match std::env::current_dir() {
         Ok(directory) => directory.join(".development-system/tiber/store"),
-        Err(error) => {
-            eprintln!("tiber.list unable_to_resolve_repository error={error}");
-            return ExitCode::FAILURE;
-        }
+        Err(error) => return Err(error.to_string()),
     };
     let store = match FileEventStore::open(store_root) {
         Ok(store) => store,
-        Err(error) => {
-            eprintln!("tiber.list unable_to_open_store error={error}");
-            return ExitCode::FAILURE;
-        }
+        Err(error) => return Err(error.to_string()),
     };
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-    match runtime.block_on(async {
-        let mut page = EventPage::first(BatchSize::new(100));
-        let mut tickets = std::collections::BTreeMap::new();
-        let mut priorities = std::collections::BTreeMap::new();
-        let mut creation_position = 0_u64;
-        loop {
-            let events = store
-                .read_events::<TicketEvent>(EventFilter::all(), page)
-                .await?;
-            let next_page = page.next_from_results(&events);
-            for (event, _) in events {
-                match event {
-                    TicketEvent::TicketCreatedV1 { ticket_id, title } => {
-                        let state = apply_ticket_state(
-                            TicketState::default(),
-                            &ticket_id,
-                            &TicketEvent::TicketCreatedV1 {
-                                ticket_id: ticket_id.clone(),
-                                title: title.clone(),
-                            },
-                        );
-                        tickets.insert(ticket_id.to_string(), (title, state, creation_position));
-                        creation_position += 1;
-                    }
-                    TicketEvent::TicketClaimedV1 { ticket_id, owner } => {
-                        if let Some((_, state, _)) = tickets.get_mut(ticket_id.as_str()) {
-                            *state = apply_ticket_state(
-                                std::mem::take(state),
+    runtime
+        .block_on(async {
+            let mut page = EventPage::first(BatchSize::new(100));
+            let mut tickets = std::collections::BTreeMap::new();
+            let mut priorities = std::collections::BTreeMap::new();
+            let mut creation_position = 0_u64;
+            loop {
+                let events = store
+                    .read_events::<TicketEvent>(EventFilter::all(), page)
+                    .await?;
+                let next_page = page.next_from_results(&events);
+                for (event, _) in events {
+                    match event {
+                        TicketEvent::TicketCreatedV1 { ticket_id, title } => {
+                            let state = apply_ticket_state(
+                                TicketState::default(),
                                 &ticket_id,
-                                &TicketEvent::TicketClaimedV1 {
+                                &TicketEvent::TicketCreatedV1 {
                                     ticket_id: ticket_id.clone(),
-                                    owner,
+                                    title: title.clone(),
                                 },
                             );
+                            tickets
+                                .insert(ticket_id.to_string(), (title, state, creation_position));
+                            creation_position += 1;
                         }
-                    }
-                    TicketEvent::TicketClaimReleasedV1 { ticket_id, owner } => {
-                        if let Some((_, state, _)) = tickets.get_mut(ticket_id.as_str()) {
-                            *state = apply_ticket_state(
-                                std::mem::take(state),
-                                &ticket_id,
-                                &TicketEvent::TicketClaimReleasedV1 {
-                                    ticket_id: ticket_id.clone(),
-                                    owner,
-                                },
-                            );
+                        TicketEvent::TicketClaimedV1 { ticket_id, owner } => {
+                            if let Some((_, state, _)) = tickets.get_mut(ticket_id.as_str()) {
+                                *state = apply_ticket_state(
+                                    std::mem::take(state),
+                                    &ticket_id,
+                                    &TicketEvent::TicketClaimedV1 {
+                                        ticket_id: ticket_id.clone(),
+                                        owner,
+                                    },
+                                );
+                            }
                         }
-                    }
-                    TicketEvent::TicketCompletedV1 { ticket_id, owner } => {
-                        if let Some((_, state, _)) = tickets.get_mut(ticket_id.as_str()) {
-                            *state = apply_ticket_state(
-                                std::mem::take(state),
-                                &ticket_id,
-                                &TicketEvent::TicketCompletedV1 {
-                                    ticket_id: ticket_id.clone(),
-                                    owner,
-                                },
-                            );
+                        TicketEvent::TicketClaimReleasedV1 { ticket_id, owner } => {
+                            if let Some((_, state, _)) = tickets.get_mut(ticket_id.as_str()) {
+                                *state = apply_ticket_state(
+                                    std::mem::take(state),
+                                    &ticket_id,
+                                    &TicketEvent::TicketClaimReleasedV1 {
+                                        ticket_id: ticket_id.clone(),
+                                        owner,
+                                    },
+                                );
+                            }
                         }
+                        TicketEvent::TicketCompletedV1 { ticket_id, owner } => {
+                            if let Some((_, state, _)) = tickets.get_mut(ticket_id.as_str()) {
+                                *state = apply_ticket_state(
+                                    std::mem::take(state),
+                                    &ticket_id,
+                                    &TicketEvent::TicketCompletedV1 {
+                                        ticket_id: ticket_id.clone(),
+                                        owner,
+                                    },
+                                );
+                            }
+                        }
+                        TicketEvent::BoardTicketPrioritySetV1 {
+                            ticket_id,
+                            priority,
+                            ..
+                        } => {
+                            priorities.insert(ticket_id.to_string(), priority);
+                        }
+                        TicketEvent::BoardTicketClaimedV1 { .. }
+                        | TicketEvent::BoardTicketClaimReleasedV1 { .. }
+                        | TicketEvent::BoardTicketCompletedV1 { .. } => {}
                     }
-                    TicketEvent::BoardTicketPrioritySetV1 {
-                        ticket_id,
-                        priority,
-                        ..
-                    } => {
-                        priorities.insert(ticket_id.to_string(), priority);
-                    }
-                    TicketEvent::BoardTicketClaimedV1 { .. }
-                    | TicketEvent::BoardTicketClaimReleasedV1 { .. }
-                    | TicketEvent::BoardTicketCompletedV1 { .. } => {}
                 }
+                let Some(next_page) = next_page else {
+                    break;
+                };
+                page = next_page;
             }
-            let Some(next_page) = next_page else {
-                break;
-            };
-            page = next_page;
-        }
-        Ok::<_, EventStoreError>((tickets, priorities))
-    }) {
-        Ok((tickets, priorities)) => {
+            Ok::<_, eventcore_types::EventStoreError>((tickets, priorities))
+        })
+        .map_err(|error| error.to_string())
+        .map(|(tickets, priorities)| {
             let mut rows = tickets
                 .into_iter()
                 .map(|(ticket_id, (title, state, creation_position))| {
                     let priority = priorities.get(&ticket_id).copied().unwrap_or(2);
-                    (priority, creation_position, ticket_id, title, state)
+                    BoardTicketRow {
+                        priority,
+                        creation_position,
+                        ticket_id,
+                        title,
+                        state,
+                    }
                 })
                 .collect::<Vec<_>>();
             rows.sort_by(|left, right| {
-                left.0
-                    .cmp(&right.0)
-                    .then(left.1.cmp(&right.1))
-                    .then(left.2.cmp(&right.2))
+                left.priority
+                    .cmp(&right.priority)
+                    .then(left.creation_position.cmp(&right.creation_position))
+                    .then(left.ticket_id.cmp(&right.ticket_id))
             });
-            for (priority, _, ticket_id, title, state) in rows {
-                let owner = state.owner.as_deref().unwrap_or("unclaimed");
-                println!(
-                    "tiber.ticket id={ticket_id} title={title} owner={owner} priority={priority} completed={}"
-                    , state.completed
-                );
+            rows
+        })
+}
+
+fn print_ticket_row(row: &BoardTicketRow) {
+    let owner = row.state.owner.as_deref().unwrap_or("unclaimed");
+    println!(
+        "tiber.ticket id={} title={} owner={owner} priority={} completed={}",
+        row.ticket_id, row.title, row.priority, row.state.completed
+    );
+}
+
+fn list_tickets() -> ExitCode {
+    match replay_board_rows() {
+        Ok(rows) => {
+            for row in &rows {
+                print_ticket_row(row);
             }
             ExitCode::SUCCESS
         }
         Err(error) => {
             eprintln!("tiber.list unable_to_replay_tickets error={error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn next_ticket() -> ExitCode {
+    match replay_board_rows() {
+        Ok(rows) => {
+            if let Some(row) = rows
+                .iter()
+                .find(|row| row.state.owner.is_none() && !row.state.completed)
+            {
+                print_ticket_row(row);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("tiber.next unable_to_replay_tickets error={error}");
             ExitCode::FAILURE
         }
     }

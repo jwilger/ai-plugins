@@ -291,3 +291,45 @@ setup() {
   claim_events_after_reclaim="$(rg --fixed-strings 'TicketClaimedV1' "$project/.development-system/tiber/store/events" | wc -l)"
   [ "$claim_events_after_reclaim" -eq "$claim_events_before_reclaim" ]
 }
+
+@test "Tiber selects the next unclaimed incomplete ticket without mutation" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Earlier eligible ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  earlier_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Earlier eligible ticket.*/\1/p' <<<"$output")"
+  [ -n "$earlier_ticket_id" ]
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Higher priority ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  higher_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Higher priority ticket.*/\1/p' <<<"$output")"
+  [ -n "$higher_ticket_id" ]
+  run bash -c 'cd "$1" && "$2" tiber prioritize "$3" --priority 0' _ "$project" "$CLI" "$higher_ticket_id"
+  [ "$status" -eq 0 ]
+
+  events_before_next="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "tiber.ticket id=$higher_ticket_id title=Higher priority ticket owner=unclaimed priority=0 completed=false" ]]
+  events_after_next="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$events_after_next" -eq "$events_before_next" ]
+
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$higher_ticket_id"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "tiber.ticket id=$earlier_ticket_id title=Earlier eligible ticket owner=unclaimed priority=2 completed=false" ]]
+
+  run bash -c 'cd "$1" && "$2" tiber complete "$3" --owner alice' _ "$project" "$CLI" "$higher_ticket_id"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner bob' _ "$project" "$CLI" "$earlier_ticket_id"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
