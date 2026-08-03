@@ -10,8 +10,11 @@ use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader};
 mod application;
 mod domain;
 
-use application::{CompleteTicket, PrioritizeTicket};
-use domain::{apply_ticket_state, TicketEvent, TicketState};
+use application::{AddTicketDependency, ClaimTicket, CompleteTicket, PrioritizeTicket};
+use domain::{
+    apply_board_dependency_state, apply_ticket_state, BoardDependencyState, TicketEvent,
+    TicketState,
+};
 
 fn main() -> ExitCode {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
@@ -21,7 +24,7 @@ fn main() -> ExitCode {
             println!("\nEventcore-backed Tiber is being initialized by development-system.");
             println!("\nusage: tiber <command> [options]");
             println!(
-                "\ncommands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next"
+                "\ncommands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next\n  depend <ticket-id> --on <dependency-id>"
             );
             ExitCode::SUCCESS
         }
@@ -33,6 +36,7 @@ fn main() -> ExitCode {
         Some("prioritize") => prioritize_ticket(&arguments[1..]),
         Some("complete") => complete_ticket(&arguments[1..]),
         Some("next") => next_ticket(),
+        Some("depend") => depend_ticket(&arguments[1..]),
         Some(command) => {
             eprintln!("tiber.usage command={command}");
             ExitCode::from(2)
@@ -46,6 +50,7 @@ struct BoardTicketRow {
     ticket_id: String,
     title: String,
     state: TicketState,
+    blocked_by: Vec<String>,
 }
 
 fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
@@ -63,6 +68,7 @@ fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
             let mut page = EventPage::first(BatchSize::new(100));
             let mut tickets = std::collections::BTreeMap::new();
             let mut priorities = std::collections::BTreeMap::new();
+            let mut dependencies = BoardDependencyState::default();
             let mut creation_position = 0_u64;
             loop {
                 let events = store
@@ -70,6 +76,7 @@ fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
                     .await?;
                 let next_page = page.next_from_results(&events);
                 for (event, _) in events {
+                    dependencies = apply_board_dependency_state(dependencies, &event);
                     match event {
                         TicketEvent::TicketCreatedV1 { ticket_id, title } => {
                             let state = apply_ticket_state(
@@ -129,7 +136,8 @@ fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
                         }
                         TicketEvent::BoardTicketClaimedV1 { .. }
                         | TicketEvent::BoardTicketClaimReleasedV1 { .. }
-                        | TicketEvent::BoardTicketCompletedV1 { .. } => {}
+                        | TicketEvent::BoardTicketCompletedV1 { .. }
+                        | TicketEvent::BoardTicketDependencyAddedV1 { .. } => {}
                     }
                 }
                 let Some(next_page) = next_page else {
@@ -137,20 +145,22 @@ fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
                 };
                 page = next_page;
             }
-            Ok::<_, eventcore_types::EventStoreError>((tickets, priorities))
+            Ok::<_, eventcore_types::EventStoreError>((tickets, priorities, dependencies))
         })
         .map_err(|error| error.to_string())
-        .map(|(tickets, priorities)| {
+        .map(|(tickets, priorities, dependencies)| {
             let mut rows = tickets
                 .into_iter()
                 .map(|(ticket_id, (title, state, creation_position))| {
                     let priority = priorities.get(&ticket_id).copied().unwrap_or(2);
+                    let blocked_by = dependencies.unresolved_dependencies(&ticket_id);
                     BoardTicketRow {
                         priority,
                         creation_position,
                         ticket_id,
                         title,
                         state,
+                        blocked_by,
                     }
                 })
                 .collect::<Vec<_>>();
@@ -167,8 +177,16 @@ fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
 fn print_ticket_row(row: &BoardTicketRow) {
     let owner = row.state.owner.as_deref().unwrap_or("unclaimed");
     println!(
-        "tiber.ticket id={} title={} owner={owner} priority={} completed={}",
-        row.ticket_id, row.title, row.priority, row.state.completed
+        "tiber.ticket id={} title={} owner={owner} priority={} completed={} blocked_by={}",
+        row.ticket_id,
+        row.title,
+        row.priority,
+        row.state.completed,
+        if row.blocked_by.is_empty() {
+            "none".to_owned()
+        } else {
+            row.blocked_by.join(",")
+        }
     );
 }
 
@@ -190,10 +208,9 @@ fn list_tickets() -> ExitCode {
 fn next_ticket() -> ExitCode {
     match replay_board_rows() {
         Ok(rows) => {
-            if let Some(row) = rows
-                .iter()
-                .find(|row| row.state.owner.is_none() && !row.state.completed)
-            {
+            if let Some(row) = rows.iter().find(|row| {
+                row.state.owner.is_none() && !row.state.completed && row.blocked_by.is_empty()
+            }) {
                 print_ticket_row(row);
             }
             ExitCode::SUCCESS
@@ -312,6 +329,58 @@ fn complete_ticket(arguments: &[String]) -> ExitCode {
     }
 }
 
+fn depend_ticket(arguments: &[String]) -> ExitCode {
+    let Some(ticket_id) = arguments
+        .first()
+        .and_then(|value| StreamId::try_new(value.clone()).ok())
+    else {
+        eprintln!("tiber.depend missing_ticket_id");
+        return ExitCode::from(2);
+    };
+    let Some(dependency_id) = arguments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--on").then(|| StreamId::try_new(pair[1].clone()).ok()))
+        .flatten()
+    else {
+        eprintln!("tiber.depend missing_dependency_id");
+        return ExitCode::from(2);
+    };
+    let store_root = match std::env::current_dir() {
+        Ok(directory) => directory.join(".development-system/tiber/store"),
+        Err(error) => {
+            eprintln!("tiber.depend unable_to_resolve_repository error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let store = match FileEventStore::open(store_root) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("tiber.depend unable_to_open_store error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let board_id = StreamId::try_new("board-local".to_owned()).expect("valid board stream");
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match runtime.block_on(execute(
+        &store,
+        AddTicketDependency {
+            ticket_id,
+            dependency_id,
+            board_id,
+        },
+        RetryPolicy::new(),
+    )) {
+        Ok(_) => {
+            println!("tiber.depend added=true");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("tiber.depend failed error={error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn release_ticket(arguments: &[String]) -> ExitCode {
     let Some(ticket_id) = arguments
         .first()
@@ -419,60 +488,16 @@ struct CreateTicket {
     title: String,
 }
 
-struct ClaimTicket {
-    ticket_id: StreamId,
-    board_id: StreamId,
-    owner: String,
-}
-
 struct ReleaseTicket {
     ticket_id: StreamId,
     board_id: StreamId,
     owner: String,
 }
 
-impl CommandStreams for ClaimTicket {
-    fn stream_declarations(&self) -> StreamDeclarations {
-        StreamDeclarations::try_from_streams(vec![self.ticket_id.clone(), self.board_id.clone()])
-            .expect("valid claim streams")
-    }
-}
-
 impl CommandStreams for ReleaseTicket {
     fn stream_declarations(&self) -> StreamDeclarations {
         StreamDeclarations::try_from_streams(vec![self.ticket_id.clone(), self.board_id.clone()])
             .expect("valid release streams")
-    }
-}
-
-impl CommandLogic for ClaimTicket {
-    type Event = TicketEvent;
-    type State = TicketState;
-    fn apply(&self, state: TicketState, event: &TicketEvent) -> TicketState {
-        apply_ticket_state(state, &self.ticket_id, event)
-    }
-    fn handle(&self, state: TicketState) -> Result<NewEvents<TicketEvent>, CommandError> {
-        if !state.exists {
-            return Err(CommandError::from("ticket does not exist"));
-        }
-        if state.completed {
-            return Err(CommandError::from("ticket is already completed"));
-        }
-        if state.owner.is_some() {
-            return Err(CommandError::from("ticket already claimed"));
-        }
-        Ok(vec![
-            TicketEvent::TicketClaimedV1 {
-                ticket_id: self.ticket_id.clone(),
-                owner: self.owner.clone(),
-            },
-            TicketEvent::BoardTicketClaimedV1 {
-                board_id: self.board_id.clone(),
-                ticket_id: self.ticket_id.clone(),
-                owner: self.owner.clone(),
-            },
-        ]
-        .into())
     }
 }
 

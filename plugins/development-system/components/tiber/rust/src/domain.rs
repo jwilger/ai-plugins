@@ -1,5 +1,6 @@
 use eventcore::{Event, StreamId};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TicketEvent {
@@ -39,6 +40,11 @@ pub enum TicketEvent {
         ticket_id: StreamId,
         priority: u8,
     },
+    BoardTicketDependencyAddedV1 {
+        board_id: StreamId,
+        ticket_id: StreamId,
+        dependency_id: StreamId,
+    },
 }
 
 impl Event for TicketEvent {
@@ -51,13 +57,86 @@ impl Event for TicketEvent {
             Self::BoardTicketClaimedV1 { board_id, .. }
             | Self::BoardTicketClaimReleasedV1 { board_id, .. }
             | Self::BoardTicketCompletedV1 { board_id, .. }
-            | Self::BoardTicketPrioritySetV1 { board_id, .. } => board_id,
+            | Self::BoardTicketPrioritySetV1 { board_id, .. }
+            | Self::BoardTicketDependencyAddedV1 { board_id, .. } => board_id,
         }
     }
 
     fn event_type_name() -> &'static str {
         "TiberTicketEvent"
     }
+}
+
+#[derive(Default)]
+pub struct BoardDependencyState {
+    pub tickets: BTreeSet<String>,
+    pub completed: BTreeSet<String>,
+    dependencies: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl BoardDependencyState {
+    pub fn unresolved_dependencies(&self, ticket_id: &str) -> Vec<String> {
+        self.dependencies
+            .get(ticket_id)
+            .into_iter()
+            .flatten()
+            .filter(|dependency_id| !self.completed.contains(*dependency_id))
+            .cloned()
+            .collect()
+    }
+
+    pub fn has_dependency(&self, ticket_id: &str, dependency_id: &str) -> bool {
+        self.dependencies
+            .get(ticket_id)
+            .is_some_and(|dependencies| dependencies.contains(dependency_id))
+    }
+
+    pub fn would_create_cycle(&self, ticket_id: &str, dependency_id: &str) -> bool {
+        let mut visited = BTreeSet::new();
+        self.reaches(dependency_id, ticket_id, &mut visited)
+    }
+
+    fn reaches(&self, from: &str, target: &str, visited: &mut BTreeSet<String>) -> bool {
+        if from == target {
+            return true;
+        }
+        if !visited.insert(from.to_owned()) {
+            return false;
+        }
+        self.dependencies.get(from).is_some_and(|dependencies| {
+            dependencies
+                .iter()
+                .any(|dependency| self.reaches(dependency, target, visited))
+        })
+    }
+}
+
+pub fn apply_board_dependency_state(
+    mut state: BoardDependencyState,
+    event: &TicketEvent,
+) -> BoardDependencyState {
+    match event {
+        TicketEvent::TicketCreatedV1 { ticket_id, .. } => {
+            state.tickets.insert(ticket_id.to_string());
+        }
+        TicketEvent::TicketCompletedV1 { ticket_id, .. }
+        | TicketEvent::BoardTicketCompletedV1 { ticket_id, .. } => {
+            state.completed.insert(ticket_id.to_string());
+        }
+        TicketEvent::BoardTicketDependencyAddedV1 {
+            ticket_id,
+            dependency_id,
+            ..
+        } => {
+            state
+                .dependencies
+                .entry(ticket_id.to_string())
+                .or_default()
+                .insert(dependency_id.to_string());
+        }
+        _ => {}
+    }
+    state
 }
 
 #[derive(Default)]

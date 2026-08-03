@@ -10,7 +10,7 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Repository-local task board"* ]]
-  expected_commands=$'commands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next'
+  expected_commands=$'commands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next\n  depend <ticket-id> --on <dependency-id>'
   actual_commands="$(sed -n '/^commands:/,$p' <<<"$output")"
   [ "$actual_commands" = "$expected_commands" ]
 
@@ -227,8 +227,8 @@ setup() {
 
   run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
   [ "$status" -eq 0 ]
-  [[ "$(head -n 1 <<<"$output")" == *"id=$later_ticket_id title=Later ticket owner=unclaimed priority=0 completed=false"* ]]
-  [[ "$output" == *"id=$earlier_ticket_id title=Earlier ticket owner=unclaimed priority=2 completed=false"* ]]
+  [[ "$(head -n 1 <<<"$output")" == *"id=$later_ticket_id title=Later ticket owner=unclaimed priority=0 completed=false blocked_by=none"* ]]
+  [[ "$output" == *"id=$earlier_ticket_id title=Earlier ticket owner=unclaimed priority=2 completed=false blocked_by=none"* ]]
 
   event_count_before_unknown="$(rg --fixed-strings 'BoardTicketPrioritySetV1' "$project/.development-system/tiber/store/events" | wc -l)"
   run bash -c 'cd "$1" && "$2" tiber prioritize ticket-missing --priority 0' _ "$project" "$CLI"
@@ -315,7 +315,7 @@ setup() {
   events_before_next="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
   run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
   [ "$status" -eq 0 ]
-  [[ "$output" == "tiber.ticket id=$higher_ticket_id title=Higher priority ticket owner=unclaimed priority=0 completed=false" ]]
+  [[ "$output" == "tiber.ticket id=$higher_ticket_id title=Higher priority ticket owner=unclaimed priority=0 completed=false blocked_by=none" ]]
   events_after_next="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
   [ "$events_after_next" -eq "$events_before_next" ]
 
@@ -323,7 +323,7 @@ setup() {
   [ "$status" -eq 0 ]
   run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
   [ "$status" -eq 0 ]
-  [[ "$output" == "tiber.ticket id=$earlier_ticket_id title=Earlier eligible ticket owner=unclaimed priority=2 completed=false" ]]
+  [[ "$output" == "tiber.ticket id=$earlier_ticket_id title=Earlier eligible ticket owner=unclaimed priority=2 completed=false blocked_by=none" ]]
 
   run bash -c 'cd "$1" && "$2" tiber complete "$3" --owner alice' _ "$project" "$CLI" "$higher_ticket_id"
   [ "$status" -eq 0 ]
@@ -332,4 +332,60 @@ setup() {
   run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "Tiber blocks ticket selection and claims on unresolved dependencies" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Dependent P0 ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  dependent_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Dependent P0 ticket.*/\1/p' <<<"$output")"
+  [ -n "$dependent_ticket_id" ]
+  run bash -c 'cd "$1" && "$2" tiber prioritize "$3" --priority 0' _ "$project" "$CLI" "$dependent_ticket_id"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Blocking P2 ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  blocker_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Blocking P2 ticket.*/\1/p' <<<"$output")"
+  [ -n "$blocker_ticket_id" ]
+
+  dependency_events_before="$(rg --fixed-strings 'BoardTicketDependencyAddedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$dependent_ticket_id" "$blocker_ticket_id"
+  [ "$status" -eq 0 ]
+  dependency_events_after="$(rg --fixed-strings 'BoardTicketDependencyAddedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$dependency_events_after" -eq $((dependency_events_before + 1)) ]
+
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$dependent_ticket_id"*"blocked_by=$blocker_ticket_id"* ]]
+  run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "tiber.ticket id=$blocker_ticket_id title=Blocking P2 ticket owner=unclaimed priority=2 completed=false blocked_by=none" ]]
+
+  claim_events_before="$(rg --fixed-strings 'TicketClaimedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$dependent_ticket_id"
+  [ "$status" -ne 0 ]
+  claim_events_after="$(rg --fixed-strings 'TicketClaimedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$claim_events_after" -eq "$claim_events_before" ]
+
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$blocker_ticket_id"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber complete "$3" --owner alice' _ "$project" "$CLI" "$blocker_ticket_id"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "tiber.ticket id=$dependent_ticket_id title=Dependent P0 ticket owner=unclaimed priority=0 completed=false blocked_by=none" ]]
+
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner bob' _ "$project" "$CLI" "$dependent_ticket_id"
+  [ "$status" -eq 0 ]
+  dependency_events_before_cycle="$(rg --fixed-strings 'BoardTicketDependencyAddedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber depend "$3" --on "$4"' _ "$project" "$CLI" "$blocker_ticket_id" "$dependent_ticket_id"
+  [ "$status" -ne 0 ]
+  dependency_events_after_cycle="$(rg --fixed-strings 'BoardTicketDependencyAddedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$dependency_events_after_cycle" -eq "$dependency_events_before_cycle" ]
 }
