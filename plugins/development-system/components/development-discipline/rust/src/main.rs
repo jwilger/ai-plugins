@@ -482,10 +482,10 @@ impl ReviewCoordinator {
                 {
                     return Err("pending_delta_risk_assignment_mismatch=true".to_string());
                 }
-                let resubmission = pending_delta_risk_core_arguments(arguments)?;
-                if resubmission != pending.arguments {
-                    return Err("pending_delta_risk_resubmission_mismatch=true".to_string());
-                }
+                let _ = pending_delta_risk_core_arguments(arguments)?;
+                // A changed scope invalidates the pending scout assignment. The lower
+                // transition replaces it with a newly bound assignment instead of
+                // trapping the caller behind the stale authoritative record.
             }
         }
         self.touch_session(session_id);
@@ -20936,13 +20936,29 @@ pre_filter = "project-pre"
                 }
             }))
             .expect("changed resubmission response");
+        let replacement: Value = serde_json::from_str(
+            changed_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("replacement assignment text"),
+        )
+        .expect("replacement assignment json");
         assert_eq!(
-            changed_response["error"]["message"],
-            "pending_delta_risk_resubmission_mismatch=true"
+            replacement["transition_status"],
+            "delta_risk_assessment_required"
+        );
+        assert_eq!(
+            replacement["delta_risk_assignments"][0]["scope"]["changed_files"],
+            json!(["src/lib.rs"])
         );
 
-        let mut exact_resubmission = base_arguments;
-        exact_resubmission["delta_risk_assessment"] = assessment;
+        let mut exact_resubmission = changed_resubmission;
+        exact_resubmission["delta_risk_assessment"] = delta_risk_assessment_for(
+            &replacement["delta_risk_assignments"][0],
+            "medium",
+            &[("correctness-behavior", "medium")],
+            &["correctness-behavior"],
+            json!([]),
+        );
         let advanced_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
