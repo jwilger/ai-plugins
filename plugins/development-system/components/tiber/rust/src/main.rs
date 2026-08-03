@@ -25,6 +25,7 @@ fn main() -> ExitCode {
         Some("create") => create_ticket(&arguments[1..]),
         Some("list") => list_tickets(),
         Some("claim") => claim_ticket(&arguments[1..]),
+        Some("release") => release_ticket(&arguments[1..]),
         Some(command) => {
             eprintln!("tiber.usage command={command}");
             ExitCode::from(2)
@@ -62,7 +63,13 @@ fn list_tickets() -> ExitCode {
                     TicketEvent::TicketClaimedV1 { ticket_id, owner } => {
                         owners.insert(ticket_id.to_string(), owner);
                     }
-                    TicketEvent::BoardTicketClaimedV1 { .. } => {}
+                    TicketEvent::TicketClaimReleasedV1 { ticket_id, owner } => {
+                        if owners.get(ticket_id.as_str()) == Some(&owner) {
+                            owners.remove(ticket_id.as_str());
+                        }
+                    }
+                    TicketEvent::BoardTicketClaimedV1 { .. }
+                    | TicketEvent::BoardTicketClaimReleasedV1 { .. } => {}
                 }
             }
             for (ticket_id, title) in titles {
@@ -76,6 +83,57 @@ fn list_tickets() -> ExitCode {
         }
         Err(error) => {
             eprintln!("tiber.list unable_to_replay_tickets error={error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn release_ticket(arguments: &[String]) -> ExitCode {
+    let Some(ticket_id) = arguments
+        .first()
+        .and_then(|value| StreamId::try_new(value.clone()).ok())
+    else {
+        eprintln!("tiber.release missing_ticket_id");
+        return ExitCode::from(2);
+    };
+    let Some(owner) = arguments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--owner").then(|| pair[1].clone()))
+    else {
+        eprintln!("tiber.release missing_owner");
+        return ExitCode::from(2);
+    };
+    let store_root = match std::env::current_dir() {
+        Ok(directory) => directory.join(".development-system/tiber/store"),
+        Err(error) => {
+            eprintln!("tiber.release unable_to_resolve_repository error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let store = match FileEventStore::open(store_root) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("tiber.release unable_to_open_store error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let board_id = StreamId::try_new("board-local".to_owned()).expect("valid board stream");
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match runtime.block_on(execute(
+        &store,
+        ReleaseTicket {
+            ticket_id,
+            board_id,
+            owner: owner.clone(),
+        },
+        RetryPolicy::new(),
+    )) {
+        Ok(_) => {
+            println!("tiber.release owner={owner}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("tiber.release failed error={error}");
             ExitCode::FAILURE
         }
     }
@@ -142,7 +200,16 @@ enum TicketEvent {
         ticket_id: StreamId,
         owner: String,
     },
+    TicketClaimReleasedV1 {
+        ticket_id: StreamId,
+        owner: String,
+    },
     BoardTicketClaimedV1 {
+        board_id: StreamId,
+        ticket_id: StreamId,
+        owner: String,
+    },
+    BoardTicketClaimReleasedV1 {
         board_id: StreamId,
         ticket_id: StreamId,
         owner: String,
@@ -152,10 +219,11 @@ enum TicketEvent {
 impl Event for TicketEvent {
     fn stream_id(&self) -> &StreamId {
         match self {
-            Self::TicketCreatedV1 { ticket_id, .. } | Self::TicketClaimedV1 { ticket_id, .. } => {
-                ticket_id
-            }
-            Self::BoardTicketClaimedV1 { board_id, .. } => board_id,
+            Self::TicketCreatedV1 { ticket_id, .. }
+            | Self::TicketClaimedV1 { ticket_id, .. }
+            | Self::TicketClaimReleasedV1 { ticket_id, .. } => ticket_id,
+            Self::BoardTicketClaimedV1 { board_id, .. }
+            | Self::BoardTicketClaimReleasedV1 { board_id, .. } => board_id,
         }
     }
     fn event_type_name() -> &'static str {
@@ -180,10 +248,23 @@ struct ClaimTicket {
     owner: String,
 }
 
+struct ReleaseTicket {
+    ticket_id: StreamId,
+    board_id: StreamId,
+    owner: String,
+}
+
 impl CommandStreams for ClaimTicket {
     fn stream_declarations(&self) -> StreamDeclarations {
         StreamDeclarations::try_from_streams(vec![self.ticket_id.clone(), self.board_id.clone()])
             .expect("valid claim streams")
+    }
+}
+
+impl CommandStreams for ReleaseTicket {
+    fn stream_declarations(&self) -> StreamDeclarations {
+        StreamDeclarations::try_from_streams(vec![self.ticket_id.clone(), self.board_id.clone()])
+            .expect("valid release streams")
     }
 }
 
@@ -197,6 +278,11 @@ impl CommandLogic for ClaimTicket {
             }
             TicketEvent::TicketClaimedV1 { ticket_id, owner } if ticket_id == &self.ticket_id => {
                 state.owner = Some(owner.clone())
+            }
+            TicketEvent::TicketClaimReleasedV1 { ticket_id, owner }
+                if ticket_id == &self.ticket_id && state.owner.as_deref() == Some(owner) =>
+            {
+                state.owner = None
             }
             _ => {}
         }
@@ -215,6 +301,48 @@ impl CommandLogic for ClaimTicket {
                 owner: self.owner.clone(),
             },
             TicketEvent::BoardTicketClaimedV1 {
+                board_id: self.board_id.clone(),
+                ticket_id: self.ticket_id.clone(),
+                owner: self.owner.clone(),
+            },
+        ]
+        .into())
+    }
+}
+
+impl CommandLogic for ReleaseTicket {
+    type Event = TicketEvent;
+    type State = ClaimState;
+    fn apply(&self, mut state: ClaimState, event: &TicketEvent) -> ClaimState {
+        match event {
+            TicketEvent::TicketCreatedV1 { ticket_id, .. } if ticket_id == &self.ticket_id => {
+                state.exists = true
+            }
+            TicketEvent::TicketClaimedV1 { ticket_id, owner } if ticket_id == &self.ticket_id => {
+                state.owner = Some(owner.clone())
+            }
+            TicketEvent::TicketClaimReleasedV1 { ticket_id, owner }
+                if ticket_id == &self.ticket_id && state.owner.as_deref() == Some(owner) =>
+            {
+                state.owner = None
+            }
+            _ => {}
+        }
+        state
+    }
+    fn handle(&self, state: ClaimState) -> Result<NewEvents<TicketEvent>, CommandError> {
+        if !state.exists {
+            return Err(CommandError::from("ticket does not exist"));
+        }
+        if state.owner.as_deref() != Some(self.owner.as_str()) {
+            return Err(CommandError::from("ticket is not claimed by owner"));
+        }
+        Ok(vec![
+            TicketEvent::TicketClaimReleasedV1 {
+                ticket_id: self.ticket_id.clone(),
+                owner: self.owner.clone(),
+            },
+            TicketEvent::BoardTicketClaimReleasedV1 {
                 board_id: self.board_id.clone(),
                 ticket_id: self.ticket_id.clone(),
                 owner: self.owner.clone(),
