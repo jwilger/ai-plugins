@@ -186,27 +186,23 @@ fn workflow_execute(arguments: &[String]) -> ExitCode {
         eprintln!("tiber.workflow command_unknown");
         return ExitCode::from(2);
     }
-    let event = arguments
-        .windows(2)
-        .find_map(|p| (p[0] == "--event").then(|| p[1].as_str()));
-    let expected = arguments
-        .windows(2)
-        .find_map(|p| (p[0] == "--expected-frontier").then(|| p[1].as_str()));
-    let observation = arguments
-        .windows(2)
-        .find_map(|p| (p[0] == "--observation").then(|| p[1].clone()));
-    if event != Some("DiscoveryEvidenceRecorded") {
+    let Some(arguments) = parse_discovery_evidence_arguments(arguments) else {
+        eprintln!("tiber.workflow command_unknown");
+        return ExitCode::from(2);
+    };
+    if arguments.event != "DiscoveryEvidenceRecorded" {
         eprintln!("tiber.workflow event_not_emitted_by_command");
         return ExitCode::from(2);
     }
-    let Some(expected) = expected.and_then(|value| value.parse::<u8>().ok()) else {
+    let Some(expected) = arguments.expected_frontier.parse::<u8>().ok() else {
         eprintln!("tiber.workflow stale_frontier expected=invalid actual=0");
         return ExitCode::from(2);
     };
-    let Some(observation) = observation.filter(|v| !v.trim().is_empty() && v.len() <= 1024) else {
+    let observation = arguments.observation;
+    if observation.trim().is_empty() || observation.len() > 1024 {
         eprintln!("tiber.workflow invalid_observation");
         return ExitCode::from(2);
-    };
+    }
     let root = match std::env::current_dir() {
         Ok(d) => d.join(".development-system/tiber/store"),
         Err(e) => {
@@ -255,6 +251,42 @@ fn workflow_execute(arguments: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+struct DiscoveryEvidenceArguments {
+    event: String,
+    expected_frontier: String,
+    observation: String,
+}
+
+fn parse_discovery_evidence_arguments(arguments: &[String]) -> Option<DiscoveryEvidenceArguments> {
+    let mut event = None;
+    let mut expected_frontier = None;
+    let mut observation = None;
+    let mut index = 1;
+
+    while index < arguments.len() {
+        let flag = arguments.get(index)?;
+        let value = arguments.get(index + 1)?;
+        if value.starts_with("--") {
+            return None;
+        }
+        match flag.as_str() {
+            "--event" if event.is_none() => event = Some(value.clone()),
+            "--expected-frontier" if expected_frontier.is_none() => {
+                expected_frontier = Some(value.clone())
+            }
+            "--observation" if observation.is_none() => observation = Some(value.clone()),
+            _ => return None,
+        }
+        index += 2;
+    }
+
+    Some(DiscoveryEvidenceArguments {
+        event: event?,
+        expected_frontier: expected_frontier?,
+        observation: observation?,
+    })
 }
 
 struct BoardTicketRow {

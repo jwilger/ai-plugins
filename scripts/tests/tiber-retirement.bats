@@ -76,6 +76,47 @@ setup() {
   [ "$output" = "tiber.workflow frontier=1 next=FormProductHypothesis evidence=derived events=ProductHypothesisFormed" ]
 }
 
+@test "Tiber rejects malformed discovery workflow arguments without appending events" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  before="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --expected-frontier 0 --observation --mistyped value' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [ "$output" = "tiber.workflow command_unknown" ]
+
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --event DiscoveryEvidenceRecorded --expected-frontier 0 --observation valid' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [ "$output" = "tiber.workflow command_unknown" ]
+
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --expected-frontier 0 --observation valid --mistyped value' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [ "$output" = "tiber.workflow command_unknown" ]
+
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --expected-frontier --observation valid' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [ "$output" = "tiber.workflow command_unknown" ]
+  after="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$after" -eq "$before" ]
+}
+
+@test "Tiber workflow replay ignores ticket events in the same Eventcore store" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Ticket event beside workflow event"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --expected-frontier 0 --observation valid' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber workflow status' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [ "$output" = "tiber.workflow frontier=1 next=FormProductHypothesis evidence=derived events=ProductHypothesisFormed" ]
+}
+
 @test "Tiber rejects invalid discovery workflow executions without appending events" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
