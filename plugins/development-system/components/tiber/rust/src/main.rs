@@ -26,6 +26,7 @@ fn main() -> ExitCode {
         Some("list") => list_tickets(),
         Some("claim") => claim_ticket(&arguments[1..]),
         Some("release") => release_ticket(&arguments[1..]),
+        Some("prioritize") => prioritize_ticket(&arguments[1..]),
         Some(command) => {
             eprintln!("tiber.usage command={command}");
             ExitCode::from(2)
@@ -51,8 +52,9 @@ fn list_tickets() -> ExitCode {
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     match runtime.block_on(async {
         let mut page = EventPage::first(BatchSize::new(100));
-        let mut titles = std::collections::BTreeMap::new();
-        let mut owners = std::collections::BTreeMap::new();
+        let mut tickets = std::collections::BTreeMap::new();
+        let mut priorities = std::collections::BTreeMap::new();
+        let mut creation_position = 0_u64;
         loop {
             let events = store
                 .read_events::<TicketEvent>(EventFilter::all(), page)
@@ -61,15 +63,26 @@ fn list_tickets() -> ExitCode {
             for (event, _) in events {
                 match event {
                     TicketEvent::TicketCreatedV1 { ticket_id, title } => {
-                        titles.insert(ticket_id.to_string(), title);
+                        tickets.insert(
+                            ticket_id.to_string(),
+                            (title, None, creation_position),
+                        );
+                        creation_position += 1;
                     }
                     TicketEvent::TicketClaimedV1 { ticket_id, owner } => {
-                        owners.insert(ticket_id.to_string(), owner);
+                        if let Some((_, current_owner, _)) = tickets.get_mut(ticket_id.as_str()) {
+                            *current_owner = Some(owner);
+                        }
                     }
                     TicketEvent::TicketClaimReleasedV1 { ticket_id, owner } => {
-                        if owners.get(ticket_id.as_str()) == Some(&owner) {
-                            owners.remove(ticket_id.as_str());
+                        if let Some((_, current_owner, _)) = tickets.get_mut(ticket_id.as_str()) {
+                            if current_owner.as_deref() == Some(owner.as_str()) {
+                                *current_owner = None;
+                            }
                         }
+                    }
+                    TicketEvent::BoardTicketPrioritySetV1 { ticket_id, priority, .. } => {
+                        priorities.insert(ticket_id.to_string(), priority);
                     }
                     TicketEvent::BoardTicketClaimedV1 { .. }
                     | TicketEvent::BoardTicketClaimReleasedV1 { .. } => {}
@@ -80,15 +93,20 @@ fn list_tickets() -> ExitCode {
             };
             page = next_page;
         }
-        Ok::<_, EventStoreError>((titles, owners))
+        Ok::<_, EventStoreError>((tickets, priorities))
     }) {
-        Ok((titles, owners)) => {
-            for (ticket_id, title) in titles {
-                let owner = owners
-                    .get(&ticket_id)
-                    .map(String::as_str)
-                    .unwrap_or("unclaimed");
-                println!("tiber.ticket id={ticket_id} title={title} owner={owner}");
+        Ok((tickets, priorities)) => {
+            let mut rows = tickets
+                .into_iter()
+                .map(|(ticket_id, (title, owner, creation_position))| {
+                    let priority = priorities.get(&ticket_id).copied().unwrap_or(2);
+                    (priority, creation_position, ticket_id, title, owner)
+                })
+                .collect::<Vec<_>>();
+            rows.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)).then(left.2.cmp(&right.2)));
+            for (priority, _, ticket_id, title, owner) in rows {
+                let owner = owner.as_deref().unwrap_or("unclaimed");
+                println!("tiber.ticket id={ticket_id} title={title} owner={owner} priority={priority}");
             }
             ExitCode::SUCCESS
         }
@@ -96,6 +114,35 @@ fn list_tickets() -> ExitCode {
             eprintln!("tiber.list unable_to_replay_tickets error={error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn prioritize_ticket(arguments: &[String]) -> ExitCode {
+    let Some(ticket_id) = arguments.first().and_then(|value| StreamId::try_new(value.clone()).ok()) else {
+        eprintln!("tiber.prioritize missing_ticket_id");
+        return ExitCode::from(2);
+    };
+    let Some(priority) = arguments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--priority").then(|| pair[1].parse::<u8>().ok()).flatten())
+        .filter(|priority| *priority <= 4)
+    else {
+        eprintln!("tiber.prioritize invalid_priority");
+        return ExitCode::from(2);
+    };
+    let store_root = match std::env::current_dir() {
+        Ok(directory) => directory.join(".development-system/tiber/store"),
+        Err(error) => { eprintln!("tiber.prioritize unable_to_resolve_repository error={error}"); return ExitCode::FAILURE; }
+    };
+    let store = match FileEventStore::open(store_root) {
+        Ok(store) => store,
+        Err(error) => { eprintln!("tiber.prioritize unable_to_open_store error={error}"); return ExitCode::FAILURE; }
+    };
+    let board_id = StreamId::try_new("board-local".to_owned()).expect("valid board stream");
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match runtime.block_on(execute(&store, PrioritizeTicket { ticket_id, board_id, priority }, RetryPolicy::new())) {
+        Ok(_) => { println!("tiber.prioritize priority={priority}"); ExitCode::SUCCESS }
+        Err(error) => { eprintln!("tiber.prioritize failed error={error}"); ExitCode::FAILURE }
     }
 }
 
@@ -225,6 +272,11 @@ enum TicketEvent {
         ticket_id: StreamId,
         owner: String,
     },
+    BoardTicketPrioritySetV1 {
+        board_id: StreamId,
+        ticket_id: StreamId,
+        priority: u8,
+    },
 }
 
 impl Event for TicketEvent {
@@ -234,7 +286,8 @@ impl Event for TicketEvent {
             | Self::TicketClaimedV1 { ticket_id, .. }
             | Self::TicketClaimReleasedV1 { ticket_id, .. } => ticket_id,
             Self::BoardTicketClaimedV1 { board_id, .. }
-            | Self::BoardTicketClaimReleasedV1 { board_id, .. } => board_id,
+            | Self::BoardTicketClaimReleasedV1 { board_id, .. }
+            | Self::BoardTicketPrioritySetV1 { board_id, .. } => board_id,
         }
     }
     fn event_type_name() -> &'static str {
@@ -265,6 +318,32 @@ struct ReleaseTicket {
     owner: String,
 }
 
+struct PrioritizeTicket {
+    ticket_id: StreamId,
+    board_id: StreamId,
+    priority: u8,
+}
+
+fn apply_claim_state(
+    mut state: ClaimState,
+    ticket_id: &StreamId,
+    event: &TicketEvent,
+) -> ClaimState {
+    match event {
+        TicketEvent::TicketCreatedV1 { ticket_id: event_ticket_id, .. }
+            if event_ticket_id == ticket_id => state.exists = true,
+        TicketEvent::TicketClaimedV1 { ticket_id: event_ticket_id, owner }
+            if event_ticket_id == ticket_id => state.owner = Some(owner.clone()),
+        TicketEvent::TicketClaimReleasedV1 { ticket_id: event_ticket_id, owner }
+            if event_ticket_id == ticket_id && state.owner.as_deref() == Some(owner) =>
+        {
+            state.owner = None;
+        }
+        _ => {}
+    }
+    state
+}
+
 impl CommandStreams for ClaimTicket {
     fn stream_declarations(&self) -> StreamDeclarations {
         StreamDeclarations::try_from_streams(vec![self.ticket_id.clone(), self.board_id.clone()])
@@ -279,25 +358,18 @@ impl CommandStreams for ReleaseTicket {
     }
 }
 
+impl CommandStreams for PrioritizeTicket {
+    fn stream_declarations(&self) -> StreamDeclarations {
+        StreamDeclarations::try_from_streams(vec![self.ticket_id.clone(), self.board_id.clone()])
+            .expect("valid priority streams")
+    }
+}
+
 impl CommandLogic for ClaimTicket {
     type Event = TicketEvent;
     type State = ClaimState;
-    fn apply(&self, mut state: ClaimState, event: &TicketEvent) -> ClaimState {
-        match event {
-            TicketEvent::TicketCreatedV1 { ticket_id, .. } if ticket_id == &self.ticket_id => {
-                state.exists = true
-            }
-            TicketEvent::TicketClaimedV1 { ticket_id, owner } if ticket_id == &self.ticket_id => {
-                state.owner = Some(owner.clone())
-            }
-            TicketEvent::TicketClaimReleasedV1 { ticket_id, owner }
-                if ticket_id == &self.ticket_id && state.owner.as_deref() == Some(owner) =>
-            {
-                state.owner = None
-            }
-            _ => {}
-        }
-        state
+    fn apply(&self, state: ClaimState, event: &TicketEvent) -> ClaimState {
+        apply_claim_state(state, &self.ticket_id, event)
     }
     fn handle(&self, state: ClaimState) -> Result<NewEvents<TicketEvent>, CommandError> {
         if !state.exists {
@@ -324,22 +396,8 @@ impl CommandLogic for ClaimTicket {
 impl CommandLogic for ReleaseTicket {
     type Event = TicketEvent;
     type State = ClaimState;
-    fn apply(&self, mut state: ClaimState, event: &TicketEvent) -> ClaimState {
-        match event {
-            TicketEvent::TicketCreatedV1 { ticket_id, .. } if ticket_id == &self.ticket_id => {
-                state.exists = true
-            }
-            TicketEvent::TicketClaimedV1 { ticket_id, owner } if ticket_id == &self.ticket_id => {
-                state.owner = Some(owner.clone())
-            }
-            TicketEvent::TicketClaimReleasedV1 { ticket_id, owner }
-                if ticket_id == &self.ticket_id && state.owner.as_deref() == Some(owner) =>
-            {
-                state.owner = None
-            }
-            _ => {}
-        }
-        state
+    fn apply(&self, state: ClaimState, event: &TicketEvent) -> ClaimState {
+        apply_claim_state(state, &self.ticket_id, event)
     }
     fn handle(&self, state: ClaimState) -> Result<NewEvents<TicketEvent>, CommandError> {
         if !state.exists {
@@ -360,6 +418,24 @@ impl CommandLogic for ReleaseTicket {
             },
         ]
         .into())
+    }
+}
+
+impl CommandLogic for PrioritizeTicket {
+    type Event = TicketEvent;
+    type State = ClaimState;
+    fn apply(&self, state: ClaimState, event: &TicketEvent) -> ClaimState {
+        apply_claim_state(state, &self.ticket_id, event)
+    }
+    fn handle(&self, state: ClaimState) -> Result<NewEvents<TicketEvent>, CommandError> {
+        if !state.exists {
+            return Err(CommandError::from("ticket does not exist"));
+        }
+        Ok(vec![TicketEvent::BoardTicketPrioritySetV1 {
+            board_id: self.board_id.clone(),
+            ticket_id: self.ticket_id.clone(),
+            priority: self.priority,
+        }].into())
     }
 }
 

@@ -203,3 +203,36 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"id=$ticket_id title=Paged ticket owner=bob"* ]]
 }
+
+@test "Tiber persists board priorities with backward-compatible defaults" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Earlier ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  earlier_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Earlier ticket.*/\1/p' <<<"$output")"
+  [ -n "$earlier_ticket_id" ]
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Later ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  later_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Later ticket.*/\1/p' <<<"$output")"
+  [ -n "$later_ticket_id" ]
+
+  run bash -c 'cd "$1" && "$2" tiber prioritize "$3" --priority 0' _ "$project" "$CLI" "$later_ticket_id"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$(head -n 1 <<<"$output")" == *"id=$later_ticket_id title=Later ticket owner=unclaimed priority=0"* ]]
+  [[ "$output" == *"id=$earlier_ticket_id title=Earlier ticket owner=unclaimed priority=2"* ]]
+
+  event_count_before_unknown="$(rg --fixed-strings 'BoardTicketPrioritySetV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber prioritize ticket-missing --priority 0' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  event_count_after_unknown="$(rg --fixed-strings 'BoardTicketPrioritySetV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$event_count_after_unknown" -eq "$event_count_before_unknown" ]
+}
