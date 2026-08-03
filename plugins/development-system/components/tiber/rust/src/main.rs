@@ -6,7 +6,7 @@ use eventcore::{
     StreamDeclarations, StreamId,
 };
 use eventcore_fs::FileEventStore;
-use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader};
+use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStoreError};
 use serde::{Deserialize, Serialize};
 
 fn main() -> ExitCode {
@@ -49,12 +49,15 @@ fn list_tickets() -> ExitCode {
         }
     };
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-    match runtime.block_on(
-        store.read_events::<TicketEvent>(EventFilter::all(), EventPage::first(BatchSize::new(100))),
-    ) {
-        Ok(events) => {
-            let mut titles = std::collections::BTreeMap::new();
-            let mut owners = std::collections::BTreeMap::new();
+    match runtime.block_on(async {
+        let mut page = EventPage::first(BatchSize::new(100));
+        let mut titles = std::collections::BTreeMap::new();
+        let mut owners = std::collections::BTreeMap::new();
+        loop {
+            let events = store
+                .read_events::<TicketEvent>(EventFilter::all(), page)
+                .await?;
+            let next_page = page.next_from_results(&events);
             for (event, _) in events {
                 match event {
                     TicketEvent::TicketCreatedV1 { ticket_id, title } => {
@@ -72,6 +75,14 @@ fn list_tickets() -> ExitCode {
                     | TicketEvent::BoardTicketClaimReleasedV1 { .. } => {}
                 }
             }
+            let Some(next_page) = next_page else {
+                break;
+            };
+            page = next_page;
+        }
+        Ok::<_, EventStoreError>((titles, owners))
+    }) {
+        Ok((titles, owners)) => {
             for (ticket_id, title) in titles {
                 let owner = owners
                     .get(&ticket_id)
