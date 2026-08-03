@@ -117,6 +117,19 @@ setup() {
   [ "$after" -eq "$before" ]
 }
 
+@test "Tiber rejects a workflow event that the selected command cannot emit" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  before="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event ProductHypothesisFormed --expected-frontier 0 --observation x' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"event_not_emitted_by_command"* ]]
+  after="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$after" -eq "$before" ]
+}
+
 @test "Tiber creates a functional ticket as an immutable Eventcore transaction" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
