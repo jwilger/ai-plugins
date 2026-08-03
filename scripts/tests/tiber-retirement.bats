@@ -275,6 +275,16 @@ setup() {
   [[ "$output" == *"owner=unclaimed"* ]]
   [[ "$output" == *"completed=true"* ]]
 
+  completion_events_before_repeated="$(rg --fixed-strings 'TicketCompletedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber complete "$3" --owner alice' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -ne 0 ]
+  run bash -c 'cd "$1" && "$2" tiber complete ticket-missing --owner alice' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  run bash -c 'cd "$1" && "$2" tiber complete "$3"' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -ne 0 ]
+  completion_events_after_invalid="$(rg --fixed-strings 'TicketCompletedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$completion_events_after_invalid" -eq "$completion_events_before_repeated" ]
+
   claim_events_before_reclaim="$(rg --fixed-strings 'TicketClaimedV1' "$project/.development-system/tiber/store/events" | wc -l)"
   run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner bob' _ "$project" "$CLI" "$ticket_id"
   [ "$status" -ne 0 ]
