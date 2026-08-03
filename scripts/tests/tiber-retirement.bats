@@ -84,7 +84,7 @@ setup() {
   before="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
   run bash -c 'cd "$1" && "$2" tiber workflow execute FormProductHypothesis --event ProductHypothesisFormed --expected-frontier 0 --observation x' _ "$project" "$CLI"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"command_unknown"* ]]
+  [ "$output" = "tiber.workflow command_not_eligible" ]
   after="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
   [ "$after" -eq "$before" ]
 }
@@ -128,6 +128,40 @@ setup() {
   [[ "$output" == *"event_not_emitted_by_command"* ]]
   after="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
   [ "$after" -eq "$before" ]
+}
+
+@test "Tiber fails closed when a well-formed replayed workflow event has an unknown semantic event" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && TIBER_WORKFLOW_TEST_MODE=1 "$2" tiber workflow test-append --command RecordDiscoveryEvidence --event UnknownWorkflowEvent --observation fixture' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  before_status="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+
+  run bash -c 'cd "$1" && "$2" tiber workflow status' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [ "$output" = "tiber.workflow replay_failed reason=event_unknown" ]
+  after_status="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$after_status" -eq "$before_status" ]
+}
+
+@test "Tiber fails closed when a well-formed replayed workflow event is impossible at its frontier" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && TIBER_WORKFLOW_TEST_MODE=1 "$2" tiber workflow test-append --command FormProductHypothesis --event ProductHypothesisFormed --observation fixture' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  before_status="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+
+  run bash -c 'cd "$1" && "$2" tiber workflow status' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [ "$output" = "tiber.workflow replay_failed reason=command_not_eligible" ]
+  after_status="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$after_status" -eq "$before_status" ]
 }
 
 @test "Tiber creates a functional ticket as an immutable Eventcore transaction" {

@@ -2,11 +2,11 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eventcore::{
-    execute, CommandError, CommandLogic, CommandStreams, NewEvents, RetryPolicy,
+    collect_events, execute, CommandError, CommandLogic, CommandStreams, NewEvents, RetryPolicy,
     StreamDeclarations, StreamId,
 };
 use eventcore_fs::FileEventStore;
-use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader};
+use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStore};
 mod application;
 mod domain;
 mod workflow;
@@ -14,10 +14,13 @@ mod workflow;
 use application::{
     AddTicketDependency, ClaimTicket, CompleteTicket, PrioritizeTicket, RemoveTicketDependency,
 };
-use workflow::{RecordDiscoveryEvidence, WorkflowEvent, WorkflowProjection, WORKFLOW_STREAM};
 use domain::{
     apply_board_dependency_state, apply_ticket_state, BoardDependencyState, TicketEvent,
     TicketState,
+};
+use workflow::{
+    RecordDiscoveryEvidence, RecordWorkflowTestEvent, WorkflowEvent, WorkflowProjection,
+    WORKFLOW_STREAM,
 };
 
 fn main() -> ExitCode {
@@ -50,7 +53,73 @@ fn main() -> ExitCode {
     }
 }
 
-fn workflow_command(arguments: &[String]) -> ExitCode { match arguments.first().map(String::as_str) { Some("status") => workflow_status(arguments), Some("execute") => workflow_execute(&arguments[1..]), _ => { eprintln!("tiber.workflow command_unknown"); ExitCode::from(2) } } }
+fn workflow_command(arguments: &[String]) -> ExitCode {
+    match arguments.first().map(String::as_str) {
+        Some("status") => workflow_status(arguments),
+        Some("execute") => workflow_execute(&arguments[1..]),
+        Some("test-append") => workflow_test_append(&arguments[1..]),
+        _ => {
+            eprintln!("tiber.workflow command_unknown");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn workflow_test_append(arguments: &[String]) -> ExitCode {
+    if std::env::var_os("TIBER_WORKFLOW_TEST_MODE").is_none() {
+        eprintln!("tiber.workflow command_unknown");
+        return ExitCode::from(2);
+    }
+    let command = arguments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--command").then(|| pair[1].clone()));
+    let event = arguments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--event").then(|| pair[1].clone()));
+    let observation = arguments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--observation").then(|| pair[1].clone()));
+    let (Some(command), Some(event), Some(observation)) = (command, event, observation) else {
+        eprintln!("tiber.workflow test_fixture_invalid");
+        return ExitCode::from(2);
+    };
+    let root = match std::env::current_dir() {
+        Ok(directory) => directory.join(".development-system/tiber/store"),
+        Err(error) => {
+            eprintln!("tiber.workflow unable_to_resolve_repository error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if !root.is_dir() {
+        eprintln!("tiber.workflow not_initialized");
+        return ExitCode::FAILURE;
+    }
+    let store = match FileEventStore::open(root) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("tiber.workflow unable_to_open_store error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let workflow_id = StreamId::try_new(WORKFLOW_STREAM.to_owned()).expect("workflow stream");
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    match runtime.block_on(execute(
+        &store,
+        RecordWorkflowTestEvent {
+            workflow_id,
+            command,
+            event,
+            observation,
+        },
+        RetryPolicy::new(),
+    )) {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("tiber.workflow test_fixture_failed error={error}");
+            ExitCode::FAILURE
+        }
+    }
+}
 
 fn workflow_status(arguments: &[String]) -> ExitCode {
     if arguments != ["status"] {
@@ -72,7 +141,13 @@ fn workflow_status(arguments: &[String]) -> ExitCode {
         eprintln!("tiber.workflow unable_to_open_store error={error}");
         return ExitCode::FAILURE;
     }
-    let decision = match replay_workflow(&store_root) { Ok(projection) => projection.decision(), Err(error) => { eprintln!("tiber.workflow replay_failed reason={error}"); return ExitCode::FAILURE; } };
+    let decision = match replay_workflow(&store_root) {
+        Ok(projection) => projection.decision(),
+        Err(error) => {
+            eprintln!("tiber.workflow replay_failed reason={error}");
+            return ExitCode::FAILURE;
+        }
+    };
     println!(
         "tiber.workflow frontier={} next={} evidence={} events={}",
         decision.frontier, decision.next, decision.evidence, decision.events
@@ -81,15 +156,105 @@ fn workflow_status(arguments: &[String]) -> ExitCode {
 }
 
 fn replay_workflow(store_root: &std::path::Path) -> Result<WorkflowProjection, String> {
- let store=FileEventStore::open(store_root).map_err(|e| e.to_string())?; let runtime=tokio::runtime::Runtime::new().map_err(|e|e.to_string())?;
- runtime.block_on(async { let mut page=EventPage::first(BatchSize::new(100)); let mut state=WorkflowProjection::initial(); loop { let events=store.read_events::<WorkflowEvent>(EventFilter::all(),page).await?; let next=page.next_from_results(&events); for (event,_) in events { state=state.apply(&event); } if let Some(next)=next { page=next; } else { break; } } Ok::<_,eventcore_types::EventStoreError>(state) }).map_err(|e|e.to_string())
+    let store = FileEventStore::open(store_root).map_err(|error| error.to_string())?;
+    let workflow_id = StreamId::try_new(WORKFLOW_STREAM.to_owned()).expect("workflow stream");
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| error.to_string())?;
+
+    runtime.block_on(async {
+        let stream = store
+            .read_stream::<WorkflowEvent>(workflow_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let events = collect_events(stream)
+            .await
+            .map_err(|error| error.to_string())?;
+        events
+            .into_iter()
+            .try_fold(WorkflowProjection::initial(), |state, event| {
+                state.try_apply(&event)
+            })
+            .map_err(|error| error.to_string())
+    })
 }
 
 fn workflow_execute(arguments: &[String]) -> ExitCode {
- if arguments.first().map(String::as_str)!=Some("RecordDiscoveryEvidence") { eprintln!("tiber.workflow command_unknown"); return ExitCode::from(2); }
- let event=arguments.windows(2).find_map(|p|(p[0]=="--event").then(||p[1].as_str())); let expected=arguments.windows(2).find_map(|p|(p[0]=="--expected-frontier").then(||p[1].as_str())); let observation=arguments.windows(2).find_map(|p|(p[0]=="--observation").then(||p[1].clone()));
- if event!=Some("DiscoveryEvidenceRecorded") { eprintln!("tiber.workflow event_not_emitted_by_command"); return ExitCode::from(2); } let Some(expected)=expected.and_then(|value| value.parse::<u8>().ok()) else { eprintln!("tiber.workflow stale_frontier expected=invalid actual=0"); return ExitCode::from(2); }; let Some(observation)=observation.filter(|v|!v.trim().is_empty()&&v.len()<=1024) else { eprintln!("tiber.workflow invalid_observation"); return ExitCode::from(2); };
- let root=match std::env::current_dir(){Ok(d)=>d.join(".development-system/tiber/store"),Err(e)=>{eprintln!("tiber.workflow unable_to_resolve_repository error={e}");return ExitCode::FAILURE;}}; if !root.is_dir(){eprintln!("tiber.workflow not_initialized");return ExitCode::FAILURE;} let actual=match replay_workflow(&root){Ok(value)=>value.decision().frontier,Err(error)=>{eprintln!("tiber.workflow replay_failed reason={error}");return ExitCode::FAILURE;}}; if expected!=actual {eprintln!("tiber.workflow stale_frontier expected={expected} actual={actual}");return ExitCode::from(2);} let store=match FileEventStore::open(root){Ok(s)=>s,Err(e)=>{eprintln!("tiber.workflow unable_to_open_store error={e}");return ExitCode::FAILURE;}}; let id=StreamId::try_new(WORKFLOW_STREAM.to_owned()).expect("workflow stream"); let runtime=tokio::runtime::Runtime::new().expect("runtime"); match runtime.block_on(execute(&store,RecordDiscoveryEvidence{workflow_id:id,observation},RetryPolicy::new())){Ok(_)=>{println!("tiber.workflow recorded=DiscoveryEvidenceRecorded frontier=1 next=FormProductHypothesis evidence=derived events=ProductHypothesisFormed");ExitCode::SUCCESS},Err(e)=>{eprintln!("tiber.workflow failed error={e}");ExitCode::FAILURE}}
+    if arguments.first().map(String::as_str) == Some("FormProductHypothesis") {
+        eprintln!("tiber.workflow command_not_eligible");
+        return ExitCode::from(2);
+    }
+    if arguments.first().map(String::as_str) != Some("RecordDiscoveryEvidence") {
+        eprintln!("tiber.workflow command_unknown");
+        return ExitCode::from(2);
+    }
+    let event = arguments
+        .windows(2)
+        .find_map(|p| (p[0] == "--event").then(|| p[1].as_str()));
+    let expected = arguments
+        .windows(2)
+        .find_map(|p| (p[0] == "--expected-frontier").then(|| p[1].as_str()));
+    let observation = arguments
+        .windows(2)
+        .find_map(|p| (p[0] == "--observation").then(|| p[1].clone()));
+    if event != Some("DiscoveryEvidenceRecorded") {
+        eprintln!("tiber.workflow event_not_emitted_by_command");
+        return ExitCode::from(2);
+    }
+    let Some(expected) = expected.and_then(|value| value.parse::<u8>().ok()) else {
+        eprintln!("tiber.workflow stale_frontier expected=invalid actual=0");
+        return ExitCode::from(2);
+    };
+    let Some(observation) = observation.filter(|v| !v.trim().is_empty() && v.len() <= 1024) else {
+        eprintln!("tiber.workflow invalid_observation");
+        return ExitCode::from(2);
+    };
+    let root = match std::env::current_dir() {
+        Ok(d) => d.join(".development-system/tiber/store"),
+        Err(e) => {
+            eprintln!("tiber.workflow unable_to_resolve_repository error={e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if !root.is_dir() {
+        eprintln!("tiber.workflow not_initialized");
+        return ExitCode::FAILURE;
+    }
+    let actual = match replay_workflow(&root) {
+        Ok(value) => value.decision().frontier,
+        Err(error) => {
+            eprintln!("tiber.workflow replay_failed reason={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if expected != actual {
+        eprintln!("tiber.workflow stale_frontier expected={expected} actual={actual}");
+        return ExitCode::from(2);
+    }
+    let store = match FileEventStore::open(root) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("tiber.workflow unable_to_open_store error={e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let id = StreamId::try_new(WORKFLOW_STREAM.to_owned()).expect("workflow stream");
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    match runtime.block_on(execute(
+        &store,
+        RecordDiscoveryEvidence {
+            workflow_id: id,
+            observation,
+        },
+        RetryPolicy::new(),
+    )) {
+        Ok(_) => {
+            println!("tiber.workflow recorded=DiscoveryEvidenceRecorded frontier=1 next=FormProductHypothesis evidence=derived events=ProductHypothesisFormed");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("tiber.workflow failed error={e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 struct BoardTicketRow {
