@@ -1781,7 +1781,8 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         "review_dimensions": review_dimensions,
         "shared_test_evidence": shared_test_evidence,
         "baseline_commit": baseline_commit,
-        "scope_resolution": scope_resolution(&scope, &baseline_commit)
+        "scope_resolution": scope_resolution(&scope, &baseline_commit),
+        "snapshot_commit": snapshot_commit
     });
     if let Some(delta_evidence) = arguments.get("delta_evidence") {
         if !delta_evidence.is_object() {
@@ -20345,6 +20346,45 @@ pre_filter = "project-pre"
         )
         .expect("second assignment");
         assert_eq!(first["assignment_id"], second["assignment_id"]);
+    }
+
+    #[test]
+    fn risk_assignment_identity_changes_when_its_snapshot_content_changes() {
+        let project_root = test_project_root("risk-assignment-snapshot-content");
+        fs::create_dir_all(project_root.join("src")).expect("create source directory");
+        fs::write(
+            project_root.join("src/lib.rs"),
+            "pub fn value() -> u8 { 1 }\n",
+        )
+        .expect("write first source revision");
+        let mut arguments = assessed_plan_arguments_for_diff_at_root(
+            "risk-assignment-snapshot-content",
+            "risk-assignment-snapshot-content-diff",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            Some(&project_root),
+        );
+        arguments["changed_files"] = json!(["src/lib.rs"]);
+        let first: Value = serde_json::from_str(
+            &risk_assessment_result(&arguments).expect("first risk assignment"),
+        )
+        .expect("first risk assignment json");
+
+        fs::write(
+            project_root.join("src/lib.rs"),
+            "pub fn value() -> u8 { 2 }\n",
+        )
+        .expect("write second source revision");
+        let second: Value = serde_json::from_str(
+            &risk_assessment_result(&arguments).expect("second risk assignment"),
+        )
+        .expect("second risk assignment json");
+
+        assert_ne!(
+            first["assignments"][0]["assignment_id"],
+            second["assignments"][0]["assignment_id"]
+        );
     }
 
     #[test]
