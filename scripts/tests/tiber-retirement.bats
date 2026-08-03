@@ -102,6 +102,21 @@ setup() {
   [ "$after" -eq "$before" ]
 }
 
+@test "Tiber rejects a stale discovery workflow frontier without appending an event" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --expected-frontier 0 --observation first' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  before="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --expected-frontier 0 --observation retry' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"stale_frontier expected=0 actual=1"* ]]
+  after="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$after" -eq "$before" ]
+}
+
 @test "Tiber creates a functional ticket as an immutable Eventcore transaction" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
