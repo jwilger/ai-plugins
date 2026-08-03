@@ -90,3 +90,25 @@ setup() {
   [[ "$output" == *"id=$ticket_id"* ]]
   [[ "$output" == *"owner=alice"* ]]
 }
+
+@test "Tiber preserves the first owner when a second claim is rejected" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Exclusively claimable"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  ticket_id="$(sed -n 's/.*id=\([^ ]*\).*/\1/p' <<<"$output")"
+
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner bob' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -ne 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$ticket_id"* ]]
+  [[ "$output" == *"owner=alice"* ]]
+  [[ "$output" != *"owner=bob"* ]]
+}
