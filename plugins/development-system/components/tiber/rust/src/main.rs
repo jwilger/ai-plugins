@@ -2,12 +2,14 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eventcore::{
-    execute, CommandError, CommandLogic, CommandStreams, Event, NewEvents, RetryPolicy,
+    execute, CommandError, CommandLogic, CommandStreams, NewEvents, RetryPolicy,
     StreamDeclarations, StreamId,
 };
 use eventcore_fs::FileEventStore;
 use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStoreError};
-use serde::{Deserialize, Serialize};
+mod domain;
+
+use domain::{apply_claim_state, ClaimState, TicketEvent};
 
 fn main() -> ExitCode {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
@@ -63,10 +65,7 @@ fn list_tickets() -> ExitCode {
             for (event, _) in events {
                 match event {
                     TicketEvent::TicketCreatedV1 { ticket_id, title } => {
-                        tickets.insert(
-                            ticket_id.to_string(),
-                            (title, None, creation_position),
-                        );
+                        tickets.insert(ticket_id.to_string(), (title, None, creation_position));
                         creation_position += 1;
                     }
                     TicketEvent::TicketClaimedV1 { ticket_id, owner } => {
@@ -81,7 +80,11 @@ fn list_tickets() -> ExitCode {
                             }
                         }
                     }
-                    TicketEvent::BoardTicketPrioritySetV1 { ticket_id, priority, .. } => {
+                    TicketEvent::BoardTicketPrioritySetV1 {
+                        ticket_id,
+                        priority,
+                        ..
+                    } => {
                         priorities.insert(ticket_id.to_string(), priority);
                     }
                     TicketEvent::BoardTicketClaimedV1 { .. }
@@ -103,10 +106,17 @@ fn list_tickets() -> ExitCode {
                     (priority, creation_position, ticket_id, title, owner)
                 })
                 .collect::<Vec<_>>();
-            rows.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)).then(left.2.cmp(&right.2)));
+            rows.sort_by(|left, right| {
+                left.0
+                    .cmp(&right.0)
+                    .then(left.1.cmp(&right.1))
+                    .then(left.2.cmp(&right.2))
+            });
             for (priority, _, ticket_id, title, owner) in rows {
                 let owner = owner.as_deref().unwrap_or("unclaimed");
-                println!("tiber.ticket id={ticket_id} title={title} owner={owner} priority={priority}");
+                println!(
+                    "tiber.ticket id={ticket_id} title={title} owner={owner} priority={priority}"
+                );
             }
             ExitCode::SUCCESS
         }
@@ -118,13 +128,20 @@ fn list_tickets() -> ExitCode {
 }
 
 fn prioritize_ticket(arguments: &[String]) -> ExitCode {
-    let Some(ticket_id) = arguments.first().and_then(|value| StreamId::try_new(value.clone()).ok()) else {
+    let Some(ticket_id) = arguments
+        .first()
+        .and_then(|value| StreamId::try_new(value.clone()).ok())
+    else {
         eprintln!("tiber.prioritize missing_ticket_id");
         return ExitCode::from(2);
     };
     let Some(priority) = arguments
         .windows(2)
-        .find_map(|pair| (pair[0] == "--priority").then(|| pair[1].parse::<u8>().ok()).flatten())
+        .find_map(|pair| {
+            (pair[0] == "--priority")
+                .then(|| pair[1].parse::<u8>().ok())
+                .flatten()
+        })
         .filter(|priority| *priority <= 4)
     else {
         eprintln!("tiber.prioritize invalid_priority");
@@ -132,17 +149,37 @@ fn prioritize_ticket(arguments: &[String]) -> ExitCode {
     };
     let store_root = match std::env::current_dir() {
         Ok(directory) => directory.join(".development-system/tiber/store"),
-        Err(error) => { eprintln!("tiber.prioritize unable_to_resolve_repository error={error}"); return ExitCode::FAILURE; }
+        Err(error) => {
+            eprintln!("tiber.prioritize unable_to_resolve_repository error={error}");
+            return ExitCode::FAILURE;
+        }
     };
     let store = match FileEventStore::open(store_root) {
         Ok(store) => store,
-        Err(error) => { eprintln!("tiber.prioritize unable_to_open_store error={error}"); return ExitCode::FAILURE; }
+        Err(error) => {
+            eprintln!("tiber.prioritize unable_to_open_store error={error}");
+            return ExitCode::FAILURE;
+        }
     };
     let board_id = StreamId::try_new("board-local".to_owned()).expect("valid board stream");
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-    match runtime.block_on(execute(&store, PrioritizeTicket { ticket_id, board_id, priority }, RetryPolicy::new())) {
-        Ok(_) => { println!("tiber.prioritize priority={priority}"); ExitCode::SUCCESS }
-        Err(error) => { eprintln!("tiber.prioritize failed error={error}"); ExitCode::FAILURE }
+    match runtime.block_on(execute(
+        &store,
+        PrioritizeTicket {
+            ticket_id,
+            board_id,
+            priority,
+        },
+        RetryPolicy::new(),
+    )) {
+        Ok(_) => {
+            println!("tiber.prioritize priority={priority}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("tiber.prioritize failed error={error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -248,62 +285,9 @@ fn claim_ticket(arguments: &[String]) -> ExitCode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum TicketEvent {
-    TicketCreatedV1 {
-        ticket_id: StreamId,
-        title: String,
-    },
-    TicketClaimedV1 {
-        ticket_id: StreamId,
-        owner: String,
-    },
-    TicketClaimReleasedV1 {
-        ticket_id: StreamId,
-        owner: String,
-    },
-    BoardTicketClaimedV1 {
-        board_id: StreamId,
-        ticket_id: StreamId,
-        owner: String,
-    },
-    BoardTicketClaimReleasedV1 {
-        board_id: StreamId,
-        ticket_id: StreamId,
-        owner: String,
-    },
-    BoardTicketPrioritySetV1 {
-        board_id: StreamId,
-        ticket_id: StreamId,
-        priority: u8,
-    },
-}
-
-impl Event for TicketEvent {
-    fn stream_id(&self) -> &StreamId {
-        match self {
-            Self::TicketCreatedV1 { ticket_id, .. }
-            | Self::TicketClaimedV1 { ticket_id, .. }
-            | Self::TicketClaimReleasedV1 { ticket_id, .. } => ticket_id,
-            Self::BoardTicketClaimedV1 { board_id, .. }
-            | Self::BoardTicketClaimReleasedV1 { board_id, .. }
-            | Self::BoardTicketPrioritySetV1 { board_id, .. } => board_id,
-        }
-    }
-    fn event_type_name() -> &'static str {
-        "TiberTicketEvent"
-    }
-}
-
 struct CreateTicket {
     ticket_id: StreamId,
     title: String,
-}
-
-#[derive(Default)]
-struct ClaimState {
-    exists: bool,
-    owner: Option<String>,
 }
 
 struct ClaimTicket {
@@ -322,26 +306,6 @@ struct PrioritizeTicket {
     ticket_id: StreamId,
     board_id: StreamId,
     priority: u8,
-}
-
-fn apply_claim_state(
-    mut state: ClaimState,
-    ticket_id: &StreamId,
-    event: &TicketEvent,
-) -> ClaimState {
-    match event {
-        TicketEvent::TicketCreatedV1 { ticket_id: event_ticket_id, .. }
-            if event_ticket_id == ticket_id => state.exists = true,
-        TicketEvent::TicketClaimedV1 { ticket_id: event_ticket_id, owner }
-            if event_ticket_id == ticket_id => state.owner = Some(owner.clone()),
-        TicketEvent::TicketClaimReleasedV1 { ticket_id: event_ticket_id, owner }
-            if event_ticket_id == ticket_id && state.owner.as_deref() == Some(owner) =>
-        {
-            state.owner = None;
-        }
-        _ => {}
-    }
-    state
 }
 
 impl CommandStreams for ClaimTicket {
@@ -435,7 +399,8 @@ impl CommandLogic for PrioritizeTicket {
             board_id: self.board_id.clone(),
             ticket_id: self.ticket_id.clone(),
             priority: self.priority,
-        }].into())
+        }]
+        .into())
     }
 }
 
