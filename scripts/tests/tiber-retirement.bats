@@ -139,6 +139,30 @@ setup() {
   [[ "$output" == *"owner=bob"* ]]
 }
 
+@test "Tiber records ticket and board release events in one Eventcore transaction" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Atomically releasable"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  ticket_id="$(sed -n 's/.*id=\([^ ]*\).*/\1/p' <<<"$output")"
+
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber release "$3" --owner alice' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -eq 0 ]
+
+  release_transaction="$(rg -l --fixed-strings '"TicketClaimReleasedV1"' "$project/.development-system/tiber/store/events")"
+  [ -n "$release_transaction" ]
+  [ "$(wc -l <<<"$release_transaction")" -eq 1 ]
+  run rg --fixed-strings '"BoardTicketClaimReleasedV1"' "$release_transaction"
+  [ "$status" -eq 0 ]
+  run rg --fixed-strings '"stream_id":"board-local"' "$release_transaction"
+  [ "$status" -eq 0 ]
+}
+
 @test "Tiber list replays claim changes beyond the first Eventcore page" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
