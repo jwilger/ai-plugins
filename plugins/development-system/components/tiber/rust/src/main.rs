@@ -21,7 +21,7 @@ fn main() -> ExitCode {
             println!("\nEventcore-backed Tiber is being initialized by development-system.");
             println!("\nusage: tiber <command> [options]");
             println!(
-                "\ncommands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>"
+                "\ncommands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>"
             );
             ExitCode::SUCCESS
         }
