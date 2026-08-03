@@ -4898,6 +4898,20 @@ fn advance_with_contract_validation_at(
                 })
                 .to_string());
             };
+            if delta_risk_assessment.get("assignment_id") != assignment.get("assignment_id")
+                || delta_risk_assessment.get("subagent_key") != assignment.get("subagent_key")
+            {
+                return Ok(json!({
+                    "state": state,
+                    "transition_status": "delta_risk_assessment_required",
+                    "delta_risk_assignments": [assignment],
+                    "complete": false,
+                    "completion_blockers": unresolved_findings(&state),
+                    "next_assignments": [],
+                    "subagent_shutdown": []
+                })
+                .to_string());
+            }
             return apply_delta_risk_reassessment(
                 state,
                 current_diff_hash,
@@ -20237,6 +20251,51 @@ pre_filter = "project-pre"
         assert_eq!(assignment["current_diff_hash"], replacement_diff_hash);
         assert_eq!(assignment["constraints"]["run_tests"], false);
         assert_eq!(assignment["constraints"]["request_more_planners"], false);
+    }
+
+    #[test]
+    fn stale_delta_assessment_is_replaced_with_a_current_scope_assignment() {
+        let arguments = assessed_plan_arguments(
+            "stale-delta-recovery",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let replacement_diff_hash = "stale-delta-recovery-v2";
+        let mut resubmission = json!({
+            "state": planned["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required: Value = serde_json::from_str(
+            &advance_synthetic_state(&resubmission).expect("delta scout required"),
+        )
+        .expect("delta response json");
+        resubmission["delta_risk_assessment"] = delta_risk_assessment_for(
+            &required["delta_risk_assignments"][0],
+            "medium",
+            &[("correctness-behavior", "medium")],
+            &["correctness-behavior"],
+            json!([]),
+        );
+        resubmission["current_changed_files"] = json!(["src/lib.rs", "tests/lib_test.rs"]);
+
+        let replacement: Value = serde_json::from_str(
+            &advance_synthetic_state(&resubmission)
+                .expect("stale delta produces a replacement assignment"),
+        )
+        .expect("replacement response json");
+        assert_eq!(
+            replacement["transition_status"],
+            "delta_risk_assessment_required"
+        );
+        assert_eq!(
+            replacement["delta_risk_assignments"][0]["scope"]["changed_files"],
+            json!(["src/lib.rs", "tests/lib_test.rs"])
+        );
     }
 
     #[test]
