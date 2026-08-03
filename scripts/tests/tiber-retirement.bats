@@ -76,6 +76,19 @@ setup() {
   [ "$output" = "tiber.workflow frontier=1 next=FormProductHypothesis evidence=derived events=ProductHypothesisFormed" ]
 }
 
+@test "Tiber rejects invalid discovery workflow executions without appending events" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  before="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber workflow execute FormProductHypothesis --event ProductHypothesisFormed --expected-frontier 0 --observation x' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"command_unknown"* ]]
+  after="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$after" -eq "$before" ]
+}
+
 @test "Tiber creates a functional ticket as an immutable Eventcore transaction" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
