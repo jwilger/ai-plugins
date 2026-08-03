@@ -10,7 +10,7 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Repository-local task board"* ]]
-  expected_commands=$'commands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>'
+  expected_commands=$'commands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>'
   actual_commands="$(sed -n '/^commands:/,$p' <<<"$output")"
   [ "$actual_commands" = "$expected_commands" ]
 
@@ -227,12 +227,57 @@ setup() {
 
   run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
   [ "$status" -eq 0 ]
-  [[ "$(head -n 1 <<<"$output")" == *"id=$later_ticket_id title=Later ticket owner=unclaimed priority=0"* ]]
-  [[ "$output" == *"id=$earlier_ticket_id title=Earlier ticket owner=unclaimed priority=2"* ]]
+  [[ "$(head -n 1 <<<"$output")" == *"id=$later_ticket_id title=Later ticket owner=unclaimed priority=0 completed=false"* ]]
+  [[ "$output" == *"id=$earlier_ticket_id title=Earlier ticket owner=unclaimed priority=2 completed=false"* ]]
 
   event_count_before_unknown="$(rg --fixed-strings 'BoardTicketPrioritySetV1' "$project/.development-system/tiber/store/events" | wc -l)"
   run bash -c 'cd "$1" && "$2" tiber prioritize ticket-missing --priority 0' _ "$project" "$CLI"
   [ "$status" -ne 0 ]
   event_count_after_unknown="$(rg --fixed-strings 'BoardTicketPrioritySetV1' "$project/.development-system/tiber/store/events" | wc -l)"
   [ "$event_count_after_unknown" -eq "$event_count_before_unknown" ]
+}
+
+@test "Tiber completes only the current owner's ticket atomically" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Completable ticket"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Completable ticket.*/\1/p' <<<"$output")"
+  [ -n "$ticket_id" ]
+
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -eq 0 ]
+
+  completion_events_before_wrong_owner="$(rg --fixed-strings 'TicketCompletedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber complete "$3" --owner bob' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -ne 0 ]
+  completion_events_after_wrong_owner="$(rg --fixed-strings 'TicketCompletedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$completion_events_after_wrong_owner" -eq "$completion_events_before_wrong_owner" ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$ticket_id"* ]]
+  [[ "$output" == *"owner=alice"* ]]
+
+  run bash -c 'cd "$1" && "$2" tiber complete "$3" --owner alice' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -eq 0 ]
+  completion_transaction="$(rg -l --fixed-strings '"TicketCompletedV1"' "$project/.development-system/tiber/store/events")"
+  [ -n "$completion_transaction" ]
+  [ "$(wc -l <<<"$completion_transaction")" -eq 1 ]
+  run rg --fixed-strings '"BoardTicketCompletedV1"' "$completion_transaction"
+  [ "$status" -eq 0 ]
+
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$ticket_id"* ]]
+  [[ "$output" == *"owner=unclaimed"* ]]
+  [[ "$output" == *"completed=true"* ]]
+
+  claim_events_before_reclaim="$(rg --fixed-strings 'TicketClaimedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner bob' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -ne 0 ]
+  claim_events_after_reclaim="$(rg --fixed-strings 'TicketClaimedV1' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$claim_events_after_reclaim" -eq "$claim_events_before_reclaim" ]
 }

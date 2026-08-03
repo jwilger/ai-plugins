@@ -15,12 +15,21 @@ pub enum TicketEvent {
         ticket_id: StreamId,
         owner: String,
     },
+    TicketCompletedV1 {
+        ticket_id: StreamId,
+        owner: String,
+    },
     BoardTicketClaimedV1 {
         board_id: StreamId,
         ticket_id: StreamId,
         owner: String,
     },
     BoardTicketClaimReleasedV1 {
+        board_id: StreamId,
+        ticket_id: StreamId,
+        owner: String,
+    },
+    BoardTicketCompletedV1 {
         board_id: StreamId,
         ticket_id: StreamId,
         owner: String,
@@ -37,9 +46,11 @@ impl Event for TicketEvent {
         match self {
             Self::TicketCreatedV1 { ticket_id, .. }
             | Self::TicketClaimedV1 { ticket_id, .. }
-            | Self::TicketClaimReleasedV1 { ticket_id, .. } => ticket_id,
+            | Self::TicketClaimReleasedV1 { ticket_id, .. }
+            | Self::TicketCompletedV1 { ticket_id, .. } => ticket_id,
             Self::BoardTicketClaimedV1 { board_id, .. }
             | Self::BoardTicketClaimReleasedV1 { board_id, .. }
+            | Self::BoardTicketCompletedV1 { board_id, .. }
             | Self::BoardTicketPrioritySetV1 { board_id, .. } => board_id,
         }
     }
@@ -50,16 +61,17 @@ impl Event for TicketEvent {
 }
 
 #[derive(Default)]
-pub struct ClaimState {
+pub struct TicketState {
     pub exists: bool,
     pub owner: Option<String>,
+    pub completed: bool,
 }
 
-pub fn apply_claim_state(
-    mut state: ClaimState,
+pub fn apply_ticket_state(
+    mut state: TicketState,
     ticket_id: &StreamId,
     event: &TicketEvent,
-) -> ClaimState {
+) -> TicketState {
     match event {
         TicketEvent::TicketCreatedV1 {
             ticket_id: event_ticket_id,
@@ -68,12 +80,19 @@ pub fn apply_claim_state(
         TicketEvent::TicketClaimedV1 {
             ticket_id: event_ticket_id,
             owner,
-        } if event_ticket_id == ticket_id => state.owner = Some(owner.clone()),
+        } if event_ticket_id == ticket_id && !state.completed => state.owner = Some(owner.clone()),
         TicketEvent::TicketClaimReleasedV1 {
             ticket_id: event_ticket_id,
             owner,
         } if event_ticket_id == ticket_id && state.owner.as_deref() == Some(owner) => {
             state.owner = None
+        }
+        TicketEvent::TicketCompletedV1 {
+            ticket_id: event_ticket_id,
+            owner,
+        } if event_ticket_id == ticket_id && state.owner.as_deref() == Some(owner) => {
+            state.owner = None;
+            state.completed = true;
         }
         _ => {}
     }
