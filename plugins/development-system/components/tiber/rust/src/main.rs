@@ -9,6 +9,7 @@ use eventcore_fs::FileEventStore;
 use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader};
 mod application;
 mod domain;
+mod workflow;
 
 use application::{
     AddTicketDependency, ClaimTicket, CompleteTicket, PrioritizeTicket, RemoveTicketDependency,
@@ -40,11 +41,40 @@ fn main() -> ExitCode {
         Some("next") => next_ticket(),
         Some("depend") => depend_ticket(&arguments[1..]),
         Some("undepend") => undepend_ticket(&arguments[1..]),
+        Some("workflow") => workflow_status(&arguments[1..]),
         Some(command) => {
             eprintln!("tiber.usage command={command}");
             ExitCode::from(2)
         }
     }
+}
+
+fn workflow_status(arguments: &[String]) -> ExitCode {
+    if arguments != ["status"] {
+        eprintln!("tiber.workflow usage=workflow_status");
+        return ExitCode::from(2);
+    }
+    let store_root = match std::env::current_dir() {
+        Ok(directory) => directory.join(".development-system/tiber/store"),
+        Err(error) => {
+            eprintln!("tiber.workflow unable_to_resolve_repository error={error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if !store_root.is_dir() {
+        eprintln!("tiber.workflow not_initialized");
+        return ExitCode::FAILURE;
+    }
+    if let Err(error) = FileEventStore::open(store_root) {
+        eprintln!("tiber.workflow unable_to_open_store error={error}");
+        return ExitCode::FAILURE;
+    }
+    let decision = workflow::WorkflowProjection::initial().decision();
+    println!(
+        "tiber.workflow frontier={} next={} evidence={} events={}",
+        decision.frontier, decision.next, decision.evidence, decision.events
+    );
+    ExitCode::SUCCESS
 }
 
 struct BoardTicketRow {

@@ -31,6 +31,32 @@ setup() {
   [ -z "$(find "$project/.development-system/tiber/store/events" -name '*.md' -print -quit)" ]
 }
 
+@test "Tiber reports its initial deterministic workflow decision without recording an event" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber workflow status' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"tiber.workflow not_initialized"* ]]
+  [ ! -e "$project/.development-system/tiber/store" ]
+
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  events_before="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+
+  run bash -c 'cd "$1" && "$2" tiber workflow status' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [ "$output" = "tiber.workflow frontier=0 next=RecordDiscoveryEvidence evidence=artifact,observation,measurement events=DiscoveryEvidenceRecorded" ]
+  events_after_first_status="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$events_after_first_status" -eq "$events_before" ]
+
+  run bash -c 'cd "$1" && "$2" tiber workflow status' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [ "$output" = "tiber.workflow frontier=0 next=RecordDiscoveryEvidence evidence=artifact,observation,measurement events=DiscoveryEvidenceRecorded" ]
+  events_after_second_status="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$events_after_second_status" -eq "$events_before" ]
+}
+
 @test "Tiber creates a functional ticket as an immutable Eventcore transaction" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
