@@ -102,6 +102,25 @@ setup() {
   [ "$after" -eq "$before" ]
 }
 
+@test "Tiber rejects unknown workflow commands and overlong observations without appending events" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+  run bash -c 'cd "$1" && "$2" tiber init' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  before="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+
+  run bash -c 'cd "$1" && "$2" tiber workflow execute UnknownWorkflowCommand --event UnknownWorkflowEvent --expected-frontier 0 --observation x' _ "$project" "$CLI"
+  [ "$status" -ne 0 ]
+  [ "$output" = "tiber.workflow command_unknown" ]
+
+  overlong="$(printf '%1025s' '' | tr ' ' x)"
+  run bash -c 'cd "$1" && "$2" tiber workflow execute RecordDiscoveryEvidence --event DiscoveryEvidenceRecorded --expected-frontier 0 --observation "$3"' _ "$project" "$CLI" "$overlong"
+  [ "$status" -ne 0 ]
+  [ "$output" = "tiber.workflow invalid_observation" ]
+  after="$(rg --fixed-strings '"record":"event"' "$project/.development-system/tiber/store/events" | wc -l)"
+  [ "$after" -eq "$before" ]
+}
+
 @test "Tiber rejects a stale discovery workflow frontier without appending an event" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
