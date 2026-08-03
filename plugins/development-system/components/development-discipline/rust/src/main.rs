@@ -1781,8 +1781,7 @@ fn risk_assessment_result(arguments: &Value) -> Result<String, String> {
         "review_dimensions": review_dimensions,
         "shared_test_evidence": shared_test_evidence,
         "baseline_commit": baseline_commit,
-        "scope_resolution": scope_resolution(&scope, &baseline_commit),
-        "snapshot_commit": snapshot_commit
+        "scope_resolution": scope_resolution(&scope, &baseline_commit)
     });
     if let Some(delta_evidence) = arguments.get("delta_evidence") {
         if !delta_evidence.is_object() {
@@ -20315,6 +20314,37 @@ pre_filter = "project-pre"
             replacement["delta_risk_assignments"][0]["scope"]["changed_files"],
             json!(["src/lib.rs", "tests/lib_test.rs"])
         );
+    }
+
+    #[test]
+    fn equivalent_delta_assignments_have_stable_identity_across_snapshot_regeneration() {
+        let arguments = assessed_plan_arguments(
+            "stable-delta-assignment",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let changed_files = vec!["src/lib.rs".to_string()];
+        let evidence = shared_test_evidence_for("stable-delta-assignment-v2");
+        let delta_evidence = json!({"summary": "Equivalent replacement diff."});
+        let (_, first) = delta_risk_assignment(
+            &planned["state"],
+            "stable-delta-assignment-v2",
+            &changed_files,
+            &evidence,
+            &delta_evidence,
+        )
+        .expect("first assignment");
+        let (_, second) = delta_risk_assignment(
+            &planned["state"],
+            "stable-delta-assignment-v2",
+            &changed_files,
+            &evidence,
+            &delta_evidence,
+        )
+        .expect("second assignment");
+        assert_eq!(first["assignment_id"], second["assignment_id"]);
     }
 
     #[test]
