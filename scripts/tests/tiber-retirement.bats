@@ -10,7 +10,7 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Repository-local task board"* ]]
-  expected_commands=$'commands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>'
+  expected_commands=$'commands:\n  init\n  create --title <title>\n  list\n  claim <ticket-id> --owner <owner>\n  release <ticket-id> --owner <owner>\n  prioritize <ticket-id> --priority <0..4>\n  complete <ticket-id> --owner <owner>\n  next'
   actual_commands="$(sed -n '/^commands:/,$p' <<<"$output")"
   [ "$actual_commands" = "$expected_commands" ]
 
