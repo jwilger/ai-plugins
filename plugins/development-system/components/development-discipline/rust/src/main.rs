@@ -24577,4 +24577,65 @@ pre_filter = "project-pre"
             Err(error) => assert_eq!(error, "review_session_event_stream_invalid=true"),
         }
     }
+
+    #[test]
+    fn legacy_session_import_is_one_time_and_leaves_sqlite_unchanged() {
+        let project_root = test_project_root("legacy-session-one-time-import");
+        let mut caller_state = add_test_risk_assessment(
+            json!({
+                "session_id": format!("legacy-session-one-time-import-{}", std::process::id()),
+                "project_root": project_root,
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "legacy-one-time"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        caller_state["scope"]["project_root"] = json!(project_root);
+        let session_id = caller_state["session_id"].as_str().expect("session id");
+        let database = durable_report_database_path(
+            project_root.to_str().expect("project root"),
+            caller_state.get("work_item_id").and_then(Value::as_str),
+        )
+        .expect("legacy database path");
+        fs::create_dir_all(database.parent().expect("database parent"))
+            .expect("create legacy database parent");
+        let connection = Connection::open(&database).expect("open legacy database");
+        initialize_durable_report_schema(&connection).expect("initialize legacy schema");
+        connection
+            .execute(
+                "INSERT INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, NULL, NULL, 1, 7)",
+                params![session_id, serde_json::to_string(&caller_state).expect("encode legacy state")],
+            )
+            .expect("insert legacy session");
+        drop(connection);
+        let source_bytes = fs::read(&database).expect("read immutable source database");
+
+        let first = load_authoritative_session(&caller_state, session_id)
+            .expect("import legacy session")
+            .expect("imported session");
+        assert_eq!(first.revision, 1);
+        assert_eq!(
+            fs::read(&database).expect("read source after import"),
+            source_bytes
+        );
+
+        let connection = Connection::open(&database).expect("reopen legacy database");
+        let mut changed_state = caller_state.clone();
+        changed_state["diff_hash"] = json!("changed-legacy-source");
+        connection
+            .execute(
+                "UPDATE final_review_session SET state_json = ?2, revision = 8 WHERE session_id = ?1",
+                params![session_id, serde_json::to_string(&changed_state).expect("encode changed state")],
+            )
+            .expect("change legacy source after import");
+        drop(connection);
+
+        let second = load_authoritative_session(&caller_state, session_id)
+            .expect("replay Eventcore session")
+            .expect("replayed session");
+        assert_eq!(second.revision, 1);
+        assert_eq!(second.state, caller_state);
+    }
 }
