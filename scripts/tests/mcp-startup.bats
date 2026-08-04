@@ -519,6 +519,8 @@ install_promptfoo_cache_launcher() {
   run find "$TMPROOT/final-review-project/.development-discipline-state/development-discipline/final-review-sessions/events" -type f -name '*.jsonl'
   [ "$status" -eq 0 ]
   [ -n "$output" ]
+  run rg 'ReportReplacedV1' "$TMPROOT/final-review-project/.development-discipline-state/development-discipline/final-review-sessions/events"
+  [ "$status" -eq 0 ]
 }
 
 @test "development-discipline MCP manifest prefers Claude plugin root when both harness markers are present" {
