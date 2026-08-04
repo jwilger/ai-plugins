@@ -12,7 +12,8 @@ setup() {
     "$REPO_ROOT/plugins/development-system/skills/worktrees/SKILL.md"
   ! rg -F 'development_system_worktree_' \
     "$REPO_ROOT/plugins/development-system/skills/worktrees/SKILL.md"
-  ! grep -Eq '^(pre-commit|pre-push):' "$REPO_ROOT/lefthook.yml"
+  grep -Eq '^pre-commit:' "$REPO_ROOT/lefthook.yml"
+  ! grep -Eq '^pre-push:' "$REPO_ROOT/lefthook.yml"
   [ ! -e "$REPO_ROOT/scripts/agent-checkout-guard.sh" ]
 }
 

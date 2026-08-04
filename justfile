@@ -7,12 +7,12 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: pre-commit development-discipline-release-from-source
+ci: pre-commit bats-expensive development-discipline-release-from-source
 
 # Every deterministic local check suitable for a commit hook.  The
 # source/distribution parity probe is deliberately CI-only because it performs
 # a release build and black-box integration run.
-pre-commit: validate-marketplace bootstrap-development-system node-tests github-actions beads-formulas development-discipline-rust development-discipline-release-complete bats
+pre-commit: validate-marketplace bootstrap-development-system node-tests github-actions beads-formulas development-discipline-rust development-discipline-release-complete bats-pre-commit
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
@@ -117,6 +117,17 @@ improve-evals:
 bats:
     bats $(find plugins scripts -name '*.bats' | sort)
 
+# Deterministic checks that are fast enough to execute before every commit.
+# Code-quality runtime-harness tests and cross-target release construction stay
+# in the complete CI gate below; all other Bats coverage remains here.
+bats-pre-commit:
+    bats $(find plugins scripts -name '*.bats' ! -path 'scripts/tests/evals-code-quality-*.bats' ! -path 'scripts/tests/development-discipline-release-integration.bats' | sort)
+
+# Integration coverage that is intentionally excluded from the commit hook but
+# remains mandatory in `just ci`.
+bats-expensive:
+    bats $(find scripts/tests -name 'evals-code-quality-*.bats' | sort) scripts/tests/development-discipline-release-integration.bats
+
 # Local-only EMC devshell coverage. This intentionally does not run in CI.
 emc-check:
     bats tests/emc-devshell.bats
@@ -141,4 +152,4 @@ validate-marketplace:
     bash scripts/check-advisor-agent-config.sh
     bash scripts/check-model-routing-config.sh
     node scripts/generate-development-system-agents.mjs --check
-    prettier --check "**/*.{json,md}"
+    prettier --check $(git ls-files --cached --others --exclude-standard -- '*.json' '*.md')

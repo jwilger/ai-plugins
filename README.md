@@ -35,7 +35,7 @@ the enabled capabilities and delivery mode.
 
 | Plugin                                                     | Harnesses          | Description                                                | Version |
 | ---------------------------------------------------------- | ------------------ | ---------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with Beads and Dolt. | 4.0.11  |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with Beads and Dolt. | 4.0.12  |
 
 ## Install development-system
 

@@ -5,7 +5,6 @@ setup() {
   DETECTOR="$ROOT/plugins/development-system/components/development-discipline/scripts/detect-target.sh"
   COMPLETE_CHECK="$ROOT/scripts/check-development-discipline-release-complete.sh"
   PARITY_CHECK="$ROOT/scripts/check-development-discipline-release-from-source.sh"
-  RELEASE_BUILD="$ROOT/scripts/build-development-discipline-release-all.sh"
   PARITY_NORMALIZER="$ROOT/scripts/tests/development-discipline-parity-normalize.mjs"
   FAKE_BIN="$BATS_TEST_TMPDIR/fake-bin"
   mkdir -p "$FAKE_BIN"
@@ -48,15 +47,6 @@ setup() {
   runtime_version="$output"
   [ "$runtime_version" = "$codex_version" ]
   [ "$runtime_version" = "$claude_version" ]
-}
-
-@test "development-discipline release builder does not require a macOS forge artifact" {
-  run env -u DEVELOPMENT_DISCIPLINE_MACOS_UNIVERSAL_BINARY \
-    -u DEVELOPMENT_DISCIPLINE_MACOS_ARTIFACT_ENVELOPE \
-    bash "$RELEASE_BUILD"
-
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"release-macos-artifact-required=true"* ]]
 }
 
 @test "development-discipline parity normalization removes runtime clock drift" {

@@ -112,7 +112,7 @@ done
 
 stage="$(mktemp -d "$state_dir/.install-staging.XXXXXX")"
 
-for hook_name in post-checkout; do
+for hook_name in post-checkout pre-commit; do
   target="$hooks_dir/$hook_name"
   if { [ -e "$target" ] || [ -L "$target" ]; } && [ ! -f "$target" ] && [ ! -L "$target" ]; then
     printf 'worktrees.hook_target_unsupported: %s must be a regular file or symlink.\n' "$target" >&2
@@ -169,6 +169,26 @@ write_post_checkout_launcher() {
 
 write_post_checkout_launcher
 
+write_pre_commit_launcher() {
+  local staged_hook="$stage/pre-commit"
+
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' '# ai-plugins-managed-hook:v1:pre-commit'
+    printf '%s\n' 'set -euo pipefail'
+    printf "LEFTHOOK_ROOT_NAME='%s'\n" "$root_name"
+    printf '%s\n' 'COMMON_DIR=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)'
+    printf '%s\n' 'LEFTHOOK_BIN="$COMMON_DIR/lefthook/roots/$LEFTHOOK_ROOT_NAME/bin/lefthook"'
+    printf '%s\n' 'LEFTHOOK_CONFIG="$COMMON_DIR/lefthook/lefthook.yml"'
+    printf '%s\n' 'export LEFTHOOK_CONFIG'
+    printf '%s\n' 'exec "$LEFTHOOK_BIN" run "pre-commit" --no-auto-install "$@"'
+  } >"$staged_hook"
+  chmod 0755 "$staged_hook"
+  bash -n "$staged_hook"
+}
+
+write_pre_commit_launcher
+
 mv -fT -- "$stage/lefthook.yml" "$state_dir/lefthook.yml"
 
 is_managed_post_checkout_hook() {
@@ -178,6 +198,22 @@ is_managed_post_checkout_hook() {
   [ -f "$target" ] || return 1
   marker="$(sed -n '2p' "$target")" || return 1
   [ "$marker" = '# ai-plugins-managed-hook:v1:post-checkout' ]
+}
+
+is_managed_pre_commit_hook() {
+  local target="$1"
+
+  [ -f "$target" ] && [ ! -L "$target" ] || return 1
+  [ "$(wc -l <"$target")" -eq 9 ] || return 1
+  [ "$(sed -n '1p' "$target")" = '#!/usr/bin/env bash' ] || return 1
+  [ "$(sed -n '2p' "$target")" = '# ai-plugins-managed-hook:v1:pre-commit' ] || return 1
+  [ "$(sed -n '3p' "$target")" = 'set -euo pipefail' ] || return 1
+  [[ "$(sed -n '4p' "$target")" =~ ^LEFTHOOK_ROOT_NAME=\'[^\']+\'$ ]] || return 1
+  [ "$(sed -n '5p' "$target")" = 'COMMON_DIR=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)' ] || return 1
+  [ "$(sed -n '6p' "$target")" = 'LEFTHOOK_BIN="$COMMON_DIR/lefthook/roots/$LEFTHOOK_ROOT_NAME/bin/lefthook"' ] || return 1
+  [ "$(sed -n '7p' "$target")" = 'LEFTHOOK_CONFIG="$COMMON_DIR/lefthook/lefthook.yml"' ] || return 1
+  [ "$(sed -n '8p' "$target")" = 'export LEFTHOOK_CONFIG' ] || return 1
+  [ "$(sed -n '9p' "$target")" = 'exec "$LEFTHOOK_BIN" run "pre-commit" --no-auto-install "$@"' ]
 }
 
 is_exact_legacy_managed_hook() {
@@ -219,6 +255,14 @@ next_backup_path() {
   printf '%s\n' "$backup"
 }
 
+target="$hooks_dir/pre-commit"
+if [ -e "$target" ] || [ -L "$target" ]; then
+  if ! is_managed_pre_commit_hook "$target" && ! is_exact_legacy_managed_hook pre-commit "$target"; then
+    printf 'worktrees.foreign_pre_commit_hook: refusing to replace %s.\n' "$target" >&2
+    exit 65
+  fi
+fi
+
 target="$hooks_dir/post-checkout"
 if [ -e "$target" ] || [ -L "$target" ]; then
   if ! is_managed_post_checkout_hook "$target"; then
@@ -229,10 +273,13 @@ if [ -e "$target" ] || [ -L "$target" ]; then
 fi
 mv --no-copy -fT -- "$stage/post-checkout" "$target"
 
+target="$hooks_dir/pre-commit"
+mv --no-copy -fT -- "$stage/pre-commit" "$target"
+
 rm -rf -- "$stage"
 stage=""
 
-for hook_name in pre-commit pre-push; do
+for hook_name in pre-push; do
   target="$hooks_dir/$hook_name"
   if is_exact_legacy_managed_hook "$hook_name" "$target"; then
     rm -- "$target"

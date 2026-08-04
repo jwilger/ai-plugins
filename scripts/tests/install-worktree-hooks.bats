@@ -100,7 +100,7 @@ lefthook_root() {
   [ ! -e "$(hook_target post-checkout)" ]
 }
 
-@test "installs only a post-checkout launcher and a pinned snapshot" {
+@test "installs post-checkout and pre-commit launchers from a pinned snapshot" {
   local root
 
   run install_repo
@@ -112,12 +112,13 @@ lefthook_root() {
   [ -f "$REPO/.git/lefthook/lefthook.yml" ]
   cmp "$REPO/lefthook.yml" "$REPO/.git/lefthook/lefthook.yml"
   [ -x "$(hook_target post-checkout)" ]
+  [ -x "$(hook_target pre-commit)" ]
   grep -Fq '# ai-plugins-managed-hook:v1:post-checkout' "$(hook_target post-checkout)"
+  grep -Fq '# ai-plugins-managed-hook:v1:pre-commit' "$(hook_target pre-commit)"
   grep -Fq "scripts/worktree-bootstrap.sh" "$(hook_target post-checkout)"
   grep -Fq 'run "post-checkout"' "$(hook_target post-checkout)"
-  ! grep -Fq 'pre-commit:' "$REPO/.git/lefthook/lefthook.yml"
+  grep -Fq 'pre-commit:' "$REPO/.git/lefthook/lefthook.yml"
   ! grep -Fq 'pre-push:' "$REPO/.git/lefthook/lefthook.yml"
-  [ ! -e "$(hook_target pre-commit)" ]
   [ ! -e "$(hook_target pre-push)" ]
 }
 
@@ -140,44 +141,40 @@ lefthook_root() {
   [ -f "$linked/.envrc" ]
 }
 
-@test "leaves foreign pre-commit and pre-push hooks untouched" {
+@test "refuses a foreign pre-commit hook without changing it" {
   local pre_commit="$(hook_target pre-commit)"
-  local pre_push="$(hook_target pre-push)"
   create_foreign_hook pre-commit
-  create_foreign_hook pre-push
   cp "$pre_commit" "$REPO/original-pre-commit"
-  cp "$pre_push" "$REPO/original-pre-push"
 
   run install_repo
 
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"foreign_pre_commit_hook"* ]]
   cmp "$REPO/original-pre-commit" "$pre_commit"
-  cmp "$REPO/original-pre-push" "$pre_push"
-  [ ! -e "$pre_commit.worktrees-backup" ]
-  [ ! -e "$pre_push.worktrees-backup" ]
 }
 
-@test "removes only exact legacy managed pre-commit and pre-push launchers" {
+@test "upgrades an exact legacy pre-commit launcher and removes pre-push" {
   write_legacy_managed_hook pre-commit
   write_legacy_managed_hook pre-push
 
   run install_repo
 
   [ "$status" -eq 0 ]
-  [ ! -e "$(hook_target pre-commit)" ]
+  [ -x "$(hook_target pre-commit)" ]
   [ ! -e "$(hook_target pre-push)" ]
-  [[ "$output" == *"legacy_managed_hook_removed: $(hook_target pre-commit)"* ]]
+  grep -Fq 'exec "$LEFTHOOK_BIN" run "pre-commit" --no-auto-install "$@"' "$(hook_target pre-commit)"
   [[ "$output" == *"legacy_managed_hook_removed: $(hook_target pre-push)"* ]]
 }
 
-@test "preserves a legacy-looking hook that is not an exact managed launcher" {
+@test "refuses a legacy-looking pre-commit hook that is not exact" {
   local pre_commit="$(hook_target pre-commit)"
   write_legacy_managed_hook pre-commit
   printf '%s\n' '# user customization' >>"$pre_commit"
 
   run install_repo
 
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"foreign_pre_commit_hook"* ]]
   [ -f "$pre_commit" ]
   grep -Fq '# user customization' "$pre_commit"
 }

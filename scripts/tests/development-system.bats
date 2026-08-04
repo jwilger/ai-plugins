@@ -377,6 +377,8 @@ SH
     >"$TEST_ROOT/project/.codex/config.toml"
 
   run env HOME="$TEST_ROOT/home" \
+    CLAUDE_CONFIG_DIR="$TEST_ROOT/home/.claude" \
+    CODEX_HOME="$TEST_ROOT/home/.codex" \
     "$REPO_ROOT/plugins/development-system/bin/development-system" \
     doctor \
     --project "$TEST_ROOT/project"

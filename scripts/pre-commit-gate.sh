@@ -15,5 +15,10 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   fi
 fi
 
+# Git exports repository-local variables to hooks.  They are correct for the
+# commit currently being checked, but would corrupt independent Git fixtures
+# created by the gate's test suites.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+
 export AI_PLUGINS_PRE_COMMIT_GATE_RUNNING=1
 exec nix develop -c just pre-commit
