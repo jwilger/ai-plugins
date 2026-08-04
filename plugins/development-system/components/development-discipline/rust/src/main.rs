@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eventcore::{Event, StreamId};
-use eventcore_fs::FileEventStore;
+use eventcore_fs::{FileEventStore, FsEventStoreError};
 use eventcore_types::{collect_events, EventStore, StreamVersion, StreamWrites};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -7014,6 +7014,13 @@ fn review_session_store_root() -> Result<PathBuf, String> {
     }
 }
 
+fn open_review_session_store() -> Result<FileEventStore, String> {
+    FileEventStore::open(review_session_store_root()?).map_err(|error| match error {
+        FsEventStoreError::StoreLocked { .. } => "review_session_busy=true".to_string(),
+        error => format!("review_session_store_open_failed source={error}"),
+    })
+}
+
 fn review_session_stream_id(state: &Value, session_id: &str) -> Result<StreamId, String> {
     let project_root = state
         .pointer("/scope/project_root")
@@ -7068,8 +7075,7 @@ fn read_eventcore_session(
     session_id: &str,
 ) -> Result<Option<RestoredReviewSession>, String> {
     let stream_id = review_session_stream_id(state, session_id)?;
-    let store = FileEventStore::open(review_session_store_root()?)
-        .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
+    let store = open_review_session_store()?;
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
     let events = runtime.block_on(async {
@@ -7134,8 +7140,7 @@ fn persist_authoritative_session(
         }
         None => 0,
     };
-    let store = FileEventStore::open(review_session_store_root()?)
-        .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
+    let store = open_review_session_store()?;
     let event = ReviewSessionEvent::SnapshotV1 {
         stream_id: stream_id.clone(),
         session_id: session_id.to_string(),
@@ -7191,8 +7196,7 @@ fn load_authoritative_session(
     session_id: &str,
 ) -> Result<Option<RestoredReviewSession>, String> {
     let stream_id = review_session_stream_id(caller_state, session_id)?;
-    let store = FileEventStore::open(review_session_store_root()?)
-        .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
+    let store = open_review_session_store()?;
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
     let events = runtime.block_on(async {
@@ -7227,8 +7231,7 @@ fn load_authoritative_session(
         return Ok(None);
     };
     let stream_id = review_session_stream_id(caller_state, session_id)?;
-    let store = FileEventStore::open(review_session_store_root()?)
-        .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
+    let store = open_review_session_store()?;
     let event = ReviewSessionEvent::ImportedFromSqliteV1 {
         stream_id: stream_id.clone(),
         session_id: session_id.to_string(),
@@ -7267,8 +7270,7 @@ fn read_eventcore_report(state: &Value) -> Result<Option<Vec<Value>>, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
     let stream_id = review_session_stream_id(state, session_id)?;
-    let store = FileEventStore::open(review_session_store_root()?)
-        .map_err(|error| format!("durable_report_store_open_failed source={error}"))?;
+    let store = open_review_session_store()?;
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|error| format!("durable_report_runtime_failed source={error}"))?;
     let events = runtime.block_on(async {
@@ -24399,5 +24401,32 @@ pre_filter = "project-pre"
             .expect("terminal advance response");
 
         assert_eq!(response["error"]["message"], "review_session_complete=true");
+    }
+
+    #[test]
+    fn review_session_store_lock_is_reported_as_sanitized_busy() {
+        let project_root = test_project_root("locked-review");
+        let mut state = add_test_risk_assessment(
+            json!({
+                "session_id": format!("locked-review-{}", std::process::id()),
+                "project_root": project_root,
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "locked"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        state["scope"]["project_root"] = json!(project_root);
+        let session_id = state["session_id"].as_str().expect("session id");
+        let _held_store = FileEventStore::open(review_session_store_root().expect("store root"))
+            .expect("hold Eventcore store lock");
+
+        let error = match load_authoritative_session(&state, session_id) {
+            Ok(_) => panic!("a held Eventcore store lock must not permit a session read"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "review_session_busy=true");
     }
 }
