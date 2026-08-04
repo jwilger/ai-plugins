@@ -44,6 +44,7 @@ const MAX_LENS_DESCRIPTION_CHARS: usize = 512;
 const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_WORK_ITEM_ID_CHARS: usize = 256;
 const MAX_ACTIVE_REVIEW_SESSIONS: usize = 32;
+#[cfg(test)]
 const MAX_DURABLE_REVIEW_SESSIONS: usize = 1024;
 const MAX_RETAINED_HISTORY_ENTRIES: usize = 64;
 const MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES: usize = 128;
@@ -6561,6 +6562,7 @@ fn prepare_durable_out_of_scope_report(state: &mut Value) -> Result<(), String> 
     Ok(())
 }
 
+#[cfg(test)]
 fn replace_durable_out_of_scope_report(
     transaction: &rusqlite::Transaction<'_>,
     state: &Value,
@@ -6615,6 +6617,7 @@ fn replace_durable_out_of_scope_report(
     Ok(())
 }
 
+#[cfg(test)]
 fn persist_prepared_out_of_scope_report(state: &Value) -> Result<(), String> {
     let project_root = state
         .pointer("/scope/project_root")
@@ -6730,6 +6733,7 @@ fn remove_report_artifact_files(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
 fn initialize_durable_report_schema(connection: &Connection) -> Result<(), String> {
     const SNAPSHOT_TABLE: &str = "
         CREATE TABLE IF NOT EXISTS final_review_lens_snapshot (
@@ -6802,6 +6806,7 @@ struct RestoredReviewSession {
     pending_delta_risk: Option<PendingVerifier>,
 }
 
+#[cfg(test)]
 fn encoded_pending_assignment(pending: Option<&PendingVerifier>) -> Result<Option<String>, String> {
     pending
         .map(|pending| {
@@ -7079,6 +7084,7 @@ fn read_eventcore_report(state: &Value) -> Result<Option<Vec<Value>>, String> {
     }))
 }
 
+#[cfg(test)]
 fn persist_legacy_authoritative_session(
     state: &Value,
     pending_verifier: Option<&PendingVerifier>,
