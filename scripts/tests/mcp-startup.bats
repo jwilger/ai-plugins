@@ -177,6 +177,8 @@ run_development_discipline_codex_cache_final_review_flow() {
   local project_root="$TMPROOT/final-review-project"
   local version
 
+  FINAL_REVIEW_FIXTURE_STATE_ROOT="$project_root/.development-discipline-state"
+
   mkdir -p "$cache_parent" "$project_root/.development-discipline"
   git -C "$project_root" init -q
   git -C "$project_root" config user.email final-review-fixture@example.test
@@ -204,6 +206,8 @@ TOML
     HOME="$HOME" \
     CARGO_HOME="$ROOT/.dependencies/cargo" \
     CODEX_HOME="$TMPROOT/codex-home" \
+    DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
+    DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
     FINAL_REVIEW_TEST_PROJECT_ROOT="$project_root" \
     FINAL_REVIEW_ROUTING_PROJECT_ROOT="$ROOT" \
     node "$ROOT/scripts/tests/development-discipline-mcp-flow.mjs" \
@@ -503,6 +507,18 @@ install_promptfoo_cache_launcher() {
   [ "$(jq -r '.lens_review' <<<"$routing")" = "gpt-5.6-terra" ]
   [ "$(jq -r '.post_filter' <<<"$routing")" = "gpt-5.6-luna" ]
   [ "$(jq -r '.verifier' <<<"$routing")" = "strong-reviewer" ]
+}
+
+@test "development-discipline packaged MCP persists final-review sessions as Eventcore transactions" {
+  cd "$ROOT"
+
+  run run_development_discipline_codex_cache_final_review_flow
+
+  [ "$status" -eq 0 ]
+  [ -d "$TMPROOT/final-review-project/.development-discipline-state/development-discipline/final-review-sessions/events" ]
+  run find "$TMPROOT/final-review-project/.development-discipline-state/development-discipline/final-review-sessions/events" -type f -name '*.jsonl'
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
 }
 
 @test "development-discipline MCP manifest prefers Claude plugin root when both harness markers are present" {

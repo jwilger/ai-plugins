@@ -15,7 +15,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use eventcore::{Event, StreamId};
+use eventcore_fs::FileEventStore;
+use eventcore_types::{collect_events, EventStore, StreamVersion, StreamWrites};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const DEFAULT_BASE: &str = "origin/main";
@@ -198,10 +202,44 @@ impl Default for ReviewCoordinator {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 struct PendingVerifier {
     assignment_id: String,
     arguments: Value,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+enum ReviewSessionEvent {
+    SnapshotV1 {
+        stream_id: StreamId,
+        session_id: String,
+        state: Value,
+        pending_verifier: Option<PendingVerifier>,
+        pending_delta_risk: Option<PendingVerifier>,
+        updated_at: u64,
+    },
+    ImportedFromSqliteV1 {
+        stream_id: StreamId,
+        session_id: String,
+        state: Value,
+        pending_verifier: Option<PendingVerifier>,
+        pending_delta_risk: Option<PendingVerifier>,
+        source_revision: u64,
+    },
+}
+
+impl Event for ReviewSessionEvent {
+    fn stream_id(&self) -> &StreamId {
+        match self {
+            Self::SnapshotV1 { stream_id, .. } | Self::ImportedFromSqliteV1 { stream_id, .. } => {
+                stream_id
+            }
+        }
+    }
+
+    fn event_type_name() -> &'static str {
+        "DevelopmentDisciplineReviewSessionEvent"
+    }
 }
 
 enum RequestLine {
@@ -6572,7 +6610,6 @@ fn replace_durable_out_of_scope_report(
     Ok(())
 }
 
-#[cfg(test)]
 fn persist_prepared_out_of_scope_report(state: &Value) -> Result<(), String> {
     let project_root = state
         .pointer("/scope/project_root")
@@ -6582,6 +6619,11 @@ fn persist_prepared_out_of_scope_report(state: &Value) -> Result<(), String> {
         project_root,
         state.get("work_item_id").and_then(Value::as_str),
     )?;
+    let directory = path
+        .parent()
+        .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("durable_report_directory_create_failed source={error}"))?;
     let mut connection = Connection::open_with_flags(
         &path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -6787,7 +6829,123 @@ fn decoded_pending_assignment(encoded: Option<String>) -> Result<Option<PendingV
         .transpose()
 }
 
+fn review_session_store_root() -> Result<PathBuf, String> {
+    Ok(durable_report_state_root(
+        env::var_os("XDG_STATE_HOME").filter(|value| !value.is_empty()).map(PathBuf::from),
+        env::var_os("HOME").filter(|value| !value.is_empty()).map(PathBuf::from),
+    )?.join("development-discipline/final-review-sessions"))
+}
+
+fn review_session_stream_id(state: &Value, session_id: &str) -> Result<StreamId, String> {
+    let project_root = state.pointer("/scope/project_root").and_then(Value::as_str)
+        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
+    let work_item_id = state.get("work_item_id").and_then(Value::as_str).unwrap_or("");
+    StreamId::try_new(format!("final-review-session-{}", stable_storage_digest(&[
+        "development-discipline-final-review-session-v1", project_root, work_item_id, session_id,
+    ]))).map_err(|error| format!("review_session_stream_id_invalid source={error}"))
+}
+
+fn session_from_event(event: ReviewSessionEvent, revision: u64) -> RestoredReviewSession {
+    match event {
+        ReviewSessionEvent::SnapshotV1 { state, pending_verifier, pending_delta_risk, .. }
+        | ReviewSessionEvent::ImportedFromSqliteV1 { state, pending_verifier, pending_delta_risk, .. } =>
+            RestoredReviewSession { state, revision, pending_verifier, pending_delta_risk },
+    }
+}
+
+fn read_eventcore_session(state: &Value, session_id: &str) -> Result<Option<RestoredReviewSession>, String> {
+    let stream_id = review_session_stream_id(state, session_id)?;
+    let store = FileEventStore::open(review_session_store_root()?)
+        .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("review_session_runtime_failed source={error}"))?;
+    let events = runtime.block_on(async {
+        let stream = store.read_stream::<ReviewSessionEvent>(stream_id).await
+            .map_err(|error| format!("review_session_read_failed source={error}"))?;
+        collect_events(stream).await.map_err(|error| format!("review_session_replay_failed source={error}"))
+    })?;
+    drop(store);
+    let revision = events.len() as u64;
+    Ok(events.into_iter().last().map(|event| session_from_event(event, revision)))
+}
+
 fn persist_authoritative_session(
+    state: &Value,
+    pending_verifier: Option<&PendingVerifier>,
+    pending_delta_risk: Option<&PendingVerifier>,
+    updated_at: u64,
+    expected_prior_state: Option<&Value>,
+    expected_revision: Option<u64>,
+) -> Result<u64, String> {
+    let session_id = state.get("session_id").and_then(Value::as_str)
+        .ok_or_else(|| "review_session_id_required=true".to_string())?;
+    let stream_id = review_session_stream_id(state, session_id)?;
+    let expected = expected_revision.unwrap_or(0);
+    if let Some(prior) = expected_prior_state {
+        if let Some(restored) = read_eventcore_session(state, session_id)? {
+            if restored.state != *prior || restored.revision != expected {
+                return Err("review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review".to_string());
+            }
+        }
+    }
+    let store = FileEventStore::open(review_session_store_root()?)
+        .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
+    let event = ReviewSessionEvent::SnapshotV1 {
+        stream_id: stream_id.clone(), session_id: session_id.to_string(), state: state.clone(),
+        pending_verifier: pending_verifier.cloned(), pending_delta_risk: pending_delta_risk.cloned(), updated_at,
+    };
+    let writes = StreamWrites::new()
+        .register_stream(stream_id, StreamVersion::new(expected as usize))
+        .map_err(|error| format!("review_session_write_prepare_failed source={error}"))?
+        .append(event).map_err(|error| format!("review_session_write_prepare_failed source={error}"))?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("review_session_runtime_failed source={error}"))?;
+    runtime.block_on(store.append_events(writes)).map_err(|error| {
+        if matches!(error, eventcore_types::EventStoreError::VersionConflict { .. }) {
+            "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review".to_string()
+        } else { format!("review_session_write_failed source={error}") }
+    })?;
+    persist_prepared_out_of_scope_report(state)?;
+    Ok(expected.saturating_add(1))
+}
+
+fn load_authoritative_session(
+    caller_state: &Value,
+    session_id: &str,
+) -> Result<Option<RestoredReviewSession>, String> {
+    let stream_id = review_session_stream_id(caller_state, session_id)?;
+    let store = FileEventStore::open(review_session_store_root()?)
+        .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("review_session_runtime_failed source={error}"))?;
+    let events = runtime.block_on(async {
+        let stream = store.read_stream::<ReviewSessionEvent>(stream_id).await
+            .map_err(|error| format!("review_session_read_failed source={error}"))?;
+        collect_events(stream).await.map_err(|error| format!("review_session_replay_failed source={error}"))
+    })?;
+    drop(store);
+    let revision = events.len() as u64;
+    if let Some(event) = events.into_iter().last() { return Ok(Some(session_from_event(event, revision))); }
+    let Some(legacy) = load_legacy_authoritative_session(caller_state, session_id)? else {
+        return Ok(None);
+    };
+    let stream_id = review_session_stream_id(caller_state, session_id)?;
+    let store = FileEventStore::open(review_session_store_root()?)
+        .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
+    let event = ReviewSessionEvent::ImportedFromSqliteV1 {
+        stream_id: stream_id.clone(), session_id: session_id.to_string(), state: legacy.state.clone(),
+        pending_verifier: legacy.pending_verifier.clone(), pending_delta_risk: legacy.pending_delta_risk.clone(),
+        source_revision: legacy.revision,
+    };
+    let writes = StreamWrites::new().register_stream(stream_id, StreamVersion::new(0))
+        .map_err(|error| format!("review_session_import_prepare_failed source={error}"))?
+        .append(event).map_err(|error| format!("review_session_import_prepare_failed source={error}"))?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("review_session_runtime_failed source={error}"))?;
+    match runtime.block_on(store.append_events(writes)) {
+        Ok(_) => Ok(Some(RestoredReviewSession { revision: 1, ..legacy })),
+        Err(eventcore_types::EventStoreError::VersionConflict { .. }) => load_authoritative_session(caller_state, session_id),
+        Err(error) => Err(format!("review_session_import_failed source={error}")),
+    }
+}
+
+fn persist_legacy_authoritative_session(
     state: &Value,
     pending_verifier: Option<&PendingVerifier>,
     pending_delta_risk: Option<&PendingVerifier>,
@@ -6867,7 +7025,7 @@ fn persist_authoritative_session(
     Ok(next_revision)
 }
 
-fn load_authoritative_session(
+fn load_legacy_authoritative_session(
     caller_state: &Value,
     session_id: &str,
 ) -> Result<Option<RestoredReviewSession>, String> {
