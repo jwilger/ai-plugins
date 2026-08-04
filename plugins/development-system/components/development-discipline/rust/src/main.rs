@@ -6695,41 +6695,18 @@ fn sync_scout_out_of_scope_report(state: &mut Value) -> Result<(), String> {
 }
 
 fn prepare_durable_out_of_scope_report(state: &mut Value) -> Result<(), String> {
-    let project_root = state
-        .pointer("/scope/project_root")
+    let session_id = state
+        .get("session_id")
         .and_then(Value::as_str)
-        .ok_or_else(|| "durable_report_project_root_required=true".to_string())?;
-    let _report_binding_id = state
+        .ok_or_else(|| "review_session_id_required=true".to_string())?;
+    let report_binding_id = state
         .get("report_binding_id")
         .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
-    let path = durable_report_database_path(
-        project_root,
-        state.get("work_item_id").and_then(Value::as_str),
-    )?;
-    remove_legacy_report_artifacts(
-        &path,
-        project_root,
-        state.get("work_item_id").and_then(Value::as_str),
-    )?;
-    let directory = path
-        .parent()
-        .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
-    fs::create_dir_all(directory)
-        .map_err(|error| format!("durable_report_directory_create_failed source={error}"))?;
-    match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            return Err("durable_report_file_symlink_forbidden=true".to_string());
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(format!(
-                "durable_report_file_metadata_failed source={error}"
-            ));
-        }
-    }
-    state["out_of_scope_report_artifact"] = json!(path.to_string_lossy());
+    let stream_id = review_session_stream_id(state, session_id)?;
+    state["out_of_scope_report_artifact"] = json!(format!(
+        "eventcore://development-discipline/final-review-sessions/{stream_id}?report_binding_id={report_binding_id}"
+    ));
     Ok(())
 }
 
@@ -6789,7 +6766,7 @@ fn replace_durable_out_of_scope_report(
 }
 
 #[cfg(test)]
-fn persist_prepared_out_of_scope_report(state: &Value) -> Result<(), String> {
+fn persist_prepared_out_of_scope_report(state: &Value) -> Result<PathBuf, String> {
     let project_root = state
         .pointer("/scope/project_root")
         .and_then(Value::as_str)
@@ -6818,7 +6795,7 @@ fn persist_prepared_out_of_scope_report(state: &Value) -> Result<(), String> {
     transaction
         .commit()
         .map_err(|error| format!("durable_report_commit_failed source={error}"))?;
-    Ok(())
+    Ok(path)
 }
 
 fn durable_report_database_path(
@@ -6859,49 +6836,6 @@ fn durable_report_state_root(
     home.filter(|path| path.is_absolute())
         .map(|home| home.join(".local/state"))
         .ok_or_else(|| "durable_report_state_home_required=true".to_string())
-}
-
-fn remove_legacy_report_artifacts(
-    current_path: &Path,
-    project_root: &str,
-    work_item_id: Option<&str>,
-) -> Result<(), String> {
-    let state_root = current_path
-        .parent()
-        .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
-    let mut legacy_keys = vec![stable_storage_digest(&[
-        "development-discipline-final-review-report-v1",
-        project_root,
-    ])];
-    if let Some(work_item_id) = work_item_id {
-        legacy_keys.push(stable_storage_digest(&[
-            "development-discipline-final-review-ticket-report-v1",
-            work_item_id,
-        ]));
-    }
-    for key in legacy_keys {
-        let legacy_path = state_root.join(format!("{key}.sqlite"));
-        if legacy_path != current_path {
-            remove_report_artifact_files(&legacy_path)?;
-        }
-    }
-    Ok(())
-}
-
-fn remove_report_artifact_files(path: &Path) -> Result<(), String> {
-    for suffix in ["", "-wal", "-shm"] {
-        let candidate = PathBuf::from(format!("{}{}", path.to_string_lossy(), suffix));
-        match fs::remove_file(&candidate) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "durable_report_legacy_remove_failed source={error}"
-                ));
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -14364,13 +14298,9 @@ pre_filter = "project-pre"
         }))
         .expect("advance");
         let advanced: Value = serde_json::from_str(&advanced).expect("json");
-        persist_prepared_out_of_scope_report(&advanced["state"]).expect("persist report");
-        let connection = Connection::open(
-            advanced["state"]["out_of_scope_report_artifact"]
-                .as_str()
-                .expect("artifact"),
-        )
-        .expect("database");
+        let database =
+            persist_prepared_out_of_scope_report(&advanced["state"]).expect("persist report");
+        let connection = Connection::open(database).expect("database");
         let escalation_json: String = connection
             .query_row(
                 "SELECT security_escalation_json FROM final_review_lens_snapshot WHERE lens = 'security-safety'",
@@ -14407,18 +14337,13 @@ pre_filter = "project-pre"
             None,
         )
         .expect("second durable report");
-        persist_prepared_out_of_scope_report(&state).expect("persist report");
+        let database = persist_prepared_out_of_scope_report(&state).expect("persist report");
         assert_eq!(
             state["out_of_scope_report"].as_array().map(Vec::len),
             Some(1)
         );
         assert_eq!(state["out_of_scope_report"][0]["finding"]["id"], "current");
-        let connection = Connection::open(
-            state["out_of_scope_report_artifact"]
-                .as_str()
-                .expect("artifact"),
-        )
-        .expect("database");
+        let connection = Connection::open(database).expect("database");
         let finding_id: String = connection
             .query_row(
                 "SELECT finding_id FROM final_review_lens_snapshot WHERE lens = 'release-integration'",
@@ -14449,13 +14374,8 @@ pre_filter = "project-pre"
         state["iteration_index"] = json!(2);
         append_out_of_scope_report(&mut state, &json!({ "out_of_scope": [] }), None)
             .expect("clean durable report");
-        persist_prepared_out_of_scope_report(&state).expect("persist report");
-        let connection = Connection::open(
-            state["out_of_scope_report_artifact"]
-                .as_str()
-                .expect("artifact"),
-        )
-        .expect("database");
+        let database = persist_prepared_out_of_scope_report(&state).expect("persist report");
+        let connection = Connection::open(database).expect("database");
         let count: u64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM final_review_lens_snapshot WHERE lens = 'release-integration'",
@@ -14493,13 +14413,8 @@ pre_filter = "project-pre"
             None,
         )
         .expect("second durable report");
-        persist_prepared_out_of_scope_report(&state).expect("persist report");
-        let connection = Connection::open(
-            state["out_of_scope_report_artifact"]
-                .as_str()
-                .expect("artifact"),
-        )
-        .expect("database");
+        let database = persist_prepared_out_of_scope_report(&state).expect("persist report");
+        let connection = Connection::open(database).expect("database");
         let count: u64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM final_review_lens_snapshot WHERE lens = 'release-integration'",
@@ -14563,13 +14478,8 @@ pre_filter = "project-pre"
         let mut second_state = second["state"].clone();
         append_out_of_scope_report(&mut second_state, &json!({ "out_of_scope": [] }), None)
             .expect("second durable report");
-        persist_prepared_out_of_scope_report(&second_state).expect("persist report");
-        let connection = Connection::open(
-            second_state["out_of_scope_report_artifact"]
-                .as_str()
-                .expect("artifact"),
-        )
-        .expect("database");
+        let database = persist_prepared_out_of_scope_report(&second_state).expect("persist report");
+        let connection = Connection::open(database).expect("database");
         let count: u64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM final_review_lens_snapshot WHERE lens = 'migration-risk'",
@@ -14582,7 +14492,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn out_of_scope_report_uses_one_project_sqlite_artifact() {
+    fn out_of_scope_report_uses_an_eventcore_artifact_locator() {
         let root = test_project_root("durable-report-sqlite-path");
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
@@ -14598,16 +14508,10 @@ pre_filter = "project-pre"
         )
         .expect("durable report");
 
-        assert_eq!(
-            Path::new(
-                state["out_of_scope_report_artifact"]
-                    .as_str()
-                    .expect("artifact"),
-            )
-            .extension()
-            .and_then(OsStr::to_str),
-            Some("sqlite")
-        );
+        assert!(state["out_of_scope_report_artifact"]
+            .as_str()
+            .is_some_and(|artifact| artifact
+                .starts_with("eventcore://development-discipline/final-review-sessions/")));
     }
 
     #[test]
@@ -14630,13 +14534,8 @@ pre_filter = "project-pre"
             None,
         )
         .expect("durable report");
-        persist_prepared_out_of_scope_report(&state).expect("persist report");
-        let connection = Connection::open(
-            state["out_of_scope_report_artifact"]
-                .as_str()
-                .expect("artifact"),
-        )
-        .expect("database");
+        let database = persist_prepared_out_of_scope_report(&state).expect("persist report");
+        let connection = Connection::open(database).expect("database");
         let finding_json: String = connection
             .query_row(
                 "SELECT finding_json FROM final_review_lens_snapshot WHERE lens = 'tests-verification'",
@@ -14669,7 +14568,7 @@ pre_filter = "project-pre"
             None,
         )
         .expect("durable report");
-        persist_prepared_out_of_scope_report(&state).expect("persist report");
+        let _database = persist_prepared_out_of_scope_report(&state).expect("persist report");
         assert_eq!(
             state["out_of_scope_report"][0]["finding"]["message"],
             "alice@example.test"
@@ -14747,7 +14646,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn out_of_scope_report_database_is_not_stored_inside_the_reviewed_worktree() {
+    fn out_of_scope_report_locator_does_not_disclose_the_reviewed_worktree() {
         let root = test_project_root("durable-report-user-state");
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
@@ -14763,41 +14662,9 @@ pre_filter = "project-pre"
         )
         .expect("durable report");
 
-        assert!(!Path::new(
-            state["out_of_scope_report_artifact"]
-                .as_str()
-                .expect("artifact"),
-        )
-        .starts_with(root));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn out_of_scope_report_rejects_a_dangling_database_symlink() {
-        use std::os::unix::fs::symlink;
-
-        let root = test_project_root("durable-report-dangling-symlink");
-        let planned: Value = serde_json::from_str(&plan(&json!({
-            "changed_files": ["src/lib.rs"],
-            "diff_hash": "report-symlink",
-            "project_root": root
-        })))
-        .expect("plan json");
-        let mut state = planned["state"].clone();
-        let database = durable_report_database_path(
-            state["scope"]["project_root"].as_str().expect("root"),
-            state.get("work_item_id").and_then(Value::as_str),
-        )
-        .expect("database path");
-        fs::create_dir_all(database.parent().expect("database parent")).expect("report directory");
-        symlink(root.join("outside.sqlite"), &database).expect("database symlink");
-
-        assert!(append_out_of_scope_report(
-            &mut state,
-            &json!({ "out_of_scope": [{ "id": "finding-1", "lens": "release-integration" }] }),
-            None,
-        )
-        .is_err());
+        assert!(!state["out_of_scope_report_artifact"]
+            .as_str()
+            .is_some_and(|artifact| artifact.contains(root.to_str().expect("root"))));
     }
 
     #[test]

@@ -547,6 +547,8 @@ install_promptfoo_cache_launcher() {
   [ -n "$output" ]
   run rg 'ReportReplacedV1' "$TMPROOT/final-review-project/.development-discipline-state/development-discipline/final-review-sessions/events"
   [ "$status" -eq 0 ]
+  run rg 'SnapshotV1' "$TMPROOT/final-review-project/.development-discipline-state/development-discipline/final-review-sessions/events"
+  [ "$status" -eq 0 ]
   run find "$TMPROOT/final-review-project/.development-discipline-state" -type f -name '*.sqlite*'
   [ "$status" -eq 0 ]
   [ -z "$output" ]

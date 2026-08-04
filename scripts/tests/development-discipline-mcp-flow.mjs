@@ -99,7 +99,8 @@ async function requestFromFreshServer(payload) {
     });
   });
   const response = responses.find((candidate) => candidate.id === payload.id);
-  if (!response) throw new Error("fresh MCP process did not return the requested response");
+  if (!response)
+    throw new Error("fresh MCP process did not return the requested response");
   return response;
 }
 
@@ -423,7 +424,9 @@ const routingRiskArguments = {
   scope: "base",
   project_root: routingRoot,
   harness: "codex",
-  changed_files: ["plugins/development-system/components/development-discipline/rust/src/main.rs"],
+  changed_files: [
+    "plugins/development-system/components/development-discipline/rust/src/main.rs",
+  ],
   diff_hash: "routing",
   shared_test_evidence: sharedTestEvidence(
     "tests-bats-codex-routing",
@@ -753,7 +756,9 @@ const ticketResumeResponse = await requestFromFreshServer({
   },
 });
 if (!ticketResumeResponse.result) {
-  throw new Error(`fresh process did not resume pending verifier: ${JSON.stringify(ticketResumeResponse)}`);
+  throw new Error(
+    `fresh process did not resume pending verifier: ${JSON.stringify(ticketResumeResponse)}`,
+  );
 }
 const ticketResumed = JSON.parse(ticketResumeResponse.result.content[0].text);
 if (
@@ -761,56 +766,55 @@ if (
   JSON.stringify(ticketResumed.state) !== JSON.stringify(ticketState) ||
   ticketResumed.revision < 2
 ) {
-  throw new Error("fresh process did not restore the exact pending verifier state");
+  throw new Error(
+    "fresh process did not restore the exact pending verifier state",
+  );
 }
-const ticketAdvancedResponse = await request(
-  {
-    jsonrpc: "2.0",
-    id: 20,
-    method: "tools/call",
-    params: {
-      name: "final_review.advance",
-      arguments: {
-        state: ticketState,
-        lens_results: ticketLensResults,
-        current_diff_hash: "ticket-evidence",
-        unrelated_follow_ups: [
+const ticketAdvancedResponse = await requestFromFreshServer({
+  jsonrpc: "2.0",
+  id: 20,
+  method: "tools/call",
+  params: {
+    name: "final_review.advance",
+    arguments: {
+      state: ticketState,
+      lens_results: ticketLensResults,
+      current_diff_hash: "ticket-evidence",
+      unrelated_follow_ups: [
+        {
+          finding_id: "material-auth-regression",
+          lens: "correctness-behavior",
+          ticket_reference: "BACKLOG-SEC-1",
+        },
+      ],
+      verifier_result: {
+        subagent_key: ticketVerifier.subagent_key,
+        assignment_id: ticketVerifier.assignment_id,
+        model_role: ticketVerifier.model_role,
+        status: "verified",
+        verdicts: [
           {
             finding_id: "material-auth-regression",
             lens: "correctness-behavior",
-            ticket_reference: "BACKLOG-SEC-1",
+            verdict: "confirmed",
+            severity: "MINOR",
+            causality: "caused",
+            causality_evidence:
+              "The diff causes only a minor diagnostic disclosure.",
+            security_impact: "minor",
+            safety_impact: "none",
+            rationale: "The confirmed impact belongs in the backlog.",
           },
         ],
-        verifier_result: {
-          subagent_key: ticketVerifier.subagent_key,
-          assignment_id: ticketVerifier.assignment_id,
+        caller_attestation: {
           model_role: ticketVerifier.model_role,
-          status: "verified",
-          verdicts: [
-            {
-              finding_id: "material-auth-regression",
-              lens: "correctness-behavior",
-              verdict: "confirmed",
-              severity: "MINOR",
-              causality: "caused",
-              causality_evidence:
-                "The diff causes only a minor diagnostic disclosure.",
-              security_impact: "minor",
-              safety_impact: "none",
-              rationale: "The confirmed impact belongs in the backlog.",
-            },
-          ],
-          caller_attestation: {
-            model_role: ticketVerifier.model_role,
-            fresh_context: true,
-            closed_after_result: true,
-          },
+          fresh_context: true,
+          closed_after_result: true,
         },
       },
     },
   },
-  false,
-);
+});
 if (!ticketAdvancedResponse.result) {
   throw new Error(
     `verifier ticket resubmission failed: ${JSON.stringify(ticketAdvancedResponse)}`,
@@ -826,6 +830,15 @@ if (
     "BACKLOG-SEC-1"
 ) {
   throw new Error("verifier ticket evidence did not advance the MCP session");
+}
+if (
+  !ticketAdvanced.state.out_of_scope_report_artifact?.startsWith(
+    "eventcore://development-discipline/final-review-sessions/",
+  )
+) {
+  throw new Error(
+    "retained final-review report did not expose an Eventcore locator",
+  );
 }
 
 child.stdin.end();

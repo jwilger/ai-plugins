@@ -48,15 +48,26 @@ iteration sees the current diff.
 Session identifiers are bounded to 128 characters, and requested clean
 iterations are bounded to 3-10 to cap assignment fanout.
 The caller carries returned state between calls, while the coordinator stores a
-project-scoped authoritative copy in its local SQLite state database. A new
-stdio MCP process automatically resumes an exact caller-carried state, including
-pending verifier and delta-risk assignments. Creation is insert-only and every
-transition uses a durable revision compare-and-swap, so concurrent processes
-cannot admit duplicate sessions or overwrite each other's progress. Unknown,
-evicted, stale, or mutated state fails closed with sanitized expected/received
-fingerprints and a restart, resume, or abandon recovery action; advancing a
-completed session also fails. Each process retains at most 32 active sessions,
-and durable storage is bounded independently.
+project-scoped authoritative copy as typed Eventcore-fs events in the
+project-scoped user-state store. A new stdio MCP process automatically resumes
+an exact caller-carried state, including pending verifier and delta-risk
+assignments. Creation is insert-only and every transition uses a durable
+revision compare-and-swap, so concurrent processes cannot admit duplicate
+sessions or overwrite each other's progress. Unknown, evicted, stale, or
+mutated state fails closed with sanitized expected/received fingerprints and a
+restart, resume, or abandon recovery action; advancing a completed session also
+fails. Each process retains at most 32 active sessions, and durable storage is
+bounded independently.
+
+Retained out-of-scope reports are persisted in the same event store. The
+returned `out_of_scope_report_artifact` is an opaque locator of the form
+`eventcore://development-discipline/final-review-sessions/<stream>?report_binding_id=<id>`;
+it is not a filesystem path or a direct-client API. Read it through
+`final_review.out_of_scope_report` with the authoritative review `state`. New
+flows create no SQLite report artifact. For one release, SQLite remains only a
+read-only import source for legacy session state: the coordinator may import it
+when the corresponding Eventcore stream is empty and the legacy state is
+unambiguous, but SQLite is never the authority or a write target.
 When an advance returns `verifier_required`, the server retains the pending
 assignment ID and exact core pre-verifier arguments. Until the caller resubmits
 the same lens, scope, and caller-decision arguments plus the matching

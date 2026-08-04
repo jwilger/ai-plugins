@@ -324,16 +324,19 @@ behavior.
 
 When the review is for a tracked ticket, pass its stable tracker ID as
 `work_item_id` to `final_review.plan` (for example, the active Beads task ID).
-The coordinator stores one current SQLite snapshot per worktree and
-work item in user state (`$XDG_STATE_HOME`, or `~/.local/state` as fallback),
-not in the reviewed repository or in per-session files. Each completed review
-transition replaces that binding's old lens rows, including stale conditional
-lenses; the returned `out_of_scope_report_artifact` path is the single report
-location. Without a tracker ID, the coordinator uses a stable worktree/scope/
-base binding so restarted non-ticketed reviews also replace stale rows.
-Use `final_review.out_of_scope_report` with the authoritative review `state` to
-read that current snapshot; it returns the complete retained findings without
-requiring a separate SQLite client.
+The coordinator persists final-review sessions and retained out-of-scope
+reports as typed Eventcore-fs events in a project-scoped user-state store
+(`$XDG_STATE_HOME`, or `~/.local/state` as fallback), not in the reviewed
+repository or in per-session files. Each completed review transition updates
+that binding's current report, replacing stale conditional-lens findings.
+Without a tracker ID, the coordinator uses a stable worktree/scope/base binding
+so restarted non-ticketed reviews update the same report. The returned
+`out_of_scope_report_artifact` is an opaque locator of the form
+`eventcore://development-discipline/final-review-sessions/<stream>?report_binding_id=<id>`;
+it is neither a filesystem path nor a direct-client API. Use
+`final_review.out_of_scope_report` with the authoritative review `state` to read
+the complete current retained findings. New flows create no SQLite report
+artifact.
 
 Use a security-impact assessment separate from review severity: `none`,
 `minor`, `moderate`, `major`, or `critical`. Do not infer this threshold from a
