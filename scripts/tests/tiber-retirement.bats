@@ -452,6 +452,36 @@ setup() {
   [ "$after_hashes" = "$before_hashes" ]
 }
 
+@test "Tiber list and next apply claim events appended after a board snapshot" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Claim after snapshot"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber create --title "Next after snapshot"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  first_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Claim after snapshot.*/\1/p' <<<"$output")"
+  second_ticket_id="$(sed -n 's/.*id=\([^ ]*\).*title=Next after snapshot.*/\1/p' <<<"$output")"
+  [ -n "$first_ticket_id" ]
+  [ -n "$second_ticket_id" ]
+  snapshot_before="$(jq -r '.cursor' "$project/.development-system/tiber/store/checkpoints/board-projection-v1.json")"
+
+  run bash -c 'cd "$1" && "$2" tiber claim "$3" --owner alice' _ "$project" "$CLI" "$first_ticket_id"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$first_ticket_id title=Claim after snapshot owner=alice"* ]]
+  snapshot_after="$(jq -r '.cursor' "$project/.development-system/tiber/store/checkpoints/board-projection-v1.json")"
+  [ "$snapshot_after" != "$snapshot_before" ]
+
+  run bash -c 'cd "$1" && "$2" tiber next' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$second_ticket_id title=Next after snapshot owner=unclaimed"* ]]
+  [[ "$output" != *"id=$first_ticket_id"* ]]
+}
+
 @test "Tiber persists board priorities with backward-compatible defaults" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
