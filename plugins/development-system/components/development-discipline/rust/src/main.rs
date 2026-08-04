@@ -340,12 +340,15 @@ impl ReviewCoordinator {
                         .pointer("/state/session_id")
                         .and_then(Value::as_str)
                     {
-                        if let Some(assignment) = self
-                            .pending_delta_risks
-                            .get(session_id)
-                            .and_then(|pending| pending.assignment.clone())
-                        {
-                            invocation_arguments["__persisted_delta_risk_assignment"] = assignment;
+                        if let Some(pending) = self.pending_delta_risks.get(session_id) {
+                            if pending_delta_risk_core_arguments(&arguments).ok()
+                                == Some(pending.arguments.clone())
+                            {
+                                if let Some(assignment) = pending.assignment.clone() {
+                                    invocation_arguments["__persisted_delta_risk_assignment"] =
+                                        assignment;
+                                }
+                            }
                         }
                     }
                 }
@@ -21502,8 +21505,28 @@ pre_filter = "project-pre"
                 }
             }))
             .expect("changed resubmission response");
+        assert_eq!(
+            changed_response["error"]["message"],
+            "pending_delta_risk_changed_scope_requires_fresh_assessment=true"
+        );
+
+        changed_resubmission
+            .as_object_mut()
+            .expect("changed resubmission object")
+            .remove("delta_risk_assessment");
+        let replacement_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": changed_resubmission
+                }
+            }))
+            .expect("fresh-scope replacement response");
         let replacement: Value = serde_json::from_str(
-            changed_response["result"]["content"][0]["text"]
+            replacement_response["result"]["content"][0]["text"]
                 .as_str()
                 .expect("replacement assignment text"),
         )
@@ -21528,7 +21551,7 @@ pre_filter = "project-pre"
         let advanced_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
-                "id": 5,
+                "id": 6,
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.advance",
