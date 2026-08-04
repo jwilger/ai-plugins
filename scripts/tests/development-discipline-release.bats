@@ -31,12 +31,18 @@ setup() {
   local codex_version
   local claude_version
   local runtime_version
+  local runtime_target
 
   codex_version="$(jq -r .version "$ROOT/plugins/development-system/components/development-discipline/.codex-plugin/plugin.json")"
   claude_version="$(jq -r .version "$ROOT/plugins/development-system/components/development-discipline/.claude-plugin/plugin.json")"
+  case "$(uname -m)" in
+    x86_64) runtime_target="x86_64-unknown-linux-musl" ;;
+    aarch64 | arm64) runtime_target="aarch64-unknown-linux-musl" ;;
+    *) skip "no packaged development-discipline runtime for host architecture $(uname -m)" ;;
+  esac
 
   run bash -c 'printf "%s\\n" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}" | "$1" | jq -r ".result.serverInfo.version"' _ \
-    "$ROOT/plugins/development-system/components/development-discipline/dist/x86_64-unknown-linux-musl/development-discipline-mcp"
+    "$ROOT/plugins/development-system/components/development-discipline/dist/$runtime_target/development-discipline-mcp"
 
   [ "$status" -eq 0 ]
   runtime_version="$output"
