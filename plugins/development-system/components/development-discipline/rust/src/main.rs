@@ -44,8 +44,6 @@ const MAX_LENS_DESCRIPTION_CHARS: usize = 512;
 const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_WORK_ITEM_ID_CHARS: usize = 256;
 const MAX_ACTIVE_REVIEW_SESSIONS: usize = 32;
-#[cfg(test)]
-const MAX_DURABLE_REVIEW_SESSIONS: usize = 1024;
 const MAX_RETAINED_HISTORY_ENTRIES: usize = 64;
 const MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES: usize = 128;
 const MAX_RETAINED_DEFERRED_FINDINGS: usize = MAX_FINDINGS_PER_ITERATION;
@@ -6806,19 +6804,6 @@ struct RestoredReviewSession {
     pending_delta_risk: Option<PendingVerifier>,
 }
 
-#[cfg(test)]
-fn encoded_pending_assignment(pending: Option<&PendingVerifier>) -> Result<Option<String>, String> {
-    pending
-        .map(|pending| {
-            serde_json::to_string(&json!({
-                "assignment_id": pending.assignment_id,
-                "arguments": pending.arguments
-            }))
-            .map_err(|error| format!("review_session_pending_encode_failed source={error}"))
-        })
-        .transpose()
-}
-
 fn decoded_pending_assignment(encoded: Option<String>) -> Result<Option<PendingVerifier>, String> {
     encoded
         .map(|encoded| {
@@ -7082,87 +7067,6 @@ fn read_eventcore_report(state: &Value) -> Result<Option<Vec<Value>>, String> {
         } if binding == report_binding_id => Some(findings),
         _ => None,
     }))
-}
-
-#[cfg(test)]
-fn persist_legacy_authoritative_session(
-    state: &Value,
-    pending_verifier: Option<&PendingVerifier>,
-    pending_delta_risk: Option<&PendingVerifier>,
-    updated_at: u64,
-    expected_prior_state: Option<&Value>,
-    expected_revision: Option<u64>,
-) -> Result<u64, String> {
-    let project_root = state
-        .pointer("/scope/project_root")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
-    let session_id = state
-        .get("session_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "review_session_id_required=true".to_string())?;
-    let path = durable_report_database_path(
-        project_root,
-        state.get("work_item_id").and_then(Value::as_str),
-    )?;
-    let directory = path
-        .parent()
-        .ok_or_else(|| "review_session_directory_missing=true".to_string())?;
-    fs::create_dir_all(directory)
-        .map_err(|error| format!("review_session_directory_create_failed source={error}"))?;
-    let mut connection = Connection::open_with_flags(
-        &path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(|error| format!("review_session_open_failed source={error}"))?;
-    initialize_durable_report_schema(&connection)?;
-    let state_json = serde_json::to_string(state)
-        .map_err(|error| format!("review_session_encode_failed source={error}"))?;
-    let pending_verifier_json = encoded_pending_assignment(pending_verifier)?;
-    let pending_delta_risk_json = encoded_pending_assignment(pending_delta_risk)?;
-    let transaction = connection
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|error| format!("review_session_transaction_failed source={error}"))?;
-    let next_revision = expected_revision.unwrap_or(0).saturating_add(1);
-    let changed = if let Some(expected_prior_state) = expected_prior_state {
-        let expected_json = serde_json::to_string(expected_prior_state)
-            .map_err(|error| format!("review_session_encode_failed source={error}"))?;
-        transaction
-            .execute(
-                "UPDATE final_review_session SET state_json = ?2, pending_verifier_json = ?3, pending_delta_risk_json = ?4, updated_at = ?5, revision = ?7 WHERE session_id = ?1 AND state_json = ?6 AND revision = ?8",
-                params![session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, expected_json, next_revision, expected_revision],
-            )
-            .map_err(|error| format!("review_session_write_failed source={error}"))?
-    } else {
-        transaction
-            .execute(
-                "INSERT OR IGNORE INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, next_revision],
-            )
-            .map_err(|error| format!("review_session_write_failed source={error}"))?
-    };
-    if changed == 0 {
-        return Err(if expected_prior_state.is_some() {
-            "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
-                .to_string()
-        } else {
-            "review_session_exists=true recovery=resume_existing_review_or_abandon_it_before_restarting"
-                .to_string()
-        });
-    }
-    replace_durable_out_of_scope_report(&transaction, state)?;
-    transaction
-        .execute(
-            "DELETE FROM final_review_session WHERE session_id <> ?1 AND session_id NOT IN (SELECT session_id FROM final_review_session WHERE session_id <> ?1 ORDER BY updated_at DESC, revision DESC, session_id DESC LIMIT ?2)",
-            params![session_id, MAX_DURABLE_REVIEW_SESSIONS.saturating_sub(1)],
-        )
-        .map_err(|error| format!("review_session_prune_failed source={error}"))?;
-    transaction
-        .commit()
-        .map_err(|error| format!("review_session_commit_failed source={error}"))?;
-    Ok(next_revision)
 }
 
 fn load_legacy_authoritative_session(
