@@ -1,6 +1,7 @@
 name: Forge development-discipline macOS candidate
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - "artifact-build/development-discipline/**"
