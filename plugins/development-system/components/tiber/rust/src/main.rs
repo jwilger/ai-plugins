@@ -1,3 +1,7 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -6,7 +10,9 @@ use eventcore::{
     StreamDeclarations, StreamId,
 };
 use eventcore_fs::FileEventStore;
-use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStore};
+use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStore, StreamPosition};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 mod application;
 mod domain;
 mod workflow;
@@ -14,10 +20,7 @@ mod workflow;
 use application::{
     AddTicketDependency, ClaimTicket, CompleteTicket, PrioritizeTicket, RemoveTicketDependency,
 };
-use domain::{
-    apply_board_dependency_state, apply_ticket_state, BoardDependencyState, TicketEvent,
-    TicketState,
-};
+use domain::{apply_ticket_state, TicketEvent, TicketState};
 use workflow::{
     RecordDiscoveryEvidence, RecordWorkflowTestEvent, WorkflowEvent, WorkflowProjection,
     WORKFLOW_STREAM,
@@ -298,125 +301,230 @@ struct BoardTicketRow {
     blocked_by: Vec<String>,
 }
 
+const BOARD_PROJECTION_REVISION: u8 = 1;
+const BOARD_PROJECTION_FILE: &str = "board-projection-v1.json";
+const BOARD_PROJECTION_BATCH_SIZE: usize = 100;
+
+#[derive(Default, Serialize, Deserialize)]
+struct BoardProjection {
+    tickets: BTreeMap<String, ProjectedTicket>,
+    priorities: BTreeMap<String, u8>,
+    dependencies: BTreeMap<String, BTreeSet<String>>,
+    completed: BTreeSet<String>,
+    next_creation_position: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProjectedTicket {
+    title: String,
+    owner: Option<String>,
+    completed: bool,
+    creation_position: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct BoardProjectionSnapshot {
+    revision: u8,
+    cursor: Option<String>,
+    projection: BoardProjection,
+}
+
+impl BoardProjection {
+    fn apply(&mut self, event: TicketEvent) {
+        match event {
+            TicketEvent::TicketCreatedV1 { ticket_id, title } => {
+                let ticket_id = ticket_id.to_string();
+                self.tickets.entry(ticket_id).or_insert_with(|| {
+                    let creation_position = self.next_creation_position;
+                    self.next_creation_position += 1;
+                    ProjectedTicket {
+                        title,
+                        owner: None,
+                        completed: false,
+                        creation_position,
+                    }
+                });
+            }
+            TicketEvent::TicketClaimedV1 { ticket_id, owner } => {
+                if let Some(ticket) = self.tickets.get_mut(ticket_id.as_str()) {
+                    if !ticket.completed {
+                        ticket.owner = Some(owner);
+                    }
+                }
+            }
+            TicketEvent::TicketClaimReleasedV1 { ticket_id, owner } => {
+                if let Some(ticket) = self.tickets.get_mut(ticket_id.as_str()) {
+                    if ticket.owner.as_deref() == Some(owner.as_str()) {
+                        ticket.owner = None;
+                    }
+                }
+            }
+            TicketEvent::TicketCompletedV1 { ticket_id, owner } => {
+                if let Some(ticket) = self.tickets.get_mut(ticket_id.as_str()) {
+                    if ticket.owner.as_deref() == Some(owner.as_str()) {
+                        ticket.owner = None;
+                        ticket.completed = true;
+                        self.completed.insert(ticket_id.to_string());
+                    }
+                }
+            }
+            TicketEvent::BoardTicketPrioritySetV1 {
+                ticket_id,
+                priority,
+                ..
+            } => {
+                self.priorities.insert(ticket_id.to_string(), priority);
+            }
+            TicketEvent::BoardTicketDependencyAddedV1 {
+                ticket_id,
+                dependency_id,
+                ..
+            } => {
+                self.dependencies
+                    .entry(ticket_id.to_string())
+                    .or_default()
+                    .insert(dependency_id.to_string());
+            }
+            TicketEvent::BoardTicketDependencyRemovedV1 {
+                ticket_id,
+                dependency_id,
+                ..
+            } => {
+                if let Some(dependencies) = self.dependencies.get_mut(ticket_id.as_str()) {
+                    dependencies.remove(dependency_id.as_str());
+                }
+            }
+            TicketEvent::BoardTicketCompletedV1 { ticket_id, .. } => {
+                self.completed.insert(ticket_id.to_string());
+            }
+            TicketEvent::BoardTicketClaimedV1 { .. }
+            | TicketEvent::BoardTicketClaimReleasedV1 { .. } => {}
+        }
+    }
+
+    fn rows(self) -> Vec<BoardTicketRow> {
+        let mut rows = self
+            .tickets
+            .into_iter()
+            .map(|(ticket_id, ticket)| BoardTicketRow {
+                priority: self.priorities.get(&ticket_id).copied().unwrap_or(2),
+                creation_position: ticket.creation_position,
+                blocked_by: self
+                    .dependencies
+                    .get(&ticket_id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|dependency_id| !self.completed.contains(*dependency_id))
+                    .cloned()
+                    .collect(),
+                ticket_id,
+                title: ticket.title,
+                state: TicketState {
+                    exists: true,
+                    owner: ticket.owner,
+                    completed: ticket.completed,
+                },
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| {
+            left.priority
+                .cmp(&right.priority)
+                .then(left.creation_position.cmp(&right.creation_position))
+                .then(left.ticket_id.cmp(&right.ticket_id))
+        });
+        rows
+    }
+}
+
+fn board_projection_path(store_root: &Path) -> PathBuf {
+    store_root.join("checkpoints").join(BOARD_PROJECTION_FILE)
+}
+
+fn load_board_projection(store_root: &Path) -> (BoardProjection, Option<StreamPosition>) {
+    let path = board_projection_path(store_root);
+    let Ok(contents) = fs::read_to_string(path) else {
+        return (BoardProjection::default(), None);
+    };
+    let Ok(snapshot) = serde_json::from_str::<BoardProjectionSnapshot>(&contents) else {
+        return (BoardProjection::default(), None);
+    };
+    if snapshot.revision != BOARD_PROJECTION_REVISION {
+        return (BoardProjection::default(), None);
+    }
+    let cursor = match snapshot.cursor {
+        None => None,
+        Some(cursor) => match Uuid::parse_str(&cursor) {
+            Ok(cursor) => Some(StreamPosition::new(cursor)),
+            Err(_) => return (BoardProjection::default(), None),
+        },
+    };
+    (snapshot.projection, cursor)
+}
+
+fn save_board_projection(
+    store_root: &Path,
+    projection: BoardProjection,
+    cursor: Option<StreamPosition>,
+) -> Result<(), String> {
+    let path = board_projection_path(store_root);
+    let parent = path
+        .parent()
+        .expect("board projection has parent directory");
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let snapshot = BoardProjectionSnapshot {
+        revision: BOARD_PROJECTION_REVISION,
+        cursor: cursor.map(|cursor| cursor.into_inner().to_string()),
+        projection,
+    };
+    let contents = serde_json::to_vec(&snapshot).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension("json.tmp");
+    let mut file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
+    file.write_all(&contents)
+        .map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    fs::rename(temporary, path).map_err(|error| error.to_string())
+}
+
 fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
     let store_root = match std::env::current_dir() {
         Ok(directory) => directory.join(".development-system/tiber/store"),
         Err(error) => return Err(error.to_string()),
     };
-    let store = match FileEventStore::open(store_root) {
+    let store = match FileEventStore::open(&store_root) {
         Ok(store) => store,
         Err(error) => return Err(error.to_string()),
     };
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     runtime
         .block_on(async {
-            let mut page = EventPage::first(BatchSize::new(100));
-            let mut tickets = std::collections::BTreeMap::new();
-            let mut priorities = std::collections::BTreeMap::new();
-            let mut dependencies = BoardDependencyState::default();
-            let mut creation_position = 0_u64;
+            let (mut projection, cursor) = load_board_projection(&store_root);
+            let mut page = cursor.map_or_else(
+                || EventPage::first(BatchSize::new(BOARD_PROJECTION_BATCH_SIZE)),
+                |cursor| EventPage::after(cursor, BatchSize::new(BOARD_PROJECTION_BATCH_SIZE)),
+            );
+            let mut last_position = cursor;
             loop {
                 let events = store
                     .read_events::<TicketEvent>(EventFilter::all(), page)
-                    .await?;
+                    .await
+                    .map_err(|error| error.to_string())?;
                 let next_page = page.next_from_results(&events);
-                for (event, _) in events {
-                    dependencies = apply_board_dependency_state(dependencies, &event);
-                    match event {
-                        TicketEvent::TicketCreatedV1 { ticket_id, title } => {
-                            let state = apply_ticket_state(
-                                TicketState::default(),
-                                &ticket_id,
-                                &TicketEvent::TicketCreatedV1 {
-                                    ticket_id: ticket_id.clone(),
-                                    title: title.clone(),
-                                },
-                            );
-                            tickets
-                                .insert(ticket_id.to_string(), (title, state, creation_position));
-                            creation_position += 1;
-                        }
-                        TicketEvent::TicketClaimedV1 { ticket_id, owner } => {
-                            if let Some((_, state, _)) = tickets.get_mut(ticket_id.as_str()) {
-                                *state = apply_ticket_state(
-                                    std::mem::take(state),
-                                    &ticket_id,
-                                    &TicketEvent::TicketClaimedV1 {
-                                        ticket_id: ticket_id.clone(),
-                                        owner,
-                                    },
-                                );
-                            }
-                        }
-                        TicketEvent::TicketClaimReleasedV1 { ticket_id, owner } => {
-                            if let Some((_, state, _)) = tickets.get_mut(ticket_id.as_str()) {
-                                *state = apply_ticket_state(
-                                    std::mem::take(state),
-                                    &ticket_id,
-                                    &TicketEvent::TicketClaimReleasedV1 {
-                                        ticket_id: ticket_id.clone(),
-                                        owner,
-                                    },
-                                );
-                            }
-                        }
-                        TicketEvent::TicketCompletedV1 { ticket_id, owner } => {
-                            if let Some((_, state, _)) = tickets.get_mut(ticket_id.as_str()) {
-                                *state = apply_ticket_state(
-                                    std::mem::take(state),
-                                    &ticket_id,
-                                    &TicketEvent::TicketCompletedV1 {
-                                        ticket_id: ticket_id.clone(),
-                                        owner,
-                                    },
-                                );
-                            }
-                        }
-                        TicketEvent::BoardTicketPrioritySetV1 {
-                            ticket_id,
-                            priority,
-                            ..
-                        } => {
-                            priorities.insert(ticket_id.to_string(), priority);
-                        }
-                        TicketEvent::BoardTicketClaimedV1 { .. }
-                        | TicketEvent::BoardTicketClaimReleasedV1 { .. }
-                        | TicketEvent::BoardTicketCompletedV1 { .. }
-                        | TicketEvent::BoardTicketDependencyAddedV1 { .. }
-                        | TicketEvent::BoardTicketDependencyRemovedV1 { .. } => {}
-                    }
+                for (event, position) in events {
+                    projection.apply(event);
+                    last_position = Some(position);
                 }
                 let Some(next_page) = next_page else {
                     break;
                 };
                 page = next_page;
             }
-            Ok::<_, eventcore_types::EventStoreError>((tickets, priorities, dependencies))
+            save_board_projection(&store_root, projection, last_position)?;
+            Ok::<_, String>(())
         })
-        .map_err(|error| error.to_string())
-        .map(|(tickets, priorities, dependencies)| {
-            let mut rows = tickets
-                .into_iter()
-                .map(|(ticket_id, (title, state, creation_position))| {
-                    let priority = priorities.get(&ticket_id).copied().unwrap_or(2);
-                    let blocked_by = dependencies.unresolved_dependencies(&ticket_id);
-                    BoardTicketRow {
-                        priority,
-                        creation_position,
-                        ticket_id,
-                        title,
-                        state,
-                        blocked_by,
-                    }
-                })
-                .collect::<Vec<_>>();
-            rows.sort_by(|left, right| {
-                left.priority
-                    .cmp(&right.priority)
-                    .then(left.creation_position.cmp(&right.creation_position))
-                    .then(left.ticket_id.cmp(&right.ticket_id))
-            });
-            rows
+        .map_err(|error| error)
+        .and_then(|()| {
+            let (projection, _) = load_board_projection(&store_root);
+            Ok(projection.rows())
         })
 }
 

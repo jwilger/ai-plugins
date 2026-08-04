@@ -397,6 +397,38 @@ setup() {
   [[ "$output" == *"id=$ticket_id title=Paged ticket owner=bob"* ]]
 }
 
+@test "Tiber list materializes a rebuildable board snapshot after replaying long Eventcore history" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Snapshot boundary"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  ticket_id="$(sed -n 's/.*id=\([^ ]*\).*/\1/p' <<<"$output")"
+  [ -n "$ticket_id" ]
+
+  run bash -c '
+    set -euo pipefail
+    cd "$1"
+    "$2" tiber claim "$3" --owner alice >/dev/null
+    for ((cycle = 0; cycle < 25; cycle++)); do
+      "$2" tiber release "$3" --owner alice >/dev/null
+      "$2" tiber claim "$3" --owner alice >/dev/null
+    done
+  ' _ "$project" "$CLI" "$ticket_id"
+  [ "$status" -eq 0 ]
+  before_hashes="$(find "$project/.development-system/tiber/store/events" -name '*.jsonl' -print0 | sort -z | xargs -0 sha256sum)"
+
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$ticket_id title=Snapshot boundary owner=alice"* ]]
+  [ -f "$project/.development-system/tiber/store/checkpoints/board-projection-v1.json" ]
+  after_hashes="$(find "$project/.development-system/tiber/store/events" -name '*.jsonl' -print0 | sort -z | xargs -0 sha256sum)"
+  [ "$after_hashes" = "$before_hashes" ]
+}
+
 @test "Tiber persists board priorities with backward-compatible defaults" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
