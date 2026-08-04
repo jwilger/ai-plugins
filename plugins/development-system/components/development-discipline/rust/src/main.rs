@@ -791,6 +791,14 @@ fn pending_delta_risk_assignment(
     pending: &PendingVerifier,
 ) -> Result<Value, String> {
     if let Some(assignment) = &pending.assignment {
+        if let Some(artifact_reference) = assignment
+            .pointer("/delta_evidence/artifact_reference")
+            .and_then(Value::as_str)
+        {
+            if !Path::new(artifact_reference).is_file() {
+                return Err("pending_delta_risk_artifact_missing=true".to_string());
+            }
+        }
         return Ok(assignment.clone());
     }
 
@@ -23660,6 +23668,73 @@ pre_filter = "project-pre"
         assert_eq!(
             resumed["error"]["message"],
             "legacy_pending_delta_assignment_unrecoverable=true recovery=resubmit_fresh_scope_without_assessment"
+        );
+    }
+
+    #[test]
+    fn json_rpc_resume_rejects_a_pending_delta_with_a_missing_artifact() {
+        let session_id = format!("missing-delta-artifact-{}", std::process::id());
+        let project_root = test_project_root("missing-delta-artifact");
+        let plan_arguments = assessed_plan_arguments_for_diff_at_root(
+            &session_id,
+            "missing-delta-artifact-v1",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            Some(&project_root),
+        );
+        let mut original = ReviewCoordinator::default();
+        let planned = original
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": plan_arguments }
+            }))
+            .expect("plan response");
+        let plan: Value = serde_json::from_str(
+            planned["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+        let missing_artifact = project_root.join("missing.patch");
+        let pending = PendingVerifier {
+            assignment_id: "stored-assignment".to_string(),
+            arguments: json!({}),
+            assignment: Some(json!({
+                "assignment_id": "stored-assignment",
+                "delta_evidence": {
+                    "artifact_reference": missing_artifact,
+                    "artifact_digest": "0123456789012345678901234567890123456789"
+                }
+            })),
+        };
+        persist_authoritative_session(
+            &plan["state"],
+            None,
+            Some(&pending),
+            1,
+            Some(&plan["state"]),
+            Some(1),
+        )
+        .expect("persist pending delta");
+
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.resume",
+                    "arguments": { "session_id": session_id, "project_root": project_root }
+                }
+            }))
+            .expect("resume response");
+        assert_eq!(
+            resumed["error"]["message"],
+            "pending_delta_risk_artifact_missing=true"
         );
     }
 
