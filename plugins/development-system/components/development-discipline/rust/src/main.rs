@@ -7234,6 +7234,9 @@ fn load_authoritative_session(
             )
         })
         .count() as u64;
+    if store_revision > 0 && revision == 0 {
+        return Err("review_session_event_stream_invalid=true".to_string());
+    }
     if let Some(restored) = events
         .into_iter()
         .rev()
@@ -24516,6 +24519,62 @@ pre_filter = "project-pre"
         match load_authoritative_session(&caller_state, session_id) {
             Ok(_) => panic!("a mismatched legacy snapshot must not be imported"),
             Err(error) => assert_eq!(error, "review_session_legacy_identity_mismatch=true"),
+        }
+    }
+
+    #[test]
+    fn legacy_session_import_rejects_a_nonempty_stream_without_a_snapshot() {
+        let project_root = test_project_root("report-only-event-stream");
+        let mut caller_state = add_test_risk_assessment(
+            json!({
+                "session_id": format!("report-only-event-stream-{}", std::process::id()),
+                "project_root": project_root,
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "report-only-event-stream"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        caller_state["scope"]["project_root"] = json!(project_root);
+        let session_id = caller_state["session_id"].as_str().expect("session id");
+        let stream_id = review_session_stream_id(&caller_state, session_id).expect("stream id");
+        let store = FileEventStore::open(review_session_store_root().expect("store root"))
+            .expect("open Eventcore store");
+        let writes = StreamWrites::new()
+            .register_stream(stream_id.clone(), StreamVersion::new(0))
+            .expect("register stream")
+            .append(ReviewSessionEvent::ReportReplacedV1 {
+                stream_id,
+                report_binding_id: "report-only-binding".to_string(),
+                findings: vec![],
+            })
+            .expect("append report event");
+        tokio::runtime::Runtime::new()
+            .expect("runtime")
+            .block_on(store.append_events(writes))
+            .expect("persist report-only event");
+        drop(store);
+
+        let database = durable_report_database_path(
+            project_root.to_str().expect("project root"),
+            caller_state.get("work_item_id").and_then(Value::as_str),
+        )
+        .expect("legacy database path");
+        fs::create_dir_all(database.parent().expect("database parent"))
+            .expect("create legacy database parent");
+        let connection = Connection::open(&database).expect("open legacy database");
+        initialize_durable_report_schema(&connection).expect("initialize legacy schema");
+        connection
+            .execute(
+                "INSERT INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, NULL, NULL, 1, 7)",
+                params![session_id, serde_json::to_string(&caller_state).expect("encode legacy state")],
+            )
+            .expect("insert legacy session");
+
+        match load_authoritative_session(&caller_state, session_id) {
+            Ok(_) => panic!("a report-only Eventcore stream must fail closed"),
+            Err(error) => assert_eq!(error, "review_session_event_stream_invalid=true"),
         }
     }
 }
