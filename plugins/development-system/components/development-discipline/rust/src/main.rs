@@ -334,11 +334,26 @@ impl ReviewCoordinator {
                         return Ok(error_response(id, -32602, &error));
                     }
                 }
+                let mut invocation_arguments = arguments.clone();
+                if name == "final_review.advance" {
+                    if let Some(session_id) = arguments
+                        .pointer("/state/session_id")
+                        .and_then(Value::as_str)
+                    {
+                        if let Some(assignment) = self
+                            .pending_delta_risks
+                            .get(session_id)
+                            .and_then(|pending| pending.assignment.clone())
+                        {
+                            invocation_arguments["__persisted_delta_risk_assignment"] = assignment;
+                        }
+                    }
+                }
                 let now_epoch_seconds = (self.now_epoch_seconds)();
                 let result = if name == "final_review.resume" {
                     self.resume_authoritative_state(&arguments)
                 } else {
-                    call_tool_at(name, &arguments, now_epoch_seconds)
+                    call_tool_at(name, &invocation_arguments, now_epoch_seconds)
                 };
                 match result {
                     Ok(result) => {
@@ -2497,11 +2512,17 @@ fn compile_risk_plan(
     let assessment = assessment
         .as_object()
         .ok_or_else(|| "risk_assessment_must_be_object=true".to_string())?;
-    let expected_payload: Value = serde_json::from_str(&risk_assessment_result(arguments)?)
-        .map_err(|error| format!("risk_assessment_binding_parse_failed source={error}"))?;
-    let expected_assignment = expected_payload
-        .pointer("/assignments/0")
-        .ok_or_else(|| "risk_assessment_binding_assignment_missing=true".to_string())?;
+    let expected_assignment: Value =
+        if let Some(assignment) = arguments.get("__persisted_delta_risk_assignment") {
+            assignment.clone()
+        } else {
+            let expected_payload: Value = serde_json::from_str(&risk_assessment_result(arguments)?)
+                .map_err(|error| format!("risk_assessment_binding_parse_failed source={error}"))?;
+            expected_payload
+                .pointer("/assignments/0")
+                .cloned()
+                .ok_or_else(|| "risk_assessment_binding_assignment_missing=true".to_string())?
+        };
     for field in ["assignment_id", "subagent_key"] {
         if assessment.get(field).and_then(Value::as_str)
             != expected_assignment.get(field).and_then(Value::as_str)
@@ -2509,7 +2530,7 @@ fn compile_risk_plan(
             return Err(risk_assessment_identity_mismatch(
                 field,
                 assessment,
-                expected_assignment,
+                &expected_assignment,
             ));
         }
     }
@@ -2523,10 +2544,10 @@ fn compile_risk_plan(
         return Err(risk_assessment_identity_mismatch(
             "shared_test_evidence_id",
             assessment,
-            expected_assignment,
+            &expected_assignment,
         ));
     }
-    validate_risk_assessment_caller_attestation(assessment, expected_assignment)?;
+    validate_risk_assessment_caller_attestation(assessment, &expected_assignment)?;
     let overall_risk = assessment
         .get("overall_risk")
         .and_then(Value::as_str)
@@ -5031,12 +5052,19 @@ fn advance_with_contract_validation_at(
             let current_changed_files = current_changed_files.as_ref().ok_or_else(|| {
                 "current_changed_files_required_when_diff_changes=true".to_string()
             })?;
-            let current_delta_evidence = generated_delta_evidence(
-                &state,
-                prior_diff_hash,
-                current_diff_hash,
-                current_changed_files,
-            )?;
+            let persisted_assignment = arguments.get("__persisted_delta_risk_assignment");
+            let current_delta_evidence = match persisted_assignment {
+                Some(assignment) => assignment
+                    .get("delta_evidence")
+                    .cloned()
+                    .ok_or_else(|| "persisted_delta_risk_evidence_required=true".to_string())?,
+                None => generated_delta_evidence(
+                    &state,
+                    prior_diff_hash,
+                    current_diff_hash,
+                    current_changed_files,
+                )?,
+            };
             if lens_results
                 .as_array()
                 .is_none_or(|results| !results.is_empty())
@@ -5061,13 +5089,19 @@ fn advance_with_contract_validation_at(
                 "verifier_rejected": []
             });
             validate_caller_decisions(&state, &empty_filtered, &caller_decisions)?;
-            let (_, assignment) = delta_risk_assignment(
-                &state,
-                current_diff_hash,
-                current_changed_files,
-                &current_shared_test_evidence,
-                &current_delta_evidence,
-            )?;
+            let assignment = match persisted_assignment {
+                Some(assignment) => assignment.clone(),
+                None => {
+                    delta_risk_assignment(
+                        &state,
+                        current_diff_hash,
+                        current_changed_files,
+                        &current_shared_test_evidence,
+                        &current_delta_evidence,
+                    )?
+                    .1
+                }
+            };
             let Some(delta_risk_assessment) = arguments.get("delta_risk_assessment") else {
                 return Ok(json!({
                     "state": state,
@@ -5100,6 +5134,7 @@ fn advance_with_contract_validation_at(
                 current_changed_files,
                 current_shared_test_evidence,
                 current_delta_evidence,
+                persisted_assignment,
                 delta_risk_assessment,
                 DeltaTransitionContext {
                     caller_decisions: &caller_decisions,
@@ -5411,6 +5446,7 @@ fn apply_delta_risk_reassessment(
     current_changed_files: &[String],
     current_shared_test_evidence: Value,
     current_delta_evidence: Value,
+    persisted_assignment: Option<&Value>,
     delta_risk_assessment: &Value,
     transition: DeltaTransitionContext<'_>,
 ) -> Result<String, String> {
@@ -5464,6 +5500,9 @@ fn apply_delta_risk_reassessment(
         &current_shared_test_evidence,
         &current_delta_evidence,
     )?;
+    if let Some(assignment) = persisted_assignment {
+        delta_arguments["__persisted_delta_risk_assignment"] = assignment.clone();
+    }
     delta_arguments["risk_assessment"] = delta_risk_assessment.clone();
     let compiled = compile_risk_plan(&delta_arguments, current_changed_files)?
         .ok_or_else(|| "delta_risk_assessment_compile_failed=true".to_string())?;
@@ -23610,6 +23649,13 @@ pre_filter = "project-pre"
             required["delta_risk_assignments"]
         );
 
+        fs::create_dir_all(project_root.join("src")).expect("create changed source directory");
+        fs::write(
+            project_root.join("src/lib.rs"),
+            "checkout changed after assignment\n",
+        )
+        .expect("move checkout after persisting assignment");
+
         let mut resumed_resubmission = resubmission;
         resumed_resubmission["delta_risk_assessment"] = delta_risk_assessment_for(
             &resumed["delta_risk_assignments"][0],
@@ -23630,6 +23676,14 @@ pre_filter = "project-pre"
             advanced.get("result").is_some(),
             "the resumed assignment must be accepted: {advanced}"
         );
+        let advanced: Value = serde_json::from_str(
+            advanced["result"]["content"][0]["text"]
+                .as_str()
+                .expect("advanced delta text"),
+        )
+        .expect("advanced delta json");
+        assert_eq!(advanced["transition_status"], "advanced");
+        assert_eq!(advanced["advance_kind"], "delta_reassessment");
     }
 
     #[test]
