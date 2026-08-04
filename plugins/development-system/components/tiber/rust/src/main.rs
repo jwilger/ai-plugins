@@ -521,10 +521,9 @@ fn replay_board_rows() -> Result<Vec<BoardTicketRow>, String> {
             save_board_projection(&store_root, projection, last_position)?;
             Ok::<_, String>(())
         })
-        .map_err(|error| error)
-        .and_then(|()| {
+        .map(|()| {
             let (projection, _) = load_board_projection(&store_root);
-            Ok(projection.rows())
+            projection.rows()
         })
 }
 
