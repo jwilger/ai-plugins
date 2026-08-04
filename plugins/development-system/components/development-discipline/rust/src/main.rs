@@ -24638,4 +24638,39 @@ pre_filter = "project-pre"
         assert_eq!(second.revision, 1);
         assert_eq!(second.state, caller_state);
     }
+
+    #[test]
+    fn locked_store_does_not_retain_a_planned_review_session() {
+        let project_root = test_project_root("locked-plan");
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": format!("locked-plan-{}", std::process::id()),
+                "project_root": project_root,
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "locked-plan"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let session_id = plan_arguments["session_id"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+        let _held_store = FileEventStore::open(review_session_store_root().expect("store root"))
+            .expect("hold Eventcore store lock");
+        let mut coordinator = ReviewCoordinator::default();
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": plan_arguments }
+            }))
+            .expect("locked plan response");
+
+        assert_eq!(response["error"]["message"], "review_session_busy=true");
+        assert!(!coordinator.sessions.contains_key(&session_id));
+        assert!(!coordinator.session_revisions.contains_key(&session_id));
+    }
 }
