@@ -7328,9 +7328,18 @@ fn load_legacy_authoritative_session(
         .optional()
         .map_err(|error| format!("review_session_read_failed source={error}"))?
         .map(|(state, verifier, delta, revision)| {
+            let state: Value = serde_json::from_str(&state)
+                .map_err(|error| format!("review_session_state_parse_failed source={error}"))?;
+            if state.get("session_id").and_then(Value::as_str) != Some(session_id)
+                || state.pointer("/scope/project_root").and_then(Value::as_str)
+                    != Some(project_root)
+                || state.get("work_item_id").and_then(Value::as_str)
+                    != caller_state.get("work_item_id").and_then(Value::as_str)
+            {
+                return Err("review_session_legacy_identity_mismatch=true".to_string());
+            }
             Ok(RestoredReviewSession {
-                state: serde_json::from_str(&state)
-                    .map_err(|error| format!("review_session_state_parse_failed source={error}"))?,
+                state,
                 pending_verifier: decoded_pending_assignment(verifier)?,
                 pending_delta_risk: decoded_pending_assignment(delta)?,
                 revision,
@@ -24428,5 +24437,45 @@ pre_filter = "project-pre"
         };
 
         assert_eq!(error, "review_session_busy=true");
+    }
+
+    #[test]
+    fn legacy_session_import_rejects_a_mismatched_embedded_session_identity() {
+        let project_root = test_project_root("legacy-session-identity");
+        let mut caller_state = add_test_risk_assessment(
+            json!({
+                "session_id": format!("legacy-session-identity-{}", std::process::id()),
+                "project_root": project_root,
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "legacy-identity"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        caller_state["scope"]["project_root"] = json!(project_root);
+        let session_id = caller_state["session_id"].as_str().expect("session id");
+        let database = durable_report_database_path(
+            project_root.to_str().expect("project root"),
+            caller_state.get("work_item_id").and_then(Value::as_str),
+        )
+        .expect("legacy database path");
+        fs::create_dir_all(database.parent().expect("database parent"))
+            .expect("create legacy database parent");
+        let connection = Connection::open(&database).expect("open legacy database");
+        initialize_durable_report_schema(&connection).expect("initialize legacy schema");
+        let mut mismatched_state = caller_state.clone();
+        mismatched_state["session_id"] = json!("different-legacy-session");
+        connection
+            .execute(
+                "INSERT INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, NULL, NULL, 1, 7)",
+                params![session_id, serde_json::to_string(&mismatched_state).expect("encode legacy state")],
+            )
+            .expect("insert legacy session");
+
+        match load_authoritative_session(&caller_state, session_id) {
+            Ok(_) => panic!("a mismatched legacy snapshot must not be imported"),
+            Err(error) => assert_eq!(error, "review_session_legacy_identity_mismatch=true"),
+        }
     }
 }
