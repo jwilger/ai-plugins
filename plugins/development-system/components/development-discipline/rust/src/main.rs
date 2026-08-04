@@ -238,9 +238,7 @@ impl Event for ReviewSessionEvent {
         match self {
             Self::SnapshotV1 { stream_id, .. }
             | Self::ImportedFromSqliteV1 { stream_id, .. }
-            | Self::ReportReplacedV1 { stream_id, .. } => {
-                stream_id
-            }
+            | Self::ReportReplacedV1 { stream_id, .. } => stream_id,
         }
     }
 
@@ -6838,42 +6836,84 @@ fn decoded_pending_assignment(encoded: Option<String>) -> Result<Option<PendingV
 
 fn review_session_store_root() -> Result<PathBuf, String> {
     Ok(durable_report_state_root(
-        env::var_os("XDG_STATE_HOME").filter(|value| !value.is_empty()).map(PathBuf::from),
-        env::var_os("HOME").filter(|value| !value.is_empty()).map(PathBuf::from),
-    )?.join("development-discipline/final-review-sessions"))
+        env::var_os("XDG_STATE_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
+        env::var_os("HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
+    )?
+    .join("development-discipline/final-review-sessions"))
 }
 
 fn review_session_stream_id(state: &Value, session_id: &str) -> Result<StreamId, String> {
-    let project_root = state.pointer("/scope/project_root").and_then(Value::as_str)
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
         .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
-    let work_item_id = state.get("work_item_id").and_then(Value::as_str).unwrap_or("");
-    StreamId::try_new(format!("final-review-session-{}", stable_storage_digest(&[
-        "development-discipline-final-review-session-v1", project_root, work_item_id, session_id,
-    ]))).map_err(|error| format!("review_session_stream_id_invalid source={error}"))
+    let work_item_id = state
+        .get("work_item_id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    StreamId::try_new(format!(
+        "final-review-session-{}",
+        stable_storage_digest(&[
+            "development-discipline-final-review-session-v1",
+            project_root,
+            work_item_id,
+            session_id,
+        ])
+    ))
+    .map_err(|error| format!("review_session_stream_id_invalid source={error}"))
 }
 
 fn session_from_event(event: ReviewSessionEvent, revision: u64) -> Option<RestoredReviewSession> {
     match event {
-        ReviewSessionEvent::SnapshotV1 { state, pending_verifier, pending_delta_risk, .. }
-        | ReviewSessionEvent::ImportedFromSqliteV1 { state, pending_verifier, pending_delta_risk, .. } =>
-            Some(RestoredReviewSession { state, revision, pending_verifier, pending_delta_risk }),
+        ReviewSessionEvent::SnapshotV1 {
+            state,
+            pending_verifier,
+            pending_delta_risk,
+            ..
+        }
+        | ReviewSessionEvent::ImportedFromSqliteV1 {
+            state,
+            pending_verifier,
+            pending_delta_risk,
+            ..
+        } => Some(RestoredReviewSession {
+            state,
+            revision,
+            pending_verifier,
+            pending_delta_risk,
+        }),
         ReviewSessionEvent::ReportReplacedV1 { .. } => None,
     }
 }
 
-fn read_eventcore_session(state: &Value, session_id: &str) -> Result<Option<RestoredReviewSession>, String> {
+fn read_eventcore_session(
+    state: &Value,
+    session_id: &str,
+) -> Result<Option<RestoredReviewSession>, String> {
     let stream_id = review_session_stream_id(state, session_id)?;
     let store = FileEventStore::open(review_session_store_root()?)
         .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
-    let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("review_session_runtime_failed source={error}"))?;
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
     let events = runtime.block_on(async {
-        let stream = store.read_stream::<ReviewSessionEvent>(stream_id).await
+        let stream = store
+            .read_stream::<ReviewSessionEvent>(stream_id)
+            .await
             .map_err(|error| format!("review_session_read_failed source={error}"))?;
-        collect_events(stream).await.map_err(|error| format!("review_session_replay_failed source={error}"))
+        collect_events(stream)
+            .await
+            .map_err(|error| format!("review_session_replay_failed source={error}"))
     })?;
     drop(store);
     let revision = events.len() as u64;
-    Ok(events.into_iter().rev().find_map(|event| session_from_event(event, revision)))
+    Ok(events
+        .into_iter()
+        .rev()
+        .find_map(|event| session_from_event(event, revision)))
 }
 
 fn persist_authoritative_session(
@@ -6884,7 +6924,9 @@ fn persist_authoritative_session(
     expected_prior_state: Option<&Value>,
     expected_revision: Option<u64>,
 ) -> Result<u64, String> {
-    let session_id = state.get("session_id").and_then(Value::as_str)
+    let session_id = state
+        .get("session_id")
+        .and_then(Value::as_str)
         .ok_or_else(|| "review_session_id_required=true".to_string())?;
     let stream_id = review_session_stream_id(state, session_id)?;
     let expected = expected_revision.unwrap_or(0);
@@ -6898,27 +6940,49 @@ fn persist_authoritative_session(
     let store = FileEventStore::open(review_session_store_root()?)
         .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
     let event = ReviewSessionEvent::SnapshotV1 {
-        stream_id: stream_id.clone(), session_id: session_id.to_string(), state: state.clone(),
-        pending_verifier: pending_verifier.cloned(), pending_delta_risk: pending_delta_risk.cloned(), updated_at,
+        stream_id: stream_id.clone(),
+        session_id: session_id.to_string(),
+        state: state.clone(),
+        pending_verifier: pending_verifier.cloned(),
+        pending_delta_risk: pending_delta_risk.cloned(),
+        updated_at,
     };
-    let report_binding_id = state.get("report_binding_id").and_then(Value::as_str)
+    let report_binding_id = state
+        .get("report_binding_id")
+        .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
-    let findings = state.get("out_of_scope_report").and_then(Value::as_array)
-        .cloned().unwrap_or_default();
+    let findings = state
+        .get("out_of_scope_report")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let report = ReviewSessionEvent::ReportReplacedV1 {
-        stream_id: stream_id.clone(), report_binding_id: report_binding_id.to_string(), findings,
+        stream_id: stream_id.clone(),
+        report_binding_id: report_binding_id.to_string(),
+        findings,
     };
     let writes = StreamWrites::new()
         .register_stream(stream_id, StreamVersion::new(expected as usize))
         .map_err(|error| format!("review_session_write_prepare_failed source={error}"))?
-        .append(event).map_err(|error| format!("review_session_write_prepare_failed source={error}"))?
-        .append(report).map_err(|error| format!("review_session_write_prepare_failed source={error}"))?;
-    let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("review_session_runtime_failed source={error}"))?;
-    runtime.block_on(store.append_events(writes)).map_err(|error| {
-        if matches!(error, eventcore_types::EventStoreError::VersionConflict { .. }) {
-            "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review".to_string()
-        } else { format!("review_session_write_failed source={error}") }
-    })?;
+        .append(event)
+        .map_err(|error| format!("review_session_write_prepare_failed source={error}"))?
+        .append(report)
+        .map_err(|error| format!("review_session_write_prepare_failed source={error}"))?;
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
+    runtime
+        .block_on(store.append_events(writes))
+        .map_err(|error| {
+            if matches!(
+                error,
+                eventcore_types::EventStoreError::VersionConflict { .. }
+            ) {
+                "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
+                    .to_string()
+            } else {
+                format!("review_session_write_failed source={error}")
+            }
+        })?;
     Ok(expected.saturating_add(2))
 }
 
@@ -6929,15 +6993,24 @@ fn load_authoritative_session(
     let stream_id = review_session_stream_id(caller_state, session_id)?;
     let store = FileEventStore::open(review_session_store_root()?)
         .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
-    let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("review_session_runtime_failed source={error}"))?;
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
     let events = runtime.block_on(async {
-        let stream = store.read_stream::<ReviewSessionEvent>(stream_id).await
+        let stream = store
+            .read_stream::<ReviewSessionEvent>(stream_id)
+            .await
             .map_err(|error| format!("review_session_read_failed source={error}"))?;
-        collect_events(stream).await.map_err(|error| format!("review_session_replay_failed source={error}"))
+        collect_events(stream)
+            .await
+            .map_err(|error| format!("review_session_replay_failed source={error}"))
     })?;
     drop(store);
     let revision = events.len() as u64;
-    if let Some(restored) = events.into_iter().rev().find_map(|event| session_from_event(event, revision)) {
+    if let Some(restored) = events
+        .into_iter()
+        .rev()
+        .find_map(|event| session_from_event(event, revision))
+    {
         return Ok(Some(restored));
     }
     let Some(legacy) = load_legacy_authoritative_session(caller_state, session_id)? else {
@@ -6947,38 +7020,61 @@ fn load_authoritative_session(
     let store = FileEventStore::open(review_session_store_root()?)
         .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
     let event = ReviewSessionEvent::ImportedFromSqliteV1 {
-        stream_id: stream_id.clone(), session_id: session_id.to_string(), state: legacy.state.clone(),
-        pending_verifier: legacy.pending_verifier.clone(), pending_delta_risk: legacy.pending_delta_risk.clone(),
+        stream_id: stream_id.clone(),
+        session_id: session_id.to_string(),
+        state: legacy.state.clone(),
+        pending_verifier: legacy.pending_verifier.clone(),
+        pending_delta_risk: legacy.pending_delta_risk.clone(),
         source_revision: legacy.revision,
     };
-    let writes = StreamWrites::new().register_stream(stream_id, StreamVersion::new(0))
+    let writes = StreamWrites::new()
+        .register_stream(stream_id, StreamVersion::new(0))
         .map_err(|error| format!("review_session_import_prepare_failed source={error}"))?
-        .append(event).map_err(|error| format!("review_session_import_prepare_failed source={error}"))?;
-    let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("review_session_runtime_failed source={error}"))?;
+        .append(event)
+        .map_err(|error| format!("review_session_import_prepare_failed source={error}"))?;
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
     match runtime.block_on(store.append_events(writes)) {
-        Ok(_) => Ok(Some(RestoredReviewSession { revision: 1, ..legacy })),
-        Err(eventcore_types::EventStoreError::VersionConflict { .. }) => load_authoritative_session(caller_state, session_id),
+        Ok(_) => Ok(Some(RestoredReviewSession {
+            revision: 1,
+            ..legacy
+        })),
+        Err(eventcore_types::EventStoreError::VersionConflict { .. }) => {
+            load_authoritative_session(caller_state, session_id)
+        }
         Err(error) => Err(format!("review_session_import_failed source={error}")),
     }
 }
 
 fn read_eventcore_report(state: &Value) -> Result<Option<Vec<Value>>, String> {
-    let session_id = state.get("session_id").and_then(Value::as_str)
+    let session_id = state
+        .get("session_id")
+        .and_then(Value::as_str)
         .ok_or_else(|| "review_session_id_required=true".to_string())?;
-    let report_binding_id = state.get("report_binding_id").and_then(Value::as_str)
+    let report_binding_id = state
+        .get("report_binding_id")
+        .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
     let stream_id = review_session_stream_id(state, session_id)?;
     let store = FileEventStore::open(review_session_store_root()?)
         .map_err(|error| format!("durable_report_store_open_failed source={error}"))?;
-    let runtime = tokio::runtime::Runtime::new().map_err(|error| format!("durable_report_runtime_failed source={error}"))?;
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| format!("durable_report_runtime_failed source={error}"))?;
     let events = runtime.block_on(async {
-        let stream = store.read_stream::<ReviewSessionEvent>(stream_id).await
+        let stream = store
+            .read_stream::<ReviewSessionEvent>(stream_id)
+            .await
             .map_err(|error| format!("durable_report_read_failed source={error}"))?;
-        collect_events(stream).await.map_err(|error| format!("durable_report_replay_failed source={error}"))
+        collect_events(stream)
+            .await
+            .map_err(|error| format!("durable_report_replay_failed source={error}"))
     })?;
     Ok(events.into_iter().rev().find_map(|event| match event {
-        ReviewSessionEvent::ReportReplacedV1 { report_binding_id: binding, findings, .. }
-            if binding == report_binding_id => Some(findings),
+        ReviewSessionEvent::ReportReplacedV1 {
+            report_binding_id: binding,
+            findings,
+            ..
+        } if binding == report_binding_id => Some(findings),
         _ => None,
     }))
 }
