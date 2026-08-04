@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use eventcore::{Event, StreamId};
 use eventcore_fs::{FileEventStore, FsEventStoreError};
@@ -73,6 +73,8 @@ const MAX_SPLIT_CANDIDATE_REASON_BYTES: usize = 2 * 1024;
 const MAX_SPLIT_DELIVERY_EVIDENCE_CHARS: usize = 512;
 const MAX_SPLIT_CANDIDATE_CRITERIA: usize = 32;
 const MAX_SPLIT_CANDIDATE_PATHS: usize = 256;
+const REVIEW_SESSION_STORE_LOCK_RETRIES: usize = 200;
+const REVIEW_SESSION_STORE_LOCK_RETRY_DELAY: Duration = Duration::from_millis(5);
 static OPAQUE_FINGERPRINT_HASHER: OnceLock<RandomState> = OnceLock::new();
 static SNAPSHOT_INDEX_COUNTER: AtomicU64 = AtomicU64::new(0);
 // This inventory is repeated once per lens assignment, while the full list is
@@ -7015,10 +7017,22 @@ fn review_session_store_root() -> Result<PathBuf, String> {
 }
 
 fn open_review_session_store() -> Result<FileEventStore, String> {
-    FileEventStore::open(review_session_store_root()?).map_err(|error| match error {
-        FsEventStoreError::StoreLocked { .. } => "review_session_busy=true".to_string(),
-        error => format!("review_session_store_open_failed source={error}"),
-    })
+    let root = review_session_store_root()?;
+    for attempt in 0..=REVIEW_SESSION_STORE_LOCK_RETRIES {
+        match FileEventStore::open(&root) {
+            Ok(store) => return Ok(store),
+            Err(FsEventStoreError::StoreLocked { .. })
+                if attempt < REVIEW_SESSION_STORE_LOCK_RETRIES =>
+            {
+                std::thread::sleep(REVIEW_SESSION_STORE_LOCK_RETRY_DELAY);
+            }
+            Err(FsEventStoreError::StoreLocked { .. }) => {
+                return Err("review_session_busy=true".to_string());
+            }
+            Err(error) => return Err(format!("review_session_store_open_failed source={error}")),
+        }
+    }
+    unreachable!("the bounded retry loop always returns")
 }
 
 fn review_session_stream_id(state: &Value, session_id: &str) -> Result<StreamId, String> {
@@ -10818,6 +10832,7 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
 mod tests {
     use super::*;
     use std::io::{BufReader, Cursor};
+    use std::sync::{Arc, Barrier};
 
     fn test_project_root(name: &str) -> PathBuf {
         let root = env::temp_dir()
@@ -24203,12 +24218,38 @@ pre_filter = "project-pre"
             .get("result")
             .is_some());
 
-        let winning = first
-            .handle_json_rpc(&advance(3, "winning-report"))
-            .expect("winning transition");
+        let first_advance = advance(3, "first-report");
+        let second_advance = advance(4, "second-report");
+        let barrier = Arc::new(Barrier::new(3));
+        let (first_response, second_response) = std::thread::scope(|scope| {
+            let first_barrier = Arc::clone(&barrier);
+            let first = scope.spawn(move || {
+                first_barrier.wait();
+                ReviewCoordinator::default()
+                    .handle_json_rpc(&first_advance)
+                    .expect("first transition response")
+            });
+            let second_barrier = Arc::clone(&barrier);
+            let second = scope.spawn(move || {
+                second_barrier.wait();
+                ReviewCoordinator::default()
+                    .handle_json_rpc(&second_advance)
+                    .expect("second transition response")
+            });
+            barrier.wait();
+            (
+                first.join().expect("first transition thread"),
+                second.join().expect("second transition thread"),
+            )
+        });
+        let (winning, winning_report, losing) = if first_response.get("result").is_some() {
+            (first_response, "first-report", second_response)
+        } else {
+            (second_response, "second-report", first_response)
+        };
         assert!(
             winning.get("result").is_some(),
-            "winning transition failed: {winning}"
+            "exactly one concurrent transition must win: {winning}"
         );
         let winning_payload: Value = serde_json::from_str(
             winning["result"]["content"][0]["text"]
@@ -24216,20 +24257,19 @@ pre_filter = "project-pre"
                 .expect("winning transition text"),
         )
         .expect("winning transition json");
-        let losing = second
-            .handle_json_rpc(&advance(4, "losing-report"))
-            .expect("losing transition response");
-
-        assert!(losing["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("review_state_out_of_sync=true")));
+        assert!(
+            losing["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("review_state_out_of_sync=true")),
+            "the simultaneous loser must receive a sanitized stale-state result: {losing}"
+        );
         let report: Value = serde_json::from_str(
             &out_of_scope_report(&json!({ "state": winning_payload["state"] }))
                 .expect("durable report"),
         )
         .expect("durable report json");
         assert_eq!(
-            report["findings"][0]["id"], "winning-report",
+            report["findings"][0]["id"], winning_report,
             "the losing transition must not overwrite the durable report"
         );
     }

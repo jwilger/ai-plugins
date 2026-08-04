@@ -1,15 +1,15 @@
 {
-  "source_fingerprint": "af7a6bf98742296bd4529eac40af4971ad2b27fc046fad380066243be887495c",
+  "source_fingerprint": "1805a05abe32599d8b7bdf44741864ce88b47318f8aabaa430143cd1e6dae272",
   "binaries": [
     {
       "target": "aarch64-unknown-linux-musl",
       "path": "dist/aarch64-unknown-linux-musl/development-discipline-mcp",
-      "sha256": "9395a21c1b80164637f5ba32836fd097b46fbdde28012277a01de115a807f5b8"
+      "sha256": "3a45ea02fe4617f765fc4973dec10f2ab8040ebf3993c566be80c0e3fa60c1cd"
     },
     {
       "target": "x86_64-unknown-linux-musl",
       "path": "dist/x86_64-unknown-linux-musl/development-discipline-mcp",
-      "sha256": "065c2f41d69410f5474fbc0f988f289785d0a539eac63955b74235014dc437f1"
+      "sha256": "d01b39b0860f48cacc0ace8ca63b96eb03aabf4bca2bee59223fcd4ad8a0154a"
     }
   ]
 }
