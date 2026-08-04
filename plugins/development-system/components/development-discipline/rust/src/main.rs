@@ -5142,11 +5142,11 @@ fn advance_with_contract_validation_at(
                 current_changed_files,
                 current_shared_test_evidence,
                 current_delta_evidence,
-                persisted_assignment,
                 delta_risk_assessment,
                 DeltaTransitionContext {
                     caller_decisions: &caller_decisions,
                     now_epoch_seconds,
+                    persisted_assignment,
                 },
             );
         } else if arguments.get("current_shared_test_evidence").is_some() {
@@ -5446,6 +5446,7 @@ fn advance_with_contract_validation_at(
 struct DeltaTransitionContext<'a> {
     caller_decisions: &'a [Value],
     now_epoch_seconds: u64,
+    persisted_assignment: Option<&'a Value>,
 }
 
 fn apply_delta_risk_reassessment(
@@ -5454,7 +5455,6 @@ fn apply_delta_risk_reassessment(
     current_changed_files: &[String],
     current_shared_test_evidence: Value,
     current_delta_evidence: Value,
-    persisted_assignment: Option<&Value>,
     delta_risk_assessment: &Value,
     transition: DeltaTransitionContext<'_>,
 ) -> Result<String, String> {
@@ -5508,7 +5508,7 @@ fn apply_delta_risk_reassessment(
         &current_shared_test_evidence,
         &current_delta_evidence,
     )?;
-    if let Some(assignment) = persisted_assignment {
+    if let Some(assignment) = transition.persisted_assignment {
         delta_arguments["__persisted_delta_risk_assignment"] = assignment.clone();
     }
     delta_arguments["risk_assessment"] = delta_risk_assessment.clone();

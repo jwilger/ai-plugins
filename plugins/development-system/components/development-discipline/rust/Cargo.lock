@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "development-discipline-mcp"
-version = "0.21.8"
+version = "0.21.9"
 dependencies = [
  "eventcore",
  "eventcore-fs",
