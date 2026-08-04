@@ -429,6 +429,29 @@ setup() {
   [ "$after_hashes" = "$before_hashes" ]
 }
 
+@test "Tiber rebuilds a malformed derived board snapshot without changing Eventcore history" {
+  project="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$project"
+
+  run bash -c 'cd "$1" && "$2" tiber create --title "Recover derived state"' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+  [ "$status" -eq 0 ]
+  ticket_id="$(sed -n 's/.*id=\([^ ]*\).*/\1/p' <<<"$output")"
+  [ -n "$ticket_id" ]
+  before_hashes="$(find "$project/.development-system/tiber/store/events" -name '*.jsonl' -print0 | sort -z | xargs -0 sha256sum)"
+
+  printf '{ malformed snapshot\n' >"$project/.development-system/tiber/store/checkpoints/board-projection-v1.json"
+  run bash -c 'cd "$1" && "$2" tiber list' _ "$project" "$CLI"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"id=$ticket_id title=Recover derived state owner=unclaimed"* ]]
+  run jq -e '.revision == 1 and .cursor != null' "$project/.development-system/tiber/store/checkpoints/board-projection-v1.json"
+  [ "$status" -eq 0 ]
+  after_hashes="$(find "$project/.development-system/tiber/store/events" -name '*.jsonl' -print0 | sort -z | xargs -0 sha256sum)"
+  [ "$after_hashes" = "$before_hashes" ]
+}
+
 @test "Tiber persists board priorities with backward-compatible defaults" {
   project="$BATS_TEST_TMPDIR/project"
   mkdir -p "$project"
