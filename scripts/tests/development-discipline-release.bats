@@ -27,6 +27,20 @@ setup() {
   [ "$output" = $'aarch64-unknown-linux-musl\nx86_64-unknown-linux-musl' ]
 }
 
+@test "development-discipline component manifests match the runtime version" {
+  run bash -c '
+    cargo_version="$(grep "^version = " "$1" | head -n 1 | cut -d "\"" -f 2)"
+    codex_version="$(jq -r .version "$2")"
+    claude_version="$(jq -r .version "$3")"
+    [ "$cargo_version" = "$codex_version" ] && [ "$cargo_version" = "$claude_version" ]
+  ' _ \
+    "$ROOT/plugins/development-system/components/development-discipline/rust/Cargo.toml" \
+    "$ROOT/plugins/development-system/components/development-discipline/.codex-plugin/plugin.json" \
+    "$ROOT/plugins/development-system/components/development-discipline/.claude-plugin/plugin.json"
+
+  [ "$status" -eq 0 ]
+}
+
 @test "development-discipline release builder does not require a macOS forge artifact" {
   run env -u DEVELOPMENT_DISCIPLINE_MACOS_UNIVERSAL_BINARY \
     -u DEVELOPMENT_DISCIPLINE_MACOS_ARTIFACT_ENVELOPE \

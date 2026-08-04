@@ -382,7 +382,10 @@ install_promptfoo_cache_launcher() {
     '  *) exit 2 ;;' \
     'esac' >"$fake_uname"
   chmod +x "$fake_uname"
-  resolved_uname="$(readlink -f /run/current-system/sw/bin/uname)"
+  # Mirror the production resolver so this test is portable to GitHub Ubuntu
+  # as well as NixOS.
+  source "$ROOT/plugins/development-system/components/development-discipline/scripts/detect-target.sh"
+  resolved_uname="$(readlink -f "$(development_discipline_resolve_uname)")"
 
   run "$AI_PLUGINS_BWRAP_BIN" \
     --ro-bind / / \
