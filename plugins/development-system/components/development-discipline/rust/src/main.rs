@@ -567,7 +567,10 @@ impl ReviewCoordinator {
             .and_then(Value::as_str)
             .ok_or_else(|| "internal tool result session missing".to_string())?
             .to_string();
-        if tool_name == "final_review.plan" && self.sessions.contains_key(&session_id) {
+        if tool_name == "final_review.plan"
+            && (self.sessions.contains_key(&session_id)
+                || load_authoritative_session(&state, &session_id)?.is_some())
+        {
             return Err("review_session_exists=true".to_string());
         }
         if tool_name == "final_review.plan"
@@ -6800,6 +6803,7 @@ fn initialize_durable_report_schema(connection: &Connection) -> Result<(), Strin
 struct RestoredReviewSession {
     state: Value,
     revision: u64,
+    store_revision: u64,
     pending_verifier: Option<PendingVerifier>,
     pending_delta_risk: Option<PendingVerifier>,
 }
@@ -6857,7 +6861,11 @@ fn review_session_stream_id(state: &Value, session_id: &str) -> Result<StreamId,
     .map_err(|error| format!("review_session_stream_id_invalid source={error}"))
 }
 
-fn session_from_event(event: ReviewSessionEvent, revision: u64) -> Option<RestoredReviewSession> {
+fn session_from_event(
+    event: ReviewSessionEvent,
+    revision: u64,
+    store_revision: u64,
+) -> Option<RestoredReviewSession> {
     match event {
         ReviewSessionEvent::SnapshotV1 {
             state,
@@ -6873,6 +6881,7 @@ fn session_from_event(event: ReviewSessionEvent, revision: u64) -> Option<Restor
         } => Some(RestoredReviewSession {
             state,
             revision,
+            store_revision,
             pending_verifier,
             pending_delta_risk,
         }),
@@ -6899,11 +6908,21 @@ fn read_eventcore_session(
             .map_err(|error| format!("review_session_replay_failed source={error}"))
     })?;
     drop(store);
-    let revision = events.len() as u64;
+    let store_revision = events.len() as u64;
+    let revision = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                ReviewSessionEvent::SnapshotV1 { .. }
+                    | ReviewSessionEvent::ImportedFromSqliteV1 { .. }
+            )
+        })
+        .count() as u64;
     Ok(events
         .into_iter()
         .rev()
-        .find_map(|event| session_from_event(event, revision)))
+        .find_map(|event| session_from_event(event, revision, store_revision)))
 }
 
 fn persist_authoritative_session(
@@ -6920,13 +6939,27 @@ fn persist_authoritative_session(
         .ok_or_else(|| "review_session_id_required=true".to_string())?;
     let stream_id = review_session_stream_id(state, session_id)?;
     let expected = expected_revision.unwrap_or(0);
-    if let Some(prior) = expected_prior_state {
-        if let Some(restored) = read_eventcore_session(state, session_id)? {
-            if restored.state != *prior || restored.revision != expected {
-                return Err("review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review".to_string());
+    let expected_store_revision = match read_eventcore_session(state, session_id)? {
+        Some(restored) => {
+            if expected_prior_state.is_some()
+                && (restored.state != *expected_prior_state.expect("checked")
+                    || restored.revision != expected)
+            {
+                return Err(
+                    "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
+                        .to_string(),
+                );
             }
+            restored.store_revision
         }
-    }
+        None if expected_prior_state.is_some() => {
+            return Err(
+                "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
+                    .to_string(),
+            );
+        }
+        None => 0,
+    };
     let store = FileEventStore::open(review_session_store_root()?)
         .map_err(|error| format!("review_session_store_open_failed source={error}"))?;
     let event = ReviewSessionEvent::SnapshotV1 {
@@ -6952,7 +6985,10 @@ fn persist_authoritative_session(
         findings,
     };
     let writes = StreamWrites::new()
-        .register_stream(stream_id, StreamVersion::new(expected as usize))
+        .register_stream(
+            stream_id,
+            StreamVersion::new(expected_store_revision as usize),
+        )
         .map_err(|error| format!("review_session_write_prepare_failed source={error}"))?
         .append(event)
         .map_err(|error| format!("review_session_write_prepare_failed source={error}"))?
@@ -6973,7 +7009,7 @@ fn persist_authoritative_session(
                 format!("review_session_write_failed source={error}")
             }
         })?;
-    Ok(expected.saturating_add(2))
+    Ok(expected.saturating_add(1))
 }
 
 fn load_authoritative_session(
@@ -6995,11 +7031,21 @@ fn load_authoritative_session(
             .map_err(|error| format!("review_session_replay_failed source={error}"))
     })?;
     drop(store);
-    let revision = events.len() as u64;
+    let store_revision = events.len() as u64;
+    let revision = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                ReviewSessionEvent::SnapshotV1 { .. }
+                    | ReviewSessionEvent::ImportedFromSqliteV1 { .. }
+            )
+        })
+        .count() as u64;
     if let Some(restored) = events
         .into_iter()
         .rev()
-        .find_map(|event| session_from_event(event, revision))
+        .find_map(|event| session_from_event(event, revision, store_revision))
     {
         return Ok(Some(restored));
     }
@@ -7027,6 +7073,7 @@ fn load_authoritative_session(
     match runtime.block_on(store.append_events(writes)) {
         Ok(_) => Ok(Some(RestoredReviewSession {
             revision: 1,
+            store_revision: 1,
             ..legacy
         })),
         Err(eventcore_types::EventStoreError::VersionConflict { .. }) => {
@@ -7111,6 +7158,7 @@ fn load_legacy_authoritative_session(
                 pending_verifier: decoded_pending_assignment(verifier)?,
                 pending_delta_risk: decoded_pending_assignment(delta)?,
                 revision,
+                store_revision: revision,
             })
         })
         .transpose()
@@ -23458,9 +23506,10 @@ pre_filter = "project-pre"
 
     #[test]
     fn json_rpc_rejects_a_duplicate_plan_after_coordinator_restart() {
+        let session_id = format!("restarted-duplicate-review-{}", std::process::id());
         let plan_arguments = add_test_risk_assessment(
             json!({
-                "session_id": "restarted-duplicate-review",
+                "session_id": session_id,
                 "changed_files": ["src/new.rs"],
                 "diff_hash": "same"
             }),
