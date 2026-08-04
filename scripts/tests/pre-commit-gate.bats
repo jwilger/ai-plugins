@@ -9,14 +9,51 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"prettier --check \$(git ls-files --cached --others --exclude-standard -- '*.json' '*.md')"* ]]
-  [[ "$output" == *'cargo fmt'* ]]
-  [[ "$output" == *'cargo clippy'* ]]
-  [[ "$output" == *'cargo test'* ]]
+  [[ "$output" == *'scripts/check-development-system-rust.sh'* ]]
   [[ "$output" == *"bats \$(find plugins scripts -name '*.bats'"* ]]
   [[ "$output" == *"! -path 'scripts/tests/evals-code-quality-*.bats'"* ]]
   [[ "$output" == *"! -path 'scripts/tests/development-discipline-release-integration.bats'"* ]]
   [[ "$output" != *'check-development-discipline-release-from-source.sh'* ]]
   [[ "$output" != *'bats scripts/tests/evals-code-quality-'* ]]
+}
+
+@test "pre-commit runs the Rust quality gate for every shipped component" {
+  run just --justfile "$ROOT/justfile" --dry-run pre-commit
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'scripts/check-development-system-rust.sh'* ]]
+
+  run "$ROOT/scripts/check-development-system-rust.sh" --list-manifests
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'components/development-discipline/rust/Cargo.toml'* ]]
+  [[ "$output" == *'components/tiber/rust/Cargo.toml'* ]]
+}
+
+@test "the component Rust gate runs formatting, strict Clippy, and tests for each manifest" {
+  local fake_bin="$BATS_TEST_TMPDIR/fake-bin"
+  local invocation_log="$BATS_TEST_TMPDIR/cargo-invocations"
+
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/cargo" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$CARGO_INVOCATION_LOG"
+SH
+  chmod +x "$fake_bin/cargo"
+
+  run env \
+    PATH="$fake_bin:$PATH" \
+    CARGO_INVOCATION_LOG="$invocation_log" \
+    "$ROOT/scripts/check-development-system-rust.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$invocation_log")" -eq 6 ]
+  grep -Fq 'fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check' "$invocation_log"
+  grep -Fq 'clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings' "$invocation_log"
+  grep -Fq 'test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml -- --test-threads=1' "$invocation_log"
+  grep -Fq 'fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check' "$invocation_log"
+  grep -Fq 'clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings' "$invocation_log"
+  grep -Fq 'test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml -- --test-threads=1' "$invocation_log"
 }
 
 @test "full CI retains the explicitly expensive integration checks" {

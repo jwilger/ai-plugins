@@ -12,7 +12,7 @@ ci: pre-commit bats-expensive development-discipline-release-from-source
 # Every deterministic local check suitable for a commit hook.  The
 # source/distribution parity probe is deliberately CI-only because it performs
 # a release build and black-box integration run.
-pre-commit: validate-marketplace bootstrap-development-system node-tests github-actions beads-formulas development-discipline-rust development-discipline-release-complete bats-pre-commit
+pre-commit: validate-marketplace bootstrap-development-system node-tests github-actions beads-formulas development-system-rust development-discipline-release-complete bats-pre-commit
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
@@ -30,11 +30,12 @@ node-tests:
 beads-formulas:
     scripts/check-beads-formulas.sh
 
-# Rust gates for the development-discipline MCP coordinator.
-development-discipline-rust:
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml -- --test-threads=1
+# Rust gates for every shipped development-system component.
+development-system-rust:
+    scripts/check-development-system-rust.sh
+
+# Compatibility alias for callers that previously named the only component.
+development-discipline-rust: development-system-rust
 
 development-discipline-release-complete:
     cd plugins/development-system/components/development-discipline && sha256sum --check release-binaries.sha256
