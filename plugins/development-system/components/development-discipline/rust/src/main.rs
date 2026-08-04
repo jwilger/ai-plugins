@@ -1661,7 +1661,7 @@ fn generated_delta_evidence(
             .map(|path| format!(":(literal){path}")),
     );
     let counter = SNAPSHOT_INDEX_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let evidence_dir = env::temp_dir().join("development-discipline-delta-evidence");
+    let evidence_dir = review_session_store_root()?.join("delta-evidence");
     fs::create_dir_all(&evidence_dir)
         .map_err(|error| format!("delta_evidence_directory_failed source={error}"))?;
     let patch_path = evidence_dir.join(format!("{}-{counter}.patch", std::process::id()));
@@ -21060,6 +21060,14 @@ pre_filter = "project-pre"
             .to_string();
         assert!(assignment["delta_evidence"].get("inline_patch").is_none());
         assert!(Path::new(&artifact_reference).is_file());
+        assert!(
+            Path::new(&artifact_reference).starts_with(
+                review_session_store_root()
+                    .expect("durable review-session store root")
+                    .join("delta-evidence")
+            ),
+            "large delta evidence must survive temporary-directory cleanup"
+        );
 
         let assessment = delta_risk_assessment_for(
             assignment,
