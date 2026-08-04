@@ -206,8 +206,6 @@ TOML
     HOME="$HOME" \
     CARGO_HOME="$ROOT/.dependencies/cargo" \
     CODEX_HOME="$TMPROOT/codex-home" \
-    DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK=1 \
-    DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1 \
     FINAL_REVIEW_TEST_PROJECT_ROOT="$project_root" \
     FINAL_REVIEW_ROUTING_PROJECT_ROOT="$ROOT" \
     node "$ROOT/scripts/tests/development-discipline-mcp-flow.mjs" \
