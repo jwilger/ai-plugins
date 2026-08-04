@@ -575,6 +575,22 @@ impl ReviewCoordinator {
                 }
             }
             if let Some(pending) = self.pending_delta_risks.get(session_id) {
+                let resubmission = pending_delta_risk_non_scope_arguments(arguments)?;
+                let pending_arguments = pending_delta_risk_non_scope_arguments(&pending.arguments)?;
+                if resubmission != pending_arguments {
+                    return Err("pending_delta_risk_resubmission_mismatch=true".to_string());
+                }
+                let scope_changed =
+                    pending_delta_risk_core_arguments(arguments)? != pending.arguments;
+                if scope_changed {
+                    if arguments.get("delta_risk_assessment").is_some() {
+                        return Err(
+                            "pending_delta_risk_changed_scope_requires_fresh_assessment=true"
+                                .to_string(),
+                        );
+                    }
+                    return Ok(());
+                }
                 let assessment = arguments
                     .get("delta_risk_assessment")
                     .ok_or_else(|| "pending_delta_risk_assessment_required=true".to_string())?;
@@ -583,14 +599,6 @@ impl ReviewCoordinator {
                 {
                     return Err("pending_delta_risk_assignment_mismatch=true".to_string());
                 }
-                let resubmission = pending_delta_risk_non_scope_arguments(arguments)?;
-                let pending_arguments = pending_delta_risk_non_scope_arguments(&pending.arguments)?;
-                if resubmission != pending_arguments {
-                    return Err("pending_delta_risk_resubmission_mismatch=true".to_string());
-                }
-                // A changed scope or its test evidence invalidates the pending scout
-                // assignment. The lower transition replaces it with a newly bound
-                // assignment while every other pending argument remains frozen.
             }
         }
         self.touch_session(session_id);
@@ -23752,6 +23760,37 @@ pre_filter = "project-pre"
         assert_eq!(
             resumed["error"]["message"],
             "legacy_pending_delta_assignment_unrecoverable=true recovery=resubmit_fresh_scope_without_assessment"
+        );
+
+        let fresh_diff_hash = "unrecoverable-legacy-delta-v3";
+        let fresh_scope = json!({
+            "state": plan["state"],
+            "lens_results": [],
+            "current_diff_hash": fresh_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(fresh_diff_hash)
+        });
+        let superseded = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": { "name": "final_review.advance", "arguments": fresh_scope }
+            }))
+            .expect("fresh scope supersedes legacy assignment");
+        let superseded: Value = serde_json::from_str(
+            superseded["result"]["content"][0]["text"]
+                .as_str()
+                .expect("fresh delta text"),
+        )
+        .expect("fresh delta json");
+        assert_eq!(
+            superseded["transition_status"],
+            "delta_risk_assessment_required"
+        );
+        assert_ne!(
+            superseded["delta_risk_assignments"][0]["assignment_id"],
+            legacy_pending.assignment_id
         );
     }
 
