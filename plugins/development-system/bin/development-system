@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PACKAGE_ROOT="$(dirname "$SCRIPT_DIR")"
-
 die() {
   printf '%s\n' "$*" >&2
   exit 2
@@ -11,81 +8,6 @@ die() {
 
 warn() {
   printf 'development_system.warning %s\n' "$*"
-}
-
-usage() {
-  printf '%s\n' \
-    'usage: development-system <command> [options]' \
-    '' \
-    'commands:' \
-    '  setup --project <repo> --preset personal-trunk [--dry-run|--apply --yes]' \
-    '  tiber <command> [options]' \
-    '  integrations --harness all|claude|codex' \
-    '  doctor --project <repo> [--harness all|claude|codex]'
-}
-
-integration_usage() {
-  printf '%s\n' \
-    'usage: development-system integrations --harness all|claude|codex' \
-    '' \
-    'Print the read-only Beads, Context7, and Hindsight integration contract.' \
-    'Beads hooks are plugin-managed; Context7 and Hindsight actions require owner approval.'
-}
-
-is_allowed_claude_plugin() {
-  case "$1" in
-    development-system@* | context7@context7-marketplace | hindsight-memory@hindsight) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-has_disallowed_claude_enabled_plugin() {
-  local file=$1
-  local plugin
-  while IFS= read -r plugin; do
-    if ! is_allowed_claude_plugin "$plugin"; then
-      return 0
-    fi
-  done < <(
-    grep -Eo '"[^"]+@[^"]+"[[:space:]]*:[[:space:]]*true' "$file" |
-      sed -E 's/^"([^"]+)".*/\1/'
-  )
-  return 1
-}
-
-has_disallowed_claude_installed_plugin() {
-  local file=$1
-  local plugin
-  while IFS= read -r plugin; do
-    if ! is_allowed_claude_plugin "$plugin"; then
-      return 0
-    fi
-  done < <(
-    grep -Eo '"[^"]+@[^"]+"' "$file" |
-      sed -E 's/^"([^"]+)"$/\1/'
-  )
-  return 1
-}
-
-is_allowed_codex_plugin() {
-  case "$1" in
-    development-system | development-system@ai-plugins | context7@context7-marketplace) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-has_disallowed_codex_plugin() {
-  local file=$1
-  local plugin
-  while IFS= read -r plugin; do
-    if ! is_allowed_codex_plugin "$plugin"; then
-      return 0
-    fi
-  done < <(
-    grep -Eo '^\[plugins\.[^]]+\]' "$file" |
-      sed -E 's/^\[plugins\.("?)([^]"]+)\1\]$/\2/'
-  )
-  return 1
 }
 
 primary_checkout() {
@@ -111,66 +33,6 @@ require_primary_checkout() {
   fi
 }
 
-existing_config_enables_beads() {
-  local config_path=$1
-  awk '
-    {
-      line = $0
-      sub(/\r$/, "", line)
-      sub(/[[:space:]]*#.*/, "", line)
-      if (index(line, "\"\"\"") || index(line, "\047\047\047"))
-        multiline_string_delimiter_seen = 1
-      if (line ~ /^[[:space:]]*\[features\][[:space:]]*$/) {
-        feature_sections++
-        in_features = 1
-        next
-      }
-      if (line ~ /^[[:space:]]*\[/) {
-        in_features = 0
-        next
-      }
-      if (in_features && line ~ /^[[:space:]]*beads[[:space:]]*=/) {
-        beads_assignments++
-        if (line ~ /^[[:space:]]*beads[[:space:]]*=[[:space:]]*true[[:space:]]*$/)
-          enabled_assignments++
-      }
-    }
-    END {
-      exit !(multiline_string_delimiter_seen == 0 && feature_sections == 1 && beads_assignments == 1 && enabled_assignments == 1)
-    }
-  ' "$config_path"
-}
-
-install_required_beads_tools() {
-  local tool_status_json=$1
-  local -a required_tools=()
-  local tool
-  while IFS= read -r tool; do
-    [[ -n "$tool" ]] && required_tools+=("$tool")
-  done < <(TOOL_STATUS_JSON="$tool_status_json" node -e '
-    const policy = JSON.parse(process.env.TOOL_STATUS_JSON);
-    for (const tool of policy.tools.filter((candidate) => candidate.requiredFor.includes("beads"))) console.log(tool.name);
-  ')
-  ((${#required_tools[@]} > 0)) || die "development_system.required_tools_missing feature=beads"
-  node "$PACKAGE_ROOT/bin/install-development-tool.mjs" install --json "${required_tools[@]}"
-}
-
-report_tool_install_result() {
-  local tool_install_json=$1
-  TOOL_INSTALL_JSON="$tool_install_json" node - <<'NODE'
-const policy = JSON.parse(process.env.TOOL_INSTALL_JSON);
-const versions = policy.tools.map((tool) => `${tool.name}=${tool.targetVersion}`).join(" ");
-if (policy.installed.length > 0) {
-  console.log(`development_system.setup_tools_installed ${versions} destination=${policy.destination}`);
-} else {
-  console.log(`development_system.setup_tools_compatible ${versions}`);
-}
-if (policy.usesUserGlobal && !policy.inheritedPathIncludesDestination && policy.pathAction) {
-  console.log(`development_system.user_global_bin_not_in_inherited_path action=${JSON.stringify(policy.pathAction)}`);
-}
-NODE
-}
-
 setup_command() {
   local project=.
   local preset=personal-trunk
@@ -178,13 +40,9 @@ setup_command() {
   local mode=dry-run
   local confirmed=false
   local feature_worktrees=true
-  local feature_beads=true
+  local feature_tiber=true
   local feature_agentic_systems=false
   local feature_eval_case_reporting=false
-  local worktree_mode=concurrent-tickets
-  local explicit_beads_enable=false
-  local beads_option_count=0
-  local other_policy_selection=false
   while (($#)); do
     case "$1" in
       --project | --preset | --delivery | --enable | --disable)
@@ -198,25 +56,16 @@ setup_command() {
           preset=$2
         elif [[ "$option" == "--delivery" ]]; then
           delivery=$2
-          other_policy_selection=true
         elif [[ "$option" == "--enable" || "$option" == "--disable" ]]; then
           local selected=true
           if [[ "$option" == "--disable" ]]; then
             selected=false
           fi
           case "$2" in
-            worktrees) feature_worktrees=$selected; other_policy_selection=true ;;
-            beads)
-              ((beads_option_count += 1))
-              feature_beads=$selected
-              if [[ "$option" == "--enable" ]]; then
-                explicit_beads_enable=true
-              else
-                explicit_beads_enable=false
-              fi
-              ;;
-            agentic-systems) feature_agentic_systems=$selected; other_policy_selection=true ;;
-            eval-case-reporting) feature_eval_case_reporting=$selected; other_policy_selection=true ;;
+            worktrees) feature_worktrees=$selected ;;
+            tiber) feature_tiber=$selected ;;
+            agentic-systems) feature_agentic_systems=$selected ;;
+            eval-case-reporting) feature_eval_case_reporting=$selected ;;
             *) die "development_system.unknown_feature feature=$2" ;;
           esac
         fi
@@ -248,173 +97,55 @@ setup_command() {
     direct-to-trunk | pull-request | local-only) ;;
     *) die "development_system.unsupported_delivery mode=$delivery" ;;
   esac
-  local config_path=$project/.development-system.toml
-  local existing_beads_tools_only=false
-  if [[ "$explicit_beads_enable" == "true" && "$beads_option_count" -eq 1 &&
-    "$other_policy_selection" == "false" &&
-    "$feature_beads" == "true" && -f "$config_path" && ! -L "$config_path" ]] &&
-    existing_config_enables_beads "$config_path"; then
-    existing_beads_tools_only=true
-  fi
   printf 'development_system.setup_preview project=%s\n' "$project"
   printf 'delivery %s\n' "$delivery"
-  printf 'features worktrees=%s beads=%s agentic_systems=%s eval_case_reporting=%s\n' \
-    "$feature_worktrees" "$feature_beads" "$feature_agentic_systems" "$feature_eval_case_reporting"
-  printf 'mode = "%s"\n' "$worktree_mode"
-  local tool_status_json=
-  if [[ "$feature_beads" == "true" ]]; then
-    tool_status_json="$(node "$PACKAGE_ROOT/bin/install-development-tool.mjs" status --json)" ||
-      die "development_system.tool_status_failed"
-    TOOL_STATUS_JSON="$tool_status_json" node - <<'NODE'
-const policy = JSON.parse(process.env.TOOL_STATUS_JSON);
-console.log("required user-global tools:");
-for (const tool of policy.tools.filter((candidate) => candidate.requiredFor.includes("beads"))) {
-  console.log(`${tool.name}: current=${tool.currentVersion ?? tool.status} status=${tool.status} target=${tool.targetVersion}`);
-}
-console.log(`destination: ${policy.destination}`);
-console.log("scope: user-global for the current user across projects");
-console.log("sudo: not required");
-NODE
-    if [[ "$existing_beads_tools_only" == "true" ]]; then
-      printf 'install or update required tools only after this setup is approved; preserve the existing configuration and Beads workspace\n'
-    else
-      printf 'install or update required tools only after this setup is approved; use Beads embedded Dolt storage; initialize Beads and install workflow formulas\n'
-    fi
-  fi
-  if [[ "$existing_beads_tools_only" == "true" ]]; then
-    printf 'preserve .development-system.toml and .beads\n'
-  else
-    printf 'write .development-system.toml\n'
-  fi
+  printf 'features worktrees=%s tiber=%s agentic_systems=%s eval_case_reporting=%s\n' \
+    "$feature_worktrees" "$feature_tiber" "$feature_agentic_systems" "$feature_eval_case_reporting"
+  printf 'write .development-system.toml\n'
   if [[ "$mode" == "dry-run" ]]; then
     return
   fi
   if [[ "$confirmed" != "true" ]]; then
     die "development_system.setup_requires_confirmation"
   fi
-
-  local tool_install_json=
-  if [[ "$existing_beads_tools_only" == "true" ]]; then
-    tool_install_json="$(install_required_beads_tools "$tool_status_json")" ||
-      die "development_system.beads_install_failed"
-    printf 'development_system.setup_no_changes\n'
-    report_tool_install_result "$tool_install_json"
-    return
-  fi
-
   if [[ -n "$(git -C "$project" status --porcelain=v1 --untracked-files=no)" ]]; then
     die "development_system.setup_tracked_changes_present"
   fi
 
+  local config_path=$project/.development-system.toml
   local config_tmp
-  local setup_head
-  setup_head="$(git -C "$project" rev-parse HEAD)"
-  local created_beads=false
-  local -a added_beads_formulas=()
   if [[ -e "$config_path" || -L "$config_path" ]]; then
     die "development_system.config_already_exists path=$config_path"
   fi
-  trap 'rm -f -- "${config_tmp:-}"; if [[ "${created_beads:-false}" == "true" ]]; then git -C "$project" reset -q HEAD -- .beads .gitignore 2>/dev/null || true; rm -rf -- "$project/.beads"; if git -C "$project" cat-file -e HEAD:.gitignore 2>/dev/null; then git -C "$project" checkout -q -- .gitignore; else rm -f -- "$project/.gitignore"; fi; elif ((${#added_beads_formulas[@]} > 0)); then rm -f -- "${added_beads_formulas[@]}"; fi' EXIT
-  if [[ "$feature_beads" == "true" ]]; then
-    local bd_bin
-    tool_install_json="$(install_required_beads_tools "$tool_status_json")" ||
-      die "development_system.beads_install_failed"
-    bd_bin="$(TOOL_INSTALL_JSON="$tool_install_json" node -e '
-      const policy = JSON.parse(process.env.TOOL_INSTALL_JSON);
-      const bd = policy.tools.find((tool) => tool.name === "bd");
-      if (!bd?.executable || bd.status !== "compatible") process.exit(2);
-      process.stdout.write(bd.executable);
-    ')" || die "development_system.beads_install_failed"
-    export PATH="$(dirname "$bd_bin"):$PATH"
-    if [[ ! -d "$project/.beads" ]]; then
-      (
-        cd "$project"
-        "$bd_bin" init --quiet --non-interactive --skip-agents --skip-hooks
-      ) || die "development_system.beads_init_failed project=$project"
-      created_beads=true
-      local initialized_head
-      initialized_head="$(git -C "$project" rev-parse HEAD)"
-      if [[ "$initialized_head" != "$setup_head" ]]; then
-        if [[ "$(git -C "$project" rev-parse "$initialized_head^")" != "$setup_head" ]]; then
-          rm -rf -- "$project/.beads"
-          die "development_system.beads_init_history_unexpected"
-        fi
-        git -C "$project" reset --soft "$setup_head"
-      fi
-    else
-      (
-        cd "$project"
-        "$bd_bin" where >/dev/null
-      ) || die "development_system.beads_workspace_invalid project=$project"
-    fi
-    mkdir -p "$project/.beads/formulas"
-    local formula source_formula target_formula
-    for source_formula in "$PACKAGE_ROOT"/formulas/*.formula.toml; do
-      formula="$(basename "$source_formula")"
-      target_formula="$project/.beads/formulas/$formula"
-      if [[ -e "$target_formula" ]] && ! cmp -s "$source_formula" "$target_formula"; then
-        if [[ "$created_beads" == "true" ]]; then rm -rf -- "$project/.beads"; fi
-        die "development_system.beads_formula_conflict path=$target_formula"
-      fi
-      if [[ ! -e "$target_formula" ]]; then
-        cp -- "$source_formula" "$target_formula"
-        added_beads_formulas+=("$target_formula")
-      fi
-    done
-    (
-      cd "$project"
-      "$bd_bin" config set dolt.auto-commit on >/dev/null
-    ) || die "development_system.beads_config_failed project=$project"
-  fi
   config_tmp="$(mktemp "$project/.development-system.toml.tmp.XXXXXX")" ||
     die "development_system.config_temp_failed project=$project"
+  trap 'rm -f -- "$config_tmp"' EXIT
   {
-    printf 'schema_version = 2\n\n'
+    printf 'schema_version = 1\n\n'
     printf '[delivery]\n'
     printf 'mode = "%s"\n' "$delivery"
     printf 'trunk_branch = "main"\n\n'
     printf '[features]\n'
     printf 'worktrees = %s\n' "$feature_worktrees"
-    printf 'beads = %s\n' "$feature_beads"
+    printf 'tiber = %s\n' "$feature_tiber"
     printf 'agentic_systems = %s\n' "$feature_agentic_systems"
     printf 'eval_case_reporting = %s\n\n' "$feature_eval_case_reporting"
     printf '[worktrees]\n'
-    printf 'mode = "%s"\n' "$worktree_mode"
     printf 'root = ".worktrees"\n\n'
-    printf '[beads]\n'
-    case "$delivery" in
-      direct-to-trunk) printf 'workflow = "development-change-direct"\n' ;;
-      pull-request) printf 'workflow = "development-change-pr"\n' ;;
-      local-only) printf 'workflow = "development-change-local"\n' ;;
-    esac
+    printf '[tiber]\n'
+    printf 'max_queued = 5\n'
   } >"$config_tmp"
   mv -- "$config_tmp" "$config_path"
   git -C "$project" add -- .development-system.toml
-  if [[ "$feature_beads" == "true" ]]; then
-    git -C "$project" add -f -- .beads/.gitignore .beads/README.md .beads/config.yaml .beads/metadata.json .beads/formulas
-  fi
-  if ! git -C "$project" commit --no-verify \
+  if ! git -C "$project" commit \
     -m "chore: initialize development system" \
     -m "Record the project workflow and optional integrations in one authoritative configuration."; then
-    git -C "$project" reset -q HEAD -- .development-system.toml .beads .gitignore 2>/dev/null || true
+    git -C "$project" reset -q HEAD -- .development-system.toml
     rm -f -- "$config_path"
-    if [[ "$created_beads" == "true" ]]; then
-      rm -rf -- "$project/.beads"
-      if git -C "$project" cat-file -e HEAD:.gitignore 2>/dev/null; then
-        git -C "$project" checkout -q -- .gitignore
-      else
-        rm -f -- "$project/.gitignore"
-      fi
-    elif ((${#added_beads_formulas[@]} > 0)); then
-      rm -f -- "${added_beads_formulas[@]}"
-    fi
     die "development_system.setup_commit_failed"
   fi
   trap - EXIT
   printf 'development_system.setup_applied commit=%s\n' "$(git -C "$project" rev-parse HEAD)"
-  if [[ -n "$tool_install_json" ]]; then
-    report_tool_install_result "$tool_install_json"
-  fi
 }
 
 inspect_conflicts() {
@@ -430,114 +161,49 @@ inspect_conflicts() {
     return
   fi
 
-  if [[ "$harness" == "all" || "$harness" == "claude" ]]; then
-    if [[ -f "$claude_settings" ]] &&
-      grep -q '"enabledPlugins"' "$claude_settings" &&
-      has_disallowed_claude_enabled_plugin "$claude_settings"; then
-      warn "conflicting_plugins harness=claude file=$claude_settings recommendation=use_only_development-system_and_approved_adjunct_integrations"
-      found=true
-    fi
-
-    if [[ -f "$claude_plugins" ]] &&
-      has_disallowed_claude_installed_plugin "$claude_plugins"; then
-      warn "conflicting_plugins harness=claude file=$claude_plugins recommendation=use_only_development-system_and_approved_adjunct_integrations"
-      found=true
-    fi
-
-    if [[ -f "$project/.mcp.json" ]]; then
-      warn "user_managed_mcps_detected harness=claude file=$project/.mcp.json action=review_for_compatibility"
-      found=true
-    fi
+  if [[ -f "$claude_settings" ]] &&
+    grep -q '"enabledPlugins"' "$claude_settings" &&
+    grep -Eo '"[^"]+@[^"]+"[[:space:]]*:[[:space:]]*true' "$claude_settings" |
+    grep -qv '^"development-system@'; then
+    warn "conflicting_plugins harness=claude file=$claude_settings recommendation=install_only_development-system"
+    found=true
   fi
 
-  if [[ "$harness" == "all" || "$harness" == "codex" ]]; then
-    for codex_config in "$project/.codex/config.toml" "$codex_home/config.toml"; do
-      if [[ -f "$codex_config" ]] &&
-        has_disallowed_codex_plugin "$codex_config"; then
-        warn "conflicting_plugins harness=codex file=$codex_config recommendation=use_only_development-system_and_approved_adjunct_integrations"
-        found=true
-      fi
+  if [[ -f "$claude_plugins" ]] &&
+    grep -Eo '"[^"]+@[^"]+"' "$claude_plugins" |
+    grep -qv '^"development-system@'; then
+    warn "conflicting_plugins harness=claude file=$claude_plugins recommendation=install_only_development-system"
+    found=true
+  fi
 
-      if [[ -f "$codex_config" ]] &&
-        grep -Eq '^[[:space:]]*(hooks|codex_hooks)[[:space:]]*=[[:space:]]*false' "$codex_config"; then
-        warn "incompatible_harness_setting harness=codex setting=hooks_disabled file=$codex_config"
-        found=true
-      fi
+  for codex_config in "$project/.codex/config.toml" "$codex_home/config.toml"; do
+    if [[ -f "$codex_config" ]] &&
+      grep -Ev '^\[plugins\."?development-system(@ai-plugins)?"?\]' "$codex_config" |
+      grep -Eq '^\[plugins\.[^]]+\]'; then
+      warn "conflicting_plugins harness=codex file=$codex_config recommendation=install_only_development-system"
+      found=true
+    fi
 
-      if [[ -f "$codex_config" ]] &&
-        grep -Eq '^[[:space:]]*allow_managed_hooks_only[[:space:]]*=[[:space:]]*true' "$codex_config"; then
-        warn "incompatible_harness_setting harness=codex setting=managed_hooks_only file=$codex_config"
-        found=true
-      fi
-    done
+    if [[ -f "$codex_config" ]] &&
+      grep -Eq '^[[:space:]]*(hooks|codex_hooks)[[:space:]]*=[[:space:]]*false' "$codex_config"; then
+      warn "incompatible_harness_setting harness=codex setting=hooks_disabled file=$codex_config"
+      found=true
+    fi
+
+    if [[ -f "$codex_config" ]] &&
+      grep -Eq '^[[:space:]]*allow_managed_hooks_only[[:space:]]*=[[:space:]]*true' "$codex_config"; then
+      warn "incompatible_harness_setting harness=codex setting=managed_hooks_only file=$codex_config"
+      found=true
+    fi
+  done
+
+  if [[ -f "$project/.mcp.json" ]]; then
+    warn "user_managed_mcps_detected file=$project/.mcp.json action=review_for_compatibility"
+    found=true
   fi
 
   if [[ "$found" == "true" ]]; then
-    warn "supply_chain_recommendation harness=$harness recommendation=use_only_development-system_and_approved_adjunct_integrations"
-  fi
-}
-
-integration_contract_command() {
-  local harness=all
-  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    integration_usage
-    return
-  fi
-  while (($#)); do
-    case "$1" in
-      --harness)
-        if (($# < 2)) || [[ "$2" == --* ]]; then
-          die "development_system.missing_option_value option=--harness"
-        fi
-        harness=$2
-        shift 2
-        ;;
-      *)
-        die "development_system.unknown_option option=$1"
-        ;;
-    esac
-  done
-  case "$harness" in
-    all | claude | codex) ;;
-    *) die "development_system.unsupported_harness harness=$harness" ;;
-  esac
-
-  if [[ "$harness" == "all" || "$harness" == "claude" ]]; then
-    printf '%s\n' \
-      'development_system.integration_contract harness=claude' \
-      'beads hooks=plugin_managed feature_gate=enabled_project_config event=SessionStart command="${CLAUDE_PLUGIN_ROOT}/bin/run-beads-hook" --project "$PWD" -- prime --hook-json' \
-      'context7 owner_action="claude plugin marketplace add upstash/context7 && claude plugin install context7@context7-marketplace"' \
-      'context7 credentials=owner_provided_CONTEXT7_API_KEY_in_user_environment_or_config_never_repository_or_plugin_config' \
-      'hindsight owner_action="claude plugin marketplace add vectorize-io/hindsight && claude plugin install hindsight-memory"' \
-      'hindsight retention=owner_selects_memory_scope_and_retention_policy' \
-      'integrations require_explicit_owner_approval=true' \
-      'credentials=not_read_or_written_by_development_system'
-  fi
-
-  if [[ "$harness" == "all" || "$harness" == "codex" ]]; then
-    printf '%s\n' \
-      'development_system.integration_contract harness=codex' \
-      'beads hooks=plugin_managed feature_gate=enabled_project_config lifecycle="SessionStart PreCompact PostCompact UserPromptSubmit"' \
-      'beads command="${PLUGIN_ROOT}/bin/run-beads-hook" --project "$PWD" -- codex-hook SessionStart' \
-      'beads command="${PLUGIN_ROOT}/bin/run-beads-hook" --project "$PWD" -- codex-hook PreCompact' \
-      'beads command="${PLUGIN_ROOT}/bin/run-beads-hook" --project "$PWD" -- codex-hook PostCompact' \
-      'beads command="${PLUGIN_ROOT}/bin/run-beads-hook" --project "$PWD" -- codex-hook UserPromptSubmit' \
-      'hooks owner_action="start_or_restart_Codex_then_open_/hooks_inspect_and_explicitly_trust_the_current_Development_System_definition_repeat_after_a_hook_definition_or_plugin_update"' \
-      'hooks trust_safety="do_not_use_--dangerously-bypass-hook-trust_merely_to_skip_review"' \
-      'context7 owner_action="codex plugin marketplace add upstash/context7 && codex plugin add context7@context7-marketplace"' \
-      'context7 credentials=owner_provided_CONTEXT7_API_KEY_in_user_environment_or_config_never_repository_or_plugin_config' \
-      'hindsight installer=owner_run_interactive not_executed_by_development_system=true' \
-      'hindsight official_upstream_installer="curl -fsSL https://hindsight.vectorize.io/get-codex | bash"' \
-      'hindsight remote_installer=owner_review_and_manual_execution_required' \
-      'hindsight safe_owner_route="fetch_to_a_temporary_file_and_inspect_before_owner_approved_execution; never_directly_pipe_remote_code_to_bash"' \
-      'hindsight hooks_file="~/.codex/hooks.json" installer_overwrites_existing_file=true' \
-      'hindsight hooks_safety="if_existing_back_up_hooks_json_before_install; after_install_review_generated_replacement; merge_Hindsight_hooks_and_backup_non_Beads_shared_hooks_into_combined_file; omit_legacy_bd_Beads_lifecycle_entries"' \
-      'hindsight hooks_trust="review_and_explicitly_trust_resulting_Hindsight_user_hook_definitions_through_/hooks"' \
-      'hindsight uninstall_safety="do_not_run_--uninstall_when_shared_hooks_exist; preserve_backup_and_manually_remove_only_Hindsight_hooks"' \
-      'hindsight decision=owner_selects_cloud_or_local_memory_and_configures_credentials_interactively' \
-      'hindsight retention=owner_selects_memory_scope_and_retention_policy' \
-      'integrations require_explicit_owner_approval=true' \
-      'credentials=not_read_or_written_by_development_system'
+    warn "supply_chain_recommendation harness=$harness recommendation=use_only_development-system_and_plugin_managed_mcps"
   fi
 }
 
@@ -566,10 +232,6 @@ doctor_command() {
         ;;
     esac
   done
-  case "$harness" in
-    all | claude | codex) ;;
-    *) die "development_system.unsupported_harness harness=$harness" ;;
-  esac
   project="$(cd "$project" && pwd)" ||
     die "development_system.project_not_found project=$project"
   local output
@@ -589,40 +251,14 @@ doctor_command() {
   fi
 }
 
-record_eval_session_start() {
-  if [[ -n "${DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER:-}" ]]; then
-    if [[ "$DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER" != /* ]]; then
-      die "development_system.eval_marker_requires_absolute_path"
-    fi
-    umask 077
-    : >"$DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER"
-  fi
-}
-
 case "${1:-}" in
-  tiber)
-    shift
-    exec "$PACKAGE_ROOT/components/tiber/bin/tiber" "$@"
-    ;;
   setup)
     shift
     setup_command "$@"
     ;;
-  doctor)
+  doctor | session-start)
     shift
     doctor_command "$@"
-    ;;
-  integrations)
-    shift
-    integration_contract_command "$@"
-    ;;
-  session-start)
-    shift
-    record_eval_session_start
-    doctor_command "$@"
-    ;;
-  help | --help | -h)
-    usage
     ;;
   *)
     die "development_system.usage command=${1:-missing}"

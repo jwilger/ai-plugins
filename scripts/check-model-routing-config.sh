@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-plugin_root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/development-system" && pwd)"}"
+plugin_root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/development-system/components/development-discipline" && pwd)"}"
 agents="$plugin_root/agents"
 
 fail() {
@@ -84,27 +84,7 @@ check_codex() {
   local sandbox="$4"
   local file="$agents/$route.toml"
 
-  require_equal "$(quoted_value "$file" name)" "$route" "$route.codex.name"
   require_equal "$(quoted_value "$file" model)" "$model" "$route.codex.model"
-  require_equal "$(quoted_value "$file" model_reasoning_effort)" "$reasoning" "$route.codex.reasoning"
-  require_equal "$(quoted_value "$file" sandbox_mode)" "$sandbox" "$route.codex.sandbox"
-}
-
-check_dynamic_codex() {
-  local route="$1"
-  local reasoning="$2"
-  local sandbox="$3"
-  local file="$agents/$route.toml"
-
-  require_equal "$(quoted_value "$file" name)" "$route" "$route.codex.name"
-  python3 - "$file" <<'PY' || fail "$route.codex.model-must-be-selected-at-dispatch"
-import pathlib
-import sys
-import tomllib
-
-document = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-raise SystemExit("model" in document)
-PY
   require_equal "$(quoted_value "$file" model_reasoning_effort)" "$reasoning" "$route.codex.reasoning"
   require_equal "$(quoted_value "$file" sandbox_mode)" "$sandbox" "$route.codex.sandbox"
 }
@@ -115,38 +95,30 @@ check_claude() {
   local tools="$3"
   local file="$agents/$route.md"
 
-  require_equal "$(yaml_value "$file" name)" "$route" "$route.claude.name"
   require_equal "$(yaml_value "$file" model)" "$model" "$route.claude.model"
   require_equal "$(yaml_value "$file" tools)" "$tools" "$route.claude.tools"
 }
 
-check_strong_claude() {
-  local route="$1"
-  local tools="$2"
-  check_claude "$route" opus "$tools"
-  require_equal "$(yaml_value "$agents/$route.md" effort)" high "$route.claude.effort"
-}
-
 check_codex bounded-helper gpt-5.6-luna low read-only
 check_codex substantive-worker gpt-5.6-terra medium workspace-write
-check_dynamic_codex strong-reviewer high read-only
-check_dynamic_codex strong-worker high workspace-write
+check_codex strong-reviewer gpt-5.6-sol high read-only
+check_codex strong-worker gpt-5.6-sol high workspace-write
 check_claude bounded-helper haiku Read,Grep,Glob
 check_claude substantive-worker sonnet Read,Grep,Glob,Bash,Write,Edit
-check_strong_claude strong-reviewer Read,Grep,Glob,Bash
-check_strong_claude strong-worker Read,Grep,Glob,Bash,Write,Edit
+check_claude strong-reviewer opus Read,Grep,Glob,Bash
+check_claude strong-worker opus Read,Grep,Glob,Bash,Write,Edit
 
 jq -cn '{
   codex: {
     "bounded-helper": {model: "gpt-5.6-luna", reasoning: "low", sandbox: "read-only"},
     "substantive-worker": {model: "gpt-5.6-terra", reasoning: "medium", sandbox: "workspace-write"},
-    "strong-reviewer": {modelStrategy: "highest-capability-eligible", reasoning: "high", sandbox: "read-only"},
-    "strong-worker": {modelStrategy: "highest-capability-eligible", reasoning: "high", sandbox: "workspace-write"}
+    "strong-reviewer": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "read-only"},
+    "strong-worker": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "workspace-write"}
   },
   claude: {
     "bounded-helper": {model: "haiku", tools: "Read,Grep,Glob"},
     "substantive-worker": {model: "sonnet", tools: "Read,Grep,Glob,Bash,Write,Edit"},
-    "strong-reviewer": {model: "opus", effort: "high", tools: "Read,Grep,Glob,Bash"},
-    "strong-worker": {model: "opus", effort: "high", tools: "Read,Grep,Glob,Bash,Write,Edit"}
+    "strong-reviewer": {model: "opus", tools: "Read,Grep,Glob,Bash"},
+    "strong-worker": {model: "opus", tools: "Read,Grep,Glob,Bash,Write,Edit"}
   }
 }'

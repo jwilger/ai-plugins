@@ -20,30 +20,6 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          toolReleases = builtins.fromJSON (
-            builtins.readFile ./plugins/development-system/bin/tool-releases.json
-          );
-          toolTarget = {
-            "x86_64-linux" = "x86_64-linux";
-            "aarch64-linux" = "aarch64-linux";
-            "x86_64-darwin" = "x86_64-darwin";
-            "aarch64-darwin" = "aarch64-darwin";
-          }.${system};
-          beadsDefinition = toolReleases.tools.bd;
-          beadsRelease = beadsDefinition.releases.${toolTarget};
-          beads = pkgs.stdenvNoCC.mkDerivation {
-            pname = "beads";
-            version = beadsDefinition.version;
-            src = pkgs.fetchurl {
-              inherit (beadsRelease) url sha256;
-            };
-            sourceRoot = ".";
-            unpackPhase = "tar -xzf $src";
-            installPhase = ''
-              mkdir -p "$out/bin"
-              install -m 0755 "${beadsRelease.binaryPath}" "$out/bin/bd"
-            '';
-          };
         in
         {
           default = pkgs.mkShell {
@@ -66,6 +42,7 @@
               cargo-mutants
               cargo-zigbuild
               file
+              chromium
               clippy
               rustc
               rustfmt
@@ -79,9 +56,7 @@
               actionlint
               yq-go
             ])
-            ++ [ beads ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-              pkgs.chromium
               pkgs.bubblewrap
               pkgs.systemd
             ];

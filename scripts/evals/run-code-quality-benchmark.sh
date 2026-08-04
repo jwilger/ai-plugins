@@ -42,7 +42,7 @@ usage() {
   printf '%s\n' \
     'Usage: scripts/evals/run-code-quality-benchmark.sh [--dry-run | --runtime-preflight] [--case CASE_ID]' \
     '' \
-    'Runs the isolated six-turn downstream Codex code-quality diagnostic.' \
+    'Runs the isolated nine-turn downstream Codex code-quality diagnostic.' \
     'Live execution requires an existing ChatGPT-backed Codex login.' \
     '--runtime-preflight prints the pinned candidate PATH and Nix runtime closure.'
 }
@@ -726,9 +726,7 @@ package_versions="$("$node_bin" - "$root" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const root = process.argv[2];
-const lock = JSON.parse(
-  fs.readFileSync(path.join(root, "tooling/evals/package-lock.json"), "utf8"),
-);
+const lock = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
 const versions = {};
 for (const name of ["@openai/codex-sdk", "promptfoo"]) {
   const packageFile = path.join(root, "node_modules", ...name.split("/"), "package.json");
@@ -749,7 +747,7 @@ NODE
 )"
 sdk_version="$(jq -er '.["@openai/codex-sdk"]' <<<"$package_versions")"
 promptfoo_version="$(jq -er '.promptfoo' <<<"$package_versions")"
-package_lock_sha256="$(sha256sum "$root/tooling/evals/package-lock.json" | cut -d' ' -f1)"
+package_lock_sha256="$(sha256sum "$root/package-lock.json" | cut -d' ' -f1)"
 boundary_sha256="$("$node_bin" - "$boundary_launcher" "$boundary_runtime" <<'NODE'
 const crypto = require("node:crypto");
 const fs = require("node:fs");

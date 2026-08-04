@@ -6,8 +6,9 @@ const { providerLabelFor } = require("./manifest.cjs");
 
 const promptfooConfig = path.join(__dirname, "promptfooconfig.yaml");
 const benchmarkModes = Object.freeze([
-  "no-plugins",
-  "development-system",
+  "no-marketplace-skills",
+  "targeted-quality-skills",
+  "all-marketplace-skills",
 ]);
 const promptTemplate =
   "Complete this coding task in the provided repository. The task is self-contained. Use any installed skill guidance when relevant.\n\n{{ scenario_prompt }}\n";
@@ -123,7 +124,7 @@ function expectedProvider(mode) {
           multi_agent: false,
           personality: false,
           plugin_sharing: false,
-          plugins: mode !== "no-plugins",
+          plugins: mode !== "no-marketplace-skills",
           remote_compaction_v2: false,
           remote_plugin: false,
           secret_auth_storage: false,
@@ -223,7 +224,7 @@ function loadPromptfooSurface(configFile = promptfooConfig) {
     parsed.prompts.length !== 1 ||
     parsed.prompts[0] !== promptTemplate ||
     !Array.isArray(parsed.providers) ||
-    parsed.providers.length !== 2
+    parsed.providers.length !== 3
   ) {
     throw new Error("Promptfoo benchmark surface does not match shared inputs");
   }

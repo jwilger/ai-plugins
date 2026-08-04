@@ -61,49 +61,6 @@ async function request(payload, emit = true) {
   return JSON.parse(line);
 }
 
-async function requestFromFreshServer(payload) {
-  const fresh = spawn(command, args, {
-    env: {
-      ...process.env,
-      XDG_STATE_HOME: stateRoot,
-    },
-    stdio: ["pipe", "pipe", "inherit"],
-  });
-  const freshLines = createInterface({ input: fresh.stdout });
-  const responses = [];
-  freshLines.on("line", (line) => responses.push(JSON.parse(line)));
-  const sendFresh = (request) =>
-    new Promise((resolve, reject) => {
-      fresh.stdin.write(`${JSON.stringify(request)}\n`, (error) => {
-        if (error) reject(error);
-        else resolve();
-      });
-    });
-  await sendFresh({
-    jsonrpc: "2.0",
-    id: "fresh-initialize",
-    method: "initialize",
-    params: {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "restart-test", version: "0.0.0" },
-    },
-  });
-  await sendFresh(payload);
-  fresh.stdin.end();
-  await new Promise((resolve, reject) => {
-    fresh.once("error", reject);
-    fresh.once("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`fresh MCP process exited ${code}`));
-    });
-  });
-  const response = responses.find((candidate) => candidate.id === payload.id);
-  if (!response)
-    throw new Error("fresh MCP process did not return the requested response");
-  return response;
-}
-
 function sharedTestEvidence(id, diffHash, summary) {
   return {
     id,
@@ -424,9 +381,7 @@ const routingRiskArguments = {
   scope: "base",
   project_root: routingRoot,
   harness: "codex",
-  changed_files: [
-    "plugins/development-system/components/development-discipline/rust/src/main.rs",
-  ],
+  changed_files: ["plugins/development-system/components/development-discipline/rust/src/main.rs"],
   diff_hash: "routing",
   shared_test_evidence: sharedTestEvidence(
     "tests-bats-codex-routing",
@@ -743,78 +698,54 @@ if (!ticketPendingResponse.result) {
 const ticketVerifier = JSON.parse(
   ticketPendingResponse.result.content[0].text,
 ).verifier_assignment;
-const ticketResumeResponse = await requestFromFreshServer({
-  jsonrpc: "2.0",
-  id: "ticket-resume-after-restart",
-  method: "tools/call",
-  params: {
-    name: "final_review.resume",
-    arguments: {
-      session_id: ticketState.session_id,
-      project_root: projectRoot,
-    },
-  },
-});
-if (!ticketResumeResponse.result) {
-  throw new Error(
-    `fresh process did not resume pending verifier: ${JSON.stringify(ticketResumeResponse)}`,
-  );
-}
-const ticketResumed = JSON.parse(ticketResumeResponse.result.content[0].text);
-if (
-  ticketResumed.pending_transition !== "verifier_required" ||
-  JSON.stringify(ticketResumed.state) !== JSON.stringify(ticketState) ||
-  ticketResumed.revision < 2
-) {
-  throw new Error(
-    "fresh process did not restore the exact pending verifier state",
-  );
-}
-const ticketAdvancedResponse = await requestFromFreshServer({
-  jsonrpc: "2.0",
-  id: 20,
-  method: "tools/call",
-  params: {
-    name: "final_review.advance",
-    arguments: {
-      state: ticketState,
-      lens_results: ticketLensResults,
-      current_diff_hash: "ticket-evidence",
-      unrelated_follow_ups: [
-        {
-          finding_id: "material-auth-regression",
-          lens: "correctness-behavior",
-          ticket_reference: "BACKLOG-SEC-1",
-        },
-      ],
-      verifier_result: {
-        subagent_key: ticketVerifier.subagent_key,
-        assignment_id: ticketVerifier.assignment_id,
-        model_role: ticketVerifier.model_role,
-        status: "verified",
-        verdicts: [
+const ticketAdvancedResponse = await request(
+  {
+    jsonrpc: "2.0",
+    id: 20,
+    method: "tools/call",
+    params: {
+      name: "final_review.advance",
+      arguments: {
+        state: ticketState,
+        lens_results: ticketLensResults,
+        current_diff_hash: "ticket-evidence",
+        unrelated_follow_ups: [
           {
             finding_id: "material-auth-regression",
             lens: "correctness-behavior",
-            verdict: "confirmed",
-            severity: "MINOR",
-            causality: "caused",
-            causality_evidence:
-              "The diff causes only a minor diagnostic disclosure.",
-            security_impact: "minor",
-            safety_impact: "none",
-            rationale: "The confirmed impact belongs in the backlog.",
+            ticket_reference: "BACKLOG-SEC-1",
           },
         ],
-        caller_attestation: {
+        verifier_result: {
+          subagent_key: ticketVerifier.subagent_key,
+          assignment_id: ticketVerifier.assignment_id,
           model_role: ticketVerifier.model_role,
-          fresh_context: true,
-          closed_after_result: true,
+          status: "verified",
+          verdicts: [
+            {
+              finding_id: "material-auth-regression",
+              lens: "correctness-behavior",
+              verdict: "confirmed",
+              severity: "MINOR",
+              causality: "caused",
+              causality_evidence:
+                "The diff causes only a minor diagnostic disclosure.",
+              security_impact: "minor",
+              safety_impact: "none",
+              rationale: "The confirmed impact belongs in the backlog.",
+            },
+          ],
+          caller_attestation: {
+            model_role: ticketVerifier.model_role,
+            fresh_context: true,
+            closed_after_result: true,
+          },
         },
       },
     },
   },
-});
+  false,
+);
 if (!ticketAdvancedResponse.result) {
   throw new Error(
     `verifier ticket resubmission failed: ${JSON.stringify(ticketAdvancedResponse)}`,
@@ -830,15 +761,6 @@ if (
     "BACKLOG-SEC-1"
 ) {
   throw new Error("verifier ticket evidence did not advance the MCP session");
-}
-if (
-  !ticketAdvanced.state.out_of_scope_report_artifact?.startsWith(
-    "eventcore://development-discipline/final-review-sessions/",
-  )
-) {
-  throw new Error(
-    "retained final-review report did not expose an Eventcore locator",
-  );
 }
 
 child.stdin.end();

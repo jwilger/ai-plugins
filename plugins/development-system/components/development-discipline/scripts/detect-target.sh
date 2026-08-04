@@ -22,14 +22,3 @@ detect_development_discipline_target() {
     *) return 1 ;;
   esac
 }
-
-development_discipline_prebuilt_target() {
-  case "$1" in
-    x86_64-unknown-linux-musl | aarch64-unknown-linux-musl)
-      printf '%s\n' "$1"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}

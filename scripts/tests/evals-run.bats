@@ -15,55 +15,9 @@ setup() {
 copy_eval_runner() {
   destination="$1"
   cp "$RUNNER" "$destination"
-  mkdir -p "$(dirname "$(dirname "${destination%/*}")")/evals/promptfoo"
   cp \
-    "$ROOT/scripts/evals/artifact-scan-receipt.mjs" \
-    "$ROOT/scripts/evals/scan-behavior-artifacts.sh" \
-    "$ROOT/scripts/evals/scan-code-quality-secrets.mjs" \
     "$ROOT/scripts/evals/provider-compositions.mjs" \
-    "${destination%/*}/"
-  cp "$ROOT/evals/promptfoo/fixtures.cjs" \
-    "$(dirname "$(dirname "${destination%/*}")")/evals/promptfoo/fixtures.cjs"
-}
-
-make_fake_codex_cli() {
-  local fake_codex="$1"
-  cat >"$fake_codex" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-
-case "$*" in
-  "plugin marketplace add "*" --json")
-    mkdir -p "$CODEX_HOME"
-    printf '%s\n' \
-      '[marketplaces.ai-plugins]' \
-      'source_type = "local"' \
-      "source = \"$CODEX_CLI_PLUGIN_ROOT\"" \
-      >"$CODEX_HOME/config.toml"
-    printf '{"marketplaceName":"ai-plugins"}\n'
-    ;;
-  "plugin add development-system@ai-plugins --json")
-    version="$(jq -r '.version' "$CODEX_CLI_PLUGIN_ROOT/plugins/development-system/.codex-plugin/plugin.json")"
-    installed="$CODEX_HOME/plugins/cache/ai-plugins/development-system/$version"
-    mkdir -p "$installed"
-    cp -R "$CODEX_CLI_PLUGIN_ROOT/plugins/development-system/." "$installed/"
-    printf '%s\n' \
-      '' \
-      '[plugins."development-system@ai-plugins"]' \
-      'enabled = true' \
-      >>"$CODEX_HOME/config.toml"
-    printf '{"pluginId":"development-system@ai-plugins","installedPath":"%s"}\n' "$installed"
-    ;;
-  "plugin list --json")
-    printf '{"installed":[{"pluginId":"development-system@ai-plugins","installed":true,"enabled":true}],"available":[]}\n'
-    ;;
-  *)
-    printf 'unexpected fake Codex CLI arguments: %s\n' "$*" >&2
-    exit 64
-    ;;
-esac
-SH
-  chmod +x "$fake_codex"
+    "${destination%/*}/provider-compositions.mjs"
 }
 
 teardown() {
@@ -87,18 +41,15 @@ teardown() {
   [[ "$output" == *"Codex:       provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium"* ]]
   [[ "$output" == *"CODEX_GRADER_MODEL            (default: gpt-5.6-sol)"* ]]
   [[ "$output" == *"CODEX_GRADER_REASONING_EFFORT (default: high)"* ]]
-  [[ "$output" == *"Claude Code and Codex retain isolated no-plugin and development-system conditions"* ]]
-  [[ "$output" == *"Pinned eval packages are managed by tooling/evals/package.json"* ]]
-  [[ "$output" == *"tooling/evals/package-lock.json"* ]]
+  [[ "$output" == *"Each provider loads the relevant marketplace surface for its harness"* ]]
+  [[ "$output" == *"Pinned eval packages are managed by package.json and package-lock.json"* ]]
   [[ "$output" == *"@openai/codex-sdk"* ]]
   [[ "$output" == *"@anthropic-ai/claude-agent-sdk"* ]]
   [[ "$output" == *"Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"* ]]
-  [[ "$output" != *"PI_EVAL"* ]]
-  [[ "$output" != *"openai-codex auth is copied"* ]]
   [[ "$output" == *"They do not require provider API keys or fresh approval for repository-owned evals"* ]]
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
   [[ "$output" == *"EVAL_PROVIDER_FILTER"* ]]
-  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-8; default: 8; global target-call cap)"* ]]
+  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-2; default: 1)"* ]]
   [[ "$output" == *"EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)"* ]]
@@ -117,7 +68,7 @@ teardown() {
   [[ "$output" == *"timeout --kill-after 30s 90m"* ]]
   [[ "$output" == *"node_modules/.bin/promptfoo"* ]]
   [[ "$output" != *"npx --yes"* ]]
-  [[ "$output" == *"--max-concurrency 8"* ]]
+  [[ "$output" == *"--max-concurrency 1"* ]]
   [[ "$output" == *"--no-cache"* ]]
   [[ "$output" == *"--no-share"* ]]
   [[ "$output" == *"evals/out/generated/agentic-systems-engineering.behavior.yaml"* ]]
@@ -130,19 +81,14 @@ teardown() {
   run "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"$ROOT/.evals/codex-home-development-system"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
+  [[ "$output" == *"$ROOT/.evals/codex-home-full-marketplace"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
 }
 
-@test "eval runner permits eight concurrent target calls and rejects values above that cap" {
-  run env PROMPTFOO_MAX_CONCURRENCY=8 "$RUNNER" --dry-run
-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"--max-concurrency 8"* ]]
-
-  run env PROMPTFOO_MAX_CONCURRENCY=9 "$RUNNER" --dry-run
+@test "eval runner rejects concurrency above the canonical cap before printing a Promptfoo launch" {
+  run env PROMPTFOO_MAX_CONCURRENCY=3 "$RUNNER" --dry-run
 
   [ "$status" -eq 2 ]
-  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY must be an integer from 1 through 8; got 9"* ]]
+  [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY must be 1 or 2; got 3"* ]]
   [[ "$output" != *"promptfoo eval"* ]]
 }
 
@@ -385,176 +331,44 @@ SH
   [ "$preparation_invoked" -eq 0 ]
 }
 
-@test "eval runner dry-run prepares harness-specific package conditions" {
-  run env EVAL_CASE_FILTER=beads-new-task-command-backlog-capture "$RUNNER" --dry-run
+@test "eval runner dry-run prepares targeted Codex home from selected behavior cases" {
+  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"prepare-codex-home.mjs"*"--plugin-mode development-system"*"--install-via-cli"* ]]
-  [[ "$output" == *"prepare-codex-home.mjs"*"--plugin-mode no-plugins"* ]]
-  [[ "$output" == *"prepare-claude-home.mjs"*"--plugin-mode development-system"* ]]
-  [[ "$output" == *"prepare-claude-home.mjs"*"--plugin-mode no-plugins"* ]]
-  [[ "$output" != *"prepare-pi-home.mjs"* ]]
-  [[ "$output" != *"targeted-plugins"* ]]
+  targeted_line="$(printf '%s\n' "$output" | grep -- '--plugin-mode targeted-plugins')"
+  [[ "$targeted_line" == *"prepare-codex-home.mjs"* ]]
+  [[ "$targeted_line" == *"--plugins development-system"* ]]
+  [[ "$targeted_line" != *"\\,"* ]]
 }
 
-@test "eval runner prepares a focused Codex development-system home" {
+@test "eval runner prepares a focused Codex home with exactly the selected case plugins" {
   fixture_root="$(mktemp -d)"
   fake_promptfoo="$fixture_root/promptfoo"
-  fake_codex="$fixture_root/codex"
-  development_system_home="$fixture_root/codex-development-system"
+  targeted_home="$fixture_root/codex-targeted"
   cat >"$fake_promptfoo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-touch "$CODEX_EVAL_SESSION_START_MARKER"
 SH
   chmod +x "$fake_promptfoo"
-  make_fake_codex_cli "$fake_codex"
 
   run env \
     OPENAI_API_KEY=fixture \
     PROMPTFOO_BIN="$fake_promptfoo" \
     EVAL_OUT_DIR="$fixture_root/out" \
-    EVAL_CASE_FILTER=beads-new-task-command-backlog-capture \
-    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-development-system \
+    EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
+    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-targeted-plugins \
     EVAL_TIMEOUT=0 \
-    CODEX_EVAL_HOME="$development_system_home" \
-    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
+    CODEX_EVAL_HOME="$fixture_root/codex-full" \
+    CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_root/codex-full" \
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-none" \
-    CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
-    CODEX_EVAL_REAL_BIN="$fake_codex" \
-    CODEX_EVAL_CODEX_BIN="$fake_codex" \
-    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
+    CODEX_EVAL_HOME_TARGETED_PLUGINS="$targeted_home" \
     "$RUNNER"
 
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^\[plugins\.' "$development_system_home/config.toml")" -eq 1 ]
-  grep -q '\[plugins\."development-system@ai-plugins"\]' "$development_system_home/config.toml"
-  [ -d "$development_system_home/plugins/cache/ai-plugins/development-system" ]
-  [ "$(find "$development_system_home/plugins/cache/ai-plugins" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ]
-
-  rm -rf "$fixture_root"
-}
-
-@test "eval runner isolates Claude plugin state and never copies the refresh token" {
-  fixture_root="$(mktemp -d)"
-  auth_home="$fixture_root/auth"
-  claude_home="$fixture_root/claude-development-system"
-  fake_claude="$fixture_root/claude"
-  fake_codex="$fixture_root/codex"
-  fake_promptfoo="$fixture_root/promptfoo"
-  mkdir -p "$auth_home"
-  expires_at_ms="$((($(date +%s) + 3600) * 1000))"
-  jq -n \
-    --arg access_token fixture-access-token \
-    --arg refresh_token fixture-refresh-token \
-    --argjson expires_at "$expires_at_ms" \
-    '{claudeAiOauth:{accessToken:$access_token,refreshToken:$refresh_token,expiresAt:$expires_at}}' \
-    >"$auth_home/.credentials.json"
-  cat >"$fake_claude" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-install_path="$CLAUDE_CODE_PLUGIN_CACHE_DIR/cache/ai-plugins/development-system/$FAKE_PLUGIN_VERSION"
-case "$*" in
-  "plugin marketplace add "*" --scope user")
-    ;;
-  "plugin install development-system@ai-plugins --scope user")
-    mkdir -p "$install_path"
-    ;;
-  "plugin list --json")
-    jq -n --arg install_path "$install_path" \
-      '[{id:"development-system@ai-plugins",enabled:true,installPath:$install_path,errors:[]}]'
-    ;;
-  "plugin validate "*)
-    ;;
-  *)
-    exit 91
-    ;;
-esac
-SH
-  cat >"$fake_promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-[ "$CLAUDE_CODE_OAUTH_TOKEN" = fixture-access-token ]
-[ "$CLAUDE_EVAL_RUNTIME_CONFIG_DIR_DEVELOPMENT_SYSTEM" = "$CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM" ]
-[ "$CLAUDE_EVAL_RUNTIME_CONFIG_DIR_NO_PLUGINS" = "$CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS" ]
-[ ! -e "$CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM/.credentials.json" ]
-[ ! -e "$CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS/.credentials.json" ]
-touch "$CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE"
-SH
-  chmod +x "$fake_claude" "$fake_promptfoo"
-  make_fake_codex_cli "$fake_codex"
-  plugin_version="$(jq -r '.version' "$ROOT/plugins/development-system/.claude-plugin/plugin.json")"
-
-  run env \
-    OPENAI_API_KEY=fixture \
-    CLAUDE_BIN="$fake_claude" \
-    CLAUDE_EVAL_AUTH_HOME="$auth_home" \
-    CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM="$claude_home" \
-    CLAUDE_EVAL_HOME_NO_PLUGINS="$fixture_root/claude-no-plugins" \
-    CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE="$fixture_root/claude-session-start" \
-    FAKE_PLUGIN_VERSION="$plugin_version" \
-    PROMPTFOO_BIN="$fake_promptfoo" \
-    EVAL_OUT_DIR="$fixture_root/out" \
-    EVAL_PROVIDER_FILTER=claude-code-sonnet-development-system \
-    EVAL_TIMEOUT=0 \
-    CODEX_EVAL_REAL_BIN="$fake_codex" \
-    CODEX_EVAL_CODEX_BIN="$fake_codex" \
-    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
-    "$RUNNER"
-
-  [ "$status" -eq 0 ]
-  jq -e '.claudeAiOauth.refreshToken == "fixture-refresh-token"' \
-    "$auth_home/.credentials.json" >/dev/null
-  [ ! -e "$claude_home/config/.credentials.json" ]
-  rm -rf "$fixture_root"
-}
-
-@test "eval runner preserves a missing SessionStart marker failure after thresholds pass" {
-  fixture_root="$(mktemp -d)"
-  fake_promptfoo="$fixture_root/promptfoo"
-  fake_codex="$fixture_root/codex"
-  development_system_home="$fixture_root/codex-development-system"
-  cat >"$fake_promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-cat >"$EVAL_OUT_DIR/results.json" <<'JSON'
-{
-  "results": {
-    "results": [
-      {
-        "success": true,
-        "provider": { "id": "openai:codex-sdk" },
-        "vars": {
-          "case_id": "development-system-canary",
-          "plugin_mode": "development-system",
-          "min_pass_rate": 1
-        }
-      }
-    ]
-  }
-}
-JSON
-SH
-  chmod +x "$fake_promptfoo"
-  make_fake_codex_cli "$fake_codex"
-
-  run env \
-    OPENAI_API_KEY=fixture \
-    PROMPTFOO_BIN="$fake_promptfoo" \
-    EVAL_OUT_DIR="$fixture_root/out" \
-    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-development-system \
-    EVAL_TIMEOUT=0 \
-    CODEX_EVAL_HOME="$development_system_home" \
-    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
-    CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
-    CODEX_EVAL_REAL_BIN="$fake_codex" \
-    CODEX_EVAL_CODEX_BIN="$fake_codex" \
-    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
-    "$RUNNER"
-
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"development-system SessionStart hook did not run in the Codex live eval"* ]]
-  [[ "$output" == *"Eval thresholds passed"* ]]
+  [ "$(grep -c '^\[plugins\.' "$targeted_home/config.toml")" -eq 1 ]
+  grep -q '\[plugins\."development-system@ai-plugins"\]' "$targeted_home/config.toml"
+  [ -d "$targeted_home/plugins/cache/ai-plugins/development-system" ]
+  [ "$(find "$targeted_home/plugins/cache/ai-plugins" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ]
 
   rm -rf "$fixture_root"
 }
@@ -563,29 +377,29 @@ SH
   for layout in exact-alias symlinked-descendant case-alias-descendant; do
     fixture_root="$(mktemp -d)"
     fake_promptfoo="$fixture_root/promptfoo"
-    development_system_home="$fixture_root/development-system-home"
-    mkdir -p "$development_system_home"
-    printf 'ai-plugins Codex eval home\n' >"$development_system_home/.ai-plugins-eval-home"
-    printf 'preserve config\n' >"$development_system_home/config.toml"
-    printf 'preserve sentinel\n' >"$development_system_home/sentinel"
+    full_home="$fixture_root/full-home"
+    mkdir -p "$full_home"
+    printf 'ai-plugins Codex eval home\n' >"$full_home/.ai-plugins-eval-home"
+    printf 'preserve config\n' >"$full_home/config.toml"
+    printf 'preserve sentinel\n' >"$full_home/sentinel"
     printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_promptfoo"
     chmod +x "$fake_promptfoo"
 
     case "$layout" in
       exact-alias)
-        no_plugins_home="$development_system_home"
+        targeted_home="$full_home"
         ;;
       symlinked-descendant)
-        ln -s "$development_system_home" "$fixture_root/development-system-home-link"
-        no_plugins_home="$(realpath -m --relative-to="$ROOT" "$fixture_root/development-system-home-link/no-plugins")"
+        ln -s "$full_home" "$fixture_root/full-home-link"
+        targeted_home="$(realpath -m --relative-to="$ROOT" "$fixture_root/full-home-link/targeted")"
         ;;
       case-alias-descendant)
-        development_system_home="$fixture_root/CaseHome"
-        mkdir -p "$development_system_home"
-        printf 'ai-plugins Codex eval home\n' >"$development_system_home/.ai-plugins-eval-home"
-        printf 'preserve config\n' >"$development_system_home/config.toml"
-        printf 'preserve sentinel\n' >"$development_system_home/sentinel"
-        no_plugins_home="$fixture_root/casehome/no-plugins"
+        full_home="$fixture_root/CaseHome"
+        mkdir -p "$full_home"
+        printf 'ai-plugins Codex eval home\n' >"$full_home/.ai-plugins-eval-home"
+        printf 'preserve config\n' >"$full_home/config.toml"
+        printf 'preserve sentinel\n' >"$full_home/sentinel"
+        targeted_home="$fixture_root/casehome/targeted"
         ;;
     esac
 
@@ -593,21 +407,21 @@ SH
       OPENAI_API_KEY=fixture \
       PROMPTFOO_BIN="$fake_promptfoo" \
       EVAL_OUT_DIR="$fixture_root/out" \
-      EVAL_CASE_FILTER=beads-new-task-command-backlog-capture \
-      EVAL_PROVIDER_FILTER=openai:codex-sdk \
+      EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
+      EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-targeted-plugins \
       EVAL_TIMEOUT=0 \
-      CODEX_EVAL_HOME="$development_system_home" \
-      CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$development_system_home" \
-      CODEX_EVAL_HOME_NO_PLUGINS="$no_plugins_home" \
+      CODEX_EVAL_HOME="$full_home" \
+      CODEX_EVAL_HOME_FULL_MARKETPLACE="$full_home" \
+      CODEX_EVAL_HOME_TARGETED_PLUGINS="$targeted_home" \
       "$RUNNER"
 
     [ "$status" -eq 2 ]
     [[ "$output" == *"Codex eval homes overlap for incompatible compositions"* ]]
-    [[ "$output" == *"development-system"* ]]
-    [[ "$output" == *"no-plugins"* ]]
-    grep -q '^preserve config$' "$development_system_home/config.toml"
-    grep -q '^preserve sentinel$' "$development_system_home/sentinel"
-    [ ! -e "$development_system_home/no-plugins" ]
+    [[ "$output" == *"full-marketplace"* ]]
+    [[ "$output" == *"targeted-plugins"* ]]
+    grep -q '^preserve config$' "$full_home/config.toml"
+    grep -q '^preserve sentinel$' "$full_home/sentinel"
+    [ ! -e "$full_home/targeted" ]
 
     rm -rf "$fixture_root"
   done
@@ -616,12 +430,9 @@ SH
 @test "eval runner ignores overlapping homes for unselected Codex modes" {
   fixture_root="$(mktemp -d)"
   fake_promptfoo="$fixture_root/promptfoo"
-  fake_codex="$fixture_root/codex"
   shared_home="$fixture_root/shared-home"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_promptfoo"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\ntouch "$CODEX_EVAL_SESSION_START_MARKER"\n' >"$fake_promptfoo"
   chmod +x "$fake_promptfoo"
-  make_fake_codex_cli "$fake_codex"
 
   run env \
     OPENAI_API_KEY=fixture \
@@ -630,13 +441,9 @@ SH
     EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra \
     EVAL_TIMEOUT=0 \
     CODEX_EVAL_HOME="$shared_home" \
-    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$shared_home" \
+    CODEX_EVAL_HOME_FULL_MARKETPLACE="$shared_home" \
     CODEX_EVAL_HOME_NO_PLUGINS="$shared_home" \
-    CODEX_EVAL_HOME_GRADER="$fixture_root/codex-grader" \
-    CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
-    CODEX_EVAL_REAL_BIN="$fake_codex" \
-    CODEX_EVAL_CODEX_BIN="$fake_codex" \
-    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
+    CODEX_EVAL_HOME_TARGETED_PLUGINS="$shared_home" \
     "$RUNNER"
 
   [ "$status" -eq 0 ]
@@ -651,10 +458,9 @@ SH
   [ "$status" -eq 0 ]
   [[ "$output" == *"generate-config.mjs"* ]]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
-  [ "$(printf '%s\n' "$output" | grep -c 'prepare-claude-home.mjs')" -eq 2 ]
-  [[ "$output" == *".evals/codex-home-grader"*"--plugin-mode no-plugins"* ]]
-  ! printf '%s\n' "$output" | grep -q \
-    'prepare-codex-home.mjs.*--plugin-mode development-system'
+  [[ "$output" == *"--plugin-mode full-marketplace"* ]]
+  [[ "$output" != *"--plugin-mode no-plugins"* ]]
+  [[ "$output" != *"--plugin-mode targeted-plugins"* ]]
   [[ "$output" == *"promptfoo eval"* ]]
 }
 
@@ -662,39 +468,18 @@ SH
   run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 2 ]
-  [[ "$output" == *"--plugin-mode development-system"* ]]
-  [[ "$output" == *".evals/codex-home-grader"*"--plugin-mode no-plugins"* ]]
-}
-
-@test "eval runner rejects a grader home shared with a treatment before preparation" {
-  fixture_root="$(mktemp -d)"
-  shared_home="$fixture_root/shared-home"
-  mkdir -p "$shared_home"
-  printf 'ai-plugins Codex eval home\n' >"$shared_home/.ai-plugins-eval-home"
-  printf 'preserve me\n' >"$shared_home/sentinel"
-
-  run env \
-    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-development-system \
-    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$shared_home" \
-    CODEX_EVAL_HOME_GRADER="$shared_home" \
-    "$RUNNER" --dry-run
-
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"Codex eval homes overlap for incompatible compositions"* ]]
-  [[ "$output" == *"development-system"* ]]
-  [[ "$output" == *"grader"* ]]
-  [ -f "$shared_home/sentinel" ]
-
-  rm -rf "$fixture_root"
+  [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
+  [[ "$output" == *"--plugin-mode full-marketplace"* ]]
+  [[ "$output" != *"--plugin-mode no-plugins"* ]]
+  [[ "$output" != *"--plugin-mode targeted-plugins"* ]]
 }
 
 @test "eval runner passes case filter to Promptfoo CLI" {
-  run env EVAL_CASE_FILTER=beads "$RUNNER" --dry-run
+  run env EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"timeout --kill-after 30s 20m"* ]]
-  [[ "$output" == *"--filter-pattern beads"* ]]
+  [[ "$output" == *"--filter-pattern tiber"* ]]
 }
 
 @test "eval runner dry-run can disable the promptfoo timeout" {
@@ -711,7 +496,7 @@ SH
   [ "$status" -eq 0 ]
   [[ "$output" == *"timeout --kill-after 30s 30m"* ]]
 
-  run env EVAL_TIMEOUT_FULL_DEFAULT=30m EVAL_TIMEOUT_FOCUSED_DEFAULT=5m EVAL_CASE_FILTER=beads "$RUNNER" --dry-run
+  run env EVAL_TIMEOUT_FULL_DEFAULT=30m EVAL_TIMEOUT_FOCUSED_DEFAULT=5m EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"timeout --kill-after 30s 5m"* ]]
@@ -721,38 +506,36 @@ SH
   run env EVAL_PROVIDER_FILTER=claude node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: claude-code-sonnet-development-system"* ]]
-  [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
-  [[ "$output" != *"label: codex-gpt-5.6-terra-development-system"* ]]
+  [[ "$output" == *"label: claude-code-sonnet-full-marketplace"* ]]
+  [[ "$output" != *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
 }
 
-@test "generated eval config exact provider variant filter selects development-system" {
+@test "generated eval config exact provider variant filter selects one full-marketplace provider" {
   run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-development-system"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
+  [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
   [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
   [[ "$output" != *"label: claude-code-sonnet"* ]]
-  [[ "$output" == *"pluginModes:"*$'\n'"      - id: development-system"* ]]
+  [[ "$output" == *"pluginModes:"*$'\n'"      - id: full-marketplace"* ]]
 }
 
 @test "generated eval config combines case and provider filters without expanding provider modes" {
-  run env EVAL_CASE_FILTER=beads-new-task-command-backlog-capture EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
+  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^  - id: openai:codex-sdk$')" -eq 1 ]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-development-system"* ]]
+  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
   [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
+  [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
   [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
   [[ "$output" != *"label: claude-code-sonnet"* ]]
 }
 
 @test "eval runner uses project-local Promptfoo state for real runs" {
   fixture_root="$(mktemp -d)"
-  mkdir -p \
-    "$fixture_root/scripts/evals" \
-    "$fixture_root/bin" \
-    "$fixture_root/tooling/evals/node_modules/@openai"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
   copy_eval_runner "$fixture_root/scripts/evals/run.sh"
   cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
   chmod +x "$fixture_root/scripts/evals/run.sh"
@@ -764,22 +547,17 @@ SH
   cat >"$fixture_root/bin/promptfoo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'PROMPTFOO_CONFIG_DIR=%s\n' "${PROMPTFOO_CONFIG_DIR:-}" \
-  >"$PROMPTFOO_STATE_FILE"
+printf 'PROMPTFOO_CONFIG_DIR=%s\n' "${PROMPTFOO_CONFIG_DIR:-}"
+printf 'ARGS=%s\n' "$*"
 SH
   chmod +x "$fixture_root/bin/promptfoo"
   touch "$fixture_root/promptfooconfig.yaml"
 
-  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    PROMPTFOO_STATE_FILE="$fixture_root/promptfoo-state" \
-    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
 
-  [ "$status" -eq 0 ]
-  grep -Fxq \
-    "PROMPTFOO_CONFIG_DIR=$fixture_root/.dependencies/promptfoo" \
-    "$fixture_root/promptfoo-state"
-  [[ "$output" != *"$fixture_root"* ]]
   rm -rf "$fixture_root"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PROMPTFOO_CONFIG_DIR=$fixture_root/.dependencies/promptfoo"* ]]
 }
 
 @test "eval threshold checker honors case min pass rates" {
@@ -792,22 +570,22 @@ SH
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
       },
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
       },
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
       },
       {
         "success": false,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 },
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 },
         "gradingResult": { "reason": "Stochastic rubric miss" }
       }
     ]
@@ -835,8 +613,13 @@ JSON
         "gradingResult": { "pass": false, "score": 0, "reason": "No plugin-specific command known" }
       },
       {
-        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
-        "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
+        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "targeted-plugins", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
+        "gradingResult": { "pass": true, "score": 1 }
+      },
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
+        "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "full-marketplace", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
         "gradingResult": { "pass": true, "score": 1 }
       }
     ]
@@ -859,7 +642,7 @@ JSON
   "results": {
     "results": [
       {
-        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
+        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
         "testCase": { "vars": { "case_id": "composition", "min_pass_rate": 1, "value_gate_mode": "none" } },
         "gradingResult": { "pass": true, "score": 1 }
       },
@@ -880,93 +663,12 @@ JSON
   [[ "$output" == *"Eval thresholds passed"* ]]
 }
 
-@test "absolute reliability gates every evaluated condition including no-plugin baseline" {
-  fixture_root="$(mktemp -d)"
-  results="$fixture_root/results.json"
-  cat >"$results" <<'JSON'
-{
-  "results": {
-    "results": [
-      {
-        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
-        "testCase": { "vars": { "case_id": "absolute-reliability", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "none" } },
-        "gradingResult": { "pass": true, "score": 1 }
-      },
-      {
-        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
-        "testCase": { "vars": { "case_id": "absolute-reliability", "plugin_mode": "no-plugins", "min_pass_rate": 1, "value_gate_mode": "none" } },
-        "gradingResult": { "pass": false, "score": 0, "reason": "Absolute reliability miss" }
-      }
-    ]
-  }
-}
-JSON
-
-  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
-
-  rm -rf "$fixture_root"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"no-plugins"* ]]
-  [[ "$output" == *"0/1 passed"* ]]
-}
-
-@test "treatment-only provider outage fails closed with zero evaluated evidence" {
-  fixture_root="$(mktemp -d)"
-  results="$fixture_root/results.json"
-  cat >"$results" <<'JSON'
-{
-  "results": {
-    "results": [
-      {
-        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
-        "testCase": { "vars": { "case_id": "focused-treatment", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
-        "gradingResult": { "pass": false, "score": 0, "reason": "provider unavailable" }
-      }
-    ]
-  }
-}
-JSON
-
-  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
-
-  rm -rf "$fixture_root"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"focused-treatment"* ]]
-  [[ "$output" == *"no evaluated provider evidence"* ]]
-}
-
-@test "eval threshold checker rejects unsupported value gate modes in artifacts" {
-  fixture_root="$(mktemp -d)"
-  results="$fixture_root/results.json"
-  cat >"$results" <<'JSON'
-{
-  "results": {
-    "results": [
-      {
-        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
-        "testCase": { "vars": { "case_id": "misspelled-mode", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "standrad" } },
-        "gradingResult": { "pass": true, "score": 1 }
-      }
-    ]
-  }
-}
-JSON
-
-  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
-
-  rm -rf "$fixture_root"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Value gate configuration failures"* ]]
-  [[ "$output" == *"unsupported value gate mode"* ]]
-  [[ "$output" == *"standrad"* ]]
-}
-
-@test "hard guard accepts direct Beads CLI workflow guidance" {
+@test "hard guard allows whitelisted tiber command context for task files" {
   run node - <<'NODE'
 const assertHardGuards = require("./evals/promptfoo/assert-hard-guards.cjs");
 const result = assertHardGuards(
-  "Use `bd ready --json` to inspect the Dolt-backed board before claiming work.",
-  { vars: { case_id: "beads-behavior-slice-bdd-tdd-checkpoint" } },
+  "Use `tiber list` to inspect the board instead of directly write order.md by hand.",
+  { vars: { case_id: "tiber-validation-discipline" } },
 );
 if (!result.pass) {
   console.error(result.reason);
@@ -1000,22 +702,22 @@ cat >evals/out/results.json <<'JSON'
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
       },
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
       },
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 }
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 }
       },
       {
         "success": false,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 0.67 },
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 0.67 },
         "gradingResult": { "reason": "Stochastic rubric miss" }
       }
     ]
@@ -1032,305 +734,6 @@ SH
   rm -rf "$fixture_root"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Eval thresholds passed"* ]]
-}
-
-@test "eval runner fails when a focused treatment provider outage leaves only blocked results" {
-  fixture_root="$(mktemp -d)"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
-  cp "$ROOT/scripts/evals/check-thresholds.mjs" "$fixture_root/scripts/evals/check-thresholds.mjs"
-  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
-  chmod +x "$fixture_root/scripts/evals/run.sh" "$fixture_root/scripts/evals/check-thresholds.mjs"
-  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-SH
-  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
-  cat >"$fixture_root/bin/promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p evals/out
-cat >evals/out/results.json <<'JSON'
-{
-  "results": {
-    "results": [
-      {
-        "provider": { "label": "codex-gpt-5.6-terra-development-system" },
-        "testCase": { "vars": { "case_id": "focused-treatment", "plugin_mode": "development-system", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
-        "gradingResult": { "pass": false, "score": 0, "reason": "provider unavailable" }
-      }
-    ]
-  }
-}
-JSON
-exit 100
-SH
-  chmod +x "$fixture_root/bin/promptfoo"
-  touch "$fixture_root/promptfooconfig.yaml"
-
-  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
-
-  rm -rf "$fixture_root"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"no evaluated provider evidence"* ]]
-  [[ "$output" != *"Eval thresholds passed"* ]]
-}
-
-@test "eval runner discards exact credential leaks before printing successful evidence" {
-  fixture_root="$(mktemp -d)"
-  secret="codex-fixture-secret-that-must-not-escape"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
-  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
-  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-SH
-  cat >"$fixture_root/bin/promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p evals/out
-printf '{"results":{"results":[]}}\n' >evals/out/results.json
-printf '<html>%s</html>\n' "$CODEX_API_KEY" >evals/out/report.html
-printf 'provider output: %s\n' "$CODEX_API_KEY"
-SH
-  chmod +x \
-    "$fixture_root/scripts/evals/run.sh" \
-    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
-    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
-    "$fixture_root/bin/promptfoo"
-  touch "$fixture_root/promptfooconfig.yaml"
-
-  run env CODEX_API_KEY="$secret" PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
-
-  [ "$status" -eq 86 ]
-  [ ! -e "$fixture_root/evals/out/results.json" ]
-  [ ! -e "$fixture_root/evals/out/report.html" ]
-  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
-  [[ "$output" == *"provider eval artifacts were discarded after secret scanning failed"* ]]
-  [[ "$output" != *"$secret"* ]]
-  rm -rf "$fixture_root"
-}
-
-@test "eval runner discards seeded Codex auth leaks without putting values in scanner arguments" {
-  fixture_root="$(mktemp -d)"
-  access_secret="codex-seeded-access-that-must-not-escape"
-  id_secret="codex-seeded-identity-that-must-not-escape"
-  refresh_secret="codex-seeded-refresh-that-must-not-escape"
-  private_key_secret="codex-seeded-private-key-that-must-not-escape"
-  secret_manifest="$fixture_root/codex-auth-artifact-secrets.json"
-  scanner_argv="$fixture_root/scanner-argv"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
-  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
-  jq -n \
-    --arg access "$access_secret" \
-    --arg id "$id_secret" \
-    --arg refresh "$refresh_secret" \
-    --arg private_key "$private_key_secret" \
-    '{version:1,secrets:[$access,$id,$refresh,$private_key]}' \
-    >"$secret_manifest"
-  chmod 600 "$secret_manifest"
-  mv "$fixture_root/scripts/evals/scan-code-quality-secrets.mjs" \
-    "$fixture_root/scripts/evals/scan-code-quality-secrets.real.mjs"
-  cat >"$fixture_root/scripts/evals/scan-code-quality-secrets.mjs" <<'SH'
-#!/usr/bin/env node
-import fs from "node:fs";
-import { spawnSync } from "node:child_process";
-fs.writeFileSync(process.env.SCANNER_ARGV_LOG, JSON.stringify(process.argv.slice(2)), { mode: 0o600 });
-const result = spawnSync(process.execPath, [new URL("./scan-code-quality-secrets.real.mjs", import.meta.url).pathname, ...process.argv.slice(2)], { stdio: "inherit" });
-process.exit(result.status ?? 2);
-SH
-  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-SH
-  cat >"$fixture_root/bin/promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p evals/out
-printf '{"results":{"results":[]},"raw":"%s"}\n' "$SEEDED_CODEX_ACCESS" >evals/out/results.json
-printf '<html>%s %s</html>\n' "$SEEDED_CODEX_ID" "$SEEDED_CODEX_REFRESH" >evals/out/report.html
-printf '<testsuite detail="%s"/>\n' "$SEEDED_CODEX_PRIVATE_KEY" >evals/out/results.junit.xml
-printf 'provider output: %s %s %s %s\n' \
-  "$SEEDED_CODEX_ACCESS" "$SEEDED_CODEX_ID" \
-  "$SEEDED_CODEX_REFRESH" "$SEEDED_CODEX_PRIVATE_KEY"
-SH
-  chmod +x \
-    "$fixture_root/scripts/evals/run.sh" \
-    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
-    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
-    "$fixture_root/scripts/evals/scan-code-quality-secrets.mjs" \
-    "$fixture_root/bin/promptfoo"
-  touch "$fixture_root/promptfooconfig.yaml"
-
-  run env SEEDED_CODEX_ACCESS="$access_secret" \
-    SEEDED_CODEX_ID="$id_secret" \
-    SEEDED_CODEX_REFRESH="$refresh_secret" \
-    SEEDED_CODEX_PRIVATE_KEY="$private_key_secret" \
-    EVAL_CODEX_ARTIFACT_SECRET_FILE="$secret_manifest" \
-    SCANNER_ARGV_LOG="$scanner_argv" \
-    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
-
-  [ "$status" -eq 86 ]
-  [ ! -e "$fixture_root/evals/out/results.json" ]
-  [ ! -e "$fixture_root/evals/out/report.html" ]
-  [ ! -e "$fixture_root/evals/out/results.junit.xml" ]
-  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
-  [[ "$output" == *"provider eval artifacts were discarded after secret scanning failed"* ]]
-  for secret in \
-    "$access_secret" "$id_secret" "$refresh_secret" "$private_key_secret"; do
-    [[ "$output" != *"$secret"* ]]
-    ! rg -Fq "$secret" "$scanner_argv"
-  done
-  jq -e --arg path "$secret_manifest" '
-    index("--secret-file") != null and index($path) != null
-  ' "$scanner_argv" >/dev/null
-  rm -rf "$fixture_root"
-}
-
-@test "eval runner fails closed when Codex auth scan metadata is unreadable" {
-  fixture_root="$(mktemp -d)"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
-  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
-  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-SH
-  cat >"$fixture_root/bin/promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p evals/out
-printf '{"results":{"results":[]}}\n' >evals/out/results.json
-SH
-  chmod +x \
-    "$fixture_root/scripts/evals/run.sh" \
-    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
-    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
-    "$fixture_root/bin/promptfoo"
-  touch "$fixture_root/promptfooconfig.yaml"
-
-  run env EVAL_CODEX_ARTIFACT_SECRET_FILE="$fixture_root/missing-secrets.json" \
-    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
-
-  [ "$status" -eq 86 ]
-  [ ! -e "$fixture_root/evals/out/results.json" ]
-  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
-  [[ "$output" != *"missing-secrets.json"* ]]
-  rm -rf "$fixture_root"
-}
-
-@test "eval runner discards evidence when the artifact scan receipt cannot be written" {
-  fixture_root="$(mktemp -d)"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
-  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
-  cat >"$fixture_root/scripts/evals/artifact-scan-receipt.mjs" <<'JS'
-#!/usr/bin/env node
-process.exit(42);
-JS
-  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-SH
-  cat >"$fixture_root/bin/promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p evals/out
-printf '{"results":{"results":[]}}\n' >evals/out/results.json
-printf 'provider output that must remain buffered\n'
-SH
-  chmod +x \
-    "$fixture_root/scripts/evals/run.sh" \
-    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
-    "$fixture_root/bin/promptfoo"
-  touch "$fixture_root/promptfooconfig.yaml"
-
-  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
-
-  [ "$status" -eq 86 ]
-  [ ! -e "$fixture_root/evals/out/results.json" ]
-  [ ! -e "$fixture_root/evals/out/artifact-scan-receipt.json" ]
-  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
-  [[ "$output" != *"provider output that must remain buffered"* ]]
-  rm -rf "$fixture_root"
-}
-
-@test "eval runner discards a dynamic host path printed only in provider output" {
-  fixture_root="$(mktemp -d)"
-  host_workspace="$fixture_root/private-provider-workspace"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
-  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
-  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-SH
-  cat >"$fixture_root/bin/promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p evals/out
-printf '{"results":{"results":[]}}\n' >evals/out/results.json
-printf 'provider inspected %s/private-guidance\n' "$EVAL_PROVIDER_WORKSPACE"
-SH
-  chmod +x \
-    "$fixture_root/scripts/evals/run.sh" \
-    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
-    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
-    "$fixture_root/bin/promptfoo"
-  touch "$fixture_root/promptfooconfig.yaml"
-
-  run env EVAL_PROVIDER_WORKSPACE="$host_workspace" \
-    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
-
-  [ "$status" -eq 86 ]
-  [ ! -e "$fixture_root/evals/out/results.json" ]
-  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
-  [[ "$output" != *"$host_workspace"* ]]
-  rm -rf "$fixture_root"
-}
-
-@test "eval runner discards generic secret patterns before retaining failed evidence" {
-  fixture_root="$(mktemp -d)"
-  secret="ghp_FAKEPROVIDERARTIFACTSECRET1234567890"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
-  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
-  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-SH
-  cat >"$fixture_root/bin/promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p evals/out
-printf '{"results":{"results":[]}}\n' >evals/out/results.json
-printf '<testsuite token="%s"/>\n' "$SYNTHETIC_PROVIDER_TOKEN" >evals/out/results.junit.xml
-exit 100
-SH
-  chmod +x \
-    "$fixture_root/scripts/evals/run.sh" \
-    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
-    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
-    "$fixture_root/bin/promptfoo"
-  touch "$fixture_root/promptfooconfig.yaml"
-
-  run env SYNTHETIC_PROVIDER_TOKEN="$secret" PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
-
-  [ "$status" -eq 86 ]
-  [ ! -e "$fixture_root/evals/out/results.json" ]
-  [ ! -e "$fixture_root/evals/out/results.junit.xml" ]
-  [ ! -d "$fixture_root/evals/out/timeout-artifacts" ]
-  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "artifact-scan-failed" ]
-  [[ "$output" != *"$secret"* ]]
-  rm -rf "$fixture_root"
 }
 
 @test "eval runner clears stale timeout status before a successful run" {
@@ -1361,7 +764,7 @@ cat >evals/out/results.json <<'JSON'
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 1 }
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 1 }
       }
     ]
   }
@@ -1381,7 +784,6 @@ SH
 
 @test "eval runner writes generated runtime filter options for real generated runs" {
   fixture_bin="$(mktemp -d)"
-  fake_codex="$fixture_bin/codex"
   mkdir -p "$fixture_bin"
   cat >"$fixture_bin/promptfoo" <<'SH'
 #!/usr/bin/env bash
@@ -1389,30 +791,25 @@ set -euo pipefail
 cat evals/out/generated/runtime-options.json
 SH
   chmod +x "$fixture_bin/promptfoo"
-  make_fake_codex_cli "$fake_codex"
 
   run env \
     PROMPTFOO_BIN="$fixture_bin/promptfoo" \
-    CODEX_EVAL_HOME="$fixture_bin/codex-development-system" \
-    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$fixture_bin/codex-development-system" \
+    CODEX_EVAL_HOME="$fixture_bin/codex-full" \
+    CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_bin/codex-full" \
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_bin/codex-none" \
-    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-no-plugins \
-    EVAL_CASE_FILTER=beads \
-    CODEX_EVAL_REAL_BIN="$fake_codex" \
-    CODEX_EVAL_CODEX_BIN="$fake_codex" \
-    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
+    CODEX_EVAL_HOME_TARGETED_PLUGINS="$fixture_bin/codex-targeted" \
+    EVAL_CASE_FILTER=tiber \
     "$RUNNER"
 
   rm -rf "$fixture_bin"
   rm -f "$ROOT/evals/out/generated/runtime-options.json"
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"caseFilter":"beads"'* ]]
+  [[ "$output" == *'"caseFilter":"tiber"'* ]]
 }
 
 @test "eval runner filtered samples use the runtime loader in an isolated output directory" {
   fixture_root="$(mktemp -d)"
   isolated_out="$fixture_root/isolated-output"
-  fake_codex="$fixture_root/codex"
   mkdir -p "$fixture_root/bin"
   cat >"$fixture_root/bin/promptfoo" <<'SH'
 #!/usr/bin/env bash
@@ -1431,26 +828,22 @@ grep -F "tests: file://$runtime_loader" "$config"
 cat "$EVAL_OUT_DIR/generated/runtime-options.json"
 SH
   chmod +x "$fixture_root/bin/promptfoo"
-  make_fake_codex_cli "$fake_codex"
 
   run env \
     PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    CODEX_EVAL_HOME="$fixture_root/codex-development-system" \
-    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$fixture_root/codex-development-system" \
+    CODEX_EVAL_HOME="$fixture_root/codex-full" \
+    CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_root/codex-full" \
     CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-none" \
-    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-no-plugins \
+    CODEX_EVAL_HOME_TARGETED_PLUGINS="$fixture_root/codex-targeted" \
     EVAL_OUT_DIR="$isolated_out" \
-    EVAL_CASE_FILTER=beads \
+    EVAL_CASE_FILTER=tiber \
     EVAL_SAMPLES=2 \
-    CODEX_EVAL_REAL_BIN="$fake_codex" \
-    CODEX_EVAL_CODEX_BIN="$fake_codex" \
-    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
     "$RUNNER"
 
   rm -rf "$fixture_root"
   [ "$status" -eq 0 ]
   [[ "$output" == *"tests: file://$isolated_out/generated/load-harness-cases.runtime.cjs"* ]]
-  [[ "$output" == *'"caseFilter":"beads"'* ]]
+  [[ "$output" == *'"caseFilter":"tiber"'* ]]
   [[ "$output" == *'"samples":"2"'* ]]
 }
 
@@ -1504,7 +897,7 @@ cat >evals/out/results.json <<'JSON'
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 1 }
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 1 }
       }
     ]
   }
@@ -1552,7 +945,7 @@ cat >evals/out/results.json <<'JSON'
       {
         "success": true,
         "provider": { "id": "openai:codex-sdk" },
-        "vars": { "case_id": "alpha", "plugin_mode": "development-system", "min_pass_rate": 1 }
+        "vars": { "case_id": "alpha", "plugin_mode": "full-marketplace", "min_pass_rate": 1 }
       }
     ]
   }
@@ -1572,40 +965,6 @@ SH
   [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "interrupted" ]
   [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval was interrupted before completion with status 130" ]
   [[ "$output" != *"Eval thresholds passed"* ]]
-  rm -rf "$fixture_root"
-}
-
-@test "eval runner does not report missing SessionStart hooks after an interrupted generated eval" {
-  fixture_root="$(mktemp -d)"
-  fake_promptfoo="$fixture_root/promptfoo"
-  fake_codex="$fixture_root/codex"
-  cat >"$fake_promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-exit 130
-SH
-  chmod +x "$fake_promptfoo"
-  make_fake_codex_cli "$fake_codex"
-
-  run env \
-    OPENAI_API_KEY=fixture \
-    PROMPTFOO_BIN="$fake_promptfoo" \
-    EVAL_OUT_DIR="$fixture_root/out" \
-    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-development-system \
-    EVAL_TIMEOUT=0 \
-    CODEX_EVAL_HOME="$fixture_root/codex-development-system" \
-    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$fixture_root/codex-development-system" \
-    CODEX_EVAL_HOME_NO_PLUGINS="$fixture_root/codex-no-plugins" \
-    CODEX_EVAL_SESSION_START_MARKER="$fixture_root/codex-session-start" \
-    CODEX_EVAL_REAL_BIN="$fake_codex" \
-    CODEX_EVAL_CODEX_BIN="$fake_codex" \
-    CODEX_CLI_PLUGIN_ROOT="$ROOT" \
-    "$RUNNER"
-
-  [ "$status" -eq 130 ]
-  [[ "$output" == *"promptfoo eval was interrupted before completion with status 130"* ]]
-  [[ "$output" != *"SessionStart hook did not run"* ]]
-
   rm -rf "$fixture_root"
 }
 
@@ -1678,80 +1037,6 @@ SH
   [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval was interrupted before completion with status 130" ]
   [ ! -e "$fixture_root/evals/out/results.json" ]
   [ -f "$fixture_root/evals/out/timeout-artifacts/"*/results.json ]
-}
-
-@test "eval runner discards unverified artifacts when scanning is interrupted" {
-  SIGNAL_FIXTURE_ROOT="$(mktemp -d)"
-  fixture_root="$SIGNAL_FIXTURE_ROOT"
-  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
-  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
-  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
-  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-SH
-  cat >"$fixture_root/scripts/evals/scan-behavior-artifacts.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-on_interrupt() {
-  printf 'interrupted\n' >"$PROCESS_FIXTURE_DIR/scan.interrupted"
-  exit 130
-}
-trap on_interrupt INT
-printf 'ready\n' >"$PROCESS_FIXTURE_DIR/scan.ready"
-while true; do sleep 1; done
-SH
-  cat >"$fixture_root/bin/promptfoo" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p evals/out
-printf '{"results":{"results":[]}}\n' >evals/out/results.json
-printf '<html>unverified</html>\n' >evals/out/report.html
-SH
-  chmod +x \
-    "$fixture_root/scripts/evals/run.sh" \
-    "$fixture_root/scripts/evals/ensure-node-deps.sh" \
-    "$fixture_root/scripts/evals/scan-behavior-artifacts.sh" \
-    "$fixture_root/bin/promptfoo"
-  touch "$fixture_root/promptfooconfig.yaml"
-
-  setsid env --default-signal=INT \
-    PROCESS_FIXTURE_DIR="$fixture_root" \
-    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
-    EVAL_TIMEOUT=0 \
-    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml" \
-    >"$fixture_root/runner.log" 2>&1 &
-  SIGNAL_RUNNER_PID="$!"
-
-  for _ in $(seq 1 200); do
-    [ ! -s "$fixture_root/scan.ready" ] || break
-    sleep 0.05
-  done
-  [ -s "$fixture_root/scan.ready" ]
-
-  kill -INT -- "-$SIGNAL_RUNNER_PID"
-  runner_exited=0
-  for _ in $(seq 1 200); do
-    if ! kill -0 "$SIGNAL_RUNNER_PID" 2>/dev/null; then
-      runner_exited=1
-      break
-    fi
-    sleep 0.05
-  done
-  [ "$runner_exited" -eq 1 ]
-
-  runner_status=0
-  wait "$SIGNAL_RUNNER_PID" || runner_status="$?"
-  SIGNAL_RUNNER_PID=""
-
-  [ "$runner_status" -eq 130 ]
-  [ -f "$fixture_root/scan.interrupted" ]
-  [ ! -e "$fixture_root/evals/out/results.json" ]
-  [ ! -e "$fixture_root/evals/out/report.html" ]
-  [ ! -e "$fixture_root/evals/out/artifact-scan-receipt.json" ]
-  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "interrupted" ]
-  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = \
-    "provider eval artifact scanning was interrupted with status 130" ]
 }
 
 @test "eval runner forwards SIGINT received before publishing the eval pid" {
@@ -1986,15 +1271,15 @@ const metadataOutput = process.argv[process.argv.indexOf('--metadata-output') + 
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, `providers:
   - id: openai:codex-sdk
-    label: codex-gpt-5.6-terra-development-system
-    pluginMode: development-system
+    label: codex-gpt-5.6-terra-targeted-plugins
+    pluginMode: targeted-plugins
 `);
 const targeted = {
-  label: 'codex-gpt-5.6-terra-development-system',
+  label: 'codex-gpt-5.6-terra-targeted-plugins',
   provider: 'openai:codex-sdk',
   providerVariant: 'codex-gpt-5.6-terra',
-  pluginMode: 'development-system',
-  plugins: ['beads'],
+  pluginMode: 'targeted-plugins',
+  plugins: ['tiber'],
 };
 const noPlugins = {
   ...targeted,
@@ -2009,7 +1294,7 @@ const cases = {
     targeted,
     {
       ...targeted,
-      label: 'codex-second-development-system',
+      label: 'codex-second-targeted-plugins',
       providerVariant: 'codex-second',
       plugins: ['advisor'],
     },
@@ -2032,18 +1317,18 @@ const cases = {
     },
   ],
   label_mismatch: [{ ...targeted, label: 'mismatched-label' }],
-  duplicate_plugin: [{ ...targeted, plugins: ['beads', 'beads'] }],
-  unsorted_plugins: [{ ...targeted, plugins: ['beads', 'advisor'] }],
-  invalid_plugin_name: [{ ...targeted, plugins: ['Beads'] }],
+  duplicate_plugin: [{ ...targeted, plugins: ['tiber', 'tiber'] }],
+  unsorted_plugins: [{ ...targeted, plugins: ['tiber', 'advisor'] }],
+  invalid_plugin_name: [{ ...targeted, plugins: ['Tiber'] }],
   missing_composition_label: [targeted],
   extra_composition_label: [targeted, noPlugins],
   both_missing_and_extra: [
     targeted,
     {
-      label: 'claude-b-development-system',
+      label: 'claude-b-full-marketplace',
       provider: 'anthropic:claude-agent-sdk',
       providerVariant: 'claude-b',
-      pluginMode: 'development-system',
+      pluginMode: 'full-marketplace',
       plugins: ['advisor'],
     },
     {
@@ -2062,7 +1347,7 @@ const providerLabelsByCase = {
   both_missing_and_extra: [
     'claude-z-no-plugins',
     targeted.label,
-    'claude-a-development-system',
+    'claude-a-full-marketplace',
   ],
   order_insensitive: [noPlugins.label, targeted.label],
 };
@@ -2081,8 +1366,8 @@ NODE
     "missing|generated eval metadata is missing providerCompositions" \
     "empty|providerCompositions must contain at least one provider" \
     "duplicate|duplicate provider label" \
-    "inconsistent|inconsistent Codex provider compositions for development-system" \
-    "targeted_empty|development-system provider composition must not be empty" \
+    "inconsistent|inconsistent Codex provider compositions for targeted-plugins" \
+    "targeted_empty|targeted provider composition must not be empty" \
     "no_plugins_nonempty|no-plugins provider composition must be empty" \
     "missing_variant|invalid provider composition" \
     "unknown_provider|unsupported provider in provider composition" \
@@ -2093,7 +1378,7 @@ NODE
     "invalid_plugin_name|invalid plugin list" \
     "missing_composition_label|provider composition labels do not match configured providers: missing: codex-gpt-5.6-terra-no-plugins" \
     "extra_composition_label|provider composition labels do not match configured providers: extra: codex-gpt-5.6-terra-no-plugins" \
-    "both_missing_and_extra|provider composition labels do not match configured providers: missing: claude-a-development-system, claude-z-no-plugins; extra: claude-b-development-system, claude-c-no-plugins"; do
+    "both_missing_and_extra|provider composition labels do not match configured providers: missing: claude-a-full-marketplace, claude-z-no-plugins; extra: claude-b-full-marketplace, claude-c-no-plugins"; do
     composition_case="${fixture%%|*}"
     expected="${fixture#*|}"
 
@@ -2108,7 +1393,7 @@ NODE
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"--plugin-mode no-plugins"* ]]
-  [[ "$output" == *"--plugin-mode development-system"* ]]
+  [[ "$output" == *"--plugin-mode targeted-plugins"* ]]
 
   cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
 #!/usr/bin/env bash
@@ -2131,7 +1416,7 @@ SH
       OPENAI_API_KEY=fixture \
       PROMPTFOO_BIN=/bin/true \
       CODEX_EVAL_HOME="$grader_home" \
-      CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="$grader_home" \
+      CODEX_EVAL_HOME_FULL_MARKETPLACE="$grader_home" \
       "$fixture_root/scripts/evals/run.sh"
 
     [ "$status" -ne 0 ]

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI agents (Codex, Claude Code, etc.) working in this repository.
+Guidance for AI agents (Claude Code, Codex, etc.) working in this repository.
 
 ## What this repo is
 
@@ -8,9 +8,6 @@ Guidance for AI agents (Codex, Claude Code, etc.) working in this repository.
 [Claude Code marketplace](https://code.claude.com/docs/en/plugin-marketplaces)
 format and carries Codex-facing marketplace metadata and plugin manifests for
 Codex and other harnesses that adopt the plugin concept.
-
-Codex is the primary supported harness; Claude Code is supported from the same
-plugin tree.
 
 When this repository's marketplace plugins are installed in an agent harness,
 use the relevant installed skills for matching work rather than treating plugin
@@ -33,7 +30,7 @@ client data, proprietary excerpts, auth material, or private transcripts.
 Use the Nix devshell — do not install global toolchains by hand.
 
 ```shell
-nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats, lefthook, bd
+nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats, lefthook
 ```
 
 **Critical convention:** anything npm would normally install "globally" must
@@ -47,46 +44,92 @@ point inside `./.dependencies/` and prepending the local npm `bin/` dir to
 Never commit `./.dependencies/`. If the environment looks broken, `rm -rf
 .dependencies` and re-enter the devshell.
 
-Promptfoo and the optional Claude and Codex evaluation SDKs are pinned in
-`tooling/evals/package.json` and `tooling/evals/package-lock.json`.
-`scripts/evals/ensure-node-deps.sh` installs them there and maintains the
-git-ignored root `node_modules` symlink required by the evaluation tooling;
-`scripts/evals/run.sh` and `scripts/evals/share.sh` restore it when missing.
+The Promptfoo eval runner is the exception to the "no root npm project" shape:
+`package.json` and `package-lock.json` are committed so Promptfoo can resolve
+its optional coding-harness provider SDKs from the project root. `node_modules/`
+is git-ignored and restored with `npm ci`; `scripts/evals/run.sh` and
+`scripts/evals/share.sh` run that restore automatically when Promptfoo, the
+Codex SDK, or the Claude Agent SDK is missing.
 
 `.envrc` (`use flake`) is git-ignored here per the maintainer's global config;
 recreate it locally if you use direnv.
 
 ## Worktree workflow
 
-Linked worktrees isolate **concurrent mutable tickets**, not ordinary work.
-Questions and read-only investigation require neither a ticket nor a worktree.
-One mutable ticket may use its current checkout. Create a linked worktree only
-when separate mutable tickets are active concurrently across sessions, agents,
-or subagents; never create a nested worktree merely for another task.
+This repo is configured for parallel development from linked worktrees. The main
+checkout is the coordination checkout; feature work should happen in worktrees
+created under the ignored repo-local `.worktrees/` directory:
 
-The active harness owns worktree creation, switching, and cleanup. Use its
-normal linked-worktree workflow, then let this repository's bootstrap and
-teardown helpers supply repository-specific environment setup and cleanup. A
-worktree is optional isolation, not a delivery precondition.
+```shell
+git worktree add .worktrees/<branch-name> -b <branch-name>
+```
 
-Install or refresh the committed post-checkout bootstrap hook from the primary
-checkout:
+Before making edits, agents should run:
+
+```shell
+scripts/agent-checkout-guard.sh
+```
+
+The guard exits successfully only from a linked worktree. In the main checkout
+it blocks feature work, points to the linked-worktree command above, and
+distinguishes ordinary local changes from the common case where the dirty
+worktree already matches the upstream branch after a fetch.
+
+Install the committed Lefthook configuration from the main checkout:
 
 ```shell
 just worktree-hooks
 ```
 
-The managed Lefthook configuration owns `post-checkout` and runs
-`scripts/worktree-bootstrap.sh` for linked worktrees. It leaves ordinary
-checkouts inert. The installer preserves foreign hooks and only removes its
-own recognized legacy launchers. Rerun it after a behavior-affecting change to
-`lefthook.yml`, `scripts/install-worktree-hooks.sh`, `flake.nix`, or
-`flake.lock`.
+Existing clones that installed the former direct shell hooks must rerun this
+command after updating to the Lefthook migration. Rerun it after any
+behavior-affecting change to `lefthook.yml` or
+`scripts/install-worktree-hooks.sh`, and whenever `flake.nix` or `flake.lock`
+changes the exported Lefthook runtime—even when its displayed version is
+unchanged. Normal installation is deliberately refused from a linked worktree
+because the installed runtime and configuration are shared by every worktree.
 
-`scripts/worktree-guard.sh` remains only as a no-op compatibility shim for
-already-installed legacy pre-commit and pre-push launchers. It is not a
-checkout-location policy and must not be used to decide whether work may
-proceed.
+The Lefthook-managed hooks do two things:
+
+- `pre-commit` and `pre-push` run `scripts/worktree-guard.sh`, which blocks
+  commits and pushes from the main checkout while allowing linked worktrees.
+- `post-checkout` runs `scripts/worktree-bootstrap.sh`, which is inert in the
+  main checkout and bootstraps linked worktrees once.
+
+The installer serializes concurrent runs with `flock`, registers the
+flake-selected Lefthook store path as a repository-local Nix garbage-collection
+root, validates and snapshots `lefthook.yml`, and replaces each launcher with an
+atomic rename. Before replacing a foreign regular-file or symlink hook, it
+copies that hook to the next unique `*.worktrees-backup` path. It does not
+execute or chain those archival backups: inspect each reported backup and
+migrate behavior that must remain active into `lefthook.yml` before deleting it.
+If installation stops partway through, every hook path is still either the
+complete old hook or the complete new launcher; fix the reported failure and
+rerun `just worktree-hooks` to converge. `flock` releases automatically after
+normal exit or a crash, and the next run removes abandoned staging directories.
+
+`LEFTHOOK_CONFIG` pins the main snapshot, but Lefthook still merges a
+checkout-local `lefthook-local.yml` into delegated jobs. Treat that file as an
+intentional local override, not as part of the installed snapshot. The mandatory
+worktree safety pass runs before Lefthook. Every launcher also passes
+`--no-auto-install`, so an ordinary local `no_auto_install: false` override
+cannot replace the repository-owned launcher.
+
+Launchers derive Git's common directory at runtime and contain no checkout-path
+literals. If a clone is moved, rerun `just worktree-hooks` from its new location
+to repair the indirect Nix GC-root registration before the old auto-root is
+garbage-collected.
+
+The mandatory safety scripts themselves remain checkout-relative: a hook invokes
+`scripts/worktree-guard.sh` or `scripts/worktree-bootstrap.sh` from the worktree
+where Git ran it. A revision that predates or removes those scripts is not
+hook-compatible and fails closed; do not treat runtime pinning as a promise that
+arbitrary historical revisions can commit or push without the safety scripts.
+
+Each launcher runs its mandatory worktree safety check once before delegating
+to Lefthook, and the matching Lefthook job suppresses only that duplicate pass.
+This keeps normal main-checkout enforcement and linked-worktree bootstrap
+independent of Lefthook job selection while avoiding duplicate work.
 
 For each linked worktree, the bootstrap:
 
@@ -106,37 +149,49 @@ package-manager scripts, another runner, or no wrapper at all.
 There are no long-running services or containers in this repo today, so
 `scripts/worktree-teardown.sh` only loads `.env.worktree` and performs a Docker
 Compose shutdown if a future workflow adds `COMPOSE_PROJECT_NAME`-scoped
-services. When optional cleanup is appropriate, prepare it through:
+services. Remove worktrees through:
 
 ```shell
 just worktree-teardown .worktrees/<branch-name>
 ```
 
-Then let the owner or active harness remove a clean worktree while preserving
-its branch. Port allocation is stable per worktree and recorded under Git's
-common directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
+Port allocation is stable per worktree and recorded under Git's common
+directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
 `WORKTREE_PORT_BASE_PG`, and `WORKTREE_PORT_STRIDE` before bootstrap if needed.
 
-## Beads workflow
+## Backlog capacity management
 
-Use Beads with its Dolt backend as the repository task board for planned mutable
-delivery work. Run `bd prime` for current CLI guidance and use `--json` for
-programmatic reads.
-Questions, read-only investigation, and ordinary explanation do not require a
-ticket, a claim, or a worktree.
+Use Tiber as the repository task board and manage queued work as a deliberately
+bounded backlog.
 
-- For ordinary ready-work selection, run
-  `bd ready --exclude-label gt:slot --json` before ordering or claiming issues.
-  Issues labeled `gt:slot` are persistent coordination state, not delivery
-  work; leave them open, unclaimed, and unclosed. Select the returned issues
-  deterministically by priority ascending, creation time ascending, then issue
-  ID ascending. Dependency edges represent real blocking relationships, not
-  artificial ordering.
-- Work on one issue at a time. Before starting ready work, claim it atomically
-  with `bd update <id> --claim`; after completing it, choose the first issue in
-  the deterministic ready order. Use the delivery formula configured in
-  `[beads].workflow` and attach behavior, documentation, CI-workflow, or
-  validation-only slice molecules according to the changed surface.
+- The active ticket (`in-progress`) does not count toward backlog capacity. A
+  queued ticket is a ticket in `backlog` status.
+- Keep at most five queued tickets. Do not maintain an overflow, icebox, shadow
+  backlog, or other hidden queue.
+- Discovery identifies a candidate; it does not create an obligation to admit
+  or retain a ticket.
+- Compare candidates by user pain and frequency, severity, blocking impact,
+  future leverage, confidence, value relative to cost, and overlap with existing
+  root causes.
+- Keep queued tickets in one strict priority order with no ties. Re-rank the
+  complete queue whenever a ticket is admitted, combined, displaced, completed,
+  reopened, or materially re-scoped; do not use creation order as priority.
+- When fewer than five tickets are queued, admit a worthwhile candidate
+  normally. At capacity, evaluate a candidate before creating a ticket and
+  choose exactly one explicit outcome: replace a lower-value queued ticket;
+  combine genuinely overlapping tickets; or reject the candidate without
+  creating a ticket. Record a concise reason for every combination,
+  displacement, or rejection.
+- When the backlog falls to two or fewer queued tickets, perform a replenishment
+  review. Inspect durable memories, recent usage friction, eval failures, and
+  recurring workarounds for worthwhile candidates. It is valid to add nothing.
+- Blocking defects and in-model security issues required to complete the active
+  ticket remain causal work within that ticket. Do not create separate backlog
+  tickets merely to evade the cap.
+- Work on one ticket at a time. Before starting a queued ticket, move it to
+  `in-progress`; after completing it, select the highest-priority queued ticket
+  whose prerequisites are satisfied. If the highest-priority ticket is blocked,
+  keep its priority explicit and start the highest-priority unblocked ticket.
 
 ## Adding a plugin
 
@@ -186,70 +241,38 @@ find plugins -name plugin.json -exec jq empty {} \;  # every plugin manifest val
 prettier --check "**/*.{json,md}"                 # formatting (use --write to fix)
 ```
 
-Run provider-backed evals only for behavior that changed files could plausibly
-affect. Case, condition, and harness selection are causal engineering choices,
-not a ritual full-suite gate. `just evals` compares the branch with
-`origin/main` and applies the repository mapping: a shared skill prose edit
-selects only mapped cases that name an unresolved stochastic question and why
-deterministic verification is insufficient; prose alone is not a live-eval
-requirement. Plugin, hook, or harness behavior selects the relevant
-installed-plugin canary or outcome scenario. Deterministically decidable
-retirement, deletion, file, routing, schema, format, metadata, and
-transformation contracts—along with documentation, tests, and unrelated
-implementation details—select no provider eval. Every selected case defaults
-to one sample unless the named metric requires repetition.
+For every plugin in this marketplace, when modifying anything under `plugins/`
+that could affect plugin or skill behavior, run the full relevant eval set
+before claiming completion. Behavior evals for the marketplace run through
+promptfoo's native Claude Code and Codex coding-agent providers, loading the
+relevant marketplace surface for each harness:
 
 ```shell
 just evals
-EVAL_BASE_REF=<ref> scripts/evals/run-changed.sh
-EVAL_CASE_FILTER='<case-regex>' EVAL_PROVIDER_FILTER='<provider>' EVAL_SAMPLES=1 \
-  scripts/evals/run.sh
+nix develop -c scripts/evals/run.sh
 nix develop -c node scripts/evals/build-site.mjs
 ```
 
-Use `just evals-all` only as an explicit research experiment when a concrete
-cross-case, cross-condition, cross-harness hypothesis requires the exhaustive
-matrix. It is never a routine completion or release gate. `just evals` shares
-fresh Promptfoo artifacts when its selected scope produces them; executable
-outcome scenarios remain local evidence. If Promptfoo writes artifacts and
-exits with failed evals, the command shares before returning the eval failure.
-Interrupted or timed-out runs are not shared.
+`just evals` is the convenience path for local provider-backed evals plus
+`promptfoo share`; it uploads the latest result and prints the share URL. Use
+the lower-level commands when you need local-only artifacts or `promptfoo view`.
+If Promptfoo writes artifacts and exits with failed evals, `just evals` still
+shares and then returns the eval failure status. If the run is interrupted
+with Ctrl-C, `just evals` exits immediately and does not share.
 
 `scripts/evals/run.sh --dry-run` only validates promptfoo wiring and is useful
 for pull-request CI without secrets; it is not behavior evidence. Provider-backed
-runs require working authentication for only the selected harnesses. The runner restores
-the pinned npm dev dependencies from `tooling/evals/package-lock.json`, generates promptfoo
-config from the current marketplace manifests, prepares isolated no-plugin and
-`development-system` homes, installs the Claude plugin through the real
-marketplace CLI, and configures Claude with `apiKeyRequired: false`. Local
-Claude subscription runs read the current access token into the eval process
-while leaving the rotating refresh token in the source Claude config; both
-plugin conditions therefore use disposable runtime config without copying
-credentials or invalidating the source login. API-key or explicit-token runs
-use the same isolated runtime config.
-
-If an intended eval harness reports missing, invalid, or expiring
-authentication, pause the eval workflow and tell the user which harness needs
-authentication. Give the user an opportunity to authenticate before narrowing
-the eval scope, skipping that harness, or declaring it unavailable. After the
-user authenticates, retry the intended harness. Never silently skip it.
-
-The runner uses Codex as the default model-graded assertion provider and disables
-prompt response caching and hosted sharing so generated artifacts are fresh and repo-owned. Run
-`scripts/evals/run.sh --suite canary` to prove installed `development-system`
-loading and SessionStart execution before relying on behavior results. The optional Promptfoo MCP
+runs require working Claude Code and Codex authentication. The runner restores
+the pinned npm dev dependencies from `package-lock.json`, generates promptfoo
+config from the current marketplace manifests, prepares a `CODEX_EVAL_HOME`
+with every Codex marketplace plugin, configures Claude with `apiKeyRequired: false`, uses
+Codex as the default model-graded assertion provider, and disables prompt
+response caching and hosted sharing so generated artifacts are fresh and
+repo-owned. Run `scripts/evals/run.sh --suite canary` to prove full-marketplace
+plugin loading before relying on behavior results. The optional Promptfoo MCP
 server in the `agentic-systems-engineering` Codex manifest is for
 agent-assisted validation, focused runs, and result inspection; it does not
 replace the canonical runner.
-
-`just evals` runs its change-selected scope in one Promptfoo process with up to
-eight target calls globally. The existing Claude Code and Codex condition-specific
-homes remain isolated within that process, and it writes the normal one-report
-artifact set under `evals/out/` before sharing it. The cap is global, so it does
-not guarantee a four-per-provider split. When no explicit concurrency is
-supplied, repository-owned provider evals use global target-call concurrency 8
-by default; use a lower explicit concurrency only for a named causal reason or
-experiment.
 
 The static dashboard summarizes latest-run status by provider, case, sample,
 plugin, and skill so PR notes can point to both aggregate quality and the
@@ -274,7 +297,7 @@ unless that automation is explicitly requested and secrets are protected.
 ### Standing authorization for repository-owned live evals
 
 The repository owner grants standing approval to run repository-owned
-provider-backed evals and benchmarks through the supported coding harnesses:
+provider-backed evals and benchmarks through both supported coding harnesses:
 
 - Claude Code using the owner's existing Claude/Anthropic subscription authentication.
 - Codex CLI using the owner's existing ChatGPT/OpenAI subscription authentication.
@@ -339,16 +362,17 @@ Skip this for Codex-only plugins.
 
 ## Multi-harness notes
 
-- Codex reads `.agents/plugins/marketplace.json` and per-plugin
-  `.codex-plugin/plugin.json`. Treat the Codex manifest as the canonical version
-  source for a plugin supported in both harnesses.
 - Claude Code reads `.claude-plugin/marketplace.json` and per-plugin
-  `.claude-plugin/plugin.json`. Keep shared Claude and Codex metadata versions
-  synchronized.
-- Codex-only plugins are allowed when Claude Code already provides equivalent
-  built-in behavior; keep them out of Claude marketplace metadata and Claude
-  behavior evaluation coverage. Prefer additive, harness-namespaced metadata
-  rather than overloading either marketplace format.
+  `.claude-plugin/plugin.json`. Keep these the source of truth.
+- Codex reads `.agents/plugins/marketplace.json` and per-plugin
+  `.codex-plugin/plugin.json`. Codex-only plugins are allowed when a harness
+  already provides equivalent built-in behavior; keep them out of Claude Code
+  marketplace metadata and Claude behavior eval coverage.
+- When adding Codex (or other-harness) support, do not break the Claude Code
+  manifest. Prefer additive, harness-namespaced metadata and a parallel
+  manifest if a harness needs a different format, rather than overloading
+  `marketplace.json`. Always note a plugin's supported harnesses in its README
+  and the `README.md` catalog tables.
 
 ## Engineering standards (harness-agnostic)
 
@@ -366,19 +390,7 @@ over-engineered; this is a scope heuristic, not permission to skip a gate. These
 rules apply to **both Claude Code and Codex**;
 `CLAUDE.md` is a thin pointer to this file.
 
-## CI/CD and package lifecycle
-
-Development-system is distributed through the Codex and Claude Code marketplace
-manifests, not as an npm package. Do not add an npm publication workflow,
-registry credential, trusted-publisher binding, publication-only version commit,
-or package tag.
-
-`plugins/development-system/.codex-plugin/plugin.json` is the canonical version
-source. For a required version bump, update it and run
-`node scripts/sync-development-system-metadata.mjs --write` to synchronize the
-Claude manifest, marketplace entries, cache launchers, and catalog. Validate
-the resulting plugin manifests and installed-harness behavior through the
-causal checks selected by `just ci`.
+## CI/CD and release
 
 CI runs on GitHub Actions (`.github/workflows/ci.yml`):
 

@@ -1,23 +1,14 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/development-system\" session-start --project \"$PWD\" --harness claude",
-            "timeout": 10,
-            "statusMessage": "Checking development system compatibility"
-          },
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/run-beads-hook\" --project \"$PWD\" -- prime --hook-json",
-            "timeout": 60,
-            "statusMessage": "Loading Beads SessionStart context"
-          }
-        ]
-      }
-    ]
-  }
+  "SessionStart": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/development-system\" session-start --project \"$PWD\" --harness claude",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
 }

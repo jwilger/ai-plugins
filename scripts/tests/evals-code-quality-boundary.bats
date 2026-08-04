@@ -145,8 +145,9 @@ case " $* " in
       '@REPOSITORY_ROOT@' \
       '@RUNTIME_ROOT@' \
       'ai-plugins-code-quality' \
-      'no-plugins' \
-      'development-system'; do
+      'no-marketplace-skills' \
+      'targeted-quality-skills' \
+      'all-marketplace-skills'; do
       case "$mountinfo" in
         *"$forbidden_mount_source"*) exit 78 ;;
       esac
@@ -770,7 +771,7 @@ NODE
     "$DISCOVERY_RUNTIME_ROOT/manifest.json" >/dev/null
 
   DISCOVERY_RUNTIME_MANIFEST="$DISCOVERY_RUNTIME_ROOT/manifest.json"
-  select_discovery_mode development-system
+  select_discovery_mode targeted-quality-skills
   BOUNDARY_CODEX_REAL_BIN="$discovery_codex_bin"
   BOUNDARY_EXPECTED_SHA256="$discovery_codex_sha256"
   BOUNDARY_EXPECTED_VERSION="$discovery_codex_version"
@@ -1093,8 +1094,9 @@ NODE
   [[ "$boundary_argv" != *"$FIXTURE_ROOT"* ]]
   [[ "$boundary_argv" != *"ai-plugins-code-quality"* ]]
   [[ "$boundary_argv" != *"benchmark"* ]]
-  [[ "$boundary_argv" != *"no-plugins"* ]]
-  [[ "$boundary_argv" != *"development-system"* ]]
+  [[ "$boundary_argv" != *"no-marketplace-skills"* ]]
+  [[ "$boundary_argv" != *"targeted-quality-skills"* ]]
+  [[ "$boundary_argv" != *"all-marketplace-skills"* ]]
   [[ ! "$boundary_argv" =~ sample-[0-9]+ ]]
 }
 
@@ -1615,8 +1617,9 @@ NODE
   )"
 
   for mode in \
-    no-plugins \
-    development-system; do
+    no-marketplace-skills \
+    targeted-quality-skills \
+    all-marketplace-skills; do
     select_discovery_mode "$mode"
     run_boundary \
       exec \
@@ -1689,7 +1692,7 @@ assert.deepEqual(canonicalDiscoveredNames, expectedNames);
 assert.ok(
   expectedRow.availableSkills.some((name) => name.startsWith("codex-system:")),
 );
-if (expectedMode === "no-plugins") {
+if (expectedMode === "no-marketplace-skills") {
   assert.ok(
     expectedRow.availableSkills.every((name) =>
       name.startsWith("codex-system:"),
@@ -1719,7 +1722,7 @@ for (const hostPath of hostPaths) {
 }
 for (const forbidden of [
   /\bsample-[0-9]+\b/,
-  /\bno-plugins\b/,
+  /\b(?:no-marketplace-skills|targeted-quality-skills|all-marketplace-skills)\b/,
   /\.plugin-eval(?:\/|\b)/,
   /(?:^|\/)benchmark\.json\b/,
   /(?:^|\/)evals\//,

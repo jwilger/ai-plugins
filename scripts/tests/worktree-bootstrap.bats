@@ -49,8 +49,8 @@ teardown() {
 }
 
 @test "does not copy disposable eval state into linked worktrees" {
-  mkdir -p "$REPO/.dependencies/evals/codex-home-development-system"
-  touch "$REPO/.dependencies/evals/codex-home-development-system/auth.json"
+  mkdir -p "$REPO/.dependencies/evals/codex-home-full-marketplace"
+  touch "$REPO/.dependencies/evals/codex-home-full-marketplace/auth.json"
   git -C "$REPO" worktree add -q "$REPO/.worktrees/evals" -b evals
 
   run bash -c "cd '$REPO/.worktrees/evals' && scripts/worktree-bootstrap.sh"

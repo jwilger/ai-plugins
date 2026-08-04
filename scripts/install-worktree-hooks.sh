@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the pinned Lefthook launcher for worktree bootstrap.
+# Install pinned Lefthook launchers for worktree bootstrap and main-checkout enforcement.
 set -euo pipefail
 
 readonly expected_lefthook_version="${AI_PLUGINS_LEFTHOOK_VERSION:-}"
@@ -98,7 +98,7 @@ cleanup() {
   fi
   if [ "$status" -ne 0 ]; then
     printf '%s\n' \
-      'worktrees.hook_install_incomplete: fix the reported error and rerun just worktree-hooks; the post-checkout launcher remains complete and foreign hooks are preserved.' >&2
+      'worktrees.hook_install_incomplete: fix the reported error and rerun just worktree-hooks; installed hook paths remain complete and foreign bytes are archived before replacement.' >&2
   fi
   exit "$status"
 }
@@ -112,7 +112,7 @@ done
 
 stage="$(mktemp -d "$state_dir/.install-staging.XXXXXX")"
 
-for hook_name in post-checkout pre-commit; do
+for hook_name in pre-commit pre-push post-checkout; do
   target="$hooks_dir/$hook_name"
   if { [ -e "$target" ] || [ -L "$target" ]; } && [ ! -f "$target" ] && [ ! -L "$target" ]; then
     printf 'worktrees.hook_target_unsupported: %s must be a regular file or symlink.\n' "$target" >&2
@@ -143,16 +143,27 @@ if [ "$snapshot_status" -ne 0 ]; then
   exit "$snapshot_status"
 fi
 
-write_post_checkout_launcher() {
-  local staged_hook="$stage/post-checkout"
+write_launcher() {
+  local hook_name="$1"
+  local safety_script
+  local safety_token
+  local staged_hook="$stage/$hook_name"
+
+  if [ "$hook_name" = post-checkout ]; then
+    safety_script=scripts/worktree-bootstrap.sh
+    safety_token=worktree-bootstrap
+  else
+    safety_script=scripts/worktree-guard.sh
+    safety_token=worktree-guard
+  fi
 
   {
     printf '%s\n' '#!/usr/bin/env bash'
-    printf '%s\n' '# ai-plugins-managed-hook:v1:post-checkout'
+    printf '# ai-plugins-managed-hook:v1:%s\n' "$hook_name"
     printf '%s\n' 'set -euo pipefail'
     printf "LEFTHOOK_ROOT_NAME='%s'\n" "$root_name"
-    printf '%s\n' "SAFETY_SCRIPT='scripts/worktree-bootstrap.sh'"
-    printf '%s\n' "SAFETY_TOKEN='worktree-bootstrap'"
+    printf "SAFETY_SCRIPT='%s'\n" "$safety_script"
+    printf "SAFETY_TOKEN='%s'\n" "$safety_token"
     printf '%s\n' 'REPO_ROOT=$(git rev-parse --show-toplevel)'
     printf '%s\n' 'COMMON_DIR=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)'
     printf '%s\n' 'LEFTHOOK_BIN="$COMMON_DIR/lefthook/roots/$LEFTHOOK_ROOT_NAME/bin/lefthook"'
@@ -161,86 +172,26 @@ write_post_checkout_launcher() {
     printf '%s\n' '"$REPO_ROOT/$SAFETY_SCRIPT" "$@"'
     printf '%s\n' 'AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN="$SAFETY_TOKEN"'
     printf '%s\n' 'export AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN LEFTHOOK_CONFIG'
-    printf '%s\n' 'exec "$LEFTHOOK_BIN" run "post-checkout" --no-auto-install "$@"'
+    printf 'exec "$LEFTHOOK_BIN" run "%s" --no-auto-install "$@"\n' "$hook_name"
   } >"$staged_hook"
   chmod 0755 "$staged_hook"
   bash -n "$staged_hook"
 }
 
-write_post_checkout_launcher
-
-write_pre_commit_launcher() {
-  local staged_hook="$stage/pre-commit"
-
-  {
-    printf '%s\n' '#!/usr/bin/env bash'
-    printf '%s\n' '# ai-plugins-managed-hook:v1:pre-commit'
-    printf '%s\n' 'set -euo pipefail'
-    printf "LEFTHOOK_ROOT_NAME='%s'\n" "$root_name"
-    printf '%s\n' 'COMMON_DIR=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)'
-    printf '%s\n' 'LEFTHOOK_BIN="$COMMON_DIR/lefthook/roots/$LEFTHOOK_ROOT_NAME/bin/lefthook"'
-    printf '%s\n' 'LEFTHOOK_CONFIG="$COMMON_DIR/lefthook/lefthook.yml"'
-    printf '%s\n' 'export LEFTHOOK_CONFIG'
-    printf '%s\n' 'exec "$LEFTHOOK_BIN" run "pre-commit" --no-auto-install "$@"'
-  } >"$staged_hook"
-  chmod 0755 "$staged_hook"
-  bash -n "$staged_hook"
-}
-
-write_pre_commit_launcher
+for hook_name in pre-commit pre-push post-checkout; do
+  write_launcher "$hook_name"
+done
 
 mv -fT -- "$stage/lefthook.yml" "$state_dir/lefthook.yml"
 
-is_managed_post_checkout_hook() {
-  local target="$1"
+is_managed_hook() {
+  local hook_name="$1"
+  local target="$2"
   local marker
 
   [ -f "$target" ] || return 1
   marker="$(sed -n '2p' "$target")" || return 1
-  [ "$marker" = '# ai-plugins-managed-hook:v1:post-checkout' ]
-}
-
-is_managed_pre_commit_hook() {
-  local target="$1"
-
-  [ -f "$target" ] && [ ! -L "$target" ] || return 1
-  [ "$(wc -l <"$target")" -eq 9 ] || return 1
-  [ "$(sed -n '1p' "$target")" = '#!/usr/bin/env bash' ] || return 1
-  [ "$(sed -n '2p' "$target")" = '# ai-plugins-managed-hook:v1:pre-commit' ] || return 1
-  [ "$(sed -n '3p' "$target")" = 'set -euo pipefail' ] || return 1
-  [[ "$(sed -n '4p' "$target")" =~ ^LEFTHOOK_ROOT_NAME=\'[^\']+\'$ ]] || return 1
-  [ "$(sed -n '5p' "$target")" = 'COMMON_DIR=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)' ] || return 1
-  [ "$(sed -n '6p' "$target")" = 'LEFTHOOK_BIN="$COMMON_DIR/lefthook/roots/$LEFTHOOK_ROOT_NAME/bin/lefthook"' ] || return 1
-  [ "$(sed -n '7p' "$target")" = 'LEFTHOOK_CONFIG="$COMMON_DIR/lefthook/lefthook.yml"' ] || return 1
-  [ "$(sed -n '8p' "$target")" = 'export LEFTHOOK_CONFIG' ] || return 1
-  [ "$(sed -n '9p' "$target")" = 'exec "$LEFTHOOK_BIN" run "pre-commit" --no-auto-install "$@"' ]
-}
-
-is_exact_legacy_managed_hook() {
-  local hook_name="$1"
-  local target="$2"
-  local root_line
-  local expected_exec
-
-  [ -f "$target" ] && [ ! -L "$target" ] || return 1
-  [ "$(wc -l <"$target")" -eq 15 ] || return 1
-  [ "$(sed -n '1p' "$target")" = '#!/usr/bin/env bash' ] || return 1
-  [ "$(sed -n '2p' "$target")" = "# ai-plugins-managed-hook:v1:$hook_name" ] || return 1
-  [ "$(sed -n '3p' "$target")" = 'set -euo pipefail' ] || return 1
-  root_line="$(sed -n '4p' "$target")"
-  [[ "$root_line" =~ ^LEFTHOOK_ROOT_NAME=\'[^\']+\'$ ]] || return 1
-  [ "$(sed -n '5p' "$target")" = "SAFETY_SCRIPT='scripts/worktree-guard.sh'" ] || return 1
-  [ "$(sed -n '6p' "$target")" = "SAFETY_TOKEN='worktree-guard'" ] || return 1
-  [ "$(sed -n '7p' "$target")" = 'REPO_ROOT=$(git rev-parse --show-toplevel)' ] || return 1
-  [ "$(sed -n '8p' "$target")" = 'COMMON_DIR=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)' ] || return 1
-  [ "$(sed -n '9p' "$target")" = 'LEFTHOOK_BIN="$COMMON_DIR/lefthook/roots/$LEFTHOOK_ROOT_NAME/bin/lefthook"' ] || return 1
-  [ "$(sed -n '10p' "$target")" = 'LEFTHOOK_CONFIG="$COMMON_DIR/lefthook/lefthook.yml"' ] || return 1
-  [ "$(sed -n '11p' "$target")" = 'unset AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN' ] || return 1
-  [ "$(sed -n '12p' "$target")" = '"$REPO_ROOT/$SAFETY_SCRIPT" "$@"' ] || return 1
-  [ "$(sed -n '13p' "$target")" = 'AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN="$SAFETY_TOKEN"' ] || return 1
-  [ "$(sed -n '14p' "$target")" = 'export AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN LEFTHOOK_CONFIG' ] || return 1
-  printf -v expected_exec 'exec "$LEFTHOOK_BIN" run "%s" --no-auto-install "$@"' "$hook_name"
-  [ "$(sed -n '15p' "$target")" = "$expected_exec" ]
+  [ "$marker" = "# ai-plugins-managed-hook:v1:$hook_name" ]
 }
 
 next_backup_path() {
@@ -255,37 +206,19 @@ next_backup_path() {
   printf '%s\n' "$backup"
 }
 
-target="$hooks_dir/pre-commit"
-if [ -e "$target" ] || [ -L "$target" ]; then
-  if ! is_managed_pre_commit_hook "$target" && ! is_exact_legacy_managed_hook pre-commit "$target"; then
-    printf 'worktrees.foreign_pre_commit_hook: refusing to replace %s.\n' "$target" >&2
-    exit 65
+for hook_name in pre-commit pre-push post-checkout; do
+  target="$hooks_dir/$hook_name"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    if ! is_managed_hook "$hook_name" "$target"; then
+      backup="$(next_backup_path "$target")"
+      cp -a -T -- "$target" "$backup"
+      printf 'worktrees.hook_backup_created: %s\n' "$backup" >&2
+    fi
   fi
-fi
-
-target="$hooks_dir/post-checkout"
-if [ -e "$target" ] || [ -L "$target" ]; then
-  if ! is_managed_post_checkout_hook "$target"; then
-    backup="$(next_backup_path "$target")"
-    cp -a -T -- "$target" "$backup"
-    printf 'worktrees.hook_backup_created: %s\n' "$backup" >&2
-  fi
-fi
-mv --no-copy -fT -- "$stage/post-checkout" "$target"
-
-target="$hooks_dir/pre-commit"
-mv --no-copy -fT -- "$stage/pre-commit" "$target"
+  mv --no-copy -fT -- "$stage/$hook_name" "$target"
+done
 
 rm -rf -- "$stage"
 stage=""
-
-for hook_name in pre-push; do
-  target="$hooks_dir/$hook_name"
-  if is_exact_legacy_managed_hook "$hook_name" "$target"; then
-    rm -- "$target"
-    printf 'worktrees.legacy_managed_hook_removed: %s\n' "$target" >&2
-  fi
-done
-
 trap - EXIT
-printf 'installed Lefthook post-checkout worktree bootstrap hook for %s using %s\n' "$repo" "$expected_lefthook_version"
+printf 'installed Lefthook worktree hooks for %s using %s\n' "$repo" "$expected_lefthook_version"

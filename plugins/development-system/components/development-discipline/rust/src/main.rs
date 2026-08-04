@@ -13,13 +13,9 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use eventcore::{Event, StreamId};
-use eventcore_fs::{FileEventStore, FsEventStoreError};
-use eventcore_types::{collect_events, EventStore, StreamVersion, StreamWrites};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const DEFAULT_BASE: &str = "origin/main";
@@ -44,6 +40,7 @@ const MAX_LENS_DESCRIPTION_CHARS: usize = 512;
 const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_WORK_ITEM_ID_CHARS: usize = 256;
 const MAX_ACTIVE_REVIEW_SESSIONS: usize = 32;
+const MAX_DURABLE_REVIEW_SESSIONS: usize = 1024;
 const MAX_RETAINED_HISTORY_ENTRIES: usize = 64;
 const MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES: usize = 128;
 const MAX_RETAINED_DEFERRED_FINDINGS: usize = MAX_FINDINGS_PER_ITERATION;
@@ -73,8 +70,6 @@ const MAX_SPLIT_CANDIDATE_REASON_BYTES: usize = 2 * 1024;
 const MAX_SPLIT_DELIVERY_EVIDENCE_CHARS: usize = 512;
 const MAX_SPLIT_CANDIDATE_CRITERIA: usize = 32;
 const MAX_SPLIT_CANDIDATE_PATHS: usize = 256;
-const REVIEW_SESSION_STORE_LOCK_RETRIES: usize = 200;
-const REVIEW_SESSION_STORE_LOCK_RETRY_DELAY: Duration = Duration::from_millis(5);
 static OPAQUE_FINGERPRINT_HASHER: OnceLock<RandomState> = OnceLock::new();
 static SNAPSHOT_INDEX_COUNTER: AtomicU64 = AtomicU64::new(0);
 // This inventory is repeated once per lens assignment, while the full list is
@@ -203,51 +198,10 @@ impl Default for ReviewCoordinator {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 struct PendingVerifier {
     assignment_id: String,
     arguments: Value,
-    #[serde(default)]
-    assignment: Option<Value>,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-enum ReviewSessionEvent {
-    SnapshotV1 {
-        stream_id: StreamId,
-        session_id: String,
-        state: Value,
-        pending_verifier: Option<PendingVerifier>,
-        pending_delta_risk: Option<PendingVerifier>,
-        updated_at: u64,
-    },
-    ImportedFromSqliteV1 {
-        stream_id: StreamId,
-        session_id: String,
-        state: Value,
-        pending_verifier: Option<PendingVerifier>,
-        pending_delta_risk: Option<PendingVerifier>,
-        source_revision: u64,
-    },
-    ReportReplacedV1 {
-        stream_id: StreamId,
-        report_binding_id: String,
-        findings: Vec<Value>,
-    },
-}
-
-impl Event for ReviewSessionEvent {
-    fn stream_id(&self) -> &StreamId {
-        match self {
-            Self::SnapshotV1 { stream_id, .. }
-            | Self::ImportedFromSqliteV1 { stream_id, .. }
-            | Self::ReportReplacedV1 { stream_id, .. } => stream_id,
-        }
-    }
-
-    fn event_type_name() -> &'static str {
-        "DevelopmentDisciplineReviewSessionEvent"
-    }
 }
 
 enum RequestLine {
@@ -328,39 +282,13 @@ impl ReviewCoordinator {
                     .pointer("/params/arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                if !matches!(
-                    name,
-                    "final_review.plan" | "final_review.assess_risk" | "final_review.resume"
-                ) {
+                if !matches!(name, "final_review.plan" | "final_review.assess_risk") {
                     if let Err(error) = self.validate_authoritative_state(name, &arguments) {
                         return Ok(error_response(id, -32602, &error));
                     }
                 }
-                let mut invocation_arguments = arguments.clone();
-                if name == "final_review.advance" {
-                    if let Some(session_id) = arguments
-                        .pointer("/state/session_id")
-                        .and_then(Value::as_str)
-                    {
-                        if let Some(pending) = self.pending_delta_risks.get(session_id) {
-                            if pending_delta_risk_core_arguments(&arguments).ok()
-                                == Some(pending.arguments.clone())
-                            {
-                                if let Some(assignment) = pending.assignment.clone() {
-                                    invocation_arguments["__persisted_delta_risk_assignment"] =
-                                        assignment;
-                                }
-                            }
-                        }
-                    }
-                }
                 let now_epoch_seconds = (self.now_epoch_seconds)();
-                let result = if name == "final_review.resume" {
-                    self.resume_authoritative_state(&arguments)
-                } else {
-                    call_tool_at(name, &invocation_arguments, now_epoch_seconds)
-                };
-                match result {
+                match call_tool_at(name, &arguments, now_epoch_seconds) {
                     Ok(result) => {
                         let response =
                             json!({ "jsonrpc": "2.0", "id": id.clone(), "result": result });
@@ -402,117 +330,6 @@ impl ReviewCoordinator {
         };
 
         Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
-    }
-
-    fn resume_authoritative_state(&mut self, arguments: &Value) -> Result<Value, String> {
-        let session_id = arguments
-            .get("session_id")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "review_session_id_required=true".to_string())?;
-        if session_id.chars().count() > MAX_SESSION_ID_CHARS {
-            return Err(format!(
-                "session_id_too_long max_chars={MAX_SESSION_ID_CHARS}"
-            ));
-        }
-        let project_root = arguments
-            .get("project_root")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
-        let work_item_id = arguments.get("work_item_id").and_then(Value::as_str);
-        let lookup = json!({
-            "scope": { "project_root": project_root },
-            "work_item_id": work_item_id
-        });
-        if let Some(restored) = load_authoritative_session(&lookup, session_id)? {
-            self.session_revisions
-                .insert(session_id.to_string(), restored.revision);
-            self.sessions.insert(session_id.to_string(), restored.state);
-            self.pending_verifiers.remove(session_id);
-            self.pending_delta_risks.remove(session_id);
-            if let Some(pending) = restored.pending_verifier {
-                self.pending_verifiers
-                    .insert(session_id.to_string(), pending);
-            }
-            if let Some(pending) = restored.pending_delta_risk {
-                self.pending_delta_risks
-                    .insert(session_id.to_string(), pending);
-            }
-        }
-        let state = self
-            .sessions
-            .get(session_id)
-            .cloned()
-            .filter(|state| {
-                state.pointer("/scope/project_root").and_then(Value::as_str) == Some(project_root)
-                    && state.get("work_item_id").and_then(Value::as_str) == work_item_id
-            })
-            .ok_or_else(|| {
-                "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
-                    .to_string()
-            })?;
-        let delta_risk_assignments = if let Some(pending) =
-            self.pending_delta_risks.get(session_id).cloned()
-        {
-            let assignment = pending_delta_risk_assignment(&state, &pending)?;
-            let assignment_id = assignment
-                .get("assignment_id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "pending_delta_risk_assignment_id_required=true".to_string())?;
-            if pending.assignment.is_some() && assignment_id != pending.assignment_id {
-                return Err("pending_delta_risk_assignment_corrupt=true".to_string());
-            }
-            if pending.assignment.is_none() {
-                if assignment_id != pending.assignment_id {
-                    return Err(
-                        "legacy_pending_delta_assignment_unrecoverable=true recovery=resubmit_fresh_scope_without_assessment"
-                            .to_string(),
-                    );
-                }
-                let refreshed = PendingVerifier {
-                    assignment_id: assignment_id.to_string(),
-                    arguments: pending.arguments,
-                    assignment: Some(assignment.clone()),
-                };
-                let now_epoch_seconds = (self.now_epoch_seconds)();
-                let revision = persist_authoritative_session(
-                    &state,
-                    self.pending_verifiers.get(session_id),
-                    Some(&refreshed),
-                    now_epoch_seconds,
-                    Some(&state),
-                    self.session_revisions.get(session_id).copied(),
-                )?;
-                self.session_revisions
-                    .insert(session_id.to_string(), revision);
-                self.pending_delta_risks
-                    .insert(session_id.to_string(), refreshed);
-            }
-            json!([assignment])
-        } else {
-            json!([])
-        };
-        let revision = self.session_revisions.get(session_id).copied().unwrap_or(1);
-        let pending_transition = if self.pending_verifiers.contains_key(session_id) {
-            "verifier_required"
-        } else if self.pending_delta_risks.contains_key(session_id) {
-            "delta_risk_assessment_required"
-        } else {
-            "none"
-        };
-        self.touch_session(session_id);
-        self.enforce_active_session_limit();
-        Ok(text_content(
-            json!({
-                "session_id": session_id,
-                "revision": revision,
-                "state": state,
-                "pending_transition": pending_transition,
-                "delta_risk_assignments": delta_risk_assignments
-            })
-            .to_string(),
-        ))
     }
 
     fn validate_authoritative_state(
@@ -580,22 +397,6 @@ impl ReviewCoordinator {
                 }
             }
             if let Some(pending) = self.pending_delta_risks.get(session_id) {
-                let resubmission = pending_delta_risk_non_scope_arguments(arguments)?;
-                let pending_arguments = pending_delta_risk_non_scope_arguments(&pending.arguments)?;
-                if resubmission != pending_arguments {
-                    return Err("pending_delta_risk_resubmission_mismatch=true".to_string());
-                }
-                let scope_changed =
-                    pending_delta_risk_core_arguments(arguments)? != pending.arguments;
-                if scope_changed {
-                    if arguments.get("delta_risk_assessment").is_some() {
-                        return Err(
-                            "pending_delta_risk_changed_scope_requires_fresh_assessment=true"
-                                .to_string(),
-                        );
-                    }
-                    return Ok(());
-                }
                 let assessment = arguments
                     .get("delta_risk_assessment")
                     .ok_or_else(|| "pending_delta_risk_assessment_required=true".to_string())?;
@@ -603,6 +404,10 @@ impl ReviewCoordinator {
                     != Some(pending.assignment_id.as_str())
                 {
                     return Err("pending_delta_risk_assignment_mismatch=true".to_string());
+                }
+                let resubmission = pending_delta_risk_core_arguments(arguments)?;
+                if resubmission != pending.arguments {
+                    return Err("pending_delta_risk_resubmission_mismatch=true".to_string());
                 }
             }
         }
@@ -639,10 +444,7 @@ impl ReviewCoordinator {
             .and_then(Value::as_str)
             .ok_or_else(|| "internal tool result session missing".to_string())?
             .to_string();
-        if tool_name == "final_review.plan"
-            && (self.sessions.contains_key(&session_id)
-                || load_authoritative_session(&state, &session_id)?.is_some())
-        {
+        if tool_name == "final_review.plan" && self.sessions.contains_key(&session_id) {
             return Err("review_session_exists=true".to_string());
         }
         if tool_name == "final_review.plan"
@@ -667,7 +469,6 @@ impl ReviewCoordinator {
             let pending = PendingVerifier {
                 assignment_id,
                 arguments: expected_arguments,
-                assignment: None,
             };
             let authoritative_state = arguments.get("state").unwrap_or(&state);
             let revision = persist_authoritative_session(
@@ -697,7 +498,6 @@ impl ReviewCoordinator {
             let pending = PendingVerifier {
                 assignment_id,
                 arguments: expected_arguments,
-                assignment: payload.pointer("/delta_risk_assignments/0").cloned(),
             };
             let authoritative_state = arguments.get("state").unwrap_or(&state);
             let revision = persist_authoritative_session(
@@ -797,93 +597,6 @@ fn pending_delta_risk_core_arguments(arguments: &Value) -> Result<Value, String>
         .ok_or_else(|| "pending_delta_risk_arguments_object_required=true".to_string())?;
     fields.remove("delta_risk_assessment");
     Ok(core)
-}
-
-fn pending_delta_risk_non_scope_arguments(arguments: &Value) -> Result<Value, String> {
-    let mut core = pending_delta_risk_core_arguments(arguments)?;
-    let fields = core
-        .as_object_mut()
-        .ok_or_else(|| "pending_delta_risk_arguments_object_required=true".to_string())?;
-    for field in [
-        "current_diff_hash",
-        "current_changed_files",
-        "current_shared_test_evidence",
-    ] {
-        fields.remove(field);
-    }
-    Ok(core)
-}
-
-fn pending_delta_risk_assignment(
-    state: &Value,
-    pending: &PendingVerifier,
-) -> Result<Value, String> {
-    if let Some(assignment) = &pending.assignment {
-        if let Some(artifact_reference) = assignment
-            .pointer("/delta_evidence/artifact_reference")
-            .and_then(Value::as_str)
-        {
-            if !Path::new(artifact_reference).is_file() {
-                return Err("pending_delta_risk_artifact_missing=true".to_string());
-            }
-            let artifact_digest = assignment
-                .pointer("/delta_evidence/artifact_digest")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "pending_delta_risk_artifact_digest_required=true".to_string())?;
-            if !valid_git_object_id(artifact_digest) {
-                return Err("pending_delta_risk_artifact_digest_invalid=true".to_string());
-            }
-            let project_root = state
-                .pointer("/scope/project_root")
-                .and_then(Value::as_str)
-                .map(Path::new)
-                .ok_or_else(|| "scope_project_root_required=true".to_string())?;
-            let observed_digest = git_text(
-                project_root,
-                &["hash-object".to_string(), artifact_reference.to_string()],
-                None,
-                None,
-                "pending_delta_risk_artifact_digest",
-            )?;
-            if observed_digest != artifact_digest {
-                return Err("pending_delta_risk_artifact_digest_mismatch=true".to_string());
-            }
-        }
-        return Ok(assignment.clone());
-    }
-
-    let current_diff_hash = pending
-        .arguments
-        .get("current_diff_hash")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "pending_delta_risk_current_diff_hash_required=true".to_string())?;
-    let current_changed_files = strict_string_array(
-        pending.arguments.get("current_changed_files"),
-        "pending_delta_risk_current_changed_files",
-    )?
-    .ok_or_else(|| "pending_delta_risk_current_changed_files_required=true".to_string())?;
-    let current_shared_test_evidence = pending
-        .arguments
-        .get("current_shared_test_evidence")
-        .ok_or_else(|| "pending_delta_risk_shared_test_evidence_required=true".to_string())?;
-    let prior_diff_hash = state
-        .pointer("/scope/diff_hash")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "pending_delta_risk_prior_diff_hash_required=true".to_string())?;
-    let current_delta_evidence = generated_delta_evidence(
-        state,
-        prior_diff_hash,
-        current_diff_hash,
-        &current_changed_files,
-    )?;
-    let (_, assignment) = delta_risk_assignment(
-        state,
-        current_diff_hash,
-        &current_changed_files,
-        current_shared_test_evidence,
-        &current_delta_evidence,
-    )?;
-    Ok(assignment)
 }
 
 fn tool_error_code(message: &str) -> i64 {
@@ -1035,20 +748,6 @@ fn tools() -> Value {
                     "risk_assessment",
                     "shared_test_evidence"
                 ]
-            }
-        },
-        {
-            "name": "final_review.resume",
-            "description": "Return the latest server-authoritative caller-carried state for an exact persisted final-review session ID without weakening subsequent revision checks.",
-            "inputSchema": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "session_id": { "type": "string", "minLength": 1, "maxLength": MAX_SESSION_ID_CHARS },
-                    "project_root": { "type": "string", "minLength": 1, "pattern": "\\S" },
-                    "work_item_id": { "type": "string", "maxLength": MAX_WORK_ITEM_ID_CHARS, "pattern": "^[A-Za-z0-9._:-]+$" }
-                },
-                "required": ["session_id", "project_root"]
             }
         },
         {
@@ -1711,7 +1410,7 @@ fn generated_delta_evidence(
             .map(|path| format!(":(literal){path}")),
     );
     let counter = SNAPSHOT_INDEX_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let evidence_dir = review_session_store_root()?.join("delta-evidence");
+    let evidence_dir = env::temp_dir().join("development-discipline-delta-evidence");
     fs::create_dir_all(&evidence_dir)
         .map_err(|error| format!("delta_evidence_directory_failed source={error}"))?;
     let patch_path = evidence_dir.join(format!("{}-{counter}.patch", std::process::id()));
@@ -2525,17 +2224,11 @@ fn compile_risk_plan(
     let assessment = assessment
         .as_object()
         .ok_or_else(|| "risk_assessment_must_be_object=true".to_string())?;
-    let expected_assignment: Value =
-        if let Some(assignment) = arguments.get("__persisted_delta_risk_assignment") {
-            assignment.clone()
-        } else {
-            let expected_payload: Value = serde_json::from_str(&risk_assessment_result(arguments)?)
-                .map_err(|error| format!("risk_assessment_binding_parse_failed source={error}"))?;
-            expected_payload
-                .pointer("/assignments/0")
-                .cloned()
-                .ok_or_else(|| "risk_assessment_binding_assignment_missing=true".to_string())?
-        };
+    let expected_payload: Value = serde_json::from_str(&risk_assessment_result(arguments)?)
+        .map_err(|error| format!("risk_assessment_binding_parse_failed source={error}"))?;
+    let expected_assignment = expected_payload
+        .pointer("/assignments/0")
+        .ok_or_else(|| "risk_assessment_binding_assignment_missing=true".to_string())?;
     for field in ["assignment_id", "subagent_key"] {
         if assessment.get(field).and_then(Value::as_str)
             != expected_assignment.get(field).and_then(Value::as_str)
@@ -2543,7 +2236,7 @@ fn compile_risk_plan(
             return Err(risk_assessment_identity_mismatch(
                 field,
                 assessment,
-                &expected_assignment,
+                expected_assignment,
             ));
         }
     }
@@ -2557,10 +2250,10 @@ fn compile_risk_plan(
         return Err(risk_assessment_identity_mismatch(
             "shared_test_evidence_id",
             assessment,
-            &expected_assignment,
+            expected_assignment,
         ));
     }
-    validate_risk_assessment_caller_attestation(assessment, &expected_assignment)?;
+    validate_risk_assessment_caller_attestation(assessment, expected_assignment)?;
     let overall_risk = assessment
         .get("overall_risk")
         .and_then(Value::as_str)
@@ -5065,19 +4758,12 @@ fn advance_with_contract_validation_at(
             let current_changed_files = current_changed_files.as_ref().ok_or_else(|| {
                 "current_changed_files_required_when_diff_changes=true".to_string()
             })?;
-            let persisted_assignment = arguments.get("__persisted_delta_risk_assignment");
-            let current_delta_evidence = match persisted_assignment {
-                Some(assignment) => assignment
-                    .get("delta_evidence")
-                    .cloned()
-                    .ok_or_else(|| "persisted_delta_risk_evidence_required=true".to_string())?,
-                None => generated_delta_evidence(
-                    &state,
-                    prior_diff_hash,
-                    current_diff_hash,
-                    current_changed_files,
-                )?,
-            };
+            let current_delta_evidence = generated_delta_evidence(
+                &state,
+                prior_diff_hash,
+                current_diff_hash,
+                current_changed_files,
+            )?;
             if lens_results
                 .as_array()
                 .is_none_or(|results| !results.is_empty())
@@ -5102,19 +4788,13 @@ fn advance_with_contract_validation_at(
                 "verifier_rejected": []
             });
             validate_caller_decisions(&state, &empty_filtered, &caller_decisions)?;
-            let assignment = match persisted_assignment {
-                Some(assignment) => assignment.clone(),
-                None => {
-                    delta_risk_assignment(
-                        &state,
-                        current_diff_hash,
-                        current_changed_files,
-                        &current_shared_test_evidence,
-                        &current_delta_evidence,
-                    )?
-                    .1
-                }
-            };
+            let (_, assignment) = delta_risk_assignment(
+                &state,
+                current_diff_hash,
+                current_changed_files,
+                &current_shared_test_evidence,
+                &current_delta_evidence,
+            )?;
             let Some(delta_risk_assessment) = arguments.get("delta_risk_assessment") else {
                 return Ok(json!({
                     "state": state,
@@ -5127,20 +4807,6 @@ fn advance_with_contract_validation_at(
                 })
                 .to_string());
             };
-            if delta_risk_assessment.get("assignment_id") != assignment.get("assignment_id")
-                || delta_risk_assessment.get("subagent_key") != assignment.get("subagent_key")
-            {
-                return Ok(json!({
-                    "state": state,
-                    "transition_status": "delta_risk_assessment_required",
-                    "delta_risk_assignments": [assignment],
-                    "complete": false,
-                    "completion_blockers": unresolved_findings(&state),
-                    "next_assignments": [],
-                    "subagent_shutdown": []
-                })
-                .to_string());
-            }
             return apply_delta_risk_reassessment(
                 state,
                 current_diff_hash,
@@ -5151,7 +4817,6 @@ fn advance_with_contract_validation_at(
                 DeltaTransitionContext {
                     caller_decisions: &caller_decisions,
                     now_epoch_seconds,
-                    persisted_assignment,
                 },
             );
         } else if arguments.get("current_shared_test_evidence").is_some() {
@@ -5451,7 +5116,6 @@ fn advance_with_contract_validation_at(
 struct DeltaTransitionContext<'a> {
     caller_decisions: &'a [Value],
     now_epoch_seconds: u64,
-    persisted_assignment: Option<&'a Value>,
 }
 
 fn apply_delta_risk_reassessment(
@@ -5513,9 +5177,6 @@ fn apply_delta_risk_reassessment(
         &current_shared_test_evidence,
         &current_delta_evidence,
     )?;
-    if let Some(assignment) = transition.persisted_assignment {
-        delta_arguments["__persisted_delta_risk_assignment"] = assignment.clone();
-    }
     delta_arguments["risk_assessment"] = delta_risk_assessment.clone();
     let compiled = compile_risk_plan(&delta_arguments, current_changed_files)?
         .ok_or_else(|| "delta_risk_assessment_compile_failed=true".to_string())?;
@@ -6695,22 +6356,44 @@ fn sync_scout_out_of_scope_report(state: &mut Value) -> Result<(), String> {
 }
 
 fn prepare_durable_out_of_scope_report(state: &mut Value) -> Result<(), String> {
-    let session_id = state
-        .get("session_id")
+    let project_root = state
+        .pointer("/scope/project_root")
         .and_then(Value::as_str)
-        .ok_or_else(|| "review_session_id_required=true".to_string())?;
-    let report_binding_id = state
+        .ok_or_else(|| "durable_report_project_root_required=true".to_string())?;
+    let _report_binding_id = state
         .get("report_binding_id")
         .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
-    let stream_id = review_session_stream_id(state, session_id)?;
-    state["out_of_scope_report_artifact"] = json!(format!(
-        "eventcore://development-discipline/final-review-sessions/{stream_id}?report_binding_id={report_binding_id}"
-    ));
+    let path = durable_report_database_path(
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
+    remove_legacy_report_artifacts(
+        &path,
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
+    let directory = path
+        .parent()
+        .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("durable_report_directory_create_failed source={error}"))?;
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err("durable_report_file_symlink_forbidden=true".to_string());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "durable_report_file_metadata_failed source={error}"
+            ));
+        }
+    }
+    state["out_of_scope_report_artifact"] = json!(path.to_string_lossy());
     Ok(())
 }
 
-#[cfg(test)]
 fn replace_durable_out_of_scope_report(
     transaction: &rusqlite::Transaction<'_>,
     state: &Value,
@@ -6766,7 +6449,7 @@ fn replace_durable_out_of_scope_report(
 }
 
 #[cfg(test)]
-fn persist_prepared_out_of_scope_report(state: &Value) -> Result<PathBuf, String> {
+fn persist_prepared_out_of_scope_report(state: &Value) -> Result<(), String> {
     let project_root = state
         .pointer("/scope/project_root")
         .and_then(Value::as_str)
@@ -6775,11 +6458,6 @@ fn persist_prepared_out_of_scope_report(state: &Value) -> Result<PathBuf, String
         project_root,
         state.get("work_item_id").and_then(Value::as_str),
     )?;
-    let directory = path
-        .parent()
-        .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
-    fs::create_dir_all(directory)
-        .map_err(|error| format!("durable_report_directory_create_failed source={error}"))?;
     let mut connection = Connection::open_with_flags(
         &path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -6795,7 +6473,7 @@ fn persist_prepared_out_of_scope_report(state: &Value) -> Result<PathBuf, String
     transaction
         .commit()
         .map_err(|error| format!("durable_report_commit_failed source={error}"))?;
-    Ok(path)
+    Ok(())
 }
 
 fn durable_report_database_path(
@@ -6838,7 +6516,49 @@ fn durable_report_state_root(
         .ok_or_else(|| "durable_report_state_home_required=true".to_string())
 }
 
-#[cfg(test)]
+fn remove_legacy_report_artifacts(
+    current_path: &Path,
+    project_root: &str,
+    work_item_id: Option<&str>,
+) -> Result<(), String> {
+    let state_root = current_path
+        .parent()
+        .ok_or_else(|| "durable_report_directory_missing=true".to_string())?;
+    let mut legacy_keys = vec![stable_storage_digest(&[
+        "development-discipline-final-review-report-v1",
+        project_root,
+    ])];
+    if let Some(work_item_id) = work_item_id {
+        legacy_keys.push(stable_storage_digest(&[
+            "development-discipline-final-review-ticket-report-v1",
+            work_item_id,
+        ]));
+    }
+    for key in legacy_keys {
+        let legacy_path = state_root.join(format!("{key}.sqlite"));
+        if legacy_path != current_path {
+            remove_report_artifact_files(&legacy_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_report_artifact_files(path: &Path) -> Result<(), String> {
+    for suffix in ["", "-wal", "-shm"] {
+        let candidate = PathBuf::from(format!("{}{}", path.to_string_lossy(), suffix));
+        match fs::remove_file(&candidate) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "durable_report_legacy_remove_failed source={error}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn initialize_durable_report_schema(connection: &Connection) -> Result<(), String> {
     const SNAPSHOT_TABLE: &str = "
         CREATE TABLE IF NOT EXISTS final_review_lens_snapshot (
@@ -6907,9 +6627,20 @@ fn initialize_durable_report_schema(connection: &Connection) -> Result<(), Strin
 struct RestoredReviewSession {
     state: Value,
     revision: u64,
-    store_revision: u64,
     pending_verifier: Option<PendingVerifier>,
     pending_delta_risk: Option<PendingVerifier>,
+}
+
+fn encoded_pending_assignment(pending: Option<&PendingVerifier>) -> Result<Option<String>, String> {
+    pending
+        .map(|pending| {
+            serde_json::to_string(&json!({
+                "assignment_id": pending.assignment_id,
+                "arguments": pending.arguments
+            }))
+            .map_err(|error| format!("review_session_pending_encode_failed source={error}"))
+        })
+        .transpose()
 }
 
 fn decoded_pending_assignment(encoded: Option<String>) -> Result<Option<PendingVerifier>, String> {
@@ -6927,130 +6658,9 @@ fn decoded_pending_assignment(encoded: Option<String>) -> Result<Option<PendingV
                     .get("arguments")
                     .cloned()
                     .ok_or_else(|| "review_session_pending_arguments_missing=true".to_string())?,
-                assignment: value.get("assignment").cloned(),
             })
         })
         .transpose()
-}
-
-fn review_session_store_root() -> Result<PathBuf, String> {
-    let root = durable_report_state_root(
-        env::var_os("XDG_STATE_HOME")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from),
-        env::var_os("HOME")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from),
-    )?
-    .join("development-discipline/final-review-sessions");
-    if cfg!(test) {
-        Ok(root.join(format!("test-{}", std::process::id())))
-    } else {
-        Ok(root)
-    }
-}
-
-fn open_review_session_store() -> Result<FileEventStore, String> {
-    let root = review_session_store_root()?;
-    for attempt in 0..=REVIEW_SESSION_STORE_LOCK_RETRIES {
-        match FileEventStore::open(&root) {
-            Ok(store) => return Ok(store),
-            Err(FsEventStoreError::StoreLocked { .. })
-                if attempt < REVIEW_SESSION_STORE_LOCK_RETRIES =>
-            {
-                std::thread::sleep(REVIEW_SESSION_STORE_LOCK_RETRY_DELAY);
-            }
-            Err(FsEventStoreError::StoreLocked { .. }) => {
-                return Err("review_session_busy=true".to_string());
-            }
-            Err(error) => return Err(format!("review_session_store_open_failed source={error}")),
-        }
-    }
-    unreachable!("the bounded retry loop always returns")
-}
-
-fn review_session_stream_id(state: &Value, session_id: &str) -> Result<StreamId, String> {
-    let project_root = state
-        .pointer("/scope/project_root")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
-    let work_item_id = state
-        .get("work_item_id")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    StreamId::try_new(format!(
-        "final-review-session-{}",
-        stable_storage_digest(&[
-            "development-discipline-final-review-session-v1",
-            project_root,
-            work_item_id,
-            session_id,
-        ])
-    ))
-    .map_err(|error| format!("review_session_stream_id_invalid source={error}"))
-}
-
-fn session_from_event(
-    event: ReviewSessionEvent,
-    revision: u64,
-    store_revision: u64,
-) -> Option<RestoredReviewSession> {
-    match event {
-        ReviewSessionEvent::SnapshotV1 {
-            state,
-            pending_verifier,
-            pending_delta_risk,
-            ..
-        }
-        | ReviewSessionEvent::ImportedFromSqliteV1 {
-            state,
-            pending_verifier,
-            pending_delta_risk,
-            ..
-        } => Some(RestoredReviewSession {
-            state,
-            revision,
-            store_revision,
-            pending_verifier,
-            pending_delta_risk,
-        }),
-        ReviewSessionEvent::ReportReplacedV1 { .. } => None,
-    }
-}
-
-fn read_eventcore_session(
-    state: &Value,
-    session_id: &str,
-) -> Result<Option<RestoredReviewSession>, String> {
-    let stream_id = review_session_stream_id(state, session_id)?;
-    let store = open_review_session_store()?;
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
-    let events = runtime.block_on(async {
-        let stream = store
-            .read_stream::<ReviewSessionEvent>(stream_id)
-            .await
-            .map_err(|error| format!("review_session_read_failed source={error}"))?;
-        collect_events(stream)
-            .await
-            .map_err(|error| format!("review_session_replay_failed source={error}"))
-    })?;
-    drop(store);
-    let store_revision = events.len() as u64;
-    let revision = events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                ReviewSessionEvent::SnapshotV1 { .. }
-                    | ReviewSessionEvent::ImportedFromSqliteV1 { .. }
-            )
-        })
-        .count() as u64;
-    Ok(events
-        .into_iter()
-        .rev()
-        .find_map(|event| session_from_event(event, revision, store_revision)))
 }
 
 fn persist_authoritative_session(
@@ -7061,212 +6671,79 @@ fn persist_authoritative_session(
     expected_prior_state: Option<&Value>,
     expected_revision: Option<u64>,
 ) -> Result<u64, String> {
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
     let session_id = state
         .get("session_id")
         .and_then(Value::as_str)
         .ok_or_else(|| "review_session_id_required=true".to_string())?;
-    let stream_id = review_session_stream_id(state, session_id)?;
-    let expected = expected_revision.unwrap_or(0);
-    let expected_store_revision = match read_eventcore_session(state, session_id)? {
-        Some(restored) => {
-            if expected_prior_state.is_some()
-                && (restored.state != *expected_prior_state.expect("checked")
-                    || restored.revision != expected)
-            {
-                return Err(
-                    "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
-                        .to_string(),
-                );
-            }
-            restored.store_revision
-        }
-        None if expected_prior_state.is_some() => {
-            return Err(
-                "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
-                    .to_string(),
-            );
-        }
-        None => 0,
+    let path = durable_report_database_path(
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
+    let directory = path
+        .parent()
+        .ok_or_else(|| "review_session_directory_missing=true".to_string())?;
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("review_session_directory_create_failed source={error}"))?;
+    let mut connection = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|error| format!("review_session_open_failed source={error}"))?;
+    initialize_durable_report_schema(&connection)?;
+    let state_json = serde_json::to_string(state)
+        .map_err(|error| format!("review_session_encode_failed source={error}"))?;
+    let pending_verifier_json = encoded_pending_assignment(pending_verifier)?;
+    let pending_delta_risk_json = encoded_pending_assignment(pending_delta_risk)?;
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| format!("review_session_transaction_failed source={error}"))?;
+    let next_revision = expected_revision.unwrap_or(0).saturating_add(1);
+    let changed = if let Some(expected_prior_state) = expected_prior_state {
+        let expected_json = serde_json::to_string(expected_prior_state)
+            .map_err(|error| format!("review_session_encode_failed source={error}"))?;
+        transaction
+            .execute(
+                "UPDATE final_review_session SET state_json = ?2, pending_verifier_json = ?3, pending_delta_risk_json = ?4, updated_at = ?5, revision = ?7 WHERE session_id = ?1 AND state_json = ?6 AND revision = ?8",
+                params![session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, expected_json, next_revision, expected_revision],
+            )
+            .map_err(|error| format!("review_session_write_failed source={error}"))?
+    } else {
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, next_revision],
+            )
+            .map_err(|error| format!("review_session_write_failed source={error}"))?
     };
-    let store = open_review_session_store()?;
-    let event = ReviewSessionEvent::SnapshotV1 {
-        stream_id: stream_id.clone(),
-        session_id: session_id.to_string(),
-        state: state.clone(),
-        pending_verifier: pending_verifier.cloned(),
-        pending_delta_risk: pending_delta_risk.cloned(),
-        updated_at,
-    };
-    let report_binding_id = state
-        .get("report_binding_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
-    let findings = state
-        .get("out_of_scope_report")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let report = ReviewSessionEvent::ReportReplacedV1 {
-        stream_id: stream_id.clone(),
-        report_binding_id: report_binding_id.to_string(),
-        findings,
-    };
-    let writes = StreamWrites::new()
-        .register_stream(
-            stream_id,
-            StreamVersion::new(expected_store_revision as usize),
+    if changed == 0 {
+        return Err(if expected_prior_state.is_some() {
+            "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
+                .to_string()
+        } else {
+            "review_session_exists=true recovery=resume_existing_review_or_abandon_it_before_restarting"
+                .to_string()
+        });
+    }
+    replace_durable_out_of_scope_report(&transaction, state)?;
+    transaction
+        .execute(
+            "DELETE FROM final_review_session WHERE session_id <> ?1 AND session_id NOT IN (SELECT session_id FROM final_review_session WHERE session_id <> ?1 ORDER BY updated_at DESC, revision DESC, session_id DESC LIMIT ?2)",
+            params![session_id, MAX_DURABLE_REVIEW_SESSIONS.saturating_sub(1)],
         )
-        .map_err(|error| format!("review_session_write_prepare_failed source={error}"))?
-        .append(event)
-        .map_err(|error| format!("review_session_write_prepare_failed source={error}"))?
-        .append(report)
-        .map_err(|error| format!("review_session_write_prepare_failed source={error}"))?;
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
-    runtime
-        .block_on(store.append_events(writes))
-        .map_err(|error| {
-            if matches!(
-                error,
-                eventcore_types::EventStoreError::VersionConflict { .. }
-            ) {
-                "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
-                    .to_string()
-            } else {
-                format!("review_session_write_failed source={error}")
-            }
-        })?;
-    Ok(expected.saturating_add(1))
+        .map_err(|error| format!("review_session_prune_failed source={error}"))?;
+    transaction
+        .commit()
+        .map_err(|error| format!("review_session_commit_failed source={error}"))?;
+    Ok(next_revision)
 }
 
 fn load_authoritative_session(
-    caller_state: &Value,
-    session_id: &str,
-) -> Result<Option<RestoredReviewSession>, String> {
-    let stream_id = review_session_stream_id(caller_state, session_id)?;
-    let store = open_review_session_store()?;
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
-    let events = runtime.block_on(async {
-        let stream = store
-            .read_stream::<ReviewSessionEvent>(stream_id)
-            .await
-            .map_err(|error| format!("review_session_read_failed source={error}"))?;
-        collect_events(stream)
-            .await
-            .map_err(|error| format!("review_session_replay_failed source={error}"))
-    })?;
-    drop(store);
-    let store_revision = events.len() as u64;
-    let revision = events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                ReviewSessionEvent::SnapshotV1 { .. }
-                    | ReviewSessionEvent::ImportedFromSqliteV1 { .. }
-            )
-        })
-        .count() as u64;
-    if store_revision > 0 && revision == 0 {
-        return Err("review_session_event_stream_invalid=true".to_string());
-    }
-    if let Some(restored) = events
-        .into_iter()
-        .rev()
-        .find_map(|event| session_from_event(event, revision, store_revision))
-    {
-        return Ok(Some(restored));
-    }
-    let Some(mut legacy) = load_legacy_authoritative_session(caller_state, session_id)? else {
-        return Ok(None);
-    };
-    let report_binding_id = legacy
-        .state
-        .get("report_binding_id")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let has_durable_report = report_binding_id.is_some();
-    if has_durable_report {
-        prepare_durable_out_of_scope_report(&mut legacy.state)?;
-    }
-    let stream_id = review_session_stream_id(caller_state, session_id)?;
-    let store = open_review_session_store()?;
-    let event = ReviewSessionEvent::ImportedFromSqliteV1 {
-        stream_id: stream_id.clone(),
-        session_id: session_id.to_string(),
-        state: legacy.state.clone(),
-        pending_verifier: legacy.pending_verifier.clone(),
-        pending_delta_risk: legacy.pending_delta_risk.clone(),
-        source_revision: legacy.revision,
-    };
-    let mut writes = StreamWrites::new()
-        .register_stream(stream_id, StreamVersion::new(0))
-        .map_err(|error| format!("review_session_import_prepare_failed source={error}"))?
-        .append(event)
-        .map_err(|error| format!("review_session_import_prepare_failed source={error}"))?;
-    if let Some(report_binding_id) = report_binding_id {
-        writes = writes
-            .append(ReviewSessionEvent::ReportReplacedV1 {
-                stream_id: review_session_stream_id(caller_state, session_id)?,
-                report_binding_id,
-                findings: legacy
-                    .state
-                    .get("out_of_scope_report")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default(),
-            })
-            .map_err(|error| format!("review_session_import_prepare_failed source={error}"))?;
-    }
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
-    match runtime.block_on(store.append_events(writes)) {
-        Ok(_) => Ok(Some(RestoredReviewSession {
-            revision: 1,
-            store_revision: 1 + u64::from(has_durable_report),
-            ..legacy
-        })),
-        Err(eventcore_types::EventStoreError::VersionConflict { .. }) => {
-            load_authoritative_session(caller_state, session_id)
-        }
-        Err(error) => Err(format!("review_session_import_failed source={error}")),
-    }
-}
-
-fn read_eventcore_report(state: &Value) -> Result<Option<Vec<Value>>, String> {
-    let session_id = state
-        .get("session_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "review_session_id_required=true".to_string())?;
-    let report_binding_id = state
-        .get("report_binding_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
-    let stream_id = review_session_stream_id(state, session_id)?;
-    let store = open_review_session_store()?;
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| format!("durable_report_runtime_failed source={error}"))?;
-    let events = runtime.block_on(async {
-        let stream = store
-            .read_stream::<ReviewSessionEvent>(stream_id)
-            .await
-            .map_err(|error| format!("durable_report_read_failed source={error}"))?;
-        collect_events(stream)
-            .await
-            .map_err(|error| format!("durable_report_replay_failed source={error}"))
-    })?;
-    Ok(events.into_iter().rev().find_map(|event| match event {
-        ReviewSessionEvent::ReportReplacedV1 {
-            report_binding_id: binding,
-            findings,
-            ..
-        } if binding == report_binding_id => Some(findings),
-        _ => None,
-    }))
-}
-
-fn load_legacy_authoritative_session(
     caller_state: &Value,
     session_id: &str,
 ) -> Result<Option<RestoredReviewSession>, String> {
@@ -7302,22 +6779,12 @@ fn load_legacy_authoritative_session(
         .optional()
         .map_err(|error| format!("review_session_read_failed source={error}"))?
         .map(|(state, verifier, delta, revision)| {
-            let state: Value = serde_json::from_str(&state)
-                .map_err(|error| format!("review_session_state_parse_failed source={error}"))?;
-            if state.get("session_id").and_then(Value::as_str) != Some(session_id)
-                || state.pointer("/scope/project_root").and_then(Value::as_str)
-                    != Some(project_root)
-                || state.get("work_item_id").and_then(Value::as_str)
-                    != caller_state.get("work_item_id").and_then(Value::as_str)
-            {
-                return Err("review_session_legacy_identity_mismatch=true".to_string());
-            }
             Ok(RestoredReviewSession {
-                state,
+                state: serde_json::from_str(&state)
+                    .map_err(|error| format!("review_session_state_parse_failed source={error}"))?,
                 pending_verifier: decoded_pending_assignment(verifier)?,
                 pending_delta_risk: decoded_pending_assignment(delta)?,
                 revision,
-                store_revision: revision,
             })
         })
         .transpose()
@@ -7486,24 +6953,6 @@ fn out_of_scope_report(arguments: &Value) -> Result<String, String> {
         .get("report_binding_id")
         .and_then(Value::as_str)
         .ok_or_else(|| "durable_report_binding_required=true".to_string())?;
-    if let Some(findings) = read_eventcore_report(state)? {
-        let findings = findings
-            .into_iter()
-            .filter_map(|entry| {
-                let mut finding = entry.get("finding")?.clone();
-                if let Some(escalation) = entry.get("security_escalation") {
-                    finding["security_escalation"] = escalation.clone();
-                }
-                Some(finding)
-            })
-            .collect::<Vec<_>>();
-        return Ok(json!({
-            "artifact": state.get("out_of_scope_report_artifact").cloned().unwrap_or(Value::Null),
-            "report_binding_id": report_binding_id,
-            "findings": findings
-        })
-        .to_string());
-    }
     let path = durable_report_database_path(
         project_root,
         state.get("work_item_id").and_then(Value::as_str),
@@ -10649,7 +10098,7 @@ fn harness_model_defaults(harness: &str) -> toml::value::Table {
         "codex" => {
             defaults.insert(
                 "pre_filter".to_string(),
-                toml::Value::String("strong-reviewer".to_string()),
+                toml::Value::String("gpt-5.6-sol".to_string()),
             );
             defaults.insert(
                 "lens_review".to_string(),
@@ -10661,13 +10110,13 @@ fn harness_model_defaults(harness: &str) -> toml::value::Table {
             );
             defaults.insert(
                 "verifier".to_string(),
-                toml::Value::String("strong-reviewer".to_string()),
+                toml::Value::String("gpt-5.6-sol".to_string()),
             );
         }
         "claude" => {
             defaults.insert(
                 "pre_filter".to_string(),
-                toml::Value::String("strong-reviewer".to_string()),
+                toml::Value::String("opus".to_string()),
             );
             defaults.insert(
                 "lens_review".to_string(),
@@ -10679,7 +10128,7 @@ fn harness_model_defaults(harness: &str) -> toml::value::Table {
             );
             defaults.insert(
                 "verifier".to_string(),
-                toml::Value::String("strong-reviewer".to_string()),
+                toml::Value::String("opus".to_string()),
             );
         }
         _ => {}
@@ -10792,7 +10241,6 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
 mod tests {
     use super::*;
     use std::io::{BufReader, Cursor};
-    use std::sync::{Arc, Barrier};
 
     fn test_project_root(name: &str) -> PathBuf {
         let root = env::temp_dir()
@@ -11249,17 +10697,6 @@ mod tests {
             )
             .expect("state root"),
             PathBuf::from("/home/tester/.local/state")
-        );
-    }
-
-    #[test]
-    fn review_session_store_is_process_scoped_under_unit_tests() {
-        let path = review_session_store_root().expect("review session store root");
-
-        assert!(
-            path.ends_with(format!("test-{}", std::process::id())),
-            "unit-test Eventcore state must not leak between test processes: {}",
-            path.display()
         );
     }
 
@@ -12658,10 +12095,10 @@ verifier = "config-verify"
             "harness": "codex"
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
-        assert_eq!(parsed["model_roles"]["pre_filter"], "strong-reviewer");
+        assert_eq!(parsed["model_roles"]["pre_filter"], "gpt-5.6-sol");
         assert_eq!(parsed["model_roles"]["lens_review"], "gpt-5.6-terra");
         assert_eq!(parsed["model_roles"]["post_filter"], "gpt-5.6-luna");
-        assert_eq!(parsed["model_roles"]["verifier"], "strong-reviewer");
+        assert_eq!(parsed["model_roles"]["verifier"], "gpt-5.6-sol");
         assert_eq!(
             parsed["model_role_sources"]["pre_filter"],
             "harness_default"
@@ -12746,10 +12183,10 @@ lens_review = "gpt-5.6-sol"
         assert_eq!(
             parsed["model_roles"],
             json!({
-                "pre_filter": "strong-reviewer",
+                "pre_filter": "opus",
                 "lens_review": "sonnet",
                 "post_filter": "haiku",
-                "verifier": "strong-reviewer"
+                "verifier": "opus"
             })
         );
         assert!(parsed["model_role_sources"]
@@ -14321,9 +13758,13 @@ pre_filter = "project-pre"
         }))
         .expect("advance");
         let advanced: Value = serde_json::from_str(&advanced).expect("json");
-        let database =
-            persist_prepared_out_of_scope_report(&advanced["state"]).expect("persist report");
-        let connection = Connection::open(database).expect("database");
+        persist_prepared_out_of_scope_report(&advanced["state"]).expect("persist report");
+        let connection = Connection::open(
+            advanced["state"]["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
         let escalation_json: String = connection
             .query_row(
                 "SELECT security_escalation_json FROM final_review_lens_snapshot WHERE lens = 'security-safety'",
@@ -14360,13 +13801,18 @@ pre_filter = "project-pre"
             None,
         )
         .expect("second durable report");
-        let database = persist_prepared_out_of_scope_report(&state).expect("persist report");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
         assert_eq!(
             state["out_of_scope_report"].as_array().map(Vec::len),
             Some(1)
         );
         assert_eq!(state["out_of_scope_report"][0]["finding"]["id"], "current");
-        let connection = Connection::open(database).expect("database");
+        let connection = Connection::open(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
         let finding_id: String = connection
             .query_row(
                 "SELECT finding_id FROM final_review_lens_snapshot WHERE lens = 'release-integration'",
@@ -14397,8 +13843,13 @@ pre_filter = "project-pre"
         state["iteration_index"] = json!(2);
         append_out_of_scope_report(&mut state, &json!({ "out_of_scope": [] }), None)
             .expect("clean durable report");
-        let database = persist_prepared_out_of_scope_report(&state).expect("persist report");
-        let connection = Connection::open(database).expect("database");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
+        let connection = Connection::open(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
         let count: u64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM final_review_lens_snapshot WHERE lens = 'release-integration'",
@@ -14436,8 +13887,13 @@ pre_filter = "project-pre"
             None,
         )
         .expect("second durable report");
-        let database = persist_prepared_out_of_scope_report(&state).expect("persist report");
-        let connection = Connection::open(database).expect("database");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
+        let connection = Connection::open(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
         let count: u64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM final_review_lens_snapshot WHERE lens = 'release-integration'",
@@ -14501,8 +13957,13 @@ pre_filter = "project-pre"
         let mut second_state = second["state"].clone();
         append_out_of_scope_report(&mut second_state, &json!({ "out_of_scope": [] }), None)
             .expect("second durable report");
-        let database = persist_prepared_out_of_scope_report(&second_state).expect("persist report");
-        let connection = Connection::open(database).expect("database");
+        persist_prepared_out_of_scope_report(&second_state).expect("persist report");
+        let connection = Connection::open(
+            second_state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
         let count: u64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM final_review_lens_snapshot WHERE lens = 'migration-risk'",
@@ -14515,7 +13976,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn out_of_scope_report_uses_an_eventcore_artifact_locator() {
+    fn out_of_scope_report_uses_one_project_sqlite_artifact() {
         let root = test_project_root("durable-report-sqlite-path");
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
@@ -14531,10 +13992,16 @@ pre_filter = "project-pre"
         )
         .expect("durable report");
 
-        assert!(state["out_of_scope_report_artifact"]
-            .as_str()
-            .is_some_and(|artifact| artifact
-                .starts_with("eventcore://development-discipline/final-review-sessions/")));
+        assert_eq!(
+            Path::new(
+                state["out_of_scope_report_artifact"]
+                    .as_str()
+                    .expect("artifact"),
+            )
+            .extension()
+            .and_then(OsStr::to_str),
+            Some("sqlite")
+        );
     }
 
     #[test]
@@ -14557,8 +14024,13 @@ pre_filter = "project-pre"
             None,
         )
         .expect("durable report");
-        let database = persist_prepared_out_of_scope_report(&state).expect("persist report");
-        let connection = Connection::open(database).expect("database");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
+        let connection = Connection::open(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .expect("database");
         let finding_json: String = connection
             .query_row(
                 "SELECT finding_json FROM final_review_lens_snapshot WHERE lens = 'tests-verification'",
@@ -14591,7 +14063,7 @@ pre_filter = "project-pre"
             None,
         )
         .expect("durable report");
-        let _database = persist_prepared_out_of_scope_report(&state).expect("persist report");
+        persist_prepared_out_of_scope_report(&state).expect("persist report");
         assert_eq!(
             state["out_of_scope_report"][0]["finding"]["message"],
             "alice@example.test"
@@ -14669,7 +14141,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn out_of_scope_report_locator_does_not_disclose_the_reviewed_worktree() {
+    fn out_of_scope_report_database_is_not_stored_inside_the_reviewed_worktree() {
         let root = test_project_root("durable-report-user-state");
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
@@ -14685,9 +14157,41 @@ pre_filter = "project-pre"
         )
         .expect("durable report");
 
-        assert!(!state["out_of_scope_report_artifact"]
-            .as_str()
-            .is_some_and(|artifact| artifact.contains(root.to_str().expect("root"))));
+        assert!(!Path::new(
+            state["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("artifact"),
+        )
+        .starts_with(root));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn out_of_scope_report_rejects_a_dangling_database_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_project_root("durable-report-dangling-symlink");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "report-symlink",
+            "project_root": root
+        })))
+        .expect("plan json");
+        let mut state = planned["state"].clone();
+        let database = durable_report_database_path(
+            state["scope"]["project_root"].as_str().expect("root"),
+            state.get("work_item_id").and_then(Value::as_str),
+        )
+        .expect("database path");
+        fs::create_dir_all(database.parent().expect("database parent")).expect("report directory");
+        symlink(root.join("outside.sqlite"), &database).expect("database symlink");
+
+        assert!(append_out_of_scope_report(
+            &mut state,
+            &json!({ "out_of_scope": [{ "id": "finding-1", "lens": "release-integration" }] }),
+            None,
+        )
+        .is_err());
     }
 
     #[test]
@@ -18447,19 +17951,14 @@ pre_filter = "project-pre"
         .expect("response");
 
         let tools = response["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 8);
-        assert_eq!(tools[1]["name"], "final_review.resume");
+        assert_eq!(tools.len(), 7);
+        assert_eq!(tools[3]["name"], "final_review.confirm_split");
         assert_eq!(
-            tools[1]["inputSchema"]["required"],
-            json!(["session_id", "project_root"])
-        );
-        assert_eq!(tools[4]["name"], "final_review.confirm_split");
-        assert_eq!(
-            tools[4]["inputSchema"]["allOf"][0]["else"]["not"]["required"],
+            tools[3]["inputSchema"]["allOf"][0]["else"]["not"]["required"],
             json!(["blocking_dependencies_reason"])
         );
-        assert_eq!(tools[6]["name"], "final_review.out_of_scope_report");
-        assert_eq!(tools[7]["name"], "final_review.assess_risk");
+        assert_eq!(tools[5]["name"], "final_review.out_of_scope_report");
+        assert_eq!(tools[6]["name"], "final_review.assess_risk");
         assert_eq!(
             tools[0]["inputSchema"]["properties"]["required_clean_iterations"]["minimum"],
             DEFAULT_CLEAN_ITERATIONS
@@ -18474,21 +17973,26 @@ pre_filter = "project-pre"
                 "shared_test_evidence"
             ])
         );
-        assert!(tools[7]["inputSchema"]["required"]
+        assert!(tools[6]["inputSchema"]["required"]
             .as_array()
             .expect("risk scout required fields")
             .contains(&json!("baseline_commit")));
         assert_eq!(
-            tools[7]["inputSchema"]["properties"]["baseline_commit"]["pattern"],
+            tools[6]["inputSchema"]["properties"]["baseline_commit"]["pattern"],
             "^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$"
+        );
+        assert_eq!(
+            tools[1]["inputSchema"]["properties"]["lens_results"]["maxItems"],
+            MAX_REVIEW_LENSES
         );
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["lens_results"]["maxItems"],
             MAX_REVIEW_LENSES
         );
         assert_eq!(
-            tools[3]["inputSchema"]["properties"]["lens_results"]["maxItems"],
-            MAX_REVIEW_LENSES
+            tools[1]["inputSchema"]["properties"]["lens_results"]["items"]["properties"]
+                ["findings"]["maxItems"],
+            MAX_FINDINGS_PER_LENS
         );
         assert_eq!(
             tools[2]["inputSchema"]["properties"]["lens_results"]["items"]["properties"]
@@ -18496,17 +18000,12 @@ pre_filter = "project-pre"
             MAX_FINDINGS_PER_LENS
         );
         assert_eq!(
-            tools[3]["inputSchema"]["properties"]["lens_results"]["items"]["properties"]
-                ["findings"]["maxItems"],
-            MAX_FINDINGS_PER_LENS
-        );
-        assert_eq!(
-            tools[3]["inputSchema"]["properties"]["verifier_result"]["properties"]["verdicts"]
+            tools[2]["inputSchema"]["properties"]["verifier_result"]["properties"]["verdicts"]
                 ["maxItems"],
             MAX_FINDINGS_PER_ITERATION
         );
         assert_eq!(
-            tools[3]["inputSchema"]["properties"]["review_budget_decision"]["oneOf"]
+            tools[2]["inputSchema"]["properties"]["review_budget_decision"]["oneOf"]
                 .as_array()
                 .expect("exact review budget variants")
                 .len(),
@@ -20645,121 +20144,6 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn stale_delta_assessment_is_replaced_with_a_current_scope_assignment() {
-        let arguments = assessed_plan_arguments(
-            "stale-delta-recovery",
-            "medium",
-            &[("correctness-behavior", "medium")],
-            json!([]),
-        );
-        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
-        let replacement_diff_hash = "stale-delta-recovery-v2";
-        let mut resubmission = json!({
-            "state": planned["state"],
-            "lens_results": [],
-            "current_diff_hash": replacement_diff_hash,
-            "current_changed_files": ["src/lib.rs"],
-            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
-        });
-        let required: Value = serde_json::from_str(
-            &advance_synthetic_state(&resubmission).expect("delta scout required"),
-        )
-        .expect("delta response json");
-        resubmission["delta_risk_assessment"] = delta_risk_assessment_for(
-            &required["delta_risk_assignments"][0],
-            "medium",
-            &[("correctness-behavior", "medium")],
-            &["correctness-behavior"],
-            json!([]),
-        );
-        resubmission["current_changed_files"] = json!(["src/lib.rs", "tests/lib_test.rs"]);
-
-        let replacement: Value = serde_json::from_str(
-            &advance_synthetic_state(&resubmission)
-                .expect("stale delta produces a replacement assignment"),
-        )
-        .expect("replacement response json");
-        assert_eq!(
-            replacement["transition_status"],
-            "delta_risk_assessment_required"
-        );
-        assert_eq!(
-            replacement["delta_risk_assignments"][0]["scope"]["changed_files"],
-            json!(["src/lib.rs", "tests/lib_test.rs"])
-        );
-    }
-
-    #[test]
-    fn equivalent_delta_assignments_have_stable_identity_across_snapshot_regeneration() {
-        let arguments = assessed_plan_arguments(
-            "stable-delta-assignment",
-            "medium",
-            &[("correctness-behavior", "medium")],
-            json!([]),
-        );
-        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
-        let changed_files = vec!["src/lib.rs".to_string()];
-        let evidence = shared_test_evidence_for("stable-delta-assignment-v2");
-        let delta_evidence = json!({"summary": "Equivalent replacement diff."});
-        let (_, first) = delta_risk_assignment(
-            &planned["state"],
-            "stable-delta-assignment-v2",
-            &changed_files,
-            &evidence,
-            &delta_evidence,
-        )
-        .expect("first assignment");
-        let (_, second) = delta_risk_assignment(
-            &planned["state"],
-            "stable-delta-assignment-v2",
-            &changed_files,
-            &evidence,
-            &delta_evidence,
-        )
-        .expect("second assignment");
-        assert_eq!(first["assignment_id"], second["assignment_id"]);
-    }
-
-    #[test]
-    fn risk_assignment_identity_changes_when_its_snapshot_content_changes() {
-        let project_root = test_project_root("risk-assignment-snapshot-content");
-        fs::create_dir_all(project_root.join("src")).expect("create source directory");
-        fs::write(
-            project_root.join("src/lib.rs"),
-            "pub fn value() -> u8 { 1 }\n",
-        )
-        .expect("write first source revision");
-        let mut arguments = assessed_plan_arguments_for_diff_at_root(
-            "risk-assignment-snapshot-content",
-            "risk-assignment-snapshot-content-diff",
-            "medium",
-            &[("correctness-behavior", "medium")],
-            json!([]),
-            Some(&project_root),
-        );
-        arguments["changed_files"] = json!(["src/lib.rs"]);
-        let first: Value = serde_json::from_str(
-            &risk_assessment_result(&arguments).expect("first risk assignment"),
-        )
-        .expect("first risk assignment json");
-
-        fs::write(
-            project_root.join("src/lib.rs"),
-            "pub fn value() -> u8 { 2 }\n",
-        )
-        .expect("write second source revision");
-        let second: Value = serde_json::from_str(
-            &risk_assessment_result(&arguments).expect("second risk assignment"),
-        )
-        .expect("second risk assignment json");
-
-        assert_ne!(
-            first["assignments"][0]["assignment_id"],
-            second["assignments"][0]["assignment_id"]
-        );
-    }
-
-    #[test]
     fn valid_delta_reassessment_targets_only_affected_lenses_plus_correctness_guard() {
         let arguments = assessed_plan_arguments(
             "targeted-delta-reassessment",
@@ -21051,14 +20435,6 @@ pre_filter = "project-pre"
             .to_string();
         assert!(assignment["delta_evidence"].get("inline_patch").is_none());
         assert!(Path::new(&artifact_reference).is_file());
-        assert!(
-            Path::new(&artifact_reference).starts_with(
-                review_session_store_root()
-                    .expect("durable review-session store root")
-                    .join("delta-evidence")
-            ),
-            "large delta evidence must survive temporary-directory cleanup"
-        );
 
         let assessment = delta_risk_assessment_for(
             assignment,
@@ -21391,32 +20767,13 @@ pre_filter = "project-pre"
             json!([]),
         );
 
-        let mut altered_resubmission = base_arguments.clone();
-        altered_resubmission["delta_risk_assessment"] = assessment.clone();
-        altered_resubmission["caller_decisions"] = json!([]);
-        let altered_response = coordinator
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {
-                    "name": "final_review.advance",
-                    "arguments": altered_resubmission
-                }
-            }))
-            .expect("altered resubmission response");
-        assert_eq!(
-            altered_response["error"]["message"],
-            "pending_delta_risk_resubmission_mismatch=true"
-        );
-
         let mut changed_resubmission = base_arguments.clone();
         changed_resubmission["current_changed_files"] = json!(["src/lib.rs"]);
         changed_resubmission["delta_risk_assessment"] = assessment.clone();
         let changed_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
-                "id": 4,
+                "id": 3,
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.advance",
@@ -21426,51 +20783,15 @@ pre_filter = "project-pre"
             .expect("changed resubmission response");
         assert_eq!(
             changed_response["error"]["message"],
-            "pending_delta_risk_changed_scope_requires_fresh_assessment=true"
+            "pending_delta_risk_resubmission_mismatch=true"
         );
 
-        changed_resubmission
-            .as_object_mut()
-            .expect("changed resubmission object")
-            .remove("delta_risk_assessment");
-        let replacement_response = coordinator
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 5,
-                "method": "tools/call",
-                "params": {
-                    "name": "final_review.advance",
-                    "arguments": changed_resubmission
-                }
-            }))
-            .expect("fresh-scope replacement response");
-        let replacement: Value = serde_json::from_str(
-            replacement_response["result"]["content"][0]["text"]
-                .as_str()
-                .expect("replacement assignment text"),
-        )
-        .expect("replacement assignment json");
-        assert_eq!(
-            replacement["transition_status"],
-            "delta_risk_assessment_required"
-        );
-        assert_eq!(
-            replacement["delta_risk_assignments"][0]["scope"]["changed_files"],
-            json!(["src/lib.rs"])
-        );
-
-        let mut exact_resubmission = changed_resubmission;
-        exact_resubmission["delta_risk_assessment"] = delta_risk_assessment_for(
-            &replacement["delta_risk_assignments"][0],
-            "medium",
-            &[("correctness-behavior", "medium")],
-            &["correctness-behavior"],
-            json!([]),
-        );
+        let mut exact_resubmission = base_arguments;
+        exact_resubmission["delta_risk_assessment"] = assessment;
         let advanced_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
-                "id": 6,
+                "id": 4,
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.advance",
@@ -23467,411 +22788,6 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn json_rpc_resumes_latest_authoritative_state_by_session_id() {
-        let session_id = format!("resumable-review-{}", std::process::id());
-        let mut coordinator = ReviewCoordinator::default();
-        let plan_arguments = add_test_risk_assessment(
-            json!({
-                "session_id": session_id,
-                "changed_files": ["src/new.rs"],
-                "diff_hash": "same"
-            }),
-            "low",
-            &[("correctness-behavior", "low")],
-            json!([]),
-        );
-        let planned = coordinator
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": { "name": "final_review.plan", "arguments": plan_arguments }
-            }))
-            .expect("plan response");
-        let plan: Value = serde_json::from_str(
-            planned["result"]["content"][0]["text"]
-                .as_str()
-                .expect("plan text"),
-        )
-        .expect("plan json");
-
-        let mut restarted = ReviewCoordinator::default();
-        let resumed = restarted
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "final_review.resume",
-                    "arguments": {
-                        "session_id": session_id,
-                        "project_root": plan["state"]["scope"]["project_root"]
-                    }
-                }
-            }))
-            .expect("resume response");
-        let payload: Value = serde_json::from_str(
-            resumed["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap_or_else(|| panic!("resume text: {resumed}")),
-        )
-        .expect("resume json");
-
-        assert_eq!(payload["state"], plan["state"]);
-        assert_eq!(payload["session_id"], session_id);
-        assert_eq!(payload["revision"], 1);
-    }
-
-    #[test]
-    fn json_rpc_resume_returns_pending_delta_assignment_after_coordinator_restart() {
-        let session_id = format!("resumable-delta-review-{}", std::process::id());
-        let project_root = test_project_root("resumable-delta-review");
-        let plan_arguments = assessed_plan_arguments_for_diff_at_root(
-            &session_id,
-            "resumable-delta-review-v1",
-            "medium",
-            &[("correctness-behavior", "medium")],
-            json!([]),
-            Some(&project_root),
-        );
-        let mut original = ReviewCoordinator::default();
-        let planned = original
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": { "name": "final_review.plan", "arguments": plan_arguments }
-            }))
-            .expect("plan response");
-        let plan: Value = serde_json::from_str(
-            planned["result"]["content"][0]["text"]
-                .as_str()
-                .expect("plan text"),
-        )
-        .expect("plan json");
-        let replacement_diff_hash = "resumable-delta-review-v2";
-        let resubmission = json!({
-            "state": plan["state"],
-            "lens_results": [],
-            "current_diff_hash": replacement_diff_hash,
-            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
-            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
-        });
-        let required = original
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": { "name": "final_review.advance", "arguments": resubmission }
-            }))
-            .expect("delta assessment request");
-        let required: Value = serde_json::from_str(
-            required["result"]["content"][0]["text"]
-                .as_str()
-                .expect("delta assessment text"),
-        )
-        .expect("delta assessment json");
-
-        let mut restarted = ReviewCoordinator::default();
-        let resumed = restarted
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {
-                    "name": "final_review.resume",
-                    "arguments": { "session_id": session_id, "project_root": project_root }
-                }
-            }))
-            .expect("resume response");
-        let resumed: Value = serde_json::from_str(
-            resumed["result"]["content"][0]["text"]
-                .as_str()
-                .expect("resume text"),
-        )
-        .expect("resume json");
-        assert_eq!(
-            resumed["pending_transition"],
-            "delta_risk_assessment_required"
-        );
-        assert_eq!(
-            resumed["delta_risk_assignments"],
-            required["delta_risk_assignments"]
-        );
-
-        fs::create_dir_all(project_root.join("src")).expect("create changed source directory");
-        fs::write(
-            project_root.join("src/lib.rs"),
-            "checkout changed after assignment\n",
-        )
-        .expect("move checkout after persisting assignment");
-
-        let mut resumed_resubmission = resubmission;
-        resumed_resubmission["delta_risk_assessment"] = delta_risk_assessment_for(
-            &resumed["delta_risk_assignments"][0],
-            "medium",
-            &[("correctness-behavior", "medium")],
-            &["correctness-behavior"],
-            json!([]),
-        );
-        let advanced = restarted
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 4,
-                "method": "tools/call",
-                "params": { "name": "final_review.advance", "arguments": resumed_resubmission }
-            }))
-            .expect("resumed delta reassessment");
-        assert!(
-            advanced.get("result").is_some(),
-            "the resumed assignment must be accepted: {advanced}"
-        );
-        let advanced: Value = serde_json::from_str(
-            advanced["result"]["content"][0]["text"]
-                .as_str()
-                .expect("advanced delta text"),
-        )
-        .expect("advanced delta json");
-        assert_eq!(advanced["transition_status"], "advanced");
-        assert_eq!(advanced["advance_kind"], "delta_reassessment");
-    }
-
-    #[test]
-    fn json_rpc_resume_rejects_an_unrecoverable_legacy_delta_assignment() {
-        let session_id = format!("unrecoverable-legacy-delta-{}", std::process::id());
-        let project_root = test_project_root("unrecoverable-legacy-delta");
-        let plan_arguments = assessed_plan_arguments_for_diff_at_root(
-            &session_id,
-            "unrecoverable-legacy-delta-v1",
-            "medium",
-            &[("correctness-behavior", "medium")],
-            json!([]),
-            Some(&project_root),
-        );
-        let mut original = ReviewCoordinator::default();
-        let planned = original
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": { "name": "final_review.plan", "arguments": plan_arguments }
-            }))
-            .expect("plan response");
-        let plan: Value = serde_json::from_str(
-            planned["result"]["content"][0]["text"]
-                .as_str()
-                .expect("plan text"),
-        )
-        .expect("plan json");
-        let replacement_diff_hash = "unrecoverable-legacy-delta-v2";
-        let resubmission = json!({
-            "state": plan["state"],
-            "lens_results": [],
-            "current_diff_hash": replacement_diff_hash,
-            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
-            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
-        });
-        let legacy_pending = PendingVerifier {
-            assignment_id: "legacy-assignment-id-that-cannot-match".to_string(),
-            arguments: pending_delta_risk_core_arguments(&resubmission)
-                .expect("legacy pending arguments"),
-            assignment: None,
-        };
-        persist_authoritative_session(
-            &plan["state"],
-            None,
-            Some(&legacy_pending),
-            1,
-            Some(&plan["state"]),
-            Some(1),
-        )
-        .expect("persist legacy pending delta");
-
-        let mut restarted = ReviewCoordinator::default();
-        let resumed = restarted
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "final_review.resume",
-                    "arguments": { "session_id": session_id, "project_root": project_root }
-                }
-            }))
-            .expect("resume response");
-        assert_eq!(
-            resumed["error"]["message"],
-            "legacy_pending_delta_assignment_unrecoverable=true recovery=resubmit_fresh_scope_without_assessment"
-        );
-
-        let fresh_diff_hash = "unrecoverable-legacy-delta-v3";
-        let fresh_scope = json!({
-            "state": plan["state"],
-            "lens_results": [],
-            "current_diff_hash": fresh_diff_hash,
-            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
-            "current_shared_test_evidence": shared_test_evidence_for(fresh_diff_hash)
-        });
-        let superseded = restarted
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": { "name": "final_review.advance", "arguments": fresh_scope }
-            }))
-            .expect("fresh scope supersedes legacy assignment");
-        let superseded: Value = serde_json::from_str(
-            superseded["result"]["content"][0]["text"]
-                .as_str()
-                .expect("fresh delta text"),
-        )
-        .expect("fresh delta json");
-        assert_eq!(
-            superseded["transition_status"],
-            "delta_risk_assessment_required"
-        );
-        assert_ne!(
-            superseded["delta_risk_assignments"][0]["assignment_id"],
-            legacy_pending.assignment_id
-        );
-    }
-
-    #[test]
-    fn json_rpc_resume_rejects_a_pending_delta_with_a_missing_artifact() {
-        let session_id = format!("missing-delta-artifact-{}", std::process::id());
-        let project_root = test_project_root("missing-delta-artifact");
-        let plan_arguments = assessed_plan_arguments_for_diff_at_root(
-            &session_id,
-            "missing-delta-artifact-v1",
-            "medium",
-            &[("correctness-behavior", "medium")],
-            json!([]),
-            Some(&project_root),
-        );
-        let mut original = ReviewCoordinator::default();
-        let planned = original
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": { "name": "final_review.plan", "arguments": plan_arguments }
-            }))
-            .expect("plan response");
-        let plan: Value = serde_json::from_str(
-            planned["result"]["content"][0]["text"]
-                .as_str()
-                .expect("plan text"),
-        )
-        .expect("plan json");
-        let missing_artifact = project_root.join("missing.patch");
-        let pending = PendingVerifier {
-            assignment_id: "stored-assignment".to_string(),
-            arguments: json!({}),
-            assignment: Some(json!({
-                "assignment_id": "stored-assignment",
-                "delta_evidence": {
-                    "artifact_reference": missing_artifact,
-                    "artifact_digest": "0123456789012345678901234567890123456789"
-                }
-            })),
-        };
-        persist_authoritative_session(
-            &plan["state"],
-            None,
-            Some(&pending),
-            1,
-            Some(&plan["state"]),
-            Some(1),
-        )
-        .expect("persist pending delta");
-
-        let mut restarted = ReviewCoordinator::default();
-        let resumed = restarted
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "final_review.resume",
-                    "arguments": { "session_id": session_id, "project_root": project_root }
-                }
-            }))
-            .expect("resume response");
-        assert_eq!(
-            resumed["error"]["message"],
-            "pending_delta_risk_artifact_missing=true"
-        );
-    }
-
-    #[test]
-    fn json_rpc_resume_rejects_a_pending_delta_with_a_corrupt_artifact() {
-        let session_id = format!("corrupt-delta-artifact-{}", std::process::id());
-        let project_root = test_project_root("corrupt-delta-artifact");
-        let plan_arguments = assessed_plan_arguments_for_diff_at_root(
-            &session_id,
-            "corrupt-delta-artifact-v1",
-            "medium",
-            &[("correctness-behavior", "medium")],
-            json!([]),
-            Some(&project_root),
-        );
-        let mut original = ReviewCoordinator::default();
-        let planned = original
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": { "name": "final_review.plan", "arguments": plan_arguments }
-            }))
-            .expect("plan response");
-        let plan: Value = serde_json::from_str(
-            planned["result"]["content"][0]["text"]
-                .as_str()
-                .expect("plan text"),
-        )
-        .expect("plan json");
-        let artifact = project_root.join("corrupt.patch");
-        fs::write(&artifact, "corrupted delta evidence\n").expect("write corrupt artifact");
-        let pending = PendingVerifier {
-            assignment_id: "stored-assignment".to_string(),
-            arguments: json!({}),
-            assignment: Some(json!({
-                "assignment_id": "stored-assignment",
-                "delta_evidence": {
-                    "artifact_reference": artifact,
-                    "artifact_digest": "0123456789012345678901234567890123456789"
-                }
-            })),
-        };
-        persist_authoritative_session(
-            &plan["state"],
-            None,
-            Some(&pending),
-            1,
-            Some(&plan["state"]),
-            Some(1),
-        )
-        .expect("persist pending delta");
-
-        let mut restarted = ReviewCoordinator::default();
-        let resumed = restarted
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "final_review.resume",
-                    "arguments": { "session_id": session_id, "project_root": project_root }
-                }
-            }))
-            .expect("resume response");
-        assert_eq!(
-            resumed["error"]["message"],
-            "pending_delta_risk_artifact_digest_mismatch=true"
-        );
-    }
-
-    #[test]
     fn json_rpc_rejects_forged_progress_against_server_owned_session_state() {
         let mut coordinator = ReviewCoordinator::default();
         let plan_arguments = add_test_risk_assessment(
@@ -23987,10 +22903,9 @@ pre_filter = "project-pre"
 
     #[test]
     fn json_rpc_rejects_a_duplicate_plan_after_coordinator_restart() {
-        let session_id = format!("restarted-duplicate-review-{}", std::process::id());
         let plan_arguments = add_test_risk_assessment(
             json!({
-                "session_id": session_id,
+                "session_id": "restarted-duplicate-review",
                 "changed_files": ["src/new.rs"],
                 "diff_hash": "same"
             }),
@@ -24111,38 +23026,12 @@ pre_filter = "project-pre"
             .get("result")
             .is_some());
 
-        let first_advance = advance(3, "first-report");
-        let second_advance = advance(4, "second-report");
-        let barrier = Arc::new(Barrier::new(3));
-        let (first_response, second_response) = std::thread::scope(|scope| {
-            let first_barrier = Arc::clone(&barrier);
-            let first = scope.spawn(move || {
-                first_barrier.wait();
-                ReviewCoordinator::default()
-                    .handle_json_rpc(&first_advance)
-                    .expect("first transition response")
-            });
-            let second_barrier = Arc::clone(&barrier);
-            let second = scope.spawn(move || {
-                second_barrier.wait();
-                ReviewCoordinator::default()
-                    .handle_json_rpc(&second_advance)
-                    .expect("second transition response")
-            });
-            barrier.wait();
-            (
-                first.join().expect("first transition thread"),
-                second.join().expect("second transition thread"),
-            )
-        });
-        let (winning, winning_report, losing) = if first_response.get("result").is_some() {
-            (first_response, "first-report", second_response)
-        } else {
-            (second_response, "second-report", first_response)
-        };
+        let winning = first
+            .handle_json_rpc(&advance(3, "winning-report"))
+            .expect("winning transition");
         assert!(
             winning.get("result").is_some(),
-            "exactly one concurrent transition must win: {winning}"
+            "winning transition failed: {winning}"
         );
         let winning_payload: Value = serde_json::from_str(
             winning["result"]["content"][0]["text"]
@@ -24150,19 +23039,20 @@ pre_filter = "project-pre"
                 .expect("winning transition text"),
         )
         .expect("winning transition json");
-        assert!(
-            losing["error"]["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("review_state_out_of_sync=true")),
-            "the simultaneous loser must receive a sanitized stale-state result: {losing}"
-        );
+        let losing = second
+            .handle_json_rpc(&advance(4, "losing-report"))
+            .expect("losing transition response");
+
+        assert!(losing["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("review_state_out_of_sync=true")));
         let report: Value = serde_json::from_str(
             &out_of_scope_report(&json!({ "state": winning_payload["state"] }))
                 .expect("durable report"),
         )
         .expect("durable report json");
         assert_eq!(
-            report["findings"][0]["id"], winning_report,
+            report["findings"][0]["id"], "winning-report",
             "the losing transition must not overwrite the durable report"
         );
     }
@@ -24343,302 +23233,5 @@ pre_filter = "project-pre"
             .expect("terminal advance response");
 
         assert_eq!(response["error"]["message"], "review_session_complete=true");
-    }
-
-    #[test]
-    fn review_session_store_lock_is_reported_as_sanitized_busy() {
-        let project_root = test_project_root("locked-review");
-        let mut state = add_test_risk_assessment(
-            json!({
-                "session_id": format!("locked-review-{}", std::process::id()),
-                "project_root": project_root,
-                "changed_files": ["src/new.rs"],
-                "diff_hash": "locked"
-            }),
-            "low",
-            &[("correctness-behavior", "low")],
-            json!([]),
-        );
-        state["scope"]["project_root"] = json!(project_root);
-        let session_id = state["session_id"].as_str().expect("session id");
-        let _held_store = FileEventStore::open(review_session_store_root().expect("store root"))
-            .expect("hold Eventcore store lock");
-
-        let error = match load_authoritative_session(&state, session_id) {
-            Ok(_) => panic!("a held Eventcore store lock must not permit a session read"),
-            Err(error) => error,
-        };
-
-        assert_eq!(error, "review_session_busy=true");
-    }
-
-    #[test]
-    fn legacy_session_import_rejects_a_mismatched_embedded_session_identity() {
-        let project_root = test_project_root("legacy-session-identity");
-        let plan_arguments = add_test_risk_assessment(
-            json!({
-                "session_id": format!("legacy-session-identity-{}", std::process::id()),
-                "project_root": project_root,
-                "changed_files": ["src/new.rs"],
-                "diff_hash": "legacy-identity"
-            }),
-            "low",
-            &[("correctness-behavior", "low")],
-            json!([]),
-        );
-        let mut caller_state: Value =
-            serde_json::from_str(&plan(&plan_arguments)).expect("plan legacy state");
-        caller_state = caller_state["state"].clone();
-        let session_id = caller_state["session_id"].as_str().expect("session id");
-        let database = durable_report_database_path(
-            project_root.to_str().expect("project root"),
-            caller_state.get("work_item_id").and_then(Value::as_str),
-        )
-        .expect("legacy database path");
-        fs::create_dir_all(database.parent().expect("database parent"))
-            .expect("create legacy database parent");
-        let connection = Connection::open(&database).expect("open legacy database");
-        initialize_durable_report_schema(&connection).expect("initialize legacy schema");
-        let mut mismatched_state = caller_state.clone();
-        mismatched_state["session_id"] = json!("different-legacy-session");
-        connection
-            .execute(
-                "INSERT INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, NULL, NULL, 1, 7)",
-                params![session_id, serde_json::to_string(&mismatched_state).expect("encode legacy state")],
-            )
-            .expect("insert legacy session");
-
-        match load_authoritative_session(&caller_state, session_id) {
-            Ok(_) => panic!("a mismatched legacy snapshot must not be imported"),
-            Err(error) => assert_eq!(error, "review_session_legacy_identity_mismatch=true"),
-        }
-    }
-
-    #[test]
-    fn legacy_session_import_rejects_a_nonempty_stream_without_a_snapshot() {
-        let project_root = test_project_root("report-only-event-stream");
-        let mut caller_state = add_test_risk_assessment(
-            json!({
-                "session_id": format!("report-only-event-stream-{}", std::process::id()),
-                "project_root": project_root,
-                "changed_files": ["src/new.rs"],
-                "diff_hash": "report-only-event-stream"
-            }),
-            "low",
-            &[("correctness-behavior", "low")],
-            json!([]),
-        );
-        caller_state["scope"]["project_root"] = json!(project_root);
-        let session_id = caller_state["session_id"].as_str().expect("session id");
-        let stream_id = review_session_stream_id(&caller_state, session_id).expect("stream id");
-        let store = FileEventStore::open(review_session_store_root().expect("store root"))
-            .expect("open Eventcore store");
-        let writes = StreamWrites::new()
-            .register_stream(stream_id.clone(), StreamVersion::new(0))
-            .expect("register stream")
-            .append(ReviewSessionEvent::ReportReplacedV1 {
-                stream_id,
-                report_binding_id: "report-only-binding".to_string(),
-                findings: vec![],
-            })
-            .expect("append report event");
-        tokio::runtime::Runtime::new()
-            .expect("runtime")
-            .block_on(store.append_events(writes))
-            .expect("persist report-only event");
-        drop(store);
-
-        let database = durable_report_database_path(
-            project_root.to_str().expect("project root"),
-            caller_state.get("work_item_id").and_then(Value::as_str),
-        )
-        .expect("legacy database path");
-        fs::create_dir_all(database.parent().expect("database parent"))
-            .expect("create legacy database parent");
-        let connection = Connection::open(&database).expect("open legacy database");
-        initialize_durable_report_schema(&connection).expect("initialize legacy schema");
-        connection
-            .execute(
-                "INSERT INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, NULL, NULL, 1, 7)",
-                params![session_id, serde_json::to_string(&caller_state).expect("encode legacy state")],
-            )
-            .expect("insert legacy session");
-
-        match load_authoritative_session(&caller_state, session_id) {
-            Ok(_) => panic!("a report-only Eventcore stream must fail closed"),
-            Err(error) => assert_eq!(error, "review_session_event_stream_invalid=true"),
-        }
-    }
-
-    #[test]
-    fn legacy_session_import_is_one_time_and_leaves_sqlite_unchanged() {
-        let project_root = test_project_root("legacy-session-one-time-import");
-        let mut caller_state = add_test_risk_assessment(
-            json!({
-                "session_id": format!("legacy-session-one-time-import-{}", std::process::id()),
-                "project_root": project_root,
-                "changed_files": ["src/new.rs"],
-                "diff_hash": "legacy-one-time"
-            }),
-            "low",
-            &[("correctness-behavior", "low")],
-            json!([]),
-        );
-        caller_state["scope"]["project_root"] = json!(project_root);
-        let session_id = caller_state["session_id"].as_str().expect("session id");
-        let database = durable_report_database_path(
-            project_root.to_str().expect("project root"),
-            caller_state.get("work_item_id").and_then(Value::as_str),
-        )
-        .expect("legacy database path");
-        fs::create_dir_all(database.parent().expect("database parent"))
-            .expect("create legacy database parent");
-        let connection = Connection::open(&database).expect("open legacy database");
-        initialize_durable_report_schema(&connection).expect("initialize legacy schema");
-        connection
-            .execute(
-                "INSERT INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, NULL, NULL, 1, 7)",
-                params![session_id, serde_json::to_string(&caller_state).expect("encode legacy state")],
-            )
-            .expect("insert legacy session");
-        drop(connection);
-        let source_bytes = fs::read(&database).expect("read immutable source database");
-
-        let first = load_authoritative_session(&caller_state, session_id)
-            .expect("import legacy session")
-            .expect("imported session");
-        assert_eq!(first.revision, 1);
-        assert_eq!(
-            fs::read(&database).expect("read source after import"),
-            source_bytes
-        );
-
-        let connection = Connection::open(&database).expect("reopen legacy database");
-        let mut changed_state = caller_state.clone();
-        changed_state["diff_hash"] = json!("changed-legacy-source");
-        connection
-            .execute(
-                "UPDATE final_review_session SET state_json = ?2, revision = 8 WHERE session_id = ?1",
-                params![session_id, serde_json::to_string(&changed_state).expect("encode changed state")],
-            )
-            .expect("change legacy source after import");
-        drop(connection);
-
-        let second = load_authoritative_session(&caller_state, session_id)
-            .expect("replay Eventcore session")
-            .expect("replayed session");
-        assert_eq!(second.revision, 1);
-        assert_eq!(second.state, caller_state);
-    }
-
-    #[test]
-    fn legacy_session_import_promotes_retained_report_to_eventcore() {
-        let project_root = test_project_root("legacy-session-report-promotion");
-        let plan_arguments = add_test_risk_assessment(
-            json!({
-                "session_id": format!("legacy-session-report-promotion-{}", std::process::id()),
-                "project_root": project_root,
-                "changed_files": ["src/new.rs"],
-                "diff_hash": "legacy-report-promotion"
-            }),
-            "low",
-            &[("correctness-behavior", "low")],
-            json!([]),
-        );
-        let planned: Value =
-            serde_json::from_str(&plan(&plan_arguments)).expect("plan legacy state");
-        let mut caller_state = planned["state"].clone();
-        append_out_of_scope_report(
-            &mut caller_state,
-            &json!({ "out_of_scope": [{
-                "id": "legacy-retained-finding",
-                "lens": "correctness-behavior",
-                "severity": "MINOR",
-                "message": "preserve this finding"
-            }] }),
-            None,
-        )
-        .expect("prepare legacy retained report");
-        let session_id = caller_state["session_id"].as_str().expect("session id");
-        let database = durable_report_database_path(
-            project_root.to_str().expect("project root"),
-            caller_state.get("work_item_id").and_then(Value::as_str),
-        )
-        .expect("legacy database path");
-        fs::create_dir_all(database.parent().expect("database parent"))
-            .expect("create legacy database parent");
-        let connection = Connection::open(&database).expect("open legacy database");
-        initialize_durable_report_schema(&connection).expect("initialize legacy schema");
-        connection
-            .execute(
-                "INSERT INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, NULL, NULL, 1, 7)",
-                params![session_id, serde_json::to_string(&caller_state).expect("encode legacy state")],
-            )
-            .expect("insert legacy session");
-        connection
-            .execute(
-                "INSERT INTO final_review_lens_snapshot (report_binding_id, lens, finding_id, iteration, finding_json) VALUES (?1, ?2, ?3, 1, ?4)",
-                params![
-                    caller_state["report_binding_id"].as_str().expect("report binding"),
-                    "correctness-behavior",
-                    fingerprint("legacy-retained-finding"),
-                    serde_json::to_string(&caller_state["out_of_scope_report"][0]["finding"])
-                        .expect("encode legacy finding")
-                ],
-            )
-            .expect("insert legacy report");
-        drop(connection);
-
-        let imported = load_authoritative_session(&caller_state, session_id)
-            .expect("import legacy session")
-            .expect("imported session");
-        let connection = Connection::open(&database).expect("reopen legacy database");
-        connection
-            .execute("DELETE FROM final_review_lens_snapshot", [])
-            .expect("remove legacy report rows");
-        drop(connection);
-
-        let report: Value = serde_json::from_str(
-            &out_of_scope_report(&json!({ "state": imported.state })).expect("read report"),
-        )
-        .expect("report json");
-        assert_eq!(report["findings"][0]["id"], "legacy-retained-finding");
-        assert!(report["artifact"].as_str().is_some_and(|artifact| artifact
-            .starts_with("eventcore://development-discipline/final-review-sessions/")));
-    }
-
-    #[test]
-    fn locked_store_does_not_retain_a_planned_review_session() {
-        let project_root = test_project_root("locked-plan");
-        let plan_arguments = add_test_risk_assessment(
-            json!({
-                "session_id": format!("locked-plan-{}", std::process::id()),
-                "project_root": project_root,
-                "changed_files": ["src/new.rs"],
-                "diff_hash": "locked-plan"
-            }),
-            "low",
-            &[("correctness-behavior", "low")],
-            json!([]),
-        );
-        let session_id = plan_arguments["session_id"]
-            .as_str()
-            .expect("session id")
-            .to_string();
-        let _held_store = FileEventStore::open(review_session_store_root().expect("store root"))
-            .expect("hold Eventcore store lock");
-        let mut coordinator = ReviewCoordinator::default();
-        let response = coordinator
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": { "name": "final_review.plan", "arguments": plan_arguments }
-            }))
-            .expect("locked plan response");
-
-        assert_eq!(response["error"]["message"], "review_session_busy=true");
-        assert!(!coordinator.sessions.contains_key(&session_id));
-        assert!(!coordinator.session_revisions.contains_key(&session_id));
     }
 }

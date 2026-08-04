@@ -7,8 +7,12 @@ const supportedProviders = new Set([
   "anthropic:claude-agent-sdk",
   "openai:codex-sdk",
 ]);
-const supportedPluginModes = new Set(["no-plugins", "development-system"]);
-const pluginModeOrder = ["development-system", "no-plugins"];
+const supportedPluginModes = new Set([
+  "no-plugins",
+  "targeted-plugins",
+  "full-marketplace",
+]);
+const pluginModeOrder = ["full-marketplace", "no-plugins", "targeted-plugins"];
 const pluginNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function sameStringLists(left, right) {
@@ -217,6 +221,10 @@ export function validateCodexHomeLayout({
   const requiredModes = new Set(
     codexPluginSelections.map((selection) => selection.pluginMode),
   );
+  if (usesCodexGrader) {
+    requiredModes.add("full-marketplace");
+  }
+
   const requiredHomes = pluginModeOrder
     .filter((pluginMode) => requiredModes.has(pluginMode))
     .map((pluginMode) => ({
@@ -227,14 +235,6 @@ export function validateCodexHomeLayout({
       ...home,
       comparisonPath: pathComparisonKey(home.path),
     }));
-  if (usesCodexGrader) {
-    const graderPath = canonicalProspectivePath(codexHomes.grader, cwd);
-    requiredHomes.push({
-      pluginMode: "grader",
-      path: graderPath,
-      comparisonPath: pathComparisonKey(graderPath),
-    });
-  }
 
   for (let leftIndex = 0; leftIndex < requiredHomes.length; leftIndex += 1) {
     for (
@@ -282,9 +282,9 @@ if (invokedPath?.href === import.meta.url) {
   }
   try {
     printCodexPluginSelections(process.argv[2], {
-      "development-system": process.argv[3],
+      "full-marketplace": process.argv[3],
       "no-plugins": process.argv[4],
-      grader: process.argv[5],
+      "targeted-plugins": process.argv[5],
     });
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

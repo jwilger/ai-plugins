@@ -15,14 +15,19 @@
   "sampleCount": 3,
   "conditions": [
     {
-      "id": "no-plugins",
+      "id": "no-marketplace-skills",
       "surface": "codex-bundled-skills-only",
       "plugins": []
     },
     {
-      "id": "development-system",
+      "id": "targeted-quality-skills",
       "surface": "skills-only",
       "plugins": ["development-system"]
+    },
+    {
+      "id": "all-marketplace-skills",
+      "surface": "skills-only",
+      "plugins": "codex-marketplace-skills-at-run-start"
     }
   ],
   "cases": [
@@ -53,8 +58,8 @@
     "aggregates": ["success-rate", "pass@3-capability", "pass^3-reliability"]
   },
   "diagnosticGates": {
-    "expectedExecutionTurns": 6,
-    "completeRuns": 6,
+    "expectedExecutionTurns": 9,
+    "completeRuns": 9,
     "providerErrors": 0,
     "operationalErrors": 0,
     "provenanceErrors": 0,

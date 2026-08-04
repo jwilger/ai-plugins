@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-umask 077
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 caller_cwd="$(pwd -P)"
@@ -16,12 +15,11 @@ generated_dir="$out_dir/generated"
 runtime_options_file="$generated_dir/runtime-options.json"
 runtime_loader_file="$generated_dir/load-harness-cases.runtime.cjs"
 export EVAL_RUNTIME_LOADER_FILE="$runtime_loader_file"
-export EVAL_RUNTIME_OPTIONS_FILE="$runtime_options_file"
-max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-8}"
+max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-1}"
 case "$max_concurrency" in
-  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8) ;;
+  1 | 2) ;;
   *)
-    printf 'PROMPTFOO_MAX_CONCURRENCY must be an integer from 1 through 8; got %q\n' "$max_concurrency" >&2
+    printf 'PROMPTFOO_MAX_CONCURRENCY must be 1 or 2; got %q\n' "$max_concurrency" >&2
     exit 2
     ;;
 esac
@@ -39,13 +37,6 @@ eval_watchdog_pid=""
 eval_launching=0
 interrupted_status=0
 interrupted_signal=""
-eval_runtime_root=""
-promptfoo_log=""
-artifact_scan_complete=0
-artifact_scan_in_progress=0
-artifact_scan_receipt=""
-codex_artifact_secret_file="${EVAL_CODEX_ARTIFACT_SECRET_FILE:-}"
-context_leak_markers_file=""
 provider_eval_lock_file="$root/.evals/provider-eval.lock"
 if git_common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
   git_common_dir="$(cd "$git_common_dir" && pwd -P)"
@@ -62,7 +53,7 @@ usage() {
 Usage: scripts/evals/run.sh [--suite behavior|canary] [config]
 
 Runs provider-backed promptfoo evals through Claude Code and Codex.
-Claude Code and Codex retain isolated no-plugin and development-system conditions.
+Each provider loads the relevant marketplace surface for its harness.
 
 Default harness posture:
   Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all
@@ -74,14 +65,13 @@ Environment overrides:
   CODEX_EVAL_REASONING_EFFORT
   CODEX_GRADER_MODEL            (default: gpt-5.6-sol)
   CODEX_GRADER_REASONING_EFFORT (default: high)
-  CODEX_EVAL_HOME_GRADER        (dedicated sanitized no-plugin grader home)
   EVAL_SAMPLES
   EVAL_CASE_FILTER
   EVAL_PROVIDER_FILTER         (filters tested providers by final label, variant id,
                                 provider id, plugin mode, or substring;
-                                an exact variant id selects development-system only;
+                                an exact variant id selects full-marketplace only;
                                 semantic grading still uses CODEX_GRADER_MODEL)
-  PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-8; default: 8; global target-call cap)
+  PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-2; default: 1)
   EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;
                                 set to 0 to disable)
   EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)
@@ -91,9 +81,8 @@ Environment overrides:
   EVAL_OUT_DIR                 (default: evals/out; isolates generated config and artifacts)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
-Pinned eval packages are managed by tooling/evals/package.json and
-tooling/evals/package-lock.json: promptfoo, @openai/codex-sdk, and
-@anthropic-ai/claude-agent-sdk.
+Pinned eval packages are managed by package.json and package-lock.json:
+promptfoo, @openai/codex-sdk, and @anthropic-ai/claude-agent-sdk.
 
 Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions.
 They do not require provider API keys or fresh approval for repository-owned evals.
@@ -111,12 +100,9 @@ USAGE
 
 write_runtime_options() {
   mkdir -p "$generated_dir"
-  node - "$runtime_options_file" "$root/tooling/evals/package.json" "$root/tooling/evals/node_modules/@openai/codex-sdk/package.json" "$root/evals/fixtures/codex-provider-capabilities.json" <<'NODE'
+  node - "$runtime_options_file" <<'NODE'
 const fs = require('fs');
 const file = process.argv[2];
-const packageFile = process.argv[3];
-const installedPackageFile = process.argv[4];
-const capabilitiesFile = process.argv[5];
 const options = {};
 if (process.env.EVAL_CASE_FILTER) {
   options.caseFilter = process.env.EVAL_CASE_FILTER;
@@ -124,24 +110,6 @@ if (process.env.EVAL_CASE_FILTER) {
 if (process.env.EVAL_SAMPLES) {
   options.samples = process.env.EVAL_SAMPLES;
 }
-const packageJson = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
-const version = packageJson.devDependencies['@openai/codex-sdk'];
-const verifiedVersion = JSON.parse(fs.readFileSync(installedPackageFile, 'utf8')).version;
-if (verifiedVersion !== version) {
-  throw new Error(`Installed @openai/codex-sdk ${verifiedVersion} does not match pinned ${version}`);
-}
-const registry = JSON.parse(fs.readFileSync(capabilitiesFile, 'utf8'));
-const capability = registry['openai:codex-sdk']?.[version];
-if (!capability) {
-  throw new Error(`No versioned Codex provider capability contract for @openai/codex-sdk ${version}`);
-}
-options.codexSpawnCapability = {
-  provider: 'openai:codex-sdk',
-  source: 'versioned-provider-contract',
-  version,
-  verifiedVersion,
-  ...capability,
-};
 fs.writeFileSync(file, JSON.stringify(options));
 NODE
 }
@@ -163,12 +131,6 @@ retain_partial_outputs() {
   local retention_parent="$out_dir/timeout-artifacts"
   local retention_dir
   local retained=0
-  local scan_status=0
-
-  if [ "$artifact_scan_complete" -ne 1 ]; then
-    scan_eval_evidence || scan_status="$?"
-    [ "$scan_status" -eq 0 ] || return "$scan_status"
-  fi
   mkdir -p "$retention_parent"
   retention_dir="$(mktemp -d "$retention_parent/$(date -u +%Y%m%dT%H%M%SZ)-$reason.XXXXXX")"
   for artifact in "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml"; do
@@ -184,10 +146,6 @@ retain_partial_outputs() {
   fi
 }
 
-cleanup_eval_runtime() {
-  [ -z "$eval_runtime_root" ] || rm -rf -- "$eval_runtime_root"
-}
-
 write_eval_status() {
   local state="$1"
   local reason="$2"
@@ -196,75 +154,6 @@ write_eval_status() {
     --state "$state" \
     --reason "$reason" \
     --provider-credentials "${EVAL_PROVIDER_CREDENTIALS_STATUS:-unknown}" >/dev/null
-}
-
-scan_eval_evidence() {
-  local scan_status=0
-  local artifact
-  local -a artifact_inputs=()
-  local -a inputs=()
-  local -a scan_args=(--private-root "$out_dir")
-  local -a context_scan_args=(--private-root "$out_dir")
-
-  [ "$artifact_scan_complete" -ne 1 ] || return 0
-  for artifact in "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml"; do
-    if [ -e "$artifact" ]; then
-      artifact_inputs+=("$artifact")
-      inputs+=("$artifact")
-    fi
-  done
-  if [ -n "$promptfoo_log" ] && [ -e "$promptfoo_log" ]; then
-    scan_args+=(--private-root "$eval_runtime_root")
-    inputs+=("$promptfoo_log")
-  fi
-  if [ "${#inputs[@]}" -eq 0 ]; then
-    artifact_scan_complete=1
-    return 0
-  fi
-  if [ "$generated_config" -eq 1 ] && [ -f "$generated_metadata_file" ]; then
-    scan_args+=(--metadata "$generated_metadata_file")
-  fi
-  if [ -n "$codex_artifact_secret_file" ]; then
-    scan_args+=(--secret-file "$codex_artifact_secret_file")
-  fi
-
-  "$root/scripts/evals/scan-behavior-artifacts.sh" \
-    "${scan_args[@]}" -- "${inputs[@]}" || scan_status="$?"
-  if [ "$scan_status" -eq 0 ] &&
-    [ -n "$context_leak_markers_file" ] &&
-    [ "${#inputs[@]}" -gt 0 ]; then
-    if [ -n "$promptfoo_log" ] && [ -e "$promptfoo_log" ]; then
-      context_scan_args+=(--private-root "$eval_runtime_root")
-    fi
-    context_scan_args+=(--secret-file "$context_leak_markers_file")
-    "$root/scripts/evals/scan-behavior-artifacts.sh" \
-      "${context_scan_args[@]}" \
-      -- "${inputs[@]}" || scan_status="$?"
-  fi
-  if [ "$scan_status" -eq 0 ]; then
-    if [ "${#artifact_inputs[@]}" -gt 0 ]; then
-      node "$root/scripts/evals/artifact-scan-receipt.mjs" write \
-        "$artifact_scan_receipt" "${artifact_inputs[@]}" || scan_status=86
-    fi
-    if [ "$scan_status" -eq 0 ]; then
-      artifact_scan_complete=1
-      return 0
-    fi
-  fi
-
-  rm -f -- "${inputs[@]}"
-  [ -z "$artifact_scan_receipt" ] || rm -f -- "$artifact_scan_receipt"
-  write_eval_status artifact-scan-failed \
-    "provider eval artifacts failed secret scanning"
-  echo "provider eval artifacts were discarded after secret scanning failed" >&2
-  return "$scan_status"
-}
-
-publish_promptfoo_log() {
-  if [ -n "$promptfoo_log" ] && [ -e "$promptfoo_log" ]; then
-    cat -- "$promptfoo_log"
-    rm -f -- "$promptfoo_log"
-  fi
 }
 
 finish_eval_interruption() {
@@ -278,9 +167,7 @@ finish_eval_interruption() {
   fi
   echo "$message" >&2
   write_eval_status interrupted "$message"
-  retention_status=0
-  retain_partial_outputs "exit-$status" || retention_status="$?"
-  [ "$retention_status" -eq 0 ] || exit "$retention_status"
+  retain_partial_outputs "exit-$status"
   exit "$status"
 }
 
@@ -290,18 +177,6 @@ forward_eval_signal() {
 
   interrupted_status="$status"
   interrupted_signal="$signal"
-  if [ "$artifact_scan_in_progress" -eq 1 ]; then
-    trap - INT TERM
-    rm -f -- \
-      "$out_dir/results.json" \
-      "$out_dir/report.html" \
-      "$out_dir/results.junit.xml" \
-      "$artifact_scan_receipt"
-    [ -z "$promptfoo_log" ] || rm -f -- "$promptfoo_log"
-    write_eval_status interrupted \
-      "provider eval artifact scanning was interrupted with status $status"
-    exit "$status"
-  fi
   if [ -n "$eval_pid" ]; then
     kill -s "$signal" -- "-$eval_pid" 2>/dev/null ||
       kill -s "$signal" "$eval_pid" 2>/dev/null || true
@@ -351,16 +226,16 @@ NODE
 
 prepare_codex_home_for_mode() {
   local mode="$1"
+  local plugins="${2:-}"
   case "$mode" in
-    development-system)
-      if [ ! -x "$CODEX_EVAL_REAL_BIN" ]; then
-        echo "Codex eval binary is not executable: $CODEX_EVAL_REAL_BIN" >&2
-        return 2
-      fi
-      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM" --plugin-mode development-system --install-via-cli --artifact-secret-output "$codex_artifact_secret_file" >/dev/null
+    full-marketplace)
+      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_FULL_MARKETPLACE" --plugin-mode full-marketplace >/dev/null
       ;;
     no-plugins)
-      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_NO_PLUGINS" --plugin-mode no-plugins --artifact-secret-output "$codex_artifact_secret_file" >/dev/null
+      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_NO_PLUGINS" --plugin-mode no-plugins >/dev/null
+      ;;
+    targeted-plugins)
+      node "$root/scripts/evals/prepare-codex-home.mjs" "$CODEX_EVAL_HOME_TARGETED_PLUGINS" --plugin-mode targeted-plugins --plugins "$plugins" >/dev/null
       ;;
     *)
       echo "unknown Codex plugin mode in generated eval config: $mode" >&2
@@ -369,183 +244,27 @@ prepare_codex_home_for_mode() {
   esac
 }
 
-prepare_codex_grader_home() {
-  node "$root/scripts/evals/prepare-codex-home.mjs" \
-    "$CODEX_EVAL_HOME_GRADER" \
-    --plugin-mode no-plugins \
-    --artifact-secret-output "$codex_artifact_secret_file" >/dev/null
-}
-
-write_context_leak_markers() {
-  node - "$root" "$context_leak_markers_file" <<'NODE'
-const fs = require('node:fs');
-const path = require('node:path');
-const [root, output] = process.argv.slice(2);
-const { contextLeakMarkers, hostContextLeakMarkers } = require(
-  path.join(root, 'evals/promptfoo/fixtures.cjs'),
-);
-fs.writeFileSync(
-  output,
-  `${JSON.stringify({
-    version: 1,
-    markers: contextLeakMarkers(),
-    secrets: hostContextLeakMarkers(),
-  })}\n`,
-  { mode: 0o600 },
-);
-fs.chmodSync(output, 0o600);
-NODE
-}
-
 print_prepare_codex_home_for_mode() {
   local mode="$1"
+  local plugins="${2:-}"
   case "$mode" in
-    development-system)
-      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_development_system_home" --plugin-mode development-system
-      printf '%q ' --install-via-cli
+    full-marketplace)
+      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_full_home" --plugin-mode full-marketplace
       printf '\n'
       ;;
     no-plugins)
       printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_no_plugins_home" --plugin-mode no-plugins
       printf '\n'
       ;;
+    targeted-plugins)
+      printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" "$dry_targeted_home" --plugin-mode targeted-plugins --plugins "$plugins"
+      printf '\n'
+      ;;
     *)
       echo "unknown Codex plugin mode in generated eval config: $mode" >&2
       return 2
       ;;
   esac
-}
-
-print_prepare_codex_grader_home() {
-  printf '%q ' node "$root/scripts/evals/prepare-codex-home.mjs" \
-    "$dry_grader_home" \
-    --plugin-mode no-plugins
-  printf '\n'
-}
-
-selected_claude_modes() {
-  jq -r '
-    .providerCompositions[]
-    | select(.provider == "anthropic:claude-agent-sdk")
-    | .pluginMode
-  ' "$generated_metadata_file"
-}
-
-provider_mode_selected() {
-  local provider="$1"
-  local mode="$2"
-  jq -e \
-    --arg provider "$provider" \
-    --arg mode "$mode" \
-    '.providerCompositions[] | select(.provider == $provider and .pluginMode == $mode)' \
-    "$generated_metadata_file" >/dev/null
-}
-
-claude_provider_selected() {
-  jq -e '
-    .providerCompositions[]
-    | select(.provider == "anthropic:claude-agent-sdk")
-  ' "$generated_metadata_file" >/dev/null
-}
-
-prepare_claude_runtime_auth() {
-  if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-    return
-  fi
-
-  local credentials_file="$CLAUDE_EVAL_AUTH_HOME/.credentials.json"
-  local access_token
-  local expires_at_ms
-  local minimum_expiry_ms
-  if [ ! -f "$credentials_file" ]; then
-    echo "Claude subscription credentials are unavailable: $credentials_file; run 'claude auth login' or set CLAUDE_CODE_OAUTH_TOKEN" >&2
-    return 2
-  fi
-  access_token="$(jq -er '.claudeAiOauth.accessToken | select(type == "string" and length > 0)' "$credentials_file")" ||
-    {
-      echo "Claude subscription access token is unavailable; run 'claude auth login' or set CLAUDE_CODE_OAUTH_TOKEN" >&2
-      return 2
-    }
-  expires_at_ms="$(jq -er '.claudeAiOauth.expiresAt | select(type == "number") | floor' "$credentials_file")" ||
-    {
-      echo "Claude subscription token expiry is unavailable; run 'claude auth login' or set CLAUDE_CODE_OAUTH_TOKEN" >&2
-      return 2
-    }
-  minimum_expiry_ms="$((($(date +%s) + 300) * 1000))"
-  if [ "$expires_at_ms" -le "$minimum_expiry_ms" ]; then
-    echo "Claude subscription access token expires too soon; run 'claude auth login' before the live eval" >&2
-    return 2
-  fi
-
-  export CLAUDE_CODE_OAUTH_TOKEN="$access_token"
-  unset access_token
-}
-
-prepare_claude_home_for_mode() {
-  local mode="$1"
-  local state
-  case "$mode" in
-    development-system)
-      state="$(
-        node "$root/scripts/evals/prepare-claude-home.mjs" \
-          "$CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM" \
-          --plugin-mode development-system
-      )"
-      export CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM
-      CLAUDE_EVAL_PLUGIN_PATH_DEVELOPMENT_SYSTEM="$(jq -r '.pluginPath' <<<"$state")"
-      ;;
-    no-plugins)
-      node "$root/scripts/evals/prepare-claude-home.mjs" \
-        "$CLAUDE_EVAL_HOME_NO_PLUGINS" \
-        --plugin-mode no-plugins >/dev/null
-      ;;
-    *)
-      echo "unknown Claude plugin mode in generated eval config: $mode" >&2
-      return 2
-      ;;
-  esac
-}
-
-print_prepare_claude_home_for_mode() {
-  local mode="$1"
-  case "$mode" in
-    development-system)
-      printf '%q ' node "$root/scripts/evals/prepare-claude-home.mjs" "$dry_claude_development_system_home" --plugin-mode development-system
-      printf '\n'
-      ;;
-    no-plugins)
-      printf '%q ' node "$root/scripts/evals/prepare-claude-home.mjs" "$dry_claude_no_plugins_home" --plugin-mode no-plugins
-      printf '\n'
-      ;;
-    *)
-      echo "unknown Claude plugin mode in generated eval config: $mode" >&2
-      return 2
-      ;;
-  esac
-}
-
-reset_session_start_markers() {
-  if provider_mode_selected "anthropic:claude-agent-sdk" "development-system"; then
-    rm -f -- "$CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE"
-  fi
-  if provider_mode_selected "openai:codex-sdk" "development-system"; then
-    rm -f -- "$CODEX_EVAL_SESSION_START_MARKER"
-  fi
-}
-
-verify_session_start_markers() {
-  local missing=0
-  if provider_mode_selected "anthropic:claude-agent-sdk" "development-system" &&
-    [ ! -f "$CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE" ]; then
-    echo "development-system SessionStart hook did not run in the Claude live eval" >&2
-    missing=1
-  fi
-  if provider_mode_selected "openai:codex-sdk" "development-system" &&
-    [ ! -f "$CODEX_EVAL_SESSION_START_MARKER" ]; then
-    echo "development-system SessionStart hook did not run in the Codex live eval" >&2
-    missing=1
-  fi
-  return "$missing"
 }
 
 acquire_provider_eval_lock() {
@@ -640,9 +359,6 @@ try {
   }
   if (entries.length === 0 && !checkOnly) {
     fs.writeFileSync(marker, markerContents, { mode: 0o600 });
-  }
-  if (!checkOnly) {
-    fs.chmodSync(outputDir, 0o700);
   }
 } catch (error) {
   console.error(error.message);
@@ -739,11 +455,9 @@ cd "$root"
 
 if [ "$dry_run" -eq 1 ]; then
   prepare_eval_output_dir check
-  dry_development_system_home="${CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-development-system}}"
+  dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-full-marketplace}}"
   dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
-  dry_grader_home="${CODEX_EVAL_HOME_GRADER:-$root/.evals/codex-home-grader}"
-  dry_claude_development_system_home="${CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM:-$root/.evals/claude-home-development-system}"
-  dry_claude_no_plugins_home="${CLAUDE_EVAL_HOME_NO_PLUGINS:-$root/.evals/claude-home-no-plugins}"
+  dry_targeted_home="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.evals/codex-home-targeted-plugins}"
   printf '%q ' "$root/scripts/evals/ensure-node-deps.sh"
   printf '\n'
   if [ "$generated_config" -eq 1 ]; then
@@ -754,23 +468,20 @@ if [ "$dry_run" -eq 1 ]; then
     generated_metadata_file="$dry_inspection_dir/metadata.json"
     node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$dry_inspection_config" --metadata-output "$generated_metadata_file" >/dev/null
     codex_provider_compositions="$(selected_codex_provider_compositions \
-      "$dry_development_system_home" \
+      "$dry_full_home" \
       "$dry_no_plugins_home" \
-      "$dry_grader_home")"
+      "$dry_targeted_home")"
     printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_output_file"
     printf '\n'
     if uses_codex_grader; then
-      print_prepare_codex_grader_home
+      print_prepare_codex_home_for_mode full-marketplace
     fi
     if [ -n "$codex_provider_compositions" ]; then
-      while IFS=$'\t' read -r mode _provider_plugins; do
-        print_prepare_codex_home_for_mode "$mode"
+      while IFS=$'\t' read -r mode provider_plugins; do
+        [ "$mode" != "full-marketplace" ] || continue
+        print_prepare_codex_home_for_mode "$mode" "$provider_plugins"
       done <<<"$codex_provider_compositions"
     fi
-    while IFS= read -r mode; do
-      [ -n "$mode" ] || continue
-      print_prepare_claude_home_for_mode "$mode"
-    done < <(selected_claude_modes)
   fi
   printf '%q ' "${run_cmd[@]}"
   printf '\n'
@@ -778,109 +489,49 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 prepare_eval_output_dir
-mkdir -p "$out_dir"
+mkdir -p "$out_dir" "$root/.evals/agent-workspace"
 rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml" "$out_dir/status.json"
-artifact_scan_receipt="$out_dir/artifact-scan-receipt.json"
-rm -f "$artifact_scan_receipt"
-eval_runtime_root="$(mktemp -d "/tmp/ai-plugins-provider-eval.XXXXXX")"
-export EVAL_RUNTIME_ROOT="$eval_runtime_root"
-trap cleanup_eval_runtime EXIT
 trap 'forward_eval_signal INT 130' INT
 trap 'forward_eval_signal TERM 143' TERM
 "$root/scripts/evals/ensure-node-deps.sh"
-export CODEX_EVAL_REAL_BIN="${CODEX_EVAL_REAL_BIN:-$root/node_modules/.bin/codex}"
-export CODEX_EVAL_CODEX_BIN="${CODEX_EVAL_CODEX_BIN:-$CODEX_EVAL_REAL_BIN}"
-provider_bwrap="${EVAL_PROVIDER_BWRAP_BIN:-${AI_PLUGINS_BWRAP_BIN:-}}"
-if [ -z "$provider_bwrap" ]; then
-  provider_bwrap="$(command -v bwrap || true)"
-fi
-if [ -z "$provider_bwrap" ] || [ ! -x "$provider_bwrap" ]; then
-  echo "provider eval filesystem boundary is unavailable: bwrap is required" >&2
-  exit 2
-fi
-export EVAL_PROVIDER_BWRAP_BIN="$(realpath -- "$provider_bwrap")"
-export EVAL_PROVIDER_NODE_BIN="$(realpath -- "$(command -v node)")"
-export EVAL_PROVIDER_CODEX_RUNTIME="$(realpath -- "$root/tooling/evals/node_modules/@openai")"
 if [ "$generated_config" -eq 1 ]; then
   node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file" >/dev/null
-  mkdir -p "$eval_runtime_root/workspaces/codex-grader"
-  while IFS= read -r provider_label; do
-    [ -n "$provider_label" ] || continue
-    mkdir -p "$eval_runtime_root/workspaces/$provider_label"
-  done < <(jq -r '.providerLabels[]' "$generated_metadata_file")
 fi
 
 export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
 export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$root/.dependencies/promptfoo}"
 export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.dependencies/promptfoo-cache}"
 export PROMPTFOO_CACHE_TTL="${PROMPTFOO_CACHE_TTL:-86400}"
-export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.evals/codex-home-development-system}"
-export CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="${CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM:-$CODEX_EVAL_HOME}"
+export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.evals/codex-home-full-marketplace}"
+export CODEX_EVAL_HOME_FULL_MARKETPLACE="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-$CODEX_EVAL_HOME}"
 export CODEX_EVAL_HOME_NO_PLUGINS="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
-export CODEX_EVAL_HOME_GRADER="${CODEX_EVAL_HOME_GRADER:-$root/.evals/codex-home-grader}"
-export CLAUDE_EVAL_AUTH_HOME="${CLAUDE_EVAL_AUTH_HOME:-${CLAUDE_CONFIG_DIR:-${HOME}/.claude}}"
-export CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM="${CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM:-$root/.evals/claude-home-development-system}"
-export CLAUDE_EVAL_HOME_NO_PLUGINS="${CLAUDE_EVAL_HOME_NO_PLUGINS:-$root/.evals/claude-home-no-plugins}"
-export CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM="${CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM:-$CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM/config}"
-export CLAUDE_EVAL_PLUGIN_CACHE_DIR_DEVELOPMENT_SYSTEM="${CLAUDE_EVAL_PLUGIN_CACHE_DIR_DEVELOPMENT_SYSTEM:-$CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM/plugin-cache}"
-export CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS="${CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS:-$CLAUDE_EVAL_HOME_NO_PLUGINS/config}"
-export CLAUDE_EVAL_PLUGIN_CACHE_DIR_NO_PLUGINS="${CLAUDE_EVAL_PLUGIN_CACHE_DIR_NO_PLUGINS:-$CLAUDE_EVAL_HOME_NO_PLUGINS/plugin-cache}"
-export CLAUDE_EVAL_RUNTIME_CONFIG_DIR_DEVELOPMENT_SYSTEM="${CLAUDE_EVAL_RUNTIME_CONFIG_DIR_DEVELOPMENT_SYSTEM:-$CLAUDE_EVAL_CONFIG_DIR_DEVELOPMENT_SYSTEM}"
-export CLAUDE_EVAL_RUNTIME_CONFIG_DIR_NO_PLUGINS="${CLAUDE_EVAL_RUNTIME_CONFIG_DIR_NO_PLUGINS:-$CLAUDE_EVAL_CONFIG_DIR_NO_PLUGINS}"
-if [ "$generated_config" -eq 1 ] && claude_provider_selected; then
-  prepare_claude_runtime_auth
-  claude_command="${CLAUDE_BIN:-claude}"
-  claude_path="$(command -v "$claude_command" 2>/dev/null || true)"
-  if [ -z "$claude_path" ] || [ ! -x "$claude_path" ]; then
-    echo "Claude eval binary is unavailable: $claude_command" >&2
-    exit 2
-  fi
-  export CLAUDE_EVAL_REAL_BIN="$(realpath -- "$claude_path")"
-fi
-export CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE="$CLAUDE_EVAL_HOME_DEVELOPMENT_SYSTEM/session-start-marker"
-export CODEX_EVAL_SESSION_START_MARKER="$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/session-start-marker"
-export CODEX_EVAL_SANITIZED_MARKETPLACE="$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM/sanitized-marketplace"
+export CODEX_EVAL_HOME_TARGETED_PLUGINS="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.evals/codex-home-targeted-plugins}"
 mkdir -p "$PROMPTFOO_CONFIG_DIR"
-if [ "$generated_config" -eq 1 ] && [ -z "$codex_artifact_secret_file" ]; then
-  codex_artifact_secret_file="$eval_runtime_root/codex-auth-artifact-secrets.json"
-fi
-context_leak_markers_file="$eval_runtime_root/context-leak-markers.json"
-write_context_leak_markers
-export EVAL_CONTEXT_LEAK_MARKERS_FILE="$context_leak_markers_file"
-export EVAL_REQUIRE_CONTEXT_LEAK_SIDECAR=1
 
 if [ "$generated_config" -eq 1 ]; then
   codex_provider_compositions="$(selected_codex_provider_compositions \
-    "$CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM" \
+    "$CODEX_EVAL_HOME_FULL_MARKETPLACE" \
     "$CODEX_EVAL_HOME_NO_PLUGINS" \
-    "$CODEX_EVAL_HOME_GRADER")"
+    "$CODEX_EVAL_HOME_TARGETED_PLUGINS")"
   write_runtime_options
   write_runtime_loader
   if uses_codex_grader; then
-    prepare_codex_grader_home
+    prepare_codex_home_for_mode full-marketplace
   fi
   if [ -n "$codex_provider_compositions" ]; then
-    while IFS=$'\t' read -r mode _provider_plugins; do
-      prepare_codex_home_for_mode "$mode"
+    while IFS=$'\t' read -r mode provider_plugins; do
+      [ "$mode" != "full-marketplace" ] || continue
+      prepare_codex_home_for_mode "$mode" "$provider_plugins"
     done <<<"$codex_provider_compositions"
   fi
-  claude_modes="$(selected_claude_modes)"
-  while IFS= read -r mode; do
-    [ -n "$mode" ] || continue
-    prepare_claude_home_for_mode "$mode"
-  done <<<"$claude_modes"
-  reset_session_start_markers
 fi
-
-promptfoo_log="$eval_runtime_root/promptfoo.log"
-: >"$promptfoo_log"
 
 set +e
 eval_launching=1
 (
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  exec "${run_cmd[@]}" >"$promptfoo_log" 2>&1
+  exec "${run_cmd[@]}"
 ) &
 eval_pid="$!"
 eval_launching=0
@@ -901,27 +552,18 @@ if [ -n "$eval_watchdog_pid" ]; then
   wait "$eval_watchdog_pid" 2>/dev/null || true
   eval_watchdog_pid=""
 fi
+trap - INT TERM
 eval_pid=""
 if [ "$interrupted_status" -ne 0 ]; then
   promptfoo_status="$interrupted_status"
 fi
 set -e
 
-artifact_scan_status=0
-artifact_scan_in_progress=1
-scan_eval_evidence || artifact_scan_status="$?"
-artifact_scan_in_progress=0
-trap - INT TERM
-[ "$artifact_scan_status" -eq 0 ] || exit "$artifact_scan_status"
-publish_promptfoo_log
-
 if [ "$promptfoo_status" -ne 0 ]; then
   if [ "$promptfoo_status" -eq 124 ] || [ "$promptfoo_status" -eq 137 ]; then
     echo "promptfoo eval timed out after EVAL_TIMEOUT=$eval_timeout" >&2
     write_eval_status timed-out "promptfoo eval timed out after EVAL_TIMEOUT=$eval_timeout"
-    retention_status=0
-    retain_partial_outputs "exit-$promptfoo_status" || retention_status="$?"
-    [ "$retention_status" -eq 0 ] || exit "$retention_status"
+    retain_partial_outputs "exit-$promptfoo_status"
     exit "$promptfoo_status"
   fi
   if [ "$promptfoo_status" -eq 143 ]; then
@@ -930,25 +572,13 @@ if [ "$promptfoo_status" -ne 0 ]; then
   if [ "$promptfoo_status" -ge 128 ]; then
     finish_eval_interruption "$promptfoo_status"
   fi
-fi
-
-session_start_status=0
-if [ "$generated_config" -eq 1 ] && ! verify_session_start_markers; then
-  session_start_status=1
-fi
-
-if [ "$promptfoo_status" -ne 0 ]; then
   if [ ! -s "$out_dir/results.json" ]; then
     exit "$promptfoo_status"
   fi
-  threshold_status=0
-  node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json" ||
-    threshold_status="$?"
-  [ "$session_start_status" -eq 0 ] || exit "$session_start_status"
-  exit "$threshold_status"
+  node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
+  exit "$?"
 fi
 
 if [ -s "$out_dir/results.json" ]; then
   node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
 fi
-[ "$session_start_status" -eq 0 ] || exit "$session_start_status"

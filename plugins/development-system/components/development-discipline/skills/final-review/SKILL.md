@@ -1,6 +1,6 @@
 ---
 name: final-review
-description: Use when completing or claiming readiness for local-only changes, a branch, pull request, merge request, or merge-to-trunk; final review applies even when repository policy forbids publishing, including scope growth, proposed work splits, and medium-risk review-budget checkpoints.
+description: Use when completing or claiming readiness for local-only changes, a branch, pull request, merge request, or merge-to-main; final review applies even when repository policy forbids publishing, including scope growth, proposed work splits, and medium-risk review-budget checkpoints.
 ---
 
 # Final Review
@@ -9,27 +9,26 @@ Apply `model-routing` to every review assignment. Ordinary lens review uses the
 substantive route; activated architecture, security, human-safety, ambiguity,
 or disputed-verification work and the accountable readiness decision use the
 strong route defined by that canonical matrix. The coordinator assigns
-architecture, security, and human-safety lenses through the resolved public
-strong-review role used for verification while ordinary lenses use the
-substantive review role. An unavailable or inherited route follows the
-canonical bounded handoff or blocked-result protocol, never an implicit
-downgrade.
+architecture, security, and human-safety lenses through the resolved strong
+model role used for verification while ordinary lenses use the substantive
+review role. An unavailable or inherited route follows the canonical bounded
+handoff or blocked-result protocol, never an implicit downgrade.
 
-Bind strong review responsibilities to the public `strong-reviewer` role in the
-project-local final-review TOML. Lower Codex routes may remain exact:
+For Codex, bind those responsibilities in the project-local final-review TOML;
+do not put Codex identifiers in universal defaults:
 
 ```toml
 [final_review.models.codex]
-pre_filter = "strong-reviewer"
+pre_filter = "gpt-5.6-sol"
 lens_review = "gpt-5.6-terra"
 post_filter = "gpt-5.6-luna"
-verifier = "strong-reviewer"
+verifier = "gpt-5.6-sol"
 ```
 
 `pre_filter` owns the all-dimension broad risk scout. `lens_review` is Terra for
 ordinary risk-selected substantive lenses, while the coordinator routes an
-assigned architecture, security, or human-safety lens through the public
-`strong-reviewer` role. `post_filter` labels the normally deterministic
+assigned architecture, security, or human-safety lens through the strong Sol
+role. `post_filter` labels the normally deterministic
 `final_review.filter_findings` path; deterministic relevance and path filtering
 normally make no model call. `verifier` owns blocking, disputed, or materially
 uncertain batched verification. These roles are part of the review contract,
@@ -38,37 +37,21 @@ as a fresh-context subagent, closes it immediately after receiving the result,
 and submits the required caller attestation naming the assigned model role plus
 `fresh_context: true` and `closed_after_result: true`.
 
-For every `strong-reviewer` assignment, inspect the eligible models advertised
-by the current harness and its authoritative capability or upgrade metadata,
-then launch that public read-only role with the highest-capability eligible
-model selected explicitly. Never infer capability from model names, lexical or
-list order, price, or release date. The Codex role omits a model and retains
-`high` effort; the Claude role uses the moving `opus` alias with `high` effort.
-If authoritative ranking, explicit selection, or launch is unavailable, return
-a visible bounded blocked result and do not silently substitute another model.
-
 Run a local, fresh-context review cycle before creating a pull request, merging,
 or claiming a change is ready.
 
-This is the full-review gate for ticket completion, not the gate for preserving
-each green implementation increment. Delivery still requires terminal success
-for the exact final pushed SHA. Start full review after the ticket's actual
-acceptance criteria are implemented, no prior failed-run hold remains, and
-apply the selected delivery mode:
+This is the ticket-completion gate, not the gate for preserving each green
+implementation increment. Start it after the ticket's actual acceptance
+criteria are implemented, no prior failed-run hold remains, and apply the
+selected delivery mode:
 
 - For direct-to-trunk review before the first push, use current local
   verification evidence. Do not require a pushed build that cannot exist until
   this review permits the push.
 - For local-only review, use current local verification evidence. Do not require
   a pushed build or create a remote action solely to unlock review.
-- For PR/MR work, require the latest in-scope pushed build to be running or
-  green before review.
-- For a direct-to-trunk revision that has already been pushed, require the
-  most recent completed run for the configured trunk branch that reached a
-  pass/fail outcome to have passed and no unresolved failure hold to exist.
-  Newer queued, pending, or running runs do not replace that watermark. A
-  canceled run is non-evidence: it neither passes nor fails, does not replace
-  the watermark, and does not create or release a hold.
+- For PR/MR work or a direct-to-trunk revision that has already been pushed,
+  require the latest in-scope pushed build to be running or green before review.
 
 A failed pushed build invokes `ci-failure-follow-up` and blocks final review and
 follow-up work until that skill's terminal-success hold is released; a newer
@@ -124,7 +107,7 @@ and supplies a concrete causal prerequisite—not administrative review ordering
 For already-landed work, broadness authorizes retrospective review batching
 only. It does not authorize delivery decomposition, tracker tickets, or a
 review-only branch. Never manufacture or push synthetic review-only branches,
-create recursive split tickets, or use Beads `blocks` relationships for
+create recursive split tickets, or use Tiber `blocks` relationships for
 administrative review. Review batches stay inside the original work item; only
 a concrete unresolved defect or unfinished independently deliverable change may
 become a follow-up ticket.
@@ -144,13 +127,10 @@ checkpoint. Apply this contract when `advance_kind` is
   requires at least two distinct ticket references. For landed reviews, the
   choices are only `ship` or `escalate` because landed work cannot be decomposed
   into delivery tickets. `escalate` requires a nonblank escalation reference.
-- Reject `ship` until every independent review gate passes: acceptance criteria
-  are met, the selected delivery mode's current CI evidence permits review, and
-  every blocking finding is resolved. For direct-to-trunk, that means the
-  completed pass/fail watermark passed with no unresolved failure hold. A valid
-  `ship` completes review but does not replace delivery's terminal-success
-  requirement for the exact final pushed SHA. Once valid, `ship` is terminal
-  and schedules no more reviewers.
+- Reject `ship` until every independent delivery gate passes: acceptance
+  criteria are met, the latest pushed CI build is running or green, and every
+  blocking finding is resolved. Once valid, `ship` is terminal and schedules no
+  more reviewers.
 - For unlanded reviews, `split` creates a terminal hold. `escalate` creates one
   in either lifecycle. Each hold preserves blockers, schedules no reviewers,
   and rejects every later `final_review.advance` for that session.
@@ -167,7 +147,7 @@ review.
 
 | User asks for                  | Review scope                                            |
 | ------------------------------ | ------------------------------------------------------- |
-| No explicit base               | configured trunk ref to the complete tracked worktree   |
+| No explicit base               | `origin/main` to the complete tracked worktree          |
 | Uncommitted changes            | ticket-start baseline to the complete tracked worktree  |
 | Since a branch, tag, or commit | that ref to the complete tracked worktree               |
 | Existing PR/MR                 | PR/MR base to the checked-out complete tracked worktree |
@@ -323,20 +303,17 @@ actual acceptance criterion; disposition is not permission to omit required
 behavior.
 
 When the review is for a tracked ticket, pass its stable tracker ID as
-`work_item_id` to `final_review.plan` (for example, the active Beads task ID).
-The coordinator persists final-review sessions and retained out-of-scope
-reports as typed Eventcore-fs events in a project-scoped user-state store
-(`$XDG_STATE_HOME`, or `~/.local/state` as fallback), not in the reviewed
-repository or in per-session files. Each completed review transition updates
-that binding's current report, replacing stale conditional-lens findings.
-Without a tracker ID, the coordinator uses a stable worktree/scope/base binding
-so restarted non-ticketed reviews update the same report. The returned
-`out_of_scope_report_artifact` is an opaque locator of the form
-`eventcore://development-discipline/final-review-sessions/<stream>?report_binding_id=<id>`;
-it is neither a filesystem path nor a direct-client API. Use
-`final_review.out_of_scope_report` with the authoritative review `state` to read
-the complete current retained findings. New flows create no SQLite report
-artifact.
+`work_item_id` to `final_review.plan` (for example, the active Tiber task ID).
+The coordinator stores one current SQLite snapshot per worktree and
+work item in user state (`$XDG_STATE_HOME`, or `~/.local/state` as fallback),
+not in the reviewed repository or in per-session files. Each completed review
+transition replaces that binding's old lens rows, including stale conditional
+lenses; the returned `out_of_scope_report_artifact` path is the single report
+location. Without a tracker ID, the coordinator uses a stable worktree/scope/
+base binding so restarted non-ticketed reviews also replace stale rows.
+Use `final_review.out_of_scope_report` with the authoritative review `state` to
+read that current snapshot; it returns the complete retained findings without
+requiring a separate SQLite client.
 
 Use a security-impact assessment separate from review severity: `none`,
 `minor`, `moderate`, `major`, or `critical`. Do not infer this threshold from a
@@ -416,28 +393,16 @@ policy.
 
 4. Fix valid findings when remediation was requested; for review-only requests,
    report without editing. When the selected mode has an in-scope pushed build,
-   check its CI again. For direct-to-trunk, remediation and another verified push
-   may proceed when the completed pass/fail watermark passed and no unresolved
-   failure hold exists, even if a newer run is queued, pending, running, or
-   canceled. In any mode, a failure that invokes `ci-failure-follow-up` must
-   follow that recovery route first.
+   check it again: running or green permits remediation only when no failure
+   hold exists, while a failed build must follow `ci-failure-follow-up` first.
    Direct-to-trunk work before its first push and local-only work use fresh local
    verification instead. Any remediation that changes the diff leaves the current
    full-review pass: run fast unit tests, run a lightweight review, commit and
-   push only when the selected mode calls for those actions, recheck its current
-   CI evidence, then submit exactly one diff-bound delta risk assessment. For
-   direct-to-trunk, another checkpoint may proceed when the completed pass/fail
-   watermark passed with no unresolved failure hold. Resume only the assignments
-   the assessment returns; do not restart unaffected lenses.
-   Route ordinary remediation through the normal substantive worker. When
-   architecture, security, human-safety, ambiguity, or separately authorized
-   destructive implementation makes remediation a strong responsibility, use
-   the public writable `strong-worker` role and the same explicit
-   highest-capability eligible model dispatch. Model choice never supplies the
-   separate authorization required for destructive work.
-
-   On the initial advancing call that records each disposition, send
-   `caller_decisions` in this shape:
+   push only when the selected mode calls for those actions, confirm any
+   resulting latest pushed build is running or green, then submit exactly one
+   diff-bound delta risk assessment. Resume only the assignments it returns; do
+   not restart unaffected lenses. On the initial advancing call
+   that records each disposition, send `caller_decisions` in this shape:
 
    ```json
    [

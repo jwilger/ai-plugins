@@ -1,59 +1,15 @@
 {
-  "description": "Run development-system compatibility checks and plugin-managed Beads lifecycle context.",
+  "description": "Warn about conflicting development plugins, harness settings, and user-managed MCPs.",
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
             "command": "\"${PLUGIN_ROOT}/bin/development-system\" session-start --project \"$PWD\" --harness codex --format json",
             "timeout": 10,
             "statusMessage": "Checking development system compatibility"
-          },
-          {
-            "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/run-beads-hook\" --project \"$PWD\" -- codex-hook SessionStart",
-            "timeout": 60,
-            "statusMessage": "Loading Beads SessionStart context"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "manual|auto",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/run-beads-hook\" --project \"$PWD\" -- codex-hook PreCompact",
-            "timeout": 15,
-            "statusMessage": "Preserving Beads context before compaction"
-          }
-        ]
-      }
-    ],
-    "PostCompact": [
-      {
-        "matcher": "manual|auto",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/run-beads-hook\" --project \"$PWD\" -- codex-hook PostCompact",
-            "timeout": 15,
-            "statusMessage": "Refreshing Beads context after compaction"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/run-beads-hook\" --project \"$PWD\" -- codex-hook UserPromptSubmit",
-            "timeout": 15,
-            "statusMessage": "Refreshing Beads context for the prompt"
           }
         ]
       }

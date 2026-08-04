@@ -26,14 +26,6 @@ matrix to that task. Lifecycle routing selects what work is needed;
 `model-routing` independently selects the eligible task-local model and its
 verification boundary.
 
-Before finalizing a plan with two or more dependent implementation steps,
-invoke the public `advisor` skill unless an existing executable BDD-style
-scenario already covers the observable behavior and material failure boundary.
-If already running as Advisor or `sharpen-plan`, perform the check directly and
-do not invoke Advisor recursively. Apply the recommendation and re-present the
-complete plan before implementation. This gate refines the selected lifecycle
-route; it does not replace any specialist or evidence gate.
-
 When the user asks only for a workflow explanation, describe the inspection and
 routing that would occur without claiming to have performed it. For an answer
 or domain-review request that is not a final review of completed development

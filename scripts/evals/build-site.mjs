@@ -35,9 +35,14 @@ function readArtifact(file) {
         const providerVariant =
           testCase.provider_variant ||
           testCase.providerVariant ||
-          String(provider).replace(/-(no-plugins|development-system)$/, "");
+          String(provider).replace(
+            /-(no-plugins|targeted-plugins|full-marketplace)$/,
+            "",
+          );
         const pluginMode =
-          String(provider).match(/(no-plugins|development-system)$/)?.[1] ||
+          String(provider).match(
+            /(no-plugins|targeted-plugins|full-marketplace)$/,
+          )?.[1] ||
           testCase.plugin_mode ||
           testCase.pluginMode ||
           "unknown";
@@ -164,22 +169,6 @@ function isProviderUnavailable(reason) {
   );
 }
 
-function providerOrder(providerVariant) {
-  if (String(providerVariant).startsWith("claude-")) return 0;
-  if (String(providerVariant).startsWith("codex-")) return 1;
-  return 2;
-}
-
-function providerSort(left, right, leftSuffix = "", rightSuffix = "") {
-  return (
-    providerOrder(left.providerVariant) -
-      providerOrder(right.providerVariant) ||
-    `${left.providerVariant}:${leftSuffix}`.localeCompare(
-      `${right.providerVariant}:${rightSuffix}`,
-    )
-  );
-}
-
 function aggregateCases(cases) {
   const groups = new Map();
 
@@ -249,11 +238,8 @@ function aggregateCases(cases) {
               : "fail",
     }))
     .sort((left, right) =>
-      providerSort(
-        left,
-        right,
-        `${left.pluginMode}:${left.id}`,
-        `${right.pluginMode}:${right.id}`,
+      `${left.providerVariant}:${left.pluginMode}:${left.id}`.localeCompare(
+        `${right.providerVariant}:${right.pluginMode}:${right.id}`,
       ),
     );
 }
@@ -298,11 +284,8 @@ function aggregateDimension(cases, field, idName) {
       cases: [...group.cases].sort(),
     }))
     .sort((left, right) =>
-      providerSort(
-        left,
-        right,
-        `${left.pluginMode}:${left[idName]}`,
-        `${right.pluginMode}:${right[idName]}`,
+      `${left.providerVariant}:${left.pluginMode}:${left[idName]}`.localeCompare(
+        `${right.providerVariant}:${right.pluginMode}:${right[idName]}`,
       ),
     );
 }
@@ -320,41 +303,39 @@ function valueGateSummaries(aggregates) {
   return [...byCase.entries()]
     .map(([key, groups]) => {
       const [providerVariant, caseId] = key.split("::");
-      const developmentSystem = groups.find(
-        (group) => group.pluginMode === "development-system",
+      const full = groups.find(
+        (group) => group.pluginMode === "full-marketplace",
       );
       const baseline = groups.find(
         (group) => group.pluginMode === "no-plugins",
       );
-      const reference = developmentSystem || groups[0];
-      const pluginComplete =
-        developmentSystem &&
-        developmentSystem.evaluated > 0 &&
-        developmentSystem.blocked === 0;
+      const targeted = groups.find(
+        (group) => group.pluginMode === "targeted-plugins",
+      );
+      const reference = full || targeted || groups[0];
+      const fullComplete = full && full.evaluated > 0 && full.blocked === 0;
       const baselineComplete =
         baseline && baseline.evaluated > 0 && baseline.blocked === 0;
       const lift =
-        pluginComplete && baselineComplete
-          ? developmentSystem.passRate - baseline.passRate
+        fullComplete && baselineComplete
+          ? full.passRate - baseline.passRate
           : null;
       const status =
         reference.valueGateMode === "safety-critical"
-          ? pluginComplete &&
+          ? fullComplete &&
             baselineComplete &&
-            developmentSystem.status === "pass" &&
+            full.status === "pass" &&
             baseline.status !== "pass"
             ? "pass"
-            : !pluginComplete || !baselineComplete
+            : !fullComplete || !baselineComplete
               ? "unsupported"
               : "fail"
-          : pluginComplete &&
+          : fullComplete &&
               baselineComplete &&
-              developmentSystem.status === "pass" &&
+              full.status === "pass" &&
               lift >= reference.baselineLiftThreshold
             ? "pass"
-            : pluginComplete &&
-                !baselineComplete &&
-                developmentSystem.status === "pass"
+            : fullComplete && !baselineComplete && full.status === "pass"
               ? "unsupported"
               : "fail";
 
@@ -365,14 +346,17 @@ function valueGateSummaries(aggregates) {
         skill: reference.skills?.[0],
         mode: reference.valueGateMode,
         baselineLiftThreshold: reference.baselineLiftThreshold,
-        developmentSystemPassRate: developmentSystem?.passRate ?? null,
+        fullMarketplacePassRate: full?.passRate ?? null,
         noPluginsPassRate: baseline?.passRate ?? null,
+        targetedPluginsPassRate: targeted?.passRate ?? null,
         lift,
         status,
       };
     })
     .sort((left, right) =>
-      providerSort(left, right, left.caseId, right.caseId),
+      `${left.providerVariant}:${left.caseId}`.localeCompare(
+        `${right.providerVariant}:${right.caseId}`,
+      ),
     );
 }
 
@@ -532,7 +516,7 @@ const valueGateRows =
   <td>${escapeHtml(gate.caseId)}</td>
   <td>${escapeHtml(gate.status)}</td>
   <td>${escapeHtml(gate.mode)}</td>
-  <td>${gate.developmentSystemPassRate === null ? "n/a" : `${(gate.developmentSystemPassRate * 100).toFixed(1)}%`}</td>
+  <td>${gate.fullMarketplacePassRate === null ? "n/a" : `${(gate.fullMarketplacePassRate * 100).toFixed(1)}%`}</td>
   <td>${gate.noPluginsPassRate === null ? "n/a" : `${(gate.noPluginsPassRate * 100).toFixed(1)}%`}</td>
   <td>${gate.lift === null ? "n/a" : `${(gate.lift * 100).toFixed(1)}pp`}</td>
 </tr>`,
@@ -601,7 +585,7 @@ ${pluginRows}
     <h2>Value gates</h2>
     <table>
       <thead>
-        <tr><th>Provider variant</th><th>Case</th><th>Status</th><th>Mode</th><th>Development system</th><th>No plugins</th><th>Lift</th></tr>
+        <tr><th>Provider variant</th><th>Case</th><th>Status</th><th>Mode</th><th>Full</th><th>No plugins</th><th>Lift</th></tr>
       </thead>
       <tbody>
 ${valueGateRows}

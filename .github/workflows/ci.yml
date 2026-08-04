@@ -15,11 +15,12 @@ on:
 permissions:
   contents: read
 
-# Keep every submitted revision observable. Event type, ref, and SHA isolate
-# main pushes, pull requests, merge-queue validation, and distinct checkpoints.
+# Cancel only an older revision of the same delivery stream. Event type keeps
+# main pushes, pull requests, and merge-queue validation isolated; ref keeps
+# separate pull requests and merge groups from canceling one another.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: false
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   quality:
@@ -39,9 +40,6 @@ jobs:
 
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
-
-      - name: Restore pinned eval dependencies
-        run: nix develop -c scripts/evals/ensure-node-deps.sh
 
       - name: Provision delegated user systemd
         run: |

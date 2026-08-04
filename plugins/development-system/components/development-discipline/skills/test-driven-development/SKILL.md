@@ -64,17 +64,11 @@ starting the next RED test:
 2. Run the lightweight review below. If it causes an edit, repeat the fast tests
    and lightweight review until both are green.
 3. Use `rationale-commit-messages`, then commit and push the green increment.
-4. Check pushed CI according to the selected delivery mode. For
-   direct-to-trunk, continue to the next verified push when the most recent
-   completed run for the configured trunk branch that reached a pass/fail
-   outcome passed and no unresolved failure hold exists. Newer queued, pending,
-   or running runs do not replace that watermark. A canceled run is
-   non-evidence: it neither passes nor fails, does not replace the watermark,
-   and does not create or release a hold. The instant a completed run for that
-   branch fails unexpectedly, invoke
-   `ci-failure-follow-up` and do only causal recovery until terminal success of
-   either the exact tested causal-repair revision or the authorized rerun of the
-   exact unchanged failed SHA.
+4. Check the latest pushed build. Continue when CI is running or green only
+   when no prior failure hold exists. A failed build invokes
+   `ci-failure-follow-up`; its exact diagnosis, constrained next push, and
+   terminal-success recovery rule blocks follow-up implementation,
+   review-finding remediation, and a new ticket.
 
 Long-running integration, mutation, exhaustive, full-suite, and similarly
 expensive checks belong in CI unless a local run is directly required to
@@ -82,14 +76,11 @@ diagnose a failure. Do not make every local increment wait for them.
 
 Full review is the ticket-completion gate after the actual acceptance criteria
 are implemented; it is not a prerequisite for preserving each green increment.
-When full review requires a code or guidance edit, first confirm the selected
-delivery mode's CI checkpoint gate passes. In direct-to-trunk mode, that means
-the completed pass/fail watermark passed and no unresolved failure hold exists.
-Make the edit test-first, then repeat fast unit tests, lightweight review,
-commit and push, and the CI check. Resume full review through one diff-bound
-delta risk assessment rather than restarting unaffected lenses. Completing the
-ticket remains stricter than pushing another checkpoint: the exact final pushed
-SHA must reach terminal success.
+When full review requires a code or guidance edit, first confirm the latest
+pushed build is running or green, make the edit test-first, then repeat fast
+unit tests, lightweight review, commit and push, and the CI check. Resume full
+review through one diff-bound delta risk assessment rather than restarting
+unaffected lenses.
 
 ## Lightweight Review
 
@@ -134,7 +125,5 @@ cannot be completed to this standard instead of silently skipping it.
 Before moving on, be able to point to the RED output, the GREEN output, and the
 small implementation step that connects them. Before starting the next cycle,
 also point to the clean lightweight review or the defended finding accepted by a
-follow-up review, the pushed commit, and current CI evidence for the selected
-delivery mode. In direct-to-trunk mode, evidence that the completed pass/fail
-watermark passed and no unresolved failure hold exists is sufficient; newer
-queued, pending, running, or canceled runs do not prevent the next cycle.
+follow-up review, the pushed commit, and a latest pushed build that is running
+or green.

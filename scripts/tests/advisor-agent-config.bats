@@ -10,67 +10,97 @@ teardown() {
   rm -rf "$TMPROOT"
 }
 
-copy_plugin() {
-  cp -R "$ROOT/plugins/development-system" "$TMPROOT/development-system"
-}
-
-@test "Advisor is public and uses each harness's strongest supported effort" {
-  run "$CHECK"
+@test "advisor agent pins GPT-5.6 Sol with high reasoning and no fallback" {
+  run "$CHECK" "$ROOT/plugins/development-system/components/advisor"
 
   [ "$status" -eq 0 ]
   [ "$output" = "advisor-agent-config: ok" ]
 }
 
-@test "Advisor check rejects reduced Claude effort" {
-  copy_plugin
-  sed -i 's/effort: max/effort: high/' \
-    "$TMPROOT/development-system/agents/advisor.md"
+@test "advisor agent check rejects a different model" {
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
+  sed -i 's/model = "gpt-5.6-sol"/model = "gpt-5.6"/' \
+    "$TMPROOT/advisor/agents/advisor.toml"
 
-  run "$CHECK" "$TMPROOT/development-system"
+  run "$CHECK" "$TMPROOT/advisor"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"claude-advisor-must-use-highest-supported-effort"* ]]
+  [[ "$output" == *"model-must-be-gpt-5.6-sol"* ]]
 }
 
-@test "Advisor check rejects a fixed Codex model" {
-  copy_plugin
-  sed -i '/^description =/a model = "gpt-5.6-sol"' \
-    "$TMPROOT/development-system/agents/advisor.toml"
+@test "advisor agent check rejects a silent default-agent fallback" {
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
+  printf '\nUse `agent_type: default` when unavailable.\n' \
+    >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
 
-  run "$CHECK" "$TMPROOT/development-system"
+  run "$CHECK" "$TMPROOT/advisor"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"invalid-codex-advisor-route"* ]]
+  [[ "$output" == *"skill-configures-default-agent-fallback"* ]]
 }
 
-@test "Advisor check rejects reduced reasoning" {
-  copy_plugin
-  sed -i 's/model_reasoning_effort = "xhigh"/model_reasoning_effort = "high"/' \
-    "$TMPROOT/development-system/agents/advisor.toml"
+@test "advisor agent check rejects a different custom-agent fallback" {
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
+  printf '\nIf the advisor is unavailable, use the custom `explorer` agent.\n' \
+    >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
 
-  run "$CHECK" "$TMPROOT/development-system"
+  run "$CHECK" "$TMPROOT/advisor"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"invalid-codex-advisor-route"* ]]
+  [[ "$output" == *"skill-configures-agent-fallback"* ]]
 }
 
-@test "Advisor check rejects missing proactive BDD routing" {
-  copy_plugin
-  sed -i 's/two or more dependent implementation steps/multiple implementation steps/g' \
-    "$TMPROOT/development-system/skills/advisor/SKILL.md"
+@test "advisor agent check rejects fallback synonyms" {
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
+  printf '\nIf the custom agent cannot start, spawn the default agent.\n' \
+    >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
 
-  run "$CHECK" "$TMPROOT/development-system"
+  run "$CHECK" "$TMPROOT/advisor"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"skill-must-trigger-for-multi-step-plans"* ]]
+  [[ "$output" == *"skill-contract-drift"* ]]
 }
 
-@test "Advisor check rejects the obsolete nested component" {
-  copy_plugin
-  mkdir -p "$TMPROOT/development-system/components/advisor"
+@test "advisor agent check rejects a skill-level reasoning override" {
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
+  printf '\nUse `reasoning_effort: medium` for quick advice.\n' \
+    >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
 
-  run "$CHECK" "$TMPROOT/development-system"
+  run "$CHECK" "$TMPROOT/advisor"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"nested-advisor-component-must-be-removed"* ]]
+  [[ "$output" == *"skill-reports-unpinned-reasoning-effort"* ]]
+}
+
+@test "advisor agent check rejects a contradictory effort footer" {
+  cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor"
+  printf '\nfooter: `effort=medium; playbook=no; context=none checked`\n' \
+    >>"$TMPROOT/advisor/skills/advisor/SKILL.md"
+
+  run "$CHECK" "$TMPROOT/advisor"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"skill-reports-unpinned-reasoning-effort"* ]]
+}
+
+@test "advisor agent check rejects alternate non-high effort claims" {
+  local claim
+  local index=0
+
+  for claim in \
+    'Use `model_reasoning_effort: low` for short requests.' \
+    'Use reasoning effort: medium for quick advice.' \
+    'Use low reasoning when the question looks simple.' \
+    'The reasoning effort should be medium for quick checks.' \
+    'Reasoning effort is low for trivial requests.'; do
+    index=$((index + 1))
+    cp -R "$ROOT/plugins/development-system/components/advisor" "$TMPROOT/advisor-$index"
+    printf '\n%s\n' "$claim" \
+      >>"$TMPROOT/advisor-$index/skills/advisor/SKILL.md"
+
+    run "$CHECK" "$TMPROOT/advisor-$index"
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"skill-reports-unpinned-reasoning-effort"* ]]
+  done
 }

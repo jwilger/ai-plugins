@@ -16,10 +16,8 @@ run_checker() {
 
 run_expected_benchmark_checker() {
   run env \
-    CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM="${RESULTS}.development-system-home" \
+    CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE="${RESULTS}.skills-home" \
     CODEX_EVAL_HOME_NO_PLUGINS="${RESULTS}.no-plugins-home" \
-    GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM="${RESULTS}.development-system-home" \
-    GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS="${RESULTS}.no-plugins-home" \
     GPT56_BENCHMARK_WORKSPACE="${RESULTS}.workspace" \
     GPT56_BENCHMARK_SAMPLES="${EXPECTED_BENCHMARK_SAMPLES:-1}" \
     PROMPTFOO_MAX_CONCURRENCY="${EXPECTED_MAX_CONCURRENCY:-2}" \
@@ -44,12 +42,8 @@ const samples = Number(process.argv[4]);
 const mutation = process.argv[5];
 const benchmarkDir = path.dirname(configPath);
 
-process.env.CODEX_EVAL_HOME_DEVELOPMENT_SYSTEM = `${resultsPath}.development-system-home`;
+process.env.CODEX_EVAL_HOME_SKILLS_ONLY_MARKETPLACE = `${resultsPath}.skills-home`;
 process.env.CODEX_EVAL_HOME_NO_PLUGINS = `${resultsPath}.no-plugins-home`;
-process.env.GPT56_BENCHMARK_CODEX_HOME_DEVELOPMENT_SYSTEM =
-  `${resultsPath}.development-system-home`;
-process.env.GPT56_BENCHMARK_CODEX_HOME_NO_PLUGINS =
-  `${resultsPath}.no-plugins-home`;
 process.env.GPT56_BENCHMARK_WORKSPACE = `${resultsPath}.workspace`;
 process.env.GPT56_BENCHMARK_SAMPLES = String(samples);
 const source = parse(fs.readFileSync(configPath, 'utf8'));
@@ -1220,7 +1214,7 @@ JSON
   cat >"$RESULTS" <<'JSON'
 {
   "results": {"results": [{
-    "provider": {"label": "codex-standard-development-system"},
+    "provider": {"label": "codex-standard-targeted-plugins"},
     "response": {"output": "Complete answer"},
     "success": true,
     "gradingResult": {"pass": true, "score": 1, "reason": "Rubric satisfied"},

@@ -6,20 +6,12 @@ import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const require = createRequire(import.meta.url);
-const evalRuntimeRoot = path.resolve(
-  process.env.EVAL_RUNTIME_ROOT ||
-    path.join(
-      "/tmp",
-      `ai-plugins-provider-eval-${process.getuid?.() ?? "user"}`,
-    ),
+const { selectedBehaviorPluginNames } = require(
+  path.join(root, "evals/promptfoo/fixtures.cjs"),
 );
-const providerBoundary = path.join(
-  root,
-  "scripts/evals/behavior-provider-boundary.sh",
-);
-const developmentSystemPluginName = "development-system";
+const evalWorkspace = path.join(root, ".evals/agent-workspace");
 const advisoryPromptPrefix =
-  "Answer the scenario as a stateless advisory question. Use only context made available inside this evaluation condition. Do not rely on prior conversations, user memory, session memory, earlier runs, or host-machine state. Do not mutate files, start evaluations, or run unrelated commands.";
+  "Answer the scenario as an advisory behavior question. Treat each scenario as stateless: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Use installed marketplace plugin and skill guidance when it is relevant, naming the relevant plugin or skill in the answer. You may read installed skill instruction files through the harness. When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording. Apply plugin-specific safety gates and documented commands exactly instead of replacing them with generic setup or validation advice. Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands.";
 
 function usage() {
   console.log(`Usage: node scripts/evals/generate-config.mjs [--suite behavior|canary] [--output path] [--metadata-output path] [--stdout]
@@ -65,7 +57,6 @@ function readPlugins(file) {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
   return manifest.plugins.map((plugin) => ({
     name: plugin.name,
-    version: plugin.version,
     path:
       plugin.source && typeof plugin.source === "object"
         ? plugin.source.path
@@ -83,7 +74,6 @@ function normalizePlugin(plugin) {
     : `./${plugin.path || `plugins/${plugin.name}`}`;
   return {
     name: plugin.name,
-    version: plugin.version,
     path: pluginPath,
     absolutePath: path.resolve(root, pluginPath),
   };
@@ -142,48 +132,12 @@ function providerEnv(value, fallback) {
   return `"{{ env.${value} | default('${fallback}') }}"`;
 }
 
-function conditionWorkspace(label) {
-  return path.join(evalRuntimeRoot, "workspaces", label);
-}
-
-function conditionIsolation(pluginMode) {
-  return {
-    boundary: "mount-namespace",
-    failClosed: true,
-    workspace: "outside-repository",
-    repository: "hidden",
-    globalGuidance: "hidden",
-    globalHomes: "hidden",
-    globalCaches: "hidden",
-    globalCatalogs: "hidden",
-    conditionHome: "owned",
-    pluginMounts:
-      pluginMode.id === "development-system"
-        ? [developmentSystemPluginName]
-        : [],
-    leakagePolicy: "reject",
-  };
-}
-
 function claudeProvider(variant, pluginMode, plugins) {
-  const evalHome = path.join(root, `.evals/claude-home-${pluginMode.id}`);
-  const envSuffix = pluginMode.id.replaceAll("-", "_").toUpperCase();
-  const plugin = plugins[0];
-  const hostPluginPath = plugin
-    ? path.join(
-        evalHome,
-        "plugin-cache/cache/ai-plugins",
-        plugin.name,
-        plugin.version,
-      )
-    : null;
   const pluginLines =
     pluginMode.id === "no-plugins"
       ? ""
       : `      plugins:
-        - type: local
-          path: "/runtime/plugin"
-      include_hook_events: true
+${indentedList(plugins, 8, (plugin) => `- type: local\n${" ".repeat(10)}path: ${quote(plugin.absolutePath)}`)}
 `;
 
   return `  - id: ${variant.provider}
@@ -193,35 +147,21 @@ function claudeProvider(variant, pluginMode, plugins) {
     config:
       apiKeyRequired: false
       model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
-      working_dir: ${quote(conditionWorkspace(`${variant.id}-${pluginMode.id}`))}
-      path_to_claude_code_executable: ${quote(providerBoundary)}
+      working_dir: ${quote(evalWorkspace)}
       permission_mode: dontAsk
       skills: all
       setting_sources: []
       persist_session: false
-      append_allowed_tools:
-        - Agent
-        - Skill
-      env:
-        EVAL_PROVIDER_HARNESS: "claude"
-        EVAL_PLUGIN_MODE: "${pluginMode.id}"
-        EVAL_PROVIDER_HOME: "{{ env.CLAUDE_EVAL_HOME_${envSuffix} | default('${evalHome}') }}"
-        EVAL_PROVIDER_WORKSPACE: ${quote(conditionWorkspace(`${variant.id}-${pluginMode.id}`))}
-        EVAL_PROVIDER_REAL_BIN: "{{ env.CLAUDE_EVAL_REAL_BIN }}"
-        EVAL_PROVIDER_BWRAP_BIN: "{{ env.EVAL_PROVIDER_BWRAP_BIN }}"
-        CLAUDE_CONFIG_DIR: "/runtime/home/config"
-        CLAUDE_CODE_PLUGIN_CACHE_DIR: "/runtime/home/plugin-cache"
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
-${pluginMode.id === "development-system" ? `        EVAL_PROVIDER_PLUGIN_SNAPSHOT: "{{ env.CLAUDE_EVAL_PLUGIN_PATH_${envSuffix} | default('${hostPluginPath}') }}"\n        EVAL_PROVIDER_SESSION_START_EVIDENCE: "{{ env.CLAUDE_EVAL_SESSION_START_MARKER_CLAUDE }}"\n        DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER: "/runtime/home/session-start-marker"\n` : ""}      disallowed_tools:
+      disallowed_tools:
         - Bash
-        - WebSearch
-        - WebFetch
+        - Write
+        - Edit
+        - MultiEdit
 ${pluginLines}`.trimEnd();
 }
 
 function codexProvider(variant, pluginMode) {
   const homeSuffix = pluginMode.id;
-  const envSuffix = pluginMode.id.replaceAll("-", "_").toUpperCase();
   return `  - id: ${variant.provider}
     label: ${variant.id}-${pluginMode.id}
     pluginMode: ${pluginMode.id}
@@ -229,36 +169,14 @@ function codexProvider(variant, pluginMode) {
     config:
       model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
       model_reasoning_effort: ${providerEnv(variant.reasoningEffortEnv, variant.defaultReasoningEffort)}
-      working_dir: ${quote(conditionWorkspace(`${variant.id}-${pluginMode.id}`))}
+      working_dir: ${quote(evalWorkspace)}
       sandbox_mode: read-only
       approval_policy: never
       enable_streaming: true
       deep_tracing: false
       skip_git_repo_check: true
-      collaboration_mode: coding
-      cli_config:
-        features:
-          expose_spawn_agent_model_overrides: true
-          multi_agent_v2:
-            enabled: true
-            max_concurrent_threads_per_session: 8
-      codex_path_override: ${quote(providerBoundary)}
       cli_env:
-        EVAL_PROVIDER_HARNESS: "codex"
-        EVAL_PLUGIN_MODE: "${pluginMode.id}"
-        EVAL_PROVIDER_HOME: "{{ env.CODEX_EVAL_HOME_${envSuffix} | default('${path.join(root, `.evals/codex-home-${homeSuffix}`)}') }}"
-        EVAL_PROVIDER_WORKSPACE: ${quote(conditionWorkspace(`${variant.id}-${pluginMode.id}`))}
-        EVAL_PROVIDER_BWRAP_BIN: "{{ env.EVAL_PROVIDER_BWRAP_BIN }}"
-        EVAL_PROVIDER_NODE_BIN: "{{ env.EVAL_PROVIDER_NODE_BIN }}"
-        EVAL_PROVIDER_CODEX_RUNTIME: "{{ env.EVAL_PROVIDER_CODEX_RUNTIME }}"
-        CODEX_HOME: "/runtime/home"${
-          pluginMode.id === "development-system"
-            ? `
-        EVAL_PROVIDER_PLUGIN_SNAPSHOT: "{{ env.CODEX_EVAL_SANITIZED_MARKETPLACE | default('${path.join(root, `.evals/codex-home-${homeSuffix}/sanitized-marketplace`)}') }}"
-        EVAL_PROVIDER_SESSION_START_EVIDENCE: "{{ env.CODEX_EVAL_SESSION_START_MARKER }}"
-        DEVELOPMENT_SYSTEM_EVAL_SESSION_START_MARKER: "/runtime/home/session-start-marker"`
-            : ""
-        }`;
+        CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.evals/codex-home-${homeSuffix}`)}') }}"`;
 }
 
 function providerFor(variant, pluginMode, plugins) {
@@ -281,6 +199,21 @@ function providerEntry(variant, pluginMode, plugins) {
   };
 }
 
+function namedPlugins(pluginNames, marketplacePlugins, harnessName) {
+  const byName = new Map(
+    marketplacePlugins.map((plugin) => [plugin.name, plugin]),
+  );
+  const missing = pluginNames.filter((pluginName) => !byName.has(pluginName));
+
+  if (missing.length > 0) {
+    throw new Error(
+      `selected behavior plugin(s) unavailable to ${harnessName}: ${missing.join(", ")}`,
+    );
+  }
+
+  return pluginNames.map((pluginName) => byName.get(pluginName));
+}
+
 function pluginsForProvider(variant, pluginMode, pluginSets) {
   if (pluginMode.id === "no-plugins") {
     return [];
@@ -296,10 +229,11 @@ function pluginsForProvider(variant, pluginMode, pluginSets) {
     throw new Error(`unsupported provider variant: ${variant.id}`);
   }
 
-  if (pluginMode.id === "development-system") {
-    return harness.filter(
-      (plugin) => plugin.name === developmentSystemPluginName,
-    );
+  if (pluginMode.id === "targeted-plugins") {
+    return harness.targeted;
+  }
+  if (pluginMode.id === "full-marketplace") {
+    return harness.full;
   }
   throw new Error(`unsupported plugin mode: ${pluginMode.id}`);
 }
@@ -309,7 +243,7 @@ function providerMatches(entry, term) {
     return true;
   }
   if (term === entry.variant.id) {
-    return entry.pluginMode.id === "development-system";
+    return entry.pluginMode.id === "full-marketplace";
   }
   if (term === entry.variant.provider || term === entry.pluginMode.id) {
     return true;
@@ -351,20 +285,26 @@ function configFor(suite) {
   const claudePlugins = manifestPlugins(".claude-plugin/marketplace.json");
   const codexPlugins = manifestPlugins(".agents/plugins/marketplace.json");
   const matrix = evalMatrix();
-  const developmentSystemPlugin = (plugins, harnessName) => {
-    const selected = plugins.filter(
-      (plugin) => plugin.name === developmentSystemPluginName,
+  const usesTargetedMode =
+    suite === "behavior" &&
+    matrix.pluginModes.some(
+      (pluginMode) => pluginMode.id === "targeted-plugins",
     );
-    if (selected.length !== 1) {
-      throw new Error(
-        `${harnessName} marketplace must contain exactly one ${developmentSystemPluginName} plugin`,
-      );
-    }
-    return selected;
-  };
+  const targetedPluginNames = usesTargetedMode
+    ? selectedBehaviorPluginNames({
+        root,
+        caseFilter: process.env.EVAL_CASE_FILTER,
+      })
+    : [];
   const pluginSets = {
-    claude: developmentSystemPlugin(claudePlugins, "Claude Code"),
-    codex: developmentSystemPlugin(codexPlugins, "Codex"),
+    claude: {
+      full: claudePlugins,
+      targeted: namedPlugins(targetedPluginNames, claudePlugins, "Claude Code"),
+    },
+    codex: {
+      full: codexPlugins,
+      targeted: namedPlugins(targetedPluginNames, codexPlugins, "Codex"),
+    },
   };
   const testLoader =
     suite === "canary"
@@ -372,34 +312,24 @@ function configFor(suite) {
       : behaviorTestLoader();
   const description =
     suite === "canary"
-      ? "Installed development-system canary for ai-plugins coding harnesses"
+      ? "Full-marketplace canary for ai-plugins coding harnesses"
       : "Provider-backed behavior evals for the ai-plugins marketplace";
   const providerEntries =
     suite === "behavior"
       ? matrix.providerVariants.flatMap((variant) =>
-          matrix.pluginModes
-            .filter((pluginMode) =>
-              (
-                variant.pluginModes ?? matrix.pluginModes.map((mode) => mode.id)
-              ).includes(pluginMode.id),
-            )
-            .map((pluginMode) =>
-              providerEntry(
-                variant,
-                pluginMode,
-                pluginsForProvider(variant, pluginMode, pluginSets),
-              ),
+          matrix.pluginModes.map((pluginMode) =>
+            providerEntry(
+              variant,
+              pluginMode,
+              pluginsForProvider(variant, pluginMode, pluginSets),
             ),
+          ),
         )
       : matrix.providerVariants.map((variant) =>
           providerEntry(
             variant,
-            { id: "development-system" },
-            pluginsForProvider(
-              variant,
-              { id: "development-system" },
-              pluginSets,
-            ),
+            { id: "full-marketplace" },
+            pluginsForProvider(variant, { id: "full-marketplace" }, pluginSets),
           ),
         );
   const providers = filteredProviderEntries(providerEntries);
@@ -412,7 +342,6 @@ function configFor(suite) {
     providerVariant: entry.variant.id,
     pluginMode: entry.pluginMode.id,
     plugins: entry.plugins.map((plugin) => plugin.name),
-    filesystemIsolation: conditionIsolation(entry.pluginMode),
   }));
   const metadata = {
     suite,
@@ -443,22 +372,14 @@ defaultTest:
         config:
           model: "{{ env.CODEX_GRADER_MODEL | default('gpt-5.6-sol') }}"
           model_reasoning_effort: "{{ env.CODEX_GRADER_REASONING_EFFORT | default('high') }}"
-          working_dir: ${quote(conditionWorkspace("codex-grader"))}
+          working_dir: ${quote(evalWorkspace)}
           sandbox_mode: read-only
           approval_policy: never
           enable_streaming: true
           deep_tracing: false
           skip_git_repo_check: true
-          codex_path_override: ${quote(providerBoundary)}
           cli_env:
-            EVAL_PROVIDER_HARNESS: "codex"
-            EVAL_PLUGIN_MODE: "no-plugins"
-            EVAL_PROVIDER_HOME: "{{ env.CODEX_EVAL_HOME_GRADER | default('${path.join(root, ".evals/codex-home-grader")}') }}"
-            EVAL_PROVIDER_WORKSPACE: ${quote(conditionWorkspace("codex-grader"))}
-            EVAL_PROVIDER_BWRAP_BIN: "{{ env.EVAL_PROVIDER_BWRAP_BIN }}"
-            EVAL_PROVIDER_NODE_BIN: "{{ env.EVAL_PROVIDER_NODE_BIN }}"
-            EVAL_PROVIDER_CODEX_RUNTIME: "{{ env.EVAL_PROVIDER_CODEX_RUNTIME }}"
-            CODEX_HOME: "/runtime/home"
+            CODEX_HOME: "{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME) | default('${path.join(root, ".evals/codex-home-full-marketplace")}') }}"
 
 tracing:
   enabled: false
@@ -473,11 +394,11 @@ metadata:
 ${indentedList(pluginModes, 6, (mode) => `- id: ${mode.id}`)}
     providerVariants:
 ${indentedList(providerVariants, 6, (variant) => `- id: ${variant.id}\n${" ".repeat(8)}provider: ${variant.provider}`)}
-  marketplacePlugins:
+  fullMarketplacePlugins:
 ${indentedList(allPlugins, 4, (plugin) => `- name: ${plugin.name}\n${" ".repeat(6)}sourcePath: ${quote(plugin.path)}`)}
 
 commandLineOptions:
-  maxConcurrency: 8
+  maxConcurrency: 1
   share: false
   cache: false
   write: true

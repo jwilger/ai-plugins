@@ -1,6 +1,0 @@
-interface:
-  display_name: "Content Authoring"
-  short_description: "Create polished human-facing content"
-  default_prompt: "Use $content-authoring to create this substantive human-facing artifact."
-policy:
-  allow_implicit_invocation: true

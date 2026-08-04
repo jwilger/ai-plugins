@@ -3,8 +3,13 @@ no_auto_install: true
 
 pre-commit:
   jobs:
-    - name: complete-local-gate
-      run: scripts/pre-commit-gate.sh
+    - name: worktree-guard
+      run: scripts/worktree-guard.sh
+
+pre-push:
+  jobs:
+    - name: worktree-guard
+      run: scripts/worktree-guard.sh
 
 post-checkout:
   jobs:

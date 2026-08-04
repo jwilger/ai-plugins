@@ -46,24 +46,20 @@ conflict with or duplicate existing local practice.
 ## Harnesses
 
 Claude Code and Codex consume the same canonical routing policy from `skills/`.
-The `development-system` plugin root packages four public task-local agents for
-both harnesses, registered as `bounded-helper`, `substantive-worker`,
-`strong-reviewer`, and `strong-worker`. Codex keeps exact role-appropriate model
-pins for the lower routes; every `strong-reviewer` and `strong-worker` dispatch
-must instead select the highest-capability eligible model explicitly while
-retaining the role's high-effort and sandbox contracts. Claude uses moving
-Haiku, Sonnet, and Opus aliases with route-specific tool allowlists. These are
-normative routing requirements: if a harness cannot confirm the requested
-route, it must report the failure instead of treating inheritance or
-substitution as success.
+The plugin also packages four task-local agents for each harness:
+`bounded-helper`, `substantive-worker`, `strong-reviewer`, and `strong-worker`.
+Codex agents pin
+the exact GPT-5.6 model identifiers and sandbox modes. Claude agents use the
+current Haiku, Sonnet, and Opus aliases with route-appropriate tool allowlists.
+If a harness cannot honor the requested route, the agent reports that failure
+instead of treating inheritance or substitution as success.
 
 The final-review coordinator ships static stdio MCP binaries for x86_64 and
-aarch64 Linux. Its launcher selects the local target without a runtime package
-installation. Darwin has no packaged binary and requires the source-tree Cargo
-fallback to be explicitly enabled with
-`DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1` in a trusted local
-Cargo/Rust environment. Release checks validate each packaged artifact's target
-format, checksum, and embedded source/toolchain fingerprint.
+aarch64 Linux plus both macOS architectures. Its launcher selects the local
+target without a runtime package installation; an explicitly enabled Cargo
+fallback remains available for source-tree development. Release checks validate
+each artifact's target format, checksum, and embedded source/toolchain
+fingerprint.
 
 The caller carries final-review state between requests, while the MCP persists
 the authoritative session copy in project-scoped local state. A restarted MCP

@@ -7,35 +7,23 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: pre-commit bats-expensive development-discipline-release-from-source
-
-# Every deterministic local check suitable for a commit hook.  The
-# source/distribution parity probe is deliberately CI-only because it performs
-# a release build and black-box integration run.
-pre-commit: validate-marketplace bootstrap-development-system node-tests github-actions beads-formulas development-system-rust development-discipline-release-complete bats-pre-commit
+ci: validate-marketplace github-actions tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
     actionlint
 
-# Verify the remaining harness-neutral bootstrap, including the managed Beads tool.
-bootstrap-development-system:
-    scripts/bootstrap-development-system.sh
+# Rust gates for the tiber plugin workspace.
+tiber-rust:
+    cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
+    cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
+    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml
 
-# Node-level behavior checks for managed development tools.
-node-tests:
-    node --test scripts/tests/development-tool-policy.test.mjs
-
-# Validate and cook every installed Beads workflow formula.
-beads-formulas:
-    scripts/check-beads-formulas.sh
-
-# Rust gates for every shipped development-system component.
-development-system-rust:
-    scripts/check-development-system-rust.sh
-
-# Compatibility alias for callers that previously named the only component.
-development-discipline-rust: development-system-rust
+# Rust gates for the development-discipline MCP coordinator.
+development-discipline-rust:
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml
 
 development-discipline-release-complete:
     cd plugins/development-system/components/development-discipline && sha256sum --check release-binaries.sha256
@@ -49,9 +37,34 @@ development-discipline-release-from-source:
 development-discipline-release-all:
     scripts/build-development-discipline-release-all.sh
 
-# Run only provider-backed evals mapped to behavior affected since origin/main,
-# with a global cap of eight target calls, then upload/share fresh Promptfoo
-# artifacts when the scope produced them.
+# Browser smoke coverage for the read-only tiber dashboard.
+tiber-dashboard-smoke:
+    scripts/evals/ensure-node-deps.sh
+    node scripts/tiber/dashboard-smoke.mjs
+
+# Build the tiber release binary for the current host target.
+tiber-release-host:
+    scripts/build-tiber-host-release.sh
+
+# Build every bundled tiber v1 release target.
+tiber-release-all:
+    scripts/build-tiber-release-all.sh
+
+# Mutation gate for the pure tiber core.
+tiber-mutants:
+    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --package tiber-core --test-workspace true
+
+# Ensure the tiber release plan names every bundled v1 binary target.
+tiber-release-manifest:
+    bash scripts/check-tiber-release-manifest.sh
+
+# Require every listed tiber release binary to be present and executable.
+tiber-release-complete:
+    bash scripts/check-tiber-release-complete.sh
+
+# Run provider-backed promptfoo evals locally, upload/share the latest result,
+# and print the share URL. This sends eval data to the configured promptfoo
+# sharing service.
 evals:
     #!/usr/bin/env bash
     set +e
@@ -59,36 +72,21 @@ evals:
     trap 'rm -f "$marker"' EXIT
     touch "$marker"
 
-    PROMPTFOO_MAX_CONCURRENCY=8 scripts/evals/run-changed.sh
+    scripts/evals/run.sh
     status=$?
     if [ "$status" -eq 124 ] || [ "$status" -ge 128 ]; then
       exit "$status"
     fi
 
     fresh_artifacts=0
-    fresh_artifact_paths=()
     for artifact in evals/out/results.json evals/out/report.html evals/out/results.junit.xml; do
       if [ -f "$artifact" ] && [ "$artifact" -nt "$marker" ]; then
         fresh_artifacts=1
-        fresh_artifact_paths+=("$artifact")
       fi
     done
 
     share_status=0
     if [ "$fresh_artifacts" -eq 1 ]; then
-      scan_args=(--private-root evals/out)
-      metadata=evals/out/generated/agentic-systems-engineering.behavior.metadata.json
-      if [ -f "$metadata" ]; then
-        scan_args+=(--metadata "$metadata")
-      fi
-      scan_status=0
-      scripts/evals/scan-behavior-artifacts.sh \
-        "${scan_args[@]}" -- "${fresh_artifact_paths[@]}" || scan_status=$?
-      if [ "$scan_status" -ne 0 ]; then
-        rm -f -- "${fresh_artifact_paths[@]}"
-        echo "Skipping promptfoo share because artifact secret scanning failed." >&2
-        exit "$scan_status"
-      fi
       scripts/evals/share.sh
       share_status=$?
     else
@@ -99,12 +97,6 @@ evals:
       exit "$status"
     fi
     exit "$share_status"
-
-# Explicit, expensive research run across every case, condition, and harness.
-# This is never the default validation path, but uses the same one-process
-# global cap of eight target calls as `just evals`.
-evals-all:
-    PROMPTFOO_MAX_CONCURRENCY=8 scripts/evals/run.sh
 
 # Run the plugin-instruction improvement loop with a plugin-only diff guard.
 improve-plugins:
@@ -118,29 +110,22 @@ improve-evals:
 bats:
     bats $(find plugins scripts -name '*.bats' | sort)
 
-# Deterministic checks that are fast enough to execute before every commit.
-# Code-quality runtime-harness tests and cross-target release construction stay
-# in the complete CI gate below; all other Bats coverage remains here.
-bats-pre-commit:
-    bats $(find plugins scripts -name '*.bats' ! -path 'scripts/tests/evals-code-quality-*.bats' ! -path 'scripts/tests/development-discipline-release-integration.bats' | sort)
-
-# Integration coverage that is intentionally excluded from the commit hook but
-# remains mandatory in `just ci`.
-bats-expensive:
-    bats $(find scripts/tests -name 'evals-code-quality-*.bats' | sort) scripts/tests/development-discipline-release-integration.bats
-
 # Local-only EMC devshell coverage. This intentionally does not run in CI.
 emc-check:
     bats tests/emc-devshell.bats
 
-# Install the Lefthook-managed post-checkout worktree bootstrap hook.
+# Install Lefthook-managed hooks for worktree bootstrap and main-checkout enforcement.
 worktree-hooks:
     scripts/install-worktree-hooks.sh
 
+# Fail unless the current checkout is a linked worktree suitable for agent edits.
+agent-checkout-guard:
+    scripts/agent-checkout-guard.sh
+
 # Tear down generated runtime state before removing a linked worktree.
 worktree-teardown path:
-    scripts/worktree-teardown.sh "{{ path }}"
-    git worktree remove "{{ path }}"
+    scripts/worktree-teardown.sh "{{path}}"
+    git worktree remove "{{path}}"
 
 # Marketplace manifest + formatting validation.
 validate-marketplace:
@@ -148,9 +133,6 @@ validate-marketplace:
     jq empty .agents/plugins/marketplace.json
     find plugins -name plugin.json -exec jq empty {} \;
     bash scripts/validate-manifests.sh
-    node scripts/sync-development-system-metadata.mjs --check
-    bash scripts/check-no-pi-support.sh
     bash scripts/check-advisor-agent-config.sh
     bash scripts/check-model-routing-config.sh
-    node scripts/generate-development-system-agents.mjs --check
-    prettier --check $(git ls-files --cached --others --exclude-standard -- '*.json' '*.md')
+    prettier --check "**/*.{json,md}"

@@ -28,6 +28,8 @@ export DEVELOPMENT_DISCIPLINE_SOURCE_FINGERPRINT="$source_fingerprint"
 targets=(
   aarch64-unknown-linux-musl
   x86_64-unknown-linux-musl
+  x86_64-apple-darwin
+  aarch64-apple-darwin
 )
 
 if ! rustup toolchain list | grep -Eq "^${toolchain}(-| )"; then
@@ -72,8 +74,12 @@ copy_binary() {
 
 build_target x86_64-unknown-linux-musl
 build_target aarch64-unknown-linux-musl
+build_target universal2-apple-darwin
+
 copy_binary "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/$binary_name" x86_64-unknown-linux-musl
 copy_binary "$CARGO_TARGET_DIR/aarch64-unknown-linux-musl/release/$binary_name" aarch64-unknown-linux-musl
+copy_binary "$CARGO_TARGET_DIR/universal2-apple-darwin/release/$binary_name" x86_64-apple-darwin
+copy_binary "$CARGO_TARGET_DIR/universal2-apple-darwin/release/$binary_name" aarch64-apple-darwin
 
 manifest_tmp="$(mktemp)"
 checksums_tmp="$(mktemp)"

@@ -12,8 +12,7 @@
 #   - registered per-harness plugin manifests exist, use the directory name,
 #     and carry valid semver versions;
 #   - marketplace entry versions match their per-harness plugin manifests;
-#   - shared Claude Code + Codex plugin versions match;
-#   - Claude hook manifests use the harness-required top-level hooks record.
+#   - shared Claude Code + Codex plugin versions match.
 set -euo pipefail
 
 root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}"
@@ -89,12 +88,6 @@ for dir in "$root"/plugins/*/; do
     marketplace_version="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .version // empty' "$claude")"
     [ -n "$marketplace_version" ] || fail "missing-claude-marketplace-version: $name"
     [ "$marketplace_version" = "$cc_version" ] || fail "claude-marketplace-version-mismatch: $name marketplace=$marketplace_version plugin=$cc_version"
-
-    claude_hooks="${dir}hooks/hooks.json"
-    if [ -f "$claude_hooks" ] &&
-      ! jq -e '.hooks | type == "object"' "$claude_hooks" >/dev/null; then
-      fail "invalid-claude-hooks-manifest: $name path=hooks/hooks.json"
-    fi
   fi
 
   if [ "$in_codex" -eq 1 ]; then

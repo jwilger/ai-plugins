@@ -37,15 +37,6 @@ claim that evidence is unavailable when the request supplies repository facts.
 Current user direction and repository-local instructions control the scope and
 workflow. This skill fills gaps without overriding them.
 
-Before finalizing a plan with two or more dependent implementation steps,
-invoke the public `advisor` skill unless an existing executable BDD-style
-scenario already covers the observable behavior and material failure boundary.
-If already running as Advisor or `sharpen-plan`, perform that check directly and
-do not invoke Advisor recursively. Apply the recommendation before presenting
-the complete plan. Do not treat the preflight record itself as an implementation
-plan or use Advisor to delay a classification that current evidence already
-supports.
-
 Skip this skill when the request is purely conversational or read-only and no
 repository edit is being prepared. Do not skip it merely because an edit is
 small.

@@ -1,6 +1,0 @@
-interface:
-  display_name: "Sharpen Plan"
-  short_description: "Improve plans one decision at a time"
-  default_prompt: "Use $sharpen-plan to apply one highest-leverage plan improvement, present the complete plan for approval, and repeat only after approval."
-policy:
-  allow_implicit_invocation: true

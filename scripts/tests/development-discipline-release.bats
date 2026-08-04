@@ -18,37 +18,6 @@ setup() {
   chmod +x "$FAKE_BIN/uname"
 }
 
-@test "development-discipline release contract declares only Linux prebuild targets" {
-  run bash -c 'jq -r ".binaries[].target" "$1" | sort' _ \
-    "$ROOT/plugins/development-system/components/development-discipline/release-binaries.json"
-
-  [ "$status" -eq 0 ]
-  [ "$output" = $'aarch64-unknown-linux-musl\nx86_64-unknown-linux-musl' ]
-}
-
-@test "development-discipline component manifests match the runtime version" {
-  local codex_version
-  local claude_version
-  local runtime_version
-  local runtime_target
-
-  codex_version="$(jq -r .version "$ROOT/plugins/development-system/components/development-discipline/.codex-plugin/plugin.json")"
-  claude_version="$(jq -r .version "$ROOT/plugins/development-system/components/development-discipline/.claude-plugin/plugin.json")"
-  case "$(uname -m)" in
-    x86_64) runtime_target="x86_64-unknown-linux-musl" ;;
-    aarch64 | arm64) runtime_target="aarch64-unknown-linux-musl" ;;
-    *) skip "no packaged development-discipline runtime for host architecture $(uname -m)" ;;
-  esac
-
-  run bash -c 'printf "%s\\n" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}" | "$1" | jq -r ".result.serverInfo.version"' _ \
-    "$ROOT/plugins/development-system/components/development-discipline/dist/$runtime_target/development-discipline-mcp"
-
-  [ "$status" -eq 0 ]
-  runtime_version="$output"
-  [ "$runtime_version" = "$codex_version" ]
-  [ "$runtime_version" = "$claude_version" ]
-}
-
 @test "development-discipline parity normalization removes runtime clock drift" {
   local source_output="$BATS_TEST_TMPDIR/source.jsonl"
   local dist_output="$BATS_TEST_TMPDIR/dist.jsonl"
@@ -446,10 +415,6 @@ detect_target() {
     bash -c 'source "$1"; detect_development_discipline_target "$2"' _ "$DETECTOR" "$FAKE_BIN/uname"
 }
 
-prebuilt_target() {
-  bash -c 'source "$1"; development_discipline_prebuilt_target "$2"' _ "$DETECTOR" "$1"
-}
-
 @test "development-discipline release includes every supported target" {
   run bash "$COMPLETE_CHECK"
 
@@ -488,6 +453,17 @@ prebuilt_target() {
   [[ "$output" == *"ARM aarch64"* ]]
   [[ "$output" == *"statically linked"* ]]
 
+  run file "$plugin_root/dist/x86_64-apple-darwin/development-discipline-mcp"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Mach-O universal binary"* ]]
+  [[ "$output" == *"x86_64"* ]]
+  [[ "$output" == *"arm64"* ]]
+
+  run file "$plugin_root/dist/aarch64-apple-darwin/development-discipline-mcp"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Mach-O universal binary"* ]]
+  [[ "$output" == *"x86_64"* ]]
+  [[ "$output" == *"arm64"* ]]
 }
 
 @test "development-discipline target detector maps supported Linux and macOS hosts" {
@@ -506,22 +482,6 @@ prebuilt_target() {
   run detect_target Darwin arm64
   [ "$status" -eq 0 ]
   [ "$output" = "aarch64-apple-darwin" ]
-}
-
-@test "development-discipline prebuild policy accepts Linux and rejects Darwin" {
-  run prebuilt_target x86_64-unknown-linux-musl
-  [ "$status" -eq 0 ]
-  [ "$output" = "x86_64-unknown-linux-musl" ]
-
-  run prebuilt_target aarch64-unknown-linux-musl
-  [ "$status" -eq 0 ]
-  [ "$output" = "aarch64-unknown-linux-musl" ]
-
-  run prebuilt_target x86_64-apple-darwin
-  [ "$status" -ne 0 ]
-
-  run prebuilt_target aarch64-apple-darwin
-  [ "$status" -ne 0 ]
 }
 
 @test "development-discipline target detector rejects unsupported hosts" {

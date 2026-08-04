@@ -32,10 +32,6 @@ DEVELOPMENT_DISCIPLINE_SOURCE_FINGERPRINT="$source_fingerprint" \
 
 source "$plugin_root/scripts/detect-target.sh"
 release_target="$(detect_development_discipline_target)"
-if ! release_target="$(development_discipline_prebuilt_target "$release_target")"; then
-  echo "development-discipline-release-parity-skipped=true reason=no_distributed_binary" >&2
-  exit 0
-fi
 dist_binary="$plugin_root/dist/$release_target/development-discipline-mcp"
 
 source_output="$(mktemp)"
@@ -119,8 +115,8 @@ jq -s -e '
   and (response(11).error.code == -32602
     and response(11).error.message == "review_session_complete=true")
   and (response(12).result.content[0].text | fromjson
-    | .model_roles.pre_filter == "strong-reviewer"
+    | .model_roles.pre_filter == "gpt-5.6-sol"
       and .model_roles.lens_review == "gpt-5.6-terra"
       and .model_roles.post_filter == "gpt-5.6-luna"
-      and .model_roles.verifier == "strong-reviewer")
+      and .model_roles.verifier == "gpt-5.6-sol")
 ' "$dist_output" >/dev/null

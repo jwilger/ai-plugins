@@ -12,7 +12,11 @@ setup() {
     "providers": [
       {
         "id": "openai:codex-sdk",
-        "label": "codex-gpt-5.6-terra-development-system"
+        "label": "codex-gpt-5.6-terra-targeted-plugins"
+      },
+      {
+        "id": "openai:codex-sdk",
+        "label": "codex-gpt-5.6-terra-full-marketplace"
       },
       {
         "id": "openai:codex-sdk",
@@ -22,11 +26,18 @@ setup() {
     "metadata": {
       "providerCompositions": [
         {
-          "label": "codex-gpt-5.6-terra-development-system",
+          "label": "codex-gpt-5.6-terra-targeted-plugins",
           "provider": "openai:codex-sdk",
           "providerVariant": "codex-gpt-5.6-terra",
-          "pluginMode": "development-system",
-          "plugins": ["development-system"]
+          "pluginMode": "targeted-plugins",
+          "plugins": ["tiber"]
+        },
+        {
+          "label": "codex-gpt-5.6-terra-full-marketplace",
+          "provider": "openai:codex-sdk",
+          "providerVariant": "codex-gpt-5.6-terra",
+          "pluginMode": "full-marketplace",
+          "plugins": ["advisor", "tiber"]
         },
         {
           "label": "codex-gpt-5.6-terra-no-plugins",
@@ -188,7 +199,8 @@ teardown() {
   grep -q '"skillSummaries"' "$TMPROOT/site/evals/summary.json"
   grep -q '"skill": "evaluate-stochastic-systems"' "$TMPROOT/site/evals/summary.json"
   [ "$(jq -r '.providerCompositionStatus.state' "$TMPROOT/site/evals/summary.json")" = "available" ]
-  [ "$(jq -c '.providerCompositions[] | select(.pluginMode == "development-system") | .plugins' "$TMPROOT/site/evals/summary.json")" = '["development-system"]' ]
+  [ "$(jq -c '.providerCompositions[] | select(.pluginMode == "targeted-plugins") | .plugins' "$TMPROOT/site/evals/summary.json")" = '["tiber"]' ]
+  [ "$(jq -c '.providerCompositions[] | select(.pluginMode == "full-marketplace") | .plugins' "$TMPROOT/site/evals/summary.json")" = '["advisor","tiber"]' ]
   [ "$(jq -c '.providerCompositions[] | select(.pluginMode == "no-plugins") | .plugins' "$TMPROOT/site/evals/summary.json")" = '[]' ]
   grep -q "fixture-pass" "$TMPROOT/site/evals/index.html"
   grep -q "codex-gpt-5.6-terra" "$TMPROOT/site/evals/index.html"
@@ -197,8 +209,8 @@ teardown() {
   grep -q "blocked" "$TMPROOT/site/evals/index.html"
   grep -q "Installed provider composition" "$TMPROOT/site/evals/index.html"
   grep -q "Case-target plugin summary" "$TMPROOT/site/evals/index.html"
-  grep -q "codex-gpt-5.6-terra-development-system" "$TMPROOT/site/evals/index.html"
-  grep -q ">development-system<" "$TMPROOT/site/evals/index.html"
+  grep -q "codex-gpt-5.6-terra-targeted-plugins" "$TMPROOT/site/evals/index.html"
+  grep -q ">tiber<" "$TMPROOT/site/evals/index.html"
   grep -q ">None<" "$TMPROOT/site/evals/index.html"
   grep -q "Skill summary" "$TMPROOT/site/evals/index.html"
 }
@@ -223,7 +235,7 @@ teardown() {
 
   for composition_case in \
     explicit_empty \
-    development_system_empty \
+    targeted_empty \
     no_plugins_nonempty \
     unknown_provider \
     unknown_mode \
@@ -253,44 +265,41 @@ switch (compositionCase) {
   case "explicit_empty":
     artifact.config.metadata.providerCompositions = [];
     break;
-  case "development_system_empty":
-    byMode("development-system").plugins = [];
+  case "targeted_empty":
+    byMode("targeted-plugins").plugins = [];
     break;
   case "no_plugins_nonempty":
-    byMode("no-plugins").plugins = ["beads"];
+    byMode("no-plugins").plugins = ["tiber"];
     break;
   case "unknown_provider":
-    byMode("development-system").provider = "unknown:provider";
+    byMode("targeted-plugins").provider = "unknown:provider";
     break;
   case "unknown_mode": {
-    const plugin = byMode("development-system");
-    plugin.pluginMode = "unknown-mode";
-    plugin.label = `${plugin.providerVariant}-unknown-mode`;
+    const targeted = byMode("targeted-plugins");
+    targeted.pluginMode = "unknown-mode";
+    targeted.label = `${targeted.providerVariant}-unknown-mode`;
     break;
   }
   case "label_mismatch":
-    byMode("development-system").label = "mismatched-label";
+    byMode("targeted-plugins").label = "mismatched-label";
     break;
   case "duplicate_label":
-    compositions.push({ ...byMode("development-system") });
+    compositions.push({ ...byMode("targeted-plugins") });
     break;
   case "duplicate_plugin":
-    byMode("development-system").plugins = [
-      "development-system",
-      "development-system",
-    ];
+    byMode("targeted-plugins").plugins = ["tiber", "tiber"];
     break;
   case "unsorted_plugins":
-    byMode("development-system").plugins = ["beads", "advisor"];
+    byMode("full-marketplace").plugins = ["tiber", "advisor"];
     break;
   case "invalid_plugin_name":
-    byMode("development-system").plugins = ["Development-System"];
+    byMode("targeted-plugins").plugins = ["Tiber"];
     break;
   case "inconsistent_codex_mode_set": {
-    const plugin = byMode("development-system");
+    const targeted = byMode("targeted-plugins");
     compositions.push({
-      ...plugin,
-      label: "codex-second-development-system",
+      ...targeted,
+      label: "codex-second-targeted-plugins",
       providerVariant: "codex-second",
       plugins: ["advisor"],
     });
@@ -301,10 +310,10 @@ switch (compositionCase) {
     break;
   case "extra_composition":
     compositions.push({
-      label: "claude-extra-development-system",
+      label: "claude-extra-full-marketplace",
       provider: "anthropic:claude-agent-sdk",
       providerVariant: "claude-extra",
-      pluginMode: "development-system",
+      pluginMode: "full-marketplace",
       plugins: ["advisor"],
     });
     break;

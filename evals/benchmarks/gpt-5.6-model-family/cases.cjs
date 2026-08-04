@@ -13,19 +13,36 @@ const standardCaseIds = new Set([
   "agentic-tool-contracts-and-loops",
   "development-discipline-review-feedback-skepticism",
 ]);
-const advisorRoutingPrefixes = [
-  'Use the local Codex skill "advisor" if it helps. ',
-  "Use the installed Advisor if it helps. ",
-];
+const advisorRoutingPrefix =
+  'Use the local Codex skill "advisor" if it helps. ';
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
 }
 
 function selectedStandardFixtures() {
-  return readJson(
-    "evals/fixtures/behavior/development-system/cases.json",
-  ).filter((testCase) => standardCaseIds.has(testCase.case_id));
+  return readJson("evals/fixtures/behavior/full-marketplace/cases.json").filter(
+    (testCase) => standardCaseIds.has(testCase.case_id),
+  );
+}
+
+function standardPluginNames() {
+  const plugins = [
+    ...new Set(
+      selectedStandardFixtures().flatMap((testCase) => testCase.plugins || []),
+    ),
+  ].sort();
+
+  if (plugins.length === 0) {
+    throw new Error("standard benchmark cases select no marketplace plugins");
+  }
+  if (plugins.includes("advisor")) {
+    throw new Error(
+      "standard benchmark cases cannot load delegation-only Advisor guidance",
+    );
+  }
+
+  return plugins;
 }
 
 function standardCases() {
@@ -40,23 +57,23 @@ function standardCases() {
 }
 
 function advisorLikeCases() {
-  const selected = new Set([
-    "tradeoff-recommendation",
-    "proactive-uncovered-plan",
-  ]);
+  const selected = new Set(["tradeoff-recommendation", "ticket-plan-outline"]);
   const benchmark = readJson(
-    "plugins/development-system/skills/advisor/.plugin-eval/benchmark.json",
+    "plugins/development-system/components/advisor/skills/advisor/.plugin-eval/benchmark.json",
   );
 
   return benchmark.scenarios
     .filter((scenario) => selected.has(scenario.id))
     .map((scenario) => {
-      const routingPrefix = advisorRoutingPrefixes.find((prefix) =>
-        scenario.userInput.startsWith(prefix),
+      if (!scenario.userInput.startsWith(advisorRoutingPrefix)) {
+        throw new Error(
+          `${scenario.id}: advisor benchmark input lacks the expected routing prefix`,
+        );
+      }
+
+      const sanitizedUserInput = scenario.userInput.slice(
+        advisorRoutingPrefix.length,
       );
-      const sanitizedUserInput = routingPrefix
-        ? scenario.userInput.slice(routingPrefix.length)
-        : scenario.userInput;
       return {
         id: `advisor-like-${scenario.id}`,
         behavior: scenario.purpose,
@@ -108,5 +125,7 @@ function loadBenchmarkCases() {
     })),
   );
 }
+
+loadBenchmarkCases.standardPluginNames = standardPluginNames;
 
 module.exports = loadBenchmarkCases;

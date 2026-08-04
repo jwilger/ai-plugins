@@ -126,7 +126,7 @@ const inputs = require(process.argv[2]);
 const source = YAML.parse(fs.readFileSync(process.argv[3], "utf8"));
 const temporaryRoot = process.argv[4];
 const first = (value) => value.providers[0].config;
-const withPlugin = (value) => value.providers[1].config;
+const targeted = (value) => value.providers[1].config;
 const mutations = [
   ["provider-order", (value) => { value.providers.reverse(); }],
   ["model", (value) => { first(value).model = "different-model"; }],
@@ -152,7 +152,7 @@ const mutations = [
   ["shell-inherit", (value) => { first(value).cli_config.shell_environment_policy.inherit = "all"; }],
   ["shell-path", (value) => { first(value).cli_config.shell_environment_policy.set.PATH = "/usr/bin"; }],
   ["guardian", (value) => { first(value).cli_config.features.guardian_approval = false; }],
-  ["plugins-condition", (value) => { withPlugin(value).cli_config.features.plugins = false; }],
+  ["plugins-condition", (value) => { targeted(value).cli_config.features.plugins = false; }],
   ["extra-provider-key", (value) => { first(value).unexpected = true; }],
 ];
 
@@ -205,7 +205,7 @@ prepare_runtime() {
     "$CASE_LOADER"
 
   [ "$status" -eq 0 ]
-  [ "$(jq 'length' <<<"$output")" -eq 2 ]
+  [ "$(jq 'length' <<<"$output")" -eq 3 ]
   jq -e \
     --slurpfile runtime "$RUNTIME_MANIFEST" '
       ($runtime[0]) as $manifest |
@@ -231,8 +231,8 @@ prepare_runtime() {
         $vars.available_skills == $row.availableSkills
       )
     ' <<<"$output"
-  [ "$(jq '[.[].vars.codex_home] | unique | length' <<<"$output")" -eq 2 ]
-  [ "$(jq '[.[].vars.codex_tmp] | unique | length' <<<"$output")" -eq 2 ]
+  [ "$(jq '[.[].vars.codex_home] | unique | length' <<<"$output")" -eq 3 ]
+  [ "$(jq '[.[].vars.codex_tmp] | unique | length' <<<"$output")" -eq 3 ]
 }
 
 @test "runtime manifest validation rejects a row from a different run" {
@@ -255,7 +255,7 @@ prepare_runtime() {
 @test "runtime evidence rejects changed config, projected skills, and injected credentials" {
   prepare_runtime
   printf '\n# host-side config mutation\n' \
-    >>"$RUNTIME_ROOT/rust-cli-feature/sample-1/no-plugins/codex-home/config.toml"
+    >>"$RUNTIME_ROOT/rust-cli-feature/sample-1/no-marketplace-skills/codex-home/config.toml"
 
   run env \
     CODE_QUALITY_WORKSPACE_MANIFEST="$WORKSPACE_MANIFEST" \
@@ -269,7 +269,7 @@ prepare_runtime() {
   rm -rf "$RUNTIME_ROOT"
   prepare_runtime
   skill_file="$(find \
-    "$RUNTIME_ROOT/rust-cli-feature/sample-1/development-system/codex-home/plugins/cache/ai-plugins/development-system" \
+    "$RUNTIME_ROOT/rust-cli-feature/sample-1/targeted-quality-skills/codex-home/plugins/cache/ai-plugins/development-system" \
     -path '*/skills/*/SKILL.md' -type f -print -quit)"
   [ -n "$skill_file" ]
   printf '\nHost-side projected skill mutation.\n' >>"$skill_file"
@@ -286,7 +286,7 @@ prepare_runtime() {
   rm -rf "$RUNTIME_ROOT"
   prepare_runtime
   printf '{"token":"must-never-be-accepted"}\n' \
-    >"$RUNTIME_ROOT/rust-cli-feature/sample-1/no-plugins/codex-home/auth.json"
+    >"$RUNTIME_ROOT/rust-cli-feature/sample-1/no-marketplace-skills/codex-home/auth.json"
 
   run env \
     CODE_QUALITY_WORKSPACE_MANIFEST="$WORKSPACE_MANIFEST" \
@@ -301,7 +301,7 @@ prepare_runtime() {
 @test "runtime evidence only advertises skill directories backed by SKILL.md" {
   prepare_runtime
   skill_file="$(find \
-    "$RUNTIME_ROOT/rust-cli-feature/sample-1/development-system/codex-home/plugins/cache/ai-plugins/development-system" \
+    "$RUNTIME_ROOT/rust-cli-feature/sample-1/targeted-quality-skills/codex-home/plugins/cache/ai-plugins/development-system" \
     -path '*/skills/*/SKILL.md' -type f -print -quit)"
   [ -n "$skill_file" ]
   mv "$skill_file" "${skill_file%/SKILL.md}/NOT-A-SKILL.md"
@@ -318,7 +318,7 @@ prepare_runtime() {
 
 @test "runtime evidence rejects a top-level skills file outside every SKILL.md-backed skill" {
   prepare_runtime
-  codex_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/development-system/codex-home"
+  codex_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/targeted-quality-skills/codex-home"
   skills_root="$(find \
     "$codex_home/plugins/cache/ai-plugins/development-system" \
     -mindepth 2 -maxdepth 2 -type d -name skills -print -quit)"
@@ -327,7 +327,7 @@ prepare_runtime() {
 
   run node "$ROOT/scripts/evals/code-quality-runtime-evidence.mjs" \
     --codex-home "$codex_home" \
-    --mode development-system \
+    --mode targeted-quality-skills \
     --phase pre-turn
 
   [ "$status" -eq 2 ]
@@ -337,7 +337,7 @@ prepare_runtime() {
 
 @test "post-turn evidence rejects all host Codex-home mutations including arg0 helpers" {
   prepare_runtime
-  codex_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/no-plugins/codex-home"
+  codex_home="$RUNTIME_ROOT/rust-cli-feature/sample-1/no-marketplace-skills/codex-home"
   arg0="$codex_home/tmp/arg0/codex-arg0fixture"
   mkdir -p "$arg0"
   : >"$arg0/.lock"
@@ -407,7 +407,7 @@ NODE
 @test "runtime manifest classifies content tampering as provenance" {
   prepare_runtime
   printf '\n# tampered\n' \
-    >>"$RUNTIME_ROOT/rust-cli-feature/sample-1/no-plugins/codex-home/config.toml"
+    >>"$RUNTIME_ROOT/rust-cli-feature/sample-1/no-marketplace-skills/codex-home/config.toml"
 
   run env \
     CODE_QUALITY_WORKSPACE_MANIFEST="$WORKSPACE_MANIFEST" \

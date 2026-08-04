@@ -48,26 +48,15 @@ iteration sees the current diff.
 Session identifiers are bounded to 128 characters, and requested clean
 iterations are bounded to 3-10 to cap assignment fanout.
 The caller carries returned state between calls, while the coordinator stores a
-project-scoped authoritative copy as typed Eventcore-fs events in the
-project-scoped user-state store. A new stdio MCP process automatically resumes
-an exact caller-carried state, including pending verifier and delta-risk
-assignments. Creation is insert-only and every transition uses a durable
-revision compare-and-swap, so concurrent processes cannot admit duplicate
-sessions or overwrite each other's progress. Unknown, evicted, stale, or
-mutated state fails closed with sanitized expected/received fingerprints and a
-restart, resume, or abandon recovery action; advancing a completed session also
-fails. Each process retains at most 32 active sessions, and durable storage is
-bounded independently.
-
-Retained out-of-scope reports are persisted in the same event store. The
-returned `out_of_scope_report_artifact` is an opaque locator of the form
-`eventcore://development-discipline/final-review-sessions/<stream>?report_binding_id=<id>`;
-it is not a filesystem path or a direct-client API. Read it through
-`final_review.out_of_scope_report` with the authoritative review `state`. New
-flows create no SQLite report artifact. For one release, SQLite remains only a
-read-only import source for legacy session state: the coordinator may import it
-when the corresponding Eventcore stream is empty and the legacy state is
-unambiguous, but SQLite is never the authority or a write target.
+project-scoped authoritative copy in its local SQLite state database. A new
+stdio MCP process automatically resumes an exact caller-carried state, including
+pending verifier and delta-risk assignments. Creation is insert-only and every
+transition uses a durable revision compare-and-swap, so concurrent processes
+cannot admit duplicate sessions or overwrite each other's progress. Unknown,
+evicted, stale, or mutated state fails closed with sanitized expected/received
+fingerprints and a restart, resume, or abandon recovery action; advancing a
+completed session also fails. Each process retains at most 32 active sessions,
+and durable storage is bounded independently.
 When an advance returns `verifier_required`, the server retains the pending
 assignment ID and exact core pre-verifier arguments. Until the caller resubmits
 the same lens, scope, and caller-decision arguments plus the matching
@@ -234,20 +223,9 @@ blocking finding remains and never substitutes for acceptance criteria or CI.
 A valid `ship` decision is terminal for final review: it clears remaining
 nonblocking lens work, returns `complete: true`, and schedules no reviewers.
 The calling workflow must still satisfy the ticket's acceptance criteria and
-apply the selected delivery mode's CI evidence. For direct-to-trunk incremental
-checkpoints, the most recent completed CI run for the configured trunk branch
-that reached a pass/fail outcome is the watermark: it must have passed, and no
-unresolved failure hold may exist. Newer queued, pending, or running runs do not
-replace that watermark. A canceled run is non-evidence: it neither passes nor
-fails, does not replace the watermark, and does not create or release a hold.
-Any unexpected completed failure immediately makes `ci-failure-follow-up` the
-exclusive lifecycle work; unrelated work and non-recovery pushes remain
-forbidden until terminal success of either the exact tested causal-repair
-revision or the authorized rerun of the exact unchanged failed SHA. PR/MR
-workflows may instead require the latest in-scope pushed build to be running or
-green where applicable, while local-only workflows use fresh local evidence.
-Ticket completion for pushed delivery separately requires terminal success for
-the exact final pushed SHA.
+confirm the latest pushed CI build is running or green before release or new
+work. If that build failed, `ci-failure-follow-up` takes precedence and
+requires exact diagnosis plus terminal success before release or new work.
 `split` and `escalate` persist a contract-bound terminal hold, preserve
 every completion blocker, schedule no reviewers, and reject any later advance
 for that session.
@@ -303,33 +281,22 @@ post_filter = "bounded-helper"
 verifier = "strong-reviewer"
 
 [final_review.models.codex]
-pre_filter = "strong-reviewer"
+pre_filter = "gpt-5.6-sol"
 lens_review = "gpt-5.6-terra"
 post_filter = "gpt-5.6-luna"
-verifier = "strong-reviewer"
+verifier = "gpt-5.6-sol"
 
 [final_review.models.claude]
-pre_filter = "strong-reviewer"
+pre_filter = "opus"
 lens_review = "sonnet"
 post_filter = "haiku"
-verifier = "strong-reviewer"
+verifier = "opus"
 ```
 
 Top-level phase values are harness-neutral. Optional `codex` or `claude`
-tables override them one phase at a time for that harness. Keep strong phases
-on the public `strong-reviewer` role while retaining exact lower routes where
-the harness supports them.
-
-The caller resolves every returned `strong-reviewer` assignment at dispatch
-time. Inspect the eligible models advertised by the current harness and its
-authoritative capability or upgrade metadata, select the highest-capability
-eligible model explicitly, and launch the public role. Never infer capability
-from model names, lexical or list order, price, or release date. The Codex role
-configuration omits a model and retains `high` effort; Claude uses the moving
-`opus` alias with `high` effort. If authoritative ranking, explicit selection,
-or launch is unavailable, report a visible bounded blocked result. Never
-silently substitute another model or claim that an unconfirmed route satisfied
-the review contract.
+tables override them one phase at a time for that harness. This lets a shared
+repository use concrete Codex model IDs without routing Claude reviewers to
+unsupported models.
 
 Legacy non-risk-planned sessions can add
 `[final_review.dispositions.<SEVERITY>]` tables for `CRITICAL`, `MAJOR`,
@@ -366,9 +333,8 @@ both conditional batched verification and the architecture, security, and
 human-safety lens assignments that require the strong route. Projects that
 override `verifier` therefore change all of those strong responsibilities
 together; the current schema does not expose an independently configurable
-strong-lens role. This keeps one source of truth for the public
-`strong-reviewer` route and avoids an apparently independent setting that could
-silently drift.
+strong-lens model. This keeps one source of truth for the Sol route and avoids
+an apparently independent setting that could silently drift.
 
 - `pre_filter` owns the mandatory all-dimension broad risk scout and any
   optional assistance for a large or noisy scope. Because the scout assesses
@@ -439,13 +405,12 @@ receive a structured invalid-params response listing supported versions.
 ## Packaging
 
 Marketplace installs require a packaged MCP binary for the host target. This
-version packages static x86_64 and aarch64 Linux binaries only. The launcher
-selects the matching artifact deterministically. Darwin has no packaged binary;
-its development-only source-tree Cargo fallback requires explicit opt-in with
-`DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1` and a trusted local
-Cargo/Rust environment. If neither a packaged binary nor the explicitly enabled
-fallback is available, MCP enforcement is unavailable and must be reported as
-such. Incoming stdio requests
+version packages static x86_64 and aarch64 Linux binaries plus macOS binaries
+for both architectures. The launcher selects the matching artifact
+deterministically. Source-tree Cargo
+fallback is development-only and must be explicitly enabled by launcher
+environment; if neither packaged binary nor approved fallback is available, MCP
+enforcement is unavailable and must be reported as such. Incoming stdio requests
 and conditional-lens fanout are bounded so malformed or bursty callers cannot
 grow coordinator memory or review-agent count without limit. On any oversized
 stdio frame, the server stops reading at the request byte limit, emits
