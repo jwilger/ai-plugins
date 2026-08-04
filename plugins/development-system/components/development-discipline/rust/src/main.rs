@@ -7178,9 +7178,18 @@ fn load_authoritative_session(
     {
         return Ok(Some(restored));
     }
-    let Some(legacy) = load_legacy_authoritative_session(caller_state, session_id)? else {
+    let Some(mut legacy) = load_legacy_authoritative_session(caller_state, session_id)? else {
         return Ok(None);
     };
+    let report_binding_id = legacy
+        .state
+        .get("report_binding_id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let has_durable_report = report_binding_id.is_some();
+    if has_durable_report {
+        prepare_durable_out_of_scope_report(&mut legacy.state)?;
+    }
     let stream_id = review_session_stream_id(caller_state, session_id)?;
     let store = open_review_session_store()?;
     let event = ReviewSessionEvent::ImportedFromSqliteV1 {
@@ -7191,17 +7200,31 @@ fn load_authoritative_session(
         pending_delta_risk: legacy.pending_delta_risk.clone(),
         source_revision: legacy.revision,
     };
-    let writes = StreamWrites::new()
+    let mut writes = StreamWrites::new()
         .register_stream(stream_id, StreamVersion::new(0))
         .map_err(|error| format!("review_session_import_prepare_failed source={error}"))?
         .append(event)
         .map_err(|error| format!("review_session_import_prepare_failed source={error}"))?;
+    if let Some(report_binding_id) = report_binding_id {
+        writes = writes
+            .append(ReviewSessionEvent::ReportReplacedV1 {
+                stream_id: review_session_stream_id(caller_state, session_id)?,
+                report_binding_id,
+                findings: legacy
+                    .state
+                    .get("out_of_scope_report")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+            })
+            .map_err(|error| format!("review_session_import_prepare_failed source={error}"))?;
+    }
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|error| format!("review_session_runtime_failed source={error}"))?;
     match runtime.block_on(store.append_events(writes)) {
         Ok(_) => Ok(Some(RestoredReviewSession {
             revision: 1,
-            store_revision: 1,
+            store_revision: 1 + u64::from(has_durable_report),
             ..legacy
         })),
         Err(eventcore_types::EventStoreError::VersionConflict { .. }) => {
@@ -24352,7 +24375,7 @@ pre_filter = "project-pre"
     #[test]
     fn legacy_session_import_rejects_a_mismatched_embedded_session_identity() {
         let project_root = test_project_root("legacy-session-identity");
-        let mut caller_state = add_test_risk_assessment(
+        let plan_arguments = add_test_risk_assessment(
             json!({
                 "session_id": format!("legacy-session-identity-{}", std::process::id()),
                 "project_root": project_root,
@@ -24363,7 +24386,9 @@ pre_filter = "project-pre"
             &[("correctness-behavior", "low")],
             json!([]),
         );
-        caller_state["scope"]["project_root"] = json!(project_root);
+        let mut caller_state: Value =
+            serde_json::from_str(&plan(&plan_arguments)).expect("plan legacy state");
+        caller_state = caller_state["state"].clone();
         let session_id = caller_state["session_id"].as_str().expect("session id");
         let database = durable_report_database_path(
             project_root.to_str().expect("project root"),
@@ -24504,6 +24529,82 @@ pre_filter = "project-pre"
             .expect("replayed session");
         assert_eq!(second.revision, 1);
         assert_eq!(second.state, caller_state);
+    }
+
+    #[test]
+    fn legacy_session_import_promotes_retained_report_to_eventcore() {
+        let project_root = test_project_root("legacy-session-report-promotion");
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": format!("legacy-session-report-promotion-{}", std::process::id()),
+                "project_root": project_root,
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "legacy-report-promotion"
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let planned: Value =
+            serde_json::from_str(&plan(&plan_arguments)).expect("plan legacy state");
+        let mut caller_state = planned["state"].clone();
+        append_out_of_scope_report(
+            &mut caller_state,
+            &json!({ "out_of_scope": [{
+                "id": "legacy-retained-finding",
+                "lens": "correctness-behavior",
+                "severity": "MINOR",
+                "message": "preserve this finding"
+            }] }),
+            None,
+        )
+        .expect("prepare legacy retained report");
+        let session_id = caller_state["session_id"].as_str().expect("session id");
+        let database = durable_report_database_path(
+            project_root.to_str().expect("project root"),
+            caller_state.get("work_item_id").and_then(Value::as_str),
+        )
+        .expect("legacy database path");
+        fs::create_dir_all(database.parent().expect("database parent"))
+            .expect("create legacy database parent");
+        let connection = Connection::open(&database).expect("open legacy database");
+        initialize_durable_report_schema(&connection).expect("initialize legacy schema");
+        connection
+            .execute(
+                "INSERT INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, NULL, NULL, 1, 7)",
+                params![session_id, serde_json::to_string(&caller_state).expect("encode legacy state")],
+            )
+            .expect("insert legacy session");
+        connection
+            .execute(
+                "INSERT INTO final_review_lens_snapshot (report_binding_id, lens, finding_id, iteration, finding_json) VALUES (?1, ?2, ?3, 1, ?4)",
+                params![
+                    caller_state["report_binding_id"].as_str().expect("report binding"),
+                    "correctness-behavior",
+                    fingerprint("legacy-retained-finding"),
+                    serde_json::to_string(&caller_state["out_of_scope_report"][0]["finding"])
+                        .expect("encode legacy finding")
+                ],
+            )
+            .expect("insert legacy report");
+        drop(connection);
+
+        let imported = load_authoritative_session(&caller_state, session_id)
+            .expect("import legacy session")
+            .expect("imported session");
+        let connection = Connection::open(&database).expect("reopen legacy database");
+        connection
+            .execute("DELETE FROM final_review_lens_snapshot", [])
+            .expect("remove legacy report rows");
+        drop(connection);
+
+        let report: Value = serde_json::from_str(
+            &out_of_scope_report(&json!({ "state": imported.state })).expect("read report"),
+        )
+        .expect("report json");
+        assert_eq!(report["findings"][0]["id"], "legacy-retained-finding");
+        assert!(report["artifact"].as_str().is_some_and(|artifact| artifact
+            .starts_with("eventcore://development-discipline/final-review-sessions/")));
     }
 
     #[test]
