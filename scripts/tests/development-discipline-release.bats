@@ -28,17 +28,20 @@ setup() {
 }
 
 @test "development-discipline component manifests match the runtime version" {
-  run bash -c '
-    cargo_version="$(grep "^version = " "$1" | head -n 1 | cut -d "\"" -f 2)"
-    codex_version="$(jq -r .version "$2")"
-    claude_version="$(jq -r .version "$3")"
-    [ "$cargo_version" = "$codex_version" ] && [ "$cargo_version" = "$claude_version" ]
-  ' _ \
-    "$ROOT/plugins/development-system/components/development-discipline/rust/Cargo.toml" \
-    "$ROOT/plugins/development-system/components/development-discipline/.codex-plugin/plugin.json" \
-    "$ROOT/plugins/development-system/components/development-discipline/.claude-plugin/plugin.json"
+  local codex_version
+  local claude_version
+  local runtime_version
+
+  codex_version="$(jq -r .version "$ROOT/plugins/development-system/components/development-discipline/.codex-plugin/plugin.json")"
+  claude_version="$(jq -r .version "$ROOT/plugins/development-system/components/development-discipline/.claude-plugin/plugin.json")"
+
+  run bash -c 'printf "%s\\n" "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}" | "$1" | jq -r ".result.serverInfo.version"' _ \
+    "$ROOT/plugins/development-system/components/development-discipline/dist/x86_64-unknown-linux-musl/development-discipline-mcp"
 
   [ "$status" -eq 0 ]
+  runtime_version="$output"
+  [ "$runtime_version" = "$codex_version" ]
+  [ "$runtime_version" = "$claude_version" ]
 }
 
 @test "development-discipline release builder does not require a macOS forge artifact" {
