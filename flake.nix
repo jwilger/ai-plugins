@@ -66,7 +66,6 @@
               cargo-mutants
               cargo-zigbuild
               file
-              chromium
               clippy
               rustc
               rustfmt
@@ -82,6 +81,7 @@
             ])
             ++ [ beads ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              pkgs.chromium
               pkgs.bubblewrap
               pkgs.systemd
             ];
