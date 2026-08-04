@@ -6829,7 +6829,7 @@ fn decoded_pending_assignment(encoded: Option<String>) -> Result<Option<PendingV
 }
 
 fn review_session_store_root() -> Result<PathBuf, String> {
-    Ok(durable_report_state_root(
+    let root = durable_report_state_root(
         env::var_os("XDG_STATE_HOME")
             .filter(|value| !value.is_empty())
             .map(PathBuf::from),
@@ -6837,7 +6837,12 @@ fn review_session_store_root() -> Result<PathBuf, String> {
             .filter(|value| !value.is_empty())
             .map(PathBuf::from),
     )?
-    .join("development-discipline/final-review-sessions"))
+    .join("development-discipline/final-review-sessions");
+    if cfg!(test) {
+        Ok(root.join(format!("test-{}", std::process::id())))
+    } else {
+        Ok(root)
+    }
 }
 
 fn review_session_stream_id(state: &Value, session_id: &str) -> Result<StreamId, String> {
@@ -11089,6 +11094,17 @@ mod tests {
             )
             .expect("state root"),
             PathBuf::from("/home/tester/.local/state")
+        );
+    }
+
+    #[test]
+    fn review_session_store_is_process_scoped_under_unit_tests() {
+        let path = review_session_store_root().expect("review session store root");
+
+        assert!(
+            path.ends_with(format!("test-{}", std::process::id())),
+            "unit-test Eventcore state must not leak between test processes: {}",
+            path.display()
         );
     }
 
