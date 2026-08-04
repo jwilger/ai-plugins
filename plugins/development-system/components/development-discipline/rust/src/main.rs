@@ -798,6 +798,28 @@ fn pending_delta_risk_assignment(
             if !Path::new(artifact_reference).is_file() {
                 return Err("pending_delta_risk_artifact_missing=true".to_string());
             }
+            let artifact_digest = assignment
+                .pointer("/delta_evidence/artifact_digest")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "pending_delta_risk_artifact_digest_required=true".to_string())?;
+            if !valid_git_object_id(artifact_digest) {
+                return Err("pending_delta_risk_artifact_digest_invalid=true".to_string());
+            }
+            let project_root = state
+                .pointer("/scope/project_root")
+                .and_then(Value::as_str)
+                .map(Path::new)
+                .ok_or_else(|| "scope_project_root_required=true".to_string())?;
+            let observed_digest = git_text(
+                project_root,
+                &["hash-object".to_string(), artifact_reference.to_string()],
+                None,
+                None,
+                "pending_delta_risk_artifact_digest",
+            )?;
+            if observed_digest != artifact_digest {
+                return Err("pending_delta_risk_artifact_digest_mismatch=true".to_string());
+            }
         }
         return Ok(assignment.clone());
     }
@@ -23743,6 +23765,74 @@ pre_filter = "project-pre"
         assert_eq!(
             resumed["error"]["message"],
             "pending_delta_risk_artifact_missing=true"
+        );
+    }
+
+    #[test]
+    fn json_rpc_resume_rejects_a_pending_delta_with_a_corrupt_artifact() {
+        let session_id = format!("corrupt-delta-artifact-{}", std::process::id());
+        let project_root = test_project_root("corrupt-delta-artifact");
+        let plan_arguments = assessed_plan_arguments_for_diff_at_root(
+            &session_id,
+            "corrupt-delta-artifact-v1",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            Some(&project_root),
+        );
+        let mut original = ReviewCoordinator::default();
+        let planned = original
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": plan_arguments }
+            }))
+            .expect("plan response");
+        let plan: Value = serde_json::from_str(
+            planned["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+        let artifact = project_root.join("corrupt.patch");
+        fs::write(&artifact, "corrupted delta evidence\n").expect("write corrupt artifact");
+        let pending = PendingVerifier {
+            assignment_id: "stored-assignment".to_string(),
+            arguments: json!({}),
+            assignment: Some(json!({
+                "assignment_id": "stored-assignment",
+                "delta_evidence": {
+                    "artifact_reference": artifact,
+                    "artifact_digest": "0123456789012345678901234567890123456789"
+                }
+            })),
+        };
+        persist_authoritative_session(
+            &plan["state"],
+            None,
+            Some(&pending),
+            1,
+            Some(&plan["state"]),
+            Some(1),
+        )
+        .expect("persist pending delta");
+
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.resume",
+                    "arguments": { "session_id": session_id, "project_root": project_root }
+                }
+            }))
+            .expect("resume response");
+        assert_eq!(
+            resumed["error"]["message"],
+            "pending_delta_risk_artifact_digest_mismatch=true"
         );
     }
 
