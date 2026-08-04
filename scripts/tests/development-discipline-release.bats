@@ -5,6 +5,7 @@ setup() {
   DETECTOR="$ROOT/plugins/development-system/components/development-discipline/scripts/detect-target.sh"
   COMPLETE_CHECK="$ROOT/scripts/check-development-discipline-release-complete.sh"
   PARITY_CHECK="$ROOT/scripts/check-development-discipline-release-from-source.sh"
+  RELEASE_BUILD="$ROOT/scripts/build-development-discipline-release-all.sh"
   PARITY_NORMALIZER="$ROOT/scripts/tests/development-discipline-parity-normalize.mjs"
   FAKE_BIN="$BATS_TEST_TMPDIR/fake-bin"
   mkdir -p "$FAKE_BIN"
@@ -16,6 +17,23 @@ setup() {
     '  *) exit 1 ;;' \
     'esac' >"$FAKE_BIN/uname"
   chmod +x "$FAKE_BIN/uname"
+}
+
+@test "development-discipline release contract declares only Linux prebuild targets" {
+  run bash -c 'jq -r ".binaries[].target" "$1" | sort' _ \
+    "$ROOT/plugins/development-system/components/development-discipline/release-binaries.json"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = $'aarch64-unknown-linux-musl\nx86_64-unknown-linux-musl' ]
+}
+
+@test "development-discipline release builder does not require a macOS forge artifact" {
+  run env -u DEVELOPMENT_DISCIPLINE_MACOS_UNIVERSAL_BINARY \
+    -u DEVELOPMENT_DISCIPLINE_MACOS_ARTIFACT_ENVELOPE \
+    bash "$RELEASE_BUILD"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"release-macos-artifact-required=true"* ]]
 }
 
 @test "development-discipline parity normalization removes runtime clock drift" {
@@ -415,6 +433,10 @@ detect_target() {
     bash -c 'source "$1"; detect_development_discipline_target "$2"' _ "$DETECTOR" "$FAKE_BIN/uname"
 }
 
+prebuilt_target() {
+  bash -c 'source "$1"; development_discipline_prebuilt_target "$2"' _ "$DETECTOR" "$1"
+}
+
 @test "development-discipline release includes every supported target" {
   run bash "$COMPLETE_CHECK"
 
@@ -453,17 +475,6 @@ detect_target() {
   [[ "$output" == *"ARM aarch64"* ]]
   [[ "$output" == *"statically linked"* ]]
 
-  run file "$plugin_root/dist/x86_64-apple-darwin/development-discipline-mcp"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Mach-O universal binary"* ]]
-  [[ "$output" == *"x86_64"* ]]
-  [[ "$output" == *"arm64"* ]]
-
-  run file "$plugin_root/dist/aarch64-apple-darwin/development-discipline-mcp"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Mach-O universal binary"* ]]
-  [[ "$output" == *"x86_64"* ]]
-  [[ "$output" == *"arm64"* ]]
 }
 
 @test "development-discipline target detector maps supported Linux and macOS hosts" {
@@ -482,6 +493,22 @@ detect_target() {
   run detect_target Darwin arm64
   [ "$status" -eq 0 ]
   [ "$output" = "aarch64-apple-darwin" ]
+}
+
+@test "development-discipline prebuild policy accepts Linux and rejects Darwin" {
+  run prebuilt_target x86_64-unknown-linux-musl
+  [ "$status" -eq 0 ]
+  [ "$output" = "x86_64-unknown-linux-musl" ]
+
+  run prebuilt_target aarch64-unknown-linux-musl
+  [ "$status" -eq 0 ]
+  [ "$output" = "aarch64-unknown-linux-musl" ]
+
+  run prebuilt_target x86_64-apple-darwin
+  [ "$status" -ne 0 ]
+
+  run prebuilt_target aarch64-apple-darwin
+  [ "$status" -ne 0 ]
 }
 
 @test "development-discipline target detector rejects unsupported hosts" {

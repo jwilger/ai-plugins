@@ -29,9 +29,7 @@ if [ "$manifest_source_fingerprint" != "$expected_source_fingerprint" ]; then
 fi
 
 expected_targets="$(printf '%s\n' \
-  aarch64-apple-darwin \
   aarch64-unknown-linux-musl \
-  x86_64-apple-darwin \
   x86_64-unknown-linux-musl)"
 actual_targets="$(jq -r '.binaries[].target' "$manifest" | sort)"
 if [ "$actual_targets" != "$expected_targets" ]; then
@@ -50,6 +48,15 @@ awk '{ print $2 }' "$checksums" | sort >"$checksum_paths"
 if ! cmp -s "$manifest_paths" "$checksum_paths"; then
   echo "release-checksum-paths-mismatch path=plugins/development-system/components/development-discipline/release-binaries.sha256" >&2
   diff -u "$checksum_paths" "$manifest_paths" >&2 || true
+  exit 1
+fi
+
+dist_paths="$(mktemp)"
+trap 'rm -f "$manifest_paths" "$checksum_paths" "$dist_paths"' EXIT
+find "$plugin_root/dist" -type f -printf 'dist/%P\n' | sort >"$dist_paths"
+if ! cmp -s "$manifest_paths" "$dist_paths"; then
+  echo "release-dist-paths-mismatch path=plugins/development-system/components/development-discipline/dist" >&2
+  diff -u "$manifest_paths" "$dist_paths" >&2 || true
   exit 1
 fi
 
@@ -85,14 +92,6 @@ while IFS= read -r encoded; do
     aarch64-unknown-linux-musl)
       required_format="ELF 64-bit"
       required_arch="ARM aarch64"
-      ;;
-    x86_64-apple-darwin)
-      required_format="Mach-O"
-      required_arch="x86_64"
-      ;;
-    aarch64-apple-darwin)
-      required_format="Mach-O"
-      required_arch="arm64"
       ;;
     *)
       echo "release-binary-target-unsupported target=$target" >&2

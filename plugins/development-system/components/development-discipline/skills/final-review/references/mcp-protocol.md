@@ -428,12 +428,13 @@ receive a structured invalid-params response listing supported versions.
 ## Packaging
 
 Marketplace installs require a packaged MCP binary for the host target. This
-version packages static x86_64 and aarch64 Linux binaries plus macOS binaries
-for both architectures. The launcher selects the matching artifact
-deterministically. Source-tree Cargo
-fallback is development-only and must be explicitly enabled by launcher
-environment; if neither packaged binary nor approved fallback is available, MCP
-enforcement is unavailable and must be reported as such. Incoming stdio requests
+version packages static x86_64 and aarch64 Linux binaries only. The launcher
+selects the matching artifact deterministically. Darwin has no packaged binary;
+its development-only source-tree Cargo fallback requires explicit opt-in with
+`DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1` and a trusted local
+Cargo/Rust environment. If neither a packaged binary nor the explicitly enabled
+fallback is available, MCP enforcement is unavailable and must be reported as
+such. Incoming stdio requests
 and conditional-lens fanout are bounded so malformed or bursty callers cannot
 grow coordinator memory or review-agent count without limit. On any oversized
 stdio frame, the server stops reading at the request byte limit, emits

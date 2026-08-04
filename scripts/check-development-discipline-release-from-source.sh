@@ -32,6 +32,10 @@ DEVELOPMENT_DISCIPLINE_SOURCE_FINGERPRINT="$source_fingerprint" \
 
 source "$plugin_root/scripts/detect-target.sh"
 release_target="$(detect_development_discipline_target)"
+if ! release_target="$(development_discipline_prebuilt_target "$release_target")"; then
+  echo "development-discipline-release-parity-skipped=true reason=no_distributed_binary" >&2
+  exit 0
+fi
 dist_binary="$plugin_root/dist/$release_target/development-discipline-mcp"
 
 source_output="$(mktemp)"

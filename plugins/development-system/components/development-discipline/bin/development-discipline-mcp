@@ -13,9 +13,17 @@ target="$(detect_development_discipline_target "$uname_path")" || {
   exit 1
 }
 
-binary="$plugin_root/dist/$target/development-discipline-mcp"
-if [ "${DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK:-}" != "1" ] && [ -x "$binary" ]; then
-  exec "$binary" "$@"
+if prebuilt_target="$(development_discipline_prebuilt_target "$target")"; then
+  binary="$plugin_root/dist/$prebuilt_target/development-discipline-mcp"
+  if [ "${DEVELOPMENT_DISCIPLINE_MCP_FORCE_CARGO_FALLBACK:-}" != "1" ] && [ -x "$binary" ]; then
+    exec "$binary" "$@"
+  fi
+else
+  binary=""
+  if [ "${DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK:-}" != "1" ]; then
+    echo "development-discipline.mcp.source_build_required target=$target opt_in=DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1" >&2
+    exit 1
+  fi
 fi
 
 if [ "${DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK:-}" != "1" ]; then

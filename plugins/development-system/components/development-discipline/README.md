@@ -58,11 +58,12 @@ route, it must report the failure instead of treating inheritance or
 substitution as success.
 
 The final-review coordinator ships static stdio MCP binaries for x86_64 and
-aarch64 Linux plus both macOS architectures. Its launcher selects the local
-target without a runtime package installation; an explicitly enabled Cargo
-fallback remains available for source-tree development. Release checks validate
-each artifact's target format, checksum, and embedded source/toolchain
-fingerprint.
+aarch64 Linux. Its launcher selects the local target without a runtime package
+installation. Darwin has no packaged binary and requires the source-tree Cargo
+fallback to be explicitly enabled with
+`DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1` in a trusted local
+Cargo/Rust environment. Release checks validate each packaged artifact's target
+format, checksum, and embedded source/toolchain fingerprint.
 
 The caller carries final-review state between requests, while the MCP persists
 the authoritative session copy in project-scoped local state. A restarted MCP

@@ -370,6 +370,31 @@ install_promptfoo_cache_launcher() {
   ln -sfn "$ROOT/plugins/development-system" "$cache_parent/$version"
 }
 
+@test "development-discipline requires explicit source-build opt-in on Darwin" {
+  local fake_uname="$TMPROOT/darwin-uname"
+  local resolved_uname
+
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'case "$1" in' \
+    '  -s) printf "%s\\n" Darwin ;;' \
+    '  -m) printf "%s\\n" arm64 ;;' \
+    '  *) exit 2 ;;' \
+    'esac' >"$fake_uname"
+  chmod +x "$fake_uname"
+  resolved_uname="$(readlink -f /run/current-system/sw/bin/uname)"
+
+  run "$AI_PLUGINS_BWRAP_BIN" \
+    --ro-bind / / \
+    --dev /dev \
+    --proc /proc \
+    --bind "$fake_uname" "$resolved_uname" \
+    "$ROOT/plugins/development-system/components/development-discipline/bin/development-discipline-mcp"
+
+  [ "$status" -eq 1 ]
+  [ "$output" = "development-discipline.mcp.source_build_required target=aarch64-apple-darwin opt_in=DEVELOPMENT_DISCIPLINE_MCP_ALLOW_CARGO_FALLBACK=1" ]
+}
+
 @test "promptfoo MCP launcher starts with repo-local promptfoo and writable state" {
   cd "$ROOT/plugins/development-system/components/agentic-systems-engineering"
 
