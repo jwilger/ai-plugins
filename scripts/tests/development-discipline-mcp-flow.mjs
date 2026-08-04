@@ -61,6 +61,48 @@ async function request(payload, emit = true) {
   return JSON.parse(line);
 }
 
+async function requestFromFreshServer(payload) {
+  const fresh = spawn(command, args, {
+    env: {
+      ...process.env,
+      XDG_STATE_HOME: stateRoot,
+    },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  const freshLines = createInterface({ input: fresh.stdout });
+  const responses = [];
+  freshLines.on("line", (line) => responses.push(JSON.parse(line)));
+  const sendFresh = (request) =>
+    new Promise((resolve, reject) => {
+      fresh.stdin.write(`${JSON.stringify(request)}\n`, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  await sendFresh({
+    jsonrpc: "2.0",
+    id: "fresh-initialize",
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "restart-test", version: "0.0.0" },
+    },
+  });
+  await sendFresh(payload);
+  fresh.stdin.end();
+  await new Promise((resolve, reject) => {
+    fresh.once("error", reject);
+    fresh.once("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`fresh MCP process exited ${code}`));
+    });
+  });
+  const response = responses.find((candidate) => candidate.id === payload.id);
+  if (!response) throw new Error("fresh MCP process did not return the requested response");
+  return response;
+}
+
 function sharedTestEvidence(id, diffHash, summary) {
   return {
     id,
@@ -698,6 +740,29 @@ if (!ticketPendingResponse.result) {
 const ticketVerifier = JSON.parse(
   ticketPendingResponse.result.content[0].text,
 ).verifier_assignment;
+const ticketResumeResponse = await requestFromFreshServer({
+  jsonrpc: "2.0",
+  id: "ticket-resume-after-restart",
+  method: "tools/call",
+  params: {
+    name: "final_review.resume",
+    arguments: {
+      session_id: ticketState.session_id,
+      project_root: projectRoot,
+    },
+  },
+});
+if (!ticketResumeResponse.result) {
+  throw new Error(`fresh process did not resume pending verifier: ${JSON.stringify(ticketResumeResponse)}`);
+}
+const ticketResumed = JSON.parse(ticketResumeResponse.result.content[0].text);
+if (
+  ticketResumed.pending_transition !== "verifier_required" ||
+  JSON.stringify(ticketResumed.state) !== JSON.stringify(ticketState) ||
+  ticketResumed.revision < 2
+) {
+  throw new Error("fresh process did not restore the exact pending verifier state");
+}
 const ticketAdvancedResponse = await request(
   {
     jsonrpc: "2.0",
