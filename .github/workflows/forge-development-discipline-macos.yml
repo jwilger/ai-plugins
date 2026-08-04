@@ -14,7 +14,7 @@ permissions:
 jobs:
   forge:
     name: Forge universal macOS binary
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - name: Check out candidate source
