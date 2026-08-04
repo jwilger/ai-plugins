@@ -205,6 +205,8 @@ impl Default for ReviewCoordinator {
 struct PendingVerifier {
     assignment_id: String,
     arguments: Value,
+    #[serde(default)]
+    assignment: Option<Value>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -430,6 +432,40 @@ impl ReviewCoordinator {
                 "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
                     .to_string()
             })?;
+        let delta_risk_assignments =
+            if let Some(pending) = self.pending_delta_risks.get(session_id).cloned() {
+                let assignment = pending_delta_risk_assignment(&state, &pending)?;
+                let assignment_id = assignment
+                    .get("assignment_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "pending_delta_risk_assignment_id_required=true".to_string())?;
+                if pending.assignment.is_some() && assignment_id != pending.assignment_id {
+                    return Err("pending_delta_risk_assignment_corrupt=true".to_string());
+                }
+                if pending.assignment.is_none() {
+                    let refreshed = PendingVerifier {
+                        assignment_id: assignment_id.to_string(),
+                        arguments: pending.arguments,
+                        assignment: Some(assignment.clone()),
+                    };
+                    let now_epoch_seconds = (self.now_epoch_seconds)();
+                    let revision = persist_authoritative_session(
+                        &state,
+                        self.pending_verifiers.get(session_id),
+                        Some(&refreshed),
+                        now_epoch_seconds,
+                        Some(&state),
+                        self.session_revisions.get(session_id).copied(),
+                    )?;
+                    self.session_revisions
+                        .insert(session_id.to_string(), revision);
+                    self.pending_delta_risks
+                        .insert(session_id.to_string(), refreshed);
+                }
+                json!([assignment])
+            } else {
+                json!([])
+            };
         let revision = self.session_revisions.get(session_id).copied().unwrap_or(1);
         let pending_transition = if self.pending_verifiers.contains_key(session_id) {
             "verifier_required"
@@ -445,7 +481,8 @@ impl ReviewCoordinator {
                 "session_id": session_id,
                 "revision": revision,
                 "state": state,
-                "pending_transition": pending_transition
+                "pending_transition": pending_transition,
+                "delta_risk_assignments": delta_risk_assignments
             })
             .to_string(),
         ))
@@ -595,6 +632,7 @@ impl ReviewCoordinator {
             let pending = PendingVerifier {
                 assignment_id,
                 arguments: expected_arguments,
+                assignment: None,
             };
             let authoritative_state = arguments.get("state").unwrap_or(&state);
             let revision = persist_authoritative_session(
@@ -624,6 +662,7 @@ impl ReviewCoordinator {
             let pending = PendingVerifier {
                 assignment_id,
                 arguments: expected_arguments,
+                assignment: payload.pointer("/delta_risk_assignments/0").cloned(),
             };
             let authoritative_state = arguments.get("state").unwrap_or(&state);
             let revision = persist_authoritative_session(
@@ -738,6 +777,48 @@ fn pending_delta_risk_non_scope_arguments(arguments: &Value) -> Result<Value, St
         fields.remove(field);
     }
     Ok(core)
+}
+
+fn pending_delta_risk_assignment(
+    state: &Value,
+    pending: &PendingVerifier,
+) -> Result<Value, String> {
+    if let Some(assignment) = &pending.assignment {
+        return Ok(assignment.clone());
+    }
+
+    let current_diff_hash = pending
+        .arguments
+        .get("current_diff_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "pending_delta_risk_current_diff_hash_required=true".to_string())?;
+    let current_changed_files = strict_string_array(
+        pending.arguments.get("current_changed_files"),
+        "pending_delta_risk_current_changed_files",
+    )?
+    .ok_or_else(|| "pending_delta_risk_current_changed_files_required=true".to_string())?;
+    let current_shared_test_evidence = pending
+        .arguments
+        .get("current_shared_test_evidence")
+        .ok_or_else(|| "pending_delta_risk_shared_test_evidence_required=true".to_string())?;
+    let prior_diff_hash = state
+        .pointer("/scope/diff_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "pending_delta_risk_prior_diff_hash_required=true".to_string())?;
+    let current_delta_evidence = generated_delta_evidence(
+        state,
+        prior_diff_hash,
+        current_diff_hash,
+        &current_changed_files,
+    )?;
+    let (_, assignment) = delta_risk_assignment(
+        state,
+        current_diff_hash,
+        &current_changed_files,
+        current_shared_test_evidence,
+        &current_delta_evidence,
+    )?;
+    Ok(assignment)
 }
 
 fn tool_error_code(message: &str) -> i64 {
@@ -6823,6 +6904,7 @@ fn decoded_pending_assignment(encoded: Option<String>) -> Result<Option<PendingV
                     .get("arguments")
                     .cloned()
                     .ok_or_else(|| "review_session_pending_arguments_missing=true".to_string())?,
+                assignment: value.get("assignment").cloned(),
             })
         })
         .transpose()
@@ -23404,6 +23486,105 @@ pre_filter = "project-pre"
         assert_eq!(payload["state"], plan["state"]);
         assert_eq!(payload["session_id"], session_id);
         assert_eq!(payload["revision"], 1);
+    }
+
+    #[test]
+    fn json_rpc_resume_returns_pending_delta_assignment_after_coordinator_restart() {
+        let session_id = format!("resumable-delta-review-{}", std::process::id());
+        let project_root = test_project_root("resumable-delta-review");
+        let plan_arguments = assessed_plan_arguments_for_diff_at_root(
+            &session_id,
+            "resumable-delta-review-v1",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            Some(&project_root),
+        );
+        let mut original = ReviewCoordinator::default();
+        let planned = original
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": plan_arguments }
+            }))
+            .expect("plan response");
+        let plan: Value = serde_json::from_str(
+            planned["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+        let replacement_diff_hash = "resumable-delta-review-v2";
+        let resubmission = json!({
+            "state": plan["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let required = original
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": { "name": "final_review.advance", "arguments": resubmission }
+            }))
+            .expect("delta assessment request");
+        let required: Value = serde_json::from_str(
+            required["result"]["content"][0]["text"]
+                .as_str()
+                .expect("delta assessment text"),
+        )
+        .expect("delta assessment json");
+
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.resume",
+                    "arguments": { "session_id": session_id, "project_root": project_root }
+                }
+            }))
+            .expect("resume response");
+        let resumed: Value = serde_json::from_str(
+            resumed["result"]["content"][0]["text"]
+                .as_str()
+                .expect("resume text"),
+        )
+        .expect("resume json");
+        assert_eq!(
+            resumed["pending_transition"],
+            "delta_risk_assessment_required"
+        );
+        assert_eq!(
+            resumed["delta_risk_assignments"],
+            required["delta_risk_assignments"]
+        );
+
+        let mut resumed_resubmission = resubmission;
+        resumed_resubmission["delta_risk_assessment"] = delta_risk_assessment_for(
+            &resumed["delta_risk_assignments"][0],
+            "medium",
+            &[("correctness-behavior", "medium")],
+            &["correctness-behavior"],
+            json!([]),
+        );
+        let advanced = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": { "name": "final_review.advance", "arguments": resumed_resubmission }
+            }))
+            .expect("resumed delta reassessment");
+        assert!(
+            advanced.get("result").is_some(),
+            "the resumed assignment must be accepted: {advanced}"
+        );
     }
 
     #[test]
