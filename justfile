@@ -7,7 +7,12 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace bootstrap-development-system node-tests github-actions beads-formulas development-discipline-rust development-discipline-release-from-source development-discipline-release-complete bats
+ci: pre-commit development-discipline-release-from-source
+
+# Every deterministic local check suitable for a commit hook.  The
+# source/distribution parity probe is deliberately CI-only because it performs
+# a release build and black-box integration run.
+pre-commit: validate-marketplace bootstrap-development-system node-tests github-actions beads-formulas development-discipline-rust development-discipline-release-complete bats
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:

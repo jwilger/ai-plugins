@@ -1,6 +1,11 @@
 assert_lefthook_installed: true
 no_auto_install: true
 
+pre-commit:
+  jobs:
+    - name: complete-local-gate
+      run: scripts/pre-commit-gate.sh
+
 post-checkout:
   jobs:
     - name: worktree-bootstrap
