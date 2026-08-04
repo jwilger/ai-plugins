@@ -432,40 +432,47 @@ impl ReviewCoordinator {
                 "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
                     .to_string()
             })?;
-        let delta_risk_assignments =
-            if let Some(pending) = self.pending_delta_risks.get(session_id).cloned() {
-                let assignment = pending_delta_risk_assignment(&state, &pending)?;
-                let assignment_id = assignment
-                    .get("assignment_id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| "pending_delta_risk_assignment_id_required=true".to_string())?;
-                if pending.assignment.is_some() && assignment_id != pending.assignment_id {
-                    return Err("pending_delta_risk_assignment_corrupt=true".to_string());
+        let delta_risk_assignments = if let Some(pending) =
+            self.pending_delta_risks.get(session_id).cloned()
+        {
+            let assignment = pending_delta_risk_assignment(&state, &pending)?;
+            let assignment_id = assignment
+                .get("assignment_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "pending_delta_risk_assignment_id_required=true".to_string())?;
+            if pending.assignment.is_some() && assignment_id != pending.assignment_id {
+                return Err("pending_delta_risk_assignment_corrupt=true".to_string());
+            }
+            if pending.assignment.is_none() {
+                if assignment_id != pending.assignment_id {
+                    return Err(
+                        "legacy_pending_delta_assignment_unrecoverable=true recovery=resubmit_fresh_scope_without_assessment"
+                            .to_string(),
+                    );
                 }
-                if pending.assignment.is_none() {
-                    let refreshed = PendingVerifier {
-                        assignment_id: assignment_id.to_string(),
-                        arguments: pending.arguments,
-                        assignment: Some(assignment.clone()),
-                    };
-                    let now_epoch_seconds = (self.now_epoch_seconds)();
-                    let revision = persist_authoritative_session(
-                        &state,
-                        self.pending_verifiers.get(session_id),
-                        Some(&refreshed),
-                        now_epoch_seconds,
-                        Some(&state),
-                        self.session_revisions.get(session_id).copied(),
-                    )?;
-                    self.session_revisions
-                        .insert(session_id.to_string(), revision);
-                    self.pending_delta_risks
-                        .insert(session_id.to_string(), refreshed);
-                }
-                json!([assignment])
-            } else {
-                json!([])
-            };
+                let refreshed = PendingVerifier {
+                    assignment_id: assignment_id.to_string(),
+                    arguments: pending.arguments,
+                    assignment: Some(assignment.clone()),
+                };
+                let now_epoch_seconds = (self.now_epoch_seconds)();
+                let revision = persist_authoritative_session(
+                    &state,
+                    self.pending_verifiers.get(session_id),
+                    Some(&refreshed),
+                    now_epoch_seconds,
+                    Some(&state),
+                    self.session_revisions.get(session_id).copied(),
+                )?;
+                self.session_revisions
+                    .insert(session_id.to_string(), revision);
+                self.pending_delta_risks
+                    .insert(session_id.to_string(), refreshed);
+            }
+            json!([assignment])
+        } else {
+            json!([])
+        };
         let revision = self.session_revisions.get(session_id).copied().unwrap_or(1);
         let pending_transition = if self.pending_verifiers.contains_key(session_id) {
             "verifier_required"
@@ -23584,6 +23591,75 @@ pre_filter = "project-pre"
         assert!(
             advanced.get("result").is_some(),
             "the resumed assignment must be accepted: {advanced}"
+        );
+    }
+
+    #[test]
+    fn json_rpc_resume_rejects_an_unrecoverable_legacy_delta_assignment() {
+        let session_id = format!("unrecoverable-legacy-delta-{}", std::process::id());
+        let project_root = test_project_root("unrecoverable-legacy-delta");
+        let plan_arguments = assessed_plan_arguments_for_diff_at_root(
+            &session_id,
+            "unrecoverable-legacy-delta-v1",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+            Some(&project_root),
+        );
+        let mut original = ReviewCoordinator::default();
+        let planned = original
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": plan_arguments }
+            }))
+            .expect("plan response");
+        let plan: Value = serde_json::from_str(
+            planned["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+        let replacement_diff_hash = "unrecoverable-legacy-delta-v2";
+        let resubmission = json!({
+            "state": plan["state"],
+            "lens_results": [],
+            "current_diff_hash": replacement_diff_hash,
+            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+        });
+        let legacy_pending = PendingVerifier {
+            assignment_id: "legacy-assignment-id-that-cannot-match".to_string(),
+            arguments: pending_delta_risk_core_arguments(&resubmission)
+                .expect("legacy pending arguments"),
+            assignment: None,
+        };
+        persist_authoritative_session(
+            &plan["state"],
+            None,
+            Some(&legacy_pending),
+            1,
+            Some(&plan["state"]),
+            Some(1),
+        )
+        .expect("persist legacy pending delta");
+
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.resume",
+                    "arguments": { "session_id": session_id, "project_root": project_root }
+                }
+            }))
+            .expect("resume response");
+        assert_eq!(
+            resumed["error"]["message"],
+            "legacy_pending_delta_assignment_unrecoverable=true recovery=resubmit_fresh_scope_without_assessment"
         );
     }
 
