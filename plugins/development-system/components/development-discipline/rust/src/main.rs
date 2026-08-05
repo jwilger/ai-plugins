@@ -6,16 +6,24 @@ use std::collections::{
 };
 use std::env;
 use std::ffi::OsStr;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use eventcore::{
+    execute, Command, CommandError, CommandLogic, Event, NewEvents, RetryPolicy, StreamId,
+};
+use eventcore_sqlite::{
+    rusqlite::{self, params, Connection, OpenFlags, OptionalExtension},
+    SqliteConfig, SqliteEventStore,
+};
+use fs2::FileExt;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const DEFAULT_BASE: &str = "origin/main";
@@ -108,6 +116,682 @@ const EXCEPTIONAL_RISK_TRIGGERS: &[&str] = &[
     "safety-critical-behavior",
 ];
 
+const FINAL_REVIEW_CATALOG_STREAM: &str = "development-discipline:final-review-catalog";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EventMetadata {
+    revision: u64,
+    updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PlanTransitionFacts {
+    arguments: Value,
+    review_started_at_epoch_seconds: u64,
+    planned_state: Value,
+    metadata: EventMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AdvanceTransitionFacts {
+    arguments_without_state: Value,
+    now_epoch_seconds: u64,
+    resulting_state: Value,
+    metadata: EventMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IterationAcceptedFacts {
+    transition: AdvanceTransitionFacts,
+    iteration_index: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DeltaRiskResolvedFacts {
+    transition: AdvanceTransitionFacts,
+    assignment_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VerifierResolvedFacts {
+    transition: AdvanceTransitionFacts,
+    assignment_id: String,
+    status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BudgetDecisionResolvedFacts {
+    transition: AdvanceTransitionFacts,
+    decision: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ConfirmSplitTransitionFacts {
+    confirmation_without_state: Value,
+    confirmed_state: Value,
+    metadata: EventMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingRequestFacts {
+    assignment_id: String,
+    arguments: Value,
+    metadata: EventMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BudgetDecisionRequestedFacts {
+    checkpoint_minutes: u64,
+    allowed_decisions: Vec<String>,
+    metadata: EventMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScopeSplitHeldFacts {
+    candidates: Vec<Value>,
+    metadata: EventMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReviewCompletedFacts {
+    iteration_index: u64,
+    clean_streak: u64,
+    metadata: EventMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LegacyImportFacts {
+    imported_state: Value,
+    pending_verifier: Option<PendingVerifier>,
+    pending_delta_risk: Option<PendingVerifier>,
+    metadata: EventMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum FinalReviewEvent {
+    ReviewPlanned {
+        stream: StreamId,
+        facts: PlanTransitionFacts,
+    },
+    ScopeSplitHeld {
+        stream: StreamId,
+        facts: ScopeSplitHeldFacts,
+    },
+    ScopeSplitConfirmed {
+        stream: StreamId,
+        facts: ConfirmSplitTransitionFacts,
+    },
+    IterationAccepted {
+        stream: StreamId,
+        facts: IterationAcceptedFacts,
+    },
+    DeltaRiskRequested {
+        stream: StreamId,
+        facts: PendingRequestFacts,
+    },
+    DeltaRiskResolved {
+        stream: StreamId,
+        facts: DeltaRiskResolvedFacts,
+    },
+    VerifierRequested {
+        stream: StreamId,
+        facts: PendingRequestFacts,
+    },
+    VerifierResolved {
+        stream: StreamId,
+        facts: VerifierResolvedFacts,
+    },
+    BudgetDecisionRequested {
+        stream: StreamId,
+        facts: BudgetDecisionRequestedFacts,
+    },
+    BudgetDecisionResolved {
+        stream: StreamId,
+        facts: BudgetDecisionResolvedFacts,
+    },
+    ReviewCompleted {
+        stream: StreamId,
+        facts: ReviewCompletedFacts,
+    },
+    LegacyReviewImported {
+        stream: StreamId,
+        facts: LegacyImportFacts,
+    },
+    CatalogSessionTouched {
+        stream: StreamId,
+        session_id: String,
+        updated_at: u64,
+        revision: u64,
+    },
+    CatalogSessionRetired {
+        stream: StreamId,
+        session_id: String,
+    },
+}
+
+impl FinalReviewEvent {
+    fn metadata(&self) -> Option<&EventMetadata> {
+        match self {
+            Self::ReviewPlanned { facts, .. } => Some(&facts.metadata),
+            Self::ScopeSplitHeld { facts, .. } => Some(&facts.metadata),
+            Self::ScopeSplitConfirmed { facts, .. } => Some(&facts.metadata),
+            Self::IterationAccepted { facts, .. } => Some(&facts.transition.metadata),
+            Self::DeltaRiskRequested { facts, .. } => Some(&facts.metadata),
+            Self::DeltaRiskResolved { facts, .. } => Some(&facts.transition.metadata),
+            Self::VerifierRequested { facts, .. } => Some(&facts.metadata),
+            Self::VerifierResolved { facts, .. } => Some(&facts.transition.metadata),
+            Self::BudgetDecisionRequested { facts, .. } => Some(&facts.metadata),
+            Self::BudgetDecisionResolved { facts, .. } => Some(&facts.transition.metadata),
+            Self::ReviewCompleted { facts, .. } => Some(&facts.metadata),
+            Self::LegacyReviewImported { facts, .. } => Some(&facts.metadata),
+            Self::CatalogSessionTouched { .. } | Self::CatalogSessionRetired { .. } => None,
+        }
+    }
+}
+
+impl Event for FinalReviewEvent {
+    fn stream_id(&self) -> &StreamId {
+        match self {
+            Self::ReviewPlanned { stream, .. }
+            | Self::ScopeSplitHeld { stream, .. }
+            | Self::ScopeSplitConfirmed { stream, .. }
+            | Self::IterationAccepted { stream, .. }
+            | Self::DeltaRiskRequested { stream, .. }
+            | Self::DeltaRiskResolved { stream, .. }
+            | Self::VerifierRequested { stream, .. }
+            | Self::VerifierResolved { stream, .. }
+            | Self::BudgetDecisionRequested { stream, .. }
+            | Self::BudgetDecisionResolved { stream, .. }
+            | Self::ReviewCompleted { stream, .. }
+            | Self::LegacyReviewImported { stream, .. }
+            | Self::CatalogSessionTouched { stream, .. }
+            | Self::CatalogSessionRetired { stream, .. } => stream,
+        }
+    }
+
+    fn event_type_name() -> &'static str {
+        "DevelopmentDisciplineFinalReviewEvent"
+    }
+}
+
+#[derive(Clone)]
+struct ReviewSessionProjection {
+    state: Value,
+    pending_verifier: Option<PendingVerifier>,
+    pending_delta_risk: Option<PendingVerifier>,
+    revision: u64,
+    updated_at: u64,
+}
+
+#[derive(Default, Clone)]
+struct ReviewEventState {
+    session: Option<ReviewSessionProjection>,
+    catalog: HashMap<String, (u64, u64)>,
+}
+
+fn apply_review_event(
+    mut state: ReviewEventState,
+    session_stream: &StreamId,
+    event: &FinalReviewEvent,
+) -> ReviewEventState {
+    if event.stream_id() == session_stream {
+        if let Some(metadata) = event.metadata() {
+            let mut session = state.session.unwrap_or_else(|| ReviewSessionProjection {
+                state: json!({}),
+                pending_verifier: None,
+                pending_delta_risk: None,
+                revision: 0,
+                updated_at: 0,
+            });
+            let transition_not_yet_applied = session.revision != metadata.revision;
+            match event {
+                FinalReviewEvent::ReviewPlanned { facts, .. } => {
+                    if transition_not_yet_applied {
+                        session.state = facts.planned_state.clone();
+                        session.pending_verifier = None;
+                        session.pending_delta_risk = None;
+                    }
+                }
+                FinalReviewEvent::ScopeSplitConfirmed { facts, .. } => {
+                    if transition_not_yet_applied {
+                        session.state = facts.confirmed_state.clone();
+                    }
+                }
+                FinalReviewEvent::IterationAccepted { facts, .. } => {
+                    if transition_not_yet_applied {
+                        session.state = facts.transition.resulting_state.clone();
+                        session.pending_verifier = None;
+                        session.pending_delta_risk = None;
+                    }
+                }
+                FinalReviewEvent::DeltaRiskResolved { facts, .. } => {
+                    if transition_not_yet_applied {
+                        session.state = facts.transition.resulting_state.clone();
+                        session.pending_verifier = None;
+                        session.pending_delta_risk = None;
+                    }
+                }
+                FinalReviewEvent::VerifierResolved { facts, .. } => {
+                    if transition_not_yet_applied {
+                        session.state = facts.transition.resulting_state.clone();
+                        session.pending_verifier = None;
+                        session.pending_delta_risk = None;
+                    }
+                }
+                FinalReviewEvent::BudgetDecisionResolved { facts, .. } => {
+                    if transition_not_yet_applied {
+                        session.state = facts.transition.resulting_state.clone();
+                        session.pending_verifier = None;
+                        session.pending_delta_risk = None;
+                    }
+                }
+                FinalReviewEvent::DeltaRiskRequested { facts, .. } => {
+                    session.pending_delta_risk = Some(PendingVerifier {
+                        assignment_id: facts.assignment_id.clone(),
+                        arguments: facts.arguments.clone(),
+                    });
+                }
+                FinalReviewEvent::VerifierRequested { facts, .. } => {
+                    session.pending_verifier = Some(PendingVerifier {
+                        assignment_id: facts.assignment_id.clone(),
+                        arguments: facts.arguments.clone(),
+                    });
+                }
+                FinalReviewEvent::LegacyReviewImported { facts, .. } => {
+                    if transition_not_yet_applied {
+                        session.state = facts.imported_state.clone();
+                        session.pending_verifier = facts.pending_verifier.clone();
+                        session.pending_delta_risk = facts.pending_delta_risk.clone();
+                    }
+                }
+                FinalReviewEvent::ScopeSplitHeld { .. }
+                | FinalReviewEvent::BudgetDecisionRequested { .. }
+                | FinalReviewEvent::ReviewCompleted { .. }
+                | FinalReviewEvent::CatalogSessionTouched { .. }
+                | FinalReviewEvent::CatalogSessionRetired { .. } => {}
+            }
+            session.revision = metadata.revision;
+            session.updated_at = metadata.updated_at;
+            state.session = Some(session);
+        }
+    }
+    match event {
+        FinalReviewEvent::CatalogSessionTouched {
+            session_id,
+            updated_at,
+            revision,
+            ..
+        } => {
+            state
+                .catalog
+                .insert(session_id.clone(), (*updated_at, *revision));
+        }
+        FinalReviewEvent::CatalogSessionRetired { session_id, .. } => {
+            state.catalog.remove(session_id);
+        }
+        _ => {}
+    }
+    state
+}
+
+fn command_events(
+    state: &ReviewEventState,
+    session_stream: &StreamId,
+    catalog_stream: &StreamId,
+    session_id: &str,
+    expected_revision: Option<u64>,
+    expected_state: Option<&Value>,
+    domain_events: Vec<FinalReviewEvent>,
+) -> Result<NewEvents<FinalReviewEvent>, CommandError> {
+    let actual_revision = state.session.as_ref().map_or(0, |session| session.revision);
+    match expected_revision {
+        None if state.session.is_some() => {
+            return Err("review_session_exists=true recovery=resume_existing_review_or_abandon_it_before_restarting".into());
+        }
+        Some(expected) if expected != actual_revision => {
+            return Err("review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review".into());
+        }
+        _ => {}
+    }
+    if let Some(expected_state) = expected_state {
+        if state.session.as_ref().map(|session| &session.state) != Some(expected_state) {
+            return Err("review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review".into());
+        }
+    }
+    let metadata = domain_events
+        .last()
+        .and_then(FinalReviewEvent::metadata)
+        .ok_or_else(|| CommandError::ValidationError("review event payload missing".to_string()))?;
+    let updated_at = metadata.updated_at;
+    let revision = metadata.revision;
+    let mut events = domain_events;
+    events.push(FinalReviewEvent::CatalogSessionTouched {
+        stream: catalog_stream.clone(),
+        session_id: session_id.to_string(),
+        updated_at,
+        revision,
+    });
+
+    let mut catalog = state.catalog.clone();
+    catalog.insert(session_id.to_string(), (updated_at, revision));
+    if catalog.len() > MAX_DURABLE_REVIEW_SESSIONS {
+        let retired = catalog
+            .iter()
+            .filter(|(candidate, _)| candidate.as_str() != session_id)
+            .min_by_key(|(candidate, (updated_at, revision))| {
+                (*updated_at, *revision, candidate.as_str())
+            })
+            .map(|(candidate, _)| candidate.clone());
+        if let Some(retired) = retired {
+            events.push(FinalReviewEvent::CatalogSessionRetired {
+                stream: catalog_stream.clone(),
+                session_id: retired,
+            });
+        }
+    }
+    let _ = session_stream;
+    Ok(events.into())
+}
+
+macro_rules! review_command {
+    ($name:ident) => {
+        #[derive(Command)]
+        struct $name {
+            #[stream]
+            session_stream: StreamId,
+            #[stream]
+            catalog_stream: StreamId,
+            session_id: String,
+            expected_revision: Option<u64>,
+            expected_state: Option<Value>,
+            events: Vec<FinalReviewEvent>,
+        }
+
+        impl CommandLogic for $name {
+            type Event = FinalReviewEvent;
+            type State = ReviewEventState;
+
+            fn apply(&self, state: Self::State, event: &Self::Event) -> Self::State {
+                apply_review_event(state, &self.session_stream, event)
+            }
+
+            fn handle(&self, state: Self::State) -> Result<NewEvents<Self::Event>, CommandError> {
+                command_events(
+                    &state,
+                    &self.session_stream,
+                    &self.catalog_stream,
+                    &self.session_id,
+                    self.expected_revision,
+                    self.expected_state.as_ref(),
+                    self.events.clone(),
+                )
+            }
+        }
+    };
+}
+
+review_command!(PlanFinalReview);
+review_command!(AdvanceFinalReview);
+review_command!(ConfirmFinalReviewSplit);
+review_command!(ImportLegacyFinalReview);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReviewEventKind {
+    Planned,
+    SplitHeld,
+    SplitConfirmed,
+    IterationAccepted,
+    DeltaRiskRequested,
+    DeltaRiskResolved,
+    VerifierRequested,
+    VerifierResolved,
+    BudgetDecisionRequested,
+    BudgetDecisionResolved,
+    Completed,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transition_event_kinds(
+    tool_name: &str,
+    transition_status: Option<&str>,
+    advance_kind: Option<&str>,
+    requests_budget_decision: bool,
+    planned_split_hold: bool,
+    resolves_verifier: bool,
+    resolves_delta_risk: bool,
+    resolves_budget_decision: bool,
+    completes_review: bool,
+) -> Vec<ReviewEventKind> {
+    if tool_name == "final_review.plan" {
+        let mut kinds = vec![ReviewEventKind::Planned];
+        if requests_budget_decision {
+            kinds.push(ReviewEventKind::BudgetDecisionRequested);
+        }
+        if planned_split_hold {
+            kinds.push(ReviewEventKind::SplitHeld);
+        }
+        return kinds;
+    }
+    if tool_name == "final_review.confirm_split" {
+        return vec![ReviewEventKind::SplitConfirmed];
+    }
+    let mut kinds = Vec::new();
+    if resolves_budget_decision {
+        kinds.push(ReviewEventKind::BudgetDecisionResolved);
+    }
+    if resolves_verifier {
+        kinds.push(ReviewEventKind::VerifierResolved);
+    }
+    if resolves_delta_risk {
+        kinds.push(ReviewEventKind::DeltaRiskResolved);
+    }
+    if advance_kind != Some("review_budget_decision") {
+        kinds.push(ReviewEventKind::IterationAccepted);
+    }
+    if requests_budget_decision {
+        kinds.push(ReviewEventKind::BudgetDecisionRequested);
+    }
+    if transition_status == Some("split_confirmation_required") {
+        kinds.push(ReviewEventKind::SplitHeld);
+    }
+    if completes_review {
+        kinds.push(ReviewEventKind::Completed);
+    }
+    kinds
+}
+
+fn arguments_without_state(arguments: &Value) -> Result<Value, String> {
+    let mut arguments = arguments.clone();
+    arguments
+        .as_object_mut()
+        .ok_or_else(|| "review_event_arguments_object_required=true".to_string())?
+        .remove("state");
+    Ok(arguments)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn semantic_review_events(
+    stream: &StreamId,
+    kinds: &[ReviewEventKind],
+    command_arguments: &Value,
+    result_payload: &Value,
+    resulting_state: &Value,
+    pending_verifier: Option<&PendingVerifier>,
+    pending_delta_risk: Option<&PendingVerifier>,
+    metadata: &EventMetadata,
+) -> Result<Vec<FinalReviewEvent>, String> {
+    let advance_transition = AdvanceTransitionFacts {
+        arguments_without_state: arguments_without_state(command_arguments)?,
+        now_epoch_seconds: metadata.updated_at,
+        resulting_state: resulting_state.clone(),
+        metadata: metadata.clone(),
+    };
+    kinds
+        .iter()
+        .copied()
+        .map(|kind| {
+            let event = match kind {
+                ReviewEventKind::Planned => FinalReviewEvent::ReviewPlanned {
+                    stream: stream.clone(),
+                    facts: PlanTransitionFacts {
+                        arguments: command_arguments.clone(),
+                        review_started_at_epoch_seconds: metadata.updated_at,
+                        planned_state: resulting_state.clone(),
+                        metadata: metadata.clone(),
+                    },
+                },
+                ReviewEventKind::SplitHeld => FinalReviewEvent::ScopeSplitHeld {
+                    stream: stream.clone(),
+                    facts: ScopeSplitHeldFacts {
+                        candidates: result_payload
+                            .pointer("/scope_split/candidates")
+                            .or_else(|| {
+                                resulting_state.pointer("/risk_plan/scope_split/candidates")
+                            })
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default(),
+                        metadata: metadata.clone(),
+                    },
+                },
+                ReviewEventKind::SplitConfirmed => FinalReviewEvent::ScopeSplitConfirmed {
+                    stream: stream.clone(),
+                    facts: ConfirmSplitTransitionFacts {
+                        confirmation_without_state: arguments_without_state(command_arguments)?,
+                        confirmed_state: resulting_state.clone(),
+                        metadata: metadata.clone(),
+                    },
+                },
+                ReviewEventKind::IterationAccepted => FinalReviewEvent::IterationAccepted {
+                    stream: stream.clone(),
+                    facts: IterationAcceptedFacts {
+                        transition: advance_transition.clone(),
+                        iteration_index: resulting_state
+                            .get("iteration_index")
+                            .and_then(Value::as_u64)
+                            .ok_or_else(|| "iteration_accepted_index_required=true".to_string())?,
+                    },
+                },
+                ReviewEventKind::DeltaRiskRequested => {
+                    let pending = pending_delta_risk
+                        .ok_or_else(|| "delta_risk_request_facts_required=true".to_string())?;
+                    FinalReviewEvent::DeltaRiskRequested {
+                        stream: stream.clone(),
+                        facts: PendingRequestFacts {
+                            assignment_id: pending.assignment_id.clone(),
+                            arguments: pending.arguments.clone(),
+                            metadata: metadata.clone(),
+                        },
+                    }
+                }
+                ReviewEventKind::DeltaRiskResolved => FinalReviewEvent::DeltaRiskResolved {
+                    stream: stream.clone(),
+                    facts: DeltaRiskResolvedFacts {
+                        transition: advance_transition.clone(),
+                        assignment_id: command_arguments
+                            .pointer("/delta_risk_assessment/assignment_id")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| {
+                                "delta_risk_resolved_assignment_required=true".to_string()
+                            })?
+                            .to_string(),
+                    },
+                },
+                ReviewEventKind::VerifierRequested => {
+                    let pending = pending_verifier
+                        .ok_or_else(|| "verifier_request_facts_required=true".to_string())?;
+                    FinalReviewEvent::VerifierRequested {
+                        stream: stream.clone(),
+                        facts: PendingRequestFacts {
+                            assignment_id: pending.assignment_id.clone(),
+                            arguments: pending.arguments.clone(),
+                            metadata: metadata.clone(),
+                        },
+                    }
+                }
+                ReviewEventKind::VerifierResolved => FinalReviewEvent::VerifierResolved {
+                    stream: stream.clone(),
+                    facts: VerifierResolvedFacts {
+                        transition: advance_transition.clone(),
+                        assignment_id: command_arguments
+                            .pointer("/verifier_result/assignment_id")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| {
+                                "verifier_resolved_assignment_required=true".to_string()
+                            })?
+                            .to_string(),
+                        status: command_arguments
+                            .pointer("/verifier_result/status")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| "verifier_resolved_status_required=true".to_string())?
+                            .to_string(),
+                    },
+                },
+                ReviewEventKind::BudgetDecisionRequested => {
+                    FinalReviewEvent::BudgetDecisionRequested {
+                        stream: stream.clone(),
+                        facts: BudgetDecisionRequestedFacts {
+                            checkpoint_minutes: result_payload
+                                .pointer("/review_budget/checkpoint_minutes")
+                                .or_else(|| {
+                                    resulting_state
+                                        .pointer("/risk_plan/review_budget/checkpoint_minutes")
+                                })
+                                .and_then(Value::as_u64)
+                                .ok_or_else(|| {
+                                    "budget_request_checkpoint_required=true".to_string()
+                                })?,
+                            allowed_decisions: result_payload
+                                .pointer("/review_budget/allowed_decisions")
+                                .and_then(Value::as_array)
+                                .into_iter()
+                                .flatten()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect(),
+                            metadata: metadata.clone(),
+                        },
+                    }
+                }
+                ReviewEventKind::BudgetDecisionResolved => {
+                    FinalReviewEvent::BudgetDecisionResolved {
+                        stream: stream.clone(),
+                        facts: BudgetDecisionResolvedFacts {
+                            transition: advance_transition.clone(),
+                            decision: command_arguments
+                                .get("review_budget_decision")
+                                .cloned()
+                                .filter(Value::is_object)
+                                .ok_or_else(|| {
+                                    "budget_resolution_decision_required=true".to_string()
+                                })?,
+                        },
+                    }
+                }
+                ReviewEventKind::Completed => FinalReviewEvent::ReviewCompleted {
+                    stream: stream.clone(),
+                    facts: ReviewCompletedFacts {
+                        iteration_index: resulting_state
+                            .get("iteration_index")
+                            .and_then(Value::as_u64)
+                            .ok_or_else(|| {
+                                "review_completed_iteration_required=true".to_string()
+                            })?,
+                        clean_streak: resulting_state
+                            .get("clean_streak")
+                            .and_then(Value::as_u64)
+                            .ok_or_else(|| {
+                                "review_completed_clean_streak_required=true".to_string()
+                            })?,
+                        metadata: metadata.clone(),
+                    },
+                },
+            };
+            Ok(event)
+        })
+        .collect()
+}
+
 fn main() {
     if let Err(error) = run_stdio(io::stdin().lock(), io::stdout().lock()) {
         eprintln!("development-discipline.mcp.error {error}");
@@ -198,7 +882,7 @@ impl Default for ReviewCoordinator {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct PendingVerifier {
     assignment_id: String,
     arguments: Value,
@@ -285,6 +969,11 @@ impl ReviewCoordinator {
                 if !matches!(name, "final_review.plan" | "final_review.assess_risk") {
                     if let Err(error) = self.validate_authoritative_state(name, &arguments) {
                         return Ok(error_response(id, -32602, &error));
+                    }
+                }
+                if name == "final_review.out_of_scope_report" {
+                    if let Err(error) = repair_projection_before_read(&arguments) {
+                        return Ok(error_response(id, -32603, &error));
                     }
                 }
                 let now_epoch_seconds = (self.now_epoch_seconds)();
@@ -478,6 +1167,9 @@ impl ReviewCoordinator {
                 now_epoch_seconds,
                 Some(authoritative_state),
                 self.session_revisions.get(&session_id).copied(),
+                vec![ReviewEventKind::VerifierRequested],
+                arguments,
+                &payload,
             )?;
             self.session_revisions.insert(session_id.clone(), revision);
             self.pending_verifiers.insert(session_id.clone(), pending);
@@ -507,6 +1199,9 @@ impl ReviewCoordinator {
                 now_epoch_seconds,
                 Some(authoritative_state),
                 self.session_revisions.get(&session_id).copied(),
+                vec![ReviewEventKind::DeltaRiskRequested],
+                arguments,
+                &payload,
             )?;
             self.session_revisions.insert(session_id.clone(), revision);
             self.pending_delta_risks.insert(session_id.clone(), pending);
@@ -526,6 +1221,19 @@ impl ReviewCoordinator {
         } else {
             arguments.get("state")
         };
+        let event_kinds = transition_event_kinds(
+            tool_name,
+            payload.get("transition_status").and_then(Value::as_str),
+            payload.get("advance_kind").and_then(Value::as_str),
+            review_budget_checkpoint_pending(&state),
+            scope_split_hold_active(&state),
+            arguments.get("verifier_result").is_some(),
+            arguments.get("delta_risk_assessment").is_some(),
+            arguments
+                .get("state")
+                .is_some_and(review_budget_checkpoint_pending),
+            review_state_complete(&state),
+        );
         let revision = persist_authoritative_session(
             &state,
             None,
@@ -533,6 +1241,9 @@ impl ReviewCoordinator {
             now_epoch_seconds,
             expected_prior,
             self.session_revisions.get(&session_id).copied(),
+            event_kinds,
+            arguments,
+            &payload,
         )?;
         self.session_revisions.insert(session_id.clone(), revision);
         self.sessions.insert(session_id.clone(), state.clone());
@@ -1149,8 +1860,8 @@ fn validated_shared_test_evidence(
     Ok(normalized)
 }
 
-fn git_command(project_root: &Path) -> Command {
-    let mut command = Command::new("git");
+fn git_command(project_root: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new("git");
     command
         .arg("-c")
         .arg("core.fsmonitor=false")
@@ -1164,7 +1875,67 @@ fn git_command(project_root: &Path) -> Command {
         .env("GIT_COMMITTER_NAME", "Development Discipline")
         .env("GIT_COMMITTER_EMAIL", "development-discipline@localhost")
         .env("GIT_COMMITTER_DATE", "@0 +0000");
+    #[cfg(test)]
+    configure_test_git_object_overlay(&mut command, project_root);
     command
+}
+
+#[cfg(test)]
+static TEST_TEMP_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+#[cfg(test)]
+extern "C" fn remove_test_temp_root_at_exit() {
+    if let Some(path) = TEST_TEMP_ROOT.get() {
+        let _ = fs::remove_dir_all(path);
+    }
+}
+
+#[cfg(test)]
+fn test_temp_root() -> &'static Path {
+    TEST_TEMP_ROOT
+        .get_or_init(|| {
+            let path = tempfile::Builder::new()
+                .prefix("development-discipline-tests-")
+                .tempdir()
+                .expect("create process-owned Development Discipline test directory")
+                .keep();
+            // SAFETY: the callback has C ABI, captures no stack state, reads only
+            // process-lifetime static data, and is registered exactly once by
+            // OnceLock initialization. Cleanup is confined to this unique test root.
+            let registered = unsafe { libc::atexit(remove_test_temp_root_at_exit) };
+            assert_eq!(registered, 0, "register test temporary-directory cleanup");
+            path
+        })
+        .as_path()
+}
+
+#[cfg(test)]
+fn configure_test_git_object_overlay(command: &mut ProcessCommand, project_root: &Path) {
+    let common_dir = ProcessCommand::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|path| PathBuf::from(path.trim()));
+    let Some(common_dir) = common_dir else {
+        return;
+    };
+    let source_objects = common_dir.join("objects");
+    let overlay = test_temp_root()
+        .join("git-objects")
+        .join(stable_storage_digest(&[
+            "development-discipline-test-git-overlay-v1",
+            &project_root.to_string_lossy(),
+        ]));
+    if fs::create_dir_all(&overlay).is_err() {
+        return;
+    }
+    command
+        .env("GIT_OBJECT_DIRECTORY", overlay)
+        .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", source_objects);
 }
 
 fn run_git(
@@ -6480,6 +7251,9 @@ fn durable_report_database_path(
     project_root: &str,
     work_item_id: Option<&str>,
 ) -> Result<PathBuf, String> {
+    #[cfg(test)]
+    let state_root = test_temp_root().join("state");
+    #[cfg(not(test))]
     let state_root = durable_report_state_root(
         env::var_os("XDG_STATE_HOME")
             .filter(|value| !value.is_empty())
@@ -6488,16 +7262,10 @@ fn durable_report_database_path(
             .filter(|value| !value.is_empty())
             .map(PathBuf::from),
     )?;
-    let test_process_scope = if cfg!(test) {
-        std::process::id().to_string()
-    } else {
-        String::new()
-    };
     let storage_key = stable_storage_digest(&[
         "development-discipline-final-review-report-v1",
         project_root,
         work_item_id.unwrap_or(""),
-        &test_process_scope,
     ]);
     Ok(state_root
         .join("development-discipline/final-review-reports")
@@ -6584,9 +7352,24 @@ fn initialize_durable_report_schema(connection: &Connection) -> Result<(), Strin
             , revision INTEGER NOT NULL DEFAULT 1
         );
     ";
+    const EVENT_PROJECTION_TABLES: &str = "
+        CREATE TABLE IF NOT EXISTS final_review_session_projection (
+            session_id TEXT PRIMARY KEY,
+            state_json TEXT NOT NULL,
+            pending_verifier_json TEXT,
+            pending_delta_risk_json TEXT,
+            updated_at INTEGER NOT NULL,
+            revision INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS final_review_catalog_projection (
+            session_id TEXT PRIMARY KEY,
+            updated_at INTEGER NOT NULL,
+            revision INTEGER NOT NULL
+        );
+    ";
     connection
         .execute_batch(&format!(
-            "PRAGMA journal_mode = WAL; {SNAPSHOT_TABLE} {SESSION_TABLE}"
+            "PRAGMA journal_mode = WAL; {SNAPSHOT_TABLE} {SESSION_TABLE} {EVENT_PROJECTION_TABLES}"
         ))
         .map_err(|error| format!("durable_report_schema_failed source={error}"))?;
     let has_complete_schema = connection
@@ -6663,6 +7446,10 @@ fn decoded_pending_assignment(encoded: Option<String>) -> Result<Option<PendingV
         .transpose()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the persistence boundary receives the complete typed transition context"
+)]
 fn persist_authoritative_session(
     state: &Value,
     pending_verifier: Option<&PendingVerifier>,
@@ -6670,6 +7457,9 @@ fn persist_authoritative_session(
     updated_at: u64,
     expected_prior_state: Option<&Value>,
     expected_revision: Option<u64>,
+    event_kinds: Vec<ReviewEventKind>,
+    command_arguments: &Value,
+    result_payload: &Value,
 ) -> Result<u64, String> {
     let project_root = state
         .pointer("/scope/project_root")
@@ -6688,58 +7478,31 @@ fn persist_authoritative_session(
         .ok_or_else(|| "review_session_directory_missing=true".to_string())?;
     fs::create_dir_all(directory)
         .map_err(|error| format!("review_session_directory_create_failed source={error}"))?;
-    let mut connection = Connection::open_with_flags(
-        &path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(|error| format!("review_session_open_failed source={error}"))?;
-    initialize_durable_report_schema(&connection)?;
-    let state_json = serde_json::to_string(state)
-        .map_err(|error| format!("review_session_encode_failed source={error}"))?;
-    let pending_verifier_json = encoded_pending_assignment(pending_verifier)?;
-    let pending_delta_risk_json = encoded_pending_assignment(pending_delta_risk)?;
-    let transaction = connection
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|error| format!("review_session_transaction_failed source={error}"))?;
     let next_revision = expected_revision.unwrap_or(0).saturating_add(1);
-    let changed = if let Some(expected_prior_state) = expected_prior_state {
-        let expected_json = serde_json::to_string(expected_prior_state)
-            .map_err(|error| format!("review_session_encode_failed source={error}"))?;
-        transaction
-            .execute(
-                "UPDATE final_review_session SET state_json = ?2, pending_verifier_json = ?3, pending_delta_risk_json = ?4, updated_at = ?5, revision = ?7 WHERE session_id = ?1 AND state_json = ?6 AND revision = ?8",
-                params![session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, expected_json, next_revision, expected_revision],
-            )
-            .map_err(|error| format!("review_session_write_failed source={error}"))?
-    } else {
-        transaction
-            .execute(
-                "INSERT OR IGNORE INTO final_review_session (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, next_revision],
-            )
-            .map_err(|error| format!("review_session_write_failed source={error}"))?
+    let _lock = lock_review_database(&path)?;
+    let metadata = EventMetadata {
+        revision: next_revision,
+        updated_at,
     };
-    if changed == 0 {
-        return Err(if expected_prior_state.is_some() {
-            "review_state_out_of_sync=true recovery=resume_latest_state_or_abandon_stale_review"
-                .to_string()
-        } else {
-            "review_session_exists=true recovery=resume_existing_review_or_abandon_it_before_restarting"
-                .to_string()
-        });
-    }
-    replace_durable_out_of_scope_report(&transaction, state)?;
-    transaction
-        .execute(
-            "DELETE FROM final_review_session WHERE session_id <> ?1 AND session_id NOT IN (SELECT session_id FROM final_review_session WHERE session_id <> ?1 ORDER BY updated_at DESC, revision DESC, session_id DESC LIMIT ?2)",
-            params![session_id, MAX_DURABLE_REVIEW_SESSIONS.saturating_sub(1)],
-        )
-        .map_err(|error| format!("review_session_prune_failed source={error}"))?;
-    transaction
-        .commit()
-        .map_err(|error| format!("review_session_commit_failed source={error}"))?;
+    let session_stream = review_stream_id(session_id)?;
+    let events = semantic_review_events(
+        &session_stream,
+        &event_kinds,
+        command_arguments,
+        result_payload,
+        state,
+        pending_verifier,
+        pending_delta_risk,
+        &metadata,
+    )?;
+    execute_review_events(
+        &path,
+        session_id,
+        events,
+        expected_prior_state.cloned(),
+        expected_revision,
+    )?;
+    project_committed_review(&path, session_id);
     Ok(next_revision)
 }
 
@@ -6758,24 +7521,221 @@ fn load_authoritative_session(
     if !path.exists() {
         return Ok(None);
     }
-    let connection = Connection::open_with_flags(
-        &path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(|error| format!("review_session_open_failed source={error}"))?;
-    connection
+    load_authoritative_session_from_path(&path, session_id)
+}
+
+fn load_authoritative_session_from_path(
+    path: &Path,
+    session_id: &str,
+) -> Result<Option<RestoredReviewSession>, String> {
+    let _lock = lock_review_database(path)?;
+    initialize_event_store(path)?;
+    rebuild_review_projections(path, Some(session_id))?;
+    if let Some(restored) = read_projected_session(path, session_id)? {
+        return Ok(Some(restored));
+    }
+
+    let connection = open_review_connection(path)?;
+    let session_stream = review_stream_id(session_id)?;
+    let already_event_sourced = connection
         .query_row(
-            "SELECT state_json, pending_verifier_json, pending_delta_risk_json, revision FROM final_review_session WHERE session_id = ?1",
-            params![session_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, u64>(3)?,
-                ))
-            },
+            "SELECT 1 FROM eventcore_events WHERE stream_id = ?1 LIMIT 1",
+            params![session_stream.as_ref()],
+            |_| Ok(()),
         )
+        .optional()
+        .map_err(|error| format!("review_session_event_check_failed source={error}"))?
+        .is_some();
+    if already_event_sourced {
+        return Ok(None);
+    }
+    let legacy = read_session_row(&connection, "final_review_session", session_id)?;
+    drop(connection);
+    let Some(legacy) = legacy else {
+        return Ok(None);
+    };
+    let stream = review_stream_id(session_id)?;
+    execute_review_events(
+        path,
+        session_id,
+        vec![FinalReviewEvent::LegacyReviewImported {
+            stream,
+            facts: LegacyImportFacts {
+                imported_state: legacy.state.clone(),
+                pending_verifier: legacy.pending_verifier.clone(),
+                pending_delta_risk: legacy.pending_delta_risk.clone(),
+                metadata: EventMetadata {
+                    revision: legacy.revision,
+                    updated_at: current_epoch_seconds(),
+                },
+            },
+        }],
+        None,
+        None,
+    )?;
+    rebuild_review_projections(path, Some(session_id))?;
+    read_projected_session(path, session_id)
+}
+
+struct ReviewDatabaseLock(fs::File);
+
+impl Drop for ReviewDatabaseLock {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
+}
+
+fn lock_review_database(path: &Path) -> Result<ReviewDatabaseLock, String> {
+    let lock_path = PathBuf::from(format!("{}.eventcore.lock", path.to_string_lossy()));
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .map_err(|error| format!("review_session_lock_open_failed source={error}"))?;
+    FileExt::lock_exclusive(&file)
+        .map_err(|error| format!("review_session_lock_failed source={error}"))?;
+    Ok(ReviewDatabaseLock(file))
+}
+
+fn open_review_connection(path: &Path) -> Result<Connection, String> {
+    Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(|error| format!("review_session_open_failed source={error}"))
+}
+
+fn review_runtime() -> Result<tokio::runtime::Runtime, String> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .map_err(|error| format!("review_event_runtime_failed source={error}"))
+}
+
+fn initialize_event_store(path: &Path) -> Result<(), String> {
+    let connection = open_review_connection(path)?;
+    initialize_durable_report_schema(&connection)?;
+    drop(connection);
+    let store = SqliteEventStore::new(SqliteConfig {
+        path: path.to_path_buf(),
+        encryption_key: None,
+    })
+    .map_err(|error| format!("review_event_store_open_failed source={error}"))?;
+    review_runtime()?
+        .block_on(store.migrate())
+        .map_err(|error| format!("review_event_store_migrate_failed source={error}"))
+}
+
+fn review_stream_id(session_id: &str) -> Result<StreamId, String> {
+    StreamId::try_new(format!(
+        "development-discipline:final-review:{}",
+        stable_storage_digest(&["development-discipline-final-review-stream-v1", session_id])
+    ))
+    .map_err(|error| format!("review_event_stream_id_failed source={error}"))
+}
+
+fn catalog_stream_id() -> Result<StreamId, String> {
+    StreamId::try_new(FINAL_REVIEW_CATALOG_STREAM)
+        .map_err(|error| format!("review_catalog_stream_id_failed source={error}"))
+}
+
+fn execute_review_events(
+    path: &Path,
+    session_id: &str,
+    events: Vec<FinalReviewEvent>,
+    expected_state: Option<Value>,
+    expected_revision: Option<u64>,
+) -> Result<(), String> {
+    initialize_event_store(path)?;
+    let session_stream = review_stream_id(session_id)?;
+    let catalog_stream = catalog_stream_id()?;
+    let primary = events.first().ok_or_else(|| {
+        "review_event_command_requires_at_least_one_semantic_event=true".to_string()
+    })?;
+    let store = SqliteEventStore::new(SqliteConfig {
+        path: path.to_path_buf(),
+        encryption_key: None,
+    })
+    .map_err(|error| format!("review_event_store_open_failed source={error}"))?;
+    let runtime = review_runtime()?;
+    let policy = RetryPolicy::new().max_retries(4);
+    let result = match primary {
+        FinalReviewEvent::ReviewPlanned { .. } => runtime.block_on(execute(
+            store,
+            PlanFinalReview {
+                session_stream,
+                catalog_stream,
+                session_id: session_id.to_string(),
+                expected_revision,
+                expected_state,
+                events,
+            },
+            policy,
+        )),
+        FinalReviewEvent::ScopeSplitConfirmed { .. } => runtime.block_on(execute(
+            store,
+            ConfirmFinalReviewSplit {
+                session_stream,
+                catalog_stream,
+                session_id: session_id.to_string(),
+                expected_revision,
+                expected_state,
+                events,
+            },
+            policy,
+        )),
+        FinalReviewEvent::LegacyReviewImported { .. } => runtime.block_on(execute(
+            store,
+            ImportLegacyFinalReview {
+                session_stream,
+                catalog_stream,
+                session_id: session_id.to_string(),
+                expected_revision,
+                expected_state,
+                events,
+            },
+            policy,
+        )),
+        _ => runtime.block_on(execute(
+            store,
+            AdvanceFinalReview {
+                session_stream,
+                catalog_stream,
+                session_id: session_id.to_string(),
+                expected_revision,
+                expected_state,
+                events,
+            },
+            policy,
+        )),
+    };
+    result
+        .map(|_| ())
+        .map_err(|error| format!("review_event_command_failed source={error}"))
+}
+
+fn read_session_row(
+    connection: &Connection,
+    table: &str,
+    session_id: &str,
+) -> Result<Option<RestoredReviewSession>, String> {
+    let sql = format!(
+        "SELECT state_json, pending_verifier_json, pending_delta_risk_json, revision FROM {table} WHERE session_id = ?1"
+    );
+    connection
+        .query_row(&sql, params![session_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, u64>(3)?,
+            ))
+        })
         .optional()
         .map_err(|error| format!("review_session_read_failed source={error}"))?
         .map(|(state, verifier, delta, revision)| {
@@ -6788,6 +7748,163 @@ fn load_authoritative_session(
             })
         })
         .transpose()
+}
+
+fn read_projected_session(
+    path: &Path,
+    session_id: &str,
+) -> Result<Option<RestoredReviewSession>, String> {
+    let connection = open_review_connection(path)?;
+    read_session_row(&connection, "final_review_session_projection", session_id)
+}
+
+fn projection_pending_path(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.projection-pending", path.to_string_lossy()))
+}
+
+fn repair_projection_before_read(arguments: &Value) -> Result<(), String> {
+    let state = arguments
+        .get("state")
+        .ok_or_else(|| "state is required".to_string())?;
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
+    let session_id = state
+        .get("session_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_session_id_required=true".to_string())?;
+    let path = durable_report_database_path(
+        project_root,
+        state.get("work_item_id").and_then(Value::as_str),
+    )?;
+    let _lock = lock_review_database(&path)?;
+    rebuild_review_projections(&path, Some(session_id))
+        .map_err(|error| format!("review_projection_repair_required=true source={error}"))?;
+    match fs::remove_file(projection_pending_path(&path)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "review_projection_repair_marker_remove_failed source={error}"
+        )),
+    }
+}
+
+fn project_committed_review(path: &Path, session_id: &str) {
+    let marker = projection_pending_path(path);
+    match rebuild_review_projections(path, Some(session_id)) {
+        Ok(()) => {
+            let _ = fs::remove_file(marker);
+        }
+        Err(_) => {
+            // The append is already committed. Projection repair is deliberately
+            // separate so a transient read-model failure cannot be reported as
+            // a failed command and prompt an unsafe duplicate retry.
+            let _ = fs::write(marker, b"final-review-projection-rebuild-required\n");
+        }
+    }
+}
+
+fn rebuild_review_projections(path: &Path, addressed_session: Option<&str>) -> Result<(), String> {
+    let mut connection = open_review_connection(path)?;
+    initialize_durable_report_schema(&connection)?;
+    let catalog_stream = catalog_stream_id()?;
+    let mut catalog = HashMap::<String, (u64, u64)>::new();
+    {
+        let mut statement = connection
+            .prepare("SELECT event_data FROM eventcore_events WHERE stream_id = ?1 ORDER BY stream_version")
+            .map_err(|error| format!("review_catalog_projection_prepare_failed source={error}"))?;
+        let rows = statement
+            .query_map(params![catalog_stream.as_ref()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|error| format!("review_catalog_projection_read_failed source={error}"))?;
+        for row in rows {
+            let encoded = row
+                .map_err(|error| format!("review_catalog_projection_read_failed source={error}"))?;
+            let event: FinalReviewEvent = serde_json::from_str(&encoded).map_err(|error| {
+                format!("review_catalog_projection_parse_failed source={error}")
+            })?;
+            match event {
+                FinalReviewEvent::CatalogSessionTouched {
+                    session_id,
+                    updated_at,
+                    revision,
+                    ..
+                } => {
+                    catalog.insert(session_id, (updated_at, revision));
+                }
+                FinalReviewEvent::CatalogSessionRetired { session_id, .. } => {
+                    catalog.remove(&session_id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let session_projection = addressed_session
+        .map(|session_id| -> Result<Option<ReviewSessionProjection>, String> {
+            let stream = review_stream_id(session_id)?;
+            let mut statement = connection
+                .prepare("SELECT event_data FROM eventcore_events WHERE stream_id = ?1 ORDER BY stream_version")
+                .map_err(|error| format!("review_session_projection_prepare_failed source={error}"))?;
+            let rows = statement
+                .query_map(params![stream.as_ref()], |row| row.get::<_, String>(0))
+                .map_err(|error| format!("review_session_projection_read_failed source={error}"))?;
+            let mut projected = ReviewEventState::default();
+            for row in rows {
+                let encoded = row.map_err(|error| format!("review_session_projection_read_failed source={error}"))?;
+                let event: FinalReviewEvent = serde_json::from_str(&encoded).map_err(|error| {
+                    format!("review_session_projection_parse_failed source={error}")
+                })?;
+                projected = apply_review_event(projected, &stream, &event);
+            }
+            Ok(projected.session)
+        })
+        .transpose()?
+        .flatten();
+
+    let transaction = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| format!("review_projection_transaction_failed source={error}"))?;
+    transaction
+        .execute("DELETE FROM final_review_catalog_projection", [])
+        .map_err(|error| format!("review_catalog_projection_write_failed source={error}"))?;
+    for (session_id, (updated_at, revision)) in &catalog {
+        transaction
+            .execute(
+                "INSERT INTO final_review_catalog_projection (session_id, updated_at, revision) VALUES (?1, ?2, ?3)",
+                params![session_id, updated_at, revision],
+            )
+            .map_err(|error| format!("review_catalog_projection_write_failed source={error}"))?;
+    }
+    transaction
+        .execute(
+            "DELETE FROM final_review_session_projection WHERE session_id NOT IN (SELECT session_id FROM final_review_catalog_projection)",
+            [],
+        )
+        .map_err(|error| format!("review_session_projection_prune_failed source={error}"))?;
+    if let (Some(session_id), Some(projected)) = (addressed_session, session_projection) {
+        if catalog.contains_key(session_id) {
+            transaction
+                .execute(
+                    "INSERT INTO final_review_session_projection (session_id, state_json, pending_verifier_json, pending_delta_risk_json, updated_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(session_id) DO UPDATE SET state_json = excluded.state_json, pending_verifier_json = excluded.pending_verifier_json, pending_delta_risk_json = excluded.pending_delta_risk_json, updated_at = excluded.updated_at, revision = excluded.revision",
+                    params![
+                        session_id,
+                        serde_json::to_string(&projected.state).map_err(|error| format!("review_session_encode_failed source={error}"))?,
+                        encoded_pending_assignment(projected.pending_verifier.as_ref())?,
+                        encoded_pending_assignment(projected.pending_delta_risk.as_ref())?,
+                        projected.updated_at,
+                        projected.revision,
+                    ],
+                )
+                .map_err(|error| format!("review_session_projection_write_failed source={error}"))?;
+            replace_durable_out_of_scope_report(&transaction, &projected.state)?;
+        }
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("review_projection_commit_failed source={error}"))
 }
 
 fn retain_latest(values: &mut Vec<Value>, maximum: usize) {
@@ -18708,6 +19825,13 @@ pre_filter = "project-pre"
         )
         .expect("plan json");
         let state = plan["state"].clone();
+        assert_eq!(
+            load_authoritative_session(&state, "json-rpc-budget-checkpoint")
+                .expect("event projection load")
+                .expect("event projection")
+                .state,
+            state
+        );
         clock.store(5_500, Ordering::SeqCst);
 
         let checkpoint_response = coordinator
@@ -18764,6 +19888,44 @@ pre_filter = "project-pre"
         .expect("ship json");
         assert_eq!(shipped["advance_kind"], "review_budget_decision");
         assert_eq!(shipped["complete"], true);
+        let project_root = shipped["state"]["scope"]["project_root"]
+            .as_str()
+            .expect("project root");
+        let path = durable_report_database_path(project_root, None).expect("event database path");
+        let connection = open_review_connection(&path).expect("event database");
+        let stream = review_stream_id("json-rpc-budget-checkpoint").expect("session stream");
+        let encoded: Vec<String> = connection
+            .prepare(
+                "SELECT event_data FROM eventcore_events WHERE stream_id = ?1 ORDER BY stream_version",
+            )
+            .expect("history query")
+            .query_map(params![stream.as_ref()], |row| row.get(0))
+            .expect("history rows")
+            .collect::<Result<_, _>>()
+            .expect("history payloads");
+        let history: Vec<&str> = encoded
+            .iter()
+            .map(|encoded| {
+                match serde_json::from_str::<FinalReviewEvent>(encoded).expect("semantic event") {
+                    FinalReviewEvent::ReviewPlanned { .. } => "planned",
+                    FinalReviewEvent::IterationAccepted { .. } => "iteration-accepted",
+                    FinalReviewEvent::BudgetDecisionRequested { .. } => "budget-requested",
+                    FinalReviewEvent::BudgetDecisionResolved { .. } => "budget-resolved",
+                    FinalReviewEvent::ReviewCompleted { .. } => "completed",
+                    _ => "other",
+                }
+            })
+            .collect();
+        assert_eq!(
+            history,
+            vec![
+                "planned",
+                "iteration-accepted",
+                "budget-requested",
+                "budget-resolved",
+                "completed",
+            ]
+        );
     }
 
     #[test]
@@ -23233,5 +24395,427 @@ pre_filter = "project-pre"
             .expect("terminal advance response");
 
         assert_eq!(response["error"]["message"], "review_session_complete=true");
+    }
+
+    fn event_sourced_test_state(root: &Path, session_id: &str) -> Value {
+        json!({
+            "session_id": session_id,
+            "scope": { "project_root": root.to_string_lossy() },
+            "report_binding_id": format!("binding-{session_id}"),
+            "out_of_scope_report": []
+        })
+    }
+
+    #[test]
+    fn process_owned_test_root_is_removed_when_the_test_process_exits() {
+        const CHILD_WITNESS: &str = "DEVELOPMENT_DISCIPLINE_TEST_ROOT_WITNESS";
+        if let Some(witness) = env::var_os(CHILD_WITNESS) {
+            let root = test_temp_root();
+            fs::write(witness, root.as_os_str().as_encoded_bytes())
+                .expect("record child test root");
+            assert!(root.exists(), "child test root exists before process exit");
+            return;
+        }
+
+        let witness_directory = tempfile::tempdir().expect("cleanup witness directory");
+        let witness = witness_directory.path().join("test-root-path");
+        let output = ProcessCommand::new(env::current_exe().expect("current test executable"))
+            .args([
+                "--exact",
+                "tests::process_owned_test_root_is_removed_when_the_test_process_exits",
+                "--nocapture",
+            ])
+            .env(CHILD_WITNESS, &witness)
+            .output()
+            .expect("run cleanup child process");
+        assert!(
+            output.status.success(),
+            "cleanup child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let root = PathBuf::from(
+            fs::read_to_string(&witness)
+                .expect("read child test root")
+                .trim(),
+        );
+        assert!(
+            !root.exists(),
+            "atexit cleanup must remove the child test root: {}",
+            root.display()
+        );
+    }
+
+    #[test]
+    fn final_review_commands_append_semantic_events_and_reject_stale_revisions() {
+        let directory = tempfile::tempdir().expect("temporary event store");
+        let path = directory.path().join("review.sqlite");
+        let arguments = assessed_plan_arguments(
+            "semantic-review",
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let planned: Value =
+            serde_json::from_str(&plan_result_at(&arguments, 10).unwrap()).expect("planned review");
+        let state = planned["state"].clone();
+        let stream = review_stream_id("semantic-review").expect("session stream");
+        let _lock = lock_review_database(&path).expect("database lock");
+
+        execute_review_events(
+            &path,
+            "semantic-review",
+            vec![FinalReviewEvent::ReviewPlanned {
+                stream: stream.clone(),
+                facts: PlanTransitionFacts {
+                    arguments: arguments.clone(),
+                    review_started_at_epoch_seconds: 10,
+                    planned_state: state.clone(),
+                    metadata: EventMetadata {
+                        revision: 1,
+                        updated_at: 10,
+                    },
+                },
+            }],
+            None,
+            None,
+        )
+        .expect("plan command");
+        rebuild_review_projections(&path, Some("semantic-review")).expect("plan projection");
+
+        let stale = execute_review_events(
+            &path,
+            "semantic-review",
+            vec![FinalReviewEvent::ReviewPlanned {
+                stream,
+                facts: PlanTransitionFacts {
+                    arguments,
+                    review_started_at_epoch_seconds: 10,
+                    planned_state: state.clone(),
+                    metadata: EventMetadata {
+                        revision: 1,
+                        updated_at: 10,
+                    },
+                },
+            }],
+            None,
+            None,
+        )
+        .expect_err("duplicate plan");
+        assert!(stale.contains("review_session_exists=true"), "{stale}");
+
+        let connection = open_review_connection(&path).expect("event database");
+        let encoded: Vec<String> = connection
+            .prepare("SELECT event_data FROM eventcore_events ORDER BY rowid")
+            .expect("event query")
+            .query_map([], |row| row.get(0))
+            .expect("event rows")
+            .collect::<Result<_, _>>()
+            .expect("event payloads");
+        let events: Vec<FinalReviewEvent> = encoded
+            .iter()
+            .map(|event| serde_json::from_str(event).expect("semantic event"))
+            .collect();
+        assert!(matches!(events[0], FinalReviewEvent::ReviewPlanned { .. }));
+        assert!(encoded.iter().all(|event| !event.contains("\"changes\":")));
+        assert_eq!(
+            events.len(),
+            2,
+            "one atomic command emits session and catalog events"
+        );
+        rebuild_review_projections(&path, Some("semantic-review")).expect("replay projection");
+        assert_eq!(
+            read_projected_session(&path, "semantic-review")
+                .expect("projected read")
+                .expect("projected session")
+                .state,
+            state
+        );
+    }
+
+    #[test]
+    fn review_event_replay_uses_the_recorded_semantic_outcome_only() {
+        let stream = review_stream_id("pure-replay").expect("session stream");
+        let recorded_state = json!({
+            "session_id": "pure-replay",
+            "recorded": "outcome"
+        });
+        let projected = apply_review_event(
+            ReviewEventState::default(),
+            &stream,
+            &FinalReviewEvent::ReviewPlanned {
+                stream: stream.clone(),
+                facts: PlanTransitionFacts {
+                    arguments: json!({
+                        "project_root": "/path/that/replay/must/not/inspect",
+                        "changed_files": "deliberately-invalid-transition-input"
+                    }),
+                    review_started_at_epoch_seconds: 10,
+                    planned_state: recorded_state.clone(),
+                    metadata: EventMetadata {
+                        revision: 1,
+                        updated_at: 10,
+                    },
+                },
+            },
+        );
+
+        let session = projected.session.expect("recorded projection");
+        assert_eq!(session.state, recorded_state);
+        assert_eq!(session.revision, 1);
+    }
+
+    #[test]
+    fn projection_failure_after_commit_is_deferred_and_repairable() {
+        let root = test_project_root("projection-repair");
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "projection-repair",
+            "project_root": root
+        })))
+        .expect("planned review");
+        let mut invalid_state = planned["state"].clone();
+        invalid_state["out_of_scope_report"] = json!([{ "finding": {} }]);
+        let path = durable_report_database_path(
+            root.to_str().expect("project root"),
+            invalid_state.get("work_item_id").and_then(Value::as_str),
+        )
+        .expect("review database path");
+        fs::create_dir_all(path.parent().expect("review database directory"))
+            .expect("review database directory");
+        let session_id = invalid_state["session_id"]
+            .as_str()
+            .expect("planned session id")
+            .to_string();
+        let stream = review_stream_id(&session_id).expect("session stream");
+        let _lock = lock_review_database(&path).expect("database lock");
+        execute_review_events(
+            &path,
+            &session_id,
+            vec![FinalReviewEvent::LegacyReviewImported {
+                stream: stream.clone(),
+                facts: LegacyImportFacts {
+                    imported_state: invalid_state.clone(),
+                    pending_verifier: None,
+                    pending_delta_risk: None,
+                    metadata: EventMetadata {
+                        revision: 1,
+                        updated_at: 1,
+                    },
+                },
+            }],
+            None,
+            None,
+        )
+        .expect("committed plan");
+
+        project_committed_review(&path, &session_id);
+        assert!(projection_pending_path(&path).exists());
+        let connection = open_review_connection(&path).expect("committed database");
+        let committed: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM eventcore_events WHERE stream_id = ?1",
+                params![review_stream_id(&session_id).unwrap().as_ref()],
+                |row| row.get(0),
+            )
+            .expect("committed event count");
+        assert_eq!(
+            committed, 1,
+            "projection failure cannot roll back the command"
+        );
+        drop(connection);
+        drop(_lock);
+
+        let mut coordinator = ReviewCoordinator::default();
+        coordinator
+            .sessions
+            .insert(session_id.to_string(), invalid_state.clone());
+        coordinator
+            .session_revisions
+            .insert(session_id.to_string(), 1);
+        let pure_status = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.clean_status",
+                    "arguments": { "state": invalid_state.clone() }
+                }
+            }))
+            .expect("pure clean-status MCP response");
+        assert!(pure_status.get("error").is_none(), "{pure_status}");
+
+        let stale_read = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.out_of_scope_report",
+                    "arguments": { "state": invalid_state.clone() }
+                }
+            }))
+            .expect("projection-gated MCP response");
+        assert!(stale_read.get("result").is_none(), "{stale_read}");
+        assert!(
+            stale_read
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .is_some_and(|message| message.contains("review_projection_repair_required=true")),
+            "{stale_read}"
+        );
+
+        let mut repaired_state = invalid_state.clone();
+        repaired_state["out_of_scope_report"] = json!([]);
+        execute_review_events(
+            &path,
+            &session_id,
+            vec![FinalReviewEvent::LegacyReviewImported {
+                stream,
+                facts: LegacyImportFacts {
+                    imported_state: repaired_state.clone(),
+                    pending_verifier: None,
+                    pending_delta_risk: None,
+                    metadata: EventMetadata {
+                        revision: 2,
+                        updated_at: 2,
+                    },
+                },
+            }],
+            Some(invalid_state),
+            Some(1),
+        )
+        .expect("repair command");
+        project_committed_review(&path, &session_id);
+        assert!(!projection_pending_path(&path).exists());
+        assert_eq!(
+            read_projected_session(&path, &session_id)
+                .expect("repaired projection read")
+                .expect("repaired projection")
+                .state,
+            repaired_state
+        );
+        coordinator
+            .sessions
+            .insert(session_id.to_string(), repaired_state.clone());
+        coordinator
+            .session_revisions
+            .insert(session_id.to_string(), 2);
+        let repaired_read = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.out_of_scope_report",
+                    "arguments": { "state": repaired_state }
+                }
+            }))
+            .expect("repaired MCP response");
+        assert!(repaired_read.get("error").is_none(), "{repaired_read}");
+    }
+
+    #[test]
+    fn addressed_legacy_session_import_is_idempotent_and_leaves_legacy_row_inert() {
+        let directory = tempfile::tempdir().expect("temporary legacy store");
+        let path = directory.path().join("review.sqlite");
+        let state = event_sourced_test_state(directory.path(), "legacy-review");
+        let connection = open_review_connection(&path).expect("legacy database");
+        initialize_durable_report_schema(&connection).expect("legacy schema");
+        connection
+            .execute(
+                "INSERT INTO final_review_session (session_id, state_json, updated_at, revision) VALUES (?1, ?2, ?3, ?4)",
+                params!["legacy-review", serde_json::to_string(&state).unwrap(), 7, 3],
+            )
+            .expect("legacy row");
+        drop(connection);
+        assert_eq!(
+            load_authoritative_session_from_path(&path, "legacy-review")
+                .expect("first addressed load")
+                .expect("imported session")
+                .revision,
+            3
+        );
+        assert_eq!(
+            load_authoritative_session_from_path(&path, "legacy-review")
+                .expect("second addressed load")
+                .expect("projected session")
+                .revision,
+            3
+        );
+
+        let connection = open_review_connection(&path).expect("imported database");
+        let imported_events: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM eventcore_events WHERE event_data LIKE '%LegacyReviewImported%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("import event count");
+        let legacy_rows: u64 = connection
+            .query_row("SELECT COUNT(*) FROM final_review_session", [], |row| {
+                row.get(0)
+            })
+            .expect("legacy row count");
+        assert_eq!(imported_events, 1);
+        assert_eq!(legacy_rows, 1, "legacy storage remains untouched");
+        assert_eq!(
+            read_session_row(
+                &connection,
+                "final_review_session_projection",
+                "legacy-review"
+            )
+            .expect("projection query")
+            .expect("projection")
+            .revision,
+            3
+        );
+    }
+
+    #[test]
+    fn catalog_retention_retires_only_the_oldest_projection() {
+        let session_stream = review_stream_id("newest").expect("session stream");
+        let catalog_stream = catalog_stream_id().expect("catalog stream");
+        let mut state = ReviewEventState::default();
+        for index in 0..MAX_DURABLE_REVIEW_SESSIONS {
+            state
+                .catalog
+                .insert(format!("session-{index:04}"), (index as u64, 1));
+        }
+        let arguments = assessed_plan_arguments(
+            "newest",
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let events: Vec<FinalReviewEvent> = Vec::from(
+            command_events(
+                &state,
+                &session_stream,
+                &catalog_stream,
+                "newest",
+                None,
+                None,
+                vec![FinalReviewEvent::ReviewPlanned {
+                    stream: session_stream.clone(),
+                    facts: PlanTransitionFacts {
+                        arguments,
+                        review_started_at_epoch_seconds: MAX_DURABLE_REVIEW_SESSIONS as u64,
+                        planned_state: json!({ "session_id": "newest" }),
+                        metadata: EventMetadata {
+                            revision: 1,
+                            updated_at: MAX_DURABLE_REVIEW_SESSIONS as u64,
+                        },
+                    },
+                }],
+            )
+            .expect("retention command"),
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            FinalReviewEvent::CatalogSessionRetired { session_id, .. }
+                if session_id == "session-0000"
+        )));
+        assert!(matches!(events[0], FinalReviewEvent::ReviewPlanned { .. }));
     }
 }
