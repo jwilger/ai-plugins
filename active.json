@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "incident_id": "ci-31030447400",
-  "state": "waiting-ci",
+  "state": "resolved",
   "epoch": 1,
   "trigger": {
     "run_id": "31030447400",
@@ -50,5 +50,10 @@
     "sha": "4d29c1db0d0da5c9a8e5c0de79dfe42c5b37b393",
     "status": "queued"
   },
-  "release_proof": null
+  "release_proof": {
+    "replacement_run_id": "31034455488",
+    "replacement_run_url": "https://github.com/jwilger/ai-plugins/actions/runs/31034455488",
+    "sha": "4d29c1db0d0da5c9a8e5c0de79dfe42c5b37b393",
+    "terminal_status": "success"
+  }
 }
