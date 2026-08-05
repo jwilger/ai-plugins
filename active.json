@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "incident_id": "ci-31030447400",
+  "state": "diagnosing",
+  "epoch": 1,
+  "trigger": {
+    "run_id": "31030447400",
+    "run_url": "https://github.com/jwilger/ai-plugins/actions/runs/31030447400",
+    "failed_sha": "02c995b59608ff9461e0f8657401ecf34ce0d54d",
+    "workflow": "CI",
+    "git_ref": "refs/heads/main"
+  },
+  "triggers": [
+    {
+      "run_id": "31030447400",
+      "run_url": "https://github.com/jwilger/ai-plugins/actions/runs/31030447400",
+      "failed_sha": "02c995b59608ff9461e0f8657401ecf34ce0d54d",
+      "workflow": "CI",
+      "git_ref": "refs/heads/main"
+    }
+  ],
+  "owner": {
+    "host": "unknown",
+    "session": "codex-root-31030447400"
+  },
+  "lease_expires_at": 1785956509,
+  "participants": [
+    {
+      "host": "unknown",
+      "session": "codex-root-31030447400"
+    }
+  ],
+  "assignments": [],
+  "failure_record": null,
+  "diagnosis": null,
+  "next_action": null,
+  "replacement": null,
+  "release_proof": null
+}
