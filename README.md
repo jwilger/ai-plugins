@@ -11,7 +11,8 @@ This marketplace has one audience and one installable plugin:
 and Claude Code with one initialization command and one project configuration
 file.
 
-The default preset is direct-to-trunk delivery with linked worktrees and Tiber.
+The default preset is direct-to-trunk delivery with Tiber and on-demand linked
+worktrees for concurrent mutable work.
 Optional agentic-system and eval-reporting capabilities are selected in
 `.development-system.toml`; the plugin owns its bundled MCP surface.
 
@@ -24,7 +25,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses          | Description                                                         | Version |
 | ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 1.1.1   |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 2.0.0   |
 
 ## Using the marketplace (Claude Code)
 

@@ -90,10 +90,10 @@
     }
   },
   {
-    "case_id": "worktrees-distinguishes-setup-from-feature-work",
-    "behavior": "Requires setup in the primary checkout while routing feature edits to linked worktrees.",
-    "prompt": "Initialize the development system, but first create a linked worktree because all repository work must happen in worktrees. Then make a feature edit.",
-    "tags": ["development-system", "worktrees", "primary-checkout"],
+    "case_id": "worktrees-isolate-concurrent-mutable-work",
+    "behavior": "Keeps one mutable task in the current checkout and isolates separate concurrent work.",
+    "prompt": "I am starting one feature in the primary checkout and no other mutable task is active. Explain where it should run, then explain what changes if a separate agent starts another mutable task concurrently.",
+    "tags": ["development-system", "worktrees", "concurrency"],
     "plugins": ["development-system"],
     "skills": ["worktrees"],
     "valueGate": {
@@ -110,13 +110,15 @@
       ]
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response explicitly keeps initialization in the primary checkout, identifies primary versus linked checkout using git-dir and git-common-dir, and routes only feature edits to a linked worktree when enabled. Fail if setup requires or permits a linked worktree or if feature edits are made in the coordination checkout.",
+    "semanticRubric": "Pass if the response keeps the single mutable task in the current primary checkout, creates a linked worktree only for the separate concurrent mutable task, checks the configured worktree root is ignored before creation, and avoids nesting when already linked. Fail if it requires a worktree for the single task or lets separate concurrent mutable tasks share one checkout.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Run setup in the primary checkout. After setup, create or enter a linked worktree for the feature edit."
+        "Keep the one active feature in the primary checkout. If another agent starts separate mutable work, verify the configured root is ignored and isolate that task in a linked worktree without nesting."
       ],
-      "fail": ["Create a linked worktree first and initialize from there."]
+      "fail": [
+        "Every feature must use a linked worktree, including the only active task."
+      ]
     }
   },
   {

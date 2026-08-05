@@ -39,7 +39,6 @@ setup_command() {
   local delivery=direct-to-trunk
   local mode=dry-run
   local confirmed=false
-  local feature_worktrees=true
   local feature_tiber=true
   local feature_agentic_systems=false
   local feature_eval_case_reporting=false
@@ -62,7 +61,6 @@ setup_command() {
             selected=false
           fi
           case "$2" in
-            worktrees) feature_worktrees=$selected ;;
             tiber) feature_tiber=$selected ;;
             agentic-systems) feature_agentic_systems=$selected ;;
             eval-case-reporting) feature_eval_case_reporting=$selected ;;
@@ -99,8 +97,8 @@ setup_command() {
   esac
   printf 'development_system.setup_preview project=%s\n' "$project"
   printf 'delivery %s\n' "$delivery"
-  printf 'features worktrees=%s tiber=%s agentic_systems=%s eval_case_reporting=%s\n' \
-    "$feature_worktrees" "$feature_tiber" "$feature_agentic_systems" "$feature_eval_case_reporting"
+  printf 'features tiber=%s agentic_systems=%s eval_case_reporting=%s\n' \
+    "$feature_tiber" "$feature_agentic_systems" "$feature_eval_case_reporting"
   printf 'write .development-system.toml\n'
   if [[ "$mode" == "dry-run" ]]; then
     return
@@ -121,12 +119,11 @@ setup_command() {
     die "development_system.config_temp_failed project=$project"
   trap 'rm -f -- "$config_tmp"' EXIT
   {
-    printf 'schema_version = 1\n\n'
+    printf 'schema_version = 2\n\n'
     printf '[delivery]\n'
     printf 'mode = "%s"\n' "$delivery"
     printf 'trunk_branch = "main"\n\n'
     printf '[features]\n'
-    printf 'worktrees = %s\n' "$feature_worktrees"
     printf 'tiber = %s\n' "$feature_tiber"
     printf 'agentic_systems = %s\n' "$feature_agentic_systems"
     printf 'eval_case_reporting = %s\n\n' "$feature_eval_case_reporting"

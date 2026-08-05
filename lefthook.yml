@@ -3,15 +3,8 @@ no_auto_install: true
 
 pre-commit:
   jobs:
-    - name: worktree-guard
-      run: scripts/worktree-guard.sh
     - name: fast-unit-tests
       run: just fast-unit
-
-pre-push:
-  jobs:
-    - name: worktree-guard
-      run: scripts/worktree-guard.sh
 
 post-checkout:
   jobs:

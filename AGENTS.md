@@ -56,24 +56,20 @@ recreate it locally if you use direnv.
 
 ## Worktree workflow
 
-This repo is configured for parallel development from linked worktrees. The main
-checkout is the coordination checkout; feature work should happen in worktrees
-created under the ignored repo-local `.worktrees/` directory:
+Linked worktrees are optional isolation for separate mutable tasks that overlap
+across sessions or agents. Questions, read-only work, and one mutable task may
+use the current checkout, including the primary checkout. Create a worktree
+under the ignored repo-local `.worktrees/` directory when concurrency or an
+explicit user request calls for one:
 
 ```shell
 git worktree add .worktrees/<branch-name> -b <branch-name>
 ```
 
-Before making edits, agents should run:
-
-```shell
-scripts/agent-checkout-guard.sh
-```
-
-The guard exits successfully only from a linked worktree. In the main checkout
-it blocks feature work, points to the linked-worktree command above, and
-distinguishes ordinary local changes from the common case where the dirty
-worktree already matches the upstream branch after a fetch.
+Before creating one, compare Git's absolute `--git-dir` and `--git-common-dir`;
+reuse an existing linked checkout rather than nesting another. Verify
+`.worktrees/` is ignored, and preserve unrelated existing changes by isolating
+new work instead of moving or rewriting those changes.
 
 Install the committed Lefthook configuration from the main checkout:
 
@@ -91,8 +87,7 @@ because the installed runtime and configuration are shared by every worktree.
 
 The Lefthook-managed hooks do two things:
 
-- `pre-commit` and `pre-push` run `scripts/worktree-guard.sh`, which blocks
-  commits and pushes from the main checkout while allowing linked worktrees.
+- `pre-commit` runs the repository's fast local quality gate.
 - `post-checkout` runs `scripts/worktree-bootstrap.sh`, which is inert in the
   main checkout and bootstraps linked worktrees once.
 
@@ -110,26 +105,19 @@ normal exit or a crash, and the next run removes abandoned staging directories.
 
 `LEFTHOOK_CONFIG` pins the main snapshot, but Lefthook still merges a
 checkout-local `lefthook-local.yml` into delegated jobs. Treat that file as an
-intentional local override, not as part of the installed snapshot. The mandatory
-worktree safety pass runs before Lefthook. Every launcher also passes
-`--no-auto-install`, so an ordinary local `no_auto_install: false` override
-cannot replace the repository-owned launcher.
+intentional local override, not as part of the installed snapshot. Every
+launcher passes `--no-auto-install`, so an ordinary local
+`no_auto_install: false` override cannot replace the repository-owned launcher.
 
 Launchers derive Git's common directory at runtime and contain no checkout-path
 literals. If a clone is moved, rerun `just worktree-hooks` from its new location
 to repair the indirect Nix GC-root registration before the old auto-root is
 garbage-collected.
 
-The mandatory safety scripts themselves remain checkout-relative: a hook invokes
-`scripts/worktree-guard.sh` or `scripts/worktree-bootstrap.sh` from the worktree
-where Git ran it. A revision that predates or removes those scripts is not
-hook-compatible and fails closed; do not treat runtime pinning as a promise that
-arbitrary historical revisions can commit or push without the safety scripts.
-
-Each launcher runs its mandatory worktree safety check once before delegating
-to Lefthook, and the matching Lefthook job suppresses only that duplicate pass.
-This keeps normal main-checkout enforcement and linked-worktree bootstrap
-independent of Lefthook job selection while avoiding duplicate work.
+The post-checkout launcher invokes `scripts/worktree-bootstrap.sh` from the
+checkout where Git ran it before delegating to Lefthook. The retired
+`scripts/worktree-guard.sh` remains a no-op compatibility shim until old managed
+launchers have been refreshed with `just worktree-hooks`.
 
 For each linked worktree, the bootstrap:
 

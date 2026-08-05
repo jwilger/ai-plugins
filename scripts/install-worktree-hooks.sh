@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install pinned Lefthook launchers for worktree bootstrap and main-checkout enforcement.
+# Install pinned Lefthook launchers for local checks and worktree bootstrap.
 set -euo pipefail
 
 readonly expected_lefthook_version="${AI_PLUGINS_LEFTHOOK_VERSION:-}"
@@ -112,7 +112,7 @@ done
 
 stage="$(mktemp -d "$state_dir/.install-staging.XXXXXX")"
 
-for hook_name in pre-commit pre-push post-checkout; do
+for hook_name in pre-commit post-checkout; do
   target="$hooks_dir/$hook_name"
   if { [ -e "$target" ] || [ -L "$target" ]; } && [ ! -f "$target" ] && [ ! -L "$target" ]; then
     printf 'worktrees.hook_target_unsupported: %s must be a regular file or symlink.\n' "$target" >&2
@@ -152,33 +152,41 @@ write_launcher() {
   if [ "$hook_name" = post-checkout ]; then
     safety_script=scripts/worktree-bootstrap.sh
     safety_token=worktree-bootstrap
+    {
+      printf '%s\n' '#!/usr/bin/env bash'
+      printf '# ai-plugins-managed-hook:v1:%s\n' "$hook_name"
+      printf '%s\n' 'set -euo pipefail'
+      printf "LEFTHOOK_ROOT_NAME='%s'\n" "$root_name"
+      printf "SAFETY_SCRIPT='%s'\n" "$safety_script"
+      printf "SAFETY_TOKEN='%s'\n" "$safety_token"
+      printf '%s\n' 'REPO_ROOT=$(git rev-parse --show-toplevel)'
+      printf '%s\n' 'COMMON_DIR=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)'
+      printf '%s\n' 'LEFTHOOK_BIN="$COMMON_DIR/lefthook/roots/$LEFTHOOK_ROOT_NAME/bin/lefthook"'
+      printf '%s\n' 'LEFTHOOK_CONFIG="$COMMON_DIR/lefthook/lefthook.yml"'
+      printf '%s\n' 'unset AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN'
+      printf '%s\n' '"$REPO_ROOT/$SAFETY_SCRIPT" "$@"'
+      printf '%s\n' 'AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN="$SAFETY_TOKEN"'
+      printf '%s\n' 'export AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN LEFTHOOK_CONFIG'
+      printf 'exec "$LEFTHOOK_BIN" run "%s" --no-auto-install "$@"\n' "$hook_name"
+    } >"$staged_hook"
   else
-    safety_script=scripts/worktree-guard.sh
-    safety_token=worktree-guard
-  fi
-
-  {
+    {
     printf '%s\n' '#!/usr/bin/env bash'
     printf '# ai-plugins-managed-hook:v1:%s\n' "$hook_name"
     printf '%s\n' 'set -euo pipefail'
     printf "LEFTHOOK_ROOT_NAME='%s'\n" "$root_name"
-    printf "SAFETY_SCRIPT='%s'\n" "$safety_script"
-    printf "SAFETY_TOKEN='%s'\n" "$safety_token"
-    printf '%s\n' 'REPO_ROOT=$(git rev-parse --show-toplevel)'
     printf '%s\n' 'COMMON_DIR=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)'
     printf '%s\n' 'LEFTHOOK_BIN="$COMMON_DIR/lefthook/roots/$LEFTHOOK_ROOT_NAME/bin/lefthook"'
     printf '%s\n' 'LEFTHOOK_CONFIG="$COMMON_DIR/lefthook/lefthook.yml"'
-    printf '%s\n' 'unset AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN'
-    printf '%s\n' '"$REPO_ROOT/$SAFETY_SCRIPT" "$@"'
-    printf '%s\n' 'AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN="$SAFETY_TOKEN"'
-    printf '%s\n' 'export AI_PLUGINS_REQUIRED_HOOK_ALREADY_RAN LEFTHOOK_CONFIG'
+    printf '%s\n' 'export LEFTHOOK_CONFIG'
     printf 'exec "$LEFTHOOK_BIN" run "%s" --no-auto-install "$@"\n' "$hook_name"
-  } >"$staged_hook"
+    } >"$staged_hook"
+  fi
   chmod 0755 "$staged_hook"
   bash -n "$staged_hook"
 }
 
-for hook_name in pre-commit pre-push post-checkout; do
+for hook_name in pre-commit post-checkout; do
   write_launcher "$hook_name"
 done
 
@@ -206,7 +214,7 @@ next_backup_path() {
   printf '%s\n' "$backup"
 }
 
-for hook_name in pre-commit pre-push post-checkout; do
+for hook_name in pre-commit post-checkout; do
   target="$hooks_dir/$hook_name"
   if [ -e "$target" ] || [ -L "$target" ]; then
     if ! is_managed_hook "$hook_name" "$target"; then
@@ -218,7 +226,13 @@ for hook_name in pre-commit pre-push post-checkout; do
   mv --no-copy -fT -- "$stage/$hook_name" "$target"
 done
 
+target="$hooks_dir/pre-push"
+if is_managed_hook pre-push "$target"; then
+  rm -- "$target"
+  printf 'worktrees.legacy_managed_hook_removed: %s\n' "$target" >&2
+fi
+
 rm -rf -- "$stage"
 stage=""
 trap - EXIT
-printf 'installed Lefthook worktree hooks for %s using %s\n' "$repo" "$expected_lefthook_version"
+printf 'installed Lefthook checks and optional worktree bootstrap for %s using %s\n' "$repo" "$expected_lefthook_version"

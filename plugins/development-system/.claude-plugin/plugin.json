@@ -1,7 +1,7 @@
 {
   "name": "development-system",
   "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "author": {
     "name": "John Wilger",
     "email": "john@johnwilger.com"

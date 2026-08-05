@@ -2,7 +2,8 @@
 
 The single personal development plugin for Codex and Claude Code.
 
-It defaults to direct-to-trunk delivery with linked worktrees and Tiber. One
+It defaults to direct-to-trunk delivery with Tiber and on-demand linked
+worktrees for concurrent mutable work. One
 project file, `.development-system.toml`, selects optional agentic-system and
 eval-reporting capabilities.
 
@@ -18,7 +19,8 @@ confirmation, and creates exactly one initialization commit. Existing projects
 are configured from scratch; there is no legacy migration path.
 
 Use `--delivery` plus repeatable `--enable` and `--disable` options to select
-worktrees, Tiber, agentic-system guidance, and eval reporting.
+Tiber, agentic-system guidance, and eval reporting. Worktree support is always
+available and does not reserve the primary checkout.
 
 `development-system doctor --project .` reports conflicting plugins, disabled
 hook settings, managed-only hook policies, and user-managed MCP configuration.

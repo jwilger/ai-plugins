@@ -236,7 +236,7 @@ teardown() {
     >/dev/null
 }
 
-@test "setup records explicit delivery and feature selections" {
+@test "setup records delivery, optional features, and the worktree root" {
   git -C "$TEST_ROOT" init --initial-branch=main project
   git -C "$TEST_ROOT/project" config user.email test@example.com
   git -C "$TEST_ROOT/project" config user.name "Test User"
@@ -249,14 +249,14 @@ teardown() {
     --project "$TEST_ROOT/project" \
     --preset personal-trunk \
     --delivery pull-request \
-    --disable worktrees \
     --enable agentic-systems \
     --apply \
     --yes
 
   [ "$status" -eq 0 ]
   grep -Fq 'mode = "pull-request"' "$TEST_ROOT/project/.development-system.toml"
-  grep -Fq 'worktrees = false' "$TEST_ROOT/project/.development-system.toml"
+  grep -Fq 'schema_version = 2' "$TEST_ROOT/project/.development-system.toml"
+  grep -Fq 'root = ".worktrees"' "$TEST_ROOT/project/.development-system.toml"
   grep -Fq 'agentic_systems = true' "$TEST_ROOT/project/.development-system.toml"
   ! grep -Fq '[mcps]' "$TEST_ROOT/project/.development-system.toml"
 }
