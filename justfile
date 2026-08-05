@@ -9,6 +9,12 @@ default: ci
 # Full local quality gate.
 ci: validate-marketplace github-actions tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
 
+# Fast unit tests run by the pre-commit hook. Integration, release, mutation,
+# browser, and shell tests remain opt-in locally and run in the full CI gate.
+fast-unit:
+    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --workspace --lib
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --bin development-discipline-mcp
+
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
     actionlint

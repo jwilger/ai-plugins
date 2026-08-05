@@ -164,7 +164,7 @@ lefthook_root() {
   grep -Fq 'scripts/worktree-bootstrap.sh' "$REPO/.git/hooks/post-checkout"
   grep -Fq 'run "post-checkout"' "$REPO/.git/hooks/post-checkout"
 
-  [ "$(yq -o=json -I=0 '."pre-commit".jobs' "$REPO/.git/lefthook/lefthook.yml")" = '[{"name":"worktree-guard","run":"scripts/worktree-guard.sh"}]' ]
+  [ "$(yq -o=json -I=0 '."pre-commit".jobs' "$REPO/.git/lefthook/lefthook.yml")" = '[{"name":"worktree-guard","run":"scripts/worktree-guard.sh"},{"name":"fast-unit-tests","run":"just fast-unit"}]' ]
   [ "$(yq -o=json -I=0 '."pre-push".jobs' "$REPO/.git/lefthook/lefthook.yml")" = '[{"name":"worktree-guard","run":"scripts/worktree-guard.sh"}]' ]
   [ "$(yq -o=json -I=0 '."post-checkout".jobs' "$REPO/.git/lefthook/lefthook.yml")" = '[{"name":"worktree-bootstrap","run":"scripts/worktree-bootstrap.sh"}]' ]
 }
