@@ -865,22 +865,3 @@ install_stale_tiber_cache_launcher() {
   [[ "$output" == *'"tools":{}'* ]]
   [[ "$output" != *"untrusted-bash-executed"* ]]
 }
-
-@test "tiber MCP manifest command uses trusted Bash candidates for launcher scripts" {
-  cd "$ROOT"
-
-  run jq -r '.mcpServers.tiber.args[1]' "$ROOT/plugins/development-system/components/tiber/.mcp.json"
-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"for candidate_bash in /run/current-system/sw/bin/bash /bin/bash /usr/bin/bash"* ]]
-  [[ "$output" == *'exec "$bash_bin" "$candidate" mcp stdio'* ]]
-  [[ "$output" != *"command -v bash"* ]]
-}
-
-@test "tiber MCP manifest forwards the SSH agent socket env var" {
-  cd "$ROOT"
-
-  run jq -e '.mcpServers.tiber.env_vars == ["SSH_AUTH_SOCK"]' "$ROOT/plugins/development-system/components/tiber/.mcp.json"
-
-  [ "$status" -eq 0 ]
-}

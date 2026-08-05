@@ -50,7 +50,7 @@
       ]
     },
     "minPassRate": 0.67,
-    "semanticRubric": "This is an advisory workflow question with no fixture repository to mutate. Pass if the response says to read .development-system.toml, classify the change before editing, work test-first, verify with fresh evidence, perform final review, and defer publication or merge decisions to the configured delivery mode without inventing authority. Do not require completed implementation evidence. Fail if it skips configuration, starts with production edits, claims completion without verification/review, or assumes permission to merge.",
+    "semanticRubric": "This is an advisory workflow question with no fixture repository to mutate. Pass if the response says to read .development-system.toml, classify the change and RED applicability before editing, work test-first because this parser behavior is new and uncovered, verify with fresh evidence, perform final review, and defer publication or merge decisions to the configured delivery mode without inventing authority. Do not require completed implementation evidence. Fail if it skips configuration or RED applicability, starts with production edits, claims completion without verification/review, or assumes permission to merge.",
     "hardAssertions": [],
     "calibration": {
       "pass": [

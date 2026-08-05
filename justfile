@@ -116,10 +116,6 @@ improve-evals:
 bats:
     bats $(find plugins scripts -name '*.bats' | sort)
 
-# Local-only EMC devshell coverage. This intentionally does not run in CI.
-emc-check:
-    bats tests/emc-devshell.bats
-
 # Install Lefthook-managed local checks and optional worktree bootstrap.
 worktree-hooks:
     scripts/install-worktree-hooks.sh
@@ -135,6 +131,5 @@ validate-marketplace:
     jq empty .agents/plugins/marketplace.json
     find plugins -name plugin.json -exec jq empty {} \;
     bash scripts/validate-manifests.sh
-    bash scripts/check-advisor-agent-config.sh
     bash scripts/check-model-routing-config.sh
     prettier --check "**/*.{json,md}"

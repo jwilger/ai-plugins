@@ -35,23 +35,23 @@ still routes to `final-review`, even when that review itself is read-only.
 
 ## Routing table
 
-| Current phase                         | Route to                                                                                   | Continue when                                                                                                       |
-| ------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| Answer or review only                 | The relevant domain, documentation, security, OpenAI, or browser capability                | The requested answer or review is complete; do not enter implementation without a change request                    |
-| Diagnose unexpected behavior          | `systematic-debugging`                                                                     | Evidence identifies the cause; implementation is separately requested or already in scope                           |
-| Prepare a substantive change          | `change-preflight`, then `delivery-workflow` to select delivery mode and increment cadence | Every required surface has an evidence-backed decision and the delivery policy is known before preservation actions |
-| Implement a feature, fix, or refactor | `test-driven-development`                                                                  | The current behavior increment is green and its lightweight review is clean                                         |
-| Verify a completion claim             | `verification-before-completion`                                                           | Fresh evidence covers the exact claim                                                                               |
-| Review the completed change           | `final-review`                                                                             | The review coordinator reports completion for the current diff                                                      |
-| Choose commit and publication mode    | `delivery-workflow`, plus `rationale-commit-messages` when a commit is authorized          | Repository-selected delivery evidence is current                                                                    |
-| Create or update a PR or MR           | `delivery-workflow` for authorization and mode, then the available forge capability        | The PR/MR exists at the intended exact head and its URL and state are recorded                                      |
-| Respond to a pushed CI failure        | `ci-failure-follow-up`                                                                     | A causal repair or unchanged-revision rerun reaches terminal success                                                |
-| Respond to review feedback            | `receiving-code-review`, then the applicable implementation and verification specialists   | Valid feedback is resolved or technically defended                                                                  |
-| Monitor a PR or MR through readiness  | `babysit-pr` when available and the selected delivery mode actually uses a PR or MR        | Required checks, review, approval, and merge state are terminal for the exact head revision                         |
+| Current phase                                  | Route to                                                                                   | Continue when                                                                                                       |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Answer or review only                          | The relevant domain, documentation, security, OpenAI, or browser capability                | The requested answer or review is complete; do not enter implementation without a change request                    |
+| Diagnose unexpected behavior                   | `systematic-debugging`                                                                     | Evidence identifies the cause; implementation is separately requested or already in scope                           |
+| Prepare a substantive change                   | `change-preflight`, then `delivery-workflow` to select delivery mode and increment cadence | Every required surface has an evidence-backed decision and the delivery policy is known before preservation actions |
+| Implement a feature, fix, removal, or refactor | `test-driven-development`                                                                  | RED is used when applicable; the current increment is verified and its lightweight review is clean                  |
+| Verify a completion claim                      | `verification-before-completion`                                                           | Fresh evidence covers the exact claim                                                                               |
+| Review the completed change                    | `final-review`                                                                             | The review coordinator reports completion for the current diff                                                      |
+| Choose commit and publication mode             | `delivery-workflow`, plus `rationale-commit-messages` when a commit is authorized          | Repository-selected delivery evidence is current                                                                    |
+| Create or update a PR or MR                    | `delivery-workflow` for authorization and mode, then the available forge capability        | The PR/MR exists at the intended exact head and its URL and state are recorded                                      |
+| Respond to a pushed CI failure                 | `ci-failure-follow-up`                                                                     | A causal repair or unchanged-revision rerun reaches terminal success                                                |
+| Respond to review feedback                     | `receiving-code-review`, then the applicable implementation and verification specialists   | Valid feedback is resolved or technically defended                                                                  |
+| Monitor a PR or MR through readiness           | `babysit-pr` when available and the selected delivery mode actually uses a PR or MR        | Required checks, review, approval, and merge state are terminal for the exact head revision                         |
 
 For ordinary implementation, the usual sequence is repository inspection,
 `change-preflight`, early `delivery-workflow` selection, one
-`test-driven-development` increment at a time,
+`test-driven-development` applicability decision and one increment at a time,
 `verification-before-completion`, `final-review`, and `delivery-workflow`.
 `rationale-commit-messages` governs each authorized commit. The selected
 delivery workflow governs whether work is committed, pushed directly, or sent
@@ -76,7 +76,7 @@ Keep these boundaries explicit in both action and advisory responses:
 
 - Start with current user direction, repository instructions, and mutable state
   before describing any commit or push. For a substantive change, select
-  `delivery-workflow` before the first TDD preservation action. After
+  `delivery-workflow` before the first preservation action. After
   `final-review`, recheck `delivery-workflow` for final delivery.
 - For answer or domain-review work that is not a completed-diff final review,
   skip `change-preflight`,

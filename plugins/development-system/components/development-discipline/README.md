@@ -14,8 +14,9 @@ generality.
   silent fallback.
 - `change-preflight` - classifies a requested change and records every affected
   project surface from repository evidence before implementation starts.
-- `test-driven-development` - Kent Beck-style TDD: one failing behavior test,
-  one smallest implementation step, then refactor only after green.
+- `test-driven-development` - classifies whether RED applies, uses one failing
+  behavior test when required, and defines safe remove-first handling for
+  obsolete tests.
 - `delivery-workflow` - routes delivery through repository-local instructions,
   after current user direction, supporting direct-to-trunk, PR/MR, and
   local-only work without inventing a pull request or letting a specialist skill

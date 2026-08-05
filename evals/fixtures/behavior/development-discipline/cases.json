@@ -495,7 +495,7 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response gives the increment loop as fast unit tests, lightweight review, commit and push, then confirm the latest pushed build is running or green before continuing; says a failed build blocks follow-up work until repaired; assigns long-running integration, mutation, exhaustive, or full-suite checks to CI unless locally needed to diagnose a failure; and starts full review only after the ticket's actual acceptance criteria are implemented. If full review requires an edit, it must first recheck the latest pushed build, apply the edit test-first, repeat fast tests and lightweight review, commit and push, confirm CI is running or green, then run one delta risk assessment and resume only affected/guard assignments. Fail if full review blocks every incremental push, expensive suites run locally after every edit, failed CI is ignored, acceptance criteria can be deferred, or every review lens restarts after a fix.",
+    "semanticRubric": "Pass if the response gives the increment loop as fast unit tests, lightweight review, commit and push, then confirm the latest pushed build is running or green before continuing; says a failed build blocks follow-up work until repaired; assigns long-running integration, mutation, exhaustive, or full-suite checks to CI unless locally needed to diagnose a failure; and starts full review only after the ticket's actual acceptance criteria are implemented. If full review requires an edit, it must first recheck the latest pushed build, classify whether RED applies, use test-first implementation when required, repeat fast tests and lightweight review, commit and push, confirm CI is running or green, then run one delta risk assessment and resume only affected/guard assignments. Fail if full review blocks every incremental push, expensive suites run locally after every edit, failed CI is ignored, acceptance criteria can be deferred, every edit is forced through synthetic RED evidence, or every review lens restarts after a fix.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
@@ -1064,7 +1064,7 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "This is an advisory fixture: pass when the response describes the required routing and evidence; do not require or penalize it because it does not perform those actions. Pass if the response first honors the stated repository instructions and describes inspecting current repository/task state, then routes the substantive change to change-preflight before edits and delivery-workflow early enough to select direct-to-main mode and increment cadence before any commit or push. It then uses test-driven-development for one failing behavior at a time, verification-before-completion for claim-scoped evidence, final-review for the completed diff, and rechecks delivery-workflow for final delivery. It must mention rationale-commit-messages before committing and exact-revision CI monitoring after pushing, without copying each specialist's detailed procedure or inventing a pull request. Fail if it selects delivery mode only after an increment would be preserved, skips preflight or test-first work, treats the router as the implementation procedure, ignores the linked-worktree/direct-main policy, invents PR delivery, or claims completion before exact CI reaches the repository-required terminal state.",
+    "semanticRubric": "This is an advisory fixture: pass when the response describes the required routing and evidence; do not require or penalize it because it does not perform those actions. Pass if the response first honors the stated repository instructions and describes inspecting current repository/task state, then routes the substantive change to change-preflight before edits and delivery-workflow early enough to select direct-to-main mode and increment cadence before any commit or push. It then uses test-driven-development to classify RED applicability and implement one behavior at a time, verification-before-completion for claim-scoped evidence, final-review for the completed diff, and rechecks delivery-workflow for final delivery. It must mention rationale-commit-messages before committing and exact-revision CI monitoring after pushing, without copying each specialist's detailed procedure or inventing a pull request. Because this scenario is an ordinary new implementation, it should require RED; fail if it selects delivery mode only after an increment would be preserved, skips preflight or required test-first work, treats the router as the implementation procedure, ignores the linked-worktree/direct-main policy, invents PR delivery, or claims completion before exact CI reaches the repository-required terminal state.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
@@ -1738,6 +1738,115 @@
       ],
       "fail": [
         "Since origin is down, rerun the failed job now and keep a local note. Force-push the coordination branch later if another agent wrote it first, and resume when the rerun is running."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-red-applicability",
+    "behavior": "Requires a new RED test only for uncovered first-party production behavior and chooses proportionate evidence for exempt changes.",
+    "prompt": "Apply the development workflow's test-first policy to these independent changes: (1) add a user-visible calculation rule with no existing failure; (2) edit only contributor documentation; (3) preserve behavior while refactoring behind an already-green black-box suite; (4) repair code already identified by one clear failing test; (5) change a simple CI job script; (6) update a small developer-only setup helper; and (7) integrate a well-documented vendor parser. Say which changes require a new failing test, what evidence the others require, and how the parser integration should be tested.",
+    "tags": [
+      "development-discipline",
+      "tdd",
+      "test-applicability",
+      "third-party",
+      "developer-utilities"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "negative-selection",
+        "scope-boundary"
+      ]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response requires a new failing black-box test only for the uncovered calculation behavior; requires no new RED test for the documentation, behavior-preserving refactor, already-clear failure, straightforward CI script, or simple non-production developer helper; uses the existing green suite as the refactor baseline, the existing failure as the repair's RED evidence, CI execution for the workflow, and direct execution plus relevant checks for the helper. For the vendor parser, it must reject tests that restate the vendor API and instead require an application-level black-box integration test only for the observable product contract, written RED first if that product behavior is new and uncovered. It must not equate RED exemption with skipping verification. Fail if it demands a synthetic failing test for every item, accepts code-first work for the uncovered calculation, unit-tests vendor-documented behavior, or skips verification for exempt work.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Only the new uncovered calculation contract necessarily starts with a new failing public test. The docs edit, covered refactor, clear existing failure, CI script, and small developer helper use formatting, the green baseline, the existing RED evidence, CI, or direct execution as appropriate. Test the parser only through the application's observable input/output contract, not the vendor API; if that product contract is new and uncovered, start that black-box integration scenario RED."
+      ],
+      "fail": [
+        "Write a new failing unit test before every change, including the README, workflow YAML, helper script, covered refactor, and each vendor parser method."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-removal-sequence",
+    "behavior": "Removes functionality before changing tests so the unchanged suite exposes accidental regressions in retained behavior.",
+    "prompt": "A command has two modes, `legacy` and `current`, which share parsing code. Remove only `legacy`. Several tests currently cover both modes. Explain the implementation and verification order, including when tests may be deleted or changed and what to do if a current-mode test fails after the removal.",
+    "tags": [
+      "development-discipline",
+      "tdd",
+      "functionality-removal",
+      "regression-safety"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "state-transition",
+        "failure-recovery"
+      ]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response removes legacy production behavior first while leaving all tests unchanged, runs the relevant suite, classifies each resulting failure, and only then deletes or updates tests that genuinely specify legacy behavior. A failing current-mode or shared-behavior test must be treated as evidence that too much code was removed and must cause an implementation repair before the suite returns to green. It must reject adding a replacement test whose only purpose is to assert that legacy mode is absent. Fail if it deletes legacy tests before implementation, interprets every post-removal failure as obsolete, weakens current-mode coverage, or adds an absence assertion.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Remove legacy mode with the old suite untouched, run it, and use the failures as evidence. Delete or revise only expectations that truly describe legacy mode. If current mode or shared parsing fails, restore or repair the retained implementation before returning the relevant suite to green; do not add a test that merely asserts legacy is gone."
+      ],
+      "fail": [
+        "Delete all legacy and shared tests first, remove the code, and add a new test asserting that the legacy command now errors."
+      ]
+    }
+  },
+  {
+    "case_id": "development-discipline-review-reports-inapplicable-tests",
+    "behavior": "Reviewers reject missing-test findings for RED-exempt changes and report pre-existing tests that violate the same policy.",
+    "prompt": "During final review of a documentation-only change, the surrounding suite contains: a test grepping the committed README; a test parsing committed workflow YAML for exact job names; unit tests that mirror a vendor library's documented parser examples; extensive tests around a 250-line developer utility with locking and crash recovery; and black-box tests for user-visible application behavior. The diff adds no production behavior. Report the test-verification findings and dispositions.",
+    "tags": [
+      "development-discipline",
+      "final-review",
+      "test-quality",
+      "pre-existing-findings"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "review-decision",
+        "scope-boundary",
+        "negative-selection"
+      ]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the reviewer does not demand a new failing test for the documentation-only diff; reports the pre-existing README and workflow-content assertions for removal; reports vendor-example unit tests for replacement only when an application integration contract needs coverage, using dependency-agnostic black-box behavior; retains the application black-box tests; and recommends extracting the complex developer utility into a maintained project or shipped subsystem while preserving its coverage until extraction is ready. It must treat discovered pre-existing violations as actionable findings rather than ignoring them because they predate the diff. Fail if it demands RED for the docs edit, keeps static-content tests, deletes complex utility coverage immediately, removes application behavior tests, or ignores all pre-existing violations.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "No RED evidence is missing for this docs-only diff. Remove the README grep and workflow-structure assertions. Replace vendor-example tests only with application-level integration behavior that would survive a vendor swap. Keep the application's black-box coverage. Report the overgrown utility for extraction, but keep its crash/locking coverage until that move is complete."
+      ],
+      "fail": [
+        "Add a failing test for the documentation edit and leave every pre-existing test alone because it is outside this diff."
       ]
     }
   }

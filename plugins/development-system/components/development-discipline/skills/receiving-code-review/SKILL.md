@@ -15,9 +15,14 @@ implement the correct change or push back with evidence.
 3. Check whether the comment is correct for this repository, stack, and current
    branch.
 4. Decide: implement, ask for clarification, or push back.
-5. Apply one actionable item at a time.
-6. Re-run the relevant verification after each meaningful change or batch.
-7. Preserve the repair as a new additive commit by default and use the normal
+5. For test-related feedback, apply the repository's RED-applicability rules
+   before accepting a missing-test claim. Report existing tests that cover only
+   committed text, removed behavior, documented third-party behavior, CI
+   structure, or simple non-production utilities; recommend removal,
+   public-behavior replacement, or extraction as appropriate.
+6. Apply one actionable item at a time.
+7. Re-run the relevant verification after each meaningful change or batch.
+8. Preserve the repair as a new additive commit by default and use the normal
    push path. Do not amend an existing commit unless the user explicitly
    authorizes that specific amend; separately require explicit authorization
    for any forced push it would entail.

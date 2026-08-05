@@ -217,13 +217,29 @@ Use repository-agnostic lenses by default:
 
 - `correctness-behavior`: requirements, edge cases, regressions, and observable behavior.
 - `tests-verification`: test quality, missing coverage, stale evidence, and
-  whether verification proves the claim. Treat tests that only inspect
-  committed repository text or CI workflow definitions as actionable findings;
-  require removal or replacement with public observable behavior. For files a
+  whether verification proves the claim. Require a new RED test only for new or
+  changed first-party production behavior without a clear existing failure. Do
+  not demand one for non-code changes, removals, third-party behavior, committed
+  static text, straightforward CI scripting, simple non-production developer
+  utilities, or behavior-preserving refactors with adequate green coverage.
+  Flag tests that restate documented third-party APIs or examples; remove them
+  when no application contract is at stake, or replace them with
+  dependency-agnostic black-box coverage of the application's observable
+  integration behavior.
+  Treat tests that only inspect committed repository text or CI workflow
+  definitions as actionable findings; require removal or replacement with
+  public observable behavior. For files a
   program creates or edits, prefer the end-user-visible effect and accept exact
   generated-text assertions only when no behavioral test can prove the
   requirement. Inspect the surrounding project test scope for existing
-  instances of either anti-pattern and require their removal or replacement too.
+  instances of these anti-patterns and report them even when they predate the
+  diff. Recommend removal, public-behavior replacement, or extraction of an
+  overgrown utility into a maintained project or shipped subsystem. Preserve
+  valuable failure-mode coverage until the extraction carries the behavior and
+  tests with it.
+  For removals, require evidence that production functionality changed before
+  its tests, the unchanged suite exposed affected expectations, obsolete tests
+  were then deleted or updated, and retained behavior returned to green.
   Reviewing only the lines in the proposed diff is incomplete; perform the
   surrounding audit and act on what it finds without requiring ritual policy
   restatement when the findings and disposition already make the action clear.
@@ -397,7 +413,8 @@ policy.
    hold exists, while a failed build must follow `ci-failure-follow-up` first.
    Direct-to-trunk work before its first push and local-only work use fresh local
    verification instead. Any remediation that changes the diff leaves the current
-   full-review pass: run fast unit tests, run a lightweight review, commit and
+   full-review pass: classify whether RED applies, use it when required, run
+   fast unit tests, run a lightweight review, commit and
    push only when the selected mode calls for those actions, confirm any
    resulting latest pushed build is running or green, then submit exactly one
    diff-bound delta risk assessment. Resume only the assignments it returns; do

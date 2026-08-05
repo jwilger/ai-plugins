@@ -23,42 +23,34 @@ teardown() {
   fi
 }
 
-@test "behavior loader reads recursive full-marketplace fixtures with coverage metadata" {
-  run node - <<NODE
-const generateTests = require('$ROOT/evals/promptfoo/load-harness-cases.cjs');
-const tests = generateTests();
-const failures = [];
-const caseIds = new Set(tests.map((testCase) => testCase.vars?.case_id));
+@test "behavior loader reads recursive fixture trees with coverage metadata" {
+  FIXTURE_TMP="$(mktemp -d)"
+  mkdir -p "$FIXTURE_TMP/evals/fixtures/behavior/nested"
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/nested/cases.json" <<'JSON'
+[
+  {
+    "case_id": "nested-case",
+    "behavior": "load recursively",
+    "prompt": "Return ok.",
+    "coverage": {"kinds": ["natural-trigger"]},
+    "valueGate": {"mode": "standard"}
+  }
+]
+JSON
 
-for (const required of [
-  'worktrees-setup-natural-trigger',
-  'babysit-pr-natural-trigger',
-  'engineering-scaffold-natural-trigger',
-  'agentic-scaffold-evals-natural-trigger',
-]) {
-  if (!caseIds.has(required)) failures.push(`missing ${required}`);
+  run node - "$FIXTURE_TMP" <<NODE
+const { loadBehaviorCases } = require('$ROOT/evals/promptfoo/fixtures.cjs');
+const cases = loadBehaviorCases({ root: process.argv[2] });
+if (cases.length !== 1) throw new Error(`unexpected case count: ${cases.length}`);
+const [entry] = cases;
+if (entry.case_id !== 'nested-case') throw new Error('nested case not loaded');
+if (!entry.fixture_file.endsWith('evals/fixtures/behavior/nested/cases.json')) {
+  throw new Error(`unexpected fixture path: ${entry.fixture_file}`);
 }
-
-for (const testCase of tests) {
-  const vars = testCase.vars || {};
-  if (!vars.fixture_file || !vars.fixture_file.includes('evals/fixtures/behavior/')) {
-    failures.push(`${vars.case_id}: missing recursive fixture_file`);
-  }
-  if (!Array.isArray(vars.coverage_kinds) || vars.coverage_kinds.length === 0) {
-    failures.push(`${vars.case_id}: missing coverage_kinds`);
-  }
-  if (!['safety-critical', 'standard'].includes(vars.value_gate_mode)) {
-    failures.push(`${vars.case_id}: invalid value_gate_mode`);
-  }
-  if ('plugin_mode' in vars || 'pluginMode' in vars) {
-    failures.push(`${vars.case_id}: plugin mode should be inferred from provider label`);
-  }
+if (JSON.stringify(entry.coverage.kinds) !== JSON.stringify(['natural-trigger'])) {
+  throw new Error('coverage metadata not preserved');
 }
-
-if (failures.length > 0) {
-  console.error(failures.join('\n'));
-  process.exit(1);
-}
+if (entry.valueGate.mode !== 'standard') throw new Error('value gate not preserved');
 NODE
 
   [ "$status" -eq 0 ]

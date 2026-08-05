@@ -347,7 +347,7 @@ NODE
   printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
   printf '%s\n' '{"token":"revoked"}' >"$eval_home/auth.json"
 
-  run env CODEX_EVAL_AUTH_HOME="$auth_home" node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$eval_home" --plugin-mode no-plugins
+  run env -u OPENAI_API_KEY CODEX_EVAL_AUTH_HOME="$auth_home" node "$ROOT/scripts/evals/prepare-codex-home.mjs" "$eval_home" --plugin-mode no-plugins
 
   [ "$status" -eq 0 ]
   cmp "$auth_home/auth.json" "$eval_home/auth.json"
