@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "incident_id": "ci-31030447400",
-  "state": "action-selected",
+  "state": "waiting-ci",
   "epoch": 1,
   "trigger": {
     "run_id": "31030447400",
@@ -44,6 +44,11 @@
     "kind": "repair",
     "description": "Restrict the pure-core mutation gate to tiber-core tests and add direct unit assertions for the four getter mutants previously caught only by workspace integration tests."
   },
-  "replacement": null,
+  "replacement": {
+    "run_id": "31034455488",
+    "run_url": "https://github.com/jwilger/ai-plugins/actions/runs/31034455488",
+    "sha": "4d29c1db0d0da5c9a8e5c0de79dfe42c5b37b393",
+    "status": "queued"
+  },
   "release_proof": null
 }
