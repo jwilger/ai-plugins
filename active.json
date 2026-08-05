@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "incident_id": "ci-31030447400",
-  "state": "diagnosing",
+  "state": "action-selected",
   "epoch": 1,
   "trigger": {
     "run_id": "31030447400",
@@ -40,7 +40,10 @@
     "cause": "The pure tiber-core mutation recipe enabled --test-workspace true, so deliberately invalid core mutants ran higher-level CLI integration tests whose reconciliation loops spawn hanging subprocesses; package-only mutation testing completes promptly but revealed four missing direct getter assertions.",
     "classification": "caused"
   },
-  "next_action": null,
+  "next_action": {
+    "kind": "repair",
+    "description": "Restrict the pure-core mutation gate to tiber-core tests and add direct unit assertions for the four getter mutants previously caught only by workspace integration tests."
+  },
   "replacement": null,
   "release_proof": null
 }
