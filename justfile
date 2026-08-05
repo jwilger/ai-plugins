@@ -12,8 +12,8 @@ ci: validate-marketplace github-actions tiber-rust development-discipline-rust d
 # Fast unit tests run by the pre-commit hook. Integration, release, mutation,
 # browser, and shell tests remain opt-in locally and run in the full CI gate.
 fast-unit:
-    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --workspace --lib
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --bin development-discipline-mcp
+    unset $(git rev-parse --local-env-vars); cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --workspace --lib
+    unset $(git rev-parse --local-env-vars); cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --bin development-discipline-mcp
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
@@ -27,9 +27,9 @@ tiber-rust:
 
 # Rust gates for the development-discipline MCP coordinator.
 development-discipline-rust:
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-.dependencies/cargo-target/development-discipline}" cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml
+    cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
+    cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
+    cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml
 
 development-discipline-release-complete:
     cd plugins/development-system/components/development-discipline && sha256sum --check release-binaries.sha256
