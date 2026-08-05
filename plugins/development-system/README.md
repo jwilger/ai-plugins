@@ -31,5 +31,11 @@ marketplaces add unnecessary supply-chain exposure. The plugin owns its bundled
 MCP integrations; user-added MCPs are warned about for compatibility review,
 not automatically rejected.
 
+The top-level plugin manifest starts the always-on development-discipline and
+Tiber MCP servers. Promptfoo remains an optional MCP owned by the
+agentic-systems-engineering component and is intentionally excluded from the
+top-level manifest because projects may disable that capability and must supply
+the pinned Promptfoo runtime separately.
+
 Skill descriptions are narrow routing indexes. Detailed workflow context is
 loaded only after a matching skill routes.

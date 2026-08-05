@@ -41,6 +41,33 @@ run_manifest_server_with_restricted_path() {
     "$command" "${args[@]}"
 }
 
+install_top_level_development_system_cache() {
+  local cache_parent="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system"
+  local version
+
+  mkdir -p "$cache_parent"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  ln -sfn "$ROOT/plugins/development-system" "$cache_parent/$version"
+}
+
+run_top_level_manifest_initialize_with_empty_path() {
+  local server="$1"
+  local command
+  local args
+
+  install_top_level_development_system_cache
+  command="$(jq -r ".mcpServers[\"$server\"].command" "$ROOT/plugins/development-system/.mcp.json")"
+  mapfile -t args < <(jq -r ".mcpServers[\"$server\"].args[]" "$ROOT/plugins/development-system/.mcp.json")
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+    env -i \
+      PATH= \
+      HOME="$TMPROOT/isolated-home" \
+      CODEX_HOME="$TMPROOT/codex-home" \
+      SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+      "$command" "${args[@]}"
+}
+
 run_promptfoo_manifest_server_with_restricted_path() {
   install_promptfoo_cache_launcher
   run_manifest_server_with_restricted_path \
@@ -623,6 +650,37 @@ install_stale_tiber_cache_launcher() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'"name":"development-discipline"'* ]]
   [[ "$output" == *'"tools":{}'* ]]
+}
+
+@test "top-level development-discipline MCP manifest initializes from isolated Codex cache with empty PATH" {
+  cd "$TMPROOT"
+
+  run run_top_level_manifest_initialize_with_empty_path development-discipline
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
+  [[ "$output" == *'"tools":{}'* ]]
+  [[ "$output" != *"development_system.plugin_root_missing"* ]]
+}
+
+@test "top-level tiber MCP manifest initializes from isolated Codex cache with empty PATH" {
+  cd "$TMPROOT"
+
+  run run_top_level_manifest_initialize_with_empty_path tiber
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"tiber"'* ]]
+  [[ "$output" == *'"tools":{}'* ]]
+  [[ "$output" != *"development_system.plugin_root_missing"* ]]
+}
+
+@test "top-level MCP manifest preserves Tiber SSH agent forwarding and component-scoped Promptfoo policy" {
+  run jq -e '
+    .mcpServers.tiber.env_vars == ["SSH_AUTH_SOCK"] and
+    (.mcpServers | keys | sort) == ["development-discipline", "tiber"]
+  ' "$ROOT/plugins/development-system/.mcp.json"
+
+  [ "$status" -eq 0 ]
 }
 
 @test "development-discipline MCP manifest clears inherited BASH_ENV before launcher startup" {
