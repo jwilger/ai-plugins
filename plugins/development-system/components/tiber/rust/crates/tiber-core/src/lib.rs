@@ -295,6 +295,12 @@ mod tests {
         ]);
 
         assert_eq!(
+            snapshot.ordered_tasks()[0].path(),
+            "20260706-abcd-write-docs"
+        );
+        assert_eq!(snapshot.ordered_tasks()[0].title(), "Write docs");
+
+        assert_eq!(
             snapshot.ordered_tasks(),
             [
                 TaskSnapshot::new("20260706-abcd-write-docs", "Write docs"),
