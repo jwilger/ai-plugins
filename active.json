@@ -31,8 +31,15 @@
     }
   ],
   "assignments": [],
-  "failure_record": null,
-  "diagnosis": null,
+  "failure_record": {
+    "job": "Quality gate",
+    "step": "Full gate",
+    "log_evidence": "cargo mutants found 44 mutants; three core invariant mutants timed out, each taking about five minutes despite a 20s test timeout; run ended after 13m with exit 3"
+  },
+  "diagnosis": {
+    "cause": "The pure tiber-core mutation recipe enabled --test-workspace true, so deliberately invalid core mutants ran higher-level CLI integration tests whose reconciliation loops spawn hanging subprocesses; package-only mutation testing completes promptly but revealed four missing direct getter assertions.",
+    "classification": "caused"
+  },
   "next_action": null,
   "replacement": null,
   "release_proof": null
