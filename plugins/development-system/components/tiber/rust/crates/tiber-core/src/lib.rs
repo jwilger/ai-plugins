@@ -253,10 +253,80 @@ impl std::error::Error for CoreError {}
 
 #[cfg(test)]
 mod tests {
+    use crate::events::TiberEvent;
+    use crate::task::{ChecklistItem, Claim, Note, Subtask, Task};
+    use eventcore_types::Event;
+
     use super::{
         BoardSnapshot, CoreError, DependencyGraph, OrderReconciliation, TaskDependencies,
         TaskSnapshot, TaskTitle,
     };
+
+    #[test]
+    fn domain_event_type_name_is_stable() {
+        assert_eq!(TiberEvent::event_type_name(), "tiber.domain_event");
+    }
+
+    #[test]
+    fn task_markdown_renderer_preserves_the_public_document_contract() {
+        let mut task = Task::new(
+            "20260805-abcd-event-source-tiber".into(),
+            "Event-source Tiber".into(),
+            "2026-08-05T20:00:00Z".into(),
+        );
+        task.blocked_by = vec!["20260805-aaaa-prerequisite".into()];
+        task.blocks = vec!["20260805-eeee-follow-up".into()];
+        task.tags = vec!["architecture".into(), "eventcore".into()];
+        task.pr_mr_url = Some("https://example.invalid/pull/1".into());
+        task.pr_mr_status = Some("open".into());
+        task.claim = Some(Claim {
+            host: "workstation".into(),
+            session: "session-1".into(),
+        });
+        task.summary = "  Replace file-backed state.  ".into();
+        task.context = "  Preserve existing behavior.  ".into();
+        task.acceptance = vec![ChecklistItem {
+            checked: true,
+            text: "Events are authoritative".into(),
+        }];
+        task.subtasks = vec![Subtask {
+            id: "model".into(),
+            checked: false,
+            title: "Model commands".into(),
+            after: vec!["store".into()],
+        }];
+        task.notes = vec![Note {
+            date: "2026-08-05".into(),
+            text: "Implementation verified".into(),
+        }];
+
+        assert_eq!(
+            task.render_markdown(),
+            concat!(
+                "---\n",
+                "title: Event-source Tiber\n",
+                "blocked_by: [20260805-aaaa-prerequisite]\n",
+                "blocks: [20260805-eeee-follow-up]\n",
+                "tags: [architecture, eventcore]\n",
+                "pr_mr_url: https://example.invalid/pull/1\n",
+                "pr_mr_status: open\n",
+                "claim:\n",
+                "  host: workstation\n",
+                "  session: session-1\n",
+                "---\n\n",
+                "## Summary\n\n",
+                "Replace file-backed state.\n\n",
+                "## Context / Why\n\n",
+                "Preserve existing behavior.\n\n",
+                "## Acceptance criteria\n",
+                "\n- [x] Events are authoritative",
+                "\n## Subtasks\n",
+                "\n- [ ] (model) Model commands — after: store",
+                "\n## Notes / Log\n",
+                "\n- 2026-08-05: Implementation verified\n",
+            )
+        );
+    }
 
     #[test]
     fn task_title_parse_trims_input_and_rejects_empty_titles() {

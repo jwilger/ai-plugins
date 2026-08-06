@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace github-actions emc-models tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
+ci: validate-marketplace github-actions tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
 
 # Fast unit tests run by the pre-commit hook. Integration, release, mutation,
 # browser, and shell tests remain opt-in locally and run in the full CI gate.
@@ -18,10 +18,6 @@ fast-unit:
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
     actionlint
-
-# Require synchronized, reviewed, and formally verified event models.
-emc-models:
-    scripts/verify-emc-models.sh
 
 # Rust gates for the tiber plugin workspace.
 tiber-rust:

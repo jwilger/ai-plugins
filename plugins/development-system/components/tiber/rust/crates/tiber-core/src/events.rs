@@ -1,3 +1,18 @@
+//! Tiber's authoritative domain-event vocabulary.
+//!
+//! The model has four semantic stream families:
+//! `tiber:repository` records format initialization, `tiber:board` owns
+//! lifecycle membership and strict backlog order, `tiber:task:<id>` owns one
+//! task's details and history, and `tiber:ci-recovery` owns the repository-wide
+//! CI incident. Commands that affect more than one family emit one atomic
+//! multi-stream append. Task and CI events are intentionally in the same enum
+//! because they share one EventCore store and the single `tiber` Git branch.
+//!
+//! Every mutating behavior has a named event below. Projections fold these
+//! events into typed task, board, and recovery state; no Markdown snapshot is
+//! authoritative. Adding a mutator therefore requires adding or deliberately
+//! reusing a semantic event and extending the corresponding fold.
+
 use crate::task::{ChecklistItem, Claim, Note, Subtask, Task, ValidationRepair};
 use eventcore_types::{Event, StreamId};
 use serde::{Deserialize, Serialize};

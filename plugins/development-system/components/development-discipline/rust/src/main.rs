@@ -1,5 +1,25 @@
 #![recursion_limit = "256"]
 
+//! Development Discipline's final-review state machine and EventCore model.
+//!
+//! `final_review.plan`, `final_review.advance`, and
+//! `final_review.confirm_split` execute EventCore commands over two stream
+//! families: one catalog stream tracks logical retention and one session stream
+//! owns each review. [`FinalReviewEvent`] names every state-machine boundary:
+//! planning, split holds and confirmation, accepted iterations, delta-risk and
+//! verifier requests/resolutions, budget requests/resolutions, completion, and
+//! addressed legacy import. The pure transition functions remain responsible
+//! for deciding outcomes; events record those already-decided facts so replay
+//! never performs Git, filesystem, time, or model-routing work again.
+//!
+//! [`apply_review_event`] is the authoritative fold used by command execution
+//! and projection repair. Callers carry state and revision for compatibility,
+//! but every command compares them with this projection and fails closed when
+//! stale. A per-database advisory lock serializes cooperative processes around
+//! EventCore execution, while expected stream versions remain the final
+//! concurrency constraint. Catalog retirement removes only logical projection
+//! membership; immutable historical events remain in SQLite.
+
 use std::collections::{
     hash_map::{DefaultHasher, RandomState},
     HashMap, HashSet, VecDeque,
@@ -207,6 +227,11 @@ struct LegacyImportFacts {
     metadata: EventMetadata,
 }
 
+/// Semantic facts emitted by final-review commands.
+///
+/// Session events carry their resulting transition facts rather than a generic
+/// `StateReplaced` snapshot. Catalog events share the same atomic append when a
+/// session is touched or logically retired.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum FinalReviewEvent {
     ReviewPlanned {
@@ -323,12 +348,15 @@ struct ReviewSessionProjection {
     updated_at: u64,
 }
 
+/// State reconstructed from one session stream plus the shared catalog stream.
 #[derive(Default, Clone)]
 struct ReviewEventState {
     session: Option<ReviewSessionProjection>,
     catalog: HashMap<String, (u64, u64)>,
 }
 
+/// Pure event fold used both during optimistic command execution and when
+/// rebuilding SQLite read projections after restart or projection failure.
 fn apply_review_event(
     mut state: ReviewEventState,
     session_stream: &StreamId,

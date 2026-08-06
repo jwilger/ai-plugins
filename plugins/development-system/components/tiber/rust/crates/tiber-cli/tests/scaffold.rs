@@ -49,7 +49,7 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
     assert!(workflow.contains("actions/checkout@"));
     assert!(!workflow.contains("actions/checkout@v4"));
     assert!(
-        workflow.contains("git -C .tiber-src checkout bce89f58a2ea23e38bf508cb3800d17efba3e28e")
+        workflow.contains("git -C .tiber-src checkout 68823dd13951586e62108dac1602ce4a45560aaf")
     );
     assert!(workflow.contains("cargo install --locked --path"));
 }

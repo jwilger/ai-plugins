@@ -1,4 +1,20 @@
 //! EventCore adapter whose transaction boundary is a confirmed Git ref.
+//!
+//! `eventcore-fs` is a disposable staging engine, not the authority. An append
+//! succeeds only after one signed candidate commit containing the immutable
+//! transaction is confirmed on `refs/heads/tiber`. A conclusive concurrent
+//! advance is translated to EventCore's version conflict so pure command logic
+//! may rerun with invocation-stable IDs and timestamps. An ambiguous push never
+//! reruns domain logic: the exact candidate is retained under Git's common
+//! directory and all mutations fail closed until `tiber sync` establishes
+//! whether that candidate was published. Repositories without `origin` use a
+//! local compare-and-swap on the same ref as their commit boundary.
+//!
+//! Reads rebuild their disposable file store from the authoritative ref. With
+//! an origin they fetch before each operation and fail rather than serving a
+//! stale cache. An absent ref is the empty EventStore required by the reusable
+//! EventCore backend contract; application-level read commands may still call
+//! that state "uninitialized".
 
 use eventcore_fs::{FileEventStore, FsConfig, FsEventStoreError};
 use eventcore_types::{

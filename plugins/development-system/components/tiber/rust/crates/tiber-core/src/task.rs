@@ -1,3 +1,9 @@
+//! Typed task projection and its user-facing Markdown renderer.
+//!
+//! `Task` is reconstructed exclusively by folding [`crate::events::TiberEvent`]
+//! values. Markdown is emitted only at CLI, MCP-resource, and dashboard-facing
+//! document boundaries; it is never parsed back into authoritative state.
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

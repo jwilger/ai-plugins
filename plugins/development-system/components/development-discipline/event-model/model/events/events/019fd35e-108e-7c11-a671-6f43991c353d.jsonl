@@ -1,2 +1,0 @@
-{"record":"header","format_version":2,"transaction_id":"019fd35e-108e-7c11-a671-6f43991c353d","replica_id":"019fd35e-108d-70b3-9f83-d61bb839c90b","parent_transaction_ids":[],"created_at":"2026-08-05T19:19:45.038840564+00:00","stream_bases":{"project":0},"content_hash":"17d5ddb7e2bfdbde8d194562c70e27d84a017ea2d4d5b9a570704d55f6338e84"}
-{"record":"event","event_id":"019fd35e-108e-7c11-a671-6f531b5101d5","stream_id":"project","stream_version":1,"event_type":"EmcEvent","event_data":{"ProjectInitialized":{"name":"development-discipline","stream_id":"project"}},"metadata":{}}

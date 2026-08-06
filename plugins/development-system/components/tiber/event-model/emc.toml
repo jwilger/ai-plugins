@@ -1,5 +1,0 @@
-[project]
-name = "Tiber"
-version = "0.1.0"
-lean_module = "Tiber"
-quint_module = "Tiber"

@@ -3,14 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    emc = {
-      url = "github:jwilger/emc/v0.2.0";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
-    { nixpkgs, emc, ... }:
+    { nixpkgs, ... }:
     let
       supportedSystems = [
         "aarch64-darwin"
@@ -59,10 +55,7 @@
               bats
               actionlint
               yq-go
-              lean4
-              quint
             ])
-            ++ [ emc.packages.${system}.default ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               pkgs.bubblewrap
               pkgs.systemd
@@ -103,9 +96,7 @@
             export CARGO_HOME="$DEPENDENCIES_DIR/cargo"
             export CARGO_INSTALL_ROOT="$CARGO_HOME"
 
-            # Keep the flake-pinned EMC ahead of stale project-local Cargo
-            # installs while retaining the dependency sandbox for other tools.
-            export PATH="${emc.packages.${system}.default}/bin:$CARGO_INSTALL_ROOT/bin:$DEPENDENCIES_DIR/npm/bin:$PATH"
+            export PATH="$CARGO_INSTALL_ROOT/bin:$DEPENDENCIES_DIR/npm/bin:$PATH"
 
             echo "ai-plugins devshell ready."
             echo "  just:  $(just --version) · node $(node --version) · npm $(npm --version)"
