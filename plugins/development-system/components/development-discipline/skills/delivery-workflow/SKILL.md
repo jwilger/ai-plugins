@@ -69,6 +69,11 @@ gate.
 
 ## Authorization and evidence
 
+- Before creating any authorized commit, use `rationale-commit-messages`. Every
+  authored commit requires a concise Conventional Commit subject and a
+  non-empty body explaining why the change exists. Capture the motivation,
+  decision context, tradeoff, or failure being prevented; reject a subject-only
+  message and a body that merely restates the subject or diff.
 - Treat a user request or standing repository authorization as permission only
   for the externally visible operations it actually covers.
 - Use additive commits for repairs, review follow-ups, and later corrections by

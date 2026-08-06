@@ -26,7 +26,10 @@
 - Debug from observed evidence and repair the causal defect.
 - Final review is required before a readiness claim.
 - Verification output must be fresh and relevant to the changed surfaces.
-- Commit messages explain why the change exists and use Conventional Commits.
+- Every authored commit has a concise Conventional Commit subject and a
+  non-empty body that explains why the change exists: its motivation, decision
+  context, tradeoff, or the failure it prevents. Reject subject-only messages
+  and bodies that merely restate the subject or diff.
 - Never add `Co-Authored-By` trailers.
 - A terminal pushed-CI failure creates a repository-wide hold. One Tiber owner
   records the exact failure, chooses either one causal repair or an unchanged-SHA

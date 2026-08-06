@@ -139,8 +139,11 @@ here.
 - **Never force-push to a remote without explicit case-by-case human
   authorization (case-by-case human authorization).** This includes `git push --force`, `git push --force-with-lease`,
   `git push -f`, and any forced refspec such as `+branch`.
-- Use **Conventional Commits**. Do **not** add AI-attribution commit trailers
-  (e.g. `Co-Authored-By`).
+- Every authored commit uses a concise **Conventional Commit** subject and a
+  non-empty body explaining why the change exists: its motivation, decision
+  context, tradeoff, or the failure it prevents. A subject-only message, or a
+  body that merely restates the subject or diff, is incomplete. Do **not** add
+  AI-attribution commit trailers (e.g. `Co-Authored-By`).
 
 If `nix` is available, prefer a flake-provided dev shell that pins the toolchain
 and redirects "global" installs into a git-ignored project-local sandbox.

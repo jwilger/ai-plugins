@@ -21,7 +21,8 @@ generality.
   after current user direction, supporting direct-to-trunk, PR/MR, and
   local-only work without inventing a pull request or letting a specialist skill
   change the selected mode, cadence, or evidence level; repairs default to new
-  additive commits, and amends require explicit case-by-case authorization.
+  additive commits, every authored commit requires a rationale-bearing body,
+  and amends require explicit case-by-case authorization.
 - `ci-failure-follow-up` - evidence-based recovery that blocks unrelated
   work after a pushed CI failure until a replacement run succeeds.
 - `rationale-commit-messages` - Conventional Commit subjects with a required

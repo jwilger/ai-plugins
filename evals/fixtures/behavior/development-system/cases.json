@@ -90,6 +90,35 @@
     }
   },
   {
+    "case_id": "delivery-requires-rationale-bearing-commit-message",
+    "behavior": "Requires an authored commit body to preserve the decision context behind the change.",
+    "prompt": "The change is verified and the configured workflow authorizes committing it. The runtime now uses EventCore directly, so the old EMC models and their verification toolchain duplicate the executable implementation and add maintenance cost. Use `refactor(development-system): remove emc models` as the commit subject and prepare the complete commit message.",
+    "tags": ["development-system", "delivery", "commit-message"],
+    "plugins": ["development-system"],
+    "skills": ["delivery"],
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "policy-enforcement",
+        "baseline-ablation"
+      ]
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response preserves the supplied Conventional Commit subject and adds a non-empty body explaining that direct EventCore usage made the EMC models a duplicate source of truth and/or unnecessary maintenance cost. The body must preserve that supplied decision context rather than merely restating that the models were removed. It must not add Co-Authored-By or another AI-attribution trailer. Fail if the message is subject-only, invents unrelated rationale, the body only summarizes the diff, or an attribution trailer is present.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "refactor(development-system): remove emc models\n\nThe runtime now uses EventCore directly, leaving the EMC models as a second source of truth. Removing them avoids maintaining and verifying a duplicate representation of the executable workflows."
+      ],
+      "fail": ["refactor(development-system): remove emc models"]
+    }
+  },
+  {
     "case_id": "worktrees-isolate-concurrent-mutable-work",
     "behavior": "Keeps one mutable task in the current checkout and isolates separate concurrent work.",
     "prompt": "I am starting one feature in the primary checkout and no other mutable task is active. Explain where it should run, then explain what changes if a separate agent starts another mutable task concurrently.",

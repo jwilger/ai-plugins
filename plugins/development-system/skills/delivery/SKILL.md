@@ -18,5 +18,12 @@ the user knows what evidence is missing.
   terminal state.
 - `local-only`: do not commit or publish unless explicitly authorized.
 
+Before creating any authorized commit, write a concise Conventional Commit
+subject and a non-empty body that explains why the change exists. The body must
+capture the motivation, decision context, tradeoff, or failure being prevented;
+it must not merely restate the subject or summarize the diff. Reject a
+subject-only message. Never add `Co-Authored-By` or another AI-attribution
+trailer.
+
 Always state each protected action explicitly: never infer permission to
 force-push, merge, or delete remote state.
