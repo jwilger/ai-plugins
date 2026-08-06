@@ -1,12 +1,20 @@
 ---
 name: tasks
-description: Use for Tiber task creation, backlog ordering, cross-worktree coordination, task status, and pushed-CI failure recovery when the tiber feature is enabled.
+description: Use whenever Tiber or origin/tiber is mentioned, including task workflows, EventCore publication conflicts, ambiguous pushes, tiber sync recovery, force-push safety, cross-worktree coordination, and pushed-CI failure recovery.
 ---
 
 # Tasks
 
 Require `[features].tiber = true` in `.development-system.toml`. Use the Tiber
 MCP when available and its CLI otherwise.
+
+This skill owns Tiber publication guidance even when a prompt also mentions Git
+delivery, pushing, rebasing, or force-pushing. A confirmed concurrent advance
+of `origin/tiber` is an optimistic EventCore version conflict: Tiber refetches
+and retries the pure command with the same invocation-stable inputs. If the
+publication result is ambiguous, stop every further mutation and use structured
+`tiber sync` recovery. Never force-push, rewrite, or manually reconcile the
+authoritative `tiber` branch.
 
 Keep one active ticket and at most `[tiber].max_queued` backlog tickets. Rank the
 whole queue strictly by user pain, frequency, severity, blocking impact,

@@ -112,6 +112,18 @@ seed_marketplace() {
   grep -Fq "debug prompt-input" "$FAKE_CODEX_LOG"
 }
 
+@test "tasks router advertises Tiber publication conflict ownership" {
+  skill="$ROOT/plugins/development-system/skills/tasks/SKILL.md"
+  description="$(sed -n 's/^description: //p' "$skill")"
+
+  [[ "$description" == *"Tiber"* ]]
+  [[ "$description" == *"origin/tiber"* ]]
+  [[ "$description" == *"publication conflicts"* ]]
+  [[ "$description" == *"ambiguous pushes"* ]]
+  [[ "$description" == *"tiber sync"* ]]
+  [[ "$description" == *"force-push"* ]]
+}
+
 @test "help documents the single-plugin commands without requiring Codex" {
   help_path="$TMPROOT/help-bin"
   mkdir "$help_path"

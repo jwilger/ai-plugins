@@ -1,6 +1,6 @@
 ---
 name: tiber
-description: Use when the user wants repository task tracking, shared agent task state, cross-worktree coordination, terminal pushed-CI failure recovery ownership, tiber setup/install/scaffold guidance, or task create/list/show/prioritize/validate/close workflows. Plugin install and session start are non-mutating; setup integration starts with dry-run previews.
+description: Use whenever Tiber or origin/tiber is mentioned, including repository task tracking, EventCore publication conflicts, ambiguous pushes, tiber sync recovery, force-push safety, cross-worktree coordination, pushed-CI recovery, setup, and task workflows.
 ---
 
 # Tiber
