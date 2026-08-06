@@ -4,19 +4,17 @@ use std::fs;
 use support::{assert_success, assert_success_ref, TempRepo};
 
 #[test]
-fn init_creates_tasks_branch_and_ignores_accidental_tasks_checkout() {
+fn init_creates_only_the_tiber_event_branch() {
     let repo = TempRepo::initialized();
 
     let output = repo.tiber(["init"]);
 
     assert_success(output);
-    assert_success(repo.git_output(["show-ref", "--verify", "refs/heads/tasks"]));
-    let gitignore =
-        fs::read_to_string(repo.path().join(".gitignore")).expect(".gitignore should be readable");
-    assert!(
-        gitignore.lines().any(|line| line.trim() == ".tasks"),
-        ".tasks should be ignored through source-branch .gitignore"
-    );
+    assert_success(repo.git_output(["show-ref", "--verify", "refs/heads/tiber"]));
+    assert!(!repo
+        .git_output(["show-ref", "--verify", "refs/heads/tasks"])
+        .status
+        .success());
     assert!(
         !repo.path().join(".tasks").exists(),
         "tiber should not keep a persistent .tasks checkout"
@@ -29,15 +27,16 @@ fn init_creates_tasks_branch_and_ignores_accidental_tasks_checkout() {
         ".tasks should not appear as source-branch worktree state"
     );
 
-    let tree = repo.git_output(["ls-tree", "-r", "--name-only", "tasks"]);
+    let tree = repo.git_output(["ls-tree", "-r", "--name-only", "tiber"]);
     assert_success_ref(&tree);
     let tree_names = String::from_utf8(tree.stdout).expect("git tree output is utf8");
-    assert!(tree_names.lines().any(|line| line == "order.md"));
-    assert!(tree_names.lines().any(|line| line == "backlog/.gitkeep"));
+    assert!(tree_names
+        .lines()
+        .all(|line| line.starts_with("eventstore/events/")));
 }
 
 #[test]
-fn init_refuses_an_existing_source_tree_tasks_system_without_mutation() {
+fn init_ignores_an_existing_source_tree_tasks_system_without_mutation() {
     let repo = TempRepo::initialized();
     fs::create_dir_all(repo.path().join(".tasks/backlog")).expect("create existing task system");
     fs::write(
@@ -50,23 +49,18 @@ fn init_refuses_an_existing_source_tree_tasks_system_without_mutation() {
 
     let output = repo.tiber(["init"]);
 
-    assert!(
-        !output.status.success(),
-        "parallel task board must be refused"
+    assert_success_ref(&output);
+    assert_eq!(
+        fs::read(repo.path().join(".tasks/backlog/existing.md")).unwrap(),
+        b"# Existing task\n"
     );
-    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
-    assert!(stderr.contains("existing_tasks_system"));
-    assert!(stderr.contains("move, migrate, or explicitly integrate"));
-    let task_ref = repo.git_output(["show-ref", "--verify", "refs/heads/tasks"]);
-    assert!(
-        !task_ref.status.success(),
-        "tasks branch must not be created"
-    );
+    let task_ref = repo.git_output(["show-ref", "--verify", "refs/heads/tiber"]);
+    assert_success_ref(&task_ref);
     let after = repo.git_output(["status", "--short"]);
     assert_success_ref(&after);
     assert_eq!(
         after.stdout, before.stdout,
-        "init refusal must not mutate files"
+        "init must not mutate source-tree task files"
     );
 }
 
@@ -86,27 +80,7 @@ fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
     assert!(stdout.contains("plugin MCP policy overlays do not change transport env"));
     assert!(stdout.contains("preserves the absolute installed launcher"));
     assert!(stdout.contains("Never forward SSH_AUTH_SOCK to a PATH-resolved"));
-    assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"hash-object\"]"));
-    assert!(stdout.contains("prefix_rule [\"git\", \"hash-object\"]"));
-    assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"mktree\"]"));
-    assert!(stdout.contains("prefix_rule [\"git\", \"mktree\"]"));
-    assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"commit-tree\"]"));
-    assert!(stdout.contains("prefix_rule [\"git\", \"commit-tree\"]"));
-    assert!(stdout.contains("signed commit-tree -S"));
-    assert!(stdout.contains(
-        "case-by-case approval for prefix_rule [\"git\", \"update-ref\", \"refs/heads/tasks\"]"
-    ));
-    assert!(stdout.contains("prefix_rule [\"git\", \"update-ref\", \"refs/heads/tasks\"]"));
-    assert!(stdout.contains(
-        "case-by-case approval for prefix_rule [\"git\", \"fetch\", \"origin\", \"tasks:refs/remotes/origin/tasks\"]"
-    ));
-    assert!(stdout.contains(
-        "prefix_rule [\"git\", \"fetch\", \"origin\", \"tasks:refs/remotes/origin/tasks\"]"
-    ));
-    assert!(stdout.contains("case-by-case approval for prefix_rule [\"git\", \"-c\", \"core.hooksPath=/dev/null\", \"push\", \"origin\", \"refs/heads/tasks:refs/heads/tasks\"]"));
-    assert!(stdout.contains(
-        "prefix_rule [\"git\", \"-c\", \"core.hooksPath=/dev/null\", \"push\", \"origin\", \"refs/heads/tasks:refs/heads/tasks\"]"
-    ));
+    assert!(stdout.contains("publish event transactions to origin/tiber"));
     assert!(stdout.contains(
         "Persist approval only when the harness can scope it to the exact Tiber-internal operation"
     ));

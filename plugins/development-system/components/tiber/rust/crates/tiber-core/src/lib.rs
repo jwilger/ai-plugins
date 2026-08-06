@@ -1,5 +1,8 @@
 use std::fmt;
 
+pub mod events;
+pub mod task;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskTitle(String);
 

@@ -1,4 +1,16 @@
 {
+  "PreToolUse": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/tiber\" workflow-guard",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
   "SessionStart": [
     {
       "matcher": "*",

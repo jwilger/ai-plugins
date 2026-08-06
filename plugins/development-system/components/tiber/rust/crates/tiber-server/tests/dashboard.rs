@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use std::fs;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
@@ -145,27 +145,6 @@ async fn dashboard_reprioritize_rejects_non_backlog_tasks() {
 }
 
 #[tokio::test]
-async fn dashboard_copy_id_uses_full_legacy_stem() {
-    let repo = TempRepo::initialized();
-    repo.tiber(["init"]);
-    repo.insert_tasks_tree_file(
-        "backlog/build-dashboard-task.md",
-        &repo.task_document("Build dashboard task", &[], &[], &[], "Legacy summary.\n"),
-    );
-
-    let board = tiber_server::router_at(repo.path.clone())
-        .oneshot(Request::get("/").body(Body::empty()).expect("request"))
-        .await
-        .expect("board response");
-
-    assert_eq!(board.status(), StatusCode::OK);
-    let board = body_text(board).await;
-    assert!(board.contains("data-copy-task-id=\"build-dashboard-task\""));
-    assert!(board.contains("Copy ticket ID build-dashboard-task"));
-    assert!(!board.contains("data-copy-task-id=\"build-dashboa\""));
-}
-
-#[tokio::test]
 async fn dashboard_board_renders_while_tiber_writer_lock_exists() {
     let repo = TempRepo::initialized();
     repo.tiber(["init"]);
@@ -195,25 +174,33 @@ async fn dashboard_board_renders_course_columns_badges_dependencies_and_modal_co
     let docs = repo.task_stem("backlog", "document-release");
     repo.move_task("backlog", "in-progress", &ui);
     repo.move_task("backlog", "done", &docs);
-    repo.insert_tasks_tree_file("order.md", &format!("{api}\n{ui}\n"));
-    repo.insert_tasks_tree_file(
-        &format!("backlog/{api}.md"),
-        &repo.task_document(
-            "Build API",
-            &[],
-            &[&ui],
-            &["backend"],
-            "API summary with `code` and [Draft](docs/missing.md).\n",
-        ),
-    );
-    repo.insert_tasks_tree_file(
-        &format!("in-progress/{ui}.md"),
-        &repo.task_document("Build UI", &[&api], &[], &["frontend"], "UI summary.\n"),
-    );
-    repo.insert_tasks_tree_file(
-        &format!("done/{docs}.md"),
-        &repo.task_document("Document release", &[], &[], &["docs"], "Docs summary.\n"),
-    );
+    tiber_git::link_blocks_at(&repo.path, &api, &ui).expect("link tasks");
+    tiber_git::update_task_at(
+        &repo.path,
+        &api,
+        tiber_git::TaskUpdate {
+            title: None,
+            summary: Some("API summary with `code` and [Draft](docs/missing.md)."),
+            context: None,
+            tags: Some(vec!["backend".into()]),
+            pr_mr_url: None,
+            pr_mr_status: None,
+        },
+    )
+    .expect("update API task");
+    tiber_git::update_task_at(
+        &repo.path,
+        &ui,
+        tiber_git::TaskUpdate {
+            title: None,
+            summary: Some("UI summary."),
+            context: None,
+            tags: Some(vec!["frontend".into()]),
+            pr_mr_url: None,
+            pr_mr_status: None,
+        },
+    )
+    .expect("update UI task");
 
     let board = tiber_server::router_at(repo.path.clone())
         .oneshot(Request::get("/").body(Body::empty()).expect("request"))
@@ -243,14 +230,19 @@ async fn dashboard_in_progress_cards_show_pr_mr_status_badges() {
     repo.tiber(["create", "Review badge"]);
     let stem = repo.task_stem("backlog", "review-badge");
     repo.move_task("backlog", "in-progress", &stem);
-    let mut task = repo.task_file("in-progress", &stem);
-    task = task
-        .replace(
-            "pr_mr_url: \n",
-            "pr_mr_url: https://github.com/example/repo/pull/42\n",
-        )
-        .replace("pr_mr_status: \n", "pr_mr_status: checks-failing\n");
-    repo.insert_tasks_tree_file(&format!("in-progress/{stem}.md"), &task);
+    tiber_git::update_task_at(
+        &repo.path,
+        &stem,
+        tiber_git::TaskUpdate {
+            title: None,
+            summary: None,
+            context: None,
+            tags: None,
+            pr_mr_url: Some("https://github.com/example/repo/pull/42"),
+            pr_mr_status: Some("checks-failing"),
+        },
+    )
+    .expect("update PR status");
 
     let response = tiber_server::router_at(repo.path.clone())
         .oneshot(Request::get("/").body(Body::empty()).expect("request"))
@@ -461,67 +453,38 @@ impl TempRepo {
     }
 
     fn move_task(&self, from_status: &str, to_status: &str, stem: &str) {
-        let contents = self.task_file(from_status, stem);
-        self.insert_tasks_tree_file(&format!("{to_status}/{stem}.md"), &contents);
-        self.remove_tasks_tree_file(&format!("{from_status}/{stem}.md"));
-    }
-
-    fn task_file(&self, status: &str, stem: &str) -> String {
-        let output = Command::new("git")
-            .args(["show", &format!("tasks:{status}/{stem}.md")])
-            .current_dir(&self.path)
-            .output()
-            .expect("read task");
-        assert_success(output.clone());
-        String::from_utf8(output.stdout).expect("task should be utf8")
+        assert!(tiber_git::list_tasks_by_status_at(&self.path, from_status)
+            .expect("read task status")
+            .iter()
+            .any(|task| task.path.contains(stem)));
+        tiber_git::transition_task_at(&self.path, stem, to_status)
+            .expect("transition projected task");
     }
 
     fn order_entries(&self) -> Vec<String> {
-        let output = Command::new("git")
-            .args(["show", "tasks:order.md"])
-            .current_dir(&self.path)
-            .output()
-            .expect("read order");
-        assert_success(output.clone());
-        String::from_utf8(output.stdout)
-            .expect("order should be utf8")
-            .lines()
-            .map(str::to_string)
+        tiber_git::list_tasks_at(&self.path)
+            .expect("read order")
+            .into_iter()
+            .map(|task| {
+                std::path::Path::new(&task.path)
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect()
     }
 
-    fn task_document(
-        &self,
-        title: &str,
-        blocked_by: &[&str],
-        blocks: &[&str],
-        tags: &[&str],
-        summary: &str,
-    ) -> String {
-        format!(
-            "---\ntitle: {title}\nblocked_by: [{}]\nblocks: [{}]\ntags: [{}]\n---\n\n## Summary\n\n{summary}\n## Context / Why\n\nContext.\n\n## Acceptance criteria\n\n- [ ] Done condition\n\n## Subtasks\n\n- [ ] (s1) First step\n\n## Notes / Log\n\n- 2026-07-06: Note.\n",
-            blocked_by.join(", "),
-            blocks.join(", "),
-            tags.join(", ")
-        )
-    }
-
     fn task_stem(&self, status: &str, nickname: &str) -> String {
-        let output = Command::new("git")
-            .args(["ls-tree", "-r", "--name-only", "tasks", status])
-            .current_dir(&self.path)
-            .output()
-            .expect("list tasks tree");
-        assert_success(output.clone());
-        let mut matches = String::from_utf8(output.stdout)
-            .expect("tree should be utf8")
-            .lines()
-            .filter_map(|path| {
-                path.strip_prefix(&format!("{status}/"))
-                    .and_then(|name| name.strip_suffix(".md"))
-                    .filter(|stem| stem.ends_with(&format!("-{nickname}")))
-                    .map(str::to_string)
+        let mut matches = tiber_git::list_tasks_by_status_at(&self.path, status)
+            .expect("list tasks")
+            .into_iter()
+            .filter_map(|task| {
+                std::path::Path::new(&task.path)
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
             })
+            .filter(|stem| stem.ends_with(&format!("-{nickname}")))
             .collect::<Vec<_>>();
         matches.sort();
         assert_eq!(matches.len(), 1, "expected one task matching {nickname}");
@@ -540,100 +503,6 @@ impl TempRepo {
             format!("pid={}\ntimestamp={timestamp}\n", std::process::id()),
         )
         .expect("write tiber lock");
-    }
-
-    fn insert_tasks_tree_file(&self, path: &str, contents: &str) {
-        let blob = Command::new("git")
-            .args(["hash-object", "-w", "--stdin"])
-            .current_dir(&self.path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                use std::io::Write;
-                child
-                    .stdin
-                    .as_mut()
-                    .expect("hash-object stdin")
-                    .write_all(contents.as_bytes())?;
-                child.wait_with_output()
-            })
-            .expect("write task blob");
-        assert_success(blob.clone());
-        let blob = String::from_utf8(blob.stdout)
-            .expect("blob should be utf8")
-            .trim()
-            .to_string();
-        self.with_tasks_index(|index| {
-            self.git_env(
-                [
-                    "update-index",
-                    "--add",
-                    "--cacheinfo",
-                    "100644",
-                    &blob,
-                    path,
-                ],
-                index,
-            );
-        });
-    }
-
-    fn remove_tasks_tree_file(&self, path: &str) {
-        self.with_tasks_index(|index| {
-            self.git_env(["update-index", "--force-remove", path], index);
-        });
-    }
-
-    fn with_tasks_index(&self, update: impl FnOnce(&std::path::Path)) {
-        let index = self.path.join(".git").join("tiber-server-test-index");
-        self.git_env(["read-tree", "tasks"], &index);
-        update(&index);
-        let tree = self.git_env_output(["write-tree"], &index);
-        let tree = String::from_utf8(tree.stdout)
-            .expect("tree should be utf8")
-            .trim()
-            .to_string();
-        let commit = Command::new("git")
-            .args([
-                "commit-tree",
-                &tree,
-                "-p",
-                "tasks",
-                "-m",
-                "Update test tasks",
-            ])
-            .current_dir(&self.path)
-            .output()
-            .expect("commit test tree");
-        assert_success(commit.clone());
-        let commit = String::from_utf8(commit.stdout)
-            .expect("commit should be utf8")
-            .trim()
-            .to_string();
-        self.git(["update-ref", "refs/heads/tasks", &commit]);
-        let _ = fs::remove_file(index);
-    }
-
-    fn git_env<I, S>(&self, args: I, index: &std::path::Path)
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<std::ffi::OsStr>,
-    {
-        assert_success(self.git_env_output(args, index));
-    }
-
-    fn git_env_output<I, S>(&self, args: I, index: &std::path::Path) -> Output
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<std::ffi::OsStr>,
-    {
-        Command::new("git")
-            .args(args)
-            .env("GIT_INDEX_FILE", index)
-            .current_dir(&self.path)
-            .output()
-            .expect("run git with index")
     }
 }
 

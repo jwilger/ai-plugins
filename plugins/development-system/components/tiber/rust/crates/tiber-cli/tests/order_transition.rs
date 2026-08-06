@@ -26,19 +26,16 @@ fn next_show_transition_and_prioritize_follow_order_md() {
         .contains("title: Write docs"));
 
     assert_success(repo.tiber(["transition", "write-docs", "in-progress"]));
-    assert_success_ref(&repo.git_output([
-        "cat-file",
-        "-e",
-        &format!("tasks:in-progress/{write_docs}.md"),
-    ]));
+    task_stem(&repo, "in-progress", "write-docs");
     let in_progress = repo.task_file("in-progress", &write_docs);
     assert!(in_progress.contains("claim:\n"));
     assert!(in_progress.contains("  host: "));
     assert!(in_progress.contains("  session: "));
-    assert!(!repo
-        .git_output(["cat-file", "-e", &format!("tasks:backlog/{write_docs}.md")])
-        .status
-        .success());
+    assert!(
+        !String::from_utf8(repo.tiber(["list", "--status", "backlog"]).stdout)
+            .unwrap()
+            .contains(&write_docs)
+    );
 
     assert_success(repo.tiber(["prioritize", "review-docs", "--before", "write-docs"]));
 
@@ -169,7 +166,7 @@ fn next_skips_tasks_blocked_by_open_dependencies() {
 }
 
 #[test]
-fn task_refs_can_use_unique_filename_identity_and_report_ambiguity() {
+fn task_refs_can_use_unique_filename_identity() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Write docs"]));
@@ -186,17 +183,4 @@ fn task_refs_can_use_unique_filename_identity_and_report_ambiguity() {
     assert_success(repo.tiber(["transition", "write-docs", "in-progress"]));
     assert_success(repo.tiber(["prioritize", "review-docs", "--before", "write-docs"]));
     assert_eq!(repo.order_file(), format!("{review_docs}\n{write_docs}\n"));
-
-    repo.insert_task_file(
-        "done",
-        "20260706-abcd-write-docs",
-        "---\ntitle: Archived duplicate\nblocked_by: []\nblocks: []\ntags: []\n---\n",
-    );
-
-    let ambiguous = repo.tiber(["show", "write-docs"]);
-    assert!(!ambiguous.status.success(), "ambiguous ref should fail");
-    let stderr = String::from_utf8(ambiguous.stderr).expect("stderr should be utf8");
-    assert!(stderr.contains("ambiguous_task_ref ref=write-docs"));
-    assert!(stderr.contains("in-progress/"));
-    assert!(stderr.contains("done/"));
 }

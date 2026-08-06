@@ -1,0 +1,7 @@
+# eventcore-fs: only events/ is the committed source of truth.
+/tmp/
+/checkpoints/
+/locks/
+/index/
+/.eventcore/
+/.lock

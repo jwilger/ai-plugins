@@ -10,10 +10,10 @@ remediation, ticket work, and all pushes except the one recovery action
 selected below. Keep the hold until the failure is diagnosed and its
 replacement run reaches terminal success.
 
-Multi-agent ownership is coordinated only through the epoch-fenced incident on
-`origin/tiber-coordination`, never through the task-board branch or local
-notes. If that remote state is unavailable, fail closed and take no recovery
-action.
+Multi-agent ownership is coordinated only through the epoch-fenced incident in
+the `tiber:ci-recovery` stream on the authoritative `origin/tiber` branch,
+never through local notes. If that remote state is unavailable, fail closed
+and take no recovery action.
 
 ## Claim the Repository-Wide Incident
 
@@ -41,13 +41,13 @@ creates a new epoch, invalidating the former owner's authority. Cross-host
 clocks must be reasonably synchronized; do not take over on a marginal
 timestamp boundary.
 
-Tiber synchronizes this state on `origin/tiber-coordination`, not the task
-board: it fetches and compares, publishes normal fast-forward updates, and
-retries after concurrent updates. Never force-push the coordination branch. If
-Tiber or `origin` is unavailable, fail closed: preserve the global hold and do
-not diagnose, push, rerun, choose an action, or release until shared
-coordination is restored. Local notes preserve observations only; they do not
-grant ownership.
+Tiber synchronizes this state in `tiber:ci-recovery` on `origin/tiber`, the
+same authoritative event branch used by the task board. It fetches and
+compares, publishes normal fast-forward updates, and retries after concurrent
+updates. Never force-push the branch. If Tiber or `origin` is unavailable,
+fail closed: preserve the global hold and do not diagnose, push, rerun, choose
+an action, or release until shared coordination is restored. Local notes
+preserve observations only; they do not grant ownership.
 
 There are exactly two recovery actions:
 
@@ -100,7 +100,10 @@ success releases it.
 ## Recover the Run
 
 1. Claim or join the repository-wide incident. The owner binds the failure to
-   the exact pushed commit and CI run.
+   the exact pushed commit and CI run. Inspect the claim result immediately. If
+   it fails, stop: do not inspect logs, diagnose, edit, test, rerun, push, or do
+   unrelated work. Only retry the exact structured claim, read CI-recovery
+   status, or run Tiber sync to restore shared coordination.
 2. The owner inspects the exact failed job, failed step, and relevant logs. Store
    only a bounded, explicitly sanitized summary or authoritative-log reference;
    never persist raw logs, credentials, tokens, or other secrets. Do not infer

@@ -34,7 +34,7 @@ fn write_commands_fail_when_tiber_lock_is_held() {
     assert!(!create.status.success(), "write command should fail");
     let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
     assert!(stderr.contains("tiber_lock_busy"));
-    let tree = repo.git_output(["ls-tree", "-r", "--name-only", "tasks", "backlog"]);
+    let tree = repo.tiber(["list", "--status", "backlog"]);
     assert_success(tree.clone());
     assert!(!String::from_utf8(tree.stdout)
         .expect("tree output should be utf8")
@@ -79,7 +79,7 @@ fn write_commands_retry_when_tiber_lock_is_released() {
 
     releaser.join().expect("lock releaser should finish");
     assert_success(create);
-    let tree = repo.git_output(["ls-tree", "-r", "--name-only", "tasks", "backlog"]);
+    let tree = repo.tiber(["list", "--status", "backlog"]);
     assert_success(tree.clone());
     assert!(String::from_utf8(tree.stdout)
         .expect("tree output should be utf8")

@@ -1,17 +1,20 @@
 //! EventCore adapter whose transaction boundary is a confirmed Git ref.
 
-use eventcore_fs::{FileEventStore, FsEventStoreError};
+use eventcore_fs::{FileEventStore, FsConfig, FsEventStoreError};
 use eventcore_types::{
     Event, EventFilter, EventPage, EventReader, EventStore, EventStoreError, EventStream,
     EventStreamSlice, Operation, StreamId, StreamPosition, StreamVersion, StreamWrites,
 };
+use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
+use uuid::Uuid;
+use wait_timeout::ChildExt;
 
 /// The single authoritative ref used for every new Tiber event stream.
 pub const TIBER_BRANCH: &str = "tiber";
@@ -20,6 +23,8 @@ const REMOTE_REF: &str = "refs/remotes/origin/tiber";
 const REMOTE_HEAD: &str = "refs/heads/tiber";
 const STORE_DIRECTORY: &str = "eventstore";
 const PUBLICATION_RETRIES: usize = 3;
+const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const PENDING_VERSION: u32 = 1;
 
 /// Failure to open or refresh the Git-backed store.
 #[derive(Debug, thiserror::Error)]
@@ -48,6 +53,23 @@ pub struct GitEventStore {
     repository: PathBuf,
     common_directory: PathBuf,
     stage: Arc<Mutex<Stage>>,
+    operation: Arc<Mutex<()>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SynchronizeOutcome {
+    Current,
+    PublishedPending,
+    DiscardedUnpublished,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PendingPublication {
+    version: u32,
+    candidate: String,
+    base: Option<String>,
+    authority: String,
 }
 
 impl GitEventStore {
@@ -60,11 +82,12 @@ impl GitEventStore {
         } else {
             repository.join(common_directory)
         };
-        let stage = load_stage(&repository)?;
+        let stage = load_stage(&repository, &common_directory)?;
         Ok(Self {
             repository,
             common_directory,
             stage: Arc::new(Mutex::new(stage)),
+            operation: Arc::new(Mutex::new(())),
         })
     }
 
@@ -74,11 +97,67 @@ impl GitEventStore {
             .join("pending-publication")
     }
 
-    async fn refresh(&self) -> Result<(), EventStoreError> {
-        let refreshed =
-            load_stage(&self.repository).map_err(|_| store_failure(Operation::ReadStream))?;
+    async fn refresh(&self, operation: Operation) -> Result<(), EventStoreError> {
+        let refreshed = load_stage(&self.repository, &self.common_directory)
+            .map_err(|_| store_failure(operation))?;
         *self.stage.lock().await = refreshed;
         Ok(())
+    }
+
+    pub async fn synchronize(&self) -> Result<SynchronizeOutcome, GitEventStoreOpenError> {
+        let _operation = self.operation.lock().await;
+        let path = self.pending_publication_path();
+        if !path.exists() {
+            *self.stage.lock().await = load_stage(&self.repository, &self.common_directory)?;
+            super::clear_publication_failure_at(&self.repository)
+                .map_err(|error| GitEventStoreOpenError::Git(error.to_string()))?;
+            return Ok(SynchronizeOutcome::Current);
+        }
+        let pending = read_pending(&path)?;
+        validate_pending(&self.repository, &pending)?;
+        let has_origin = git(&self.repository, ["remote", "get-url", "origin"])
+            .is_ok_and(|output| output.status.success());
+        let expected_authority = if has_origin { "origin" } else { "local" };
+        if pending.authority != expected_authority {
+            return Err(GitEventStoreOpenError::Git(
+                "pending publication authority changed".into(),
+            ));
+        }
+        let head = if has_origin {
+            refresh_remote(&self.repository)?
+        } else {
+            resolve_optional_ref(&self.repository, LOCAL_REF)?
+        };
+        let outcome = if head
+            .as_deref()
+            .is_some_and(|head| is_ancestor(&self.repository, &pending.candidate, head))
+        {
+            SynchronizeOutcome::PublishedPending
+        } else if head == pending.base {
+            match if has_origin {
+                publish_remote(
+                    &self.repository,
+                    &pending.candidate,
+                    pending.base.as_deref(),
+                )?
+            } else {
+                publish_local(
+                    &self.repository,
+                    &pending.candidate,
+                    pending.base.as_deref(),
+                )?
+            } {
+                Publication::Confirmed => SynchronizeOutcome::PublishedPending,
+                Publication::Conflict => SynchronizeOutcome::DiscardedUnpublished,
+            }
+        } else {
+            SynchronizeOutcome::DiscardedUnpublished
+        };
+        remove_pending(&path)?;
+        *self.stage.lock().await = load_stage(&self.repository, &self.common_directory)?;
+        super::clear_publication_failure_at(&self.repository)
+            .map_err(|error| GitEventStoreOpenError::Git(error.to_string()))?;
+        Ok(outcome)
     }
 }
 
@@ -87,7 +166,8 @@ impl EventStore for GitEventStore {
         &self,
         stream_id: StreamId,
     ) -> Result<EventStream<E>, EventStoreError> {
-        self.refresh().await?;
+        let _operation = self.operation.lock().await;
+        self.refresh(Operation::ReadStream).await?;
         self.stage.lock().await.store.read_stream(stream_id).await
     }
 
@@ -95,20 +175,23 @@ impl EventStore for GitEventStore {
         &self,
         writes: StreamWrites,
     ) -> Result<EventStreamSlice, EventStoreError> {
+        let _operation = self.operation.lock().await;
         if self.pending_publication_path().exists() {
             return Err(store_failure(Operation::AppendEvents));
         }
 
-        let conflict = writes
+        let expected_versions = writes
             .expected_versions()
             .iter()
-            .next()
-            .map(|(stream_id, version)| (stream_id.clone(), *version));
-        let stage =
-            load_stage(&self.repository).map_err(|_| store_failure(Operation::AppendEvents))?;
+            .map(|(stream_id, version)| (stream_id.clone(), *version))
+            .collect::<Vec<_>>();
+        let stage = load_stage_with_retry(&self.repository, &self.common_directory)
+            .map_err(|_| store_failure(Operation::AppendEvents))?;
         let appended = stage.store.append_events(writes).await?;
         let candidate = create_candidate(&self.repository, &stage)
             .map_err(|_| store_failure(Operation::AppendEvents))?;
+        #[cfg(test)]
+        run_before_initial_publish_hook(&self.repository);
 
         let publication = if stage.has_origin {
             publish_remote(&self.repository, &candidate, stage.base.as_deref())
@@ -118,28 +201,92 @@ impl EventStore for GitEventStore {
 
         match publication {
             Ok(Publication::Confirmed) => {
-                *self.stage.lock().await = load_stage(&self.repository)
+                *self.stage.lock().await = load_stage(&self.repository, &self.common_directory)
                     .map_err(|_| store_failure(Operation::AppendEvents))?;
                 Ok(appended)
             }
             Ok(Publication::Conflict) => {
-                *self.stage.lock().await = load_stage(&self.repository)
+                let mut refreshed = load_stage(&self.repository, &self.common_directory)
                     .map_err(|_| store_failure(Operation::AppendEvents))?;
-                let (stream_id, expected) =
-                    conflict.ok_or_else(|| store_failure(Operation::AppendEvents))?;
-                Err(EventStoreError::VersionConflict {
-                    stream_id,
-                    expected,
-                    actual: StreamVersion::new(usize::from(expected).saturating_add(1)),
-                })
+                for _ in 0..PUBLICATION_RETRIES {
+                    match actual_conflict(&refreshed.store, &expected_versions).await {
+                        Ok(conflict) => {
+                            *self.stage.lock().await = refreshed;
+                            return Err(conflict);
+                        }
+                        Err(EventStoreError::StoreFailure { .. }) => {}
+                        Err(error) => return Err(error),
+                    }
+                    // The conflict probe intentionally appends to its disposable stage.
+                    // Reload the exact authority that will be unioned, and repeat the
+                    // version check if authority moved between the probe and reload.
+                    let merge_base = load_stage(&self.repository, &self.common_directory)
+                        .map_err(|_| store_failure(Operation::AppendEvents))?;
+                    if merge_base.base != refreshed.base {
+                        refreshed = merge_base;
+                        continue;
+                    }
+                    let merged = merge_disjoint_stage(&self.common_directory, merge_base, &stage)
+                        .map_err(|_| store_failure(Operation::AppendEvents))?;
+                    let rebased_candidate = create_candidate(&self.repository, &merged)
+                        .map_err(|_| store_failure(Operation::AppendEvents))?;
+                    #[cfg(test)]
+                    run_before_rebased_publish_hook(&self.repository);
+                    match if merged.has_origin {
+                        publish_remote(&self.repository, &rebased_candidate, merged.base.as_deref())
+                    } else {
+                        publish_local(&self.repository, &rebased_candidate, merged.base.as_deref())
+                    } {
+                        Ok(Publication::Confirmed) => {
+                            *self.stage.lock().await =
+                                load_stage(&self.repository, &self.common_directory)
+                                    .map_err(|_| store_failure(Operation::AppendEvents))?;
+                            return Ok(appended);
+                        }
+                        Ok(Publication::Conflict) => {
+                            refreshed = load_stage(&self.repository, &self.common_directory)
+                                .map_err(|_| store_failure(Operation::AppendEvents))?;
+                        }
+                        Err(_) => {
+                            persist_indeterminate(self, &rebased_candidate, &merged)?;
+                            *self.stage.lock().await = merged;
+                            return Err(store_failure(Operation::AppendEvents));
+                        }
+                    }
+                }
+                Err(store_failure(Operation::AppendEvents))
             }
             Err(_) => {
-                persist_pending(&self.pending_publication_path(), &candidate)
-                    .map_err(|_| store_failure(Operation::AppendEvents))?;
+                persist_indeterminate(self, &candidate, &stage)?;
                 *self.stage.lock().await = stage;
                 Err(store_failure(Operation::AppendEvents))
             }
         }
+    }
+}
+
+#[cfg(test)]
+type RebasedPublishHook = Box<dyn FnMut(&Path) + Send>;
+
+#[cfg(test)]
+static BEFORE_INITIAL_PUBLISH_HOOK: std::sync::Mutex<Option<RebasedPublishHook>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(test)]
+static BEFORE_REBASED_PUBLISH_HOOK: std::sync::Mutex<Option<RebasedPublishHook>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(test)]
+fn run_before_initial_publish_hook(repository: &Path) {
+    if let Some(mut hook) = BEFORE_INITIAL_PUBLISH_HOOK.lock().unwrap().take() {
+        hook(repository);
+    }
+}
+
+#[cfg(test)]
+fn run_before_rebased_publish_hook(repository: &Path) {
+    if let Some(mut hook) = BEFORE_REBASED_PUBLISH_HOOK.lock().unwrap().take() {
+        hook(repository);
     }
 }
 
@@ -151,7 +298,8 @@ impl EventReader for GitEventStore {
         filter: EventFilter,
         page: EventPage,
     ) -> Result<Vec<(E, StreamPosition)>, Self::Error> {
-        self.refresh().await?;
+        let _operation = self.operation.lock().await;
+        self.refresh(Operation::ReadStream).await?;
         self.stage
             .lock()
             .await
@@ -167,7 +315,7 @@ enum Publication {
     Conflict,
 }
 
-fn load_stage(repository: &Path) -> Result<Stage, GitEventStoreOpenError> {
+fn load_stage(repository: &Path, common_directory: &Path) -> Result<Stage, GitEventStoreOpenError> {
     let has_origin = git(repository, ["remote", "get-url", "origin"])
         .map(|output| output.status.success())
         .unwrap_or(false);
@@ -183,7 +331,10 @@ fn load_stage(repository: &Path) -> Result<Stage, GitEventStoreOpenError> {
     if let Some(commit) = &base {
         checkout_tree(repository, commit, &work_tree)?;
     }
-    let store = FileEventStore::open(work_tree.join(STORE_DIRECTORY))?;
+    let store = FileEventStore::open_with_config(
+        FsConfig::new(work_tree.join(STORE_DIRECTORY))
+            .with_replica_id(load_or_create_replica_id(common_directory)?),
+    )?;
     Ok(Stage {
         _directory: directory,
         work_tree,
@@ -191,6 +342,80 @@ fn load_stage(repository: &Path) -> Result<Stage, GitEventStoreOpenError> {
         base,
         has_origin,
     })
+}
+
+fn load_stage_with_retry(
+    repository: &Path,
+    common_directory: &Path,
+) -> Result<Stage, GitEventStoreOpenError> {
+    let mut last = None;
+    for _ in 0..PUBLICATION_RETRIES {
+        match load_stage(repository, common_directory) {
+            Ok(stage) => return Ok(stage),
+            Err(error) => {
+                last = Some(error);
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+    }
+    Err(last.expect("retry loop always records an error"))
+}
+
+fn merge_disjoint_stage(
+    common_directory: &Path,
+    refreshed: Stage,
+    original: &Stage,
+) -> Result<Stage, GitEventStoreOpenError> {
+    let source = original.work_tree.join(STORE_DIRECTORY).join("events");
+    let destination = refreshed.work_tree.join(STORE_DIRECTORY).join("events");
+    fs::create_dir_all(&destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            let target = destination.join(entry.file_name());
+            if !target.exists() {
+                fs::copy(entry.path(), target)?;
+            }
+        }
+    }
+    let Stage {
+        _directory,
+        work_tree,
+        store,
+        base,
+        has_origin,
+    } = refreshed;
+    drop(store);
+    let store = FileEventStore::open_with_config(
+        FsConfig::new(work_tree.join(STORE_DIRECTORY))
+            .with_replica_id(load_or_create_replica_id(common_directory)?),
+    )?;
+    Ok(Stage {
+        _directory,
+        work_tree,
+        store,
+        base,
+        has_origin,
+    })
+}
+
+fn persist_indeterminate(
+    event_store: &GitEventStore,
+    candidate: &str,
+    stage: &Stage,
+) -> Result<(), EventStoreError> {
+    persist_pending(
+        &event_store.pending_publication_path(),
+        &PendingPublication {
+            version: PENDING_VERSION,
+            candidate: candidate.to_owned(),
+            base: stage.base.clone(),
+            authority: if stage.has_origin { "origin" } else { "local" }.to_owned(),
+        },
+    )
+    .map_err(|_| store_failure(Operation::AppendEvents))?;
+    super::record_publication_failure_at(&event_store.repository)
+        .map_err(|_| store_failure(Operation::AppendEvents))
 }
 
 fn refresh_remote(repository: &Path) -> Result<Option<String>, GitEventStoreOpenError> {
@@ -206,7 +431,7 @@ fn refresh_remote(repository: &Path) -> Result<Option<String>, GitEventStoreOpen
                     "fetch",
                     "--no-tags",
                     "origin",
-                    &format!("{REMOTE_HEAD}:{REMOTE_REF}"),
+                    &format!("+{REMOTE_HEAD}:{REMOTE_REF}"),
                 ],
             )?)?;
             resolve_optional_ref(repository, REMOTE_REF)
@@ -255,7 +480,7 @@ fn create_candidate(repository: &Path, stage: &Stage) -> Result<String, GitEvent
         repository,
         Some(&stage.work_tree),
         index_env,
-        ["add", "--all", "--", STORE_DIRECTORY],
+        ["add", "--all", "--", &format!("{STORE_DIRECTORY}/events")],
     )?)?;
     let tree = output_text(require_success(git_with(
         repository,
@@ -263,13 +488,12 @@ fn create_candidate(repository: &Path, stage: &Stage) -> Result<String, GitEvent
         index_env,
         ["write-tree"],
     )?)?);
-    let mut arguments = vec![
-        "commit-tree",
-        tree.as_str(),
-        "-S",
-        "-m",
-        "tiber event transaction",
-    ];
+    let signing = git(repository, ["config", "--bool", "commit.gpgsign"])?;
+    let mut arguments = vec!["commit-tree", tree.as_str()];
+    if signing.status.success() && output_text(signing) == "true" {
+        arguments.push("-S");
+    }
+    arguments.extend(["-m", "tiber event transaction"]);
     if let Some(base) = &stage.base {
         arguments.extend(["-p", base.as_str()]);
     }
@@ -350,13 +574,133 @@ fn resolve_optional_ref(
     }
 }
 
-fn persist_pending(path: &Path, candidate: &str) -> Result<(), std::io::Error> {
+fn persist_pending(path: &Path, pending: &PendingPublication) -> Result<(), std::io::Error> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let temporary = path.with_extension("tmp");
-    fs::write(&temporary, format!("{candidate}\n"))?;
+    let encoded = serde_json::to_vec(pending).map_err(std::io::Error::other)?;
+    fs::write(&temporary, encoded)?;
     fs::rename(temporary, path)
+}
+
+fn read_pending(path: &Path) -> Result<PendingPublication, GitEventStoreOpenError> {
+    let pending: PendingPublication =
+        serde_json::from_slice(&fs::read(path)?).map_err(|error| {
+            GitEventStoreOpenError::Git(format!("pending publication is invalid: {error}"))
+        })?;
+    if pending.version != PENDING_VERSION {
+        return Err(GitEventStoreOpenError::Git(format!(
+            "unsupported pending publication version {}",
+            pending.version
+        )));
+    }
+    Ok(pending)
+}
+
+fn validate_pending(
+    repository: &Path,
+    pending: &PendingPublication,
+) -> Result<(), GitEventStoreOpenError> {
+    if !is_full_object_id(&pending.candidate)
+        || pending
+            .base
+            .as_deref()
+            .is_some_and(|base| !is_full_object_id(base))
+    {
+        return Err(GitEventStoreOpenError::Git(
+            "pending publication contains an invalid object id".into(),
+        ));
+    }
+    let object = format!("{}^{{commit}}", pending.candidate);
+    require_success(git(repository, ["cat-file", "-e", &object])?)?;
+    let parents = output_text(require_success(git(
+        repository,
+        ["rev-list", "--parents", "-n", "1", &pending.candidate],
+    )?)?);
+    let fields = parents.split_whitespace().collect::<Vec<_>>();
+    if fields.is_empty() || fields.len() > 2 || fields.get(1).copied() != pending.base.as_deref() {
+        return Err(GitEventStoreOpenError::Git(
+            "pending publication parent mismatch".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn is_full_object_id(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn remove_pending(path: &Path) -> Result<(), std::io::Error> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn load_or_create_replica_id(common_directory: &Path) -> Result<Uuid, GitEventStoreOpenError> {
+    let directory = common_directory.join("tiber");
+    fs::create_dir_all(&directory)?;
+    let path = directory.join("replica-id");
+    if let Ok(value) = fs::read_to_string(&path) {
+        return Uuid::parse_str(value.trim()).map_err(|error| {
+            GitEventStoreOpenError::Git(format!("invalid replica identity: {error}"))
+        });
+    }
+    let replica_id = Uuid::now_v7();
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            writeln!(file, "{replica_id}")?;
+            file.sync_all()?;
+            Ok(replica_id)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let value = fs::read_to_string(path)?;
+            Uuid::parse_str(value.trim()).map_err(|source| {
+                GitEventStoreOpenError::Git(format!("invalid replica identity: {source}"))
+            })
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+async fn actual_conflict(
+    store: &FileEventStore,
+    expected_versions: &[(StreamId, StreamVersion)],
+) -> Result<EventStoreError, EventStoreError> {
+    for (stream_id, expected) in expected_versions {
+        let probe = StreamWrites::new()
+            .register_stream(stream_id.clone(), *expected)?
+            .append(ConflictProbe {
+                stream_id: stream_id.clone(),
+            })?;
+        match store.append_events(probe).await {
+            Err(conflict @ EventStoreError::VersionConflict { .. }) => return Ok(conflict),
+            Err(error) => return Err(error),
+            Ok(_) => {}
+        }
+    }
+    Err(store_failure(Operation::AppendEvents))
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct ConflictProbe {
+    stream_id: StreamId,
+}
+
+impl Event for ConflictProbe {
+    fn stream_id(&self) -> &StreamId {
+        &self.stream_id
+    }
+    fn event_type_name() -> &'static str {
+        "tiber.git_event_store.conflict_probe"
+    }
 }
 
 fn git_path<const N: usize>(
@@ -399,8 +743,26 @@ where
     if let Some(work_tree) = work_tree {
         command.arg(format!("--work-tree={}", work_tree.display()));
     }
-    command.envs(environment).args(arguments);
-    command.output().map_err(GitEventStoreOpenError::Io)
+    command
+        .envs(environment)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "Never")
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .args(arguments);
+    let mut child = command.spawn()?;
+    match child.wait_timeout(GIT_TIMEOUT)? {
+        Some(_) => child.wait_with_output().map_err(GitEventStoreOpenError::Io),
+        None => {
+            child.kill()?;
+            let _ = child.wait();
+            Err(GitEventStoreOpenError::Git(
+                "Git command timed out".to_owned(),
+            ))
+        }
+    }
 }
 
 fn require_success(output: Output) -> Result<Output, GitEventStoreOpenError> {
@@ -424,4 +786,211 @@ fn output_text(output: Output) -> String {
 
 fn store_failure(operation: Operation) -> EventStoreError {
     EventStoreError::StoreFailure { operation }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eventcore_types::collect_events;
+
+    static TEST_SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[derive(Clone, Deserialize, Serialize)]
+    struct TestEvent {
+        stream_id: StreamId,
+    }
+
+    impl Event for TestEvent {
+        fn stream_id(&self) -> &StreamId {
+            &self.stream_id
+        }
+
+        fn event_type_name() -> &'static str {
+            "tiber.git_event_store.test"
+        }
+    }
+
+    fn writes(stream: &StreamId) -> StreamWrites {
+        StreamWrites::new()
+            .register_stream(stream.clone(), StreamVersion::new(0))
+            .unwrap()
+            .append(TestEvent {
+                stream_id: stream.clone(),
+            })
+            .unwrap()
+    }
+
+    fn require_git(repository: &Path, arguments: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repository)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    #[tokio::test]
+    async fn second_same_stream_advance_is_reprobed_before_rebased_publication() {
+        let _serial = TEST_SERIAL.lock().await;
+        let directory = TempDir::new().unwrap();
+        let repository = directory.path().join("repository");
+        let origin = directory.path().join("origin.git");
+        require_git(
+            directory.path(),
+            &["init", "--bare", origin.to_str().unwrap()],
+        );
+        require_git(directory.path(), &["init", repository.to_str().unwrap()]);
+        require_git(&repository, &["config", "user.name", "Tiber Test"]);
+        require_git(
+            &repository,
+            &["config", "user.email", "tiber@example.invalid"],
+        );
+        require_git(
+            &repository,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+
+        let disjoint_stream = StreamId::try_new("tiber:task:disjoint").unwrap();
+        let contested_stream = StreamId::try_new("tiber:task:contested").unwrap();
+        GitEventStore::open(&repository)
+            .unwrap()
+            .append_events(writes(&disjoint_stream))
+            .await
+            .unwrap();
+        let disjoint_head = require_git(&repository, &["rev-parse", REMOTE_REF]);
+
+        GitEventStore::open(&repository)
+            .unwrap()
+            .append_events(writes(&contested_stream))
+            .await
+            .unwrap();
+        let winner_head = require_git(&repository, &["rev-parse", REMOTE_REF]);
+        require_git(&origin, &["update-ref", "-d", REMOTE_HEAD, &winner_head]);
+
+        let initial_origin = origin.clone();
+        let initial_disjoint = disjoint_head.clone();
+        *BEFORE_INITIAL_PUBLISH_HOOK.lock().unwrap() = Some(Box::new(move |_| {
+            require_git(
+                &initial_origin,
+                &["update-ref", REMOTE_HEAD, &initial_disjoint],
+            );
+        }));
+
+        let hook_origin = origin.clone();
+        let hook_winner = winner_head.clone();
+        let hook_expected = disjoint_head.clone();
+        *BEFORE_REBASED_PUBLISH_HOOK.lock().unwrap() = Some(Box::new(move |_| {
+            require_git(
+                &hook_origin,
+                &["update-ref", REMOTE_HEAD, &hook_winner, &hook_expected],
+            );
+        }));
+
+        let result = GitEventStore::open(&repository)
+            .unwrap()
+            .append_events(writes(&contested_stream))
+            .await;
+        assert!(matches!(
+            result,
+            Err(EventStoreError::VersionConflict { .. })
+        ));
+        let reopened = GitEventStore::open(&repository).unwrap();
+        assert_eq!(
+            collect_events(
+                reopened
+                    .read_stream::<TestEvent>(contested_stream)
+                    .await
+                    .unwrap()
+            )
+            .await
+            .unwrap()
+            .len(),
+            1,
+            "the losing candidate must not create an eventcore-fs fork"
+        );
+        assert_eq!(
+            collect_events(
+                reopened
+                    .read_stream::<TestEvent>(disjoint_stream)
+                    .await
+                    .unwrap()
+            )
+            .await
+            .unwrap()
+            .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn ambiguous_rebased_publication_persists_the_exact_candidate() {
+        let _serial = TEST_SERIAL.lock().await;
+        let directory = TempDir::new().unwrap();
+        let repository = directory.path().join("repository");
+        let origin = directory.path().join("origin.git");
+        require_git(
+            directory.path(),
+            &["init", "--bare", origin.to_str().unwrap()],
+        );
+        require_git(directory.path(), &["init", repository.to_str().unwrap()]);
+        require_git(&repository, &["config", "user.name", "Tiber Test"]);
+        require_git(
+            &repository,
+            &["config", "user.email", "tiber@example.invalid"],
+        );
+        require_git(
+            &repository,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+
+        let authority_stream = StreamId::try_new("tiber:task:authority").unwrap();
+        GitEventStore::open(&repository)
+            .unwrap()
+            .append_events(writes(&authority_stream))
+            .await
+            .unwrap();
+        let authority = require_git(&repository, &["rev-parse", REMOTE_REF]);
+        require_git(&origin, &["update-ref", "-d", REMOTE_HEAD, &authority]);
+
+        let initial_origin = origin.clone();
+        let initial_authority = authority.clone();
+        *BEFORE_INITIAL_PUBLISH_HOOK.lock().unwrap() = Some(Box::new(move |_| {
+            require_git(
+                &initial_origin,
+                &["update-ref", REMOTE_HEAD, &initial_authority],
+            );
+        }));
+        let receive_hook = origin.join("hooks/pre-receive");
+        fs::write(&receive_hook, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&receive_hook, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let pending_stream = StreamId::try_new("tiber:task:pending").unwrap();
+        assert!(GitEventStore::open(&repository)
+            .unwrap()
+            .append_events(writes(&pending_stream))
+            .await
+            .is_err());
+
+        let marker: PendingPublication = serde_json::from_slice(
+            &fs::read(repository.join(".git/tiber/pending-publication")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(marker.base.as_deref(), Some(authority.as_str()));
+        let parent = require_git(
+            &repository,
+            &["rev-parse", &format!("{}^", marker.candidate)],
+        );
+        assert_eq!(parent, authority);
+        assert!(repository.join(".git/tiber/workflow-blocker.json").exists());
+    }
 }

@@ -62,9 +62,10 @@ fallback remains available for source-tree development. Release checks validate
 each artifact's target format, checksum, and embedded source/toolchain
 fingerprint.
 
-The caller carries final-review state between requests, while the MCP persists
-the authoritative session copy in project-scoped local state. A restarted MCP
-automatically resumes exact state and pending assignments. Mutated, stale, or
-concurrently superseded state and post-completion transitions fail closed with
-sanitized recovery diagnostics; active sessions and retained review history are
-bounded.
+The caller carries final-review state between requests, while the MCP records
+semantic final-review events through EventCore in a project-scoped local SQLite
+store. SQLite is intentionally local: these short-lived review sessions do not
+benefit from Git sharing. A restarted MCP reconstructs exact state, reports,
+and pending assignments from the event history. Mutated, stale, or concurrently
+superseded state and post-completion transitions fail closed with sanitized
+recovery diagnostics; active sessions and retained review history are bounded.

@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
-use support::{assert_success, assert_success_ref, task_stem, TempRepo};
+use support::{assert_success, task_stem, TempRepo};
 
 #[test]
 fn mcp_admissions_return_the_shared_backlog_capacity_refusal() {
@@ -322,11 +322,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(codex_setup_tool.contains("env_vars = [\\\"SSH_AUTH_SOCK\\\"]"));
     assert!(codex_setup_tool.contains("preserves the absolute installed launcher"));
     assert!(codex_setup_tool.contains("Never forward SSH_AUTH_SOCK to a PATH-resolved"));
-    assert!(codex_setup_tool
-        .contains("case-by-case approval for prefix_rule [\\\"git\\\", \\\"hash-object\\\"]"));
-    assert!(codex_setup_tool.contains("prefix_rule [\\\"git\\\", \\\"commit-tree\\\"]"));
-    assert!(codex_setup_tool
-        .contains("case-by-case approval for prefix_rule [\\\"git\\\", \\\"update-ref\\\", \\\"refs/heads/tasks\\\"]"));
+    assert!(codex_setup_tool.contains("publish event transactions to origin/tiber"));
     assert!(codex_setup_tool.contains(
         "Persist approval only when the harness can scope it to the exact Tiber-internal operation"
     ));
@@ -483,7 +479,6 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let scaffold = read_message(&mut stdout);
     assert!(scaffold.contains(r#""id":20"#));
-    assert!(scaffold.contains("already configured .gitignore"));
 
     write_message(&mut stdin, r#"{"jsonrpc":"2.0","id":21}"#);
     let missing_method = read_json_message(&mut stdout);
@@ -642,6 +637,10 @@ fn mcp_stdio_exposes_strict_structured_ci_recovery_tools() {
         false
     );
     assert_eq!(status["result"]["structuredContent"]["trigger_count"], 1);
+    assert_eq!(
+        status["result"]["structuredContent"]["owner"]["session"],
+        "mcp-session"
+    );
     let status_tool = listed_tools
         .iter()
         .find(|tool| tool["name"] == "tiber.ci_recovery.status")
@@ -667,6 +666,113 @@ fn mcp_stdio_exposes_strict_structured_ci_recovery_tools() {
 
     drop(stdin);
     assert!(child.wait().expect("wait for mcp process").success());
+}
+
+#[test]
+fn mcp_stdio_generates_a_process_stable_ci_identity_when_harness_identity_is_absent() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    let repo = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(repo.path())
+            .output()
+            .expect("add origin remote"),
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(repo.path())
+        .env("TIBER_CLAIM_HOST", "mcp-host")
+        .env_remove("TIBER_CLAIM_SESSION")
+        .env_remove("CODEX_SESSION_ID")
+        .env_remove("CLAUDE_SESSION_ID")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tiber mcp stdio");
+    let mut stdin = child.stdin.take().expect("mcp stdin");
+    let stdout = child.stdout.take().expect("mcp stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    let claim = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.ci_recovery.claim","arguments":{"run_id":"generated","run_url":"https://example.invalid/runs/generated","failed_sha":"abcdef0123456789","workflow":"CI","git_ref":"refs/heads/main"}}}"#;
+    write_message(&mut stdin, claim);
+    let first = read_json_message(&mut stdout);
+    assert_eq!(first["result"]["structuredContent"]["role"], "owner");
+    write_message(&mut stdin, &claim.replace(r#""id":1"#, r#""id":2"#));
+    let second = read_json_message(&mut stdout);
+    assert_eq!(second["result"]["structuredContent"]["role"], "owner");
+    assert_eq!(
+        first["result"]["structuredContent"]["incident_id"],
+        second["result"]["structuredContent"]["incident_id"]
+    );
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tiber.ci_recovery.status","arguments":{}}}"#,
+    );
+    let status = read_json_message(&mut stdout);
+    assert!(status["result"]["structuredContent"]["owner"]["session"]
+        .as_str()
+        .expect("generated session")
+        .starts_with("tiber-mcp-"));
+
+    drop(stdin);
+    assert!(child.wait().expect("wait for mcp server").success());
+}
+
+#[test]
+fn failed_mcp_claim_returns_structured_blocker_and_successful_retry_clears_it() {
+    let repo = TempRepo::initialized();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(repo.path())
+        .env_remove("TIBER_CLAIM_SESSION")
+        .env_remove("CODEX_SESSION_ID")
+        .env_remove("CLAUDE_SESSION_ID")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tiber mcp stdio");
+    let mut stdin = child.stdin.take().expect("mcp stdin");
+    let stdout = child.stdout.take().expect("mcp stdout");
+    let mut stdout = BufReader::new(stdout);
+    let claim = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.ci_recovery.claim","arguments":{"run_id":"blocked","run_url":"https://example.invalid/runs/blocked","failed_sha":"abcdef0123456789","workflow":"CI","git_ref":"refs/heads/main"}}}"#;
+
+    write_message(&mut stdin, claim);
+    let failed = read_json_message(&mut stdout);
+    assert_eq!(failed["error"]["data"]["workflow_blocked"], true);
+    assert_eq!(
+        failed["error"]["data"]["error_code"],
+        "tiber.ci_recovery_claim_failed"
+    );
+    assert!(repo
+        .path()
+        .join(".git/tiber/workflow-blocker.json")
+        .is_file());
+
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(repo.path())
+            .output()
+            .expect("add origin"),
+    );
+    write_message(&mut stdin, &claim.replace(r#""id":1"#, r#""id":2"#));
+    let retried = read_json_message(&mut stdout);
+    assert_eq!(retried["result"]["structuredContent"]["role"], "owner");
+    assert!(!repo
+        .path()
+        .join(".git/tiber/workflow-blocker.json")
+        .exists());
+
+    drop(stdin);
+    assert!(child.wait().expect("wait for mcp server").success());
 }
 
 fn write_message(stdin: &mut impl Write, message: &str) {
@@ -700,100 +806,4 @@ fn mcp_stdio_ignores_json_rpc_notifications() {
     tiber_mcp::run_stdio(std::io::BufReader::new(input), &mut output).expect("run stdio");
 
     assert_eq!(output, b"");
-}
-
-#[test]
-fn mcp_stdio_create_sync_failure_reports_created_ref_and_redacts_stderr() {
-    let (origin, hook_path) = TempRepo::bare_with_rejecting_hook();
-    let repo = TempRepo::initialized();
-    repo.git([
-        "remote",
-        "add",
-        "origin",
-        origin.path().to_str().expect("origin path should be utf8"),
-    ]);
-    assert_success(repo.tiber(["init"]));
-
-    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
-        .args(["mcp", "stdio"])
-        .current_dir(repo.path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn tiber mcp stdio");
-    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
-    let stdout = child.stdout.take().expect("mcp stdout should be available");
-    let mut stdout = BufReader::new(stdout);
-
-    write_message(
-        &mut stdin,
-        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.create","arguments":{"title":"MCP partial create"}}}"#,
-    );
-    let create = read_json_message(&mut stdout);
-
-    assert_eq!(create["id"], 1);
-    assert_eq!(create["error"]["code"], -32603);
-    let message = create["error"]["message"]
-        .as_str()
-        .expect("error message should be a string");
-    assert!(
-        message.contains("tiber.create_sync_failed created="),
-        "MCP error should include partial-success error with created ref: {message}"
-    );
-    assert!(
-        message.contains("-mcp-partial-create"),
-        "MCP error should include the created task nickname: {message}"
-    );
-    assert!(
-        message.contains("run tiber sync after resolving the sync error"),
-        "MCP error should include recovery guidance: {message}"
-    );
-    assert!(
-        message.contains("stderr_redacted=true"),
-        "MCP error should report redaction instead of raw sync output: {message}"
-    );
-    assert!(
-        message.contains("args_redacted=true"),
-        "MCP error should report redacted sync command arguments: {message}"
-    );
-    assert!(
-        !message.contains("secret@example.invalid"),
-        "MCP error should not leak token-bearing remote details: {message}"
-    );
-    assert!(
-        !message.contains("private/repo.git"),
-        "MCP error should not leak private remote paths: {message}"
-    );
-    assert!(
-        !message.contains(repo.path().to_str().expect("repo path should be utf8")),
-        "MCP error should not leak local repository paths: {message}"
-    );
-    let stem = task_stem(&repo, "backlog", "mcp-partial-create");
-    assert!(
-        message.contains(&stem),
-        "MCP error should include the exact locally created task ref {stem}: {message}"
-    );
-
-    fs::remove_file(&hook_path).expect("remove rejecting hook");
-    write_message(
-        &mut stdin,
-        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tiber.sync","arguments":{}}}"#,
-    );
-    let sync = read_message(&mut stdout);
-    assert!(sync.contains(r#""id":2"#));
-    assert!(sync.contains("synced tiber"));
-
-    let remote_listing = origin.git_output(["ls-tree", "-r", "--name-only", "tasks"]);
-    assert_success_ref(&remote_listing);
-    assert!(
-        String::from_utf8(remote_listing.stdout)
-            .expect("remote task listing should be utf8")
-            .contains(&format!("backlog/{stem}.md")),
-        "tiber sync should recover the locally created MCP task to origin/tasks"
-    );
-
-    drop(stdin);
-    let status = child.wait().expect("wait for mcp process");
-    assert!(status.success());
 }

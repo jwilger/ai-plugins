@@ -19,9 +19,7 @@ pub fn codex_sandbox_setup() -> String {
         "- case-by-case approval for prefix_rule [\"git\", \"hash-object\"] because it can write arbitrary host-readable file contents into Git objects",
         "- case-by-case approval for prefix_rule [\"git\", \"mktree\"] because it can construct arbitrary Git trees from stdin",
         "- case-by-case approval for prefix_rule [\"git\", \"commit-tree\"] because it can create commits, including signed commit-tree -S when commit.gpgsign=true",
-        "- case-by-case approval for prefix_rule [\"git\", \"update-ref\", \"refs/heads/tasks\"] because raw prefix approval can still be reused outside the current Tiber operation",
-        "- case-by-case approval for prefix_rule [\"git\", \"fetch\", \"origin\", \"tasks:refs/remotes/origin/tasks\"] because raw prefix approval can be extended with additional Git arguments",
-        "- case-by-case approval for prefix_rule [\"git\", \"-c\", \"core.hooksPath=/dev/null\", \"push\", \"origin\", \"refs/heads/tasks:refs/heads/tasks\"] because raw prefix approval can be extended with additional refspecs or options",
+        "- case-by-case approval for Tiber MCP calls that publish event transactions to origin/tiber",
         "",
         "Persist approval only when the harness can scope it to the exact Tiber-internal operation, not merely to a raw git prefix.",
         "Never persist a raw git, wildcard git, bash, sh, or whole-MCP-server permission for Tiber recovery.",
@@ -34,6 +32,14 @@ pub fn codex_sandbox_setup() -> String {
 }
 
 pub fn run_stdio(input: impl BufRead, mut output: impl Write) -> Result<(), tiber_git::Error> {
+    let fallback_session = format!(
+        "tiber-mcp-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
     for line in input.lines() {
         let line = match line {
             Ok(line) => line,
@@ -66,9 +72,18 @@ pub fn run_stdio(input: impl BufRead, mut output: impl Write) -> Result<(), tibe
             continue;
         }
         let id = request.get("id").cloned().unwrap_or(Value::Null);
-        let response = match handle_json_rpc(&request) {
+        let response = match tiber_git::with_mcp_ci_recovery_session(&fallback_session, || {
+            handle_json_rpc(&request)
+        }) {
             Ok(response) => response,
-            Err(error) => error_response(id, -32603, &error.to_string()),
+            Err(error) => {
+                let message = error.to_string();
+                if let Some(blocker) = error.workflow_blocker_data() {
+                    blocking_error_response(id, &message, blocker)
+                } else {
+                    error_response(id, -32603, &message)
+                }
+            }
         };
         writeln!(output, "{response}")?;
         output.flush()?;
@@ -596,7 +611,7 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.sync",
             "Sync tiber",
-            "Sync local task state into the Git-backed tasks branch.",
+            "Synchronize the EventCore store on the Git-backed tiber branch.",
             json!({}),
             vec![],
         ),
@@ -1285,6 +1300,27 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
     })
 }
 
+fn blocking_error_response(
+    id: Value,
+    message: &str,
+    blocker: tiber_git::WorkflowBlockerData,
+) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": -32603,
+            "message": message,
+            "data": {
+                "error_code": blocker.error_code,
+                "workflow_blocked": true,
+                "required_action": blocker.required_action,
+                "prohibited_actions": ["diagnose", "edit", "test", "rerun", "push", "unrelated-work"]
+            }
+        }
+    })
+}
+
 fn resources() -> Result<Vec<Value>, tiber_git::Error> {
     let mut resources = vec![
         json!({
@@ -1348,4 +1384,29 @@ fn read_resource(uri: &str) -> Result<String, tiber_git::Error> {
     Err(tiber_git::Error::Parse(format!(
         "unsupported_resource uri={uri}"
     )))
+}
+
+#[cfg(test)]
+mod blocker_response_tests {
+    use super::*;
+
+    #[test]
+    fn structured_blocker_uses_the_errors_actual_code_and_recovery() {
+        let response = blocking_error_response(
+            json!(7),
+            "tiber.publication_failed workflow_blocked=true",
+            tiber_git::WorkflowBlockerData {
+                error_code: "tiber.publication_failed",
+                required_action: "run Tiber sync until authoritative publication is resolved",
+            },
+        );
+        assert_eq!(
+            response["error"]["data"]["error_code"],
+            "tiber.publication_failed"
+        );
+        assert_eq!(
+            response["error"]["data"]["required_action"],
+            "run Tiber sync until authoritative publication is resolved"
+        );
+    }
 }

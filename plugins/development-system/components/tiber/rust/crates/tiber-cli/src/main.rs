@@ -94,9 +94,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Initialize the tasks branch.
+    #[command(hide = true)]
+    WorkflowGuard,
+    /// Initialize the Tiber event store.
     Init,
-    /// Synchronize local task state with origin/tasks.
+    /// Synchronize local event state with origin/tiber.
     Sync,
     /// Show Codex sandbox approval guidance.
     CodexSandbox(CodexSandboxArgs),
@@ -758,6 +760,15 @@ fn normalized_cli_arguments(arguments: impl IntoIterator<Item = OsString>) -> Ve
 
 fn run(cli: Cli) -> Result<(), tiber_git::Error> {
     match cli.command {
+        Command::WorkflowGuard => {
+            let mut input = String::new();
+            std::io::stdin().read_to_string(&mut input)?;
+            if let Some(message) = tiber_git::workflow_guard(&input)? {
+                eprintln!("{message}");
+                process::exit(2);
+            }
+            Ok(())
+        }
         Command::Init => tiber_git::init_repository(),
         Command::Sync => tiber_git::sync_repository(),
         Command::CodexSandbox(_) => {

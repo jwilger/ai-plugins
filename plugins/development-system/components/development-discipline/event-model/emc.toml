@@ -1,0 +1,5 @@
+[project]
+name = "development-discipline"
+version = "0.1.0"
+lean_module = "DevelopmentDiscipline"
+quint_module = "DevelopmentDiscipline"

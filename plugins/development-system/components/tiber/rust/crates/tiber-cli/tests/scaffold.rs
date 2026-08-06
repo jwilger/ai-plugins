@@ -12,7 +12,7 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
 
     assert_success_ref(&dry_run);
     let dry_run_stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
-    assert!(dry_run_stdout.contains("would write .gitignore"));
+    assert!(!dry_run_stdout.contains(".gitignore"));
     assert!(dry_run_stdout.contains("skipped hook-dispatch"));
     assert!(dry_run_stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
     assert!(!repo.path().join(".gitignore").exists());
@@ -31,7 +31,7 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
     let apply = repo.tiber(["scaffold", "repo", "--apply"]);
 
     assert_success(apply);
-    assert!(repo.path().join(".gitignore").exists());
+    assert!(!repo.path().join(".gitignore").exists());
     assert!(!repo.path().join(".githooks/post-commit.tiber").exists());
     assert!(repo
         .path()
@@ -196,7 +196,7 @@ fn scaffold_repo_refuses_unsigned_workflow_for_signed_publication_policy() {
 }
 
 #[test]
-fn scaffold_repo_preserves_existing_gitignore_entries() {
+fn scaffold_repo_leaves_existing_gitignore_untouched() {
     let repo = TempRepo::initialized();
     let existing = "target/\n.env\ncoverage/\n";
     fs::write(repo.path().join(".gitignore"), existing).expect("write existing gitignore");
@@ -204,27 +204,19 @@ fn scaffold_repo_preserves_existing_gitignore_entries() {
     let apply = repo.tiber(["scaffold", "repo", "--apply"]);
 
     assert_success(apply);
-    let gitignore =
-        fs::read_to_string(repo.path().join(".gitignore")).expect("read updated gitignore");
-    assert!(gitignore.starts_with(existing));
-    assert_eq!(
-        gitignore
-            .lines()
-            .filter(|line| line.trim() == ".tasks")
-            .count(),
-        1
-    );
+    let gitignore = fs::read_to_string(repo.path().join(".gitignore")).expect("read gitignore");
+    assert_eq!(gitignore, existing);
 }
 
 #[test]
-fn scaffold_repo_does_not_replace_non_utf8_gitignore() {
+fn scaffold_repo_ignores_non_utf8_gitignore() {
     let repo = TempRepo::initialized();
     let existing = b"target/\n\xff\n";
     fs::write(repo.path().join(".gitignore"), existing).expect("write non-utf8 gitignore");
 
     let apply = repo.tiber(["scaffold", "repo", "--apply"]);
 
-    assert!(!apply.status.success());
+    assert_success(apply);
     assert_eq!(
         fs::read(repo.path().join(".gitignore")).expect("read unchanged gitignore"),
         existing
@@ -727,7 +719,7 @@ fn scaffold_repo_reports_repeated_setup_as_already_configured() {
 
     assert_success_ref(&dry_run);
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
-    assert!(stdout.contains("already configured .gitignore"));
+    assert!(!stdout.contains(".gitignore"));
     assert!(stdout.contains("skipped hook-dispatch"));
     assert!(stdout.contains("already configured .github/workflows/tiber-close-from-trailers.yml"));
     assert!(!stdout.contains("would write"));
@@ -736,19 +728,15 @@ fn scaffold_repo_reports_repeated_setup_as_already_configured() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        for path in [
-            ".gitignore",
-            ".github/workflows/tiber-close-from-trailers.yml",
-        ] {
-            fs::set_permissions(repo.path().join(path), fs::Permissions::from_mode(0o444))
-                .expect("make generated file read-only");
-        }
+        let path = ".github/workflows/tiber-close-from-trailers.yml";
+        fs::set_permissions(repo.path().join(path), fs::Permissions::from_mode(0o444))
+            .expect("make generated file read-only");
     }
     let second_apply = repo.tiber(["scaffold", "repo", "--apply"]);
 
     assert_success_ref(&second_apply);
     let stdout = String::from_utf8(second_apply.stdout).expect("apply output should be utf8");
-    assert!(stdout.contains("already configured .gitignore"));
+    assert!(!stdout.contains(".gitignore"));
     assert!(stdout.contains("skipped hook-dispatch"));
     assert!(stdout.contains("already configured .github/workflows/tiber-close-from-trailers.yml"));
     assert!(!stdout.contains("wrote"));
@@ -769,7 +757,7 @@ fn scaffold_repo_reports_conflicts_and_refuses_ambiguous_overwrites_atomically()
 
     assert_success_ref(&dry_run);
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
-    assert!(stdout.contains("would write .gitignore"));
+    assert!(!stdout.contains(".gitignore"));
     assert!(stdout.contains("conflict .githooks/post-commit.tiber resolution=--replace-conflicts"));
 
     let apply = repo.tiber(["scaffold", "repo", "--apply"]);
@@ -862,29 +850,6 @@ fn scaffold_repo_preserves_existing_files_when_a_destination_is_a_dangling_symli
 }
 
 #[test]
-fn scaffold_repo_preserves_an_existing_file_when_its_replacement_write_fails() {
-    let repo = TempRepo::initialized();
-    let existing_gitignore = "target/\n".repeat(512);
-    fs::write(repo.path().join(".gitignore"), &existing_gitignore).expect("write gitignore");
-
-    let apply = repo.command(
-        "bash",
-        [
-            "-c",
-            "ulimit -f 1; exec \"$1\" scaffold repo --apply",
-            "_",
-            env!("CARGO_BIN_EXE_tiber"),
-        ],
-    );
-
-    assert!(!apply.status.success());
-    assert_eq!(
-        fs::read_to_string(repo.path().join(".gitignore")).expect("read unchanged gitignore"),
-        existing_gitignore
-    );
-}
-
-#[test]
 fn scaffold_repo_preserves_an_unowned_atomic_replacement_file() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join(".gitignore"), "target/\n").expect("write gitignore");
@@ -917,15 +882,9 @@ fn scaffold_repo_replaces_ambiguous_targets_only_with_an_explicit_choice() {
         fs::read_to_string(&hook_path).expect("read replaced hook"),
         "#!/usr/bin/env bash\nset -euo pipefail\n\ntiber close-from-trailers\n"
     );
-    let gitignore =
-        fs::read_to_string(repo.path().join(".gitignore")).expect("read updated gitignore");
-    assert!(gitignore.starts_with("target/\n"));
     assert_eq!(
-        gitignore
-            .lines()
-            .filter(|line| line.trim() == ".tasks")
-            .count(),
-        1
+        fs::read_to_string(repo.path().join(".gitignore")).expect("read gitignore"),
+        "target/\n"
     );
 }
 
@@ -940,7 +899,7 @@ fn scaffold_repo_adds_show_tasks_recipe_when_justfile_exists() {
     assert_success_ref(&dry_run);
     let stdout = String::from_utf8(dry_run.stdout).expect("dry-run output should be utf8");
     assert!(stdout.contains("skipped hook-dispatch"));
-    assert!(stdout.contains("would write .gitignore"));
+    assert!(!stdout.contains(".gitignore"));
     assert!(stdout.contains("would write .github/workflows/tiber-close-from-trailers.yml"));
     assert!(stdout.contains("would write justfile"));
     assert_eq!(

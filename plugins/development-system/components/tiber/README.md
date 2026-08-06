@@ -1,11 +1,11 @@
 # Tiber
 
-Tiber is a Git-backed task board for coding agents. It keeps task state in a
-dedicated orphan `tasks` branch and gives agents a deterministic CLI plus stdio
-MCP tools for creating, ordering, validating, and closing repository-local work.
+Tiber is an event-sourced task board for coding agents. It keeps task and
+CI-recovery state in an EventCore/eventcore-fs store on one dedicated orphan
+`tiber` branch and gives agents a deterministic CLI plus stdio MCP tools.
 
-The goal is simple: multiple agents and worktrees can coordinate without turning
-task files into untracked side chatter or hand-edited markdown drift.
+The goal is simple: multiple agents and worktrees can coordinate through one
+authoritative event history instead of repository ticket files.
 
 ## Screenshots
 
@@ -65,21 +65,16 @@ Backlog tasks are unclaimed work, not informal reservations.
 
 ## What Tiber Stores
 
-- `tasks` is an orphan Git branch that owns task-board state.
-- The branch stores a shared tree with `backlog/`, `in-progress/`,
-  `done/`, and `abandoned/` status directories.
-- Tiber reads and writes that branch through Git object/tree/ref operations. It
-  does not keep the `tasks` branch checked out locally and does not create a
-  persistent `.tasks` working copy.
-- Task files are named `<YYYYMMDD-xxxx>-<nickname>.md` and contain YAML
-  frontmatter plus standard Markdown sections.
-- `order.md` records one bare task stem per line for open work only.
+- `tiber` is an orphan Git branch containing the eventcore-fs event store.
+- Semantic task and CI-recovery events share that store in separate EventCore
+  streams and use expected stream versions for optimistic concurrency.
+- A command is successful only after its exact event transaction is published
+  to `origin/tiber` when an origin exists.
 - CLI and MCP commands accept a task id, nickname, or full stem. Users do not
-  need to pass `.tasks` paths, status directories, or Markdown section names.
+  need to know stream identifiers or EventCore storage details.
 
 This keeps task state versioned, syncable, and separate from the source branch.
-Inspect it through `tiber show`, `tiber list`, the dashboard, or normal Git
-commands such as `git show tasks:order.md`.
+Inspect it through `tiber show`, `tiber list`, or the dashboard.
 
 Bare `tiber list` preserves board-order output for open work. Use
 `tiber list --status <backlog|in-progress|done|abandoned>` to inspect one
@@ -205,17 +200,20 @@ tiber --help
 The apply step never replaces an existing `tiber` file or symlink. Remove or
 relocate an existing target deliberately before reinstalling or upgrading.
 
-`validate --fix` only performs safe mechanical repairs: misplaced claims,
-missing reciprocal links, and `order.md` reconciliation. Dangling references and
-dependency cycles are reported for deliberate resolution.
+`validate --fix` only performs safe mechanical repairs such as misplaced claims
+and missing reciprocal links. Dangling references and dependency cycles are
+reported for deliberate resolution.
 
 ## Sync Model
 
-Tiber writes local board changes, commits them to the `tasks` branch, and pushes
-that branch when an `origin` remote exists.
+Tiber appends semantic events through EventCore, commits eventcore-fs files to
+the `tiber` branch, and pushes that branch when an `origin` remote exists.
 
-Write sync conflicts are hard failures. Do not force-push or choose a side
-blindly. Preserve both sides, resolve the conflict deliberately, then rerun:
+Confirmed concurrent publication is handled as an EventCore version conflict:
+Tiber refreshes the authoritative branch and retries the pure command with its
+original invocation identity. Never force-push or choose a side blindly. If
+publication cannot be confirmed either way, Tiber blocks further mutations
+until the pending candidate is resolved with:
 
 ```shell
 tiber sync
@@ -240,8 +238,8 @@ divergent task data.
 ## Pushed-CI Recovery Coordination
 
 Tiber coordinates a terminal pushed-CI failure as one repository-wide incident
-on the remote `tiber-coordination` branch. This is distinct from the `tasks`
-branch. Every agent that detects the failure claims or joins before diagnosing,
+stream in the EventCore store on the remote `tiber` branch. Task and CI state
+share that single branch. Every agent that detects the failure claims or joins before diagnosing,
 pushing, rerunning, or releasing anything:
 
 ```shell
@@ -272,8 +270,8 @@ may take over only after the lease expires. Only matching replacement-run proof
 with terminal `success` releases the hold—queued, running, canceled, and failed
 runs do not.
 
-The coordination client fetches and compares `origin/tiber-coordination`, then
-publishes normal fast-forward updates. A concurrent update is refetched,
+The coordination client fetches and compares `origin/tiber`, then publishes
+normal fast-forward event-store updates. A concurrent update is refetched,
 compared, and retried; it is never force-pushed. If Tiber or `origin` is
 unavailable, keep the CI hold, do not push, rerun, select a recovery action, or
 release it, and restore shared coordination first. Local notes can preserve
@@ -300,7 +298,8 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `tiber/0.15.1` Codex plugin cache
+when that variable is set, or from the exact `development-system/3.0.0` Codex
+plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with
 `tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
@@ -372,8 +371,6 @@ tiber scaffold repo --dry-run
 
 The preview covers:
 
-- an additive `.gitignore` update that preserves existing entries and adds
-  `.tasks` at most once
 - a post-commit hook snippet only when the active executable hook verifiably
   dispatches it; otherwise the preview reports the missing integration
 - a GitHub workflow for `tiber close-from-trailers` with pinned checkout and
@@ -397,11 +394,9 @@ tiber scaffold repo --apply --replace-conflicts
 
 ### Established repositories
 
-`tiber init` refuses before mutation when the source checkout already contains
-a root `.tasks` path. Move or migrate that task system, or design an explicit
-integration, before creating Tiber's separate Git-object-backed `tasks` branch.
-Tiber never treats a source-tree `.tasks` directory as its temporary internal
-working copy.
+Legacy `.tasks` trees and the former `tasks` and `tiber-coordination` branches
+are ignored history, not Tiber state. Tiber neither migrates nor mutates them;
+recreate any still-useful tickets manually through Tiber commands.
 
 Scaffold resolves Git's active hooks directory. With no configured hook
 dispatcher, it reports that local automation was skipped instead of writing an
@@ -411,7 +406,7 @@ manager's active `post-commit` hook to `.githooks/post-commit.tiber`, then
 preview again. Existing active task-closing hooks and push workflows remain
 untouched and suppress only their matching generated integration.
 
-The generated GitHub workflow publishes the `tasks` branch with explicit
+The generated GitHub workflow publishes Tiber event transactions with explicit
 `contents: write` permission. It pins `actions/checkout` and the Tiber source
 commit rather than following mutable tags or branches, installs with the
 committed Cargo lockfile, and targets the remote default branch when available

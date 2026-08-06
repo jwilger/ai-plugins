@@ -80,16 +80,18 @@ fn subtask_check_only_updates_subtasks_section() {
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Scoped subtask check"]));
     assert_success(repo.tiber(["subtask", "add", "scoped-subtask-check", "Real subtask"]));
+    assert_success(repo.tiber([
+        "acceptance",
+        "add",
+        "scoped-subtask-check",
+        "Acceptance item with matching marker (s1)",
+    ]));
     let task = support::task_stem(&repo, "backlog", "scoped-subtask-check");
-    let contents = repo.task_file("backlog", &task).replace(
-        "## Acceptance criteria\n\n",
-        "## Acceptance criteria\n\n- [ ] (s1) Acceptance item with matching marker\n\n",
-    );
-    repo.insert_task_file("backlog", &task, &contents);
 
     assert_success(repo.tiber(["subtask", "check", "scoped-subtask-check", "s1"]));
 
     let updated = repo.task_file("backlog", &task);
-    assert!(updated.contains("## Acceptance criteria\n\n- [ ] (s1) Acceptance item"));
+    assert!(updated
+        .contains("## Acceptance criteria\n\n- [ ] Acceptance item with matching marker (s1)"));
     assert!(updated.contains("## Subtasks\n\n- [x] (s1) Real subtask"));
 }

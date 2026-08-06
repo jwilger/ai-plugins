@@ -7,14 +7,14 @@ description: Use when the user wants repository task tracking, shared agent task
 
 For a terminal failed pushed-CI run, every detecting agent must first use the
 repository-wide `tiber ci-recovery claim` protocol described below. Its
-authoritative state is `origin/tiber-coordination`, never the `tasks` branch.
+authoritative state is the EventCore store on `origin/tiber`.
 Never substitute a task claim, local note, or independent rerun for that
 incident; if the remote is unavailable, keep the hold and take no recovery
 action.
 
-Use Tiber for repository-local task boards backed by the Git `tasks` branch and
-a shared `backlog/`, `in-progress/`, `done/`, and `abandoned/` task tree. Tiber
-uses Git object/tree/ref operations rather than a persistent `.tasks` checkout.
+Use Tiber for repository-local task boards backed by EventCore and eventcore-fs
+on the shared Git `tiber` branch. Task and CI-recovery state share this one
+event store; Markdown task files are no longer persistent state.
 The bundled launcher is `<plugin-root>/bin/tiber`; resolve `<plugin-root>`
 relative to this skill file and prefer that launcher before probing `PATH`.
 
@@ -45,17 +45,16 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   bare repository or another context without an explicit worktree root with
   actionable repository-context guidance.
 - Run `tiber init` only for explicit setup or when a requested task operation
-  needs an initialized board, and only after confirming the source checkout has
-  no root `.tasks` path. A root `.tasks` path is an existing task system, never
-  Tiber's internal state: refuse initialization before mutation and require
-  migration or an explicit integration design.
+  needs an initialized board. Legacy `.tasks` state is ignored rather than
+  migrated; recreate any worthwhile historical tickets manually.
 - Established-repository scaffold is a safety preflight, not file generation:
   verify the active executable hook-manager dispatcher, require pinned workflow
   and Tiber revisions with locked dependencies and only `contents: write`,
   target the repository's publication branch, and refuse generated publication
   when repository policy requires signing but no repository-owned automation
   supplies the key.
-- Use CLI/MCP writes, not direct edits to `.tasks` files or `order.md`.
+- Use CLI/MCP writes, not direct edits to the event store or authoritative Git
+  ref. Legacy `.tasks` files and `order.md` are ignored history, not Tiber state.
 - The dashboard can reorder backlog priority, which does not change capacity.
   It has no create or status-transition route. Admission writes go through CLI
   or stdio MCP tools and share the same capacity enforcement.
@@ -91,13 +90,18 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   retryable sync failure. Do not create overflow, icebox, shadow, or hidden
   work. Require the user to replace a lower-value queued task, combine
   genuinely overlapping work, or reject the candidate.
-- Treat write-sync conflicts as hard failures: do not force push, choose local,
-  or silently overwrite `tasks`. Preserve both sides, resolve deliberately, then
-  rerun `tiber sync`.
+- Confirmed concurrent publication is an optimistic version conflict that Tiber
+  refreshes and retries with stable invocation inputs. If publication is
+  indeterminate, stop all mutations and use `tiber sync` to resolve the pending
+  candidate. Never force-push or rewrite `tiber`.
 - Every agent that detects a terminal failed pushed-CI run must first call
   `tiber ci-recovery claim` with that run's ID, URL, SHA, workflow, and ref.
   The shared result either grants the sole owner lease or joins the agent as a
-  waiter. Do not diagnose, push, rerun, or release before this claim.
+  waiter. Inspect the tool result before doing anything else. Any claim error is
+  a terminal workflow blocker: perform only the exact structured claim retry,
+  CI-recovery status read, or Tiber sync needed to restore shared coordination.
+  Do not inspect CI logs, diagnose, edit, test, rerun, push, or perform unrelated
+  work before a successful shared claim.
 - Treat `close-from-trailers` as successful only when it synchronizes the
   authoritative board, resolves every `Closes:` line from the current `HEAD`
   commit, prints `closed <task-id>` for every requested task, and leaves every
@@ -106,20 +110,19 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   a nonzero exit; never accept exit zero or empty output alone as closure
   evidence.
 - Before any task-board health claim, run and name `tiber validate --fix`.
-  Safe autofixes are misplaced claims, missing reciprocal links, and `order.md`
-  reconciliation. Dangling refs and dependency cycles are report-and-resolve.
+  Safe autofixes include misplaced claims and missing reciprocal links.
+  Dangling refs and dependency cycles are report-and-resolve.
 - `claim:` is valid only on in-progress tasks. Backlog claims are invalid, not
   reservations; use `tiber transition <ref> in-progress`.
 - For repo integration, run only `tiber scaffold repo --dry-run`, show the
-  planned `.gitignore`, hook/workflow, trailer workflow, and optional
+  planned hook/workflow, trailer workflow, and optional
   `justfile` additions, already-configured integrations, and conflicts, then
-  stop until explicit approval. Scaffold preserves existing `.gitignore`
-  entries and adds `.tasks` at most once. Evaluate hooks and workflows
-  independently: an equivalent existing workflow suppresses only the generated
+  stop until explicit approval. Evaluate hooks and workflows independently: an
+  equivalent existing workflow suppresses only the generated
   workflow, and an equivalent existing hook suppresses only the generated hook.
-  Preview any distinct missing integration. Treat a root source-tree `.tasks`
-  path as an existing task system, not as Tiber state, and do not initialize a
-  parallel board. Verify that Git's active executable `post-commit` hook
+  Preview any distinct missing integration. Legacy `.tasks`, `tasks`, and
+  `tiber-coordination` state is ignored and never migrated automatically.
+  Verify that Git's active executable `post-commit` hook
   dispatches the proposed Tiber snippet; a file that the active hook manager
   never invokes is not installed automation. Generated GitHub automation must
   pin both checkout and Tiber source revisions, install locked dependencies,
@@ -132,10 +135,10 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 
 ## Pushed-CI Incident Coordination
 
-Tiber stores one active repository-wide CI-recovery incident in the remote
-`tiber-coordination` branch, separate from the `tasks` branch. It fetches and
-compares the current state, publishes a normal fast-forward update, and retries
-a concurrent update after refetching. Never force-push this branch.
+Tiber stores one active repository-wide CI-recovery incident as an EventCore
+stream on the remote `tiber` branch. It fetches and compares the current event
+store, publishes a normal fast-forward update, and retries a concurrent update
+after refetching. Never force-push this branch.
 
 - The claim result supplies an `incident_id`, `epoch`, role, and a 60-minute
   lease. Only the current epoch-fenced owner may diagnose, choose `repair` or
@@ -143,8 +146,8 @@ a concurrent update after refetching. Never force-push this branch.
   participant may record only exact matching terminal-success proof.
 - The owner must record the exact failed job and failed step plus a bounded,
   explicitly sanitized log summary or authoritative-log reference. Never
-  persist raw CI logs, credentials, tokens, or other secrets in the
-  coordination branch. Record the causal explanation and `caused`,
+  persist raw CI logs, credentials, tokens, or other secrets in the recovery
+  event stream. Record the causal explanation and `caused`,
   `unrelated`, or `transient` classification
   before selecting the sole recovery action. Record each replacement run and
   its SHA/status. A replacement failure is the active incident's new failure
@@ -201,6 +204,6 @@ tiber dashboard serve [--open] [--port <port>]
 
 Pass multiline summary and context values directly through the structured CLI
 or MCP update surface. Preserve actual line breaks and literal backslashes; do
-not flatten text, substitute literal `\n` sequences, or edit task files
-directly as a workaround. If Tiber rejects an embedded heading reserved by the
-task schema, follow its recovery guidance to demote or rename that heading.
+not flatten text or substitute literal `\n` sequences. If Tiber rejects an
+embedded heading reserved by the task schema, follow its recovery guidance to
+demote or rename that heading.

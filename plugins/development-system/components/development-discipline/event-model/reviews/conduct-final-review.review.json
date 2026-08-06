@@ -1,0 +1,23 @@
+{
+  "category_results": {
+    "board-connections": "clean",
+    "branch-shape": "clean",
+    "canonical-lanes": "clean",
+    "fake-intermediates": "clean",
+    "lifecycle-entry": "clean",
+    "navigation-targets": "clean",
+    "outcomes-and-errors": "clean",
+    "scenario-coverage": "clean",
+    "slice-ownership": "clean",
+    "source-chains": "clean",
+    "timeline-rendering": "clean",
+    "transition-resolution": "clean",
+    "workflow-reachability": "clean"
+  },
+  "mandatory_findings": [],
+  "model_content_digest": "emc-fnv1a64:12b2f3006763b3fe",
+  "reviewed_at": "2026-08-05T21:42:23.000Z",
+  "reviewer_id": "Codex",
+  "status": "clean",
+  "workflow_slug": "conduct-final-review"
+}

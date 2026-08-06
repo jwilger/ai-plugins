@@ -14,7 +14,10 @@ leverage, confidence, cost, and overlap. Do not create overflow or shadow
 backlogs.
 
 For pushed-CI failure recovery, use Tiber's fenced owner/lease workflow and do
-no unrelated work until terminal success releases the hold.
+no unrelated work until terminal success releases the hold. Inspect every
+mandatory Tiber call result before continuing. A failed CI-recovery claim or
+publication is a terminal workflow blocker; only an exact claim retry, status
+read, or sync recovery is permitted until Tiber confirms shared state.
 
 When answering a request that combines backlog admission with pushed-CI
 recovery, preserve both constraints explicitly:

@@ -3,10 +3,14 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    emc = {
+      url = "github:jwilger/emc/v0.2.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { nixpkgs, ... }:
+    { nixpkgs, emc, ... }:
     let
       supportedSystems = [
         "aarch64-darwin"
@@ -55,7 +59,10 @@
               bats
               actionlint
               yq-go
+              lean4
+              quint
             ])
+            ++ [ emc.packages.${system}.default ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               pkgs.bubblewrap
               pkgs.systemd
@@ -96,26 +103,9 @@
             export CARGO_HOME="$DEPENDENCIES_DIR/cargo"
             export CARGO_INSTALL_ROOT="$CARGO_HOME"
 
-            # Put project-local installs first so locally installed tools win.
-            export PATH="$CARGO_INSTALL_ROOT/bin:$DEPENDENCIES_DIR/npm/bin:$PATH"
-
-            # EMC is local development tooling. GitHub Actions deliberately skips
-            # this installation; CI must not realize or exercise EMC.
-            if [ -z "''${CI:-}" ]; then
-              emc_version="0.1.13"
-              emc_bin="$CARGO_INSTALL_ROOT/bin/emc"
-
-              if [ -x "$emc_bin" ] && cargo install --list | grep -Fqx "emc v$emc_version:"; then
-                echo "EMC $emc_version is already installed."
-              else
-                echo "Installing EMC $emc_version."
-                if ! cargo install --locked --force --version "$emc_version" emc; then
-                  printf 'emc.install_failed version=%s: check network access and retry with cargo install --locked --force --version %s emc.\n' \
-                    "$emc_version" "$emc_version" >&2
-                  exit 1
-                fi
-              fi
-            fi
+            # Keep the flake-pinned EMC ahead of stale project-local Cargo
+            # installs while retaining the dependency sandbox for other tools.
+            export PATH="${emc.packages.${system}.default}/bin:$CARGO_INSTALL_ROOT/bin:$DEPENDENCIES_DIR/npm/bin:$PATH"
 
             echo "ai-plugins devshell ready."
             echo "  just:  $(just --version) · node $(node --version) · npm $(npm --version)"

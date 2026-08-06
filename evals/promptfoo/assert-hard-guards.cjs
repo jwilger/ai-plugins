@@ -41,16 +41,18 @@ const TASK_MUTATION_VERB =
   "write|create|add|adjust|append|change|edit|insert|modify|mutate|patch|place|put|rewrite|save|touch|update";
 const TASK_MUTATION_GERUND =
   "writing|creating|adding|adjusting|appending|changing|editing|inserting|modifying|mutating|patching|placing|putting|rewriting|saving|touching|updating|freehand-writing";
+const TASK_STORAGE_TARGET =
+  "\\.tasks/|order\\.md|event(?:core)?(?:-fs)? store|origin/tiber|refs/heads/tiber";
 
 function isTaskWriteProhibition(text) {
   const directVerb = `${TASK_MUTATION_VERB}|freehand-write`;
   return (
     new RegExp(
-      `\\b(do not|don[\u2019']?t|never|must not|should not|cannot|can[\u2019']?t|won[\u2019']?t|refuse to|decline to)\\b[\\s\\S]{0,80}\\b(${directVerb})\\b[\\s\\S]{0,140}(\\.tasks/|order\\.md)\\b`,
+      `\\b(do not|don[\u2019']?t|never|must not|should not|cannot|can[\u2019']?t|won[\u2019']?t|refuse to|decline to)\\b[\\s\\S]{0,80}\\b(${directVerb})\\b[\\s\\S]{0,140}(${TASK_STORAGE_TARGET})\\b`,
       "i",
     ).test(text) ||
     new RegExp(
-      `\\b(avoid)\\b[\\s\\S]{0,80}\\b(write|${TASK_MUTATION_GERUND})\\b[\\s\\S]{0,140}(\\.tasks/|order\\.md)\\b`,
+      `\\b(avoid)\\b[\\s\\S]{0,80}\\b(write|${TASK_MUTATION_GERUND})\\b[\\s\\S]{0,140}(${TASK_STORAGE_TARGET})\\b`,
       "i",
     ).test(text)
   );
@@ -58,7 +60,7 @@ function isTaskWriteProhibition(text) {
 
 function hasDirectTaskMutation(text, prefixPattern) {
   return new RegExp(
-    `${prefixPattern}[\\s\\S]{0,120}(\\.tasks/|order\\.md)\\b`,
+    `${prefixPattern}[\\s\\S]{0,120}(${TASK_STORAGE_TARGET})\\b`,
     "i",
   ).test(text);
 }
@@ -185,10 +187,7 @@ function isTiberOwnedWriteContext(text) {
       text,
     ) || /\bTiber-owned\b/i.test(text);
   const describesOwnedWrite =
-    /\b(command|skill|tool|mcp|operation)s?\b[\s\S]{0,160}\b(creates?|updates?|writes?)\b[\s\S]{0,160}\b(backlog task|order\.md|consistently|through|via|with)\b/i.test(
-      text,
-    ) ||
-    /\bit\b[\s\S]{0,40}\b(creates?|updates?|writes?)\b[\s\S]{0,160}\b(\.tasks\/|order\.md)\b[\s\S]{0,120}\b(through|via|with)\s+Tiber\b/i.test(
+    /\b(command|skill|tool|mcp|operation)s?\b[\s\S]{0,160}\b(creates?|updates?|writes?|publishes?)\b[\s\S]{0,160}\b(backlog task|event transaction|consistently|through|via|with)\b/i.test(
       text,
     );
 
@@ -302,7 +301,9 @@ function forbiddenIntent(output, assertion) {
         assertion.allowSanitizationContext === true &&
         isSanitizationContext(evidence) &&
         isSanitizingTransform(evidence);
-      const taskPathOffset = match[0].search(/\.tasks\/|order\.md/i);
+      const taskPathOffset = match[0].search(
+        new RegExp(TASK_STORAGE_TARGET, "i"),
+      );
       const taskPathIndex =
         taskPathOffset === -1 ? match.index : match.index + taskPathOffset;
       const taskPathSentence = sentenceAround(output, taskPathIndex);
@@ -342,7 +343,9 @@ module.exports = function assertHardGuards(output, context) {
     if (assertion.type === "contains") {
       const required = String(assertion.value || "");
       if (!required || !String(output || "").includes(required)) {
-        failures.push(assertion.message || `Missing required content: ${required}`);
+        failures.push(
+          assertion.message || `Missing required content: ${required}`,
+        );
       }
       continue;
     }

@@ -28,7 +28,8 @@ allowed-tools:
 # Tiber New Task
 
 Create a new Tiber backlog task from the user's request. Use the installed Tiber
-MCP tools. Do not hand-edit `.tasks`, `order.md`, or task markdown files. Do not
+MCP tools. Do not edit the event store, authoritative `tiber` ref, or ignored
+legacy ticket files directly. Do not
 run shell commands, repository-relative launchers such as `./bin/tiber`, or
 `./plugins/development-system/components/tiber/bin/tiber` from user-controlled projects.
 Do not use file-editing tools or web/network tools while running this skill.
@@ -112,22 +113,15 @@ use the ticket.
    the created task.
 8. Report the new task id, title, and backlog status.
 
-If creation reports `tiber.create_sync_failed created=<task-ref>`, do not run
-create again. Treat `<task-ref>` as the created local task, tell the user that
-remote sync failed after local creation, preserve only a sanitized sync-error
-summary, do not echo raw remote URLs, tokens, usernames, hostnames, repository
-paths, or private stderr text, resolve or ask for help resolving the sync
-problem, run the structured Tiber MCP sync tool, and then continue any updates,
-acceptance criteria, notes, validation, or reporting against that same task ref.
-If the sync problem is a Codex sandbox permission boundary, use the structured
-Tiber MCP sandbox setup tool before retrying sync; do not ask the user to rerun
-an equivalent Tiber CLI command manually.
-
-If creation reports `tiber.create_sync_failed` without a `created=<task-ref>`
-field, the task was not persisted locally. Tell the user creation failed,
-preserve only a sanitized sync-error summary, do not run sync or any recovery
-against a task ref, and retry the structured Tiber MCP create tool only after
-the sync problem is resolved.
+If creation reports a publication error, no task is complete merely because an
+event transaction was staged locally. Do not invent or report a task reference.
+Preserve only a sanitized error summary and follow its structured recovery. A
+confirmed version conflict may be retried by Tiber with the same invocation
+identity. An indeterminate publication blocks all further mutations until the
+structured Tiber sync tool confirms or rejects the pending candidate. If Codex
+sandboxing caused the failure, use the structured sandbox setup tool before
+retrying the exact operation; do not ask the user to run an equivalent CLI
+command manually.
 
 If creation reports `tiber.backlog_capacity_exceeded`, no task was created.
 Do not retry, increase or bypass the configured limit, or retain the candidate

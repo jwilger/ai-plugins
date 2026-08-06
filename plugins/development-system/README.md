@@ -32,7 +32,9 @@ MCP integrations; user-added MCPs are warned about for compatibility review,
 not automatically rejected.
 
 The top-level plugin manifest starts the always-on development-discipline and
-Tiber MCP servers. Promptfoo remains an optional MCP owned by the
+Tiber MCP servers. Development Discipline stores local final-review events in
+SQLite; Tiber publishes task and CI-recovery events to one shared `tiber` Git
+branch. Promptfoo remains an optional MCP owned by the
 agentic-systems-engineering component and is intentionally excluded from the
 top-level manifest because projects may disable that capability and must supply
 the pinned Promptfoo runtime separately.

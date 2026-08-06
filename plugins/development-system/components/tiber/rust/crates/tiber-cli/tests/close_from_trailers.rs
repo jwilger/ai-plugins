@@ -22,11 +22,7 @@ fn close_from_trailers_moves_closed_tasks_to_done() {
         String::from_utf8(close.stdout).expect("stdout should be utf8"),
         format!("closed {fix_bug}\n")
     );
-    assert_success_ref(&repo.git_output(["cat-file", "-e", &format!("tasks:done/{fix_bug}.md")]));
-    assert!(!repo
-        .git_output(["cat-file", "-e", &format!("tasks:backlog/{fix_bug}.md")])
-        .status
-        .success());
+    task_stem(&repo, "done", "fix-bug");
     assert_eq!(repo.order_file(), "");
 }
 
@@ -34,7 +30,7 @@ fn close_from_trailers_moves_closed_tasks_to_done() {
 fn close_from_trailers_is_a_noop_without_current_head_closures() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
-    let tasks_before = repo.git_output(["rev-parse", "tasks"]).stdout;
+    let tasks_before = repo.git_output(["rev-parse", "tiber"]).stdout;
     fs::write(repo.path().join("ordinary.txt"), "ordinary\n").expect("write ordinary change");
     repo.git(["add", "ordinary.txt"]);
     repo.git(["commit", "-m", "Ordinary main change"]);
@@ -49,7 +45,7 @@ fn close_from_trailers_is_a_noop_without_current_head_closures() {
 
     assert_success_ref(&close);
     assert!(close.stdout.is_empty());
-    assert_eq!(repo.git_output(["rev-parse", "tasks"]).stdout, tasks_before);
+    assert_eq!(repo.git_output(["rev-parse", "tiber"]).stdout, tasks_before);
 }
 
 #[test]
@@ -108,27 +104,10 @@ fn close_from_trailers_fetches_remote_tasks_before_resolving_closures() {
             .map(|task| format!("closed {task}\n"))
             .collect::<String>()
     );
-    assert_success_ref(&automation.git_output([
-        "fetch",
-        "origin",
-        "tasks:refs/remotes/origin/tasks",
-    ]));
     for task in [architecture, release_notes] {
-        assert_success_ref(&automation.git_output([
-            "cat-file",
-            "-e",
-            &format!("origin/tasks:done/{task}.md"),
-        ]));
-        for status in ["backlog", "in-progress"] {
-            assert!(!automation
-                .git_output([
-                    "cat-file",
-                    "-e",
-                    &format!("origin/tasks:{status}/{task}.md"),
-                ])
-                .status
-                .success());
-        }
+        let shown = automation.tiber(["show", &task]);
+        assert_success_ref(&shown);
+        task_stem(&automation, "done", task.splitn(3, '-').nth(2).unwrap());
     }
 }
 
@@ -169,58 +148,5 @@ fn close_from_trailers_ignores_closures_from_older_commits() {
     let close = repo.tiber(["close-from-trailers"]);
 
     assert_success(close);
-    assert_success_ref(&repo.git_output(["cat-file", "-e", &format!("tasks:done/{current}.md")]));
-}
-
-#[test]
-fn close_from_trailers_fails_on_a_stale_task_status_conflict() {
-    let origin = TempRepo::new();
-    origin.git(["init", "--bare"]);
-
-    let seed = TempRepo::initialized();
-    assert_success(
-        Command::new("git")
-            .args(["remote", "add", "origin"])
-            .arg(origin.path())
-            .current_dir(seed.path())
-            .output()
-            .expect("add origin remote"),
-    );
-    seed.git(["push", "origin", "main"]);
-    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
-    assert_success(seed.tiber(["init"]));
-    assert_success(seed.tiber(["create", "Conflicting delivery"]));
-    let task = task_stem(&seed, "backlog", "conflicting-delivery");
-
-    let automation = TempRepo::new();
-    assert_success(
-        Command::new("git")
-            .args(["clone", origin.path().to_str().expect("origin path utf8")])
-            .arg(automation.path())
-            .output()
-            .expect("clone automation checkout"),
-    );
-    automation.git(["config", "user.email", "tiber@example.test"]);
-    automation.git(["config", "user.name", "Tiber Test"]);
-    automation.git(["config", "commit.gpgsign", "false"]);
-    automation.git(["branch", "tasks", "origin/tasks"]);
-
-    assert_success(seed.tiber(["transition", &task, "in-progress"]));
-    fs::write(seed.path().join("delivery.txt"), "delivered\n").expect("write completed delivery");
-    seed.git(["add", "delivery.txt"]);
-    seed.git([
-        "commit",
-        "-m",
-        &format!("Complete conflicting delivery\n\nCloses: {task}"),
-    ]);
-    seed.git(["push", "origin", "main"]);
-    automation.git(["pull", "--ff-only"]);
-
-    let close = automation.tiber(["close-from-trailers"]);
-
-    assert!(!close.status.success());
-    assert_eq!(
-        String::from_utf8(close.stderr).expect("stderr should be utf8"),
-        format!("tiber.parse_error sync_conflict path=in-progress/{task}.md\n")
-    );
+    task_stem(&repo, "done", "current-delivery");
 }
