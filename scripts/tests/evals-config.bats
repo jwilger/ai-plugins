@@ -95,23 +95,26 @@ description: Codex-only skill.
 MD
 }
 
-@test "generated behavior config uses native Promptfoo coding-agent providers" {
+@test "generated behavior config uses native providers and a neutral advisory prefix" {
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"openai:codex-sdk"* ]]
   [[ "$output" == *"anthropic:claude-agent-sdk"* ]]
-  [[ "$output" == *"Use installed marketplace plugin and skill guidance when it is relevant"* ]]
-  [[ "$output" == *"When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording."* ]]
-  [[ "$output" == *"You may read installed skill instruction files through the harness."* ]]
+  [[ "$output" == *"Answer the scenario directly as a stateless advisory question"* ]]
+  [[ "$output" == *"If you recommend a command, give its exact name and flags"* ]]
+  [[ "$output" == *"Apply any available instructions relevant to the scenario without naming their source."* ]]
+  [[ "$output" != *"Use installed marketplace plugin"* ]]
+  [[ "$output" != *"naming the relevant plugin or skill"* ]]
   [[ "$output" == *"Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands."* ]]
   [[ "$output" != *"deep_tracing: true"* ]]
   [[ "$output" == *"deep_tracing: false"* ]]
   [[ "$output" == *"tracing:"*$'\n'"  enabled: false"* ]]
-  [[ "$output" == *"Treat each scenario as stateless"* ]]
+  [[ "$output" == *"do not use, mention, or rely on prior conversations"* ]]
   [[ "$output" == *"sandbox_mode: read-only"* ]]
   [[ "$output" == *"skip_git_repo_check: true"* ]]
-  [[ "$output" == *"working_dir: \"$ROOT/.evals/agent-workspace\""* ]]
+  [[ "$output" == *"working_dir: \"/tmp/ai-plugins-provider-eval-workspace\""* ]]
+  [[ "$output" != *"working_dir: \"$ROOT/"* ]]
   [[ "$output" == *"skills: all"* ]]
   [[ "$output" == *"setting_sources: []"* ]]
   [[ "$output" == *"persist_session: false"* ]]
@@ -300,14 +303,7 @@ NODE
   run node - <<'NODE'
 const assertCanary = require('./evals/promptfoo/assert-full-marketplace-canary.cjs');
 const natural = [
-  'Agentic Systems Engineering: Evaluate Stochastic Systems',
-  'Babysit PR: Babysit PR',
-  'Engineering Standards: Engineering Standards',
-  'Eval Case Reporter: Submit Eval Case',
-  'Tiber: Tiber',
-  'Worktrees: Setup',
-  'Development Discipline: Test Driven Development',
-  'Development System: Setup',
+  'Development System: Agentic Systems',
 ].join('\n');
 
 const result = assertCanary(natural, {

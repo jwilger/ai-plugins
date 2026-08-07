@@ -15,7 +15,11 @@ If you are already running as a subagent, do the advisor work directly from the 
    - Use the custom `advisor` agent when available. Its agent file is the single routing source and pins read-only `gpt-5.6-sol` with `model_reasoning_effort: high`.
    - If the custom agent is unavailable, stop and report the unavailable advisor agent. Do not silently substitute a different agent or model.
    - Do not use `agent_type: worker` for advisor work.
-2. Pass a compact brief: the user's request, the current repo/path if relevant, known constraints, and the exact artifact needed (`none`, `spec`, or `ticket plan`). Do not pass your conclusions.
+2. Pass a compact brief: the user's request, the current repo/path if relevant,
+   known constraints, and the exact artifact needed (`recommendation`, `spec`,
+   or `ticket-plan`). Pass user preferences, constraints, and repository
+   evidence, but withhold the parent's preferred solution so it does not anchor
+   the advisor's recommendation.
 3. Give the subagent a read-only contract: read/search only; no file edits, no commits, no package installs, no service mutations, and no commands whose purpose is to change persistent state.
 4. Continue with non-overlapping work while it runs, or wait if the advisory answer is on the critical path.
 5. Use the report to decide the next user-facing step. Summarize only the decisions, pushback, risks, and recommended path that matter.
@@ -34,7 +38,7 @@ Use the installed advisor skill to think through this request:
 Context:
 - repo/path: <path or "none">
 - constraints: <known constraints>
-- desired output: <none | spec | ticket plan | recommendation>
+- desired output: <recommendation | spec | ticket-plan>
 
 Read only the code/docs/current sources needed to ground load-bearing recommendations.
 Read-only contract: do not edit files, commit changes, install packages, mutate services, or run commands whose purpose is to change persistent state.
@@ -59,9 +63,15 @@ When running as the advisor subagent:
 - Bring recommendations, not neutral menus. Ask the user only when the answer materially changes the plan.
 - Push back once when the proposed direction is costly, fragile, vague, or contradicted by the code; defer after the user chooses.
 - Prefer smaller scope. Look for a cheap assumption or UX simplification that removes a subsystem.
-- Return a compact advisory report. Do not write files unless the parent prompt explicitly asks for a spec draft.
+- Return a compact advisory report. Never write files. When the requested
+  artifact is a spec, return standalone Markdown for the parent agent to apply.
 - Treat web research as optional and targeted: use it for current third-party facts, vendor capabilities, pricing, standards, or fast-moving APIs; otherwise prefer repo evidence and stable engineering judgment.
-- Preserve a security floor. Cut optional security product features when appropriate, but do not casually defer baseline auth, authorization, auditability, secret handling, replay protection, privacy-safe logging, abuse controls, or rollback/recovery for sensitive workflows.
+- Preserve controls required by the actual trust boundary. Do not casually
+  defer authentication, authorization, secret handling, privacy-safe logging,
+  abuse controls, or rollback/recovery for sensitive workflows. Require audit
+  trails where accountability matters and replay protection where operations
+  can be replayed; do not add either as ritual scope when the deployment does
+  not need it.
 - For ticket planning, return a proposal or outline first. Do not create real tickets or draft full ticket bodies until the user explicitly approves the proposal.
 
 Read [references/playbook.md](references/playbook.md) only when the request is broad enough that you need the deeper framework for outputs, dimensions, tickets, or spec writing.

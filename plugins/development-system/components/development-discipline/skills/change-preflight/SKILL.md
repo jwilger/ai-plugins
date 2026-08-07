@@ -14,16 +14,16 @@ Start the answer with this exact record shape:
 Change classification: <feature | bug fix | refactor | docs/config | packaging/release | migration | operational change | mixed>
 
 Affected surfaces
-- Behavior: <applicable — evidence and effect | not applicable — evidence-backed reason>
-- Tests: <applicable — evidence and effect | not applicable — evidence-backed reason>
-- Documentation: <applicable — evidence and effect | not applicable — evidence-backed reason>
-- Configuration: <applicable — evidence and effect | not applicable — evidence-backed reason>
-- Packaging: <applicable — evidence and effect | not applicable — evidence-backed reason>
-- Release artifacts: <applicable — evidence and effect | not applicable — evidence-backed reason>
-- Migrations: <applicable — evidence and effect | not applicable — evidence-backed reason>
-- Operational startup: <applicable — evidence and effect | not applicable — evidence-backed reason>
-- Evaluations: <applicable — evidence and effect | not applicable — evidence-backed reason>
-- User workflows: <applicable — evidence and effect | not applicable — evidence-backed reason>
+- Behavior: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
+- Tests: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
+- Documentation: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
+- Configuration: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
+- Packaging: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
+- Release artifacts: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
+- Migrations: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
+- Operational startup: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
+- Evaluations: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
+- User workflows: <applicable — relation=<relation>; artifact/fact and effect | not applicable — relation=none; evidence-backed reason>
 ```
 
 A preflight is incomplete unless it begins with the change classification and
@@ -31,6 +31,21 @@ gives an explicit `applicable` or `not applicable` decision for each of the ten
 named surfaces below. Follow that record shape even in a short advisory answer.
 Never substitute a generic checklist, a list of things to inspect later, or a
 claim that evidence is unavailable when the request supplies repository facts.
+
+Use exactly one primary impact relation per row:
+
+- `directly-modified`: the change edits the surface itself;
+- `generated-derivative`: the surface is built or generated from changed input;
+- `contract-consumer`: the surface consumes a changed public or persisted
+  contract;
+- `operational-dependency`: startup, deployment, observation, or recovery
+  depends on the changed behavior;
+- `validation-evidence`: the surface proves or evaluates the changed contract;
+- `none`: repository evidence establishes no dependency.
+
+Proximity is not an impact relation. A nearby file or an artifact that merely
+exists does not make a row applicable. Name the artifact or supplied fact and
+the effect carried through the selected relation.
 
 ## Precedence and triggers
 

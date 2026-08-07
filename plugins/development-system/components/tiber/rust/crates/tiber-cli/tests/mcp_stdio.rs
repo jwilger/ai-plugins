@@ -114,6 +114,9 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     let instructions = initialize["result"]["instructions"]
         .as_str()
         .expect("initialize instructions should be a string");
+    assert!(instructions.contains(
+        "Mutating task tools publish an EventCore transaction to origin/tiber on success"
+    ));
     assert!(instructions.contains("tiber.codex_sandbox_setup"));
     assert!(instructions.contains("case-by-case approval for raw Git prefixes"));
     assert!(instructions.contains("exact Tiber-internal operation"));
@@ -167,6 +170,72 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         serde_json::json!(["backlog", "in-progress", "done", "abandoned"])
     );
     assert_eq!(list_tool["inputSchema"]["required"], serde_json::json!([]));
+    let transition_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.transition")
+        .expect("tiber.transition should be advertised");
+    assert_eq!(
+        transition_tool["inputSchema"]["properties"]["status"]["enum"],
+        serde_json::json!(["backlog", "in-progress", "done", "abandoned"])
+    );
+    let show_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.show")
+        .expect("tiber.show should be advertised");
+    assert!(show_tool["inputSchema"]["properties"]["ref"]["description"]
+        .as_str()
+        .expect("task ref description")
+        .contains("task ID, nickname, or full task stem"));
+    let link_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.link")
+        .expect("tiber.link should be advertised");
+    assert!(link_tool["description"]
+        .as_str()
+        .expect("link description")
+        .contains("from is the blocker and to is the blocked task"));
+    assert!(
+        link_tool["inputSchema"]["properties"]["from"]["description"]
+            .as_str()
+            .expect("from description")
+            .contains("Blocking task")
+    );
+    assert!(link_tool["inputSchema"]["properties"]["to"]["description"]
+        .as_str()
+        .expect("to description")
+        .contains("blocked by from"));
+    let subtask_check = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.subtask.check")
+        .expect("tiber.subtask.check should be advertised");
+    assert_eq!(
+        subtask_check["inputSchema"]["properties"]["index"]["pattern"],
+        "^[1-9][0-9]*$"
+    );
+    let sync_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.sync")
+        .expect("tiber.sync should be advertised");
+    assert!(sync_tool["description"]
+        .as_str()
+        .expect("sync description")
+        .contains("publishing any pending local transaction"));
+    let validate_fix = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.validate_fix")
+        .expect("tiber.validate_fix should be advertised");
+    assert!(validate_fix["description"]
+        .as_str()
+        .expect("validate description")
+        .contains("report dependency cycles that still require manual resolution"));
+    let close_from_trailers = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.close_from_trailers")
+        .expect("tiber.close_from_trailers should be advertised");
+    assert!(close_from_trailers["description"]
+        .as_str()
+        .expect("closure description")
+        .contains("current HEAD commit message only"));
     let search_tool = listed_tools
         .iter()
         .find(|tool| tool["name"] == "tiber.search")
@@ -599,6 +668,14 @@ fn mcp_stdio_exposes_strict_structured_ci_recovery_tools() {
     assert_eq!(
         assign["inputSchema"]["properties"]["capabilities"]["items"]["enum"],
         serde_json::json!(["inspect", "reproduce", "edit", "test"])
+    );
+    assert_eq!(
+        assign["inputSchema"]["properties"]["capabilities"]["type"],
+        "array"
+    );
+    assert_eq!(
+        assign["inputSchema"]["properties"]["capabilities"]["uniqueItems"],
+        true
     );
 
     write_message(

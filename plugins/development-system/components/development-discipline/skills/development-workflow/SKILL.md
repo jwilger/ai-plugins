@@ -26,6 +26,24 @@ matrix to that task. Lifecycle routing selects what work is needed;
 `model-routing` independently selects the eligible task-local model and its
 verification boundary.
 
+## Mechanical transitions are not authorization
+
+When the Development Discipline MCP is installed, its `workflow.start`,
+`workflow.record_red`, `workflow.authorize_implementation`,
+`workflow.record_green`, `workflow.authorize_review`,
+`workflow.record_clean_review`, and `workflow.authorize_delivery` calls are
+mechanical lifecycle transitions. They prove that required predecessor evidence
+was recorded and control which repository mutation phase is open. Despite the
+`authorize_*` method names, they do not grant human or policy authorization for
+an edit, destructive operation, commit, push, PR/MR, merge, release, or other
+externally visible action.
+
+Derive action authorization separately from current user direction and
+repository policy. Require both conditions before acting: the mechanical phase
+permits the operation, and the user or repository authorizes that exact class of
+operation. A model choice, successful transition, review recommendation, or
+standing instruction for a different operation satisfies neither condition.
+
 When the user asks only for a workflow explanation, describe the inspection and
 routing that would occur without claiming to have performed it. For an answer
 or domain-review request that is not a final review of completed development
@@ -57,7 +75,7 @@ For ordinary implementation, the usual sequence is repository inspection,
 delivery workflow governs whether work is committed, pushed directly, or sent
 through a PR/MR, and whether exact-revision CI must reach a terminal result.
 
-PR/MR creation is conditional: direct-to-main and local-only modes skip PR/MR
+PR/MR creation is conditional: direct-to-trunk and local-only modes skip PR/MR
 creation. In PR/MR mode, bind review, checks, approval, queue, and merge evidence
 to the exact current head revision, and re-evaluate the entire readiness
 decision whenever that head changes. Valid review-driven edits return through

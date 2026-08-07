@@ -6,7 +6,7 @@ and system shape can be made dependable.
 
 ## Walking Skeleton
 
-- Choose one meaningful workflow path.
+- Choose one real end-to-end workflow path with an observable acceptance result.
 - Stub blocked integrations rather than waiting for every dependency.
 - Include tracing from the first run.
 - Include a small eval set before optimizing.
@@ -33,15 +33,16 @@ observable checkpoints:
    name the refusal/escalation boundaries, and ship a walking skeleton.
 2. Days 2-5: build a small eval set with representative, edge, and failure-path
    cases; baseline the skeleton; inspect traces; and change one lever per loop.
-3. Week 2: run repeated eval samples against thresholds, track cost and latency,
-   and keep a visible list of failures that remain out of scope.
+3. Week 2: run the representative eval set against thresholds; repeat cases only
+   for a named reliability metric; track cost and latency; and keep a visible
+   list of failures that remain out of scope.
 4. Final review: demo the workflow and present the data story side by side. The
    decision is promote, narrow scope, keep iterating, or stop.
 
 ## Demo Plus Data Story
 
 - Demo the workflow path a stakeholder cares about.
-- Show eval rates over the set, not selected examples.
-- Attach cost and latency when they affect adoption.
+- Show case-level pass rates over the representative set, not selected examples.
+- Attach cost and latency distributions when they affect adoption.
 - Name what the system refuses or escalates.
 - Show at least one adversarial or failure-path case for trust.

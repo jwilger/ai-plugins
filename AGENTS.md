@@ -13,12 +13,14 @@ When this repository's marketplace plugins are installed in an agent harness,
 use the relevant installed skills for matching work rather than treating plugin
 content as inert documentation. In particular, route LLM, RAG, agent, tool-use,
 structured-output, stochastic-eval, and agentic-delivery work through
-`agentic-systems-engineering`; use `eval-case-reporter` when surprising or
-borderline assistant behavior should become a scrubbed eval-case issue; and use
-`engineering-standards` for the broader engineering regime. Eval-case reporting
-must scrub/anonymize sensitive details, show the sanitized issue preview, and
-require explicit user approval before posting. Never post raw secrets, private
-client data, proprietary excerpts, auth material, or private transcripts.
+`development-system:agentic-systems`; use
+`development-system:eval-case-reporting` when surprising or borderline
+assistant behavior should become a scrubbed eval-case issue; and use
+`development-system:engineering-standards` for the broader engineering regime.
+Eval-case reporting must scrub/anonymize sensitive details, show the sanitized
+issue preview, and require explicit user approval before posting. Never post
+raw secrets, private client data, proprietary excerpts, auth material, or
+private transcripts.
 
 - The Claude Code marketplace manifest is [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json).
 - The Codex marketplace manifest is [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json).
@@ -258,9 +260,11 @@ Codex as the default model-graded assertion provider, and disables prompt
 response caching and hosted sharing so generated artifacts are fresh and
 repo-owned. Run `scripts/evals/run.sh --suite canary` to prove full-marketplace
 plugin loading before relying on behavior results. The optional Promptfoo MCP
-server in the `agentic-systems-engineering` Codex manifest is for
-agent-assisted validation, focused runs, and result inspection; it does not
-replace the canonical runner.
+definition retained under
+`plugins/development-system/components/agentic-systems-engineering/` is internal
+component source, not a separately installable marketplace plugin. It supports
+agent-assisted validation, focused runs, and result inspection when explicitly
+configured; it does not replace the canonical runner.
 
 The static dashboard summarizes latest-run status by provider, case, sample,
 plugin, and skill so PR notes can point to both aggregate quality and the

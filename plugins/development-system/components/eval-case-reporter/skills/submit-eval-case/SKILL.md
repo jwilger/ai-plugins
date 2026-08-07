@@ -27,12 +27,16 @@ reusable or diagnostic.
 ## Required Workflow
 
 1. Summarize the candidate eval case in neutral terms.
-2. Scrub and anonymize the sanitized input, actual behavior, expected behavior,
-   and artifacts using `references/scrubbing.md`.
-3. Classify the expected eval outcome: `pass`, `fail`, `partial`,
-   `adversarial`, or `unsure`.
+2. Apply data minimization, secret redaction, and de-identification to the input,
+   actual behavior, expected behavior, provenance, and artifacts using
+   `references/scrubbing.md`.
+3. Classify two independent dimensions:
+   - observed result: `pass`, `fail`, `partial`, or `uncertain`;
+   - coverage kind: `regression`, `boundary`, `adversarial`, or `other`.
 4. Draft the issue title and body locally.
-5. Show the preview to the user and ask for explicit approval before posting.
+5. Show the exact final sanitized preview to the user and ask for explicit
+   approval before posting. Approval authorizes only that exact body; any later
+   change requires a new preview and approval.
 6. If approved, post with:
 
    ```shell
@@ -48,9 +52,12 @@ reusable or diagnostic.
 
 ## Hard Rules
 
-- Never post without explicit user approval of the sanitized preview.
+- Never post without explicit user approval of the exact final sanitized
+  preview.
 - Never include secrets, credentials, private client data, raw proprietary
   excerpts, or access tokens.
+- Never echo removed secret values in the preview, safety checklist, or a
+  redaction manifest; name only the category removed.
 - If you cannot confidently scrub the data, ask the user to provide a sanitized
   version instead of posting.
 - If `gh` is unavailable or unauthenticated, leave the sanitized issue body in a

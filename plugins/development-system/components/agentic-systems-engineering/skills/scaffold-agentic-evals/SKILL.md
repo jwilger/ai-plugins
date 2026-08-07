@@ -29,7 +29,10 @@ Load `references/scaffold.md`.
   `openai:codex-sdk` and `anthropic:claude-agent-sdk` before writing custom
   wrappers.
 - Separate canaries that prove plugin/skill loading from natural behavior
-  prompts that measure whether the system chooses the right guidance unaided.
+  prompts that measure unaided routing. Run both the production plugin
+  composition and a targeted-plugin ablation when attribution matters.
+- Record the exact provider, model, reasoning settings, plugin composition,
+  distinct-case count, repeated-sample count, and named metric in artifacts.
 - Treat Promptfoo's MCP server as optional agent tooling for validation, focused
   runs, and result inspection. Treat Promptfoo's `mcp` provider as a separate
   choice for evaluating MCP servers as systems under test.
@@ -50,5 +53,5 @@ Load `references/scaffold.md`.
 - Use protected credentials for unattended trusted automation only when it
   cannot reuse an interactive harness session.
 - Upload artifacts on every CI run that executes evals.
-- For this marketplace, point users to `eval-case-reporter` when they find a
-  behavior that should become a future fixture.
+- For this marketplace, point users to the `eval-case-reporting` skill when they
+  find a behavior that should become a future fixture.

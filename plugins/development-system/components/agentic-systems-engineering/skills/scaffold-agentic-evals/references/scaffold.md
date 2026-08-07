@@ -42,9 +42,13 @@ without depending on a hosted dashboard.
 - For coding harnesses, start with native promptfoo providers. Use custom
   providers only when a canary proves the native provider cannot faithfully load
   the system under test.
-- Load the same plugin set users will have in normal work. If plugins are meant
-  to compose, run evals with all of them loaded, not a target plugin alone.
+- Run the production plugin composition users receive. When attributing a
+  behavior change, also run a targeted-plugin ablation against the same cases
+  and provider settings.
 - Use canaries to prove plugin/skill loading. Keep behavior prompts natural so
   they measure routing and judgment rather than obedience to the eval prompt.
+- Record exact provider, model, reasoning settings, plugin composition,
+  distinct-case count, repeated-sample count, named metric, and aggregation rule
+  in the result artifact.
 - Make failures actionable: show case id, behavior, expected result, actual
   result, and artifact path.

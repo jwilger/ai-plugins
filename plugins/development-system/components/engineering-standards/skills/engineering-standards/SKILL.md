@@ -10,32 +10,34 @@ adapt the concrete tooling to the language while keeping the discipline.
 
 ## Architecture
 
-- **Functional core, imperative shell.** All business logic is pure (no I/O, no
-  side effects). All I/O lives in the shell at the edges.
-- Express the core's needed side effects with an **effect pattern** (e.g. a
-  Step/Trampoline state machine): the pure core _describes_ effects; the shell
-  interprets them. Keep side-effect _dependencies_ out of the core — where the
-  language allows, isolate the core so its purity is compiler/tooling-enforced.
-- **Parse, don't validate. Zero primitive-obsession.** Only semantic types flow
-  through the domain; primitives and structural types appear only at I/O
-  boundaries. Renaming a string, number, boolean, UUID, built-in, or structural
-  record with a type alias does not make it semantic. Parse external input
-  immediately into named wrappers whose private construction proves their
-  invariants, and model mutually exclusive alternatives with closed sum types.
-  Domain functions accept those parsed values without re-validating them.
-- **Railway-oriented errors.** Errors are values; functions return results and
-  propagate failures explicitly. Error messages are machine-readable identifiers.
-  Never discard an error's source chain.
+- **Functional core, imperative shell.** Keep deterministic domain decisions
+  referentially transparent. When a decision requires external work, have the
+  core return typed commands or effect descriptions and execute them in boundary
+  adapters. Keep effectful
+  dependencies out of the core, and use a state machine or richer effect type
+  only when ordering, suspension, or resumption semantics require one.
+- **Parse, don't validate.** Use value objects, newtypes, or refined types for
+  values with domain identity, units, or invariants. A type alias over a
+  primitive or structural record is documentation, not invariant proof. Parse
+  external representations at the boundary with a total parser or smart
+  constructor, make invalid construction unavailable, and represent mutually
+  exclusive valid states with a closed sum or discriminated-union type. Do not
+  wrap arbitrary primitives that carry no domain meaning.
+- **Typed failure semantics.** Return `Result`/`Either`-style values for expected,
+  recoverable domain and application failures. Give them stable error codes and
+  structured context, and retain the causal/source chain. Reserve exceptions or
+  panics for programmer defects or unrecoverable invariant violations and
+  translate them at the system boundary.
 
 ## Process
 
 - **Vertical slices, not layers.** Each unit of work delivers a user-observable
   behavior end-to-end. Never plan component-by-component waterfalls.
-- **BDD, black-box.** Cover all externally-observable behavior (incl. edge cases)
-  with executable specifications that exercise only the public surface — never
-  internal types. Implement **one Given/When/Then step at a time**: get one step
-  green with the repository's proportionate increment gates passing, preserve
-  it at the cadence selected by repository-local policy, then the next step.
+- **BDD, black-box.** Cover externally observable behavior, including edge
+  cases, with executable specifications that exercise only the public surface.
+  Deliver one observable scenario or vertical slice at a time; make that
+  scenario green with the repository's proportionate increment gates passing,
+  then preserve it at the cadence selected by repository-local policy.
 - Tests assert behavior, never source text (no tautological "file contains
   string" tests).
 - **One major change at a time.** Don't start another major task while a PR is
@@ -49,27 +51,25 @@ and the claim. Fast relevant gates protect each implementation increment;
 expensive exhaustive or mutation suites may run at the repository's declared CI
 or completion boundary instead of before every commit.
 
-- **Lint as strictly as the toolchain allows, as an allowlist.** Every
-  language and tool differs, but the philosophy is universal: turn on every lint
-  group/level the toolchain offers (treat warnings as errors in the gate), then
-  relax individual lints _only_ as deliberate, documented, per-project decisions
-  — and only when you genuinely need to, never to save time. The friction is the
-  point: confronting each lint forces an intentional choice about what correct
-  code looks like here. Prefer a narrowly-scoped, reason-carrying suppression
-  (e.g. `#[expect(reason = "…")]` or the local equivalent) over a blanket allow,
-  and forbid panic-prone constructs on production paths. Only ever ratchet
-  stricter; never loosen the baseline.
-- **Mutation testing with a 100% kill rate** when the repository's risk model and
-  configured completion gate require it, normally enforced in CI.
+- **Warnings-as-errors lint baseline.** Enable the strict, stable lint groups
+  appropriate to the detected toolchain and fail the gate on warnings. Relax an
+  individual lint only through a narrowly scoped, reason-carrying suppression
+  recorded as project policy; do not add blanket allowances to save time. Ratchet
+  the baseline deliberately as the toolchain evolves.
+- **Mutation testing with a 100% actionable mutation score** when the
+  repository's risk model and configured completion gate require it, normally
+  enforced in CI. Define the denominator and document verified equivalent or
+  non-viable mutants, tool errors, and timeouts rather than silently excluding
+  them.
 - **Effectiveness measured by evals, not vibes** — prompts/skills/tool
   descriptions are validated by evals (triggering + behavior), not opinion.
 - **Minimum-necessary context** — skills, tool schemas, hooks, and injected
   context use the least context that stays effective across every supported
   harness.
-- For LLM and agentic-system work, use the `agentic-systems-engineering` plugin
-  for specialized guidance on prompts, RAG, agent loops, stochastic evals,
-  observability, security, cost, and delivery. Keep this skill focused on the
-  general engineering regime.
+- For LLM and agentic-system work, use
+  `development-system:agentic-systems` for specialized guidance on prompts,
+  retrieval, agent loops, stochastic evals, observability, security, cost, and
+  delivery. Keep this skill focused on the general engineering regime.
 - Pin the toolchain; manage dependencies through the package-manager CLI so
   versions and feature flags are checked at the time of change.
 
@@ -88,8 +88,9 @@ threat model mechanically to every project.
   silently.
 - Test whether data access, N+1 work, fanout, concurrency, and memory, file,
   network, or other I/O growth remain bounded at production-sized inputs and
-  during DOS-like bursts. Prevent synchronized retries, cache misses, or startup
-  work from producing thundering herds.
+  during denial-of-service-shaped bursts. Bound fan-out and amplification, apply
+  backpressure where producers can outrun consumers, and prevent synchronized
+  retries, cache misses, or startup work from producing thundering herds.
 - For a local single-owner tool, trust the owner, machine, installed toolchain,
   PATH, environment, and configuration by default. Keep ordinary mistakes,
   crashes, interruption, stale state, filesystem failure, partial remote
@@ -113,8 +114,9 @@ here.
 
 ## Documentation
 
-- **An ADR for every architectural decision** (context, decision, consequences,
-  alternatives considered, and the conditions under which to revisit).
+- Record an **ADR for every architecturally significant or hard-to-reverse
+  decision** (context, decision, consequences, alternatives considered, and the
+  conditions under which to revisit), not for routine implementation choices.
 - Keep guardrails **harness-agnostic** (e.g. `AGENTS.md` + `docs/rules/`);
   harness-specific instruction files are thin pointers.
 

@@ -12,8 +12,9 @@ Load `references/delivery.md`.
 
 ## Practice
 
-- Start with a walking skeleton: one real workflow path, minimal tools, visible
-  traces, and enough evals to compare changes.
+- Start with a walking skeleton: one real end-to-end workflow path, its actual
+  model/retrieval/tool boundaries, visible traces, and an observable acceptance
+  result with enough eval cases to compare changes.
 - Run an experiment loop: baseline, inspect failures, change one thing, rerun,
   compare against thresholds, and decide promote or iterate.
 - When the user asks for a delivery plan, give a concrete checkpoint plan, not
@@ -23,7 +24,8 @@ Load `references/delivery.md`.
 - Keep two tracks visible: product workflow discovery and technical reliability
   evidence.
 - Pair demos with data stories. A demo shows the workflow; the data story shows
-  rate-over-set quality, cost, latency, and the failures still outside scope.
+  case-level pass rate over a representative set, cost and latency distributions,
+  the failure taxonomy, and the failures still outside scope.
 - Include at least one failure-path case in stakeholder evidence so the review
   is not a happy-path-only performance.
 - Use stakeholder reviews to decide scope and risk, not to launder a happy path

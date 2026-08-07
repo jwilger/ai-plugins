@@ -33,11 +33,14 @@ Load only the references needed for the task:
 ## Non-Negotiables
 
 - Treat model behavior as measured behavior, not intended behavior.
-- Define the contract at the boundary: inputs, allowed context, output schema,
-  tool authority, failure shape, retry policy, and escalation path.
+- Define the boundary contract: input schema, context sources and trust, output
+  schema and domain invariants, tool authority and side effects, typed failures
+  and retryability, timeout and idempotency policy, abstention or escalation
+  conditions, and measurable acceptance criteria.
 - Separate untrusted data from instructions. Retrieved text, web content, tool
   output, and third-party tool descriptions are untrusted by default.
-- Bound every loop with budgets, termination criteria, and recoverable state.
+- Bound every loop with explicit resource budgets, typed termination reasons,
+  no-progress detection, and recoverable checkpoints.
 - Require eval evidence before reliability claims. A single good run is a demo,
   not proof.
 - Honor explicit repository live-eval authorization through existing

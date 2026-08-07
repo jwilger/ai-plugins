@@ -56,8 +56,8 @@ setup() {
         "testCase": {
           "case_id": "fixture-pass",
           "behavior": "fixture behavior",
-          "plugins": ["agentic-systems-engineering"],
-          "skills": ["evaluate-stochastic-systems"],
+          "plugins": ["development-system"],
+          "skills": ["agentic-systems"],
           "sample_index": 1,
           "min_pass_rate": 0.67
         },
@@ -75,8 +75,8 @@ setup() {
         "testCase": {
           "case_id": "fixture-pass",
           "behavior": "fixture behavior",
-          "plugins": ["agentic-systems-engineering"],
-          "skills": ["evaluate-stochastic-systems"],
+          "plugins": ["development-system"],
+          "skills": ["agentic-systems"],
           "sample_index": 2,
           "min_pass_rate": 0.67
         },
@@ -94,8 +94,8 @@ setup() {
         "testCase": {
           "case_id": "fixture-pass",
           "behavior": "fixture behavior",
-          "plugins": ["agentic-systems-engineering"],
-          "skills": ["evaluate-stochastic-systems"],
+          "plugins": ["development-system"],
+          "skills": ["agentic-systems"],
           "sample_index": 3,
           "min_pass_rate": 0.67
         },
@@ -113,8 +113,8 @@ setup() {
         "testCase": {
           "case_id": "fixture-zero-defaults",
           "behavior": "zero default fixture",
-          "plugins": ["agentic-systems-engineering"],
-          "skills": ["evaluate-stochastic-systems"],
+          "plugins": ["development-system"],
+          "skills": ["agentic-systems"],
           "sample_index": 0,
           "min_pass_rate": 0
         },
@@ -132,8 +132,8 @@ setup() {
         "testCase": {
           "case_id": "fixture-provider-limit",
           "behavior": "provider limit fixture",
-          "plugins": ["agentic-systems-engineering"],
-          "skills": ["evaluate-stochastic-systems"],
+          "plugins": ["development-system"],
+          "skills": ["agentic-systems"],
           "sample_index": 1,
           "min_pass_rate": 1
         },
@@ -151,8 +151,8 @@ setup() {
         "testCase": {
           "case_id": "fixture-auth-guidance-failure",
           "behavior": "normal failed rubric mentioning auth",
-          "plugins": ["agentic-systems-engineering"],
-          "skills": ["evaluate-stochastic-systems"],
+          "plugins": ["development-system"],
+          "skills": ["agentic-systems"],
           "sample_index": 1,
           "min_pass_rate": 1
         },
@@ -184,7 +184,9 @@ teardown() {
   [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "6" ]
   [ "$(jq '.blocked' "$TMPROOT/site/evals/summary.json")" = "1" ]
   [ "$(jq '.failed' "$TMPROOT/site/evals/summary.json")" = "3" ]
+  [ "$(jq -r '.suite' "$TMPROOT/site/evals/summary.json")" = "development-system" ]
   [ "$(jq -r '.status.state' "$TMPROOT/site/evals/summary.json")" = "completed" ]
+  [ "$(jq -r '.status.suite' "$TMPROOT/site/evals/summary.json")" = "development-system" ]
   [ "$(jq -r '.aggregates[] | select(.id == "fixture-pass") | .provider' "$TMPROOT/site/evals/summary.json")" = "codex-gpt-5.6-terra" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-pass") | .passRate' "$TMPROOT/site/evals/summary.json")" = "0.6666666666666666" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .samples[0].sampleIndex' "$TMPROOT/site/evals/summary.json")" = "0" ]
@@ -195,9 +197,9 @@ teardown() {
   [ "$(jq -r '.aggregates[] | select(.id == "fixture-auth-guidance-failure") | .status' "$TMPROOT/site/evals/summary.json")" = "fail" ]
   [ "$(jq '.thresholdsBlocked' "$TMPROOT/site/evals/summary.json")" = "1" ]
   grep -q '"pluginSummaries"' "$TMPROOT/site/evals/summary.json"
-  grep -q '"plugin": "agentic-systems-engineering"' "$TMPROOT/site/evals/summary.json"
+  grep -q '"plugin": "development-system"' "$TMPROOT/site/evals/summary.json"
   grep -q '"skillSummaries"' "$TMPROOT/site/evals/summary.json"
-  grep -q '"skill": "evaluate-stochastic-systems"' "$TMPROOT/site/evals/summary.json"
+  grep -q '"skill": "agentic-systems"' "$TMPROOT/site/evals/summary.json"
   [ "$(jq -r '.providerCompositionStatus.state' "$TMPROOT/site/evals/summary.json")" = "available" ]
   [ "$(jq -c '.providerCompositions[] | select(.pluginMode == "targeted-plugins") | .plugins' "$TMPROOT/site/evals/summary.json")" = '["tiber"]' ]
   [ "$(jq -c '.providerCompositions[] | select(.pluginMode == "full-marketplace") | .plugins' "$TMPROOT/site/evals/summary.json")" = '["advisor","tiber"]' ]
@@ -341,7 +343,7 @@ NODE
   cat >"$TMPROOT/evals/out/status.json" <<'JSON'
 {
   "generatedAt": "2026-07-04T00:00:00.000Z",
-  "suite": "agentic-systems-engineering",
+  "suite": "legacy-suite-name",
   "state": "skipped",
   "reason": "Provider-backed evals were not run because credentials are missing.",
   "providerCredentials": "missing"
@@ -353,6 +355,7 @@ JSON
   [ "$status" -eq 0 ]
   [ "$(jq '.total' "$TMPROOT/site/evals/summary.json")" = "0" ]
   [ "$(jq -r '.status.state' "$TMPROOT/site/evals/summary.json")" = "skipped" ]
+  [ "$(jq -r '.status.suite' "$TMPROOT/site/evals/summary.json")" = "development-system" ]
   [ "$(jq -r '.status.providerCredentials' "$TMPROOT/site/evals/summary.json")" = "missing" ]
   grep -q "Provider-backed evals were not run" "$TMPROOT/site/evals/index.html"
   grep -q "No eval samples are available" "$TMPROOT/site/evals/index.html"

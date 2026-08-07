@@ -43,6 +43,24 @@ function resultReason(result) {
   );
 }
 
+function failedHardGuardReasons(result) {
+  const components = result.gradingResult?.componentResults;
+  if (!Array.isArray(components)) {
+    return [];
+  }
+
+  return components
+    .filter((component) => {
+      const assertion = component?.assertion || {};
+      return (
+        component?.pass === false &&
+        assertion.type === "javascript" &&
+        String(assertion.value || "").includes("assert-hard-guards.cjs")
+      );
+    })
+    .map((component) => String(component.reason || "hard guard failed"));
+}
+
 function providerId(result) {
   return String(
     result.provider?.label ||
@@ -97,13 +115,15 @@ for (const result of results) {
   const valueGateMode = String(
     vars.value_gate_mode ?? vars.valueGateMode ?? "standard",
   );
-  if (
-    valueGateMode !== "measurement" &&
-    mode !== "no-plugins" &&
-    !pass &&
-    /\bResponse appears\b/.test(reason)
-  ) {
-    hardGuardFailures.push(`${key}: ${reason}`);
+  if (valueGateMode !== "measurement" && mode !== "no-plugins" && !pass) {
+    const componentReasons = failedHardGuardReasons(result);
+    if (componentReasons.length > 0) {
+      for (const componentReason of componentReasons) {
+        hardGuardFailures.push(`${key}: ${componentReason}`);
+      }
+    } else if (/\bResponse appears\b/.test(reason)) {
+      hardGuardFailures.push(`${key}: ${reason}`);
+    }
   }
 
   if (!groups.has(key)) {
@@ -177,55 +197,56 @@ for (const group of groups.values()) {
 }
 
 for (const [key, caseGroups] of groupsByCase) {
-  const full = caseGroups.find(
-    (group) => group.pluginMode === "full-marketplace",
-  );
-  const targeted = caseGroups.find(
-    (group) => group.pluginMode === "targeted-plugins",
-  );
   const baseline = caseGroups.find(
     (group) => group.pluginMode === "no-plugins",
   );
+  const pluginGroups = caseGroups.filter(
+    (group) => group.pluginMode !== "no-plugins",
+  );
 
-  if (!baseline || (!full && !targeted)) {
+  if (!baseline || pluginGroups.length === 0) {
     continue;
   }
 
-  const reference = full || targeted;
-  const plugin = full || targeted;
+  for (const plugin of pluginGroups) {
+    const reference = plugin;
 
-  if (reference.valueGateMode === "none") {
-    continue;
-  }
-  if (reference.valueGateMode === "measurement") {
-    continue;
-  }
+    if (reference.valueGateMode === "none") {
+      continue;
+    }
+    if (reference.valueGateMode === "measurement") {
+      continue;
+    }
 
-  const pluginComplete = plugin.evaluated > 0 && plugin.blocked === 0;
-  const baselineComplete = baseline.evaluated > 0 && baseline.blocked === 0;
-  const pluginPass = groupThresholdMet(plugin);
-  const baselinePass = groupThresholdMet(baseline);
-  const lift = groupPassRate(plugin) - groupPassRate(baseline);
-  const valueGatePass =
-    reference.valueGateMode === "safety-critical"
-      ? pluginComplete && baselineComplete && pluginPass && !baselinePass
-      : pluginComplete &&
-        baselineComplete &&
-        pluginPass &&
-        lift >= reference.baselineLiftThreshold;
+    const pluginComplete = plugin.evaluated > 0 && plugin.blocked === 0;
+    const baselineComplete = baseline.evaluated > 0 && baseline.blocked === 0;
+    const pluginPass = groupThresholdMet(plugin);
+    const baselinePass = groupThresholdMet(baseline);
+    const pluginRate = groupPassRate(plugin);
+    const baselineRate = groupPassRate(baseline);
+    const lift = pluginRate - baselineRate;
+    const ceilingSaturated = pluginRate === 1 && baselineRate === 1;
+    const valueGatePass =
+      reference.valueGateMode === "safety-critical"
+        ? pluginComplete && baselineComplete && pluginPass && !baselinePass
+        : pluginComplete &&
+          baselineComplete &&
+          pluginPass &&
+          (lift >= reference.baselineLiftThreshold || ceilingSaturated);
 
-  if (!valueGatePass) {
-    const reason =
-      !pluginComplete || !baselineComplete
-        ? "missing complete plugin or baseline evidence"
-        : reference.valueGateMode === "safety-critical"
-          ? "safety-critical value gate requires plugin pass and no-plugin baseline miss"
-          : `standard value gate requires lift >= ${reference.baselineLiftThreshold}`;
-    failures.push(
-      `${key}: ${reason} (plugin ${(groupPassRate(plugin) * 100).toFixed(
-        1,
-      )}%, no-plugins ${(groupPassRate(baseline) * 100).toFixed(1)}%)`,
-    );
+    if (!valueGatePass) {
+      const reason =
+        !pluginComplete || !baselineComplete
+          ? "missing complete plugin or baseline evidence"
+          : reference.valueGateMode === "safety-critical"
+            ? "safety-critical value gate requires plugin pass and no-plugin baseline miss"
+            : `standard value gate requires lift >= ${reference.baselineLiftThreshold} unless both compositions reach 100%`;
+      failures.push(
+        `${plugin.key}: ${reason} (plugin ${(pluginRate * 100).toFixed(
+          1,
+        )}%, no-plugins ${(baselineRate * 100).toFixed(1)}%)`,
+      );
+    }
   }
 }
 

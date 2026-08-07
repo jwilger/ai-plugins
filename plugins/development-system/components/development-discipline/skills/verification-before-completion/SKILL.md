@@ -8,27 +8,38 @@ description: Use when claiming work is done, fixed, passing, ready, reviewed, co
 Evidence comes before claims. A completion statement is only valid when fresh
 verification proves the exact scope being claimed.
 
+`Fresh` means collected after the last mutation that can affect the claim,
+against the exact current commit or worktree diff, configuration, and toolchain.
+`Authoritative` means read from the owning system of record rather than an agent
+summary or a derived report. `Scope-complete` evidence includes every
+repository-required gate plus the impact-selected checks for the claimed
+behavior; a focused check remains evidence only for its named scope.
+
 Apply `model-routing` to delegated evidence gathering and review. A helper may
 collect bounded evidence, but the accountable completion or readiness decision
 must remain on the strong route defined by that canonical matrix.
 
 ## Gate
 
-1. State the claim precisely.
-2. Identify the evidence that would prove that claim.
-3. Run the relevant command or inspect the authoritative source now.
-4. Read the full output or current state, including exit code and failures.
-5. Report only what the evidence proves. Name any gaps.
+1. State the claim precisely and split compound claims into independently
+   provable parts.
+2. Map each part to its required command or authoritative source.
+3. Capture the exact commit OID or worktree diff hash, then run or inspect the
+   evidence after the last relevant mutation.
+4. Record the command/source, project or working directory, revision/hash,
+   relevant configuration or toolchain identity, timestamp/current-state
+   identity, exit/status, and failures.
+5. Report only the claim parts the evidence proves and name each uncovered part.
 
 ## Claim Scope
 
-| Claim                  | Required evidence                                                                  |
-| ---------------------- | ---------------------------------------------------------------------------------- |
-| "Tests pass"           | Fresh full relevant test output with zero failures                                 |
-| "Lint/format is clean" | Fresh lint/format command output                                                   |
-| "Bug fixed"            | The original symptom or regression test now passes                                 |
-| "Requirement met"      | Requirement-by-requirement check against files, output, runtime state, or PR state |
-| "Ready to merge"       | Current checks, review state, branch status, and required approvals                |
+| Claim                  | Required evidence                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| "Tests pass"           | Fresh scope-complete output for repository-required and impact-selected tests, with zero failures |
+| "Lint/format is clean" | Fresh lint/format command output                                                                  |
+| "Bug fixed"            | The original symptom or regression test now passes                                                |
+| "Requirement met"      | Requirement-by-requirement check against files, output, runtime state, or PR state                |
+| "Ready to merge"       | Current checks, review state, branch status, and required approvals                               |
 
 Partial checks prove partial claims only. A focused test can prove a narrow fix;
 it cannot prove the whole repo is green.

@@ -8,65 +8,61 @@ description: Use when making repository changes, debugging, handling review feed
 Read `.development-system.toml` before choosing a workflow. Treat it as the
 project's single feature and delivery-policy source.
 
-For a change:
+For every workflow question, load [workflow
+rules](references/workflow-rules.md). Before editing, classify artifact impact
+relations and RED applicability. Keep diagnosis causal, bind readiness claims
+to post-mutation exact-revision evidence, select review lenses from changed
+system boundaries, and use the configured delivery mode.
 
-1. Classify the change surfaces before editing.
-2. Classify whether RED is required; work test-first only for new or changed
-   first-party production behavior that has no applicable exemption.
-3. Keep diagnosis causal and implementation scoped.
-4. Verify with fresh evidence.
-5. Perform risk-proportional final review.
-6. Deliver using the configured delivery mode.
+Load the retained specialist contract only when its intent matches:
+
+- Change classification or preflight: [change
+  preflight](../../components/development-discipline/skills/change-preflight/SKILL.md).
+- Causal debugging: [systematic
+  debugging](../../components/development-discipline/skills/systematic-debugging/SKILL.md).
+- RED-GREEN-refactor behavior: [test-driven
+  development](../../components/development-discipline/skills/test-driven-development/SKILL.md).
+- Exact-revision evidence: [verification before
+  completion](../../components/development-discipline/skills/verification-before-completion/SKILL.md).
+- Final-review scope, findings, or verifier flow: [final
+  review](../../components/development-discipline/skills/final-review/SKILL.md).
+- Worker or reviewer selection: [model
+  routing](../../components/development-discipline/skills/model-routing/SKILL.md).
+- Failed pushed CI: [CI failure
+  follow-up](../../components/development-discipline/skills/ci-failure-follow-up/SKILL.md).
+- Lifecycle-aware delivery: [delivery
+  workflow](../../components/development-discipline/skills/delivery-workflow/SKILL.md).
+- Authoring or reviewing a skill: [writing
+  skills](../../components/development-discipline/skills/writing-skills/SKILL.md).
 
 ## Mechanical lifecycle gate
 
-When the Development Discipline MCP is installed, repository mutations require
-an active lifecycle. Start it before the first test, implementation, or
-documentation edit:
+When Development Discipline is installed, start its lifecycle before mutation:
 
-1. Call `workflow.start` with `change_kind: "production"` for changed
-   first-party behavior, or `change_kind: "exempt"` only for a documented RED
-   exemption. An exemption skips only RED: record focused successful
-   verification, complete final review, and authorize delivery normally.
-2. For production work, add or update the focused test, then call
-   `workflow.record_red` with the failing command and
-   `workflow.authorize_implementation` before editing production code.
-3. Run the focused passing test through `workflow.record_green`, then call
-   `workflow.authorize_review`.
-4. Complete the authoritative `final_review` state machine. Supply its
-   completed returned `state` as `review_state` to
-   `workflow.record_clean_review`, then call `workflow.authorize_delivery`.
+1. `workflow.start`: `production` for changed first-party shipped behavior;
+   `exempt` only for a documented RED exemption.
+2. Production: add the focused test, `workflow.record_red`, then
+   `workflow.authorize_implementation`.
+3. `workflow.record_green`, then `workflow.authorize_review`.
+4. Complete `final_review`, `workflow.record_clean_review` with its state, then
+   `workflow.authorize_delivery`.
 
-The hook blocks unclassified mutations, production edits before RED, mutations
-while review is required, post-review mutations before delivery authorization,
-and all unrelated work during a shared CI-recovery hold.
+An exemption skips only RED; verification, review, and delivery gates remain.
+RED evidence requires executing one focused public or black-box behavior test
+and confirming that it fails because the intended behavior is absent; a compile,
+fixture, or setup failure is not valid RED. After authorization, implement only
+enough to make that test pass. Refactor only after GREEN while the test remains
+green, then repeat one observable behavior at a time.
 
-If a lifecycle must be superseded before delivery, call `workflow.abandon`.
-It preserves the terminal audit state and releases the repository for a new
-lifecycle; never remove workflow-state files manually.
+The `workflow.authorize_implementation`, `workflow.authorize_review`, and
+`workflow.authorize_delivery` calls are mechanical transitions, never user
+approval for a destructive action, commit, push, pull request, merge, or
+release. `production` means shipped behavior, not deployment.
 
-If pushed CI fails, stop unrelated work and establish one workflow-owned
-CI-recovery owner through Development Discipline before repairing or rerunning
-it. This gate is independent of whether the project uses Tiber for tickets.
+To supersede a lifecycle, call `workflow.abandon`; never remove its state.
 
-Before starting a **new task**, inspect CI through the repository's forge. The
-most recently completed build must be successful. A newer queued or running
-build does not count as a replacement result, but any current build with a
-completed failed job creates the CI-recovery hold immediately. This rule is
-workflow-owned and applies whether or not the project uses Tiber.
-
-For functionality removal, change production code first with tests untouched,
-then run the suite and classify failures. Delete or update only expectations for
-the removed behavior. Repair implementation whenever shared or retained
-behavior fails, and never add a replacement test whose sole assertion is that
-the removed capability is absent.
-
-During review, apply the RED exemptions and audit existing surrounding tests,
-not only changed lines. Report committed-text and workflow-structure assertions
-for removal; vendor-example tests for removal or dependency-agnostic black-box
-replacement; and overgrown developer utilities for extraction into a maintained
-project or shipped subsystem while their valuable coverage is preserved. Retain
-public black-box tests of user-visible behavior.
-
-Load [workflow rules](references/workflow-rules.md) only when executing or
-reviewing a change.
+Before a new task, inspect forge CI. Require a successful completed run for the
+candidate revision; queued/running is not terminal evidence, and any completed
+failed required job activates a repository-wide hold. Use one Development
+Discipline recovery owner and record SHA, run, checks, and terminal status.
+Tiber does not own this hold.

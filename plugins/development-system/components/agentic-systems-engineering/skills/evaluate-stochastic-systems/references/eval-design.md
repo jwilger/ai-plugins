@@ -1,14 +1,15 @@
 # Eval Design Reference
 
-Evaluate an AI behavior as an instrument. The instrument has inputs, scoring,
-variance, blind spots, and maintenance cost.
+Treat an AI eval as a measurement system with a stated behavior claim, unit of
+analysis, metric, aggregation rule, variance, blind spots, and maintenance cost.
 
 ## Eval Set Shape
 
 - Start with real production-like cases where possible.
 - Add synthetic cases only after a human reviews them for realism and correct
-  expected answers.
-- Cover pass, fail, partial, and adversarial outcomes.
+  expected behavior.
+- Cover nominal, boundary, expected-refusal or expected-error, partial-credit,
+  and adversarial cases.
 - Include boundary cases for missing context, conflicting context, unsafe
   instructions, malformed tool outputs, empty results, and timeout paths.
 - Grow the set whenever a new failure category appears.
@@ -28,8 +29,11 @@ variance, blind spots, and maintenance cost.
 - Report both the per-run success rate and the user-facing reliability
   expectation for repeated use.
 - Do not increase `k` as a ritual substitute for better fixtures.
-- Do not compare close scores as meaningful unless the set has enough cases to
-  detect that difference.
+- For prompt or model comparisons, keep cases and settings matched, score paired
+  case-level outcomes, and predefine the minimum meaningful effect: the smallest
+  difference worth acting on.
+- Do not treat close scores as meaningful without enough cases to distinguish
+  that effect from sampling variation.
 
 ## Scoring
 
@@ -37,7 +41,8 @@ variance, blind spots, and maintenance cost.
   refusal conditions, citation presence, tool authorization, and safety gates.
 - Use rubric or judge scoring for semantic quality only when deterministic
   checks cannot represent the behavior.
-- Calibrate judges with known good, known bad, and borderline examples.
+- Calibrate each rubric family with frozen human-labeled clear-pass, clear-fail,
+  borderline, and prompt-injection-style examples.
 - Preserve written critiques for failures so future maintainers understand why
   a case exists.
 

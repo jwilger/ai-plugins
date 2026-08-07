@@ -5,8 +5,8 @@ description: Use when a bug, failing test, broken command, unexpected output, or
 
 # Systematic Debugging
 
-Find the root cause before changing code. Keep the loop compact: read,
-reproduce, hypothesize, test, then fix.
+Establish a causal mechanism before changing production code. Keep the loop
+compact: characterize, reproduce, hypothesize, discriminate, then fix.
 
 Apply `model-routing` to each delegated debugging task. A bounded helper may
 collect independently verifiable evidence, but ambiguous diagnosis and any
@@ -14,14 +14,21 @@ stronger responsibility use the route defined by that canonical matrix.
 
 ## Loop
 
-1. Read the exact error, stack trace, command, exit code, and recent output.
-2. Reproduce the failure with the smallest reliable command or scenario.
-3. Inspect recent changes and nearby working examples.
-4. State one hypothesis: "I think X is causing Y because Z."
-5. Test that hypothesis with the smallest observation or reversible change.
-6. If confirmed, write a failing regression test when practical, then fix the
-   root cause.
-7. Verify the fix with the reproduction and the relevant broader gate.
+1. Record expected versus observed behavior, exact error/output, command and
+   inputs, exit code, revision, and environment facts that can affect the run.
+2. Build the minimal reproducer: the smallest command or scenario that retains
+   the same failure mechanism, not merely the same error text.
+3. Inspect recent changes, boundary state, and a nearby working comparison.
+4. State one falsifiable causal hypothesis: "X causes Y through mechanism Z; if
+   true, observation A will differ from control B."
+5. Run one discriminating experiment that observes A and B while holding
+   unrelated variables constant. A reversible diagnostic change may collect
+   evidence; it is not a production fix.
+6. If the prediction holds, capture the reproducer as a failing regression test
+   when RED applies, then change the earliest controllable cause in the failing
+   path rather than masking the terminal symptom.
+7. Verify that the original reproducer changes from failing to passing and run
+   the owning component's required regression gate.
 
 ## Rules
 
@@ -30,8 +37,10 @@ stronger responsibility use the route defined by that canonical matrix.
 - Fix the source of the bad state, not the line where it finally explodes.
 - If the failure spans components, add temporary evidence at the boundaries to
   find where the data or state changes.
-- After three failed fix attempts, stop and question the architecture or the
-  framing instead of adding a fourth guess.
+- Count a failed fix attempt only when production code was mutated, tested
+  against the reproducer, and rejected. Evidence-gathering experiments do not
+  consume the count. After three failed fix attempts, stop and question the
+  architecture or problem framing instead of adding a fourth mutation.
 
 ## Common Traps
 

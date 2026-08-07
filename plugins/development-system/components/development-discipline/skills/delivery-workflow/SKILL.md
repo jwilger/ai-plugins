@@ -12,6 +12,11 @@ defined by that canonical matrix; model choice never supplies authorization.
 Choose the delivery path from the repository's actual policy instead of assuming
 that every change needs a pull request.
 
+Development Discipline `workflow.authorize_delivery` is a mechanical phase
+transition proving that its predecessor gates completed. It does not authorize
+a commit, push, PR/MR, merge, release, or destructive operation. Obtain action
+authorization independently from current user direction or repository policy.
+
 ## Precedence
 
 Current user direction comes first. Apply guidance in this order:
@@ -41,7 +46,8 @@ consequential. Do not invent a pull request.
 ### Direct-to-trunk
 
 Use the repository's declared trunk branch. Complete the required local checks
-and final review, then make the normal authorized push without creating a
+and final review, then make the authorized non-history-rewriting push to the
+policy-selected trunk ref without creating a
 PR/MR. Preserve repository-required branch or worktree topology; direct-to-trunk
 describes the delivery destination, not where development must occur. After pushing, bind the delivery evidence to the exact
 pushed revision and verify its required CI run reaches the state the repository

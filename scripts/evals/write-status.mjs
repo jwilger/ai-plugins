@@ -4,6 +4,7 @@ import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const defaultOutput = path.join(root, "evals/out/status.json");
+const SUITE = "development-system";
 
 function readFlag(name, fallback = "") {
   const index = process.argv.indexOf(name);
@@ -16,7 +17,7 @@ function readFlag(name, fallback = "") {
 
 const status = {
   generatedAt: new Date().toISOString(),
-  suite: "agentic-systems-engineering",
+  suite: SUITE,
   state: readFlag("--state", "unknown"),
   reason: readFlag("--reason", ""),
   providerCredentials: readFlag("--provider-credentials", "unknown"),

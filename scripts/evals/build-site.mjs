@@ -8,6 +8,7 @@ const outDir = path.join(root, "evals/out");
 const siteDir = path.join(root, "site/evals");
 const resultsPath = path.join(outDir, "results.json");
 const statusPath = path.join(outDir, "status.json");
+const SUITE = "development-system";
 
 function readArtifact(file) {
   const raw = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -372,7 +373,7 @@ function defaultStatus(cases) {
   if (cases.length > 0) {
     return {
       generatedAt: new Date().toISOString(),
-      suite: "agentic-systems-engineering",
+      suite: SUITE,
       state: "completed",
       reason: "Promptfoo results were found and summarized.",
       providerCredentials: "available",
@@ -381,7 +382,7 @@ function defaultStatus(cases) {
 
   return {
     generatedAt: new Date().toISOString(),
-    suite: "agentic-systems-engineering",
+    suite: SUITE,
     state: "empty",
     reason: "No Promptfoo results were found.",
     providerCredentials: "unknown",
@@ -394,7 +395,10 @@ function readStatus(file, cases) {
   }
 
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
+    return {
+      ...JSON.parse(fs.readFileSync(file, "utf8")),
+      suite: SUITE,
+    };
   } catch {
     return defaultStatus(cases);
   }
@@ -419,7 +423,7 @@ const failed = cases.length - passed - blocked;
 const evaluated = passed + failed;
 const summary = {
   generatedAt: new Date().toISOString(),
-  suite: "agentic-systems-engineering",
+  suite: SUITE,
   status: runStatus,
   total: cases.length,
   passed,

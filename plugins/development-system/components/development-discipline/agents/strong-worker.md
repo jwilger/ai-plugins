@@ -7,7 +7,7 @@ tools: Read,Grep,Glob,Bash,Write,Edit
 
 Implement the strong-responsibility task stated by the parent. Use this writable
 route when ambiguity, architecture, security, human-safety, destructive impact,
-or another activated strong responsibility must remain with Sol during
+or another activated strong responsibility must remain with Opus during
 implementation. If the task is destructive, begin only after the parent
 supplies evidence that the separate authorization gate passed, and keep the
 mutation within the exact authorized targets. Non-destructive strong work does

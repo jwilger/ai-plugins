@@ -13,6 +13,7 @@ allowed-tools:
   - mcp__tiber__tiber_codex_sandbox_setup
   - mcp__tiber__tiber_list
   - mcp__tiber__tiber_show
+  - mcp__tiber__tiber_search
   - mcp__plugin_tiber_tiber__tiber_create
   - mcp__plugin_tiber_tiber__tiber_update
   - mcp__plugin_tiber_tiber__tiber_acceptance_add
@@ -23,6 +24,7 @@ allowed-tools:
   - mcp__plugin_tiber_tiber__tiber_codex_sandbox_setup
   - mcp__plugin_tiber_tiber__tiber_list
   - mcp__plugin_tiber_tiber__tiber_show
+  - mcp__plugin_tiber_tiber__tiber_search
 ---
 
 # Tiber New Task
@@ -113,15 +115,16 @@ use the ticket.
    the created task.
 8. Report the new task id, title, and backlog status.
 
-If creation reports a publication error, no task is complete merely because an
-event transaction was staged locally. Do not invent or report a task reference.
-Preserve only a sanitized error summary and follow its structured recovery. A
-confirmed version conflict may be retried by Tiber with the same invocation
-identity. An indeterminate publication blocks all further mutations until the
-structured Tiber sync tool confirms or rejects the pending candidate. If Codex
-sandboxing caused the failure, use the structured sandbox setup tool before
-retrying the exact operation; do not ask the user to run an equivalent CLI
-command manually.
+If creation reports a publication error, a locally appended or staged candidate
+is not durable publication evidence. Do not invent or report a task reference.
+Preserve only a sanitized error summary and follow its structured recovery. An
+expected stream-version mismatch is a confirmed optimistic-concurrency conflict
+that Tiber may refresh and retry with the same invocation identity. An ambiguous
+publication outcome blocks all further mutations until the structured Tiber sync
+tool reconciles that exact pending invocation and confirms or rejects its durable
+publication. If Codex sandboxing caused the failure, use the structured sandbox
+setup tool before retrying the exact operation; do not ask the user to run an
+equivalent CLI command manually.
 
 If creation reports `tiber.backlog_capacity_exceeded`, no task was created.
 Do not retry, increase or bypass the configured limit, or retain the candidate

@@ -18,6 +18,12 @@ copy_eval_runner() {
   cp \
     "$ROOT/scripts/evals/provider-compositions.mjs" \
     "${destination%/*}/provider-compositions.mjs"
+  cp \
+    "$ROOT/scripts/evals/prepare-gpt56-workspace.mjs" \
+    "$ROOT/scripts/evals/gpt56-workspace-policy.mjs" \
+    "$ROOT/scripts/evals/check-thresholds.mjs" \
+    "$ROOT/scripts/evals/write-status.mjs" \
+    "${destination%/*}/"
 }
 
 teardown() {
@@ -63,13 +69,15 @@ teardown() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"scripts/evals/ensure-node-deps.sh"* ]]
+  [[ "$output" == *"scripts/evals/prepare-gpt56-workspace.mjs"* ]]
+  [[ "$output" == *"ai-plugins-provider-eval-workspace"* ]]
   [[ "$output" != *"timeout --kill-after"* ]]
   [[ "$output" == *"node_modules/.bin/promptfoo"* ]]
   [[ "$output" != *"npx --yes"* ]]
   [[ "$output" == *"--max-concurrency 1"* ]]
   [[ "$output" == *"--no-cache"* ]]
   [[ "$output" == *"--no-share"* ]]
-  [[ "$output" == *"evals/out/generated/agentic-systems-engineering.behavior.yaml"* ]]
+  [[ "$output" == *"evals/out/generated/development-system.behavior.yaml"* ]]
   [[ "$output" == *"evals/out/results.json"* ]]
   [[ "$output" == *"evals/out/report.html"* ]]
   [[ "$output" == *"evals/out/results.junit.xml"* ]]
@@ -109,7 +117,7 @@ teardown() {
 
   rm -rf "$other_cwd"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"$ROOT/evals/out/generated/agentic-systems-engineering.behavior.yaml"* ]]
+  [[ "$output" == *"$ROOT/evals/out/generated/development-system.behavior.yaml"* ]]
   [[ "$output" != *"$other_cwd/evals/out/generated"* ]]
 }
 
@@ -138,7 +146,7 @@ teardown() {
   [[ "$output" == *"$isolated_out/results.json"* ]]
   [[ "$output" == *"$isolated_out/report.html"* ]]
   [[ "$output" == *"$isolated_out/results.junit.xml"* ]]
-  [[ "$output" == *"$isolated_out/generated/agentic-systems-engineering.behavior.yaml"* ]]
+  [[ "$output" == *"$isolated_out/generated/development-system.behavior.yaml"* ]]
   [ ! -e "$isolated_out" ]
 
   rm -rf "${isolated_out%/*}"
@@ -207,8 +215,8 @@ teardown() {
   printf 'junit sentinel\n' >"$isolated_out/results.junit.xml"
   printf 'status sentinel\n' >"$isolated_out/status.json"
   mkdir "$isolated_out/generated"
-  printf 'config sentinel\n' >"$isolated_out/generated/agentic-systems-engineering.behavior.yaml"
-  printf 'metadata sentinel\n' >"$isolated_out/generated/agentic-systems-engineering.behavior.metadata.json"
+  printf 'config sentinel\n' >"$isolated_out/generated/development-system.behavior.yaml"
+  printf 'metadata sentinel\n' >"$isolated_out/generated/development-system.behavior.metadata.json"
 
   run env EVAL_OUT_DIR="$isolated_out" "$RUNNER" --dry-run
 
@@ -217,8 +225,8 @@ teardown() {
   grep -q 'report sentinel' "$isolated_out/report.html"
   grep -q 'junit sentinel' "$isolated_out/results.junit.xml"
   grep -q 'status sentinel' "$isolated_out/status.json"
-  grep -q 'config sentinel' "$isolated_out/generated/agentic-systems-engineering.behavior.yaml"
-  grep -q 'metadata sentinel' "$isolated_out/generated/agentic-systems-engineering.behavior.metadata.json"
+  grep -q 'config sentinel' "$isolated_out/generated/development-system.behavior.yaml"
+  grep -q 'metadata sentinel' "$isolated_out/generated/development-system.behavior.metadata.json"
 
   rm -rf "$temp_root"
 }
@@ -231,10 +239,14 @@ teardown() {
   provider_marker="$temp_root/provider-invoked"
   mkdir -p "$(dirname "$lock_path")"
   printf 'prompts: []\nproviders: []\ntests: []\n' >"$config"
-  cat >"$fake_promptfoo" <<'SH'
+cat >"$fake_promptfoo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 touch "$PROVIDER_MARKER"
+mkdir -p "$EVAL_OUT_DIR"
+cat >"$EVAL_OUT_DIR/results.json" <<'JSON'
+{"results":{"results":[{"success":true,"provider":{"id":"fixture-full-marketplace"},"vars":{"case_id":"fixture","plugin_mode":"full-marketplace","min_pass_rate":1,"value_gate_mode":"none"}}]}}
+JSON
 SH
   chmod +x "$fake_promptfoo"
 
@@ -358,6 +370,10 @@ SH
   cat >"$fake_promptfoo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+mkdir -p "$EVAL_OUT_DIR"
+cat >"$EVAL_OUT_DIR/results.json" <<'JSON'
+{"results":{"results":[{"success":true,"provider":{"id":"fixture-full-marketplace"},"vars":{"case_id":"fixture","plugin_mode":"full-marketplace","min_pass_rate":1,"value_gate_mode":"none"}}]}}
+JSON
 SH
   chmod +x "$fake_promptfoo"
 
@@ -441,7 +457,14 @@ SH
   fixture_root="$(mktemp -d)"
   fake_promptfoo="$fixture_root/promptfoo"
   shared_home="$fixture_root/shared-home"
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_promptfoo"
+  cat >"$fake_promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "$EVAL_OUT_DIR"
+cat >"$EVAL_OUT_DIR/results.json" <<'JSON'
+{"results":{"results":[{"success":true,"provider":{"id":"fixture-full-marketplace"},"vars":{"case_id":"fixture","plugin_mode":"full-marketplace","min_pass_rate":1,"value_gate_mode":"none"}}]}}
+JSON
+SH
   chmod +x "$fake_promptfoo"
 
   run env \
@@ -559,6 +582,10 @@ SH
 set -euo pipefail
 printf 'PROMPTFOO_CONFIG_DIR=%s\n' "${PROMPTFOO_CONFIG_DIR:-}"
 printf 'ARGS=%s\n' "$*"
+mkdir -p "$EVAL_OUT_DIR"
+cat >"$EVAL_OUT_DIR/results.json" <<'JSON'
+{"results":{"results":[{"success":true,"provider":{"id":"fixture-full-marketplace"},"vars":{"case_id":"fixture","plugin_mode":"full-marketplace","min_pass_rate":1,"value_gate_mode":"none"}}]}}
+JSON
 SH
   chmod +x "$fixture_root/bin/promptfoo"
   touch "$fixture_root/promptfooconfig.yaml"
@@ -642,6 +669,117 @@ JSON
   rm -rf "$fixture_root"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Eval thresholds passed"* ]]
+}
+
+@test "eval threshold checker accepts a standard gate saturated at the quality ceiling" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
+        "testCase": { "vars": { "case_id": "already-solved", "plugin_mode": "no-plugins", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
+        "gradingResult": { "pass": true, "score": 1 }
+      },
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "testCase": { "vars": { "case_id": "already-solved", "plugin_mode": "targeted-plugins", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
+        "gradingResult": { "pass": true, "score": 1 }
+      },
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
+        "testCase": { "vars": { "case_id": "already-solved", "plugin_mode": "full-marketplace", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
+        "gradingResult": { "pass": true, "score": 1 }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Eval thresholds passed"* ]]
+}
+
+@test "eval threshold checker applies value gates to every plugin composition" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
+        "testCase": { "vars": { "case_id": "composition-regression", "plugin_mode": "no-plugins", "min_pass_rate": 0, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
+        "gradingResult": { "pass": false, "score": 0 }
+      },
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "testCase": { "vars": { "case_id": "composition-regression", "plugin_mode": "targeted-plugins", "min_pass_rate": 0, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
+        "gradingResult": { "pass": false, "score": 0 }
+      },
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
+        "testCase": { "vars": { "case_id": "composition-regression", "plugin_mode": "full-marketplace", "min_pass_rate": 0, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
+        "gradingResult": { "pass": true, "score": 1 }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"codex-gpt-5.6-terra::targeted-plugins::composition-regression"* ]]
+}
+
+@test "eval threshold checker reports failed hard-guard components hidden by semantic reasons" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "results": {
+    "results": [
+      {
+        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "testCase": { "vars": { "case_id": "hidden-hard-guard", "plugin_mode": "targeted-plugins", "min_pass_rate": 0, "value_gate_mode": "none" } },
+        "gradingResult": {
+          "pass": false,
+          "score": 0,
+          "reason": "Semantic rubric omitted a detail",
+          "componentResults": [
+            {
+              "assertion": { "type": "javascript", "value": "file:///repo/evals/promptfoo/assert-hard-guards.cjs" },
+              "pass": false,
+              "score": 0,
+              "reason": "Missing required content: exact-command"
+            },
+            {
+              "assertion": { "type": "llm-rubric", "value": "Focused rubric" },
+              "pass": false,
+              "score": 0,
+              "reason": "Semantic rubric omitted a detail"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Hard guard failures:"* ]]
+  [[ "$output" == *"Missing required content: exact-command"* ]]
 }
 
 @test "eval threshold checker skips value gates when fixture marks them none" {
@@ -746,7 +884,7 @@ SH
   [[ "$output" == *"Eval thresholds passed"* ]]
 }
 
-@test "eval runner clears stale timeout status before a successful run" {
+@test "eval runner replaces stale timeout status with terminal success" {
   fixture_root="$(mktemp -d)"
   mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin" "$fixture_root/evals/out"
   copy_eval_runner "$fixture_root/scripts/evals/run.sh"
@@ -787,7 +925,8 @@ SH
   run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
 
   [ "$status" -eq 0 ]
-  [ ! -e "$fixture_root/evals/out/status.json" ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "complete" ]
+  [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo evaluation completed and configured thresholds passed" ]
   [[ "$output" == *"Eval thresholds passed"* ]]
   rm -rf "$fixture_root"
 }
@@ -799,6 +938,10 @@ SH
 #!/usr/bin/env bash
 set -euo pipefail
 cat evals/out/generated/runtime-options.json
+mkdir -p "$EVAL_OUT_DIR"
+cat >"$EVAL_OUT_DIR/results.json" <<'JSON'
+{"results":{"results":[{"success":true,"provider":{"id":"fixture-full-marketplace"},"vars":{"case_id":"fixture","plugin_mode":"full-marketplace","min_pass_rate":1,"value_gate_mode":"none"}}]}}
+JSON
 SH
   chmod +x "$fixture_bin/promptfoo"
 
@@ -836,6 +979,10 @@ runtime_loader="$EVAL_OUT_DIR/generated/load-harness-cases.runtime.cjs"
 test -f "$runtime_loader"
 grep -F "tests: file://$runtime_loader" "$config"
 cat "$EVAL_OUT_DIR/generated/runtime-options.json"
+mkdir -p "$EVAL_OUT_DIR"
+cat >"$EVAL_OUT_DIR/results.json" <<'JSON'
+{"results":{"results":[{"success":true,"provider":{"id":"fixture-full-marketplace"},"vars":{"case_id":"fixture","plugin_mode":"full-marketplace","min_pass_rate":1,"value_gate_mode":"none"}}]}}
+JSON
 SH
   chmod +x "$fixture_root/bin/promptfoo"
 

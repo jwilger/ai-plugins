@@ -4,7 +4,9 @@ Load this only for broad shaping work where the compact protocol is not enough.
 
 ## Dimensions
 
-- `output`: `none` for conversation and recap; `spec` for a standalone markdown spec; `ticket plan` for scoped implementation tickets. If unclear and it changes the work, ask.
+- `output`: `recommendation` for conversation and recap; `spec` for standalone
+  Markdown; `ticket-plan` for scoped implementation tickets. If unclear and it
+  changes the work, ask.
 - `pushback`: `stress-test` by default; use `direct-disagreement` when the cost of being wrong is high or the user asked for strong opinions.
 - `altitude`: `plan-as-given` by default; use `challenge-framing` when priority, root cause, or "should we build this?" is unresolved.
 - `audience`: infer technical vs non-technical from the user's vocabulary. Surface implementation details only when the user can use them or they are load-bearing.
@@ -22,7 +24,10 @@ Load this only for broad shaping work where the compact protocol is not enough.
 
 ## Pushback Patterns
 
-- Stress test vague claims with concrete scenarios: crashes, retries, old data, concurrent users, empty states, permission boundaries, rollback, and support ownership.
+- Stress-test vague claims against crash consistency and failure atomicity,
+  retry idempotency, schema and data migration compatibility, concurrency
+  control, empty states, authorization boundaries, rollback and recovery, and
+  operational ownership.
 - For direct disagreement: state the concern, propose the simpler alternative, and ask the user to accept it or defend the original.
 - If the plan is sound, say so and lock in the decision. Do not manufacture resistance.
 
@@ -44,12 +49,12 @@ For a spec, first ask who will consume it: AI coding agent, human team, stakehol
 
 - Overview
 - Goals and non-goals
-- User types and permissions
+- Actors, roles, resources, and authorization policy
 - Core features
 - User flows
-- Data model
-- Technical decisions
-- Edge cases and error handling
+- Data ownership, lifecycle, retention, consistency, and migration
+- External interfaces, protocols, and technical decisions
+- Failure semantics, edge cases, and observability
 - Security/privacy requirements
 - Prerequisites and operational ownership
 - Open questions, ideally empty or clearly assigned

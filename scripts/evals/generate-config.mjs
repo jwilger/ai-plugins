@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -9,9 +10,12 @@ const require = createRequire(import.meta.url);
 const { selectedBehaviorPluginNames } = require(
   path.join(root, "evals/promptfoo/fixtures.cjs"),
 );
-const evalWorkspace = path.join(root, ".evals/agent-workspace");
+const evalWorkspace = path.resolve(
+  process.env.EVAL_AGENT_WORKSPACE ||
+    path.join(os.tmpdir(), "ai-plugins-provider-eval-workspace"),
+);
 const advisoryPromptPrefix =
-  "Answer the scenario as an advisory behavior question. Treat each scenario as stateless: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Use installed marketplace plugin and skill guidance when it is relevant, naming the relevant plugin or skill in the answer. You may read installed skill instruction files through the harness. When plugin or skill guidance documents a command, include the exact command name and flags instead of generic setup-path wording. Apply plugin-specific safety gates and documented commands exactly instead of replacing them with generic setup or validation advice. Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands.";
+  "Answer the scenario directly as a stateless advisory question: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Apply any available instructions relevant to the scenario without naming their source. If you recommend a command, give its exact name and flags; do not replace a documented command or safety gate with generic advice. Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands.";
 
 function usage() {
   console.log(`Usage: node scripts/evals/generate-config.mjs [--suite behavior|canary] [--output path] [--metadata-output path] [--stdout]

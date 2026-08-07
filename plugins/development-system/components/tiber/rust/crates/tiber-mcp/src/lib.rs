@@ -108,7 +108,7 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
                 "name": "tiber",
                 "version": env!("CARGO_PKG_VERSION")
             },
-            "instructions": "For Codex sandbox write failures, call tiber.codex_sandbox_setup or read tasks://codex-sandbox before retrying the same structured Tiber MCP operation. Use case-by-case approval for raw Git prefixes; persist approval only when the harness can scope it to the exact Tiber-internal operation. Do not run the whole Tiber MCP server outside the sandbox unless narrow Git permissions are insufficient."
+            "instructions": "Mutating task tools publish an EventCore transaction to origin/tiber on success. For Codex sandbox write failures, call tiber.codex_sandbox_setup or read tasks://codex-sandbox before retrying the same structured Tiber MCP operation. Use case-by-case approval for raw Git prefixes; persist approval only when the harness can scope it to the exact Tiber-internal operation. Do not run the whole Tiber MCP server outside the sandbox unless narrow Git permissions are insufficient."
         }),
         "tools/list" => json!({ "tools": tools() }),
         "resources/list" => json!({ "resources": resources()? }),
@@ -599,6 +599,21 @@ fn optional_string_array(
     ))
 }
 
+fn task_ref_schema(role: &str) -> Value {
+    json!({
+        "type": "string",
+        "description": format!("{role} Accepts a task ID, nickname, or full task stem.")
+    })
+}
+
+fn one_based_index_schema(item: &str) -> Value {
+    json!({
+        "type": "string",
+        "pattern": "^[1-9][0-9]*$",
+        "description": format!("One-based {item} index encoded as a decimal string.")
+    })
+}
+
 fn tools() -> Vec<Value> {
     vec![
         tool(
@@ -611,7 +626,7 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.sync",
             "Sync tiber",
-            "Synchronize the EventCore store on the Git-backed tiber branch.",
+            "Fetch and reconcile the Git-backed EventCore store, publishing any pending local transaction. If unpublished work is discarded during reconciliation, return a workflow blocker requiring the operation to be reissued.",
             json!({}),
             vec![],
         ),
@@ -645,15 +660,15 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.show",
             "Show task",
-            "Read a task by ref.",
-            json!({ "ref": { "type": "string" } }),
+            "Read a task by task reference.",
+            json!({ "ref": task_ref_schema("Task to read.") }),
             vec!["ref"],
         ),
         tool(
             "tiber.metadata",
             "Read task metadata",
-            "Read task path, title, and tasks-branch commit time by ref.",
-            json!({ "ref": { "type": "string" } }),
+            "Read task path, title, and tasks-branch commit time by task reference.",
+            json!({ "ref": task_ref_schema("Task whose metadata is requested.") }),
             vec!["ref"],
         ),
         tool(
@@ -667,28 +682,43 @@ fn tools() -> Vec<Value> {
             "tiber.transition",
             "Transition task",
             "Move a task to another status.",
-            json!({ "ref": { "type": "string" }, "status": { "type": "string" } }),
+            json!({
+                "ref": task_ref_schema("Task to transition."),
+                "status": {
+                    "type": "string",
+                    "enum": ["backlog", "in-progress", "done", "abandoned"]
+                }
+            }),
             vec!["ref", "status"],
         ),
         tool(
             "tiber.prioritize",
             "Prioritize task",
             "Move a task before another task in board order.",
-            json!({ "ref": { "type": "string" }, "before": { "type": "string" } }),
+            json!({
+                "ref": task_ref_schema("Task to move."),
+                "before": task_ref_schema("Task that will immediately follow the moved task.")
+            }),
             vec!["ref", "before"],
         ),
         tool(
             "tiber.link",
             "Link task dependency",
-            "Add a blocks relationship between two tasks.",
-            json!({ "from": { "type": "string" }, "to": { "type": "string" } }),
+            "Add a dependency where from is the blocker and to is the blocked task.",
+            json!({
+                "from": task_ref_schema("Blocking task."),
+                "to": task_ref_schema("Task blocked by from.")
+            }),
             vec!["from", "to"],
         ),
         tool(
             "tiber.unlink",
             "Unlink task dependency",
-            "Remove a blocks relationship between two tasks.",
-            json!({ "from": { "type": "string" }, "to": { "type": "string" } }),
+            "Remove a dependency where from is the blocker and to is the blocked task.",
+            json!({
+                "from": task_ref_schema("Blocking task."),
+                "to": task_ref_schema("Task blocked by from.")
+            }),
             vec!["from", "to"],
         ),
         tool(
@@ -696,7 +726,7 @@ fn tools() -> Vec<Value> {
             "Add subtask",
             "Add a checklist subtask to a task.",
             json!({
-                "ref": { "type": "string" },
+                "ref": task_ref_schema("Task receiving the subtask."),
                 "title": { "type": "string" },
                 "after": { "type": "array", "items": { "type": "string" } }
             }),
@@ -706,14 +736,14 @@ fn tools() -> Vec<Value> {
             "tiber.subtask.check",
             "Check subtask",
             "Mark a subtask checked by one-based index.",
-            json!({ "ref": { "type": "string" }, "index": { "type": "string" } }),
+            json!({ "ref": task_ref_schema("Task containing the subtask."), "index": one_based_index_schema("subtask") }),
             vec!["ref", "index"],
         ),
         tool(
             "tiber.subtask.uncheck",
             "Uncheck subtask",
             "Mark a subtask unchecked by one-based index.",
-            json!({ "ref": { "type": "string" }, "index": { "type": "string" } }),
+            json!({ "ref": task_ref_schema("Task containing the subtask."), "index": one_based_index_schema("subtask") }),
             vec!["ref", "index"],
         ),
         tool(
@@ -721,7 +751,7 @@ fn tools() -> Vec<Value> {
             "Update task",
             "Update task title, summary, context, tags, or PR/MR tracking fields.",
             json!({
-                "ref": { "type": "string" },
+                "ref": task_ref_schema("Task to update."),
                 "title": { "type": "string" },
                 "summary": { "type": "string" },
                 "context": { "type": "string" },
@@ -735,48 +765,48 @@ fn tools() -> Vec<Value> {
             "tiber.acceptance.add",
             "Add acceptance criterion",
             "Add an acceptance criterion to a task.",
-            json!({ "ref": { "type": "string" }, "criterion": { "type": "string" } }),
+            json!({ "ref": task_ref_schema("Task receiving the acceptance criterion."), "criterion": { "type": "string" } }),
             vec!["ref", "criterion"],
         ),
         tool(
             "tiber.acceptance.check",
             "Check acceptance criterion",
             "Mark an acceptance criterion checked by one-based index.",
-            json!({ "ref": { "type": "string" }, "index": { "type": "string" } }),
+            json!({ "ref": task_ref_schema("Task containing the acceptance criterion."), "index": one_based_index_schema("acceptance-criterion") }),
             vec!["ref", "index"],
         ),
         tool(
             "tiber.acceptance.uncheck",
             "Uncheck acceptance criterion",
             "Mark an acceptance criterion unchecked by one-based index.",
-            json!({ "ref": { "type": "string" }, "index": { "type": "string" } }),
+            json!({ "ref": task_ref_schema("Task containing the acceptance criterion."), "index": one_based_index_schema("acceptance-criterion") }),
             vec!["ref", "index"],
         ),
         tool(
             "tiber.acceptance.remove",
             "Remove acceptance criterion",
             "Remove an acceptance criterion by one-based index.",
-            json!({ "ref": { "type": "string" }, "index": { "type": "string" } }),
+            json!({ "ref": task_ref_schema("Task containing the acceptance criterion."), "index": one_based_index_schema("acceptance-criterion") }),
             vec!["ref", "index"],
         ),
         tool(
             "tiber.note.add",
             "Add note",
             "Append a dated note to a task.",
-            json!({ "ref": { "type": "string" }, "note": { "type": "string" } }),
+            json!({ "ref": task_ref_schema("Task receiving the note."), "note": { "type": "string" } }),
             vec!["ref", "note"],
         ),
         tool(
             "tiber.validate_fix",
             "Validate and safely fix",
-            "Run tiber validation with safe autofixes.",
+            "Validate the task projection; repair reciprocal typed links and board-order membership, and report dependency cycles that still require manual resolution.",
             json!({}),
             vec![],
         ),
         tool(
             "tiber.close_from_trailers",
             "Close from trailers",
-            "Close tasks referenced by Closes trailers in Git history.",
+            "Close tasks referenced by Closes trailers in the current HEAD commit message only; older commit trailers are ignored.",
             json!({}),
             vec![],
         ),
@@ -791,7 +821,13 @@ fn tools() -> Vec<Value> {
             "tiber.scaffold_repo_apply",
             "Apply repository scaffold",
             "Write repository files tiber scaffolds.",
-            json!({ "replace_conflicts": { "type": "boolean" } }),
+            json!({
+                "replace_conflicts": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When false, preserve conflicting existing files; when true, replace conflicts that the scaffold operation reports as replaceable."
+                }
+            }),
             vec![],
         ),
         tool(
@@ -800,7 +836,11 @@ fn tools() -> Vec<Value> {
             "Preview or install the bundled tiber launcher into a target directory.",
             json!({
                 "target_dir": { "type": "string" },
-                "apply": { "type": "boolean" }
+                "apply": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "False previews the launcher path; true writes the launcher and fails if the target already exists."
+                }
             }),
             vec!["target_dir"],
         ),
@@ -878,9 +918,10 @@ fn ci_recovery_tools() -> Vec<Value> {
                     "type": "array",
                     "minItems": 1,
                     "uniqueItems": true,
+                    "description": "Bounded helper capabilities; matches the preferred Development Discipline CI-recovery representation.",
                     "items": { "type": "string", "enum": ["inspect", "reproduce", "edit", "test"] }
                 },
-                "scope": { "type": "string" }
+                "scope": { "type": "string", "description": "Exact bounded files, commands, or diagnostic responsibility delegated to the helper." }
             }),
             vec![
                 "incident_id",
@@ -917,7 +958,7 @@ fn ci_recovery_tools() -> Vec<Value> {
         ci_recovery_tool(
             "tiber.ci_recovery.diagnose",
             "Record CI recovery diagnosis",
-            "Record the exact failed job, step, evidence, and diagnosis.",
+            "Record the exact failed job, step, log evidence, and whether the failure was caused by the pushed SHA, unrelated, or transient.",
             json!({
                 "incident_id": { "type": "string" },
                 "epoch": { "type": "integer", "minimum": 0 },
@@ -940,7 +981,7 @@ fn ci_recovery_tools() -> Vec<Value> {
         ci_recovery_tool(
             "tiber.ci_recovery.choose_action",
             "Choose CI recovery action",
-            "Select the one permitted repair or rerun recovery action.",
+            "Select exactly one diagnosis-compatible action: repair for a caused failure, or unchanged-SHA rerun for an unrelated or transient failure.",
             json!({
                 "incident_id": { "type": "string" },
                 "epoch": { "type": "integer", "minimum": 0 },
@@ -966,7 +1007,7 @@ fn ci_recovery_tools() -> Vec<Value> {
         ci_recovery_tool(
             "tiber.ci_recovery.resolve",
             "Resolve CI recovery",
-            "Record terminal-success proof and release the CI recovery hold.",
+            "Release the hold only with terminal-success proof whose run identity and SHA match the recorded replacement.",
             json!({
                 "incident_id": { "type": "string" },
                 "replacement_run_id": { "type": "string" },
@@ -988,7 +1029,11 @@ fn ci_recovery_tools() -> Vec<Value> {
 fn ci_recovery_owner_properties() -> Value {
     json!({
         "incident_id": { "type": "string" },
-        "epoch": { "type": "integer", "minimum": 0 }
+        "epoch": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Fenced ownership epoch returned by the current incident state; stale epochs are rejected."
+        }
     })
 }
 

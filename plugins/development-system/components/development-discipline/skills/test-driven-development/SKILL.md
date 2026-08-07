@@ -6,9 +6,17 @@ description: Use when implementing a feature, bugfix, production behavior change
 # Test-Driven Development
 
 Require RED only for new or changed first-party production behavior without a
-clear existing failing test. When RED applies, write a public black-box behavior
-test first, watch it fail for the intended behavioral reason, write the smallest
-implementation that makes it pass, and refactor only while green.
+clear existing failing test. When RED applies, write a test first through a
+stable observable boundary, watch it fail for the intended behavioral reason,
+write the smallest implementation that makes it pass, and refactor only while
+green.
+
+A stable observable boundary is a supported interface whose result survives an
+internal rewrite: for example CLI arguments plus exit status/stdout/files, an
+HTTP request and response, a public API result, or an emitted event. A test is
+not black-box merely because it runs outside the production module; it must not
+read private symbols, source files, committed repository text, or workflow
+structure to infer behavior.
 
 ## Decide Whether RED Applies
 
@@ -20,9 +28,10 @@ Do not create a new failing test for:
 - assertions that committed static text or file structure exists;
 - a change already proved by a clear failing test;
 - straightforward CI workflow scripting, where executing CI is the test;
-- simple developer-environment setup or utilities with no production effect;
-- behavior-preserving refactoring with adequate existing green black-box
-  coverage.
+- a non-shipped, stateless developer-environment helper with no concurrency,
+  persistence, destructive I/O, recovery contract, or production effect;
+- behavior-preserving refactoring whose existing green stable-boundary tests
+  would fail if any preserved externally observable invariant regressed.
 
 If an existing failing test is correct but unclear, improve its diagnostic
 message when possible without weakening the test. For third-party integrations,
@@ -30,10 +39,11 @@ explicitly reject tests that restate the vendor API. Test only the application's
 observable product contract through a public, end-to-end black-box boundary;
 the test should remain valid if the dependency is replaced. If that product
 behavior is new and uncovered, write this application-level integration test
-RED first. Verify exempt work with the relevant formatter, validator, unchanged
-test suite, CI run, or direct utility execution. If a developer utility is too
-complex for direct execution to establish confidence, extract it into a
-maintained project or shipped subsystem and preserve coverage there.
+RED first. Verify exempt work with the owning formatter or validator, unchanged
+component suite, repository-required gate, CI run, or direct utility execution.
+A developer utility with concurrency, persistence, destructive I/O, or recovery
+semantics is not a simple-helper exemption; extract it into a maintained project
+or shipped subsystem and preserve coverage there.
 
 For a removal, change production code first while leaving tests untouched. Run
 the relevant suite and classify every failure. Delete or update only tests that
@@ -45,8 +55,9 @@ only asserts the capability is absent.
 ## Rules
 
 - One test at a time.
-- One assertion or observable behavior per test.
-- Prefer public, black-box behavior tests.
+- One contract and failure reason per test. Multiple assertions may observe one
+  contract outcome.
+- Prefer tests through a stable observable boundary.
 - Never open a committed repository file merely to assert expected text or
   structure. This includes documentation, fixtures, policies, skills,
   manifests, and configuration.
@@ -54,8 +65,10 @@ only asserts the capability is absent.
   in CI is the test.
 - RED must fail because the behavior is missing, not because of typos, compile
   errors, broken setup, or missing fixtures.
-- GREEN is the smallest change that passes the current test.
-- REFACTOR starts only after the relevant test and existing gate are green.
+- GREEN is the smallest change that passes the current test without weakening
+  another preserved contract.
+- REFACTOR starts only after the focused test, owning component suite, and
+  repository-required fast gate are green.
 - No production code before the failing test has been observed when RED applies.
 
 When a program creates or edits a file, first test the behavioral effect visible
@@ -88,7 +101,8 @@ then, implementation proceeds one step or scenario at a time.
    until RED proves the behavior is missing.
 4. Implement only enough code for that test. For removal work, instead follow
    the remove-first sequence above with the old tests unchanged.
-5. Run the focused test and the relevant existing checks.
+5. Run the focused test, the owning component suite, and the
+   repository-required fast gate.
 6. Run a lightweight post-implementation review before the next testing cycle.
 7. Refactor only with the tests green and the lightweight review clean.
 8. Repeat for the next behavior.
@@ -98,16 +112,20 @@ then, implementation proceeds one step or scenario at a time.
 Treat each completed behavior as a preservable implementation increment. Before
 starting the next RED test:
 
-1. Run the fast unit tests and directly relevant quick checks.
+1. Run the focused test, owning component suite, and repository-required fast
+   checks.
 2. Run the lightweight review below. If it causes an edit, repeat the fast tests
    and lightweight review until both are green.
 3. Use `rationale-commit-messages`, then commit and push the green increment.
-4. Check CI before starting a new task. The most recently **completed** build
-   must be successful. A newer queued or running build does not replace that
-   completed result, but a completed failed job in any current build invokes
-   `ci-failure-follow-up`; its exact diagnosis, constrained next push, and
-   terminal-success recovery rule blocks follow-up implementation,
-   review-finding remediation, and a new ticket.
+4. Record the exact pushed commit OID and its repository-required in-scope CI
+   runs. Before starting a new task, the most recently **completed** in-scope
+   build must be successful. A newer queued or running build is waiting and does
+   not replace that completed result. A completed failed job in any required
+   current run invokes `ci-failure-follow-up`; its exact diagnosis, constrained
+   next push, and terminal-success recovery rule blocks follow-up
+   implementation, review-finding remediation, and a new ticket. Final review
+   and delivery apply their own exact-revision terminal-evidence requirements;
+   do not report queued or running CI as green.
 
 Long-running integration, mutation, exhaustive, full-suite, and similarly
 expensive checks belong in CI unless a local run is directly required to

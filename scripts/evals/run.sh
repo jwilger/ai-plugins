@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 caller_cwd="$(pwd -P)"
-config="evals/promptfoo/agentic-systems-engineering.yaml"
+config="evals/promptfoo/development-system.yaml"
 default_out_dir="$root/evals/out"
 requested_out_dir="${EVAL_OUT_DIR:-$default_out_dir}"
 case "$requested_out_dir" in
@@ -11,6 +11,9 @@ case "$requested_out_dir" in
   *) out_dir="$(realpath -m -- "$caller_cwd/$requested_out_dir")" ;;
 esac
 export EVAL_OUT_DIR="$out_dir"
+eval_workspace="${EVAL_AGENT_WORKSPACE:-${TMPDIR:-/tmp}/ai-plugins-provider-eval-workspace}"
+eval_workspace="$(realpath -m -- "$eval_workspace")"
+export EVAL_AGENT_WORKSPACE="$eval_workspace"
 generated_dir="$out_dir/generated"
 runtime_options_file="$generated_dir/runtime-options.json"
 runtime_loader_file="$generated_dir/load-harness-cases.runtime.cjs"
@@ -76,6 +79,8 @@ Environment overrides:
   EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)
   EVAL_INTERRUPT_GRACE         (default: 2s between INT, TERM, and KILL)
   EVAL_OUT_DIR                 (default: evals/out; isolates generated config and artifacts)
+  EVAL_AGENT_WORKSPACE         (default: an isolated marker-owned workspace under /tmp;
+                                must be outside this repository and ancestor instructions)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
 Pinned eval packages are managed by package.json and package-lock.json:
@@ -151,6 +156,20 @@ write_eval_status() {
     --state "$state" \
     --reason "$reason" \
     --provider-credentials "${EVAL_PROVIDER_CREDENTIALS_STATUS:-unknown}" >/dev/null
+}
+
+check_thresholds_and_record_status() {
+  local threshold_status
+  set +e
+  node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
+  threshold_status="$?"
+  set -e
+  if [ "$threshold_status" -eq 0 ]; then
+    write_eval_status complete "promptfoo evaluation completed and configured thresholds passed"
+  else
+    write_eval_status failed "promptfoo evaluation completed but configured thresholds failed"
+  fi
+  return "$threshold_status"
 }
 
 finish_eval_interruption() {
@@ -402,10 +421,10 @@ case "$suite" in
     ;;
 esac
 
-generated_metadata_file="$generated_dir/agentic-systems-engineering.${suite}.metadata.json"
+generated_metadata_file="$generated_dir/development-system.${suite}.metadata.json"
 
-if [ "$config" = "evals/promptfoo/agentic-systems-engineering.yaml" ]; then
-  config="$generated_dir/agentic-systems-engineering.${suite}.yaml"
+if [ "$config" = "evals/promptfoo/development-system.yaml" ]; then
+  config="$generated_dir/development-system.${suite}.yaml"
   generated_config=1
 fi
 
@@ -462,6 +481,8 @@ if [ "$dry_run" -eq 1 ]; then
       "$dry_targeted_home")"
     printf '%q ' node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_output_file"
     printf '\n'
+    printf '%q ' node "$root/scripts/evals/prepare-gpt56-workspace.mjs" "$EVAL_AGENT_WORKSPACE" --forbid-overlap "$root" --forbid-overlap "$out_dir"
+    printf '\n'
     if uses_codex_grader; then
       print_prepare_codex_home_for_mode full-marketplace
     fi
@@ -478,7 +499,7 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 prepare_eval_output_dir
-mkdir -p "$out_dir" "$root/.evals/agent-workspace"
+mkdir -p "$out_dir"
 rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml" "$out_dir/status.json"
 trap 'forward_eval_signal INT 130' INT
 trap 'forward_eval_signal TERM 143' TERM
@@ -502,6 +523,10 @@ if [ "$generated_config" -eq 1 ]; then
     "$CODEX_EVAL_HOME_FULL_MARKETPLACE" \
     "$CODEX_EVAL_HOME_NO_PLUGINS" \
     "$CODEX_EVAL_HOME_TARGETED_PLUGINS")"
+  node "$root/scripts/evals/prepare-gpt56-workspace.mjs" \
+    "$EVAL_AGENT_WORKSPACE" \
+    --forbid-overlap "$root" \
+    --forbid-overlap "$out_dir"
   write_runtime_options
   write_runtime_loader
   if uses_codex_grader; then
@@ -567,12 +592,12 @@ if [ "$promptfoo_status" -ne 0 ]; then
     write_eval_status failed "promptfoo eval exited without results with status $promptfoo_status"
     exit "$promptfoo_status"
   fi
-  rm -f "$out_dir/status.json"
-  node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
+  check_thresholds_and_record_status
   exit "$?"
 fi
 
-rm -f "$out_dir/status.json"
-if [ -s "$out_dir/results.json" ]; then
-  node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
+if [ ! -s "$out_dir/results.json" ]; then
+  write_eval_status failed "promptfoo evaluation completed without a results artifact"
+  exit 1
 fi
+check_thresholds_and_record_status

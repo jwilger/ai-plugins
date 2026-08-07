@@ -18,24 +18,24 @@ unchanged.
 
 ## Routing matrix
 
-| Route           | Eligible work                                                                                                                                                                                     | Required boundary                                                                                                                                                    |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gpt-5.6-luna`  | Bounded inventory, extraction, classification, or mechanical transformation                                                                                                                       | Keep the helper read-only or make its change easily reversible; define the expected result before delegation; independently verify every result before relying on it |
-| `gpt-5.6-terra` | Normal substantive implementation and ordinary review with clear scope and ordinary risk                                                                                                          | Return the substantive result to the accountable parent; route analysis behind final verification and every completion or readiness claim to confirmed Sol           |
-| `gpt-5.6-sol`   | Advisor work; ambiguous debugging; architecture, security, or human-safety analysis; separately authorized destructive changes; blocking or disputed verification; completion or readiness claims | Keep required authorization and evidence gates separate from model choice; a confirmed Sol assignment must produce the strong-responsibility result                  |
+| Route           | Eligibility predicates                                                                                                                                                                                                                                                                                                        | Required boundary                                                                                                                                                    |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gpt-5.6-luna`  | The expected result and finite input set are stated before delegation; the work is inventory, extraction, classification, or a rule-preserving mechanical transformation; no implementation or judgment is required; and a separate deterministic check can verify every result                                               | Keep the helper read-only or make its change easily reversible; define the expected result before delegation; independently verify every result before relying on it |
+| `gpt-5.6-terra` | Acceptance criteria and mutation targets are explicit; the change is reversible through normal version control; no destructive operation or unresolved architecture decision is present; no authentication/authorization, sensitive-data, or human-safety boundary changes; and verification is neither blocking nor disputed | Return the substantive result to the accountable parent; route analysis behind final verification and every completion or readiness claim to confirmed Sol           |
+| `gpt-5.6-sol`   | Any Luna or Terra exclusion predicate is present, or the assignment is advisor work, ambiguous diagnosis, architecture/security/human-safety analysis, separately authorized destructive execution, blocking or disputed verification, or a completion/readiness recommendation                                               | Keep required authorization and evidence gates separate from model choice; a confirmed Sol assignment must produce the strong-responsibility result                  |
 
 Do not use Luna for substantive implementation, completion claims, ambiguous
 work, or any task whose result cannot be independently checked. Do not treat a
 helper's own explanation as independent verification.
 
-Use Terra instead of Luna for ordinary code, test, configuration, and
-documentation changes even when their specification is clear; ordinary review
-also stays on Terra. Every Terra recommendation must name both ordinary
-substantive implementation and ordinary review as Terra responsibilities. Do
-not escalate routine substantive work beyond Terra without an activated reason.
-Escalate the affected task specifically to `gpt-5.6-sol` when ambiguity,
-destructive impact, architecture, security, human-safety, or blocking or
-disputed verification enters the task.
+Use Terra instead of Luna for code, test, configuration, and documentation
+changes whenever every Terra predicate above remains true; review of that work
+also stays on Terra. Every Terra recommendation must name both substantive
+implementation and ordinary review as Terra responsibilities. Do not infer low
+risk from a small diff, a familiar file, or reversibility alone. Transfer only
+the affected responsibility to `gpt-5.6-sol` as soon as any Terra exclusion
+predicate becomes true; do not wait for an undefined threshold such as
+"material ambiguity."
 
 Sol is the strong responsibility route. Use it for every listed responsibility,
 including the analysis and recommendation behind final verification,

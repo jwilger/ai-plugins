@@ -34,22 +34,24 @@ and no install touches `$HOME`.
 
 ## b. Pinned toolchain
 
-Declare exact versions in the file the chosen environment reads:
+Declare exact toolchain versions in the file the chosen environment reads, and
+commit the ecosystem's dependency lockfile or equivalent resolved graph:
 
 - flake inputs (with a committed lockfile);
 - a tool-versions file (mise/asdf);
 - a language toolchain file (e.g. a Rust toolchain file, `.nvmrc`,
   `.python-version`, `.ruby-version`);
-- an engines/constraints field in the project manifest.
+- an exact engines/runtime constraint in the project manifest.
 
 Always add/upgrade dependencies via the package-manager CLI so versions and
 feature flags are resolved and recorded at change time; never hand-edit the
 manifest's dependency tables.
 
-## c. Strict lint allowlist
+## c. Warnings-as-errors lint baseline
 
-Turn on every group the linter offers, fail on warnings in the gate, then decline
-individual lints only as documented decisions. Example strict baselines:
+Enable the strict, stable groups appropriate to the detected toolchain, fail on
+warnings in the gate, then suppress individual lints only as documented
+decisions. Example strict baselines:
 
 - **Rust:** clippy `pedantic` + `restriction` (+ `nursery`) as groups; deny the
   panic family (`unwrap_used`, `expect_used`, `panic`, `indexing_slicing`,
@@ -67,8 +69,10 @@ Forbid panic-prone constructs on production paths regardless of language.
 
 ## d. Mutation testing
 
-Wire a mutation tool where the ecosystem has one and target a 100% kill rate;
-gate it in CI (release-gated if slow). Examples:
+Wire a mature mutation tool where the ecosystem has one and target a 100%
+actionable mutation score; define the denominator and document verified
+equivalent/non-viable mutants, tool errors, and timeouts. Gate it in CI
+(release-gated if slow). Examples:
 
 - Rust → cargo-mutants
 - JS/TS / C# → Stryker
@@ -89,9 +93,10 @@ surface only:
   UI as a user would.
 
 Rules: never import internal modules or assert on source text; assert observable
-behavior. Get one Given/When/Then step green with all gates passing, commit, then
-the next. For multi-target or cross-harness behavior, use a scenario outline /
-parametrized examples so parity is verified per slice.
+behavior. Get one scenario or vertical slice green with all gates passing, then
+preserve it at the repository's selected commit cadence. For multi-target or
+cross-harness behavior, use a scenario outline / parametrized examples so parity
+is verified per slice.
 
 ## f. Decisions + guardrail docs
 
@@ -158,9 +163,10 @@ Nothing canonical should live under a single harness's directory.
 
 ## g. CI/CD themes
 
-Mirror the local gate in CI on whatever runner the project uses (detect it; do
-not hard-code a provider). Express the workflow as a provider-agnostic dependency
-graph, then translate it into the detected platform's syntax:
+Preserve local/CI gate parity on whatever runner the project uses: the same tool
+versions, configuration, and logical checks may be staged differently in CI.
+Express the workflow as a provider-agnostic dependency graph, then translate it
+into the detected platform's syntax:
 
 1. **Setup / fast stage:** restore the pinned environment, then run independent
    cheap deterministic jobs such as format, lint-as-errors, type/compile checks,

@@ -25,10 +25,11 @@ post_filter = "gpt-5.6-luna"
 verifier = "gpt-5.6-sol"
 ```
 
-`pre_filter` owns the all-dimension broad risk scout. `lens_review` is Terra for
-ordinary risk-selected substantive lenses, while the coordinator routes an
-assigned architecture, security, or human-safety lens through the strong Sol
-role. `post_filter` labels the normally deterministic
+`pre_filter` owns the all-dimension broad risk scout. For Codex, `lens_review`
+is Terra for ordinary risk-selected substantive lenses. The coordinator routes
+an assigned architecture, security, or human-safety lens through the resolved
+strong role: `gpt-5.6-sol` in Codex and `opus` in Claude. `post_filter` labels
+the normally deterministic
 `final_review.filter_findings` path; deterministic relevance and path filtering
 normally make no model call. `verifier` owns blocking, disputed, or materially
 uncertain batched verification. These roles are part of the review contract,
@@ -77,15 +78,29 @@ generation, and source diff hash). Generation one is the maximum: a
 generation-one child cannot split recursively, even after its diff changes.
 
 For unlanded work, the risk scout must set `split_required: true` when the ticket
-has grown into a new subsystem or an unusually broad diff. It must name the
-corresponding `scope_growth_triggers`, give a nonblank split rationale, and
-propose 2-16 `split_candidates`.
+meets either predicate below:
+
+- `new-subsystem`: scope added beyond the original request or acceptance
+  criteria crosses a runtime, ownership, or delivery boundary and can ship with
+  its own acceptance criteria plus build, test, and shipping mechanisms.
+- `unusually-broad-diff`: the work contains at least two internally cohesive,
+  low-coupling increments that can be accepted and shipped independently.
+  File count, path count, generated churn, or diff size alone never satisfies
+  this predicate.
+
+If the scout cannot construct valid independently shippable candidates, it must
+not assert either trigger merely because review is large; use risk-selected
+review batching instead. When a predicate is met, name the corresponding
+`scope_growth_triggers`, give a nonblank split rationale, and propose 2-16
+`split_candidates`.
 Every candidate needs a stable ID, title, normalized scope paths, independent
 acceptance criteria, an independently shippable reason, and structured
 `delivery_boundaries` proving distinct build, test, and shipping mechanisms.
 Paths, path aliases, or synthetic path-filtered diffs are not delivery-boundary
 evidence. Candidate ownership cannot fully overlap, and their combined paths
-must cover the changed-file inventory.
+must cover the changed-file inventory. A candidate is cohesive when its paths
+serve one acceptance contract; candidates are low-coupling when one can build,
+test, and ship without the other's unfinished behavior.
 
 The coordinator persists a contract-bound `scope_split_hold`. The hold means
 exactly: it returns no assignments, the review remains incomplete, and no later
@@ -273,6 +288,16 @@ Every finding must state its relevance to at least one of:
 - a real cross-cutting safety, data-loss, security, compatibility, or release
   risk introduced or exposed by the current change.
 
+Every actionable finding must also state whether it is `caused`, `worsened`,
+`pre-existing`, or `incidental`; cite the changed path/symbol or matched review
+context; and name the failure mechanism, required precondition, affected
+behavior or asset, intended deployment, and impact. Security findings must name
+the in-model actor or untrusted input, crossed trust boundary, affected asset,
+and unauthorized outcome. Human-safety findings must name the initiating
+failure, hazard, exposure path, and plausible consequence. A generic hardening
+preference or an actor outside the repository's threat model is not a failure
+path.
+
 A user-request, acceptance-criteria, or explicit-concern finding may cite an
 unmodified path when it includes `matched_context` copied exactly from the
 supplied review context. Other unmodified-file or nearby-context findings need a
@@ -300,9 +325,10 @@ confirm the completion condition above.
 Disposition is deterministic and separate from acceptance criteria:
 
 - A caused or worsened `CRITICAL`/`MAJOR` finding blocks final review only when
-  it identifies a concrete, plausible security failure (unauthorized access to
-  the system or its data) or human/physical-safety failure in the intended
-  deployment, with material impact and an in-scope remediation path.
+  it satisfies the security or human-safety evidence contract above, has
+  `security_impact` or `safety_impact` of `major` or `critical`, and names an
+  in-scope changed remediation path. The word `material` is not an additional
+  free-form threshold.
 - Incidental or pre-existing `CRITICAL`/`MAJOR` findings, and caused findings of
   those severities outside security and human safety, become backlog tickets.
 - Every `MINOR` finding becomes appropriately prioritized backlog work.

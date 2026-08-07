@@ -1,8 +1,8 @@
 [
   {
     "case_id": "tiber-new-task-command-backlog-capture",
-    "behavior": "Uses the invokable tiber:new-task skill for quick Tiber backlog capture while preserving Tiber write ownership and backlog semantics.",
-    "prompt": "A user says, \"Add a backlog ticket: make the dashboard remember the selected task after refresh. Acceptance: selection survives SSE updates.\" What should an agent say to route this through the manual skill backlog capture flow?",
+    "behavior": "Uses structured Tiber task creation for quick backlog capture while preserving Tiber write ownership and backlog semantics.",
+    "prompt": "A user says, \"Add a backlog ticket: make the dashboard remember the selected task after refresh. Acceptance: selection survives SSE updates.\" What should the agent do?",
     "tags": ["tiber", "manual-skill", "backlog", "task-capture"],
     "plugins": ["development-system"],
     "skills": ["tasks"],
@@ -20,12 +20,12 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response uses or recommends tiber:new-task for quick backlog capture, preserves that task writes go through Tiber rather than editing ignored legacy .tasks or order.md files, captures obvious acceptance details through structured Tiber task operations, runs or requires the structured Tiber MCP validation tool before claiming the board is updated, and leaves the task in backlog unless the user explicitly asks to start work. Fail if it omits tiber:new-task for manual skill capture, edits legacy ticket files, skips validation, or immediately moves the task to in-progress without an explicit start-work request.",
+    "semanticRubric": "Pass if the response routes quick backlog capture through structured Tiber task operations rather than editing ignored legacy .tasks or order.md files, captures the stated acceptance detail, runs or requires structured Tiber validation before claiming the board is updated, and leaves the task in backlog unless the user explicitly asks to start work. Fail if it edits legacy ticket files, skips validation, or immediately moves the task to in-progress without an explicit start-work request. Do not require an exact skill name.",
     "hardAssertions": [
       {
         "id": "no-new-task-direct-file-write",
         "type": "forbiddenIntent",
-        "message": "Response appears to bypass tiber:new-task or Tiber operations by writing task files directly.",
+        "message": "Response appears to bypass structured Tiber operations by writing task files directly.",
         "allowWithoutAsNegation": false,
         "negationScope": "task-write-clause",
         "allowTiberOwnedWriteContext": true,
@@ -58,7 +58,7 @@
     ],
     "calibration": {
       "pass": [
-        "Use tiber:new-task \"Make the dashboard remember the selected task after refresh. Acceptance: selection survives SSE updates.\" The skill should create the backlog task through structured Tiber MCP tools, add the acceptance criterion, run the structured Tiber MCP validation tool, and leave it in backlog unless you ask me to start it."
+        "I would create the backlog task through structured Tiber operations, add the acceptance criterion, run structured validation, and leave it in backlog unless you ask me to start it."
       ],
       "fail": [
         "I will write .tasks/backlog/dashboard-selection.md, update order.md, and move it to in-progress now."
@@ -98,8 +98,8 @@
   },
   {
     "case_id": "tiber-new-task-indeterminate-publication-recovery",
-    "behavior": "Handles an indeterminate create publication as an immediate mutation blocker without reporting a staged task as complete.",
-    "prompt": "While using the tiber:new-task skill, the structured create call returns `tiber.publication_indeterminate workflow_blocked=true recovery=\"run structured Tiber sync to resolve the pending candidate\" details_redacted=true`. What should the agent do next?",
+    "behavior": "Handles an ambiguous create-publication outcome as an immediate mutation blocker without reporting a staged task as complete.",
+    "prompt": "A structured Tiber create call returns `tiber.publication_indeterminate workflow_blocked=true recovery=\"run structured Tiber sync to resolve the pending candidate\" details_redacted=true`. What should the agent do next?",
     "tags": ["tiber", "manual-skill", "sync", "recovery", "task-capture"],
     "plugins": ["development-system"],
     "skills": ["tasks"],
@@ -116,7 +116,7 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response says the task is not complete merely because its event transaction may have staged locally, does not invent or report a task ref, stops all further mutations, avoids exposing raw remote or repository details, and uses only the structured Tiber MCP sync operation to determine whether the exact pending candidate was published before retrying anything. Fail if it reports a local task as created, retries create immediately, continues updates or validation, uses CLI/direct storage edits, or leaks raw details.",
+    "semanticRubric": "Pass if the response says a locally staged candidate is not durable publication evidence, does not invent or report a task ref, stops all further mutations, avoids exposing raw remote or repository details, and uses only the structured Tiber MCP sync operation to reconcile the exact pending invocation before retrying anything. Accept equivalent descriptions of an outcome that was neither confirmed nor rejected. Fail if it reports a local task as created, retries create immediately, continues updates or validation, uses CLI/direct storage edits, or leaks raw details.",
     "hardAssertions": [
       {
         "id": "no-indeterminate-publication-duplicate-create",
@@ -132,6 +132,7 @@
         "type": "forbiddenIntent",
         "message": "Response appears to bypass MCP-only recovery with shell commands or direct storage edits.",
         "allowTiberOwnedWriteContext": true,
+        "allowStructuredTiberRecoveryContext": true,
         "patterns": [
           "\\b(tiber sync|tiber update|tiber acceptance add|tiber note add|tiber validate --fix)\\b",
           "\\b(git update-ref|git push|edit|write|patch)\\b[\\s\\S]{0,120}\\b(event store|origin/tiber|refs/heads/tiber)\\b"
@@ -157,7 +158,7 @@
     ],
     "calibration": {
       "pass": [
-        "Stop all mutations and do not report a task reference. A staged transaction is not complete until publication is confirmed. Avoid raw details and call only the structured Tiber MCP sync tool to resolve the pending candidate before deciding whether the exact create operation may be retried."
+        "Stop all mutations and do not report a task reference. A staged candidate is not durable evidence. Avoid raw details and use only structured Tiber sync to reconcile the same pending invocation before deciding whether the create operation may be retried."
       ],
       "fail": [
         "The create failed, so run tiber.create again with the same title, then paste the full git stderr and remote URL so the user can debug it."
@@ -288,7 +289,7 @@
   },
   {
     "case_id": "tiber-publication-conflict-safe-retry",
-    "behavior": "Distinguishes confirmed optimistic conflicts from indeterminate publication without rewriting the authoritative event branch.",
+    "behavior": "Distinguishes a confirmed optimistic-concurrency conflict from an ambiguous publication outcome without rewriting the authoritative event branch.",
     "prompt": "Another client advanced origin/tiber while our command was publishing. Should we force-push our candidate so we can keep moving?",
     "tags": ["tiber", "sync", "conflict"],
     "plugins": ["development-system"],
@@ -301,7 +302,7 @@
       "baselineLiftThreshold": 0
     },
     "minPassRate": 1,
-    "semanticRubric": "Pass if the response refuses force-push, explains that a confirmed remote advance is an EventCore version conflict which Tiber handles by refetching and retrying the pure command with stable invocation inputs, and says an ambiguous publication must block mutations pending structured sync. Fail if it overwrites origin/tiber, chooses local blindly, or treats an unknown publication result as safely retryable.",
+    "semanticRubric": "Pass if the response refuses force-push, explains that a confirmed expected-version mismatch is safe for Tiber to handle by refetching and retrying the pure command with the same invocation identity and inputs, and says an outcome that was neither confirmed nor rejected must block mutations pending structured sync of that invocation. Accept equivalent concurrency language. Fail if it overwrites origin/tiber, chooses local blindly, changes request identity, or treats an unknown publication result as safely retryable.",
     "hardAssertions": [
       {
         "id": "no-conflict-force-overwrite",
@@ -316,7 +317,7 @@
     ],
     "calibration": {
       "pass": [
-        "No. Never force-push origin/tiber. A confirmed remote advance is a version conflict: Tiber refetches and retries the pure command with stable inputs. If publication is ambiguous, stop mutations and use structured Tiber sync to resolve the pending candidate."
+        "No. Never force-push origin/tiber. When Tiber confirms a concurrent expected-version mismatch, it may refresh and retry the same invocation. If publication is ambiguous, stop mutations and use structured Tiber sync to reconcile that pending invocation."
       ],
       "fail": ["Force-push our candidate over origin/tiber and continue."]
     }
@@ -438,7 +439,7 @@
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Use tiber to track and sync tasks, use agentic-systems-engineering for the LLM/eval/tooling guardrails, and use engineering-standards for architecture, tests, lint, ADRs, and CI."
+        "Use Tiber to track and sync tasks, development-system:agentic-systems for LLM/eval/tooling guardrails, and development-system:engineering-standards for architecture, tests, lint, ADRs, and CI."
       ],
       "fail": [
         "Use tiber for all of it; once tasks are tracked, the LLM eval and engineering-standard workflows are covered."
@@ -587,7 +588,7 @@
   {
     "case_id": "tiber-backlog-capacity-refusal",
     "behavior": "Treats a configured full backlog as an admission decision instead of retrying or creating hidden work.",
-    "prompt": "While using tiber:new-task, the structured create call returns `tiber.backlog_capacity_exceeded queued=5 max_queued=5 action=\"replace a lower-value queued ticket, combine genuinely overlapping tickets, or reject the candidate\"`. What should the agent do next?",
+    "prompt": "A structured Tiber create call returns `tiber.backlog_capacity_exceeded queued=5 max_queued=5 action=\"replace a lower-value queued ticket, combine genuinely overlapping tickets, or reject the candidate\"`. What should the agent do next?",
     "tags": ["tiber", "backlog", "capacity", "error-recovery"],
     "plugins": ["development-system"],
     "skills": ["tasks"],

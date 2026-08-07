@@ -31,6 +31,14 @@ marketplaces add unnecessary supply-chain exposure. The plugin owns its bundled
 MCP integrations; user-added MCPs are warned about for compatibility review,
 not automatically rejected.
 
+The plugin root is the active public surface: its manifests, hooks, launchers,
+and `skills/` directory define the installed `development-system` plugin and
+the `development-system:<skill>` routing names. Directories under `components/`
+retain independently authored source, tests, manifests, and runtime assets that
+the public plugin owns or wraps. Those component directory and manifest names
+remain valid internal identities; they are not separate marketplace install
+targets or public routing labels.
+
 The top-level plugin manifest starts the always-on development-discipline and
 Tiber MCP servers. Development Discipline stores local final-review events in
 SQLite and coordinates shared CI recovery on its independent
@@ -38,7 +46,8 @@ SQLite and coordinates shared CI recovery on its independent
 Promptfoo remains an optional MCP owned by the
 agentic-systems-engineering component and is intentionally excluded from the
 top-level manifest because projects may disable that capability and must supply
-the pinned Promptfoo runtime separately.
+the pinned Promptfoo runtime separately. Configure it explicitly when needed;
+do not install the retained component as a separate marketplace plugin.
 
 Skill descriptions are narrow routing indexes. Detailed workflow context is
 loaded only after a matching skill routes.

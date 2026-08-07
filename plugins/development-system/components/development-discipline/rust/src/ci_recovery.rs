@@ -295,19 +295,7 @@ fn assign(root: &Path, arguments: &Value) -> Result<Value, String> {
     let epoch = number(arguments, "epoch")?;
     let assignee = named_participant(arguments, "to_host", "to_session")?;
     let scope = text(arguments, "scope")?;
-    let capabilities = text(arguments, "capabilities")?
-        .split(',')
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    if capabilities.is_empty()
-        || capabilities
-            .iter()
-            .any(|value| !matches!(value.as_str(), "inspect" | "reproduce" | "edit" | "test"))
-    {
-        return Err("development_workflow.ci_recovery_capability_invalid allowed=inspect,reproduce,edit,test".to_string());
-    }
+    let capabilities = capabilities(arguments)?;
     mutate(root, |current, now| {
         let mut state = required_state(current)?;
         ensure_owner(&state, &incident, epoch, &caller)?;
@@ -756,6 +744,36 @@ fn choice(arguments: &Value, key: &str, allowed: &[&str]) -> Result<String, Stri
         ))
     }
 }
+
+fn capabilities(arguments: &Value) -> Result<Vec<String>, String> {
+    let values = match arguments.get("capabilities") {
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| value.as_str().map(str::trim))
+            .collect::<Option<Vec<_>>>(),
+        Some(Value::String(value)) => Some(
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect(),
+        ),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        "development_workflow.ci_recovery_capability_invalid allowed=inspect,reproduce,edit,test"
+            .to_string()
+    })?;
+    let mut unique = std::collections::HashSet::with_capacity(values.len());
+    if values.is_empty()
+        || values.iter().any(|value| {
+            !matches!(*value, "inspect" | "reproduce" | "edit" | "test") || !unique.insert(*value)
+        })
+    {
+        return Err("development_workflow.ci_recovery_capability_invalid allowed=inspect,reproduce,edit,test".to_string());
+    }
+    Ok(values.into_iter().map(str::to_owned).collect())
+}
 fn participant() -> Result<Participant, String> {
     #[cfg(test)]
     if let Some(session) = TEST_SESSION.with(|slot| slot.borrow().clone()) {
@@ -939,7 +957,8 @@ fn git_stdin(root: &Path, args: &[&str], input: &[u8]) -> Result<String, String>
 #[cfg(test)]
 mod tests {
     use super::{
-        active_hold, call, load, publish, status, with_test_session, Participant, State, Trigger,
+        active_hold, call, capabilities, load, publish, status, with_test_session, Participant,
+        State, Trigger,
     };
     use serde_json::json;
     use std::{
@@ -1010,6 +1029,21 @@ mod tests {
             replacement: None,
             release_proof: None,
         }
+    }
+
+    #[test]
+    fn helper_capabilities_prefer_the_array_and_retain_the_legacy_string() {
+        assert_eq!(
+            capabilities(&json!({ "capabilities": ["inspect", "test"] }))
+                .expect("array capabilities"),
+            vec!["inspect", "test"]
+        );
+        assert_eq!(
+            capabilities(&json!({ "capabilities": "inspect, test" })).expect("legacy capabilities"),
+            vec!["inspect", "test"]
+        );
+        assert!(capabilities(&json!({ "capabilities": ["inspect", "inspect"] })).is_err());
+        assert!(capabilities(&json!({ "capabilities": ["deploy"] })).is_err());
     }
 
     #[test]

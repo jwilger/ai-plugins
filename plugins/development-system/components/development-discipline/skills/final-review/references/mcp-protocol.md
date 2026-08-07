@@ -163,8 +163,18 @@ the same contract.
 The broad risk scout evaluates whether the current ticket has grown into either
 of these scope triggers:
 
-- `new-subsystem`
-- `unusually-broad-diff`
+- `new-subsystem`: added scope outside the original request or acceptance
+  criteria crosses a runtime, ownership, or delivery boundary and has its own
+  acceptance contract plus independent build, test, and shipping mechanisms;
+- `unusually-broad-diff`: the work contains at least two internally cohesive,
+  low-coupling increments that can be accepted and shipped independently.
+  File/path count, generated churn, and diff size alone are not evidence.
+
+A candidate is cohesive when its paths serve one acceptance contract.
+Candidates are low-coupling when either can build, test, and ship without the
+other's unfinished behavior. If valid candidates cannot be constructed, the
+scout uses review batching and must not assert a scope-growth trigger merely
+because the review surface is large.
 
 The initial risk assessment and plan declare `review_lifecycle` as `landed` or
 `unlanded`; the coordinator propagates it through delta reassessment. A child
@@ -243,8 +253,10 @@ for that session.
 ## Finding Disposition And Escalation
 
 Risk-planned review blocks only caused or worsened `CRITICAL`/`MAJOR` findings
-with a concrete plausible major/critical security or human-safety impact in the
-intended deployment and an in-scope changed remediation path. Incidental or
+whose evidence names the in-model actor/input or initiating failure, trust or
+hazard boundary, affected asset/person, causal mechanism, intended deployment,
+and `major` or `critical` security/safety impact, plus an in-scope changed
+remediation path. Incidental or
 pre-existing findings at those severities, caused non-security/non-safety
 findings, and every `MINOR` finding require a matching
 `unrelated_follow_ups` backlog reference before advance. `TRIVIAL` findings are
@@ -343,7 +355,8 @@ both conditional batched verification and the architecture, security, and
 human-safety lens assignments that require the strong route. Projects that
 override `verifier` therefore change all of those strong responsibilities
 together; the current schema does not expose an independently configurable
-strong-lens model. This keeps one source of truth for the Sol route and avoids
+strong-lens model. This keeps one source of truth for the harness-resolved
+strong route and avoids
 an apparently independent setting that could silently drift.
 
 - `pre_filter` owns the mandatory all-dimension broad risk scout and any

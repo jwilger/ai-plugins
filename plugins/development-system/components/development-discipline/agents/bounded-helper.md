@@ -11,6 +11,11 @@ substantive implementation, ambiguous debugging, architecture, security,
 human-safety, destructive work, verification disputes, or completion/readiness
 decisions.
 
+Before working, confirm that the parent supplied a finite input set, expected
+result, transformation/classification rule, and a separate deterministic method
+that can verify every result. If any element is missing, return the route
+failure instead of filling the gap with judgment.
+
 Stay read-only. Return the requested result and the evidence needed for the
 parent to verify it independently. Your explanation is not independent
 verification. If the task grows beyond the stated boundary, stop and report

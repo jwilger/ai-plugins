@@ -34,10 +34,10 @@ action, push, or rerun authority.
 
 The owner heartbeats about every 15 minutes during the 60-minute lease, checks
 ownership/epoch before owner actions, and transfers explicitly for a handoff.
-A joined participant may take over only after expiry; transfer or takeover
-creates a new epoch, invalidating the former owner's authority. Cross-host
-clocks must be reasonably synchronized; do not take over on a marginal
-timestamp boundary.
+A joined participant may take over only after authoritative recovery status
+reports that the server-timed lease expired; do not decide expiry from a local
+wall clock. Transfer or takeover creates a new epoch, invalidating the former
+owner's authority.
 
 Development Discipline synchronizes this state on `origin/development-workflow`,
 separate from any task board. It fetches and compares, publishes lease-fenced
@@ -49,11 +49,30 @@ preserve observations only; they do not grant ownership.
 
 There are exactly two recovery actions:
 
+Classify the causal mechanism before choosing one:
+
+- `caused`: the failed revision introduced or worsened the mechanism. Evidence
+  names the changed path or contract and the failure path to the failed step.
+- `unrelated`: the mechanism is outside the active diff's dependency path.
+  Evidence must locate it independently, such as the same failure on the pinned
+  baseline or an authoritative external component failure; a different file or
+  job name is not sufficient.
+- `transient`: source revision and relevant inputs are unchanged, while an
+  identified non-repository condition such as runner loss or service outage
+  explains the failure. "Flaky" without a mechanism is not a diagnosis.
+
+A `tested causal repair` uses the same focused reproducer or check failing on
+the failed SHA and passing on the repair candidate, followed by the owning
+component gate. When exact reproduction is impossible, record why and provide a
+discriminating trace or authoritative external record that connects the changed
+mechanism to both failure and repair; a broadly green suite alone is not causal
+evidence.
+
 1. If the diagnosed failure requires a repository change, push only its tested
    causal repair. Its commit body must explain the diagnosed cause or risk. If
    the failure is unrelated to the active ticket, pause that ticket and make
    the separate repair the explicit recovery scope.
-2. If evidence proves the failure unrelated or transient, rerun the exact
+2. If evidence satisfies the `unrelated` or `transient` predicate above, rerun the exact
    unchanged SHA with no intervening push and keep any separate defect outside
    the active ticket. If that rerun fails, the hold remains and the failed
    rerun becomes the new failure record. Diagnose it; if it needs a repository
@@ -108,10 +127,11 @@ success releases it.
    the cause from the workflow or job title.
 3. Record the causal diagnosis, classification, and supporting evidence in the
    active incident and recovery record.
-4. If the diagnosed failure requires a repository change, write the focused
-   test or check, repair only that cause, and make the next pushed commit the
-   repair. Only the owner pushes it; its rationale-bearing body must name the
-   diagnosed failure or risk.
+4. If the diagnosed failure requires a repository change, establish the focused
+   failing reproducer or documented causal-evidence substitute, repair only that
+   cause, prove the repair candidate as defined above, and make the next pushed
+   commit the repair. Only the owner pushes it; its rationale-bearing body must
+   name the diagnosed failure or risk.
    For a defect unrelated to the active ticket, pause that ticket and track the
    causal repair as the explicit recovery scope.
 5. If evidence proves the failure unrelated or transient, record that

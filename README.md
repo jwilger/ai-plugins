@@ -25,7 +25,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses          | Description                                                         | Version |
 | ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 3.1.3   |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 3.2.0   |
 
 ## Using the marketplace (Claude Code)
 
@@ -108,9 +108,10 @@ therefore narrows both the cases and their installed plugin set. Full-marketplac
 mode still installs the complete harness-specific catalog, while no-plugin mode
 installs none. The generated config records each provider's exact installed
 composition separately from the plugins targeted by an individual case. An
-unfiltered targeted run may equal Claude's full catalog today, but it excludes
-Codex-only plugins with no selected behavior case and remains a distinct measured
-composition. Promptfoo is pinned at `0.121.18`;
+unfiltered targeted run equals the full catalog in both harnesses today because
+the marketplace has one public plugin and the selected cases target it. The two
+modes remain distinct controls for filtered runs and future catalog changes.
+Promptfoo is pinned at `0.121.18`;
 the Promptfoo, Codex SDK, and Claude Agent SDK packages are pinned in
 `package.json` and `package-lock.json`. The runner disables prompt response
 caching and hosted sharing so a behavior run is a fresh local record.
@@ -144,11 +145,13 @@ The canary suite is separate from behavior evals. Canaries may explicitly ask
 the harness to prove plugin and skill loading. Behavior prompts stay natural and
 do not tell the model to use this repository's plugins.
 
-Repeated samples are a deliberate measurement choice, not a blanket rule. Use
-more distinct cases when estimating population quality; use repeated samples
-when measuring per-input reliability, pass@k capability, pass^k reliability, or
-small stochastic differences. Trusted release evidence for this repository
-defaults to `EVAL_SAMPLES=3`; PR dry-runs do not run live samples.
+Repeated samples are a deliberate measurement choice, not a blanket rule. The
+default one-sample matrix treats every case as a binary pass/fail observation
+and estimates population quality across distinct cases. Set `EVAL_SAMPLES`
+above one only when measuring per-input reliability, pass@k capability, pass^k
+reliability, judge variance, or a small stochastic difference; fractional
+per-case thresholds apply only to those repeated runs. PR dry-runs do not run
+live samples.
 
 Pull-request CI validates the eval configuration with `--dry-run` but does not
 claim behavior evidence. Provider-backed behavior evidence comes from local,
@@ -180,24 +183,25 @@ without sharing. Interrupted, terminated, and timed-out runs all retain any
 partial artifacts under
 `evals/out/timeout-artifacts/` for debugging.
 
-Codex users who install `agentic-systems-engineering` also get an optional
-Promptfoo MCP server (`promptfoo mcp --transport stdio`). Consuming projects
-must provide `promptfoo@0.121.18` on `PATH`; when the project uses `flake.nix`,
-prefer `pkgs.promptfoo` when nixpkgs provides the required version so updates
-flow through the flake lockfile, otherwise use the project's local
-package-manager sandbox. Use it for agent-assisted config validation, focused
-eval runs, result inspection, and fixture development. It supplements the
-canonical runner; it does not replace the repo-owned artifact path above.
-Promptfoo's separate `mcp` provider is for testing MCP servers as systems under
-test and should be added only when a plugin or project exposes an MCP server to
-evaluate.
+The repository retains an optional Promptfoo MCP definition under
+`plugins/development-system/components/agentic-systems-engineering/`. That path
+is an internal component identity, not a public marketplace plugin or skill
+name; users install only `development-system`. A project that explicitly wires
+the optional server must provide `promptfoo@0.121.18` on `PATH`. When the
+project uses `flake.nix`, prefer `pkgs.promptfoo` when nixpkgs provides the
+required version so updates flow through the flake lockfile; otherwise use the
+project's local package-manager sandbox. The server supports agent-assisted
+config validation, focused eval runs, result inspection, and fixture
+development. It supplements the canonical runner; it does not replace the
+repo-owned artifact path above. Promptfoo's separate `mcp` provider is for
+testing MCP servers as systems under test and should be added only when a plugin
+or project exposes an MCP server to evaluate.
 
-If Codex reports `No such file or directory` for the `promptfoo` or `tiber` MCP
-client at startup, upgrade or reinstall the marketplace plugins so Codex loads
-`agentic-systems-engineering` `0.1.4` or newer and `tiber` `0.5.0` or newer.
-For Claude Code, reinstall or upgrade `tiber` to `0.5.0` or newer if its bundled
-MCP server cannot resolve. Those manifests bootstrap through an absolute
-`/bin/sh` launcher before resolving the bundled plugin command.
+If Codex or Claude Code reports `No such file or directory` for a bundled MCP
+client, upgrade or reinstall `development-system` so the active root manifest
+and launchers are refreshed. For an explicitly configured Promptfoo server,
+also verify that the pinned runtime above is available on `PATH`. The bundled
+launchers bootstrap through `/bin/sh` before resolving their commands.
 
 ## Reporting eval cases
 

@@ -84,10 +84,12 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   retryable sync failure. Do not create overflow, icebox, shadow, or hidden
   work. Require the user to replace a lower-value queued task, combine
   genuinely overlapping work, or reject the candidate.
-- Confirmed concurrent publication is an optimistic version conflict that Tiber
-  refreshes and retries with stable invocation inputs. If publication is
-  indeterminate, stop all mutations and use `tiber sync` to resolve the pending
-  candidate. Never force-push or rewrite `tiber`.
+- A confirmed expected stream-version mismatch is an optimistic-concurrency
+  conflict: Tiber refreshes the authoritative branch and retries with the same
+  invocation identity and inputs. An ambiguous publication outcome means durable
+  publication was not confirmed or rejected; stop all mutations and use
+  `tiber sync` to reconcile that exact pending invocation. Never force-push or
+  rewrite `tiber`.
 - Treat `close-from-trailers` as successful only when it synchronizes the
   authoritative board, resolves every `Closes:` line from the current `HEAD`
   commit, prints `closed <task-id>` for every requested task, and leaves every

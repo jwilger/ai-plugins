@@ -1,5 +1,24 @@
 # Workflow rules
 
+## Change-impact preflight
+
+Before editing, classify the change and decide each surface explicitly:
+Behavior, Tests, Documentation, Configuration, Packaging, Release artifacts,
+Migrations, Operational startup, Evaluations, and User workflows. For every
+surface, record `applicable` or `not-applicable`, the impact relation
+(`directly-modified`, `consumes`, `generates-from`, `validates`, `ships`, or
+`none`), and repository evidence. File proximity is not an impact relation.
+
+## CI recovery record
+
+For a terminal pushed-CI failure, retain four records:
+
+- Failure: revision, run ID or URL, failed job and step, and relevant log evidence.
+- Diagnosis: causal explanation plus `caused`, `unrelated`, or `transient`, with evidence.
+- Next action: one tested causal repair, or an authorized unchanged-revision rerun; never a no-op or intervening diagnostic commit.
+- Release proof: replacement run ID, exact revision, and terminal success. Queued,
+  pending, or running never releases the hold.
+
 - Preserve user changes and avoid destructive Git operations.
 - New or changed first-party production behavior starts with a failing test
   unless a clear existing failure already proves the change. Documentation and
@@ -23,9 +42,15 @@
   has grown complex enough to need extensive locking, crash-recovery, or similar
   tests, recommend extracting it into a maintained project or shipped subsystem
   and preserve its valuable coverage until the extraction carries it forward.
-- Debug from observed evidence and repair the causal defect.
+- Debug from a minimal reproducer, one falsifiable causal hypothesis, its
+  predicted observation, and a discriminating experiment. Repair the earliest
+  controllable cause supported by that evidence.
 - Final review is required before a readiness claim.
-- Verification output must be fresh and relevant to the changed surfaces.
+- Verification evidence is fresh only when collected after the last in-scope
+  mutation against the exact revision or worktree snapshot and current
+  configuration. It is scope-complete only when it includes repository-required
+  gates plus impact-selected checks. Map each readiness claim to its command or
+  authoritative source, revision, environment identity, timestamp, and result.
 - Every authored commit has a concise Conventional Commit subject and a
   non-empty body that explains why the change exists: its motivation, decision
   context, tradeoff, or the failure it prevents. Reject subject-only messages
