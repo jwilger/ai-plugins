@@ -10,9 +10,15 @@ default: ci
 ci: validate-marketplace github-actions tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
 
 # The developer gate runs before every commit. It deliberately excludes
-# expensive acceptance, release, browser, mutation, and shell suites; CI owns
-# those after the push.
-pre-commit: validate-marketplace github-actions tiber-rust development-discipline-rust
+# acceptance, release, browser, mutation, and shell suites; CI owns those after
+# the push. It still runs formatting, linting, and every Rust unit-test target.
+pre-commit: validate-marketplace github-actions
+    cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
+    cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
+    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --workspace --lib
+    cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
+    cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
+    cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --bin development-discipline-mcp
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
