@@ -709,7 +709,6 @@ NODE
 
   exec 8>>"$lock_path"
   flock --nonblock 8
-  printf 'held by focused-run contention regression\n' >&8
 
   run env \
     PATH="$fake_bin:$PATH" \

@@ -50,10 +50,8 @@ teardown() {
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
   [[ "$output" == *"EVAL_PROVIDER_FILTER"* ]]
   [[ "$output" == *"PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-2; default: 1)"* ]]
-  [[ "$output" == *"EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;"* ]]
-  [[ "$output" == *"EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)"* ]]
-  [[ "$output" == *"EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)"* ]]
-  [[ "$output" == *"set to 0 to disable)"* ]]
+  [[ "$output" == *"EVAL_TIMEOUT                 Optional explicit whole-run deadline."* ]]
+  [[ "$output" == *"runner has no wall-clock deadline"* ]]
   [[ "$output" == *"EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)"* ]]
   [[ "$output" == *"EVAL_INTERRUPT_GRACE         (default: 2s between INT, TERM, and KILL)"* ]]
   [[ "$output" == *"EVAL_OUT_DIR                 (default: evals/out; isolates generated config and artifacts)"* ]]
@@ -65,7 +63,7 @@ teardown() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"scripts/evals/ensure-node-deps.sh"* ]]
-  [[ "$output" == *"timeout --kill-after 30s 90m"* ]]
+  [[ "$output" != *"timeout --kill-after"* ]]
   [[ "$output" == *"node_modules/.bin/promptfoo"* ]]
   [[ "$output" != *"npx --yes"* ]]
   [[ "$output" == *"--max-concurrency 1"* ]]
@@ -75,6 +73,18 @@ teardown() {
   [[ "$output" == *"evals/out/results.json"* ]]
   [[ "$output" == *"evals/out/report.html"* ]]
   [[ "$output" == *"evals/out/results.junit.xml"* ]]
+}
+
+@test "eval runner has no implicit wall-clock deadline and honors an explicit timeout" {
+  run "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"timeout --kill-after"* ]]
+
+  run env EVAL_TIMEOUT=17m "$RUNNER" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"timeout --kill-after 30s 17m"* ]]
 }
 
 @test "eval runner defaults generated Codex homes to dedicated eval runtime state" {
@@ -478,28 +488,28 @@ SH
   run env EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"timeout --kill-after 30s 20m"* ]]
+  [[ "$output" != *"timeout --kill-after"* ]]
   [[ "$output" == *"--filter-pattern tiber"* ]]
 }
 
-@test "eval runner dry-run can disable the promptfoo timeout" {
+@test "eval runner dry-run treats zero timeout as no timeout" {
   run env EVAL_TIMEOUT=0 "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"timeout --kill-after 30s 0"* ]]
+  [[ "$output" != *"timeout --kill-after"* ]]
   [[ "$output" == *"node_modules/.bin/promptfoo eval"* ]]
 }
 
-@test "eval runner dry-run supports shorter local default timeout overrides" {
+@test "eval runner does not infer a timeout from retired default timeout variables" {
   run env EVAL_TIMEOUT_FULL_DEFAULT=30m EVAL_TIMEOUT_FOCUSED_DEFAULT=5m "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"timeout --kill-after 30s 30m"* ]]
+  [[ "$output" != *"timeout --kill-after"* ]]
 
   run env EVAL_TIMEOUT_FULL_DEFAULT=30m EVAL_TIMEOUT_FOCUSED_DEFAULT=5m EVAL_CASE_FILTER=tiber "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"timeout --kill-after 30s 5m"* ]]
+  [[ "$output" != *"timeout --kill-after"* ]]
 }
 
 @test "generated eval config can filter providers" {
@@ -871,6 +881,74 @@ SH
   [[ "$output" == *"promptfoo eval timed out after EVAL_TIMEOUT=1s"* ]]
   [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "timed-out" ]
   [ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" = "promptfoo eval timed out after EVAL_TIMEOUT=1s" ]
+  rm -rf "$fixture_root"
+}
+
+@test "eval runner publishes running status while Promptfoo is active" {
+  SIGNAL_FIXTURE_ROOT="$(mktemp -d)"
+  fixture_root="$SIGNAL_FIXTURE_ROOT"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'started\n' >"$PROCESS_FIXTURE_DIR/promptfoo.started"
+while true; do sleep 1; done
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  setsid env --default-signal=INT \
+    PROCESS_FIXTURE_DIR="$fixture_root" \
+    PROMPTFOO_BIN="$fixture_root/bin/promptfoo" \
+    EVAL_TIMEOUT=0 \
+    "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml" \
+    >"$fixture_root/runner.log" 2>&1 &
+  SIGNAL_RUNNER_PID="$!"
+
+  for _ in $(seq 1 100); do
+    [ -f "$fixture_root/evals/out/status.json" ] && break
+    sleep 0.05
+  done
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "running" ]
+  [[ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" == *"promptfoo eval active pid="* ]]
+
+  kill -INT -- "-$SIGNAL_RUNNER_PID"
+  wait "$SIGNAL_RUNNER_PID" || runner_status="$?"
+  SIGNAL_RUNNER_PID=""
+  [ "${runner_status:-0}" -eq 130 ]
+}
+
+@test "eval runner replaces running status with failure when Promptfoo exits without results" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p "$fixture_root/scripts/evals" "$fixture_root/bin"
+  copy_eval_runner "$fixture_root/scripts/evals/run.sh"
+  cp "$ROOT/scripts/evals/write-status.mjs" "$fixture_root/scripts/evals/write-status.mjs"
+  chmod +x "$fixture_root/scripts/evals/run.sh"
+  cat >"$fixture_root/scripts/evals/ensure-node-deps.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+  chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
+  cat >"$fixture_root/bin/promptfoo" <<'SH'
+#!/usr/bin/env bash
+exit 23
+SH
+  chmod +x "$fixture_root/bin/promptfoo"
+  touch "$fixture_root/promptfooconfig.yaml"
+
+  run env PROMPTFOO_BIN="$fixture_root/bin/promptfoo" "$fixture_root/scripts/evals/run.sh" "$fixture_root/promptfooconfig.yaml"
+
+  [ "$status" -eq 23 ]
+  [ "$(jq -r '.state' "$fixture_root/evals/out/status.json")" = "failed" ]
+  [[ "$(jq -r '.reason' "$fixture_root/evals/out/status.json")" == *"status 23"* ]]
   rm -rf "$fixture_root"
 }
 

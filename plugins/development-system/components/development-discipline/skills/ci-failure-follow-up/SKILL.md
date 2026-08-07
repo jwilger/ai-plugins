@@ -1,6 +1,6 @@
 ---
 name: ci-failure-follow-up
-description: Use when a pushed CI run fails or before later work or pushes; coordinate multiple agents through one Tiber CI-recovery owner/lease, reproduce the exact recovery record, permit only a causal repair or unchanged-SHA rerun, and require terminal success.
+description: Use when a pushed CI run fails or before later work or pushes; coordinate multiple agents through the workflow-owned CI-recovery owner/lease, reproduce the exact recovery record, permit only a causal repair or unchanged-SHA rerun, and require terminal success.
 ---
 
 # CI Failure Follow-up
@@ -10,9 +10,9 @@ remediation, ticket work, and all pushes except the one recovery action
 selected below. Keep the hold until the failure is diagnosed and its
 replacement run reaches terminal success.
 
-Multi-agent ownership is coordinated only through the epoch-fenced incident in
-the `tiber:ci-recovery` stream on the authoritative `origin/tiber` branch,
-never through local notes. If that remote state is unavailable, fail closed
+Multi-agent ownership is coordinated only through the epoch-fenced incident on
+the authoritative `origin/development-workflow` branch, never through local
+notes or a task board. If that remote state is unavailable, fail closed
 and take no recovery action.
 
 ## Claim the Repository-Wide Incident
@@ -20,14 +20,12 @@ and take no recovery action.
 Every agent that detects a terminal failed pushed-CI run claims it before
 diagnosis, a rerun, a push, or a release:
 
-```shell
-tiber ci-recovery claim --run-id <id> --run-url <url> --failed-sha <sha> \
-  --workflow <workflow> --ref <ref>
-```
+Call `workflow.ci_recovery.claim` on the Development Discipline MCP with
+`run_id`, `run_url`, `failed_sha`, `workflow`, and `git_ref`.
 
 The result identifies the single incident, current epoch, and role. Only the
 epoch-fenced owner diagnoses and selects the recovery action. Nonowners hold
-and make bounded `tiber ci-recovery wait` calls; they may help only through an
+and make bounded `workflow.ci_recovery.wait` calls; they may help only through an
 owner assignment limited to inspect, reproduce, edit, or test. Helpers report
 evidence and never push, rerun, or choose an action. Proof closure is not
 helper work, but any joined participant may independently record exact matching
@@ -41,10 +39,10 @@ creates a new epoch, invalidating the former owner's authority. Cross-host
 clocks must be reasonably synchronized; do not take over on a marginal
 timestamp boundary.
 
-Tiber synchronizes this state in `tiber:ci-recovery` on `origin/tiber`, the
-same authoritative event branch used by the task board. It fetches and
-compares, publishes normal fast-forward updates, and retries after concurrent
-updates. Never force-push the branch. If Tiber or `origin` is unavailable,
+Development Discipline synchronizes this state on `origin/development-workflow`,
+separate from any task board. It fetches and compares, publishes lease-fenced
+updates, and retries after concurrent updates. Never force-push the branch. If
+Development Discipline or `origin` is unavailable,
 fail closed: preserve the global hold and do not diagnose, push, rerun, choose
 an action, or release until shared coordination is restored. Local notes
 preserve observations only; they do not grant ownership.
@@ -69,7 +67,7 @@ In advice, status, or handoff output, reproduce and complete this exact record;
 do not collapse or omit a field:
 
 ```text
-Incident: <Tiber incident ID>; epoch=<current owner epoch>; role=<owner|waiting>;
+Incident: <workflow incident ID>; epoch=<current owner epoch>; role=<owner|waiting>;
   lease expiry=<timestamp>
 Failure record: <failed commit SHA>; <run ID or URL>; <exact failed job>;
   <failed step>; <bounded sanitized log summary or authoritative-log reference>
@@ -84,7 +82,7 @@ Release proof: <replacement run ID>; terminal status=<success>;
 
 Persist this record in the active ticket's shared notes or the repository's
 shared handoff state before ending a session. At session entry and before later
-work or pushes, inspect the pushed CI runs for the active ticket since its first
+work or pushes, inspect the pushed CI runs for the active change since its first
 pushed commit. Any failed run without a recorded terminal-success replacement
 recreates the hold, even when a newer run is green or running.
 
@@ -103,7 +101,7 @@ success releases it.
    the exact pushed commit and CI run. Inspect the claim result immediately. If
    it fails, stop: do not inspect logs, diagnose, edit, test, rerun, push, or do
    unrelated work. Only retry the exact structured claim, read CI-recovery
-   status, or run Tiber sync to restore shared coordination.
+   status to restore shared coordination.
 2. The owner inspects the exact failed job, failed step, and relevant logs. Store
    only a bounded, explicitly sanitized summary or authoritative-log reference;
    never persist raw logs, credentials, tokens, or other secrets. Do not infer
@@ -125,7 +123,7 @@ success releases it.
    tested causal-repair action. No unrelated commit is allowed.
 6. The owner records and polls the repair commit or evidence-backed rerun to
    terminal success. Queued or running is not repaired. Any joined participant
-   may record the matching terminal-success proof in Tiber; this is the only
+   may record the matching terminal-success proof through Development Discipline; this is the only
    hold release and does not grant recovery-action authority.
 
 The ordinary green-increment rule permits new work once CI is running or green

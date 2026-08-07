@@ -25,7 +25,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses          | Description                                                         | Version |
 | ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 3.0.1   |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 3.1.0   |
 
 ## Using the marketplace (Claude Code)
 
@@ -164,11 +164,11 @@ nix develop -c scripts/evals/run.sh --suite canary
 nix develop -c node scripts/evals/build-site.mjs
 ```
 
-Eval runs are time-bounded by default: 90 minutes for the full behavior suite
-and 20 minutes for focused, filtered, or canary runs. Override with
-`EVAL_TIMEOUT`, or adjust the default classes with `EVAL_TIMEOUT_FULL_DEFAULT`
-and `EVAL_TIMEOUT_FOCUSED_DEFAULT`. Timed-out or interrupted runs write
-`evals/out/status.json` so the dashboard can show why no fresh result completed.
+Eval runs have no implicit whole-run deadline: a large matrix must not lose
+nearly-complete work to an arbitrary wall-clock cutoff. Set `EVAL_TIMEOUT`
+only when the caller deliberately wants a bounded run. Timed-out or interrupted
+runs write `evals/out/status.json` so the dashboard can show why no fresh
+result completed.
 
 `just evals` uploads the latest eval result through `promptfoo share`. For a
 local-only report, run `scripts/evals/run.sh` and then

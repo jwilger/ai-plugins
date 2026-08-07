@@ -5,11 +5,12 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
-eventcore = "1.0.2"
-eventcore-sqlite = "1.0.2"
+eventcore = { version = "1.1.1", features = ["experimental-modeling"] }
+eventcore-sqlite = "1.1.1"
 fs2 = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+shlex = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 toml = "0.8"
 
@@ -18,5 +19,6 @@ name = "development-discipline-mcp"
 path = "src/main.rs"
 
 [dev-dependencies]
+eventcore = { version = "1.1.1", features = ["experimental-model-check"] }
 libc = "0.2.189"
 tempfile = "3"

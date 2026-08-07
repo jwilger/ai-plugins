@@ -235,58 +235,14 @@ state automatically, the read continues with the merged board. If the sync canno
 be resolved automatically, the read fails instead of returning stale or locally
 divergent task data.
 
-## Pushed-CI Recovery Coordination
+## CI Recovery Is Workflow-Owned
 
-Tiber coordinates a terminal pushed-CI failure as one repository-wide incident
-stream in the EventCore store on the remote `tiber` branch. Task and CI state
-share that single branch. Every agent that detects the failure claims or joins before diagnosing,
-pushing, rerunning, or releasing anything:
-
-```shell
-tiber ci-recovery claim --run-id <id> --run-url <url> --failed-sha <sha> \
-  --workflow <workflow> --ref <ref>
-```
-
-The result names the incident, current epoch, lease expiry, and whether the
-caller is the owner or a waiter. The current owner alone records the exact
-failed job, step, relevant logs, causal explanation, classification
-(`caused`, `unrelated`, or `transient`), selected recovery action, and each
-replacement run. It may choose only a tested causal repair or an unchanged-SHA
-rerun. A failed replacement updates this active incident; it never creates a
-parallel recovery incident.
-
-Nonowners wait in bounded calls (at most 60 seconds each) or carry out an
-explicit owner assignment limited to `inspect`, `reproduce`, `edit`, or `test`.
-Helpers report their evidence; they never push, rerun, choose the action, or
-take recovery action. Proof closure is not helper work, but any joined
-participant may independently record exact matching terminal-success proof;
-that objective closure does not grant diagnosis, action, push, or rerun
-authority.
-
-Ownership is epoch-fenced. The lease lasts 60 minutes; owners should heartbeat
-about every 15 minutes and check ownership before owner-only operations.
-Ownership transfers explicitly and increments the epoch. A joined participant
-may take over only after the lease expires. Only matching replacement-run proof
-with terminal `success` releases the hold—queued, running, canceled, and failed
-runs do not.
-
-The coordination client fetches and compares `origin/tiber`, then publishes
-normal fast-forward event-store updates. A concurrent update is refetched,
-compared, and retried; it is never force-pushed. If Tiber or `origin` is
-unavailable, keep the CI hold, do not push, rerun, select a recovery action, or
-release it, and restore shared coordination first. Local notes can preserve
-observations but cannot substitute for the remote incident.
-
-Useful commands:
-
-```shell
-tiber ci-recovery status
-tiber ci-recovery wait --incident-id <id> --epoch <epoch> --timeout-seconds 60
-tiber ci-recovery heartbeat --incident-id <id> --epoch <epoch>
-tiber ci-recovery transfer --incident-id <id> --epoch <epoch> \
-  --to-host <host> --to-session <session>
-tiber ci-recovery takeover --incident-id <id> --epoch <expired-epoch>
-```
+Tiber is only the task board. The Development Discipline MCP coordinates
+pushed-CI recovery on its independent `origin/development-workflow` authority;
+that hold applies whether or not a project has a Tiber board. Existing
+`tiber ci-recovery` commands remain temporary compatibility support for an
+already-active legacy incident, but new recovery work must use
+`workflow.ci_recovery.*`.
 
 ## Stdio MCP
 
@@ -298,7 +254,7 @@ tiber mcp stdio
 
 The plugin manifest registers this server through an absolute `/bin/sh` launcher
 that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `development-system/3.0.1` Codex
+when that variable is set, or from the exact `development-system/3.1.0` Codex
 plugin cache
 when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
 an executable `bin/tiber`, startup fails with

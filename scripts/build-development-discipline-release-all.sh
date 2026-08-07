@@ -22,7 +22,10 @@ fi
 binary_name="development-discipline-mcp"
 source_fingerprint="$(
   cd "$plugin_root/rust"
-  sha256sum Cargo.toml Cargo.lock rust-toolchain.toml src/main.rs | sha256sum | awk '{ print $1 }'
+  {
+    sha256sum Cargo.toml Cargo.lock rust-toolchain.toml
+    find src -type f -name '*.rs' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+  } | sha256sum | awk '{ print $1 }'
 )"
 export DEVELOPMENT_DISCIPLINE_SOURCE_FINGERPRINT="$source_fingerprint"
 targets=(

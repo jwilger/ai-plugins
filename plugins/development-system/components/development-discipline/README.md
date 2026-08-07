@@ -70,3 +70,12 @@ benefit from Git sharing. A restarted MCP reconstructs exact state, reports,
 and pending assignments from the event history. Mutated, stale, or concurrently
 superseded state and post-completion transitions fail closed with sanitized
 recovery diagnostics; active sessions and retained review history are bounded.
+
+The same MCP mechanically enforces the checked development lifecycle: a
+repository mutation must first enter a production or explicit-exemption
+lifecycle; a production change requires observed RED evidence, authorized
+implementation, observed GREEN evidence, a completed authoritative final-review
+state, and a delivery gate. Pushed-CI recovery is coordinated independently of Tiber on the repository's
+`origin/development-workflow` ref through epoch-fenced leases. An unresolved
+remote incident blocks all unrelated hook activity across clones, and only
+matching terminal-success replacement evidence releases delivery.

@@ -24,8 +24,6 @@ case "$max_concurrency" in
     ;;
 esac
 eval_timeout="${EVAL_TIMEOUT:-}"
-eval_timeout_full_default="${EVAL_TIMEOUT_FULL_DEFAULT:-90m}"
-eval_timeout_focused_default="${EVAL_TIMEOUT_FOCUSED_DEFAULT:-20m}"
 eval_timeout_kill_after="${EVAL_TIMEOUT_KILL_AFTER:-30s}"
 eval_interrupt_grace="${EVAL_INTERRUPT_GRACE:-2s}"
 suite="behavior"
@@ -72,10 +70,9 @@ Environment overrides:
                                 an exact variant id selects full-marketplace only;
                                 semantic grading still uses CODEX_GRADER_MODEL)
   PROMPTFOO_MAX_CONCURRENCY    (allowed: 1-2; default: 1)
-  EVAL_TIMEOUT                 (default: 90m for full behavior runs, 20m otherwise;
-                                set to 0 to disable)
-  EVAL_TIMEOUT_FULL_DEFAULT    (default: 90m)
-  EVAL_TIMEOUT_FOCUSED_DEFAULT (default: 20m)
+  EVAL_TIMEOUT                 Optional explicit whole-run deadline. By default the
+                               runner has no wall-clock deadline; use provider-level
+                               request timeouts and the live status record instead.
   EVAL_TIMEOUT_KILL_AFTER      (default: 30s; force-kill grace period)
   EVAL_INTERRUPT_GRACE         (default: 2s between INT, TERM, and KILL)
   EVAL_OUT_DIR                 (default: evals/out; isolates generated config and artifacts)
@@ -412,18 +409,6 @@ if [ "$config" = "evals/promptfoo/agentic-systems-engineering.yaml" ]; then
   generated_config=1
 fi
 
-if [ -z "$eval_timeout" ]; then
-  if [ "$generated_config" -eq 1 ] &&
-    [ "$suite" = "behavior" ] &&
-    [ -z "${EVAL_CASE_FILTER:-}" ] &&
-    [ -z "${EVAL_PROVIDER_FILTER:-}" ] &&
-    [ -z "${EVAL_SAMPLES:-}" ]; then
-    eval_timeout="$eval_timeout_full_default"
-  else
-    eval_timeout="$eval_timeout_focused_default"
-  fi
-fi
-
 cmd=(
   "$promptfoo_bin"
   eval
@@ -445,7 +430,11 @@ if [ -n "${EVAL_CASE_FILTER:-}" ]; then
   cmd+=(--filter-pattern "$EVAL_CASE_FILTER")
 fi
 
-run_cmd=(timeout --kill-after "$eval_timeout_kill_after" "$eval_timeout" "${cmd[@]}")
+if [ -n "$eval_timeout" ] && [ "$eval_timeout" != "0" ]; then
+  run_cmd=(setsid timeout --kill-after "$eval_timeout_kill_after" "$eval_timeout" "${cmd[@]}")
+else
+  run_cmd=(setsid "${cmd[@]}")
+fi
 
 if [ "$dry_run" -eq 0 ]; then
   acquire_provider_eval_lock
@@ -535,6 +524,8 @@ eval_launching=1
 ) &
 eval_pid="$!"
 eval_launching=0
+write_eval_status running "promptfoo eval active pid=$eval_pid; no implicit whole-run timeout"
+echo "promptfoo eval active pid=$eval_pid status=$out_dir/status.json" >&2
 if [ -n "$interrupted_signal" ]; then
   kill -s "$interrupted_signal" -- "-$eval_pid" 2>/dev/null ||
     kill -s "$interrupted_signal" "$eval_pid" 2>/dev/null || true
@@ -573,12 +564,15 @@ if [ "$promptfoo_status" -ne 0 ]; then
     finish_eval_interruption "$promptfoo_status"
   fi
   if [ ! -s "$out_dir/results.json" ]; then
+    write_eval_status failed "promptfoo eval exited without results with status $promptfoo_status"
     exit "$promptfoo_status"
   fi
+  rm -f "$out_dir/status.json"
   node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
   exit "$?"
 fi
 
+rm -f "$out_dir/status.json"
 if [ -s "$out_dir/results.json" ]; then
   node "$root/scripts/evals/check-thresholds.mjs" "$out_dir/results.json"
 fi

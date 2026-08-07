@@ -18,10 +18,31 @@ For a change:
 5. Perform risk-proportional final review.
 6. Deliver using the configured delivery mode.
 
-If pushed CI fails, stop unrelated work. When `[features].tiber = true`,
-establish one Tiber CI-recovery owner before repairing or rerunning it. When
-Tiber is disabled, follow the same single-owner recovery discipline locally
-without invoking Tiber.
+## Mechanical lifecycle gate
+
+When the Development Discipline MCP is installed, repository mutations require
+an active lifecycle. Start it before the first test, implementation, or
+documentation edit:
+
+1. Call `workflow.start` with `change_kind: "production"` for changed
+   first-party behavior, or `change_kind: "exempt"` only for a documented RED
+   exemption.
+2. For production work, add or update the focused test, then call
+   `workflow.record_red` with the failing command and
+   `workflow.authorize_implementation` before editing production code.
+3. Run the focused passing test through `workflow.record_green`, then call
+   `workflow.authorize_review`.
+4. Complete the authoritative `final_review` state machine. Supply its
+   completed returned `state` as `review_state` to
+   `workflow.record_clean_review`, then call `workflow.authorize_delivery`.
+
+The hook blocks unclassified mutations, production edits before RED, mutations
+while review is required, post-review mutations before delivery authorization,
+and all unrelated work during a shared CI-recovery hold.
+
+If pushed CI fails, stop unrelated work and establish one workflow-owned
+CI-recovery owner through Development Discipline before repairing or rerunning
+it. This gate is independent of whether the project uses Tiber for tickets.
 
 For functionality removal, change production code first with tests untouched,
 then run the suite and classify failures. Delete or update only expectations for

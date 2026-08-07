@@ -19,7 +19,10 @@ flow_script="$root/scripts/tests/development-discipline-mcp-flow.mjs"
 parity_normalizer="$root/scripts/tests/development-discipline-parity-normalize.mjs"
 source_fingerprint="$(
   cd "$plugin_root/rust"
-  sha256sum Cargo.toml Cargo.lock rust-toolchain.toml src/main.rs | sha256sum | awk '{ print $1 }'
+  {
+    sha256sum Cargo.toml Cargo.lock rust-toolchain.toml
+    find src -type f -name '*.rs' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+  } | sha256sum | awk '{ print $1 }'
 )"
 
 if ! rustup toolchain list | grep -Eq "^${toolchain}(-| )"; then

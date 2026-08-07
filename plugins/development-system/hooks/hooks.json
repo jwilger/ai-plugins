@@ -5,7 +5,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/tiber\" workflow-guard",
+          "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/development-discipline-mcp\" workflow-guard",
           "timeout": 5
         }
       ]

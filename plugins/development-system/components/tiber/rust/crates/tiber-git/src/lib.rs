@@ -1,4 +1,5 @@
 use crate::git_event_store::{GitEventStore, SynchronizeOutcome};
+use eventcore::{mapping, ModelInput, ModelOutput};
 use eventcore_types::{
     BatchSize, Event, EventFilter, EventPage, EventReader, EventStore, EventStoreError, StreamId,
     StreamVersion, StreamWrites,
@@ -38,6 +39,45 @@ const CI_RECOVERY_TEXT_MAX_BYTES: usize = 16 * 1024;
 const REPOSITORY_STREAM: &str = "tiber:repository";
 const BOARD_STREAM: &str = "tiber:board";
 const CI_RECOVERY_STREAM: &str = "tiber:ci-recovery";
+
+#[derive(ModelInput)]
+struct BacklogCapacityInput {
+    #[model(origin)]
+    queued: usize,
+    #[model(origin)]
+    max_queued: usize,
+}
+
+#[derive(ModelOutput)]
+struct BacklogAdmissionAllowed {
+    value: bool,
+}
+
+fn has_backlog_capacity(queued: &usize, max_queued: &usize) -> bool {
+    queued < max_queued
+}
+
+mapping! { BacklogCapacityToAdmission: (BacklogCapacityInput.queued, BacklogCapacityInput.max_queued) => BacklogAdmissionAllowed.value using has_backlog_capacity; }
+
+fn backlog_admission_allowed(queued: usize, max_queued: usize) -> bool {
+    let input = BacklogCapacityInput::model_builder()
+        .queued(queued)
+        .max_queued(max_queued)
+        .build();
+    BacklogAdmissionAllowed::model_builder()
+        .value(BacklogCapacityToAdmission::apply((
+            input.as_ref(),
+            input.as_ref(),
+        )))
+        .build()
+        .into_inner()
+        .value
+}
+
+#[cfg(test)]
+fn check_tiber_model() -> Result<eventcore::model::CheckReport, eventcore::model::CheckError> {
+    eventcore::model::check()
+}
 
 #[derive(Clone, Copy)]
 enum TaskMutation {
@@ -2771,7 +2811,7 @@ impl GitRepository {
             return Ok(());
         };
         let queued = self.backlog_count()?;
-        if queued >= max_queued {
+        if !backlog_admission_allowed(queued, max_queued) {
             return Err(Error::BacklogCapacityExceeded { queued, max_queued });
         }
         Ok(())
@@ -4770,6 +4810,15 @@ fn command_output(
 #[cfg(test)]
 mod lock_tests {
     use super::*;
+
+    #[test]
+    fn checked_backlog_model_proves_capacity_gate() {
+        let report = check_tiber_model().expect("model check completes");
+
+        assert_eq!(report.status, eventcore::model::CheckStatus::Verified);
+        assert!(backlog_admission_allowed(4, 5));
+        assert!(!backlog_admission_allowed(5, 5));
+    }
 
     fn temporary_repository(label: &str) -> PathBuf {
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);

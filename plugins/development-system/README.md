@@ -33,8 +33,9 @@ not automatically rejected.
 
 The top-level plugin manifest starts the always-on development-discipline and
 Tiber MCP servers. Development Discipline stores local final-review events in
-SQLite; Tiber publishes task and CI-recovery events to one shared `tiber` Git
-branch. Promptfoo remains an optional MCP owned by the
+SQLite and coordinates shared CI recovery on its independent
+`development-workflow` Git branch; Tiber publishes task events on `tiber`.
+Promptfoo remains an optional MCP owned by the
 agentic-systems-engineering component and is intentionally excluded from the
 top-level manifest because projects may disable that capability and must supply
 the pinned Promptfoo runtime separately.

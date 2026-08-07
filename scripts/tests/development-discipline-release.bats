@@ -18,6 +18,22 @@ setup() {
   chmod +x "$FAKE_BIN/uname"
 }
 
+@test "development-discipline release fingerprint covers every Rust module" {
+  local fixture_root="$BATS_TEST_TMPDIR/release-fingerprint-fixture"
+  mkdir -p "$fixture_root/scripts" "$fixture_root/plugins/development-system/components"
+  cp "$COMPLETE_CHECK" "$fixture_root/scripts/"
+  cp -R "$ROOT/plugins/development-system/components/development-discipline" \
+    "$fixture_root/plugins/development-system/components/"
+
+  run "$fixture_root/scripts/check-development-discipline-release-complete.sh"
+  [ "$status" -eq 0 ]
+
+  printf '%s\n' '// changed after release' >>"$fixture_root/plugins/development-system/components/development-discipline/rust/src/workflow.rs"
+  run "$fixture_root/scripts/check-development-discipline-release-complete.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"release-source-fingerprint-mismatch"* ]]
+}
+
 @test "development-discipline parity normalization removes runtime clock drift" {
   local source_output="$BATS_TEST_TMPDIR/source.jsonl"
   local dist_output="$BATS_TEST_TMPDIR/dist.jsonl"
@@ -428,7 +444,10 @@ detect_target() {
 
   expected="$(
     cd "$ROOT/plugins/development-system/components/development-discipline/rust"
-    sha256sum Cargo.toml Cargo.lock rust-toolchain.toml src/main.rs | sha256sum | awk '{ print $1 }'
+    {
+      sha256sum Cargo.toml Cargo.lock rust-toolchain.toml
+      find src -type f -name '*.rs' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+    } | sha256sum | awk '{ print $1 }'
   )"
   actual="$(jq -r '.source_fingerprint' "$ROOT/plugins/development-system/components/development-discipline/release-binaries.json")"
   [ "$actual" = "$expected" ]

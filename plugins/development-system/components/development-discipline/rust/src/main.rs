@@ -20,6 +20,9 @@
 //! concurrency constraint. Catalog retirement removes only logical projection
 //! membership; immutable historical events remain in SQLite.
 
+mod ci_recovery;
+mod workflow;
+
 use std::collections::{
     hash_map::{DefaultHasher, RandomState},
     HashMap, HashSet, VecDeque,
@@ -821,6 +824,24 @@ fn semantic_review_events(
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("workflow-guard") {
+        let mut input = String::new();
+        if let Err(error) = io::stdin().read_to_string(&mut input) {
+            eprintln!("development_workflow.guard_input_failed source={error}");
+            std::process::exit(2);
+        }
+        match workflow::guard(&input) {
+            Ok(Some(message)) => {
+                eprintln!("{message}");
+                std::process::exit(2);
+            }
+            Ok(None) => return,
+            Err(error) => {
+                eprintln!("development_workflow.guard_failed workflow_blocked=true source={error}");
+                std::process::exit(2);
+            }
+        }
+    }
     if let Err(error) = run_stdio(io::stdin().lock(), io::stdout().lock()) {
         eprintln!("development-discipline.mcp.error {error}");
         std::process::exit(1);
@@ -994,6 +1015,12 @@ impl ReviewCoordinator {
                     .pointer("/params/arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
+                if name.starts_with("workflow.") {
+                    return match self.call_workflow_tool(name, &arguments) {
+                        Ok(result) => Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result })),
+                        Err(error) => Ok(error_response(id, tool_error_code(&error), &error)),
+                    };
+                }
                 if !matches!(name, "final_review.plan" | "final_review.assess_risk") {
                     if let Err(error) = self.validate_authoritative_state(name, &arguments) {
                         return Ok(error_response(id, -32602, &error));
@@ -1047,6 +1074,52 @@ impl ReviewCoordinator {
         };
 
         Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+    }
+
+    fn call_workflow_tool(&mut self, name: &str, arguments: &Value) -> Result<Value, String> {
+        let project_root = workflow_project_root(arguments)?;
+        if let Some(action) = name.strip_prefix("workflow.ci_recovery.") {
+            let structured = ci_recovery::call(&project_root, action, arguments)?;
+            return Ok(json!({
+                "content": [{ "type": "text", "text": structured.to_string() }],
+                "structuredContent": structured
+            }));
+        }
+        if name == "workflow.start" {
+            let change_kind = arguments
+                .get("change_kind")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "development_workflow.change_kind_required".to_string())?;
+            let change_kind =
+                workflow::ChangeKind::parse(change_kind).map_err(|error| error.to_string())?;
+            return workflow_result(workflow::start_at(&project_root, change_kind)?);
+        }
+        if name == "workflow.status" {
+            return workflow_result(workflow::status_at(&project_root)?);
+        }
+        let action = name
+            .strip_prefix("workflow.")
+            .ok_or_else(|| format!("unsupported tool: {name}"))?;
+        if matches!(action, "record_red" | "record_green") {
+            observe_test_evidence(&project_root, arguments, action == "record_red")?;
+        }
+        if action == "record_clean_review" {
+            self.require_clean_review_evidence(arguments)?;
+        }
+        workflow_result(workflow::transition_at(&project_root, action)?)
+    }
+
+    fn require_clean_review_evidence(&mut self, arguments: &Value) -> Result<(), String> {
+        let state = arguments
+            .get("review_state")
+            .ok_or_else(|| "development_workflow.clean_review_evidence_required".to_string())?;
+        let review_arguments = json!({ "state": state });
+        self.validate_authoritative_state("final_review.clean_status", &review_arguments)
+            .map_err(|_| "development_workflow.clean_review_evidence_required".to_string())?;
+        if !review_state_complete(state) {
+            return Err("development_workflow.clean_review_evidence_required".to_string());
+        }
+        Ok(())
     }
 
     fn validate_authoritative_state(
@@ -1390,7 +1463,7 @@ fn initialize_response(request: &Value, id: Value) -> Value {
 }
 
 fn tools() -> Value {
-    json!([
+    let mut advertised = json!([
         {
             "name": "final_review.plan",
             "description": "Build caller-carried review state plus the next subagent assignments and retain its authoritative server copy. The calling agent launches actual subagents.",
@@ -1675,8 +1748,118 @@ fn tools() -> Value {
                 },
                 "required": ["baseline_commit", "changed_files", "diff_hash", "shared_test_evidence"]
             }
+        },
+        {
+            "name": "workflow.start",
+            "description": "Start a checked development lifecycle for one production or exempt change.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "change_kind": { "type": "string", "enum": ["production", "exempt"] },
+                    "project_root": { "type": "string", "minLength": 1 }
+                },
+                "required": ["change_kind"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "workflow.status",
+            "description": "Read the current checked development lifecycle phase.",
+            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
+        },
+        {
+            "name": "workflow.record_red",
+            "description": "Record verified failing focused-test evidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_root": { "type": "string", "minLength": 1 },
+                    "command": { "type": "string", "minLength": 1, "maxLength": 16384 }
+                },
+                "required": ["command"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "workflow.authorize_implementation",
+            "description": "Authorize implementation only after red evidence.",
+            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
+        },
+        {
+            "name": "workflow.record_green",
+            "description": "Record verified passing focused-test evidence after implementation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_root": { "type": "string", "minLength": 1 },
+                    "command": { "type": "string", "minLength": 1, "maxLength": 16384 }
+                },
+                "required": ["command"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "workflow.authorize_review",
+            "description": "Authorize final review only after green evidence.",
+            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
+        },
+        {
+            "name": "workflow.record_clean_review",
+            "description": "Record the authoritative completed final-review state before delivery.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_root": { "type": "string", "minLength": 1 },
+                    "review_state": { "type": "object" }
+                },
+                "required": ["review_state"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "workflow.authorize_delivery",
+            "description": "Authorize delivery only after a clean final review.",
+            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
         }
     ])
+    .as_array()
+    .expect("tool inventory is an array")
+    .clone();
+    advertised.extend(ci_recovery_tools());
+    Value::Array(advertised)
+}
+
+fn ci_recovery_tools() -> Vec<Value> {
+    let project_root = json!({ "type": "string", "minLength": 1 });
+    let string = json!({ "type": "string", "minLength": 1, "maxLength": 16384 });
+    let integer = json!({ "type": "integer", "minimum": 0 });
+    [
+        ("claim", "Claim or join the one shared CI-recovery incident.", vec![("run_id", string.clone()), ("run_url", string.clone()), ("failed_sha", string.clone()), ("workflow", string.clone()), ("git_ref", string.clone())]),
+        ("status", "Read the authoritative shared CI-recovery state.", vec![]),
+        ("assert_owner", "Verify that this session owns the active recovery lease.", vec![("incident_id", string.clone()), ("epoch", integer.clone())]),
+        ("heartbeat", "Renew the active recovery owner's lease.", vec![("incident_id", string.clone()), ("epoch", integer.clone())]),
+        ("transfer", "Transfer the recovery lease to a joined participant.", vec![("incident_id", string.clone()), ("epoch", integer.clone()), ("to_host", string.clone()), ("to_session", string.clone())]),
+        ("takeover", "Take over an expired recovery lease.", vec![("incident_id", string.clone()), ("epoch", integer.clone())]),
+        ("assign", "Assign a bounded CI-recovery helper task.", vec![("incident_id", string.clone()), ("epoch", integer.clone()), ("to_host", string.clone()), ("to_session", string.clone()), ("capabilities", string.clone()), ("scope", string.clone())]),
+        ("report", "Report a completed CI-recovery helper assignment.", vec![("incident_id", string.clone()), ("assignment_id", string.clone()), ("summary", string.clone()), ("evidence", string.clone())]),
+        ("wait", "Wait no more than sixty seconds for an owner, epoch, or assignment change.", vec![("incident_id", string.clone()), ("epoch", integer.clone()), ("timeout_seconds", integer.clone())]),
+        ("diagnose", "Record the attributable, unrelated, or transient CI diagnosis.", vec![("incident_id", string.clone()), ("epoch", integer.clone()), ("job", string.clone()), ("step", string.clone()), ("log_evidence", string.clone()), ("cause", string.clone()), ("classification", json!({"type":"string","enum":["caused","unrelated","transient"]}))]),
+        ("choose_action", "Choose the diagnosis-compatible repair or rerun action.", vec![("incident_id", string.clone()), ("epoch", integer.clone()), ("kind", json!({"type":"string","enum":["repair","rerun"]})), ("description", string.clone())]),
+        ("record_replacement", "Record a queued, running, or failed replacement CI run.", vec![("incident_id", string.clone()), ("epoch", integer.clone()), ("run_id", string.clone()), ("run_url", string.clone()), ("sha", string.clone()), ("status", json!({"type":"string","enum":["queued","running","failed"]}))]),
+        ("resolve", "Release the hold only with matching terminal-success proof.", vec![("incident_id", string.clone()), ("replacement_run_id", string.clone()), ("replacement_run_url", string.clone()), ("sha", string.clone()), ("terminal_status", json!({"type":"string","enum":["success"]}))]),
+    ]
+    .into_iter()
+    .map(|(action, description, fields)| {
+        let mut properties = serde_json::Map::new();
+        properties.insert("project_root".to_string(), project_root.clone());
+        for (name, schema) in &fields { properties.insert((*name).to_string(), schema.clone()); }
+        json!({
+            "name": format!("workflow.ci_recovery.{action}"),
+            "description": description,
+            "inputSchema": { "type": "object", "properties": properties, "required": fields.iter().map(|(name, _)| *name).collect::<Vec<_>>(), "additionalProperties": false }
+        })
+    })
+    .collect()
 }
 
 fn baseline_commit_schema() -> Value {
@@ -1787,6 +1970,60 @@ fn call_tool_at(name: &str, arguments: &Value, now_epoch_seconds: u64) -> Result
         "final_review.assess_risk" => Ok(text_content(risk_assessment_result(arguments)?)),
         other => Err(format!("unsupported tool: {other}")),
     }
+}
+
+fn workflow_project_root(arguments: &Value) -> Result<PathBuf, String> {
+    match arguments.get("project_root") {
+        Some(Value::String(path)) if !path.trim().is_empty() => Ok(PathBuf::from(path)),
+        Some(_) => Err("development_workflow.project_root_invalid".to_string()),
+        None => env::current_dir().map_err(|error| {
+            format!("development_workflow.project_root_current_dir_failed source={error}")
+        }),
+    }
+}
+
+fn workflow_result(workflow: workflow::Workflow) -> Result<Value, String> {
+    let structured = json!({ "phase": workflow.phase_name() });
+    Ok(json!({
+        "content": [{ "type": "text", "text": structured.to_string() }],
+        "structuredContent": structured
+    }))
+}
+
+fn observe_test_evidence(
+    project_root: &Path,
+    arguments: &Value,
+    expect_failure: bool,
+) -> Result<(), String> {
+    let command = arguments
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|command| !command.trim().is_empty())
+        .ok_or_else(|| "development_workflow.test_command_required".to_string())?;
+    if command.len() > 16 * 1024
+        || command.contains("$(")
+        || command
+            .chars()
+            .any(|character| matches!(character, ';' | '|' | '&' | '<' | '>' | '\n' | '\r' | '`'))
+    {
+        return Err("development_workflow.test_command_invalid".to_string());
+    }
+    let tokens = shlex::split(command)
+        .filter(|tokens| !tokens.is_empty())
+        .ok_or_else(|| "development_workflow.test_command_invalid".to_string())?;
+    let status = ProcessCommand::new(&tokens[0])
+        .args(&tokens[1..])
+        .current_dir(project_root)
+        .status()
+        .map_err(|error| format!("development_workflow.test_command_failed source={error}"))?;
+    if status.success() == expect_failure {
+        return Err(if expect_failure {
+            "development_workflow.expected_test_failure".to_string()
+        } else {
+            "development_workflow.expected_test_success".to_string()
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -19096,7 +19333,7 @@ pre_filter = "project-pre"
         .expect("response");
 
         let tools = response["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 28);
         assert_eq!(tools[3]["name"], "final_review.confirm_split");
         assert_eq!(
             tools[3]["inputSchema"]["allOf"][0]["else"]["not"]["required"],
@@ -19104,6 +19341,10 @@ pre_filter = "project-pre"
         );
         assert_eq!(tools[5]["name"], "final_review.out_of_scope_report");
         assert_eq!(tools[6]["name"], "final_review.assess_risk");
+        assert_eq!(tools[7]["name"], "workflow.start");
+        assert_eq!(tools[14]["name"], "workflow.authorize_delivery");
+        assert_eq!(tools[15]["name"], "workflow.ci_recovery.claim");
+        assert_eq!(tools[27]["name"], "workflow.ci_recovery.resolve");
         assert_eq!(
             tools[0]["inputSchema"]["properties"]["required_clean_iterations"]["minimum"],
             DEFAULT_CLEAN_ITERATIONS
@@ -19192,6 +19433,262 @@ pre_filter = "project-pre"
                 "independently_shippable_reason",
                 "delivery_boundaries"
             ])
+        );
+    }
+
+    #[test]
+    fn workflow_mcp_requires_red_evidence_before_implementation() {
+        let mut coordinator = ReviewCoordinator::default();
+        let repository = tempfile::TempDir::new().expect("temporary repository");
+        assert!(ProcessCommand::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(repository.path())
+            .status()
+            .expect("initialize repository")
+            .success());
+        let project_root = repository.path().to_string_lossy();
+        let start = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "workflow.start",
+                    "arguments": { "change_kind": "production", "project_root": project_root }
+                }
+            }))
+            .expect("start response");
+        assert_eq!(
+            start["result"]["structuredContent"]["phase"],
+            "awaiting_red"
+        );
+
+        let blocked = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": { "name": "workflow.authorize_implementation", "arguments": { "project_root": project_root } }
+            }))
+            .expect("blocked response");
+        assert_eq!(blocked["error"]["code"], -32602);
+        assert_eq!(
+            blocked["error"]["message"],
+            "development_workflow.red_evidence_required"
+        );
+    }
+
+    #[test]
+    fn workflow_mcp_observes_test_exit_status_for_red_and_green_evidence() {
+        let mut coordinator = ReviewCoordinator::default();
+        let repository = tempfile::TempDir::new().expect("temporary repository");
+        assert!(ProcessCommand::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(repository.path())
+            .status()
+            .expect("initialize repository")
+            .success());
+        let project_root = repository.path().to_string_lossy();
+        let call = |coordinator: &mut ReviewCoordinator, id, name: &str, arguments: Value| {
+            coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                    "params": { "name": name, "arguments": arguments }
+                }))
+                .expect("workflow response")
+        };
+        assert!(call(
+            &mut coordinator,
+            1,
+            "workflow.start",
+            json!({ "change_kind": "production", "project_root": project_root })
+        )
+        .get("result")
+        .is_some());
+
+        let unexpected_green = call(
+            &mut coordinator,
+            2,
+            "workflow.record_red",
+            json!({ "command": "true", "project_root": project_root }),
+        );
+        assert_eq!(
+            unexpected_green["error"]["message"],
+            "development_workflow.expected_test_failure"
+        );
+
+        assert!(call(
+            &mut coordinator,
+            3,
+            "workflow.record_red",
+            json!({ "command": "false", "project_root": project_root })
+        )
+        .get("result")
+        .is_some());
+    }
+
+    #[test]
+    fn workflow_mcp_rejects_a_clean_review_claim_without_authoritative_review_evidence() {
+        let mut coordinator = ReviewCoordinator::default();
+        let repository = tempfile::TempDir::new().expect("temporary repository");
+        assert!(ProcessCommand::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(repository.path())
+            .status()
+            .expect("initialize repository")
+            .success());
+        let project_root = repository.path().to_string_lossy();
+        let call = |coordinator: &mut ReviewCoordinator, id, name: &str, arguments: Value| {
+            coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                    "params": { "name": name, "arguments": arguments }
+                }))
+                .expect("workflow response")
+        };
+        for (id, name, arguments) in [
+            (
+                1,
+                "workflow.start",
+                json!({ "change_kind": "production", "project_root": project_root }),
+            ),
+            (
+                2,
+                "workflow.record_red",
+                json!({ "command": "false", "project_root": project_root }),
+            ),
+            (
+                3,
+                "workflow.authorize_implementation",
+                json!({ "project_root": project_root }),
+            ),
+            (
+                4,
+                "workflow.record_green",
+                json!({ "command": "true", "project_root": project_root }),
+            ),
+            (
+                5,
+                "workflow.authorize_review",
+                json!({ "project_root": project_root }),
+            ),
+        ] {
+            assert!(call(&mut coordinator, id, name, arguments)
+                .get("result")
+                .is_some());
+        }
+
+        let response = call(
+            &mut coordinator,
+            6,
+            "workflow.record_clean_review",
+            json!({ "project_root": project_root }),
+        );
+        assert_eq!(
+            response["error"]["message"],
+            "development_workflow.clean_review_evidence_required"
+        );
+    }
+
+    #[test]
+    fn workflow_mcp_accepts_the_completed_authoritative_final_review_state() {
+        let mut coordinator = ReviewCoordinator::default();
+        let repository = test_project_root("workflow-review-binding");
+        let project_root = repository.to_string_lossy();
+        let call = |coordinator: &mut ReviewCoordinator, id, name: &str, arguments: Value| {
+            coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                    "params": { "name": name, "arguments": arguments }
+                }))
+                .expect("workflow response")
+        };
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "workflow-review-binding",
+                "base": "HEAD",
+                "scope": "uncommitted",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "workflow-review-diff",
+                "pre_filter_model_role": "explicit-pre",
+                "project_root": project_root,
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
+        let plan_response = call(&mut coordinator, 1, "final_review.plan", plan_arguments);
+        let plan: Value = serde_json::from_str(
+            plan_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+        let mut review_state = plan["state"].clone();
+        let required = review_state["required_clean_iterations"]
+            .as_u64()
+            .expect("required clean iterations");
+        for iteration in 1..=required {
+            let response = call(
+                &mut coordinator,
+                10 + iteration,
+                "final_review.advance",
+                json!({
+                    "state": review_state,
+                    "lens_results": clean_lens_results_for(&review_state),
+                    "current_diff_hash": "workflow-review-diff",
+                }),
+            );
+            let advanced: Value = serde_json::from_str(
+                response["result"]["content"][0]["text"]
+                    .as_str()
+                    .expect("advance text"),
+            )
+            .expect("advance json");
+            review_state = advanced["state"].clone();
+        }
+        assert!(review_state_complete(&review_state));
+
+        for (id, name, arguments) in [
+            (
+                100,
+                "workflow.start",
+                json!({ "change_kind": "production", "project_root": project_root }),
+            ),
+            (
+                101,
+                "workflow.record_red",
+                json!({ "command": "false", "project_root": project_root }),
+            ),
+            (
+                102,
+                "workflow.authorize_implementation",
+                json!({ "project_root": project_root }),
+            ),
+            (
+                103,
+                "workflow.record_green",
+                json!({ "command": "true", "project_root": project_root }),
+            ),
+            (
+                104,
+                "workflow.authorize_review",
+                json!({ "project_root": project_root }),
+            ),
+        ] {
+            assert!(call(&mut coordinator, id, name, arguments)
+                .get("result")
+                .is_some());
+        }
+        let accepted = call(
+            &mut coordinator,
+            105,
+            "workflow.record_clean_review",
+            json!({ "project_root": project_root, "review_state": review_state }),
+        );
+        assert_eq!(
+            accepted["result"]["structuredContent"]["phase"],
+            "awaiting_delivery"
         );
     }
 

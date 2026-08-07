@@ -31,6 +31,8 @@
   context, tradeoff, or the failure it prevents. Reject subject-only messages
   and bodies that merely restate the subject or diff.
 - Never add `Co-Authored-By` trailers.
-- A terminal pushed-CI failure creates a repository-wide hold. One Tiber owner
-  records the exact failure, chooses either one causal repair or an unchanged-SHA
-  rerun, and releases the hold only after terminal-success proof.
+- A terminal pushed-CI failure creates a repository-wide hold. The Development
+  Discipline workflow coordinator records the exact failure, chooses either one
+  causal repair or an unchanged-SHA rerun, and releases the hold only after
+  terminal-success proof. This coordination is independent of Tiber and works
+  in repositories that have no task board.

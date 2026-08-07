@@ -1,20 +1,14 @@
 ---
 name: tiber
-description: Use whenever Tiber or origin/tiber is mentioned, including repository task tracking, EventCore publication conflicts, ambiguous pushes, tiber sync recovery, force-push safety, cross-worktree coordination, pushed-CI recovery, setup, and task workflows.
+description: Use whenever Tiber or origin/tiber is mentioned, including repository task tracking, EventCore publication conflicts, ambiguous pushes, tiber sync recovery, force-push safety, cross-worktree task-board coordination, setup, and task workflows.
 ---
 
 # Tiber
 
-For a terminal failed pushed-CI run, every detecting agent must first use the
-repository-wide `tiber ci-recovery claim` protocol described below. Its
-authoritative state is the EventCore store on `origin/tiber`.
-Never substitute a task claim, local note, or independent rerun for that
-incident; if the remote is unavailable, keep the hold and take no recovery
-action.
-
 Use Tiber for repository-local task boards backed by EventCore and eventcore-fs
-on the shared Git `tiber` branch. Task and CI-recovery state share this one
-event store; Markdown task files are no longer persistent state.
+on the shared Git `tiber` branch. Markdown task files are no longer persistent
+state. Pushed-CI recovery belongs to Development Discipline's independent
+workflow coordinator, not this task board.
 The bundled launcher is `<plugin-root>/bin/tiber`; resolve `<plugin-root>`
 relative to this skill file and prefer that launcher before probing `PATH`.
 
@@ -94,14 +88,6 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   refreshes and retries with stable invocation inputs. If publication is
   indeterminate, stop all mutations and use `tiber sync` to resolve the pending
   candidate. Never force-push or rewrite `tiber`.
-- Every agent that detects a terminal failed pushed-CI run must first call
-  `tiber ci-recovery claim` with that run's ID, URL, SHA, workflow, and ref.
-  The shared result either grants the sole owner lease or joins the agent as a
-  waiter. Inspect the tool result before doing anything else. Any claim error is
-  a terminal workflow blocker: perform only the exact structured claim retry,
-  CI-recovery status read, or Tiber sync needed to restore shared coordination.
-  Do not inspect CI logs, diagnose, edit, test, rerun, push, or perform unrelated
-  work before a successful shared claim.
 - Treat `close-from-trailers` as successful only when it synchronizes the
   authoritative board, resolves every `Closes:` line from the current `HEAD`
   commit, prints `closed <task-id>` for every requested task, and leaves every
@@ -135,41 +121,9 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 
 ## Pushed-CI Incident Coordination
 
-Tiber stores one active repository-wide CI-recovery incident as an EventCore
-stream on the remote `tiber` branch. It fetches and compares the current event
-store, publishes a normal fast-forward update, and retries a concurrent update
-after refetching. Never force-push this branch.
-
-- The claim result supplies an `incident_id`, `epoch`, role, and a 60-minute
-  lease. Only the current epoch-fenced owner may diagnose, choose `repair` or
-  `rerun`, push the causal repair, or start an unchanged-SHA rerun. Any joined
-  participant may record only exact matching terminal-success proof.
-- The owner must record the exact failed job and failed step plus a bounded,
-  explicitly sanitized log summary or authoritative-log reference. Never
-  persist raw CI logs, credentials, tokens, or other secrets in the recovery
-  event stream. Record the causal explanation and `caused`,
-  `unrelated`, or `transient` classification
-  before selecting the sole recovery action. Record each replacement run and
-  its SHA/status. A replacement failure is the active incident's new failure
-  record, not a new incident.
-- Nonowners hold. Use `tiber ci-recovery wait --timeout-seconds <60-or-less>`
-  in bounded intervals. The owner may assign only `inspect`, `reproduce`,
-  `edit`, or `test`; helpers report evidence and never push, rerun, select an
-  action. Do not assign proof closure as helper work; any joined participant
-  may independently record exact matching terminal-success proof.
-- The owner sends `heartbeat` about every 15 minutes. Cross-host clocks must be
-  reasonably synchronized; use the deliberately generous 60-minute lease and
-  do not take over on a marginal timestamp boundary. Transfer deliberately
-  with `transfer`; it advances the epoch. A participant may use `takeover`
-  only after the 60-minute lease expires. Recheck ownership and epoch before
-  every owner action.
-- Only `resolve` with the matching replacement run/SHA and terminal status
-  `success` releases the hold. Queued, pending, running, canceled, or failed
-  never do.
-- If Tiber or `origin` is unavailable, fail closed: preserve the global hold,
-  do not push, rerun, choose an action, or release, and restore shared
-  coordination before proceeding. Local notes may preserve observations but
-  are not an incident claim.
+Tiber does not coordinate CI recovery. Load Development Discipline's
+`ci-failure-follow-up` skill and use `workflow.ci_recovery.*`; its independent
+workflow authority applies to projects with and without Tiber.
 
 ## Commands
 
@@ -195,10 +149,6 @@ tiber note add <task-ref> "Progress note"
 tiber validate --fix
 tiber close-from-trailers
 tiber mcp stdio
-tiber ci-recovery claim --run-id <id> --run-url <url> --failed-sha <sha> --workflow <workflow> --ref <ref>
-tiber ci-recovery status
-tiber ci-recovery wait --incident-id <id> --epoch <epoch> --timeout-seconds 60
-tiber ci-recovery heartbeat --incident-id <id> --epoch <epoch>
 tiber dashboard serve [--open] [--port <port>]
 ```
 
