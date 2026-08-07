@@ -44,8 +44,10 @@ When Development Discipline is installed, start its lifecycle before mutation:
 2. Production: add the focused test, `workflow.record_red`, then
    `workflow.authorize_implementation`.
 3. `workflow.record_green`, then `workflow.authorize_review`.
-4. Complete `final_review`, `workflow.record_clean_review` with its state, then
-   `workflow.authorize_delivery`.
+4. Complete `final_review`, then call `workflow.record_clean_review` with its
+   compact `state_ref` as `review_state_ref` (or its exact legacy full state as
+   `review_state`). A zero-assignment plan can route directly to this step.
+   Finally call `workflow.authorize_delivery`.
 
 An exemption skips only RED; verification, review, and delivery gates remain.
 RED evidence requires executing one focused public or black-box behavior test

@@ -116,6 +116,24 @@ function normalizeReviewState(payload) {
   return true;
 }
 
+function normalizeStateReference(payload) {
+  const stateReference = payload?.state_ref;
+  if (
+    !stateReference ||
+    typeof stateReference !== "object" ||
+    typeof stateReference.session_id !== "string" ||
+    !/^[A-Za-z0-9._:-]{1,128}$/.test(stateReference.session_id) ||
+    typeof stateReference.project_root !== "string" ||
+    stateReference.project_root.length === 0 ||
+    typeof stateReference.state_fingerprint !== "string" ||
+    !/^[0-9a-f]{16}$/.test(stateReference.state_fingerprint)
+  ) {
+    return false;
+  }
+  stateReference.state_fingerprint = "<review-state-fingerprint>";
+  return true;
+}
+
 function normalizeResponse(response) {
   if (typeof response?.error?.message === "string") {
     const normalizedMessage = response.error.message.replaceAll(
@@ -142,7 +160,9 @@ function normalizeResponse(response) {
     }
     try {
       const payload = JSON.parse(item.text);
-      if (normalizeReviewState(payload)) {
+      const reviewStateNormalized = normalizeReviewState(payload);
+      const stateReferenceNormalized = normalizeStateReference(payload);
+      if (reviewStateNormalized || stateReferenceNormalized) {
         item.text = JSON.stringify(payload);
         normalized = true;
       }

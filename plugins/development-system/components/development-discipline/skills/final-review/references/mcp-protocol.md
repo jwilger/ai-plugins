@@ -55,16 +55,27 @@ differs from the stored hash, provide `current_changed_files` so the next review
 iteration sees the current diff.
 Session identifiers are bounded to 128 characters, and requested clean
 iterations are bounded to 3-10 to cap assignment fanout.
-The caller carries returned state between calls, while the coordinator stores a
-project-scoped authoritative copy in its local SQLite state database. A new
-stdio MCP process automatically resumes an exact caller-carried state, including
-pending verifier and delta-risk assignments. Creation is insert-only and every
+The coordinator returns both the legacy full `state` and a compact `state_ref`.
+Prefer `state_ref` between calls; it contains only session identity, storage
+scope, and the authoritative-state fingerprint. Never summarize or reconstruct
+the legacy state. The coordinator stores the full project-scoped authoritative
+copy in its local SQLite state database. A new stdio MCP process resolves a
+valid reference, including pending verifier and delta-risk assignments. If a
+caller loses the latest handoff, `final_review.resume_latest` returns the latest
+reference from `session_id`, `project_root`, and optional `work_item_id` without
+advancing the review. Creation is insert-only and every
 transition uses a durable revision compare-and-swap, so concurrent processes
 cannot admit duplicate sessions or overwrite each other's progress. Unknown,
 evicted, stale, or mutated state fails closed with sanitized expected/received
 fingerprints and a restart, resume, or abandon recovery action; advancing a
 completed session also fails. Each process retains at most 32 active sessions,
 and durable storage is bounded independently.
+
+When `final_review.plan` selects no lenses and returns `assignments: []`, the
+state is already complete. The response names
+`next_tool: workflow.record_clean_review`; pass its `state_ref` as
+`review_state_ref`. Calling `final_review.advance` for this terminal state is a
+protocol error.
 When an advance returns `verifier_required`, the server retains the pending
 assignment ID and exact core pre-verifier arguments. Until the caller resubmits
 the same lens, scope, and caller-decision arguments plus the matching

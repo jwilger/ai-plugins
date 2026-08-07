@@ -61,8 +61,12 @@ follow-up work until that skill's terminal-success hold is released; a newer
 running build does not mask an earlier hold or disappear in another mode.
 
 Use the plugin's `development-discipline` stdio MCP when available:
-`final_review.plan` assigns reviewers and `final_review.advance` is the canonical
-filter/state transition. If unavailable, a manual pass may produce review
+`final_review.plan` assigns reviewers and returns a compact `state_ref` for
+subsequent calls. `final_review.advance` is the canonical filter/state
+transition when the plan has assignments. A plan with `assignments: []`,
+`complete: true`, and `next_tool: workflow.record_clean_review` is already
+terminal; record it directly and do not call `final_review.advance`. If the MCP
+is unavailable, a manual pass may produce review
 observations, but it does not satisfy this final-review gate and cannot support a
 PR, merge, or readiness claim. Disclose that enforcement is unavailable and
 stop before claiming completion. Read `references/mcp-protocol.md` only for MCP
@@ -377,10 +381,13 @@ policy.
    and call `final_review.assess_risk` with the full `baseline_commit`. Launch
    and close its one scout, append the required caller attestation, then submit
    that assessment to `final_review.plan` with the identical baseline, scope,
-   inventory, hash, and evidence. Later calls carry state that the server checks
-   against its durable authoritative session copy. Keep the stdio MCP process
-   alive when practical; after an ordinary process restart, resubmit the latest
-   unchanged state and the coordinator resumes it automatically.
+   inventory, hash, and evidence. Later calls should carry the returned compact
+   `state_ref`, which the server resolves against its durable authoritative
+   session copy; the full `state` remains a compatibility form and must never be
+   summarized or edited. Keep the stdio MCP process alive when practical. After
+   an ordinary process restart or a lost handoff, call
+   `final_review.resume_latest` with `session_id`, `project_root`, and optional
+   `work_item_id` to obtain the current `state_ref` without advancing the review.
    `final_review.plan` rejects any call that omits
    the bound scout assessment, baseline, or shared evidence.
 
@@ -414,12 +421,14 @@ policy.
    `caller_attestation` with its assigned model role, `fresh_context: true`, and
    `closed_after_result: true`. Carry continuity only through MCP state,
    defenses, and caller decisions.
-3. Call `final_review.filter_findings` with the returned `state` and complete
+3. If the plan is already complete with no assignments, pass its `state_ref` to
+   `workflow.record_clean_review` as `review_state_ref` and stop this loop.
+   Otherwise call `final_review.filter_findings` with the returned `state_ref` and complete
    `lens_results`. Prepare any applicable `caller_decisions` from its retained
    findings before the first `final_review.advance` call; include those
    decisions on that initial call, which may return `verifier_required`.
    Re-resolve the complete changed-file inventory and rerun the bundled scope
-   hash helper. Call `final_review.advance` with the returned `state`, all
+   hash helper. Call `final_review.advance` with the returned `state_ref`, all
    `lens_results`, and that exact output as `current_diff_hash` on every
    iteration. When it differs from the state's scope hash, also include the
    complete `current_changed_files` inventory. If it returns
@@ -485,7 +494,7 @@ policy.
 This skill requires a harness that can launch fresh-context subagents. If that
 capability is unavailable, stop and report that final-review cannot be
 completed to this standard. The MCP
-rejects stale or mutated caller-carried state, enforces result keys/sets,
+rejects stale full state or stale state references, enforces result keys/sets,
 verifier gates, and terminal completion, validates the caller's explicit
 model/fresh-context/shutdown attestations, and binds model routing into the
 review contract.

@@ -1011,17 +1011,31 @@ impl ReviewCoordinator {
                 let Some(name) = request.pointer("/params/name").and_then(Value::as_str) else {
                     return Ok(error_response(id, -32602, "mcp_tool_name_missing=true"));
                 };
-                let arguments = request
+                let mut arguments = request
                     .pointer("/params/arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
                 if name.starts_with("workflow.") {
+                    if name == "workflow.record_clean_review" {
+                        if let Err(error) = self.resolve_review_state_reference(&mut arguments) {
+                            return Ok(error_response(id, -32602, &error));
+                        }
+                    }
                     return match self.call_workflow_tool(name, &arguments) {
                         Ok(result) => Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result })),
                         Err(error) => Ok(error_response(id, tool_error_code(&error), &error)),
                     };
                 }
+                if name == "final_review.resume_latest" {
+                    return match self.resume_latest(&arguments) {
+                        Ok(result) => Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result })),
+                        Err(error) => Ok(error_response(id, -32602, &error)),
+                    };
+                }
                 if !matches!(name, "final_review.plan" | "final_review.assess_risk") {
+                    if let Err(error) = self.resolve_state_reference(&mut arguments) {
+                        return Ok(error_response(id, -32602, &error));
+                    }
                     if let Err(error) = self.validate_authoritative_state(name, &arguments) {
                         return Ok(error_response(id, -32602, &error));
                     }
@@ -1034,6 +1048,7 @@ impl ReviewCoordinator {
                 let now_epoch_seconds = (self.now_epoch_seconds)();
                 match call_tool_at(name, &arguments, now_epoch_seconds) {
                     Ok(result) => {
+                        let result = attach_state_reference(result)?;
                         let response =
                             json!({ "jsonrpc": "2.0", "id": id.clone(), "result": result });
                         let response_size = serde_json::to_vec(&response)
@@ -1120,6 +1135,125 @@ impl ReviewCoordinator {
             return Err("development_workflow.clean_review_evidence_required".to_string());
         }
         Ok(())
+    }
+
+    fn resolve_review_state_reference(&mut self, arguments: &mut Value) -> Result<(), String> {
+        if arguments.get("review_state").is_some() {
+            return Ok(());
+        }
+        let state_ref = arguments
+            .get("review_state_ref")
+            .cloned()
+            .ok_or_else(|| "development_workflow.clean_review_evidence_required".to_string())?;
+        let state = self.resolve_reference(&state_ref)?;
+        arguments["review_state"] = state;
+        Ok(())
+    }
+
+    fn resolve_state_reference(&mut self, arguments: &mut Value) -> Result<(), String> {
+        if arguments.get("state").is_some() {
+            return Ok(());
+        }
+        let state_ref = arguments
+            .get("state_ref")
+            .cloned()
+            .ok_or_else(|| "state_or_state_ref_required=true".to_string())?;
+        arguments["state"] = self.resolve_reference(&state_ref)?;
+        Ok(())
+    }
+
+    fn resolve_reference(&mut self, state_ref: &Value) -> Result<Value, String> {
+        let session_id = state_ref
+            .get("session_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "review_session_id_required=true".to_string())?;
+        let project_root = state_ref
+            .get("project_root")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
+        if !self.sessions.contains_key(session_id) {
+            let mut lookup = json!({ "scope": { "project_root": project_root } });
+            if let Some(work_item_id) = state_ref.get("work_item_id") {
+                lookup["work_item_id"] = work_item_id.clone();
+            }
+            if let Some(restored) = load_authoritative_session(&lookup, session_id)? {
+                self.session_revisions
+                    .insert(session_id.to_string(), restored.revision);
+                self.sessions.insert(session_id.to_string(), restored.state);
+                if let Some(pending) = restored.pending_verifier {
+                    self.pending_verifiers
+                        .insert(session_id.to_string(), pending);
+                }
+                if let Some(pending) = restored.pending_delta_risk {
+                    self.pending_delta_risks
+                        .insert(session_id.to_string(), pending);
+                }
+            }
+        }
+        let state = self.sessions.get(session_id).cloned().ok_or_else(|| {
+            "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
+                .to_string()
+        })?;
+        let received = state_ref
+            .get("state_fingerprint")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "review_state_fingerprint_required=true".to_string())?;
+        let expected = state_fingerprint(&state);
+        if received != expected {
+            return Err(format!(
+                "review_state_out_of_sync=true expected_state_fingerprint={expected} received_state_fingerprint={received} recovery=resume_latest_state_or_abandon_stale_review"
+            ));
+        }
+        self.touch_session(session_id);
+        self.enforce_active_session_limit();
+        Ok(state)
+    }
+
+    fn resume_latest(&mut self, arguments: &Value) -> Result<Value, String> {
+        let mut state_ref = arguments.clone();
+        if state_ref.get("state_fingerprint").is_none() {
+            let session_id = state_ref
+                .get("session_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "review_session_id_required=true".to_string())?
+                .to_string();
+            let project_root = state_ref
+                .get("project_root")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "review_session_project_root_required=true".to_string())?
+                .to_string();
+            let mut lookup = json!({ "scope": { "project_root": project_root } });
+            if let Some(work_item_id) = state_ref.get("work_item_id") {
+                lookup["work_item_id"] = work_item_id.clone();
+            }
+            let restored = load_authoritative_session(&lookup, &session_id)?.ok_or_else(|| {
+                "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
+                    .to_string()
+            })?;
+            state_ref = state_reference(&restored.state)?;
+            self.session_revisions
+                .insert(session_id.clone(), restored.revision);
+            self.sessions.insert(session_id.clone(), restored.state);
+            if let Some(pending) = restored.pending_verifier {
+                self.pending_verifiers.insert(session_id.clone(), pending);
+            }
+            if let Some(pending) = restored.pending_delta_risk {
+                self.pending_delta_risks.insert(session_id, pending);
+            }
+        }
+        let state = self.resolve_reference(&state_ref)?;
+        Ok(text_content(
+            json!({
+                "state_ref": state_reference(&state)?,
+                "complete": review_state_complete(&state),
+                "next_tool": if review_state_complete(&state) {
+                    "workflow.record_clean_review"
+                } else {
+                    "final_review.advance"
+                }
+            })
+            .to_string(),
+        ))
     }
 
     fn validate_authoritative_state(
@@ -1374,17 +1508,52 @@ impl ReviewCoordinator {
 }
 
 fn state_out_of_sync_error(expected: &Value, received: &Value) -> String {
-    let expected = stable_storage_digest(&[
-        "final-review-state-v1",
-        &serde_json::to_string(expected).unwrap_or_else(|_| "invalid".to_string()),
-    ]);
-    let received = stable_storage_digest(&[
-        "final-review-state-v1",
-        &serde_json::to_string(received).unwrap_or_else(|_| "invalid".to_string()),
-    ]);
+    let expected = state_fingerprint(expected);
+    let received = state_fingerprint(received);
     format!(
         "review_state_out_of_sync=true expected_state_fingerprint={expected} received_state_fingerprint={received} recovery=resume_latest_state_or_abandon_stale_review"
     )
+}
+
+fn state_fingerprint(state: &Value) -> String {
+    stable_storage_digest(&[
+        "final-review-state-v1",
+        &serde_json::to_string(state).unwrap_or_else(|_| "invalid".to_string()),
+    ])
+}
+
+fn state_reference(state: &Value) -> Result<Value, String> {
+    let session_id = state
+        .get("session_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_session_id_required=true".to_string())?;
+    let project_root = state
+        .pointer("/scope/project_root")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
+    let mut reference = json!({
+        "session_id": session_id,
+        "project_root": project_root,
+        "state_fingerprint": state_fingerprint(state)
+    });
+    if let Some(work_item_id) = state.get("work_item_id").filter(|value| !value.is_null()) {
+        reference["work_item_id"] = work_item_id.clone();
+    }
+    Ok(reference)
+}
+
+fn attach_state_reference(mut result: Value) -> Result<Value, String> {
+    let Some(text) = result.pointer("/content/0/text").and_then(Value::as_str) else {
+        return Ok(result);
+    };
+    let mut payload: Value = serde_json::from_str(text)
+        .map_err(|error| format!("internal tool result parse failed: {error}"))?;
+    let Some(state) = payload.get("state") else {
+        return Ok(result);
+    };
+    payload["state_ref"] = state_reference(state)?;
+    result["content"][0]["text"] = json!(payload.to_string());
+    Ok(result)
 }
 
 fn pending_verifier_core_arguments(arguments: &Value) -> Result<Value, String> {
@@ -1466,7 +1635,7 @@ fn tools() -> Value {
     let mut advertised = json!([
         {
             "name": "final_review.plan",
-            "description": "Build caller-carried review state from the exact risk-scout assessment produced for the same baseline commit, scope, changed-file inventory, diff hash, and shared test evidence. Retain the authoritative server copy and return assignments that the calling agent must launch as actual subagents.",
+            "description": "Build authoritative review state from the exact risk-scout assessment produced for the same baseline commit, scope, changed-file inventory, diff hash, and shared test evidence. Return both the legacy full state and a compact state_ref; prefer state_ref for subsequent calls.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1569,22 +1738,25 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "state": { "type": "object", "description": "Caller-carried review state returned by final_review.plan or final_review.advance; validated against the authoritative server copy." },
+                    "state_ref": state_reference_schema(),
                     "lens_results": {
                         "type": "array",
                         "maxItems": MAX_REVIEW_LENSES,
                         "items": caller_lens_result_schema()
                     }
                 },
-                "required": ["state", "lens_results"]
+                "required": ["lens_results"],
+                "oneOf": [{ "required": ["state"] }, { "required": ["state_ref"] }]
             }
         },
         {
             "name": "final_review.advance",
-            "description": "Advance caller-carried review state after validating it against the server-authoritative session. Supply the current diff hash on every call; when it changed, also supply the current changed-file inventory, diff-bound shared test evidence, and the assigned delta-risk assessment. While a verifier is pending, resubmit the exact lens results and current-diff arguments with its result.",
+            "description": "Advance review state after validating either the compact state_ref (preferred) or legacy full state against the server-authoritative session. Supply the current diff hash on every call; when it changed, also supply the current changed-file inventory, diff-bound shared test evidence, and the assigned delta-risk assessment. While a verifier is pending, resubmit the exact lens results and current-diff arguments with its result.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "state": { "type": "object", "description": "Caller-carried review state returned by final_review.plan or final_review.advance; validated against the authoritative server copy." },
+                    "state_ref": state_reference_schema(),
                     "lens_results": {
                         "type": "array",
                         "maxItems": MAX_REVIEW_LENSES,
@@ -1661,7 +1833,8 @@ fn tools() -> Value {
                     "review_budget_decision": review_budget_decision_schema(),
                     "verifier_result": verifier_result_schema()
                 },
-                "required": ["state", "lens_results", "current_diff_hash"]
+                "required": ["lens_results", "current_diff_hash"],
+                "oneOf": [{ "required": ["state"] }, { "required": ["state_ref"] }]
             }
         },
         {
@@ -1672,12 +1845,14 @@ fn tools() -> Value {
                 "additionalProperties": false,
                 "properties": {
                     "state": { "type": "object" },
+                    "state_ref": state_reference_schema(),
                     "confirmation_id": { "type": "string", "pattern": "^split-[0-9a-f]{16}$" },
                     "explicit_user_confirmation": { "const": true },
                     "tracker_representation": { "type": "string", "enum": ["delivery-tickets", "delivery-tickets-with-blocking-dependencies"] },
                     "blocking_dependencies_reason": { "type": "string", "minLength": 1, "maxLength": MAX_SPLIT_DELIVERY_EVIDENCE_CHARS, "pattern": "\\S" }
                 },
-                "required": ["state", "confirmation_id", "explicit_user_confirmation", "tracker_representation"],
+                "required": ["confirmation_id", "explicit_user_confirmation", "tracker_representation"],
+                "oneOf": [{ "required": ["state"] }, { "required": ["state_ref"] }],
                 "allOf": [{
                     "if": { "properties": { "tracker_representation": { "const": "delivery-tickets-with-blocking-dependencies" } }, "required": ["tracker_representation"] },
                     "then": { "required": ["blocking_dependencies_reason"] },
@@ -1690,8 +1865,8 @@ fn tools() -> Value {
             "description": "Compatibility helper for reporting clean-streak completion from caller-carried state after server-authoritative validation.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "state": { "type": "object" } },
-                "required": ["state"]
+                "properties": { "state": { "type": "object" }, "state_ref": state_reference_schema() },
+                "oneOf": [{ "required": ["state"] }, { "required": ["state_ref"] }]
             }
         },
         {
@@ -1699,8 +1874,22 @@ fn tools() -> Value {
             "description": "Read the current out-of-scope review report for an authoritative review state.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "state": { "type": "object" } },
-                "required": ["state"]
+                "properties": { "state": { "type": "object" }, "state_ref": state_reference_schema() },
+                "oneOf": [{ "required": ["state"] }, { "required": ["state_ref"] }]
+            }
+        },
+        {
+            "name": "final_review.resume_latest",
+            "description": "Return a fresh compact state_ref for the latest server-authoritative state of a review session. Use this after losing or truncating caller-carried state; it does not advance the review.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string", "maxLength": MAX_SESSION_ID_CHARS },
+                    "project_root": { "type": "string", "minLength": 1 },
+                    "work_item_id": { "type": "string", "maxLength": MAX_WORK_ITEM_ID_CHARS, "pattern": "^[A-Za-z0-9._:-]+$" }
+                },
+                "required": ["session_id", "project_root"],
+                "additionalProperties": false
             }
         },
         {
@@ -1825,9 +2014,10 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "project_root": { "type": "string", "minLength": 1 },
-                    "review_state": { "type": "object" }
+                    "review_state": { "type": "object" },
+                    "review_state_ref": state_reference_schema()
                 },
-                "required": ["review_state"],
+                "oneOf": [{ "required": ["review_state"] }, { "required": ["review_state_ref"] }],
                 "additionalProperties": false
             }
         },
@@ -1907,6 +2097,24 @@ fn baseline_commit_schema() -> Value {
         "type": "string",
         "pattern": "^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$",
         "description": "Full commit OID resolved before computing changed_files, diff_hash, and shared_test_evidence."
+    })
+}
+
+fn state_reference_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "session_id": { "type": "string", "maxLength": MAX_SESSION_ID_CHARS },
+            "project_root": { "type": "string", "minLength": 1 },
+            "work_item_id": {
+                "type": "string",
+                "maxLength": MAX_WORK_ITEM_ID_CHARS,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "state_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{16}$" }
+        },
+        "required": ["session_id", "project_root", "state_fingerprint"],
+        "additionalProperties": false
     })
 }
 
@@ -4804,6 +5012,16 @@ fn plan_result_internal(
         response["transition_status"] = json!("retrospective_review");
         response["advance_kind"] = json!("review_assignments");
         response["scope_split"] = scope_split;
+    } else if review_state_complete(&response["state"]) {
+        response["complete"] = json!(true);
+        response["next_tool"] = json!("workflow.record_clean_review");
+        response
+            .as_object_mut()
+            .expect("plan response object")
+            .remove("advance_tool");
+        response["calling_agent_responsibility"] = json!(
+            "No deeper review lenses were selected. Pass state_ref to workflow.record_clean_review as review_state_ref; do not call final_review.advance for this already-complete session."
+        );
     }
     let response = response.to_string();
     if response.len() > MAX_REQUEST_BYTES {
@@ -19559,24 +19777,25 @@ pre_filter = "project-pre"
         .expect("response");
 
         let tools = response["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 29);
+        assert_eq!(tools.len(), 30);
         assert_eq!(tools[3]["name"], "final_review.confirm_split");
         assert_eq!(
             tools[3]["inputSchema"]["allOf"][0]["else"]["not"]["required"],
             json!(["blocking_dependencies_reason"])
         );
         assert_eq!(tools[5]["name"], "final_review.out_of_scope_report");
-        assert_eq!(tools[6]["name"], "final_review.assess_risk");
-        assert_eq!(tools[7]["name"], "workflow.start");
-        assert_eq!(tools[9]["name"], "workflow.abandon");
-        assert_eq!(tools[15]["name"], "workflow.authorize_delivery");
-        assert_eq!(tools[16]["name"], "workflow.ci_recovery.claim");
-        assert_eq!(tools[28]["name"], "workflow.ci_recovery.resolve");
-        assert!(tools[7]["description"]
+        assert_eq!(tools[6]["name"], "final_review.resume_latest");
+        assert_eq!(tools[7]["name"], "final_review.assess_risk");
+        assert_eq!(tools[8]["name"], "workflow.start");
+        assert_eq!(tools[10]["name"], "workflow.abandon");
+        assert_eq!(tools[16]["name"], "workflow.authorize_delivery");
+        assert_eq!(tools[17]["name"], "workflow.ci_recovery.claim");
+        assert_eq!(tools[29]["name"], "workflow.ci_recovery.resolve");
+        assert!(tools[8]["description"]
             .as_str()
             .expect("workflow start description")
             .contains("exempt only for a documented RED exemption"));
-        for index in [10, 12] {
+        for index in [11, 13] {
             let description = tools[index]["description"]
                 .as_str()
                 .expect("test-evidence description");
@@ -19589,16 +19808,16 @@ pre_filter = "project-pre"
                     .contains("Shell operators")
             );
         }
-        assert!(tools[11]["description"]
+        assert!(tools[12]["description"]
             .as_str()
             .expect("mechanical authorization description")
             .contains("not user authorization"));
         assert_eq!(
-            tools[22]["inputSchema"]["properties"]["capabilities"]["anyOf"][0]["items"]["enum"],
+            tools[23]["inputSchema"]["properties"]["capabilities"]["anyOf"][0]["items"]["enum"],
             json!(["inspect", "reproduce", "edit", "test"])
         );
         assert_eq!(
-            tools[22]["inputSchema"]["properties"]["capabilities"]["anyOf"][1]["type"],
+            tools[23]["inputSchema"]["properties"]["capabilities"]["anyOf"][1]["type"],
             "string"
         );
         assert_eq!(
@@ -19615,12 +19834,12 @@ pre_filter = "project-pre"
                 "shared_test_evidence"
             ])
         );
-        assert!(tools[6]["inputSchema"]["required"]
+        assert!(tools[7]["inputSchema"]["required"]
             .as_array()
             .expect("risk scout required fields")
             .contains(&json!("baseline_commit")));
         assert_eq!(
-            tools[6]["inputSchema"]["properties"]["baseline_commit"]["pattern"],
+            tools[7]["inputSchema"]["properties"]["baseline_commit"]["pattern"],
             "^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$"
         );
         assert_eq!(
@@ -25351,6 +25570,168 @@ pre_filter = "project-pre"
             .expect("terminal advance response");
 
         assert_eq!(response["error"]["message"], "review_session_complete=true");
+    }
+
+    #[test]
+    fn json_rpc_plan_returns_a_compact_state_reference_accepted_by_advance() {
+        let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = assessed_plan_arguments(
+            "compact-state-reference",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": plan_arguments }
+            }))
+            .expect("plan response");
+        let planned: Value = serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+
+        assert_eq!(
+            planned["state_ref"]["session_id"],
+            "compact-state-reference"
+        );
+        assert!(planned["state_ref"]["state_fingerprint"].is_string());
+        assert!(planned["state_ref"].to_string().len() < 512);
+
+        let advanced = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state_ref": planned["state_ref"],
+                        "lens_results": clean_lens_results_for(&planned["state"]),
+                        "current_diff_hash": "compact-state-reference-diff"
+                    }
+                }
+            }))
+            .expect("advance response");
+
+        assert!(advanced.get("result").is_some(), "{advanced}");
+    }
+
+    #[test]
+    fn resume_latest_recovers_the_current_compact_reference_without_advancing() {
+        let project_root = test_project_root("resume-latest-reference");
+        let mut coordinator = ReviewCoordinator::default();
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.plan",
+                    "arguments": assessed_plan_arguments_for_diff_at_root(
+                        "resume-latest-reference",
+                        "resume-latest-reference-diff",
+                        "medium",
+                        &[("correctness-behavior", "medium")],
+                        json!([]),
+                        Some(&project_root),
+                    )
+                }
+            }))
+            .expect("plan response");
+        let planned: Value = serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+
+        drop(coordinator);
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.resume_latest",
+                    "arguments": {
+                        "session_id": "resume-latest-reference",
+                        "project_root": project_root
+                    }
+                }
+            }))
+            .expect("resume response");
+        let resumed: Value = serde_json::from_str(
+            resumed["result"]["content"][0]["text"]
+                .as_str()
+                .expect("resume text"),
+        )
+        .expect("resume json");
+
+        assert_eq!(resumed["state_ref"], planned["state_ref"]);
+        assert_eq!(resumed["complete"], false);
+        assert_eq!(resumed["next_tool"], "final_review.advance");
+    }
+
+    #[test]
+    fn zero_assignment_plan_is_complete_and_routes_directly_to_clean_review() {
+        let mut coordinator = ReviewCoordinator::default();
+        let project_root = test_project_root("zero-assignment-review");
+        workflow::start_at(&project_root, workflow::ChangeKind::Exempt)
+            .expect("start exempt lifecycle");
+        workflow::transition_at(&project_root, "record_green").expect("record green");
+        workflow::transition_at(&project_root, "authorize_review").expect("authorize review");
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.plan",
+                    "arguments": assessed_plan_arguments_for_diff_at_root(
+                        "zero-assignment-review",
+                        "zero-assignment-review-diff",
+                        "low",
+                        &[],
+                        json!([]),
+                        Some(&project_root),
+                    )
+                }
+            }))
+            .expect("plan response");
+        let planned: Value = serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+
+        assert_eq!(planned["assignments"], json!([]));
+        assert_eq!(planned["complete"], true);
+        assert_eq!(planned["next_tool"], "workflow.record_clean_review");
+        assert!(planned.get("advance_tool").is_none());
+
+        let recorded = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "workflow.record_clean_review",
+                    "arguments": {
+                        "project_root": project_root,
+                        "review_state_ref": planned["state_ref"]
+                    }
+                }
+            }))
+            .expect("clean review response");
+        assert!(recorded.get("result").is_some(), "{recorded}");
     }
 
     fn event_sourced_test_state(root: &Path, session_id: &str) -> Value {
