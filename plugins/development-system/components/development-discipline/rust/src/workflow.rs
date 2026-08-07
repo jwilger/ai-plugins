@@ -97,7 +97,7 @@ fn lifecycle_guard(
 ) -> Result<Option<String>, String> {
     let state_path = common_directory.join(BLOCKER_DIRECTORY).join(STATE_FILE);
     let Some(workflow) = read_workflow_state(&state_path)? else {
-        return if is_read_only(input) || permits_workflow_control(input) {
+        return if !is_repository_mutation(input) || permits_workflow_control(input) {
             Ok(None)
         } else {
             Ok(Some(
@@ -110,19 +110,20 @@ fn lifecycle_guard(
         return Ok(None);
     }
     match workflow.phase {
-        Phase::AwaitingRed if is_test_edit(input) || is_read_only(input) => Ok(None),
+        Phase::AwaitingRed if is_test_edit(input) || !is_repository_mutation(input) => Ok(None),
         Phase::AwaitingRed => Ok(Some(
             "development_workflow.blocked workflow_blocked=true error_code=development_workflow.red_evidence_required required_action=\"add or update a focused test, then record its observed failure\"".to_string(),
         )),
+        Phase::AwaitingImplementation if !is_repository_mutation(input) => Ok(None),
         Phase::AwaitingImplementation => Ok(Some(
             "development_workflow.blocked workflow_blocked=true error_code=development_workflow.implementation_authorization_required required_action=\"authorize implementation after red evidence\"".to_string(),
         )),
-        Phase::AwaitingReview | Phase::Reviewing if is_read_only(input) => Ok(None),
+        Phase::AwaitingReview | Phase::Reviewing if !is_repository_mutation(input) => Ok(None),
         Phase::AwaitingReview | Phase::Reviewing => Ok(Some(
             "development_workflow.blocked workflow_blocked=true error_code=development_workflow.review_required required_action=\"complete final review before further delivery work\"".to_string(),
         )),
-        Phase::AwaitingGreen | Phase::Delivered | Phase::Exempt => Ok(None),
-        Phase::AwaitingDelivery if is_read_only(input) => Ok(None),
+        Phase::AwaitingGreen | Phase::Delivered | Phase::Abandoned | Phase::Exempt => Ok(None),
+        Phase::AwaitingDelivery if !is_repository_mutation(input) => Ok(None),
         Phase::AwaitingDelivery => Ok(Some(
             "development_workflow.blocked workflow_blocked=true error_code=development_workflow.delivery_authorization_required required_action=\"authorize delivery before further repository mutations\"".to_string(),
         )),
@@ -141,14 +142,36 @@ fn permits_workflow_control(input: &serde_json::Value) -> bool {
         || permits_recovery(input)
 }
 
-fn is_read_only(input: &serde_json::Value) -> bool {
-    matches!(
-        input.get("tool_name").and_then(serde_json::Value::as_str),
-        Some("Read" | "Glob" | "Grep" | "Search" | "LS")
-    ) || is_read_only_git_command(input)
+/// Returns whether the hook invocation can modify repository state.
+///
+/// The lifecycle gate intentionally has no read/research allowlist: an
+/// unrecognized tool is allowed unless it is known to mutate. This keeps
+/// inspection, web research, and other non-mutating work available at every
+/// phase instead of making progress depend on a brittle list of commands.
+fn is_repository_mutation(input: &serde_json::Value) -> bool {
+    is_file_mutation_tool(input) || is_known_terminal_mutation(input)
 }
 
-fn is_read_only_git_command(input: &serde_json::Value) -> bool {
+fn is_file_mutation_tool(input: &serde_json::Value) -> bool {
+    let tool_name = input
+        .get("tool_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    [
+        "write",
+        "edit",
+        "applypatch",
+        "apply_patch",
+        "delete",
+        "rename",
+        "move",
+    ]
+    .iter()
+    .any(|operation| tool_name.contains(operation))
+}
+
+fn is_known_terminal_mutation(input: &serde_json::Value) -> bool {
     let command = input
         .pointer("/tool_input/command")
         .or_else(|| input.pointer("/tool_input/cmd"))
@@ -156,26 +179,43 @@ fn is_read_only_git_command(input: &serde_json::Value) -> bool {
     let Some(command) = command else {
         return false;
     };
-    if command.contains("$(")
-        || command
-            .chars()
-            .any(|character| matches!(character, ';' | '|' | '&' | '<' | '>' | '\n' | '\r' | '`'))
-    {
-        return false;
-    }
-    let Some(tokens) = shlex::split(command) else {
-        return false;
-    };
-    if tokens
-        .first()
-        .is_none_or(|executable| Path::new(executable).file_name() != Some(OsStr::new("git")))
-    {
-        return false;
-    }
-    matches!(
-        tokens.get(1).map(String::as_str),
-        Some("status" | "diff" | "log" | "show" | "rev-parse" | "ls-files" | "remote")
-    )
+    command.lines().any(terminal_line_mutates)
+}
+
+fn terminal_line_mutates(command: &str) -> bool {
+    let normalized = command.to_ascii_lowercase();
+    let write_markers = [
+        "apply_patch",
+        "sed -i",
+        "sed --in-place",
+        "perl -i",
+        "perl --in-place",
+        "tee ",
+        "touch ",
+        "mkdir ",
+        "rm ",
+        "rm -",
+        "mv ",
+        "cp ",
+        "patch ",
+        "git add ",
+        "git commit",
+        "git push",
+        "git reset",
+        "git checkout",
+        "git restore",
+        "git clean",
+        "git merge",
+        "git rebase",
+        "npm install",
+        "npm ci",
+        "cargo fmt",
+        "prettier --write",
+    ];
+    normalized.contains('>')
+        || write_markers
+            .iter()
+            .any(|marker| normalized.starts_with(marker) || normalized.contains(marker))
 }
 
 fn is_test_edit(input: &serde_json::Value) -> bool {
@@ -187,13 +227,13 @@ fn is_test_edit(input: &serde_json::Value) -> bool {
     if !explicit_paths.is_empty() {
         return explicit_paths.into_iter().all(is_test_path);
     }
-    tool_input
+    let patch = tool_input
         .get("patch")
         .and_then(serde_json::Value::as_str)
-        .map(patch_targets)
-        .is_some_and(|targets| {
-            !targets.is_empty() && targets.iter().all(|target| is_test_path(target))
-        })
+        .or_else(|| tool_input.as_str());
+    patch.map(patch_targets).is_some_and(|targets| {
+        !targets.is_empty() && targets.iter().all(|target| is_test_path(target))
+    })
 }
 
 fn patch_targets(patch: &str) -> Vec<&str> {
@@ -299,6 +339,7 @@ enum Phase {
     Reviewing,
     AwaitingDelivery,
     Delivered,
+    Abandoned,
     Exempt,
 }
 
@@ -451,7 +492,9 @@ impl Workflow {
             phase: if gate.red_required {
                 Phase::AwaitingRed
             } else {
-                Phase::Exempt
+                // Exemption removes only the RED prerequisite. Successful
+                // verification, review, and delivery remain mandatory.
+                Phase::AwaitingGreen
             },
             change_kind,
             red_observed: false,
@@ -479,13 +522,16 @@ impl Workflow {
                 self.phase = Phase::AwaitingGreen;
                 Ok(())
             }
-            Phase::Exempt => Ok(()),
+            Phase::Exempt => {
+                self.phase = Phase::AwaitingGreen;
+                Ok(())
+            }
             _ => Err(WorkflowError::GreenEvidenceRequired),
         }
     }
 
     pub fn record_green(&mut self) -> Result<(), WorkflowError> {
-        if self.phase != Phase::AwaitingGreen {
+        if !matches!(self.phase, Phase::AwaitingGreen | Phase::Exempt) {
             return Err(WorkflowError::UnexpectedEvidence);
         }
         self.green_observed = true;
@@ -517,13 +563,18 @@ impl Workflow {
                 self.phase = Phase::Delivered;
                 Ok(())
             }
-            Phase::Exempt => {
-                self.phase = Phase::Delivered;
-                Ok(())
-            }
+            Phase::Exempt => Err(WorkflowError::GreenEvidenceRequired),
             Phase::Reviewing => Err(WorkflowError::ReviewEvidenceRequired),
             _ => Err(WorkflowError::DeliveryEvidenceRequired),
         }
+    }
+
+    pub fn abandon(&mut self) -> Result<(), WorkflowError> {
+        if self.is_terminal() {
+            return Err(WorkflowError::UnexpectedEvidence);
+        }
+        self.phase = Phase::Abandoned;
+        Ok(())
     }
 
     fn gate(&self, ci_hold_active: bool) -> ModelGate {
@@ -545,12 +596,13 @@ impl Workflow {
             Phase::Reviewing => "reviewing",
             Phase::AwaitingDelivery => "awaiting_delivery",
             Phase::Delivered => "delivered",
+            Phase::Abandoned => "abandoned",
             Phase::Exempt => "exempt",
         }
     }
 
     fn is_terminal(&self) -> bool {
-        self.phase == Phase::Delivered
+        matches!(self.phase, Phase::Delivered | Phase::Abandoned)
     }
 
     pub fn transition(&mut self, action: &str, ci_hold_active: bool) -> Result<(), WorkflowError> {
@@ -561,6 +613,7 @@ impl Workflow {
             "authorize_review" => self.authorize_review(),
             "record_clean_review" => self.record_clean_review(),
             "authorize_delivery" => self.authorize_delivery(ci_hold_active),
+            "abandon" => self.abandon(),
             _ => Err(WorkflowError::UnexpectedEvidence),
         }
     }
@@ -714,7 +767,7 @@ pub fn check_model() -> Result<eventcore::model::CheckReport, eventcore::model::
 #[cfg(test)]
 mod tests {
     use super::{
-        check_model, start_at, status_at, transition_at, ChangeKind, Workflow, WorkflowError,
+        check_model, start_at, status_at, transition_at, ChangeKind, Phase, Workflow, WorkflowError,
     };
     use std::process::Command;
     use tempfile::TempDir;
@@ -754,15 +807,64 @@ mod tests {
     }
 
     #[test]
-    fn exempt_change_can_be_delivered_without_tdd_evidence() {
+    fn exempt_change_skips_red_but_requires_green_and_review_evidence() {
         let mut workflow = Workflow::start(ChangeKind::Exempt);
 
+        assert_eq!(
+            workflow.authorize_review(),
+            Err(WorkflowError::GreenEvidenceRequired)
+        );
         workflow
-            .authorize_implementation()
-            .expect("exempt change implementation");
+            .record_green()
+            .expect("record focused exempt verification");
+        workflow
+            .authorize_review()
+            .expect("authorize review after exempt verification");
+        assert_eq!(
+            workflow.authorize_delivery(false),
+            Err(WorkflowError::ReviewEvidenceRequired)
+        );
+        workflow
+            .record_clean_review()
+            .expect("record exempt final review");
         workflow
             .authorize_delivery(false)
-            .expect("exempt change delivery");
+            .expect("exempt change delivery after review");
+    }
+
+    #[test]
+    fn legacy_exempt_lifecycle_can_resume_with_green_evidence_and_reach_delivery() {
+        let mut workflow = Workflow {
+            phase: Phase::Exempt,
+            change_kind: ChangeKind::Exempt,
+            red_observed: false,
+            green_observed: false,
+            clean_review_observed: false,
+        };
+
+        workflow
+            .record_green()
+            .expect("legacy exempt lifecycle accepts successful verification");
+        workflow.authorize_review().expect("authorize review");
+        workflow.record_clean_review().expect("record review");
+        workflow.authorize_delivery(false).expect("deliver");
+    }
+
+    #[test]
+    fn abandoned_lifecycle_is_terminal_and_allows_the_next_lifecycle_to_start() {
+        let repository = TempDir::new().expect("temporary repository");
+        assert!(Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(repository.path())
+            .status()
+            .expect("initialize repository")
+            .success());
+
+        start_at(repository.path(), ChangeKind::Production).expect("start lifecycle");
+        transition_at(repository.path(), "abandon").expect("abandon lifecycle");
+        let restarted = start_at(repository.path(), ChangeKind::Production)
+            .expect("start replacement lifecycle");
+        assert_eq!(restarted.phase_name(), "awaiting_red");
     }
 
     #[test]

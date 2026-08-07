@@ -42,6 +42,14 @@ or quoted display forms. A clean status does not erase committed base-scope
 paths.
 Delete the inventory file after each call. Treat helper failure as a blocked
 review; do not replace it with an ad hoc Git-diff hash.
+Treat the complete `final_review.assess_risk` argument object as an immutable
+replay contract. To call `final_review.plan`, reuse every scope, request,
+acceptance-criteria, concern, model-role, and evidence field unchanged, then
+add the scout's `risk_assessment` result and its caller attestation. The scout
+assignment alone intentionally does not duplicate all caller-owned review
+context. If the scope changes, recompute the scope hash and start a fresh risk
+assessment rather than retrying a stale handoff.
+
 `final_review.advance` also validates scope state; when `current_diff_hash`
 differs from the stored hash, provide `current_changed_files` so the next review
 iteration sees the current diff.
@@ -223,8 +231,10 @@ blocking finding remains and never substitutes for acceptance criteria or CI.
 A valid `ship` decision is terminal for final review: it clears remaining
 nonblocking lens work, returns `complete: true`, and schedules no reviewers.
 The calling workflow must still satisfy the ticket's acceptance criteria and
-confirm the latest pushed CI build is running or green before release or new
-work. If that build failed, `ci-failure-follow-up` takes precedence and
+confirm the most recently completed pushed CI build is successful before
+release or new work. A newer queued or running build does not replace that
+result; any current build with a completed failed job activates
+`ci-failure-follow-up`, which takes precedence and
 requires exact diagnosis plus terminal success before release or new work.
 `split` and `escalate` persist a contract-bound terminal hold, preserve
 every completion blocker, schedule no reviewers, and reject any later advance

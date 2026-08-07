@@ -51,7 +51,9 @@ selected delivery mode:
 - For local-only review, use current local verification evidence. Do not require
   a pushed build or create a remote action solely to unlock review.
 - For PR/MR work or a direct-to-trunk revision that has already been pushed,
-  require the latest in-scope pushed build to be running or green before review.
+  require the most recently completed in-scope pushed build to be successful;
+  a newer queued or running build does not replace that evidence. A completed
+  failed job in any current build activates `ci-failure-follow-up` immediately.
 
 A failed pushed build invokes `ci-failure-follow-up` and blocks final review and
 follow-up work until that skill's terminal-success hold is released; a newer
@@ -128,7 +130,8 @@ checkpoint. Apply this contract when `advance_kind` is
   choices are only `ship` or `escalate` because landed work cannot be decomposed
   into delivery tickets. `escalate` requires a nonblank escalation reference.
 - Reject `ship` until every independent delivery gate passes: acceptance
-  criteria are met, the latest pushed CI build is running or green, and every
+  criteria are met, the most recently completed pushed CI build is successful
+  with no current completed failed job, and every
   blocking finding is resolved. Once valid, `ship` is terminal and schedules no
   more reviewers.
 - For unlanded reviews, `split` creates a terminal hold. `escalate` creates one
@@ -409,14 +412,16 @@ policy.
 
 4. Fix valid findings when remediation was requested; for review-only requests,
    report without editing. When the selected mode has an in-scope pushed build,
-   check it again: running or green permits remediation only when no failure
-   hold exists, while a failed build must follow `ci-failure-follow-up` first.
+   check it again: remediation is permitted only when the most recently
+   completed build is successful and no current build has a completed failed
+   job; a failed build must follow `ci-failure-follow-up` first.
    Direct-to-trunk work before its first push and local-only work use fresh local
    verification instead. Any remediation that changes the diff leaves the current
    full-review pass: classify whether RED applies, use it when required, run
    fast unit tests, run a lightweight review, commit and
    push only when the selected mode calls for those actions, confirm any
-   resulting latest pushed build is running or green, then submit exactly one
+   resulting most recently completed pushed build is successful (and no current
+   build has a completed failed job), then submit exactly one
    diff-bound delta risk assessment. Resume only the assignments it returns; do
    not restart unaffected lenses. On the initial advancing call
    that records each disposition, send `caller_decisions` in this shape:

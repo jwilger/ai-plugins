@@ -26,7 +26,8 @@
   push. Wait for that replacement run's terminal success before resuming
   unrelated implementation.
 - **Rationale-bearing Conventional Commits.** Commit between BDD steps once
-  `just ci` is green. Every authored commit needs a concise Conventional Commit
+  `just pre-commit` is green. CI runs the full, expensive gate after the push.
+  Every authored commit needs a concise Conventional Commit
   subject and a non-empty body explaining why the change is necessary, such as
   the motivation, tradeoff, or failure it prevents. A subject-only message, or
   a body that merely repeats what changed, is not complete.

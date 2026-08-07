@@ -129,6 +129,84 @@ fn workflow_guard_allows_harness_named_lifecycle_start_and_read_only_git_before_
 }
 
 #[test]
+fn workflow_guard_allows_non_mutating_research_at_every_lifecycle_phase() {
+    let repository = TempDir::new().expect("temporary repository");
+    git(repository.path(), &["init", "--quiet"]);
+    let state_directory = repository.path().join(".git/development-discipline");
+    fs::create_dir_all(&state_directory).expect("create state directory");
+
+    for phase in [
+        "AwaitingRed",
+        "AwaitingImplementation",
+        "AwaitingReview",
+        "AwaitingDelivery",
+    ] {
+        fs::write(
+            state_directory.join("workflow-state.json"),
+            format!(
+                r#"{{"phase":"{phase}","change_kind":"Production","red_observed":false,"green_observed":false,"clean_review_observed":false}}"#
+            ),
+        )
+        .expect("write lifecycle state");
+
+        let output = guard(
+            repository.path(),
+            r#"{"cwd":".","tool_name":"Bash","tool_input":{"command":"sed -n '1,20p' README.md; git status --short --branch; gh run list --limit 1"}}"#,
+        );
+        assert!(output.status.success(), "phase={phase} output={output:?}");
+    }
+
+    let lookup = guard(
+        repository.path(),
+        r#"{"cwd":".","tool_name":"webrun","tool_input":{"query":"EventCore model checking"}}"#,
+    );
+    assert!(lookup.status.success(), "{lookup:?}");
+}
+
+#[test]
+fn workflow_guard_accepts_raw_test_patch_payload_before_red_but_blocks_raw_production_patch() {
+    let repository = TempDir::new().expect("temporary repository");
+    git(repository.path(), &["init", "--quiet"]);
+    let state_directory = repository.path().join(".git/development-discipline");
+    fs::create_dir_all(&state_directory).expect("create state directory");
+    fs::write(
+        state_directory.join("workflow-state.json"),
+        r#"{"phase":"AwaitingRed","change_kind":"Production","red_observed":false,"green_observed":false,"clean_review_observed":false}"#,
+    )
+    .expect("write lifecycle state");
+
+    let test_patch = guard(
+        repository.path(),
+        r#"{"cwd":".","tool_name":"apply_patch","tool_input":"*** Begin Patch\n*** Update File: tests/workflow_guard.rs\n*** End Patch"}"#,
+    );
+    assert!(test_patch.status.success(), "{test_patch:?}");
+
+    let production_patch = guard(
+        repository.path(),
+        r#"{"cwd":".","tool_name":"apply_patch","tool_input":"*** Begin Patch\n*** Update File: src/workflow.rs\n*** End Patch"}"#,
+    );
+    assert_eq!(production_patch.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&production_patch.stderr)
+        .contains("development_workflow.red_evidence_required"));
+}
+
+#[test]
+fn workflow_guard_blocks_recognized_terminal_mutations_without_a_lifecycle() {
+    let repository = TempDir::new().expect("temporary repository");
+    git(repository.path(), &["init", "--quiet"]);
+
+    for command in ["sed -i 's/old/new/' src/workflow.rs", "rm src/workflow.rs"] {
+        let output = guard(
+            repository.path(),
+            &format!(r#"{{"cwd":".","tool_name":"Bash","tool_input":{{"command":"{command}"}}}}"#),
+        );
+        assert_eq!(output.status.code(), Some(2), "command={command}");
+        assert!(String::from_utf8_lossy(&output.stderr)
+            .contains("development_workflow.lifecycle_required"));
+    }
+}
+
+#[test]
 fn workflow_guard_blocks_post_review_mutations_until_delivery_is_authorized() {
     let repository = TempDir::new().expect("temporary repository");
     assert!(Command::new("git")

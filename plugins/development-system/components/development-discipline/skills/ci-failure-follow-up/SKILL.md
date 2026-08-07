@@ -126,9 +126,11 @@ success releases it.
    may record the matching terminal-success proof through Development Discipline; this is the only
    hold release and does not grant recovery-action authority.
 
-The ordinary green-increment rule permits new work once CI is running or green
-only when no failed-run hold exists. This recovery rule takes precedence after
-a failure.
+Before starting a new task, the ordinary green-increment rule requires the most
+recently completed CI build to be successful. A newer queued or running build
+does not replace that result, but any current build with a completed failed job
+creates this hold immediately. This recovery rule takes precedence after a
+failure.
 
 For example, if a marketplace canary names every loaded plugin but a checker
 still rejects a capability description because it expected a literal skill

@@ -1768,6 +1768,11 @@ fn tools() -> Value {
             "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
         },
         {
+            "name": "workflow.abandon",
+            "description": "Mark an active lifecycle abandoned so a replacement lifecycle can begin without deleting workflow state.",
+            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
+        },
+        {
             "name": "workflow.record_red",
             "description": "Record verified failing focused-test evidence.",
             "inputSchema": {
@@ -19333,7 +19338,7 @@ pre_filter = "project-pre"
         .expect("response");
 
         let tools = response["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 28);
+        assert_eq!(tools.len(), 29);
         assert_eq!(tools[3]["name"], "final_review.confirm_split");
         assert_eq!(
             tools[3]["inputSchema"]["allOf"][0]["else"]["not"]["required"],
@@ -19342,9 +19347,10 @@ pre_filter = "project-pre"
         assert_eq!(tools[5]["name"], "final_review.out_of_scope_report");
         assert_eq!(tools[6]["name"], "final_review.assess_risk");
         assert_eq!(tools[7]["name"], "workflow.start");
-        assert_eq!(tools[14]["name"], "workflow.authorize_delivery");
-        assert_eq!(tools[15]["name"], "workflow.ci_recovery.claim");
-        assert_eq!(tools[27]["name"], "workflow.ci_recovery.resolve");
+        assert_eq!(tools[9]["name"], "workflow.abandon");
+        assert_eq!(tools[15]["name"], "workflow.authorize_delivery");
+        assert_eq!(tools[16]["name"], "workflow.ci_recovery.claim");
+        assert_eq!(tools[28]["name"], "workflow.ci_recovery.resolve");
         assert_eq!(
             tools[0]["inputSchema"]["properties"]["required_clean_iterations"]["minimum"],
             DEFAULT_CLEAN_ITERATIONS
@@ -19711,6 +19717,36 @@ pre_filter = "project-pre"
             risk_assessment_result(&arguments)
                 .expect_err("test evidence must be bound to the reviewed diff"),
             "shared_test_evidence_diff_hash_mismatch=true"
+        );
+    }
+
+    #[test]
+    fn risk_scout_assignment_is_stable_across_timestamp_boundaries() {
+        let arguments = assessed_plan_arguments(
+            "stable-risk-scout",
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let first: Value = serde_json::from_str(
+            &risk_assessment_result(&arguments).expect("first risk assignment"),
+        )
+        .expect("first risk assignment json");
+
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        let second: Value = serde_json::from_str(
+            &risk_assessment_result(&arguments).expect("second risk assignment"),
+        )
+        .expect("second risk assignment json");
+
+        assert_eq!(
+            first["assignments"][0]["assignment_id"],
+            second["assignments"][0]["assignment_id"]
+        );
+        assert_eq!(
+            first["assignments"][0]["scope"]["snapshot_commit"],
+            second["assignments"][0]["scope"]["snapshot_commit"]
         );
     }
 

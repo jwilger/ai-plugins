@@ -102,8 +102,9 @@ starting the next RED test:
 2. Run the lightweight review below. If it causes an edit, repeat the fast tests
    and lightweight review until both are green.
 3. Use `rationale-commit-messages`, then commit and push the green increment.
-4. Check the latest pushed build. Continue when CI is running or green only
-   when no prior failure hold exists. A failed build invokes
+4. Check CI before starting a new task. The most recently **completed** build
+   must be successful. A newer queued or running build does not replace that
+   completed result, but a completed failed job in any current build invokes
    `ci-failure-follow-up`; its exact diagnosis, constrained next push, and
    terminal-success recovery rule blocks follow-up implementation,
    review-finding remediation, and a new ticket.
@@ -114,8 +115,9 @@ diagnose a failure. Do not make every local increment wait for them.
 
 Full review is the ticket-completion gate after the actual acceptance criteria
 are implemented; it is not a prerequisite for preserving each green increment.
-When full review requires a code or guidance edit, first confirm the latest
-pushed build is running or green, classify whether RED applies and use it when
+When full review requires a code or guidance edit, first confirm that the most
+recently completed pushed build is successful and no current build has a
+completed failed job, classify whether RED applies and use it when
 required, then repeat fast
 unit tests, lightweight review, commit and push, and the CI check. Resume full
 review through one diff-bound delta risk assessment rather than restarting
@@ -169,5 +171,5 @@ implementation step connecting them. For exempt work, point to the applicability
 decision and fresh verification; for removals, also show the unchanged-suite
 failure classification. Before starting the next cycle,
 also point to the clean lightweight review or the defended finding accepted by a
-follow-up review, the pushed commit, and a latest pushed build that is running
-or green.
+follow-up review, the pushed commit, and a successful most-recently-completed
+CI build (with no current completed failed job).

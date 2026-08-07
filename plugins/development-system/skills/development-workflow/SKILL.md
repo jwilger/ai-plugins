@@ -26,7 +26,8 @@ documentation edit:
 
 1. Call `workflow.start` with `change_kind: "production"` for changed
    first-party behavior, or `change_kind: "exempt"` only for a documented RED
-   exemption.
+   exemption. An exemption skips only RED: record focused successful
+   verification, complete final review, and authorize delivery normally.
 2. For production work, add or update the focused test, then call
    `workflow.record_red` with the failing command and
    `workflow.authorize_implementation` before editing production code.
@@ -40,9 +41,19 @@ The hook blocks unclassified mutations, production edits before RED, mutations
 while review is required, post-review mutations before delivery authorization,
 and all unrelated work during a shared CI-recovery hold.
 
+If a lifecycle must be superseded before delivery, call `workflow.abandon`.
+It preserves the terminal audit state and releases the repository for a new
+lifecycle; never remove workflow-state files manually.
+
 If pushed CI fails, stop unrelated work and establish one workflow-owned
 CI-recovery owner through Development Discipline before repairing or rerunning
 it. This gate is independent of whether the project uses Tiber for tickets.
+
+Before starting a **new task**, inspect CI through the repository's forge. The
+most recently completed build must be successful. A newer queued or running
+build does not count as a replacement result, but any current build with a
+completed failed job creates the CI-recovery hold immediately. This rule is
+workflow-owned and applies whether or not the project uses Tiber.
 
 For functionality removal, change production code first with tests untouched,
 then run the suite and classify failures. Delete or update only expectations for

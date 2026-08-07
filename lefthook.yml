@@ -3,8 +3,8 @@ no_auto_install: true
 
 pre-commit:
   jobs:
-    - name: fast-unit-tests
-      run: just fast-unit
+    - name: developer-gate
+      run: just pre-commit
 
 post-checkout:
   jobs:

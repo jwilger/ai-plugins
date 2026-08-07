@@ -8,8 +8,10 @@ Scenarios are **black-box**: they exercise the public surface and avoid private
 implementation details. Cross-harness behaviors should cover Claude Code and
 Codex when both harnesses are affected.
 
-**One behavior step at a time:** get one observable behavior green with **all
-gates passing** (`just ci`), **commit**, then move to the next step.
+**One behavior step at a time:** get one observable behavior green with the
+fast developer gate passing (`just pre-commit`), **commit**, then move to the
+next step. Long-running acceptance, mutation, release, browser, and shell
+suites run in CI after the push; run them locally only to diagnose a failure.
 
 Start with RED only when adding or changing first-party production behavior and
 no existing failing test already proves the required change. Do not invent a
