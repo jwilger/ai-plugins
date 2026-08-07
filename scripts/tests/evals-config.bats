@@ -96,6 +96,8 @@ MD
 }
 
 @test "generated behavior config uses native providers and a neutral advisory prefix" {
+  local expected_eval_workspace
+  expected_eval_workspace="$(node -p "require('path').join(require('os').tmpdir(), 'ai-plugins-provider-eval-workspace')")"
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
@@ -113,7 +115,7 @@ MD
   [[ "$output" == *"do not use, mention, or rely on prior conversations"* ]]
   [[ "$output" == *"sandbox_mode: read-only"* ]]
   [[ "$output" == *"skip_git_repo_check: true"* ]]
-  [[ "$output" == *"working_dir: \"/tmp/ai-plugins-provider-eval-workspace\""* ]]
+  [[ "$output" == *"working_dir: \"$expected_eval_workspace\""* ]]
   [[ "$output" != *"working_dir: \"$ROOT/"* ]]
   [[ "$output" == *"skills: all"* ]]
   [[ "$output" == *"setting_sources: []"* ]]
