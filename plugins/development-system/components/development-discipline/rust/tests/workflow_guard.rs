@@ -106,6 +106,29 @@ fn workflow_guard_requires_a_lifecycle_before_any_repository_mutation() {
 }
 
 #[test]
+fn workflow_guard_allows_harness_named_lifecycle_start_and_read_only_git_before_start() {
+    let repository = TempDir::new().expect("temporary repository");
+    assert!(Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(repository.path())
+        .status()
+        .expect("initialize repository")
+        .success());
+
+    let lifecycle_start = guard(
+        repository.path(),
+        r#"{"cwd":".","tool_name":"mcp__development_discipline__workflow_start","tool_input":{"change_kind":"production"}}"#,
+    );
+    assert!(lifecycle_start.status.success());
+
+    let git_status = guard(
+        repository.path(),
+        r#"{"cwd":".","tool_name":"Bash","tool_input":{"command":"git status --short --branch"}}"#,
+    );
+    assert!(git_status.status.success());
+}
+
+#[test]
 fn workflow_guard_blocks_post_review_mutations_until_delivery_is_authorized() {
     let repository = TempDir::new().expect("temporary repository");
     assert!(Command::new("git")

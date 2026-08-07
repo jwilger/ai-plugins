@@ -136,6 +136,8 @@ fn permits_workflow_control(input: &serde_json::Value) -> bool {
         .unwrap_or_default();
     tool_name.contains("workflow.")
         || tool_name.contains("final_review.")
+        || tool_name.contains("__workflow_")
+        || tool_name.contains("__final_review_")
         || permits_recovery(input)
 }
 
@@ -143,6 +145,36 @@ fn is_read_only(input: &serde_json::Value) -> bool {
     matches!(
         input.get("tool_name").and_then(serde_json::Value::as_str),
         Some("Read" | "Glob" | "Grep" | "Search" | "LS")
+    ) || is_read_only_git_command(input)
+}
+
+fn is_read_only_git_command(input: &serde_json::Value) -> bool {
+    let command = input
+        .pointer("/tool_input/command")
+        .or_else(|| input.pointer("/tool_input/cmd"))
+        .and_then(serde_json::Value::as_str);
+    let Some(command) = command else {
+        return false;
+    };
+    if command.contains("$(")
+        || command
+            .chars()
+            .any(|character| matches!(character, ';' | '|' | '&' | '<' | '>' | '\n' | '\r' | '`'))
+    {
+        return false;
+    }
+    let Some(tokens) = shlex::split(command) else {
+        return false;
+    };
+    if tokens
+        .first()
+        .is_none_or(|executable| Path::new(executable).file_name() != Some(OsStr::new("git")))
+    {
+        return false;
+    }
+    matches!(
+        tokens.get(1).map(String::as_str),
+        Some("status" | "diff" | "log" | "show" | "rev-parse" | "ls-files" | "remote")
     )
 }
 
