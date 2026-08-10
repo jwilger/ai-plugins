@@ -1,8 +1,8 @@
-# ADR 0003: Enforce development workflow through semantic capabilities
+# ADR 0003: Separate development workflow into semantic capabilities
 
 ## Status
 
-Accepted.
+Superseded in part by [ADR-0004](0004-tiber-standalone-authority.md).
 
 ## Decision
 
@@ -12,126 +12,73 @@ and direct-argv project commands. It rejects shell entry points, Git/forge
 programs, absolute and parent paths, protected policy/state paths, and symlink
 escapes.
 
-The plugin-wide Development Discipline MCP is read/setup-only. It exposes
-status, preview, and an explicitly confirmed setup application. It does not
-infer effects from tool names, patch content, command strings, shell segments,
-redirects, wrappers, or Git/forge arguments. Tiber is the sole structured
-authority for task-board and CI-recovery facts; Development Discipline consumes
-only Tiber's delivery hold and never keeps a parallel CI incident. `PreToolUse:
-"*"` workflow hooks are removed.
+The plugin-wide Development Discipline MCP exposes repository inspection and
+explicitly confirmed, repository-local setup. Plugin instructions and hooks are
+advisory. They do not establish caller identity, isolate host tools, deny normal
+Codex or Claude capabilities, or authorize repository effects. Setup does not
+generate privileged agents, activation receipts, or repository launch wrappers
+and does not modify global user configuration.
 
-Mutating services are separate capability endpoints: workspace editor, project
-runner, repository-local, repository-remote, and diagnostics. Each must
-revalidate a durable assignment containing role, state epoch, scope IDs,
-command IDs, expiry, and configuration digest. The service registration is
-allowed only when a harness proof establishes both per-agent MCP isolation and
-an OS write boundary. Until then, generated Claude and Codex profiles remain
-read-only and mutation is unavailable rather than falling back to Bash,
-`apply_patch`, raw Git, or forge argv.
+The workspace editor, project runner, repository-local, repository-remote, and
+diagnostic services remain capability-separated reusable components. Each
+revalidates a durable assignment containing role, state epoch, scope IDs,
+command IDs, expiry, and configuration digest. Standalone Tiber owns their
+registration, authorization, isolation, and execution. An ordinary host may
+continue using its normal repository and delivery tools while Tiber is being
+bootstrapped.
 
-Lifecycle state has explicit RED, implementation authorization, implementation,
-verification, review, delivery, and terminal states. A later mutation invalidates
-verification/review evidence and returns to RED. Checkpoints, index ownership,
-and semantic local/remote delivery receipts are implemented only by their
-dedicated repository services.
+Lifecycle state has explicit RED, implementation authorization,
+implementation, verification, review, delivery, and terminal states. A later
+mutation invalidates verification/review evidence and returns to RED.
+Checkpoints, index ownership, and semantic local/remote delivery receipts are
+implemented only by their dedicated repository services.
 
 Accepting RED or GREEN is one checked EventCore decision that emits the
 accepted command evidence, lifecycle transition, and exact Git-index
 checkpoint together. Wrong-test recovery is a separately confirmed two-phase
-semantic operation: `AuthorizeCheckpointAbort` folds the current phase, last
-checkpoint identity/tree, paths changed since that checkpoint, and used
-operation IDs; the repository-local boundary archives those paths under the
-Git common directory and restores only their worktree/index entries;
-`CompleteCheckpointAbort` then records the bounded receipt and returns the
-lifecycle to RED while invalidating later evidence. Preview hashes and index
-trees make concurrent overlap fail closed. Replaying a completed operation
-returns its original receipt. Unrelated staged entries are never replaced by a
-full-index restore.
+semantic operation. Preview hashes and index trees make concurrent overlap
+fail closed, completed operations replay their original receipts, and unrelated
+staged entries are never replaced by a full-index restore.
 
-The live Development Discipline workflow authority uses one project-scoped
+The Development Discipline workflow authority uses one project-scoped
 EventCore stream for lifecycle transitions, assignments, epochs, command
-receipts, and checkpoints. Every remaining workflow fact—including evidence,
-blockers, delivery receipts, and final-review facts—must join an
-EventCore-backed authority rather than a mutable sidecar record.
-Each transition must execute through an EventCore experimental `ModelCommand`
-whose typed `ModelState` data is evolved from its declared stream. Its inputs,
-commands, events, mappings, and state fields must be registered in the strict
-model checker with no accepted assumptions. The complete checker must run for
-every Development Discipline command/state lane and every independently
-governed Tiber command/state lane; a passing model for one helper is not
-evidence for the rest.
+receipts, and checkpoints. Every authoritative workflow fact must join an
+EventCore-backed authority rather than a mutable sidecar record. Each
+transition executes through an EventCore `ModelCommand` whose typed state is
+folded from declared streams and covered by the strict model checker.
 
 An EventCore command names domain intent. Its state contains only the facts
-that specific command needs to decide; folding relevant events mutates that
-state. A successful decision emits typed facts caused by that intent. Generic
-write-envelope commands, event-log command state, whole-workflow snapshots,
-and “state published” events do not meet this requirement. The only domain
-write path is EventCore `execute()`; mutating a projection then diffing it into
-events, manually validating a caller-built event, or appending an arbitrary
-event list is not an equivalent implementation.
+that command needs to decide, and a successful decision emits typed facts
+caused by that intent. Generic write envelopes, whole-workflow snapshots, and
+"state published" events are not substitutes for domain commands. JSON and
+SQLite may exist only as rebuildable projections, one-time import inputs, or
+bounded non-authoritative recovery journals.
 
-EventCore is not modeled or described in aggregate terms. Domain authority is
-expressed by commands whose own purpose-specific state is folded from their
-declared streams.
-
-This is an active migration requirement, not a claim that legacy state is
-already compliant. Until a lane has typed facts, typed command provenance, a
-checked command/state model, and an EventCore-compatible Git-backed authority, it is
-incomplete. JSON/SQLite may exist only as a rebuildable projection, one-time
-legacy import input, or bounded non-authoritative crash-recovery journal. In
-particular, a typed wrapper around a whole-state snapshot is an interoperability
-step, not the final per-transition model.
+Tiber is the sole structured authority for task-board and CI-recovery facts.
+Development Discipline may consume Tiber's delivery hold but never keeps a
+parallel CI incident.
 
 ## Consequences
 
-- Read-only inspection remains useful outside Git, without configuration, and
-  under malformed/stale configuration.
-- Invalid configuration fails closed for mutation and reports typed remediation.
-- Tiber owns CI-recovery CAS and bounded receipt behavior as a repository
-  service concern; it is not an approval bridge for arbitrary shell execution.
-- Ordinary unit and integration tests complement, but do not replace, the
-  strict checked-model gate for each EventCore command/state lane.
-- Privileged Codex profiles are generated only from a fresh live-probe receipt
-  bound to the current plugin version and project configuration. Other
-  harnesses remain read-only until they can supply equivalent evidence.
+- Read-only inspection remains useful outside Git and under absent or malformed
+  configuration.
+- Invalid configuration reports typed remediation but does not disable ordinary
+  host tools.
+- Semantic services remain testable and reusable without pretending that a
+  host plugin supplies an authority boundary.
+- Tiber owns authoritative identities, policies, effects, receipts, recovery,
+  and delivery.
+- Existing boundary-proof, activation, generated-agent, and hook-denial
+  artifacts are obsolete experimental residue and must not be regenerated.
 
-## Boundary-spike record
+## Superseded boundary experiment
 
-On 2026-08-08, a Claude Code 2.1.226 session loaded the public plugin through
-`--plugin-dir`; the repository-local 3.3.0 marketplace plugin was subsequently
-installed and validated successfully. After the MCP command was changed to use
-`${CLAUDE_PLUGIN_ROOT}` and the SessionStart hook was changed to the current
-`{ "hooks": { ... } }` wrapper schema, both Development Discipline and Tiber
-connected. A repeat non-interactive probe on the same Claude version advertised
-only `workspace-reader.{status,list,read,search}` and
-`setup.{preview,apply}` from Development Discipline; it advertised no workspace
-editor, runner, repository, or diagnostics mutation service. This establishes
-the direct read/setup launch surface. Claude nevertheless still exposes its
-built-in Bash, Edit, and Write tools, plus independently governed Tiber
-mutations; the SessionStart command also could not create Claude's per-session
-environment directory under the evaluator's read-only home mount. This is not
-a per-agent containment, caller-identity, or OS write-boundary proof.
-An auto-discovered project subagent also received its built-in read/search
-surface but did not receive an inline privileged MCP registration.
-Development Discipline privileged profiles therefore remain unavailable for
-Claude.
+Earlier experiments used generated Codex agent profiles, a `PreToolUse` denial
+hook, and short-lived proof and activation files. They demonstrated some
+version-specific filtering behavior but not a stable, supported authority
+boundary. Treating that behavior as enforcement made normal Codex work fail
+closed when MCP startup or generated state drifted. ADR-0004 therefore rejects
+plugin-owned enforcement and moves authority into standalone Tiber.
 
-The installed Codex CLI 0.147.0 loads the repository-local plugin. Direct
-ephemeral probes established that the plugin-wide surface contains only reader
-and setup tools, and that a manually supplied specialist configuration can keep
-built-in writes inside a read-only OS sandbox while exposing only its named MCP
-tools. The generated `.codex/agents/*.toml` files use Codex's current standalone
-agent-role schema and are auto-discovered. On 2026-08-10, an authenticated
-disposable-home probe observed the generated implementer receiving
-`workspace-editor` without `repository-remote`, and observed the root agent's
-shell mutation rejected by the plugin PreToolUse hook with
-`development_system.agent_capability_denied`. Codex hook input supplies stable
-`agent_id` and `agent_type`; the hook denies built-in mutation for every role
-and cross-role semantic services, while the MCP independently validates the
-current assignment, role, scope, command, revision, and configuration digest.
-This satisfies the Codex boundary. Setup records the result for thirty days and
-activates it only after generating role profiles. Activation is bound to the
-proof and exact profile digest, and fails closed after expiry, plugin upgrade,
-configuration change, missing activation, or profile tampering. Claude's
-current hook input lacks equivalent subagent identity, so Claude privileged
-profiles remain unavailable.
+The independent code-quality benchmark sandbox is not part of this plugin
+boundary experiment. It remains a purpose-built eval containment mechanism.

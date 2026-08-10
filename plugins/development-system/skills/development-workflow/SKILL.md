@@ -6,8 +6,9 @@ description: Use when making repository changes, debugging, handling review feed
 # Development workflow
 
 Use `workspace-reader.status` before choosing a workflow. Outside Git, without
-configuration, or with invalid configuration, inspection remains available and
-project mutation is unavailable.
+configuration, or with invalid configuration, inspection remains available but
+the plugin cannot provide configured workflow guidance. This advisory state
+does not deny ordinary host mutation capabilities.
 
 For every workflow question, load [workflow
 rules](references/workflow-rules.md). Before editing, classify artifact impact
@@ -44,8 +45,10 @@ before any commit or push. Recheck it after final review for final delivery.
 
 ## Structured lifecycle
 
-When a generated privileged profile is enabled, use only its structured
-services. Never invoke Bash, apply-patch, raw Git, or forge argv as a fallback.
+Follow the structured lifecycle when its semantic services are available.
+During bootstrap, ordinary repository tools may implement and verify work; do
+not claim that plugin instructions or hooks enforce the lifecycle. Tiber will
+make these services authoritative when work moves into the standalone harness.
 
 1. `workflow.start`: `production` for changed first-party shipped behavior;
    `exempt` only for a documented RED exemption.

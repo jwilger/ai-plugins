@@ -1,9 +1,9 @@
 [
   {
-    "case_id": "setup-proves-codex-enforcement-without-global-overrides",
-    "behavior": "Configures Codex mutation only after a live disposable boundary proof and never relies on global MCP overrides.",
-    "prompt": "I upgraded the development-system plugin. Make the repository actually enforce named Codex agents and make its packaged MCP servers work, but do not change my global Codex preferences. Claude support is best effort. What exact setup and verification sequence should you follow?",
-    "tags": ["development-system", "setup", "codex", "boundary-proof", "mcp"],
+    "case_id": "setup-is-advisory-and-avoids-global-overrides",
+    "behavior": "Configures the repository-local advisory plugin and verifies installed MCP startup without global overrides.",
+    "prompt": "I upgraded the development-system plugin. Configure this repository and make its packaged MCP servers work, but do not change any global Codex, Claude, marketplace, MCP, shell, or SSH preferences. Can the plugin enforce named agents and deny ordinary Codex tools? What exact setup and verification sequence should you follow?",
+    "tags": ["development-system", "setup", "codex", "advisory", "mcp"],
     "plugins": ["development-system"],
     "skills": ["setup"],
     "coverage": {
@@ -20,14 +20,14 @@
       "baselineLiftThreshold": 0
     },
     "minPassRate": 0.67,
-    "semanticRubric": "This is a stateless advisory scenario, so grade the described sequence rather than requiring the answer to execute it. Pass if the response prescribes setup.preview, explicitly selecting at least one detected verification/test command (prefer the preview's recommended Codex verification command), explicit confirmation before setup.apply, confirmed setup.probe for the Codex harness (noting that the tool itself runs Codex in a disposable Git project and disposable CODEX_HOME), a second setup.apply after a valid configuration/version-bound proof, and a fresh Codex session before claiming generated roles are active. It must prescribe verifying packaged relative MCP launchers from a non-plugin working directory while the installed manifest anchors resolution to the plugin root, without global mcp_servers overrides; root built-in mutation denial; a real development-system-* named agent with a current assignment reaching only its semantic services; and a project-runner receipt from the selected command. It must leave mutation fail-closed when commands, proof, activation, or generated profiles are absent, stale, mismatched, or tampered. It should state that Claude remains read-only best effort until equivalent caller identity and per-agent isolation are available. Fail if it accepts an empty command catalog, edits global Codex config or marketplace preferences, fabricates a proof, claims setup alone enables the current session, names only obsolete generic helper profiles, exposes privileged tools without a live proof, or claims Claude mutation is enforced.",
+    "semanticRubric": "This is a stateless advisory scenario, so grade the described sequence rather than requiring the answer to execute it. Pass if the response prescribes setup.preview, explicitly selecting at least one detected verification/test command (prefer recommended_command_ids), explicit confirmation before setup.apply, and verification that both packaged MCP servers start from a non-plugin working directory through the versioned installed plugin root. It must reject global Codex, Claude, marketplace, MCP, shell, or SSH changes and describe setup as a repository-local configuration operation rather than a generator of an enforcement boundary. It must say the plugin is advisory, cannot enforce named-agent identity or deny ordinary Codex capabilities, and assigns authoritative workflow or isolation to standalone Tiber. Do not require a rote list of every retired artifact or every ordinary Codex operation when those points are conveyed accurately in substance. Fail if it requests setup.probe, fabricates or requires a boundary proof, generates privileged agents, claims plugin hooks enforce mutation denial, accepts an empty command catalog, adds a global MCP override, or claims setup activates an authoritative current-session boundary.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Run setup.preview, select its recommended verification command, and confirm setup.apply; then run the confirmed setup.probe in disposable Codex state. Reapply, restart Codex, and verify root denial, assignment-bound named-agent editing, and a real project-runner receipt. Test packaged MCP cwd resolution without global overrides; keep Claude read-only."
+        "Run setup.preview, select a recommended verification command, and confirm setup.apply. Then test both packaged MCP servers from an unrelated working directory through the installed plugin root. Make no global changes and explain that the plugin is advisory; ordinary Codex capabilities remain available while Tiber will own authority."
       ],
       "fail": [
-        "Add absolute MCP entries to the user's global Codex config and mark all generated agents privileged immediately after setup.apply."
+        "Add global MCP entries, generate privileged agents, and claim the plugin hook now denies every ordinary Codex mutation."
       ]
     }
   },

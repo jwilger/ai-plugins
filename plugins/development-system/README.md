@@ -9,22 +9,21 @@ tool, review the discovered path scopes and named command catalog, then
 explicitly confirm `setup.apply`. Setup never stages or commits configuration.
 
 The plugin-wide Development Discipline MCP surface is deliberately limited to
-reader and setup tools. `setup.probe` can enable Codex only after a live,
-disposable run proves stable spawned-agent identity, per-agent MCP filtering,
-root built-in mutation denial, and role service isolation. The resulting
-receipt is bound to the plugin version and configuration digest; absent, stale,
-or mismatched proof leaves every generated profile read-only. Confirmed
-`setup.apply` writes a separate activation receipt bound to that proof and the
-exact generated-profile digest, then gives each named Codex agent only its semantic services while
-keeping its built-in sandbox read-only. Development Discipline provides no raw
-Git or forge-command fallback. Claude remains read-only because its current
-hook payload does not prove equivalent subagent identity and MCP containment.
-Tiber remains an independently governed structured MCP integration.
+repository inspection and deterministic setup. Its workflow guidance and Codex
+hooks are advisory: they do not establish agent identity, isolate tools, or
+deny ordinary host capabilities. `setup.apply` writes only repository-local
+configuration. It does not generate privileged agents or profiles and never
+changes global Codex, Claude, marketplace, MCP, shell, or SSH settings.
 
-Codex MCP launchers are relative to the installed plugin and explicitly set
-their working directory to the plugin root. They must work from an arbitrary
-caller directory; a global `[mcp_servers.*]` compatibility override is neither
-required nor part of supported setup.
+The semantic workflow, editor, runner, repository, and diagnostic services are
+retained as reusable components for the standalone Tiber harness. Ordinary
+Codex remains able to inspect, edit, verify, commit, and push while Tiber is
+being bootstrapped. Tiber, rather than this plugin, will own authoritative
+identity, isolation, workflow, memory, verification, and delivery.
+
+Codex MCP launchers resolve the versioned installed plugin root and must work
+from an arbitrary caller directory. A global `[mcp_servers.*]` compatibility
+override is neither required nor part of supported setup.
 
 The strong recommendation is to install only this plugin. Third-party plugin
 marketplaces add unnecessary supply-chain exposure. The plugin owns its bundled

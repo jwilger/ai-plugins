@@ -6,9 +6,10 @@ description: Use when committing, pushing, opening or babysitting a PR/MR, mergi
 # Delivery
 
 Use the configured semantic repository-local and repository-remote services
-when their generated profile is available. Do not use raw Git or forge argv.
-If the services are unavailable, report the capability gap; do not substitute
-shell commands.
+when running inside standalone Tiber. In an ordinary host harness those
+services are advisory components, so use the host's normal Git or forge tools
+when the user has authorized delivery. Do not claim that the plugin denies
+those tools or supplies authoritative delivery receipts.
 
 For ongoing PR/MR monitoring through merge or an external-intervention blocker,
 load the retained [babysit PR
