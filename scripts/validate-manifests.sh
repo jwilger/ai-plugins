@@ -131,17 +131,8 @@ for dir in "$root"/plugins/*/; do
 	      ' "$mcp_file" >/dev/null; then
 	        fail "codex-relative-mcp-command-requires-plugin-root-cwd: $name path=$mcp_ref"
 	      fi
-	      codex_cache_version="$(
-	        { grep -Eo "plugins/cache/ai-plugins/$name/[0-9A-Za-z.+-]+/bin/" "$mcp_file" || true; } \
-	          | sed -E "s#.*$name/([^/]+)/bin/#\\1#" \
-	          | sort -u
-	      )"
-	      if grep -q "plugins/cache/ai-plugins/$name/" "$mcp_file" && [ -z "$codex_cache_version" ]; then
-	        fail "codex-mcp-cache-version-missing: $name"
-	      fi
-	      if [ -n "$codex_cache_version" ]; then
-	        [ "$(wc -l <<<"$codex_cache_version" | tr -d ' ')" = "1" ] || fail "codex-mcp-cache-version-ambiguous: $name versions=$(tr '\n' ',' <<<"$codex_cache_version" | sed 's/,$//')"
-	        [ "$codex_cache_version" = "$cx_version" ] || fail "codex-mcp-cache-version-mismatch: $name mcp=$codex_cache_version plugin=$cx_version"
+	      if grep -q "plugins/cache/" "$mcp_file"; then
+	        fail "codex-mcp-launcher-must-use-plugin-root: $name path=$mcp_ref"
 	      fi
 	    fi
 	  fi

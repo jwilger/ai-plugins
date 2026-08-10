@@ -39,6 +39,7 @@ initialize_codex_plugin_server() {
   local version
   local installed_root
   local command
+  local cwd
   local args
 
   version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
@@ -46,10 +47,15 @@ initialize_codex_plugin_server() {
   mkdir -p "$(dirname "$installed_root")" "$TMPROOT/caller"
   ln -sfn "$ROOT/plugins/development-system" "$installed_root"
   command="$(jq -r ".mcpServers[\"$server\"].command" "$manifest")"
+  cwd="$(jq -r ".mcpServers[\"$server\"].cwd // empty" "$manifest")"
   mapfile -t args < <(jq -r ".mcpServers[\"$server\"].args[]" "$manifest")
 
   (
-    cd "$TMPROOT/caller"
+    if [ "$cwd" = "." ]; then
+      cd "$installed_root"
+    else
+      cd "$TMPROOT/caller"
+    fi
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
       env -i \
         PATH="$PATH" \
@@ -133,6 +139,12 @@ initialize_codex_plugin_server() {
 
 @test "Codex plugin MCP manifest starts every server from an arbitrary caller directory" {
   local manifest="$ROOT/plugins/development-system/.codex-mcp.json"
+
+  [ "$(jq -r '.mcpServers["development-discipline"].command' "$manifest")" = \
+    "./bin/development-discipline-mcp" ]
+  [ "$(jq -r '.mcpServers["development-discipline"].cwd' "$manifest")" = "." ]
+  [ "$(jq -r '.mcpServers.tiber.command' "$manifest")" = "./bin/tiber" ]
+  [ "$(jq -r '.mcpServers.tiber.cwd' "$manifest")" = "." ]
 
   run initialize_codex_plugin_server "$manifest" development-discipline
   [ "$status" -eq 0 ]

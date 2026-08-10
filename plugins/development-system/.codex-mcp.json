@@ -1,25 +1,15 @@
 {
   "mcpServers": {
     "development-discipline": {
-      "command": "/bin/sh",
-      "args": [
-        "-c",
-        "exec \"${CODEX_HOME:-$HOME/.codex}/plugins/cache/ai-plugins/development-system/4.0.0/bin/development-discipline-mcp\" \"$@\"",
-        "development-discipline-mcp",
-        "--service",
-        "plugin-read-only"
-      ],
+      "command": "./bin/development-discipline-mcp",
+      "args": ["--service", "plugin-read-only"],
+      "cwd": ".",
       "description": "Advisory Development System reader and deterministic repository-local setup surface."
     },
     "tiber": {
-      "command": "/bin/sh",
-      "args": [
-        "-c",
-        "exec \"${CODEX_HOME:-$HOME/.codex}/plugins/cache/ai-plugins/development-system/4.0.0/bin/tiber\" \"$@\"",
-        "tiber",
-        "mcp",
-        "stdio"
-      ],
+      "command": "./bin/tiber",
+      "args": ["mcp", "stdio"],
+      "cwd": ".",
       "env": {
         "GIT_SSH_COMMAND": "ssh -F /dev/null"
       },

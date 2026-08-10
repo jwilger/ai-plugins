@@ -218,7 +218,7 @@ manifest_for() {
   [[ "$output" == *"codex-relative-mcp-command-requires-plugin-root-cwd"* ]]
 }
 
-@test "fails when codex MCP cache version differs from plugin version" {
+@test "fails when a Codex MCP launcher hard-codes a versioned cache path" {
   make_plugin alpha alpha alpha 1.2.3 1.2.4
   rm -rf "$ROOT/plugins/alpha/.claude-plugin"
   add_codex_mcp_manifest alpha 1.2.3
@@ -228,15 +228,15 @@ manifest_for() {
   mv "$ROOT/.agents/plugins/marketplace.json.tmp" "$ROOT/.agents/plugins/marketplace.json"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"codex-mcp-cache-version-mismatch"* ]]
+  [[ "$output" == *"codex-mcp-launcher-must-use-plugin-root"* ]]
 }
 
-@test "fails when codex MCP cache launcher uses wildcard version" {
+@test "fails when a Codex MCP launcher searches the cache with a wildcard" {
   make_plugin alpha
   rm -rf "$ROOT/plugins/alpha/.claude-plugin"
   add_codex_mcp_manifest_with_wildcard_cache alpha
   write_manifests "" "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"codex-mcp-cache-version-missing"* ]]
+  [[ "$output" == *"codex-mcp-launcher-must-use-plugin-root"* ]]
 }

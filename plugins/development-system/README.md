@@ -21,7 +21,7 @@ Codex remains able to inspect, edit, verify, commit, and push while Tiber is
 being bootstrapped. Tiber, rather than this plugin, will own authoritative
 identity, isolation, workflow, memory, verification, and delivery.
 
-Codex MCP launchers resolve the versioned installed plugin root and must work
+Codex MCP launchers resolve relative to the installed plugin root and must work
 from an arbitrary caller directory. A global `[mcp_servers.*]` compatibility
 override is neither required nor part of supported setup.
 
