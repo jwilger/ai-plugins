@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="${BASH_SOURCE[0]%/*}"
 plugin_root="$(cd -- "$script_dir/.." && pwd -P)"
+export DEVELOPMENT_SYSTEM_DISCIPLINE_LAUNCHER="${DEVELOPMENT_SYSTEM_DISCIPLINE_LAUNCHER:-$plugin_root/bin/development-discipline-mcp}"
 source "$plugin_root/scripts/detect-target.sh"
 uname_path="$(development_discipline_resolve_uname)" || {
   echo "development-discipline.mcp.missing_uname" >&2

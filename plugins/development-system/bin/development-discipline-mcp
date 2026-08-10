@@ -2,4 +2,5 @@
 set -euo pipefail
 
 plugin_root="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+export DEVELOPMENT_SYSTEM_DISCIPLINE_LAUNCHER="${DEVELOPMENT_SYSTEM_DISCIPLINE_LAUNCHER:-$plugin_root/bin/development-discipline-mcp}"
 exec "$plugin_root/components/development-discipline/bin/development-discipline-mcp" "$@"

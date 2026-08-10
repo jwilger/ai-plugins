@@ -13,7 +13,7 @@ fi
 export RUSTUP_HOME="${RUSTUP_HOME:-$root/.dependencies/rustup}"
 export CARGO_HOME="${CARGO_HOME:-$root/.dependencies/cargo}"
 export PATH="$CARGO_HOME/bin:$PATH"
-target_dir="$root/.dependencies/cargo-target/development-discipline-release"
+target_dir="${CARGO_TARGET_DIR:-$root/.dependencies/cargo-target/development-discipline-release}"
 source_binary="$target_dir/release/development-discipline-mcp"
 flow_script="$root/scripts/tests/development-discipline-mcp-flow.mjs"
 parity_normalizer="$root/scripts/tests/development-discipline-parity-normalize.mjs"

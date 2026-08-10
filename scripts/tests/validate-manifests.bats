@@ -203,6 +203,21 @@ manifest_for() {
   [ "$status" -eq 0 ]
 }
 
+@test "fails when a relative Codex MCP command has no plugin-root cwd" {
+  make_plugin alpha
+  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
+  echo '{"mcpServers":{"alpha":{"command":"./bin/alpha"}}}' >"$ROOT/plugins/alpha/.codex-mcp.json"
+  jq '.mcpServers="./.codex-mcp.json"' \
+    "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
+  mv "$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
+  write_manifests "" "alpha"
+
+  run bash "$SCRIPT" "$ROOT"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"codex-relative-mcp-command-requires-plugin-root-cwd"* ]]
+}
+
 @test "fails when codex MCP cache version differs from plugin version" {
   make_plugin alpha alpha alpha 1.2.3 1.2.4
   rm -rf "$ROOT/plugins/alpha/.claude-plugin"

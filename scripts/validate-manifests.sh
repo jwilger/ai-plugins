@@ -123,6 +123,14 @@ for dir in "$root"/plugins/*/; do
 	      mcp_path="${mcp_ref#./}"
 	      mcp_file="$dir$mcp_path"
 	      [ -f "$mcp_file" ] || fail "missing-codex-mcp-manifest: $name path=$mcp_ref"
+	      if jq -e '
+	        .mcpServers
+	        | to_entries[]
+	        | select(.value.command | type == "string" and startswith("./"))
+	        | select(.value.cwd != ".")
+	      ' "$mcp_file" >/dev/null; then
+	        fail "codex-relative-mcp-command-requires-plugin-root-cwd: $name path=$mcp_ref"
+	      fi
 	      codex_cache_version="$(
 	        { grep -Eo "plugins/cache/ai-plugins/$name/[0-9A-Za-z.+-]+/bin/" "$mcp_file" || true; } \
 	          | sed -E "s#.*$name/([^/]+)/bin/#\\1#" \

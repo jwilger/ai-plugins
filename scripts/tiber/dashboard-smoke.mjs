@@ -4,7 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { chromium } from "playwright";
 
 const root = resolve(new URL("../..", import.meta.url).pathname);
@@ -13,6 +13,9 @@ const tiberBinary = process.env.TIBER_SMOKE_BIN
   ? resolve(root, process.env.TIBER_SMOKE_BIN)
   : null;
 const repo = mkdtempSync(join(tmpdir(), "tiber-dashboard-smoke-"));
+const screenshotPath = process.env.TIBER_DASHBOARD_SCREENSHOT
+  ? resolve(root, process.env.TIBER_DASHBOARD_SCREENSHOT)
+  : join(repo, "tiber-dashboard.png");
 const port = await findFreePort();
 const url = `http://127.0.0.1:${port}/`;
 let server;
@@ -152,9 +155,9 @@ try {
   );
   await assertText(page.locator("[data-link-intercept-status]"), "intercepted");
 
-  mkdirSync(join(root, "output/playwright"), { recursive: true });
+  mkdirSync(dirname(screenshotPath), { recursive: true });
   await page.screenshot({
-    path: join(root, "output/playwright/tiber-dashboard.png"),
+    path: screenshotPath,
     fullPage: true,
   });
 } finally {

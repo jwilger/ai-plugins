@@ -1,5 +1,10 @@
 schema_version = 3
 
+[commands.just-ci]
+argv = ["nix", "develop", "-c", "just", "ci"]
+capability = "verification"
+network = "denied"
+
 [delivery]
 mode = "direct-to-trunk"
 trunk_branch = "main"
@@ -46,9 +51,6 @@ include = ["src/**", "lib/**", "app/**", "**/src/**", "**/lib/**", "**/app/**"]
 [scopes.tests]
 category = "tests"
 include = ["test/**", "tests/**", "spec/**", "specs/**", "**/test/**", "**/tests/**", "**/spec/**", "**/specs/**"]
-
-[tiber]
-max_queued = 5
 
 [worktrees]
 root = ".worktrees"

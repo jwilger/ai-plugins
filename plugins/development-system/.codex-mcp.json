@@ -3,11 +3,16 @@
     "development-discipline": {
       "command": "./bin/development-discipline-mcp",
       "args": ["--service", "plugin-read-only"],
+      "cwd": ".",
       "description": "Read-only Development System reader and explicit setup surface. Privileged services require a generated, harness-proven profile."
     },
     "tiber": {
       "command": "./bin/tiber",
       "args": ["mcp", "stdio"],
+      "cwd": ".",
+      "env": {
+        "GIT_SSH_COMMAND": "ssh -F /dev/null"
+      },
       "env_vars": ["SSH_AUTH_SOCK"],
       "description": "Git-backed task tracking and bounded backlog coordination."
     }

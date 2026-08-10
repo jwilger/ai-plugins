@@ -11,6 +11,11 @@ export XDG_CACHE_HOME="${DEVELOPMENT_DISCIPLINE_RELEASE_XDG_CACHE_HOME:-$root/.d
 export PATH="$CARGO_HOME/bin:$PATH"
 mkdir -p "$ZIG_GLOBAL_CACHE_DIR" "$ZIG_LOCAL_CACHE_DIR" "$XDG_CACHE_HOME"
 
+if [ "$(uname -s)" = "Linux" ] && [ -z "${SDKROOT:-}" ]; then
+  SDKROOT="$(nix build --no-link --print-out-paths "$root#apple-sdk-source")"
+  export SDKROOT
+fi
+
 manifest="$root/plugins/development-system/components/development-discipline/rust/Cargo.toml"
 plugin_root="$root/plugins/development-system/components/development-discipline"
 toolchain_file="$plugin_root/rust/rust-toolchain.toml"

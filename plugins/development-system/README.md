@@ -9,14 +9,22 @@ tool, review the discovered path scopes and named command catalog, then
 explicitly confirm `setup.apply`. Setup never stages or commits configuration.
 
 The plugin-wide Development Discipline MCP surface is deliberately limited to
-reader and setup tools. Project mutation is available only through separate,
-structured Development Discipline services after the selected harness has
-proved per-agent MCP isolation, a stable caller identity, and an OS-enforced
-write boundary. Until that proof is recorded, generated profiles are read-only;
-Development Discipline provides no Bash, `apply_patch`, raw Git, or
-forge-command fallback. Tiber remains an independently governed structured MCP
-integration. A harness's own built-in tools remain outside this plugin's
-authority and are part of the boundary proof.
+reader and setup tools. `setup.probe` can enable Codex only after a live,
+disposable run proves stable spawned-agent identity, per-agent MCP filtering,
+root built-in mutation denial, and role service isolation. The resulting
+receipt is bound to the plugin version and configuration digest; absent, stale,
+or mismatched proof leaves every generated profile read-only. Confirmed
+`setup.apply` writes a separate activation receipt bound to that proof and the
+exact generated-profile digest, then gives each named Codex agent only its semantic services while
+keeping its built-in sandbox read-only. Development Discipline provides no raw
+Git or forge-command fallback. Claude remains read-only because its current
+hook payload does not prove equivalent subagent identity and MCP containment.
+Tiber remains an independently governed structured MCP integration.
+
+Codex MCP launchers are relative to the installed plugin and explicitly set
+their working directory to the plugin root. They must work from an arbitrary
+caller directory; a global `[mcp_servers.*]` compatibility override is neither
+required nor part of supported setup.
 
 The strong recommendation is to install only this plugin. Third-party plugin
 marketplaces add unnecessary supply-chain exposure. The plugin owns its bundled

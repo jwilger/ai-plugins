@@ -1,0 +1,129 @@
+# Tiber Product Requirements
+
+## Product
+
+Tiber is a standalone, local-first development harness for one repository
+owner. OpenAI provides inference through `codex app-server`; Tiber owns the
+authoritative state and execution of development work.
+
+The v1 product and executable are named `tiber`. The existing task board is
+named Tiber Tasks. Running `tiber` without arguments opens the interactive
+terminal UI; native task operations live under `tiber tasks …`.
+
+## Problem
+
+An inference client cannot safely serve as the authority for durable task,
+workflow, tool, memory, repository, verification, or delivery decisions.
+Advisory plugin instructions are useful bootstrap context, but they cannot prove
+agent identity, isolate a process, reconcile an ambiguous write, or resume a
+partially completed delivery after a crash.
+
+Tiber gives an individual developer one inspectable authority for those
+concerns while retaining Codex's subscription-backed inference and familiar
+terminal interaction.
+
+## Target user
+
+The v1 user is a single repository owner developing on x86_64 Linux. Tiber
+trusts that owner, the repository, local environment, configured toolchain,
+PATH, and explicitly configured integrations. It protects against ordinary
+mistakes, malformed or hostile external data, model errors, interruption,
+crashes, stale or corrupt state, partial I/O, ambiguous remote results, and
+remote data loss. Malicious local root, intentional owner bypass, and a
+compromised trusted toolchain are outside the v1 threat model.
+
+## Primary workflows
+
+1. Start `tiber`, resume or create a session, select a Tiber Task, and converse
+   with streaming Codex inference.
+2. Inspect the model's proposed tools, apply Tiber policy and owner approvals,
+   execute authorized effects, and retain durable receipts.
+3. Delegate bounded assignments to typed agents while Tiber owns identity,
+   context, budgets, cancellation, and no-progress termination.
+4. Inspect repository state, edit in an assignment boundary, run isolated
+   processes, verify behavior, review changes, and reconcile failures.
+5. Commit, push, open or update a pull request, recover CI, and resume delivery
+   after restart from EventCore facts.
+6. Use native Tiber Tasks and development-workflow services, third-party MCP
+   integrations, and optional Hindsight memory without internal MCP loopback.
+
+## Terminal experience
+
+The TUI preserves the useful Codex transcript, streaming, composer, Plan mode,
+`/side`, `/btw`, resume, diff display, status bar, and status card
+interactions. It adds workflow phase, active task, assignment, agent, gate,
+memory, and integration health plus `/tasks`, `/memory`, and
+`/integrations`. UI state is a projection; it never grants authority.
+
+## Functional requirements
+
+- Create invariant-carrying agent, session, assignment, attempt, effect, task,
+  and workflow identities.
+- Construct bounded context with provenance and explicit trust labels.
+- Use `codex app-server` as the sole inference transport and delegate
+  login, credential storage, refresh, account selection, endpoint selection,
+  headers, streaming, and authentication errors to it.
+- Run app-server with a Tiber-owned isolated Codex home that cannot load the
+  user's Codex plugins, hooks, agents, MCP servers, tools, or global settings.
+- Parse streamed text and structured tool requests; never let the model execute
+  a tool.
+- Own Tiber Tasks and development-workflow operations through native services.
+- Execute configured third-party MCP servers through a harness-owned client.
+- Provide a swappable memory port with Hindsight HTTP API 0.8.3 as the first
+  adapter.
+- Isolate repository and process effects behind an x86_64 Linux platform port.
+- Record durable facts and receipts for decisions, mutations, tests, memory,
+  retries, cancellation, reconciliation, verification, and delivery.
+- Resume safely after cancellation, interruption, crash, stale state, corrupt
+  state, concurrency, or an ambiguous remote result.
+
+## Non-functional requirements
+
+- Functional core and imperative shell with explicit serializable trampoline
+  steps; no closure continuations.
+- Semantic types at domain boundaries and typed expected errors with stable
+  codes, structured context, causal chains, and retryability.
+- Explicit bounds for attempts, elapsed time, tokens, tool calls, cost where
+  applicable, and no-progress detection.
+- EventCore commands for durable decisions, command-specific folds, and no
+  unconsumed provenance in checked models.
+- Rust Edition 2024, forbidden unsafe code, strict workspace Clippy inheritance,
+  and warnings denied in CI.
+- Secrets never read, copied, decoded, logged, retained, or included in traces.
+- Observable model, context, policy, tool, memory, and delivery decisions with
+  sensitive data redacted.
+- Reproducible x86_64 Linux packaging and clean-machine installation.
+
+## Acceptance criteria
+
+- A deterministic fixture and opt-in live smoke test prove isolated app-server
+  conversation streaming and inert tool calls.
+- No undeclared app-server operation is advertised or executable. Failure of
+  this contract stops the roadmap after the spike and amends the inference ADR.
+- Native tasks, workflow, repository, process, verification, and delivery
+  services operate without MCP or shell loopback into Tiber.
+- MCP denial, cancellation, ambiguous-write, hostile-input, and capability
+  negotiation cases pass.
+- Hindsight fake-server tests and opt-in live tests prove scoped memory,
+  provenance budgets, cancellation, and nonfatal failure behavior.
+- Crash/restart, stale/corrupt state, concurrency, and clean-machine packaging
+  cases pass.
+- Formatting, strict Clippy, behavior, EventCore, semantic-type property,
+  trampoline, mutation, TUI snapshot, secret-leak, and stochastic eval gates
+  pass.
+- Every roadmap increment is reviewed, committed with a rationale-bearing
+  Conventional Commit, pushed, confirmed green in CI, and closed in Tiber.
+
+## Non-goals
+
+- Platforms other than x86_64 Linux in v1.
+- Direct OpenAI Responses API or Anthropic/Claude inference providers.
+- `codex --remote` or Codex runtime authority.
+- Installing or globally configuring Codex, Claude, MCP, Hindsight, shells, or
+  SSH.
+- MCP sampling, elicitation, or MCP tasks in the initial integration.
+- Hindsight `reflect` as the primary agent reasoning mechanism.
+- Compatibility aliases, deprecated task commands, transition crates, or a
+  command/package migration window.
+- Defending against malicious local root, intentional owner self-bypass, or a
+  compromised trusted local toolchain.

@@ -16,6 +16,19 @@
       ];
     in
     {
+      packages = nixpkgs.lib.genAttrs supportedSystems (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        {
+          # cargo-zigbuild needs an SDK when linking Darwin targets from Linux.
+          # Expose the pinned, platform-independent payload without attempting
+          # to build Nixpkgs' Darwin-only apple-sdk wrapper derivation.
+          apple-sdk-source = pkgs.apple-sdk_15.src;
+        }
+      );
+
       devShells = nixpkgs.lib.genAttrs supportedSystems (
         system:
         let
@@ -32,6 +45,7 @@
             (with pkgs; [
               bash
               git
+              openssh
               jq
               ripgrep
               fd

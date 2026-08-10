@@ -7551,7 +7551,18 @@ pub fn run_named_command_at(
         .args(&argv[1..])
         .current_dir(root)
         .env_clear()
-        .env("TMPDIR", &runner_scratch.0);
+        .env("HOME", &runner_scratch.0)
+        .env("TMPDIR", &runner_scratch.0)
+        .env("CARGO_TARGET_DIR", runner_scratch.0.join("cargo-target"))
+        .env("GIT_AUTHOR_EMAIL", "runner@development-system.invalid")
+        .env("GIT_AUTHOR_NAME", "Development System Runner")
+        .env("GIT_COMMITTER_EMAIL", "runner@development-system.invalid")
+        .env("GIT_COMMITTER_NAME", "Development System Runner")
+        .env("NPM_CONFIG_CACHE", runner_scratch.0.join("npm-cache"))
+        .env("NPM_CONFIG_PREFIX", runner_scratch.0.join("npm-prefix"))
+        .env("XDG_CACHE_HOME", runner_scratch.0.join("cache"))
+        .env("XDG_CONFIG_HOME", runner_scratch.0.join("config"))
+        .env("XDG_STATE_HOME", runner_scratch.0.join("state"));
     for name in &command.environment {
         if let Some(value) = std::env::var_os(name) {
             process.env(name, value);
@@ -9309,6 +9320,105 @@ capability="tests"
     }
 
     #[test]
+    fn runner_isolates_home_and_xdg_state_in_its_writable_scratch() {
+        let root = TempDir::new().expect("repository");
+        Command::new("git")
+            .args(["init", "--quiet", root.path().to_str().expect("path")])
+            .status()
+            .expect("git init");
+        let config = ProjectConfig::parse(
+            r#"schema_version=3
+[scopes.tests]
+category="tests"
+include=["tests/**"]
+[commands.environment]
+argv=["/usr/bin/env"]
+capability="tests"
+"#,
+        )
+        .expect("config");
+        fs::write(
+            root.path().join(CONFIG_FILE),
+            toml::to_string(&config).expect("config"),
+        )
+        .expect("write");
+        activate_test_workflow(root.path(), 1);
+        issue_assignment_at(
+            root.path(),
+            Assignment {
+                id: "runner-environment".to_string(),
+                role: Role::TestAuthor,
+                state_epoch: 1,
+                scope_ids: BTreeSet::new(),
+                command_ids: ["environment".to_string()].into_iter().collect(),
+                expires_at: 10,
+                configuration_digest: config.digest(),
+            },
+        )
+        .expect("issue");
+
+        let result = run_named_command_at(
+            root.path(),
+            "runner-environment",
+            Role::TestAuthor,
+            "environment",
+            &BTreeMap::new(),
+            9,
+        )
+        .expect("run");
+
+        assert!(result.succeeded, "{}", result.stderr);
+        let values = result
+            .stdout
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .collect::<BTreeMap<_, _>>();
+        let home = values.get("HOME").expect("isolated HOME");
+        assert_eq!(values.get("TMPDIR"), Some(home));
+        assert_eq!(
+            values.get("CARGO_TARGET_DIR"),
+            Some(&format!("{home}/cargo-target").as_str())
+        );
+        assert_eq!(
+            values.get("NPM_CONFIG_CACHE"),
+            Some(&format!("{home}/npm-cache").as_str())
+        );
+        assert_eq!(
+            values.get("NPM_CONFIG_PREFIX"),
+            Some(&format!("{home}/npm-prefix").as_str())
+        );
+        assert_eq!(
+            values.get("GIT_AUTHOR_NAME"),
+            Some(&"Development System Runner")
+        );
+        assert_eq!(
+            values.get("GIT_AUTHOR_EMAIL"),
+            Some(&"runner@development-system.invalid")
+        );
+        assert_eq!(
+            values.get("GIT_COMMITTER_NAME"),
+            Some(&"Development System Runner")
+        );
+        assert_eq!(
+            values.get("GIT_COMMITTER_EMAIL"),
+            Some(&"runner@development-system.invalid")
+        );
+        assert_eq!(
+            values.get("XDG_CACHE_HOME"),
+            Some(&format!("{home}/cache").as_str())
+        );
+        assert_eq!(
+            values.get("XDG_CONFIG_HOME"),
+            Some(&format!("{home}/config").as_str())
+        );
+        assert_eq!(
+            values.get("XDG_STATE_HOME"),
+            Some(&format!("{home}/state").as_str())
+        );
+        assert_ne!(*home, std::env::var("HOME").unwrap_or_default());
+    }
+
+    #[test]
     fn runner_accepts_only_declared_typed_whole_argument_parameters() {
         let root = TempDir::new().expect("repository");
         Command::new("git")
@@ -9491,11 +9601,11 @@ path="string"
 category="tests"
 include=["tests/**"]
 [commands.denied]
-argv=["/run/current-system/sw/bin/ping", "-c", "1", "127.0.0.1"]
+argv=["/run/current-system/sw/bin/readlink", "/proc/self/ns/net"]
 capability="tests"
 network="denied"
 [commands.allowed]
-argv=["/run/current-system/sw/bin/ping", "-c", "1", "127.0.0.1"]
+argv=["/run/current-system/sw/bin/readlink", "/proc/self/ns/net"]
 capability="tests"
 network="allowed"
 "#,
@@ -9531,10 +9641,7 @@ network="allowed"
             8,
         )
         .expect("denied-network receipt");
-        assert!(
-            !denied.succeeded,
-            "network namespace unexpectedly reachable"
-        );
+        assert!(denied.succeeded, "{}", denied.stderr);
         let allowed = run_named_command_at(
             root.path(),
             "network-runner",
@@ -9545,6 +9652,12 @@ network="allowed"
         )
         .expect("allowed-network receipt");
         assert!(allowed.succeeded, "{}", allowed.stderr);
+        let parent_namespace = fs::read_link("/proc/self/ns/net")
+            .expect("parent network namespace")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(allowed.stdout.trim(), parent_namespace);
+        assert_ne!(denied.stdout.trim(), parent_namespace);
     }
 
     #[test]

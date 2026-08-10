@@ -10,7 +10,7 @@ MCP when available and its CLI otherwise.
 
 Load the matching retained contract before answering:
 
-- Creating or admitting a ticket, including backlog-capacity decisions: [new
+- Creating or admitting a ticket: [new
   task](../../components/tiber/skills/new-task/SKILL.md).
 - Search/history, transitions, dependencies, acceptance criteria, validation,
   current-HEAD trailers, dashboard, scaffold/install, CI-recovery interaction,
@@ -25,10 +25,10 @@ nor rejected, treat the outcome as ambiguous: stop every further mutation and
 use structured `tiber sync` to reconcile that exact pending invocation. Never
 force-push, rewrite, or manually reconcile the authoritative `tiber` branch.
 
-Keep one active ticket and at most `[tiber].max_queued` backlog tickets. Rank the
-whole queue strictly by user pain, frequency, severity, blocking impact,
-leverage, confidence, cost, and overlap. Do not create overflow or shadow
-backlogs.
+Keep one active ticket and rank the whole queue strictly by user pain,
+frequency, severity, blocking impact, leverage, confidence, cost, and overlap.
+An optional engine-level capacity remains available to other repositories, but
+this repository does not configure an arbitrary backlog limit.
 
 Before admitting a candidate, call structured `tiber.search` across `backlog`,
 `in-progress`, `done`, and `abandoned`; combine genuine overlap or reject a

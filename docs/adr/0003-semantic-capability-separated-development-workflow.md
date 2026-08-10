@@ -91,8 +91,9 @@ step, not the final per-transition model.
   service concern; it is not an approval bridge for arbitrary shell execution.
 - Ordinary unit and integration tests complement, but do not replace, the
   strict checked-model gate for each EventCore command/state lane.
-- The initial implementation intentionally withholds privileged profiles until
-  the disposable Claude/Codex boundary spike supplies evidence.
+- Privileged Codex profiles are generated only from a fresh live-probe receipt
+  bound to the current plugin version and project configuration. Other
+  harnesses remain read-only until they can supply equivalent evidence.
 
 ## Boundary-spike record
 
@@ -115,18 +116,22 @@ surface but did not receive an inline privileged MCP registration.
 Development Discipline privileged profiles therefore remain unavailable for
 Claude.
 
-The installed Codex CLI 0.147.0 loads the repository-local 3.3.0 plugin. Direct
+The installed Codex CLI 0.147.0 loads the repository-local plugin. Direct
 ephemeral probes established that the plugin-wide surface contains only reader
 and setup tools, and that a manually supplied specialist configuration can keep
 built-in writes inside a read-only OS sandbox while exposing only its named MCP
 tools. The generated `.codex/agents/*.toml` files use Codex's current standalone
-agent-role schema and are auto-discovered. However, the authenticated live
-spawn of the generated test-author failed inside the collaboration thread
-before producing a trustworthy child tool inventory; the fallback report did
-not contain the configured specialist MCP services. A valid configuration file
-and a manually loaded role do not prove the spawned-role boundary. Per-agent
-MCP filtering and stable caller identity therefore remain unproved, and Codex
-privileged profiles remain unavailable. A successful authenticated spawned-role
-probe remains necessary
-for installed-marketplace testing; Codex remains read-only and Development
-Discipline mutation remains unavailable.
+agent-role schema and are auto-discovered. On 2026-08-10, an authenticated
+disposable-home probe observed the generated implementer receiving
+`workspace-editor` without `repository-remote`, and observed the root agent's
+shell mutation rejected by the plugin PreToolUse hook with
+`development_system.agent_capability_denied`. Codex hook input supplies stable
+`agent_id` and `agent_type`; the hook denies built-in mutation for every role
+and cross-role semantic services, while the MCP independently validates the
+current assignment, role, scope, command, revision, and configuration digest.
+This satisfies the Codex boundary. Setup records the result for thirty days and
+activates it only after generating role profiles. Activation is bound to the
+proof and exact profile digest, and fails closed after expiry, plugin upgrade,
+configuration change, missing activation, or profile tampering. Claude's
+current hook input lacks equivalent subagent identity, so Claude privileged
+profiles remain unavailable.

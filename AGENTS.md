@@ -149,15 +149,14 @@ Port allocation is stable per worktree and recorded under Git's common
 directory. Override defaults with `WORKTREE_PORT_BASE_HTTP`,
 `WORKTREE_PORT_BASE_PG`, and `WORKTREE_PORT_STRIDE` before bootstrap if needed.
 
-## Backlog capacity management
+## Backlog management
 
-Use Tiber as the repository task board and manage queued work as a deliberately
-bounded backlog.
+Use Tiber as the repository task board. This repository intentionally leaves
+Tiber's optional backlog-capacity setting unset; there is no arbitrary numeric
+limit on worthwhile queued work.
 
-- The active ticket (`in-progress`) does not count toward backlog capacity. A
-  queued ticket is a ticket in `backlog` status.
-- Keep at most five queued tickets. Do not maintain an overflow, icebox, shadow
-  backlog, or other hidden queue.
+- A queued ticket is a ticket in `backlog` status. The active ticket is
+  `in-progress`.
 - Discovery identifies a candidate; it does not create an obligation to admit
   or retain a ticket.
 - Compare candidates by user pain and frequency, severity, blocking impact,
@@ -166,18 +165,11 @@ bounded backlog.
 - Keep queued tickets in one strict priority order with no ties. Re-rank the
   complete queue whenever a ticket is admitted, combined, displaced, completed,
   reopened, or materially re-scoped; do not use creation order as priority.
-- When fewer than five tickets are queued, admit a worthwhile candidate
-  normally. At capacity, evaluate a candidate before creating a ticket and
-  choose exactly one explicit outcome: replace a lower-value queued ticket;
-  combine genuinely overlapping tickets; or reject the candidate without
-  creating a ticket. Record a concise reason for every combination,
-  displacement, or rejection.
-- When the backlog falls to two or fewer queued tickets, perform a replenishment
-  review. Inspect durable memories, recent usage friction, eval failures, and
-  recurring workarounds for worthwhile candidates. It is valid to add nothing.
+- Admit worthwhile, materially distinct candidates and combine or reject
+  overlapping work. Record a concise reason for every combination or rejection.
 - Blocking defects and in-model security issues required to complete the active
   ticket remain causal work within that ticket. Do not create separate backlog
-  tickets merely to evade the cap.
+  tickets merely to fragment that causal work.
 - Work on one ticket at a time. Before starting a queued ticket, move it to
   `in-progress`; after completing it, select the highest-priority queued ticket
   whose prerequisites are satisfied. If the highest-priority ticket is blocked,

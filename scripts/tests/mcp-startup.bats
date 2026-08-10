@@ -111,7 +111,7 @@ initialize_server() {
   run initialize_server "$command" --service plugin-read-only
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Mutation services are intentionally unavailable"* ]]
+  [[ "$output" == *"confirmed setup.probe to prove and enable the Codex named-agent boundary"* ]]
   [[ "$output" != *'"name":"final_review.plan"'* ]]
   [[ "$output" != *'"name":"workflow.start"'* ]]
 }
