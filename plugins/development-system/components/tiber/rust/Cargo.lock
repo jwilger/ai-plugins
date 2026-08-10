@@ -1119,6 +1119,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "tempfile",
  "tiber-git",
  "tiber-mcp",
  "tiber-server",

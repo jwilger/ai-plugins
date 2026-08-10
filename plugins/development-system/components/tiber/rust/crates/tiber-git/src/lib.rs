@@ -2331,7 +2331,10 @@ where
     }
 }
 
-fn event_store_error(_error: impl std::fmt::Display) -> Error {
+fn event_store_error(error: impl std::fmt::Display) -> Error {
+    if std::env::var_os("TIBER_EVENT_STORE_DIAGNOSTICS").is_some() {
+        eprintln!("tiber.event_store_failure source={error}");
+    }
     Error::Parse("event_store_failed source_redacted=true".to_string())
 }
 
@@ -7993,17 +7996,57 @@ impl GitRepository {
     }
 
     fn discover() -> Result<Self, Error> {
-        if let Ok(root) = git_output(["rev-parse", "--show-toplevel"], None) {
+        let current_directory_error = match Self::discover_from(None) {
+            Ok(repository) => return Ok(repository),
+            Err(error) => error,
+        };
+
+        if let Some(configured_root) = std::env::var_os("TIBER_REPOSITORY_ROOT") {
+            let configured_root = PathBuf::from(configured_root);
+            return Self::discover_from(Some(&configured_root)).map_err(|error| {
+                Error::Usage(format!(
+                    "tiber.repository_root_invalid source=TIBER_REPOSITORY_ROOT error={error}"
+                ))
+            });
+        }
+
+        let launched_from_plugin_root = std::env::current_dir()
+            .map(|directory| directory.join(".codex-plugin/plugin.json").is_file())
+            .unwrap_or(false);
+        if launched_from_plugin_root {
+            if let Some(inherited_working_directory) = std::env::var_os("PWD") {
+                let inherited_working_directory = PathBuf::from(inherited_working_directory);
+                if inherited_working_directory.is_absolute() {
+                    if let Ok(repository) = Self::discover_from(Some(&inherited_working_directory))
+                    {
+                        return Ok(repository);
+                    }
+                }
+            }
+        }
+
+        Err(current_directory_error)
+    }
+
+    fn discover_from(working_directory: Option<&Path>) -> Result<Self, Error> {
+        if let Ok(root) = git_output(["rev-parse", "--show-toplevel"], working_directory) {
             return Ok(Self::at(PathBuf::from(root.trim())));
         }
 
-        let git_dir = git_output(["rev-parse", "--absolute-git-dir"], None).map_err(|_| {
+        let git_dir = git_output(
+            ["rev-parse", "--absolute-git-dir"],
+            working_directory,
+        )
+        .map_err(|_| {
                 Error::Usage(
-                    "tiber.repository_not_found action=\"run from a repository checkout or configure the integration with an explicit repository root\""
+                    "tiber.repository_not_found action=\"run from a repository checkout or configure TIBER_REPOSITORY_ROOT\""
                         .to_string(),
                 )
             })?;
-        if let Ok(root) = git_output(["config", "--path", "--get", "core.worktree"], None) {
+        if let Ok(root) = git_output(
+            ["config", "--path", "--get", "core.worktree"],
+            working_directory,
+        ) {
             let root = PathBuf::from(root.trim());
             let root = if root.is_absolute() {
                 root
@@ -8014,7 +8057,7 @@ impl GitRepository {
         }
 
         Err(Error::Usage(
-            "tiber.repository_root_unresolved action=\"run from a repository checkout or configure the integration with an explicit repository root\""
+            "tiber.repository_root_unresolved action=\"run from a repository checkout or configure TIBER_REPOSITORY_ROOT\""
                 .to_string(),
         ))
     }

@@ -13,6 +13,9 @@ tiber-mcp = { path = "../tiber-mcp" }
 tiber-server = { path = "../tiber-server" }
 tokio = { version = "1", features = ["net", "rt-multi-thread"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 [[bin]]
 name = "tiber"
 path = "src/main.rs"

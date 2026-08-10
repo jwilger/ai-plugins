@@ -46,6 +46,8 @@ const PUBLICATION_RETRIES: usize = 3;
 const STAGE_LOAD_RETRIES: usize = 8;
 const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const PENDING_VERSION: u32 = 1;
+const EVENT_STORE_GIT_NAME: &str = "Tiber Event Store";
+const EVENT_STORE_GIT_EMAIL: &str = "tiber-event-store@localhost.invalid";
 
 /// A closed set of independent Git authorities supported by this EventCore
 /// adapter.  Keeping this an enum rather than accepting ref names from a
@@ -750,8 +752,18 @@ fn create_candidate(
     if let Some(base) = &stage.base {
         arguments.extend(["-p", base.as_str()]);
     }
+    let commit_environment = [
+        ("GIT_INDEX_FILE", index.as_os_str()),
+        ("GIT_AUTHOR_NAME", OsStr::new(EVENT_STORE_GIT_NAME)),
+        ("GIT_AUTHOR_EMAIL", OsStr::new(EVENT_STORE_GIT_EMAIL)),
+        ("GIT_COMMITTER_NAME", OsStr::new(EVENT_STORE_GIT_NAME)),
+        ("GIT_COMMITTER_EMAIL", OsStr::new(EVENT_STORE_GIT_EMAIL)),
+    ];
     let candidate = output_text(require_success(git_with(
-        repository, None, index_env, arguments,
+        repository,
+        None,
+        commit_environment,
+        arguments,
     )?)?);
     let _ = fs::remove_file(index);
     Ok(candidate)
@@ -1057,10 +1069,11 @@ fn store_failure(operation: Operation) -> EventStoreError {
 
 fn diagnosed_store_failure(
     operation: Operation,
-    _error: &GitEventStoreOpenError,
+    error: &GitEventStoreOpenError,
 ) -> EventStoreError {
-    #[cfg(test)]
-    eprintln!("tiber_git.event_store_failure operation={operation:?} source={_error}");
+    if std::env::var_os("TIBER_EVENT_STORE_DIAGNOSTICS").is_some() {
+        eprintln!("tiber_git.event_store_failure operation={operation:?} source={error}");
+    }
     store_failure(operation)
 }
 
@@ -1109,6 +1122,38 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    #[tokio::test]
+    async fn event_transactions_use_the_adapter_owned_git_identity() {
+        let _serial = TEST_SERIAL.lock().await;
+        let directory = TempDir::new().unwrap();
+        let repository = directory.path().join("repository");
+        require_git(directory.path(), &["init", repository.to_str().unwrap()]);
+
+        let stream = StreamId::try_new("tiber:task:adapter-identity").unwrap();
+        GitEventStore::open(&repository)
+            .unwrap()
+            .append_events(writes(&stream))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            require_git(
+                &repository,
+                &[
+                    "show",
+                    "--no-patch",
+                    "--no-show-signature",
+                    "--format=%an <%ae>|%cn <%ce>",
+                    "refs/heads/tiber",
+                ],
+            ),
+            format!(
+                "{EVENT_STORE_GIT_NAME} <{EVENT_STORE_GIT_EMAIL}>|\
+                 {EVENT_STORE_GIT_NAME} <{EVENT_STORE_GIT_EMAIL}>"
+            )
+        );
     }
 
     #[tokio::test]

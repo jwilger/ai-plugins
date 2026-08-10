@@ -7,6 +7,43 @@ use std::process::{Command, Stdio};
 use support::{assert_success, task_stem, TempRepo};
 
 #[test]
+fn mcp_uses_inherited_pwd_when_the_host_sets_an_installed_plugin_cwd() {
+    let repo = TempRepo::initialized();
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Inherited repository root"]));
+    let plugin_root = tempfile::tempdir().expect("create installed plugin root");
+    std::fs::create_dir_all(plugin_root.path().join(".codex-plugin"))
+        .expect("create Codex plugin manifest directory");
+    std::fs::write(
+        plugin_root.path().join(".codex-plugin/plugin.json"),
+        r#"{"name":"development-system"}"#,
+    )
+    .expect("write Codex plugin manifest");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(plugin_root.path())
+        .env("PWD", repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tiber MCP from installed plugin root");
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let mut stdout = BufReader::new(child.stdout.take().expect("mcp stdout should be available"));
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.list","arguments":{"status":"backlog"}}}"#,
+    );
+    let response = read_message(&mut stdout);
+
+    assert!(response.contains("Inherited repository root"));
+    assert!(!response.contains("tiber.repository_not_found"));
+    drop(stdin);
+    assert!(child.wait().expect("wait for mcp server").success());
+}
+
+#[test]
 fn mcp_admissions_return_the_shared_backlog_capacity_refusal() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));

@@ -9,20 +9,31 @@ target="$(detect_tiber_target)" || {
   exit 1
 }
 
-cargo build \
-  --release \
-  --manifest-path "$root/plugins/development-system/components/tiber/rust/Cargo.toml" \
-  --bin tiber
+manifest="$root/plugins/development-system/components/tiber/rust/Cargo.toml"
+if [ "$target" = x86_64-unknown-linux-gnu ]; then
+  cargo zigbuild \
+    --release \
+    --manifest-path "$manifest" \
+    --bin tiber \
+    --target "$target"
+  release_subdirectory="$target/release"
+else
+  cargo build \
+    --release \
+    --manifest-path "$manifest" \
+    --bin tiber
+  release_subdirectory=release
+fi
 
 target_dir="$(
   cargo metadata \
-    --manifest-path "$root/plugins/development-system/components/tiber/rust/Cargo.toml" \
+    --manifest-path "$manifest" \
     --format-version 1 \
     --no-deps |
     jq -r .target_directory
 )"
 destination="$root/plugins/development-system/components/tiber/dist/$target/tiber"
 mkdir -p "$(dirname "$destination")"
-cp "$target_dir/release/tiber" "$destination"
+cp "$target_dir/$release_subdirectory/tiber" "$destination"
 chmod 0755 "$destination"
 echo "built $destination"
