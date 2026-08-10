@@ -314,7 +314,7 @@ impl EventStore for GitEventStore {
         let _common_operation = self
             .lock_common_operation()
             .await
-            .map_err(|_| store_failure(Operation::AppendEvents))?;
+            .map_err(|error| diagnosed_store_failure(Operation::AppendEvents, &error))?;
         if self.pending_publication_path().exists() {
             return Err(store_failure(Operation::AppendEvents));
         }
@@ -325,10 +325,10 @@ impl EventStore for GitEventStore {
             .map(|(stream_id, version)| (stream_id.clone(), *version))
             .collect::<Vec<_>>();
         let stage = load_stage_with_retry(&self.repository, &self.common_directory, self.authority)
-            .map_err(|_| store_failure(Operation::AppendEvents))?;
+            .map_err(|error| diagnosed_store_failure(Operation::AppendEvents, &error))?;
         let appended = stage.store.append_events(writes).await?;
         let candidate = create_candidate(&self.repository, &stage, self.authority)
-            .map_err(|_| store_failure(Operation::AppendEvents))?;
+            .map_err(|error| diagnosed_store_failure(Operation::AppendEvents, &error))?;
         #[cfg(test)]
         run_before_initial_publish_hook(&self.repository);
 
@@ -1053,6 +1053,15 @@ fn output_text(output: Output) -> String {
 
 fn store_failure(operation: Operation) -> EventStoreError {
     EventStoreError::StoreFailure { operation }
+}
+
+fn diagnosed_store_failure(
+    operation: Operation,
+    _error: &GitEventStoreOpenError,
+) -> EventStoreError {
+    #[cfg(test)]
+    eprintln!("tiber_git.event_store_failure operation={operation:?} source={_error}");
+    store_failure(operation)
 }
 
 #[cfg(test)]
