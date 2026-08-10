@@ -22241,6 +22241,16 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
 mod tests {
     use super::*;
 
+    fn test_executable(program: &str) -> PathBuf {
+        std::env::var_os("PATH")
+            .and_then(|path| {
+                std::env::split_paths(&path)
+                    .map(|directory| directory.join(program))
+                    .find(|candidate| candidate.is_file())
+            })
+            .unwrap_or_else(|| panic!("test executable {program} should be available on PATH"))
+    }
+
     #[test]
     fn internally_tagged_newtype_event_preserves_flat_payload_fields() {
         #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -36087,9 +36097,15 @@ pre_filter = "project-pre"
     fn zero_assignment_plan_is_complete_and_routes_directly_to_clean_review() {
         let mut coordinator = ReviewCoordinator::default();
         let project_root = test_project_root("zero-assignment-review");
-        let configuration = "schema_version = 3\n[scopes.source]\ncategory = 'source'\ninclude = ['src/**']\n[commands.verify]\nargv = ['/run/current-system/sw/bin/true']\ncapability = 'verification'\n";
-        fs::write(project_root.join(".development-system.toml"), configuration)
-            .expect("semantic config");
+        let configuration = format!(
+            "schema_version = 3\n[scopes.source]\ncategory = 'source'\ninclude = ['src/**']\n[commands.verify]\nargv = ['{}']\ncapability = 'verification'\n",
+            test_executable("true").display()
+        );
+        fs::write(
+            project_root.join(".development-system.toml"),
+            &configuration,
+        )
+        .expect("semantic config");
         workflow::start_at(&project_root, workflow::ChangeKind::Exempt)
             .expect("start exempt lifecycle");
         workflow::begin_verification_at(&project_root).expect("begin verification");
@@ -36098,7 +36114,7 @@ pre_filter = "project-pre"
                 .is_err(),
             "verification cannot advance without a durable successful command receipt"
         );
-        let configuration = semantic::ProjectConfig::parse(configuration).expect("configuration");
+        let configuration = semantic::ProjectConfig::parse(&configuration).expect("configuration");
         semantic::issue_assignment_at(
             &project_root,
             semantic::Assignment {

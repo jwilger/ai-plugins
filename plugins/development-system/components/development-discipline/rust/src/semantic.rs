@@ -7912,6 +7912,11 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn test_executable(program: &str) -> PathBuf {
+        resolve_executable_on_path(program)
+            .unwrap_or_else(|| panic!("test executable {program} should be available on PATH"))
+    }
+
     #[test]
     fn complete_domain_model_has_no_unconsumed_provenance() {
         let report = eventcore::model::check().expect("complete EventCore assignment model");
@@ -9257,16 +9262,18 @@ include = ["tests/**", "**/tests/**"]
             .args(["init", "--quiet", root.path().to_str().expect("path")])
             .status()
             .expect("git init");
-        let config = ProjectConfig::parse(
+        let false_executable = test_executable("false");
+        let config = ProjectConfig::parse(&format!(
             r#"schema_version=3
 [scopes.tests]
 category="tests"
 include=["tests/**"]
 [commands.probe]
-argv=["/run/current-system/sw/bin/false"]
+argv=["{}"]
 capability="tests"
 "#,
-        )
+            false_executable.display()
+        ))
         .expect("config");
         fs::write(
             root.path().join(CONFIG_FILE),
@@ -9420,20 +9427,22 @@ capability="tests"
             .args(["init", "--quiet", root.path().to_str().expect("path")])
             .status()
             .expect("git init");
-        let config = ProjectConfig::parse(
+        let echo_executable = test_executable("echo");
+        let config = ProjectConfig::parse(&format!(
             r#"schema_version=3
 [scopes.tests]
 category="tests"
 include=["tests/**"]
 [commands.probe]
-argv=["/run/current-system/sw/bin/echo", "{label}", "{count}", "{enabled}"]
+argv=["{}", "{{label}}", "{{count}}", "{{enabled}}"]
 capability="tests"
 [commands.probe.parameters]
 label="string"
 count="integer"
 enabled="boolean"
 "#,
-        )
+            echo_executable.display()
+        ))
         .expect("config");
         fs::write(
             root.path().join(CONFIG_FILE),
@@ -9479,18 +9488,19 @@ enabled="boolean"
             9,
         )
         .is_err());
-        assert!(ProjectConfig::parse(
+        assert!(ProjectConfig::parse(&format!(
             r#"schema_version=3
 [scopes.tests]
 category="tests"
 include=["tests/**"]
 [commands.invalid]
-argv=["/run/current-system/sw/bin/echo", "prefix-{value}"]
+argv=["{}", "prefix-{{value}}"]
 capability="tests"
 [commands.invalid.parameters]
 value="string"
 "#,
-        )
+            echo_executable.display()
+        ))
         .is_err());
     }
 
@@ -9502,7 +9512,8 @@ value="string"
             .status()
             .expect("git init")
             .success());
-        let config = ProjectConfig::parse(
+        let touch_executable = test_executable("touch");
+        let config = ProjectConfig::parse(&format!(
             r#"schema_version=3
 [scopes.tests]
 category="tests"
@@ -9511,14 +9522,15 @@ include=["tests/**"]
 category="source"
 include=["src/**"]
 [commands.touch]
-argv=["/run/current-system/sw/bin/touch", "{path}"]
+argv=["{}", "{{path}}"]
 capability="tests"
 output_scopes=["tests"]
 network="denied"
 [commands.touch.parameters]
 path="string"
 "#,
-        )
+            touch_executable.display()
+        ))
         .expect("config");
         fs::write(
             root.path().join(CONFIG_FILE),
@@ -9590,21 +9602,24 @@ path="string"
             .status()
             .expect("git init")
             .success());
-        let config = ProjectConfig::parse(
+        let readlink_executable = test_executable("readlink");
+        let config = ProjectConfig::parse(&format!(
             r#"schema_version=3
 [scopes.tests]
 category="tests"
 include=["tests/**"]
 [commands.denied]
-argv=["/run/current-system/sw/bin/readlink", "/proc/self/ns/net"]
+argv=["{}", "/proc/self/ns/net"]
 capability="tests"
 network="denied"
 [commands.allowed]
-argv=["/run/current-system/sw/bin/readlink", "/proc/self/ns/net"]
+argv=["{}", "/proc/self/ns/net"]
 capability="tests"
 network="allowed"
 "#,
-        )
+            readlink_executable.display(),
+            readlink_executable.display()
+        ))
         .expect("config");
         fs::write(
             root.path().join(CONFIG_FILE),
