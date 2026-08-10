@@ -1,15 +1,25 @@
 {
   "mcpServers": {
     "development-discipline": {
-      "command": "./bin/development-discipline-mcp",
-      "args": ["--service", "plugin-read-only"],
-      "cwd": ".",
-      "description": "Read-only Development System reader and explicit setup surface. Privileged services require a generated, harness-proven profile."
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "exec \"${CODEX_HOME:-$HOME/.codex}/plugins/cache/ai-plugins/development-system/4.0.0/bin/development-discipline-mcp\" \"$@\"",
+        "development-discipline-mcp",
+        "--service",
+        "plugin-read-only"
+      ],
+      "description": "Advisory Development System reader and deterministic repository-local setup surface."
     },
     "tiber": {
-      "command": "./bin/tiber",
-      "args": ["mcp", "stdio"],
-      "cwd": ".",
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "exec \"${CODEX_HOME:-$HOME/.codex}/plugins/cache/ai-plugins/development-system/4.0.0/bin/tiber\" \"$@\"",
+        "tiber",
+        "mcp",
+        "stdio"
+      ],
       "env": {
         "GIT_SSH_COMMAND": "ssh -F /dev/null"
       },

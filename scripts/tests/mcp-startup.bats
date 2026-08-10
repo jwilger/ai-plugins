@@ -33,6 +33,33 @@ initialize_server() {
       "$command" "$@"
 }
 
+initialize_codex_plugin_server() {
+  local manifest=$1
+  local server=$2
+  local version
+  local installed_root
+  local command
+  local args
+
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  installed_root="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system/$version"
+  mkdir -p "$(dirname "$installed_root")" "$TMPROOT/caller"
+  ln -sfn "$ROOT/plugins/development-system" "$installed_root"
+  command="$(jq -r ".mcpServers[\"$server\"].command" "$manifest")"
+  mapfile -t args < <(jq -r ".mcpServers[\"$server\"].args[]" "$manifest")
+
+  (
+    cd "$TMPROOT/caller"
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
+      env -i \
+        PATH="$PATH" \
+        HOME="$TMPROOT/home" \
+        CODEX_HOME="$TMPROOT/codex-home" \
+        SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+        "$command" "${args[@]}"
+  )
+}
+
 @test "component MCP manifests resolve only repository-owned launchers" {
   local promptfoo_manifest="$ROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json"
   local tiber_manifest="$ROOT/plugins/development-system/components/tiber/.mcp.json"
@@ -104,6 +131,18 @@ initialize_server() {
   [[ "$output" != *"stale-global-launcher-used"* ]]
 }
 
+@test "Codex plugin MCP manifest starts every server from an arbitrary caller directory" {
+  local manifest="$ROOT/plugins/development-system/.codex-mcp.json"
+
+  run initialize_codex_plugin_server "$manifest" development-discipline
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
+
+  run initialize_codex_plugin_server "$manifest" tiber
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"tiber"'* ]]
+}
+
 @test "packaged read-only development-discipline does not expose privileged final-review tools" {
   local command="$ROOT/plugins/development-system/bin/development-discipline-mcp"
   mkdir -p "$TMPROOT/codex-home"
@@ -111,7 +150,7 @@ initialize_server() {
   run initialize_server "$command" --service plugin-read-only
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"confirmed setup.probe to prove and enable the Codex named-agent boundary"* ]]
+  [[ "$output" == *'"name":"development-discipline"'* ]]
   [[ "$output" != *'"name":"final_review.plan"'* ]]
   [[ "$output" != *'"name":"workflow.start"'* ]]
 }
