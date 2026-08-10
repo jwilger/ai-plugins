@@ -18,7 +18,7 @@ pre-commit: validate-marketplace github-actions
     cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --workspace --lib
     cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
     cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
-    cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --bin development-discipline-mcp
+    cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --bin development-discipline-mcp -- --test-threads=1
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
@@ -34,7 +34,7 @@ tiber-rust:
 development-discipline-rust:
     cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
     cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
-    cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml
+    cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml -- --test-threads=1
 
 development-discipline-release-complete:
     cd plugins/development-system/components/development-discipline && sha256sum --check release-binaries.sha256
