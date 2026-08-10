@@ -2143,12 +2143,19 @@ pub(crate) fn legacy_semantic_stream_id(project_root: &Path) -> Result<StreamId,
     .map_err(|error| format!("development_workflow.stream_invalid source={error}"))
 }
 
-fn lifecycle_runtime() -> Result<tokio::runtime::Runtime, String> {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .map_err(|error| format!("development_workflow.event_runtime_failed source={error}"))
+pub(crate) fn lifecycle_runtime() -> Result<&'static tokio::runtime::Runtime, String> {
+    static RUNTIME: std::sync::LazyLock<Result<tokio::runtime::Runtime, String>> =
+        std::sync::LazyLock::new(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .map_err(|error| {
+                    format!("development_workflow.event_runtime_failed source={error}")
+                })
+        });
+
+    RUNTIME.as_ref().map_err(Clone::clone)
 }
 
 /// The fixed Git EventStore authority is the sole live lifecycle authority.
@@ -2437,6 +2444,14 @@ fn common_git_directory(cwd: &Path) -> Result<PathBuf, String> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn lifecycle_operations_share_one_process_runtime() {
+        let first = lifecycle_runtime().expect("first lifecycle runtime");
+        let second = lifecycle_runtime().expect("second lifecycle runtime");
+
+        assert!(std::ptr::eq(first, second));
+    }
 
     #[test]
     fn modeled_lifecycle_has_complete_provenance_without_assumptions() {
