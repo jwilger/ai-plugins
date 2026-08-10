@@ -13,19 +13,6 @@
           }
         ]
       }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/development-discipline-mcp\" --hook codex-pre-tool-use",
-            "timeout": 10,
-            "statusMessage": "Enforcing Development System agent capabilities"
-          }
-        ]
-      }
     ]
   }
 }

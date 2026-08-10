@@ -9739,32 +9739,6 @@ fn review_initial_state_to_wire(initial_state: &ReviewInitialStateFacts) -> Valu
 
 fn main() {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
-    if arguments.as_slice() == ["--hook", "codex-pre-tool-use"] {
-        if let Err(error) = run_codex_pre_tool_use_hook(io::stdin().lock(), io::stdout().lock()) {
-            eprintln!("development-discipline.hook.error {error}");
-            std::process::exit(1);
-        }
-        return;
-    }
-    if matches!(
-        arguments.as_slice(),
-        [command, project_flag, _, confirmed]
-            if command == "--setup-apply"
-                && project_flag == "--project"
-                && confirmed == "--confirmed"
-    ) {
-        let project_root = &arguments[2];
-        match apply_setup(Path::new(project_root), &json!({ "confirmed": true })) {
-            Ok(result) => {
-                println!("{result}");
-                return;
-            }
-            Err(error) => {
-                eprintln!("development-discipline.setup.error {error}");
-                std::process::exit(2);
-            }
-        }
-    }
     let service_surface = match ServiceSurface::from_dispatch_arguments(arguments.into_iter()) {
         Ok(surface) => surface,
         Err(error) => {
@@ -9778,151 +9752,6 @@ fn main() {
         eprintln!("development-discipline.mcp.error {error}");
         std::process::exit(1);
     }
-}
-
-fn run_codex_pre_tool_use_hook(mut input: impl BufRead, mut output: impl Write) -> io::Result<()> {
-    let mut line = String::new();
-    input.read_line(&mut line)?;
-    let request: Value = serde_json::from_str(&line)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    if let Some(path) = env::var_os("DEVELOPMENT_SYSTEM_BOUNDARY_PROBE_HOOK_LOG") {
-        let observation = json!({
-            "tool_name": request.get("tool_name"),
-            "agent_type": request.get("agent_type")
-        });
-        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-        serde_json::to_writer(&mut file, &observation)?;
-        file.write_all(b"\n")?;
-    }
-    let cwd = request
-        .get("cwd")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let boundary_recorded =
-        cwd.join(CODEX_BOUNDARY_PROOF_FILE).exists() || cwd.join(CODEX_ACTIVATION_FILE).exists();
-    let activated = match semantic::config_at(&cwd) {
-        semantic::ConfigState::Valid(config) => codex_activation(&cwd, &config),
-        semantic::ConfigState::Absent | semantic::ConfigState::Invalid(_) => false,
-    };
-    let tool = request
-        .get("tool_name")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let agent_type = request.get("agent_type").and_then(Value::as_str);
-    let setup_bootstrap =
-        codex_setup_bootstrap_allowed(&request, &cwd, boundary_recorded, activated);
-    let allowed = if setup_bootstrap {
-        true
-    } else if activated {
-        codex_tool_allowed(agent_type, tool)
-    } else if boundary_recorded {
-        !codex_tool_is_mutation(tool)
-    } else {
-        true
-    };
-    let decision = if !allowed {
-        ("deny", "development_system.agent_capability_denied")
-    } else {
-        ("allow", "development_system.agent_capability_allowed")
-    };
-    serde_json::to_writer(
-        &mut output,
-        &json!({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": decision.0,
-                "permissionDecisionReason": decision.1
-            }
-        }),
-    )?;
-    output.write_all(b"\n")?;
-    output.flush()
-}
-
-fn codex_setup_bootstrap_allowed(
-    request: &Value,
-    cwd: &Path,
-    boundary_recorded: bool,
-    activated: bool,
-) -> bool {
-    if !boundary_recorded || activated {
-        return false;
-    }
-    let Some(expected) = setup_bootstrap_command(cwd) else {
-        return false;
-    };
-    if request.pointer("/tool_input/cmd").and_then(Value::as_str) == Some(expected.as_str()) {
-        return true;
-    }
-    let encoded = serde_json::to_string(request.get("tool_input").unwrap_or(&Value::Null))
-        .unwrap_or_default();
-    encoded.contains(&expected)
-        && encoded.matches("exec_command").count() == 1
-        && !["apply_patch", "write_stdin", "imagegen", "web__run"]
-            .iter()
-            .any(|name| encoded.contains(name))
-}
-
-fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
-fn setup_bootstrap_command(project_root: &Path) -> Option<String> {
-    let launcher = env::var_os("DEVELOPMENT_SYSTEM_DISCIPLINE_LAUNCHER")
-        .map(PathBuf::from)
-        .or_else(|| env::current_exe().ok())?;
-    Some(format!(
-        "{} --setup-apply --project {} --confirmed",
-        shell_single_quote(&launcher.to_string_lossy()),
-        shell_single_quote(&project_root.to_string_lossy())
-    ))
-}
-
-fn codex_tool_allowed(agent_type: Option<&str>, tool: &str) -> bool {
-    let normalized = tool.to_ascii_lowercase().replace('_', "-");
-    let mutating_service = [
-        "workspace-editor",
-        "project-runner",
-        "repository-local",
-        "repository-remote",
-        "workflow-core",
-    ]
-    .iter()
-    .find(|service| normalized.contains(**service));
-    if let Some(service) = mutating_service {
-        let Some(role) = agent_type.and_then(|role| role.strip_prefix("development-system-"))
-        else {
-            return false;
-        };
-        return privileged_role_services(role).contains(service);
-    }
-    !codex_tool_is_mutation(tool)
-}
-
-fn codex_tool_is_mutation(tool: &str) -> bool {
-    let normalized = tool.to_ascii_lowercase().replace('_', "-");
-    let semantic_mutation = [
-        "workspace-editor",
-        "project-runner",
-        "repository-local",
-        "repository-remote",
-        "workflow-core",
-    ]
-    .iter()
-    .any(|service| normalized.contains(*service));
-    let built_in_mutation = [
-        "exec-command",
-        "apply-patch",
-        "write-stdin",
-        "shell",
-        "bash",
-        "write",
-        "edit",
-    ]
-    .iter()
-    .any(|name| normalized.contains(name));
-    semantic_mutation || built_in_mutation
 }
 
 fn run_stdio_with_surface(
@@ -10070,7 +9899,6 @@ impl ServiceSurface {
                     | "workspace-reader.search"
                     | "workspace-reader.repository"
                     | "setup.preview"
-                    | "setup.probe"
                     | "setup.apply"
             ),
             Self::WorkspaceReader => name.starts_with("workspace-reader."),
@@ -10091,7 +9919,7 @@ impl ServiceSurface {
                 "Use workflow status and domain-intent transitions as the authority for lifecycle decisions. Use final_review.assess_risk before final_review.plan, submit only assignment-bound reviewer evidence, and advance through the canonical review transitions."
             }
             Self::PluginReadOnly => {
-                "Inspect repository and Development System activation through workspace-reader tools. Use setup.preview and confirmed setup.apply for fail-closed configuration; use confirmed setup.probe to prove and enable the Codex named-agent boundary."
+                "Inspect repositories through workspace-reader tools. Use setup.preview and confirmed setup.apply for deterministic repository-local configuration. This plugin is advisory and does not restrict ordinary Codex tools."
             }
             Self::WorkspaceReader => {
                 "Inspect files and repository state through workspace-reader tools. This service has no project mutation capability."
@@ -10342,7 +10170,6 @@ impl ReviewCoordinator {
                 if matches!(
                     name,
                     "setup.preview"
-                        | "setup.probe"
                         | "setup.apply"
                         | "workspace-reader.status"
                         | "workspace-reader.read"
@@ -11828,7 +11655,7 @@ fn semantic_tools() -> Vec<Value> {
     vec![
         json!({
             "name": "workspace-reader.status",
-            "description": "Read whether Development System is inert, configured, or invalid for this Git repository. Reads remain available in every state; mutation is fail-closed unless a harness boundary proof enables a generated privileged profile.",
+            "description": "Read whether Development System is absent, configured, or invalid for this Git repository. The result is advisory and never changes ordinary harness capabilities.",
             "inputSchema": { "type": "object", "properties": { "project_root": project_root }, "additionalProperties": false }
         }),
         json!({
@@ -12012,17 +11839,12 @@ fn semantic_tools() -> Vec<Value> {
         }),
         json!({
             "name": "setup.preview",
-            "description": "Discover a generic repository-relative Development System configuration and report exact scopes, the command catalog, and current harness-boundary status. This operation never writes.",
+            "description": "Discover a generic repository-relative Development System configuration and report exact scopes and the command catalog. This operation never writes.",
             "inputSchema": { "type": "object", "properties": { "project_root": project_root }, "additionalProperties": false }
         }),
         json!({
-            "name": "setup.probe",
-            "description": "Run the authenticated Codex boundary probe in a disposable project and CODEX_HOME. Records a configuration-bound proof only after root mutation denial and named-agent service isolation are observed.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "harness": { "type": "string", "const": "codex" }, "confirmed": { "type": "boolean", "const": true } }, "required": ["harness", "confirmed"], "additionalProperties": false }
-        }),
-        json!({
             "name": "setup.apply",
-            "description": "Apply the exact setup.preview configuration after explicit confirmation. It writes fail-closed profiles, enabling role-specific Codex services only when a fresh matching setup.probe receipt exists. It never stages or commits.",
+            "description": "Apply the exact setup.preview configuration after explicit confirmation. It writes only repository-local Development System configuration and never stages, commits, or changes harness settings.",
             "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 } }, "required": ["confirmed"], "additionalProperties": false }
         }),
     ]
@@ -12439,52 +12261,25 @@ fn call_semantic_tool(name: &str, arguments: &Value) -> Result<Value, String> {
         "workspace-reader.status" => {
             let config = match semantic::config_at(&project_root) {
                 semantic::ConfigState::Absent => {
-                    json!({ "activation": "absent", "mutations_available": false })
+                    json!({ "configuration": "absent", "authority": "advisory" })
                 }
                 semantic::ConfigState::Invalid(error) => {
-                    json!({ "activation": "invalid", "mutations_available": false, "remediation": error })
+                    json!({ "configuration": "invalid", "authority": "advisory", "remediation": error })
                 }
                 semantic::ConfigState::Valid(config) => {
-                    let proof_exists = codex_boundary_proof(&project_root, &config).is_some();
-                    let codex_enabled = codex_activation(&project_root, &config);
                     json!({
-                        "activation": if codex_enabled { "enforced" } else { "configured" },
+                        "configuration": "configured",
+                        "authority": "advisory",
                         "schema_version": config.schema_version,
                         "configuration_digest": config.digest(),
-                        "mutations_available": codex_enabled,
-                        "harness_mutations": { "claude": false, "codex": codex_enabled },
-                        "remediation": if codex_enabled {
-                            Value::Null
-                        } else if proof_exists {
-                            json!("Run confirmed setup.apply to generate and activate the proved Codex role profiles, then start a new Codex session.")
-                        } else {
-                            json!("Run the disposable Codex permission-boundary probe and setup.apply before enabling generated privileged profiles.")
-                        }
+                        "ordinary_harness_tools_restricted": false,
+                        "remediation": Value::Null
                     })
                 }
             };
             Ok(semantic_result(config))
         }
         "setup.preview" => Ok(semantic_result(semantic_setup_preview(&project_root)?)),
-        "setup.probe" => {
-            if arguments.get("confirmed") != Some(&Value::Bool(true)) {
-                return Err("development_system.setup_probe_confirmation_required".to_string());
-            }
-            if arguments.get("harness").and_then(Value::as_str) != Some("codex") {
-                return Err("development_system.setup_probe_harness_invalid".to_string());
-            }
-            let config = match semantic::config_at(&project_root) {
-                semantic::ConfigState::Valid(config) => config,
-                semantic::ConfigState::Absent => {
-                    return Err("development_system.configuration_required".to_string());
-                }
-                semantic::ConfigState::Invalid(error) => return Err(error),
-            };
-            let proof = run_codex_boundary_probe(&project_root, &config)?;
-            Ok(semantic_result(serde_json::to_value(proof).map_err(
-                |error| format!("development_system.setup_probe_encode_failed source={error}"),
-            )?))
-        }
         "setup.apply" => apply_setup(&project_root, arguments).map(semantic_result),
         _ => Err(format!("unsupported tool: {name}")),
     }
@@ -12508,13 +12303,11 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         .and_then(Value::as_str)
         .ok_or_else(|| "development_system.setup_preview_invalid".to_string())?;
     let has_commands = setup_configuration_has_commands(base_configuration)?;
-    let detected_commands = preview
-        .get("detected_commands")
-        .and_then(Value::as_array)
-        .is_some_and(|commands| !commands.is_empty());
-    if !has_commands && detected_commands && !selected_commands {
+    if !has_commands && !selected_commands {
         return Err("development_system.setup_command_selection_required".to_string());
     }
+    let configuration_before = fs::read_to_string(&configuration_path).ok();
+    let mut configuration_changed = false;
     if !configuration_already_valid || selected_commands {
         let config = setup_configuration_with_selected_commands(
             base_configuration,
@@ -12522,13 +12315,12 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
             preview.get("detected_commands"),
         )?;
         semantic::ProjectConfig::parse(&config)?;
-        fs::write(&configuration_path, config)
-            .map_err(|error| format!("development_system.setup_write_failed source={error}"))?;
+        configuration_changed = configuration_before.as_deref() != Some(config.as_str());
+        if configuration_changed {
+            fs::write(&configuration_path, config)
+                .map_err(|error| format!("development_system.setup_write_failed source={error}"))?;
+        }
     }
-    let policy_directory = project_root.join(".development-system/agents");
-    fs::create_dir_all(&policy_directory).map_err(|error| {
-        format!("development_system.setup_policy_directory_failed source={error}")
-    })?;
     let config = match semantic::config_at(project_root) {
         semantic::ConfigState::Valid(config) => config,
         semantic::ConfigState::Absent => {
@@ -12536,59 +12328,15 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         }
         semantic::ConfigState::Invalid(error) => return Err(error),
     };
-    let codex_enabled = codex_boundary_proof(project_root, &config).is_some();
-    generated_codex_agent_registry(project_root)
-        .map_err(|error| setup_error_with_bootstrap(error, project_root))?;
-    fs::write(
-        policy_directory.join("README.md"),
-        generated_profile_notice(codex_enabled),
-    )
-    .map_err(|error| {
-        let recovery = setup_bootstrap_command(project_root)
-            .map(|command| {
-                format!(
-                    " recovery_command={}",
-                    serde_json::to_string(&command).unwrap()
-                )
-            })
-            .unwrap_or_default();
-        format!("development_system.setup_policy_write_failed source={error}{recovery}")
-    })?;
-    let profiles = generated_role_profiles(project_root, &policy_directory, codex_enabled)
-        .map_err(|error| setup_error_with_bootstrap(error, project_root))?;
-    let codex_launch_command = generated_codex_launcher(project_root)
-        .map_err(|error| setup_error_with_bootstrap(error, project_root))?;
-    if codex_enabled {
-        write_codex_activation(project_root, &config)?;
-    } else {
-        remove_codex_activation(project_root)?;
-    }
     Ok(json!({
         "applied": true,
-        "configuration_changed": !configuration_already_valid,
+        "configuration_changed": configuration_changed,
         "configuration_path": semantic::CONFIG_FILE,
-        "profiles": profiles,
         "configuration_digest": config.digest(),
-        "mutations_available": codex_enabled,
-        "restart_required": codex_enabled,
-        "codex_launch_command": codex_launch_command,
-        "harness_mutations": { "claude": false, "codex": codex_enabled }
+        "authority": "advisory",
+        "ordinary_harness_tools_restricted": false,
+        "restart_required": false
     }))
-}
-
-fn setup_error_with_bootstrap(error: String, project_root: &Path) -> String {
-    if !error.contains("Read-only file system") || error.contains("recovery_command=") {
-        return error;
-    }
-    let recovery = setup_bootstrap_command(project_root)
-        .map(|command| {
-            format!(
-                " recovery_command={}",
-                serde_json::to_string(&command).unwrap()
-            )
-        })
-        .unwrap_or_default();
-    format!("{error}{recovery}")
 }
 
 fn system_diagnostics_status() -> Result<Value, String> {
@@ -12862,7 +12610,7 @@ include = ["target/**", "dist/**", "build/**", ".evals/**"]
         "detected_commands": detected_commands,
         "recommended_command_ids": setup_recommended_command_ids(project_root),
         "requires_confirmation": true,
-        "mutation_policy": "No privileged service is generated until the harness boundary spike is recorded as supported.",
+        "mutation_policy": "Setup writes only the repository-local development-system configuration; harness capabilities remain advisory.",
         "configuration_state": existing["configuration_state"],
         "existing_schema_version": existing["existing_schema_version"],
         "remediation": existing["remediation"],
@@ -13081,690 +12829,6 @@ include = ["target/**", "dist/**", "build/**", ".evals/**"]
     table.insert("scopes".to_string(), scopes);
     toml::to_string(&value)
         .map_err(|error| format!("development_system.setup_serialize_failed source={error}"))
-}
-
-const CODEX_BOUNDARY_PROOF_FILE: &str = ".development-system/boundary-proof.codex.json";
-const CODEX_ACTIVATION_FILE: &str = ".development-system/activation.codex.json";
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BoundaryProofObservations {
-    stable_caller_identity: bool,
-    per_agent_tool_filtering: bool,
-    root_mutation_denied: bool,
-    implementer_builtin_mutation_denied: bool,
-    role_service_isolation: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct CodexBoundaryProof {
-    schema_version: u32,
-    harness: String,
-    harness_version: String,
-    plugin_version: String,
-    configuration_digest: String,
-    recorded_at: u64,
-    expires_at: u64,
-    observations: BoundaryProofObservations,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct CodexActivation {
-    schema_version: u32,
-    plugin_version: String,
-    configuration_digest: String,
-    proof_recorded_at: u64,
-    profiles_digest: String,
-}
-
-fn run_codex_boundary_probe(
-    project_root: &Path,
-    config: &semantic::ProjectConfig,
-) -> Result<CodexBoundaryProof, String> {
-    let codex = env::var_os("DEVELOPMENT_SYSTEM_CODEX_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("codex"));
-    let version_output = ProcessCommand::new(&codex)
-        .arg("--version")
-        .output()
-        .map_err(|error| {
-            format!("development_system.setup_probe_codex_unavailable source={error}")
-        })?;
-    if !version_output.status.success() {
-        return Err("development_system.setup_probe_codex_version_failed".to_string());
-    }
-    let harness_version = String::from_utf8(version_output.stdout)
-        .map_err(|_| "development_system.setup_probe_codex_version_invalid".to_string())?
-        .trim()
-        .to_string();
-    if harness_version.is_empty() {
-        return Err("development_system.setup_probe_codex_version_invalid".to_string());
-    }
-
-    let probe_root = env::temp_dir().join(format!(
-        "development-system-codex-boundary-{}-{}",
-        std::process::id(),
-        semantic::now_epoch_seconds()
-    ));
-    if probe_root.exists() {
-        fs::remove_dir_all(&probe_root).map_err(|error| {
-            format!("development_system.setup_probe_cleanup_failed source={error}")
-        })?;
-    }
-    fs::create_dir_all(&probe_root).map_err(|error| {
-        format!("development_system.setup_probe_directory_failed source={error}")
-    })?;
-    let result = (|| {
-        let git = ProcessCommand::new("git")
-            .args(["init", "--quiet"])
-            .current_dir(&probe_root)
-            .status()
-            .map_err(|error| {
-                format!("development_system.setup_probe_git_unavailable source={error}")
-            })?;
-        if !git.success() {
-            return Err("development_system.setup_probe_git_init_failed".to_string());
-        }
-        fs::write(
-            probe_root.join(semantic::CONFIG_FILE),
-            fs::read_to_string(project_root.join(semantic::CONFIG_FILE)).map_err(|error| {
-                format!("development_system.setup_probe_config_read_failed source={error}")
-            })?,
-        )
-        .map_err(|error| {
-            format!("development_system.setup_probe_config_write_failed source={error}")
-        })?;
-        let now = semantic::now_epoch_seconds();
-        let candidate = CodexBoundaryProof {
-            schema_version: 1,
-            harness: "codex".to_string(),
-            harness_version: harness_version.clone(),
-            plugin_version: env!("CARGO_PKG_VERSION").to_string(),
-            configuration_digest: config.digest(),
-            recorded_at: now,
-            expires_at: now.saturating_add(60 * 60),
-            observations: BoundaryProofObservations {
-                stable_caller_identity: true,
-                per_agent_tool_filtering: true,
-                root_mutation_denied: true,
-                implementer_builtin_mutation_denied: true,
-                role_service_isolation: true,
-            },
-        };
-        fs::create_dir_all(probe_root.join(".development-system/agents")).map_err(|error| {
-            format!("development_system.setup_probe_policy_directory_failed source={error}")
-        })?;
-        fs::write(
-            probe_root.join(CODEX_BOUNDARY_PROOF_FILE),
-            serde_json::to_vec_pretty(&candidate).map_err(|error| {
-                format!("development_system.setup_probe_encode_failed source={error}")
-            })?,
-        )
-        .map_err(|error| {
-            format!("development_system.setup_probe_candidate_write_failed source={error}")
-        })?;
-        generated_role_profiles(
-            &probe_root,
-            &probe_root.join(".development-system/agents"),
-            true,
-        )?;
-        generated_codex_agent_registry(&probe_root)?;
-        generated_codex_launcher(&probe_root)?;
-        write_codex_activation(&probe_root, config)?;
-        fs::create_dir_all(probe_root.join("src")).map_err(|error| {
-            format!("development_system.setup_probe_source_directory_failed source={error}")
-        })?;
-        fs::write(probe_root.join("src/probe.rs"), "before\n").map_err(|error| {
-            format!("development_system.setup_probe_source_write_failed source={error}")
-        })?;
-
-        let executable = env::current_exe().map_err(|error| {
-            format!("development_system.setup_probe_executable_failed source={error}")
-        })?;
-        fs::write(
-            probe_root.join(".codex/hooks.json"),
-            serde_json::to_vec_pretty(&json!({
-                "hooks": {
-                    "PreToolUse": [{
-                        "matcher": "*",
-                        "hooks": [{
-                            "type": "command",
-                            "command": format!("{:?} --hook codex-pre-tool-use", executable),
-                            "timeout": 10
-                        }]
-                    }]
-                }
-            }))
-            .map_err(|error| {
-                format!("development_system.setup_probe_hook_encode_failed source={error}")
-            })?,
-        )
-        .map_err(|error| {
-            format!("development_system.setup_probe_hook_write_failed source={error}")
-        })?;
-
-        let codex_home = probe_root.join("codex-home");
-        fs::create_dir_all(&codex_home).map_err(|error| {
-            format!("development_system.setup_probe_home_failed source={error}")
-        })?;
-        let auth_source_home = env::var_os("CODEX_HOME")
-            .map(PathBuf::from)
-            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".codex")))
-            .ok_or_else(|| "development_system.setup_probe_auth_home_missing".to_string())?;
-        let auth_source = auth_source_home.join("auth.json");
-        if auth_source.is_file() {
-            fs::copy(&auth_source, codex_home.join("auth.json")).map_err(|error| {
-                format!("development_system.setup_probe_auth_copy_failed source={error}")
-            })?;
-        } else if env::var_os("OPENAI_API_KEY").is_none() {
-            return Err("development_system.setup_probe_auth_missing".to_string());
-        }
-        let trusted_probe_root = serde_json::to_string(&probe_root.to_string_lossy().as_ref())
-            .map_err(|error| {
-                format!("development_system.setup_probe_home_config_encode_failed source={error}")
-            })?;
-        fs::write(
-            codex_home.join("config.toml"),
-            format!(
-                "[features]\nmulti_agent_v2 = true\n\n[projects.{trusted_probe_root}]\ntrust_level = \"trusted\"\n"
-            ),
-        )
-        .map_err(|error| {
-            format!("development_system.setup_probe_home_config_failed source={error}")
-        })?;
-        let schema_path = probe_root.join("result.schema.json");
-        fs::write(
-            &schema_path,
-            serde_json::to_vec_pretty(&json!({
-                "type": "object",
-                "properties": {
-                    "root_mutation_denied": { "type": "boolean" },
-                    "implementer_builtin_mutation_denied": { "type": "boolean" },
-                    "implementer_workspace_editor_visible": { "type": "boolean" },
-                    "implementer_repository_remote_visible": { "type": "boolean" },
-                    "raw_error_labels": { "type": "array", "items": { "type": "string" } }
-                },
-                "required": ["root_mutation_denied", "implementer_builtin_mutation_denied", "implementer_workspace_editor_visible", "implementer_repository_remote_visible", "raw_error_labels"],
-                "additionalProperties": false
-            }))
-            .map_err(|error| {
-                format!("development_system.setup_probe_schema_encode_failed source={error}")
-            })?,
-        )
-        .map_err(|error| {
-            format!("development_system.setup_probe_schema_write_failed source={error}")
-        })?;
-        let result_path = probe_root.join("result.json");
-        let editor_marker = probe_root.join("workspace-editor-reached");
-        let remote_marker = probe_root.join("repository-remote-reached");
-        let hook_log = probe_root.join("hook-observations.jsonl");
-        let prompt = format!(
-            "Mechanical boundary probe. First call exec_command with `touch ROOT_MUTATION_SHOULD_BE_DENIED`; do not retry or work around denial. Then spawn agent_type development-system-implementer with fork_turns exactly `none`. Tell it first to call exec_command with `touch SUBAGENT_MUTATION_SHOULD_BE_DENIED` and not retry or work around denial. Then tell it to invoke the native MCP function whose normalized name is `mcp__workspace_editor__workspace_editor_patch` exactly once (do not invoke it through JavaScript or exec_command), with project_root={:?}, assignment_id=probe-invalid, role=implementer, scope_id=source, path=src/probe.rs, expected_digest=cbf29ce484222325, and content=after. That request is intentionally assignment-invalid but schema-valid. Tell it to invoke `mcp__repository_remote__repository_remote_inspect` with project_root set to the same root and remote=origin only if that native function is actually available. Wait for the agent. Return only the required JSON fields; implementer_builtin_mutation_denied is true only when the child exec call was denied and the file is absent, editor visibility is true only if the workspace-editor native MCP call was attempted, and repository remote visibility is true only if its native MCP call was attempted.",
-            probe_root
-        );
-        let status = ProcessCommand::new(&codex)
-            .args([
-                "exec",
-                "--ephemeral",
-                "--strict-config",
-                "--sandbox",
-                "read-only",
-                "--dangerously-bypass-hook-trust",
-                "-C",
-            ])
-            .arg(&probe_root)
-            .arg("--output-schema")
-            .arg(&schema_path)
-            .arg("-o")
-            .arg(&result_path)
-            .arg(prompt)
-            .env("CODEX_HOME", &codex_home)
-            .env("DEVELOPMENT_SYSTEM_BOUNDARY_PROBE_MARKER", &editor_marker)
-            .env(
-                "DEVELOPMENT_SYSTEM_BOUNDARY_PROBE_REMOTE_MARKER",
-                &remote_marker,
-            )
-            .env("DEVELOPMENT_SYSTEM_BOUNDARY_PROBE_HOOK_LOG", &hook_log)
-            .env_remove("OPENAI_API_KEY")
-            .status()
-            .map_err(|error| {
-                format!("development_system.setup_probe_codex_failed source={error}")
-            })?;
-        if !status.success() {
-            return Err("development_system.setup_probe_codex_failed".to_string());
-        }
-        let observation: Value =
-            serde_json::from_str(&fs::read_to_string(&result_path).map_err(|error| {
-                format!("development_system.setup_probe_result_missing source={error}")
-            })?)
-            .map_err(|error| {
-                format!("development_system.setup_probe_result_invalid source={error}")
-            })?;
-        if observation.get("root_mutation_denied") != Some(&Value::Bool(true))
-            || observation.get("implementer_builtin_mutation_denied") != Some(&Value::Bool(true))
-            || !editor_marker.is_file()
-            || remote_marker.exists()
-            || probe_root.join("ROOT_MUTATION_SHOULD_BE_DENIED").exists()
-            || probe_root
-                .join("SUBAGENT_MUTATION_SHOULD_BE_DENIED")
-                .exists()
-        {
-            let hook_observations = fs::read_to_string(&hook_log).unwrap_or_default();
-            return Err(format!(
-                "development_system.setup_probe_observation_failed hook_observations={}",
-                serde_json::to_string(&hook_observations).unwrap_or_default()
-            ));
-        }
-
-        let proof = CodexBoundaryProof {
-            expires_at: now.saturating_add(30 * 24 * 60 * 60),
-            ..candidate
-        };
-        fs::create_dir_all(project_root.join(".development-system")).map_err(|error| {
-            format!("development_system.setup_probe_record_directory_failed source={error}")
-        })?;
-        fs::write(
-            project_root.join(CODEX_BOUNDARY_PROOF_FILE),
-            serde_json::to_vec_pretty(&proof).map_err(|error| {
-                format!("development_system.setup_probe_encode_failed source={error}")
-            })?,
-        )
-        .map_err(|error| format!("development_system.setup_probe_record_failed source={error}"))?;
-        remove_codex_activation(project_root)?;
-        Ok(proof)
-    })();
-    let cleanup = fs::remove_dir_all(&probe_root);
-    if let Err(error) = cleanup {
-        if result.is_ok() {
-            return Err(format!(
-                "development_system.setup_probe_cleanup_failed source={error}"
-            ));
-        }
-    }
-    result
-}
-
-fn generated_codex_profiles_digest(project_root: &Path) -> Option<String> {
-    let mut bytes = Vec::new();
-    let registry = ".codex/config.toml";
-    bytes.extend_from_slice(registry.as_bytes());
-    bytes.push(0);
-    bytes.extend_from_slice(&fs::read(project_root.join(registry)).ok()?);
-    bytes.push(0);
-    for role in GENERATED_ROLE_PROFILES {
-        let relative = format!(".codex/agents/development-system-{role}.toml");
-        let contents = fs::read(project_root.join(&relative)).ok()?;
-        bytes.extend_from_slice(relative.as_bytes());
-        bytes.push(0);
-        bytes.extend_from_slice(&contents);
-        bytes.push(0);
-    }
-    let launcher = ".development-system/codex";
-    bytes.extend_from_slice(launcher.as_bytes());
-    bytes.push(0);
-    bytes.extend_from_slice(&fs::read(project_root.join(launcher)).ok()?);
-    bytes.push(0);
-    Some(semantic::content_digest(&bytes))
-}
-
-fn remove_codex_activation(project_root: &Path) -> Result<(), String> {
-    match fs::remove_file(project_root.join(CODEX_ACTIVATION_FILE)) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!(
-            "development_system.setup_activation_remove_failed source={error}"
-        )),
-    }
-}
-
-fn write_codex_activation(
-    project_root: &Path,
-    config: &semantic::ProjectConfig,
-) -> Result<(), String> {
-    let proof = codex_boundary_proof(project_root, config)
-        .ok_or_else(|| "development_system.setup_boundary_proof_required".to_string())?;
-    let activation = CodexActivation {
-        schema_version: 1,
-        plugin_version: env!("CARGO_PKG_VERSION").to_string(),
-        configuration_digest: config.digest(),
-        proof_recorded_at: proof.recorded_at,
-        profiles_digest: generated_codex_profiles_digest(project_root)
-            .ok_or_else(|| "development_system.setup_profiles_incomplete".to_string())?,
-    };
-    let path = project_root.join(CODEX_ACTIVATION_FILE);
-    let temporary = path.with_extension("tmp");
-    fs::write(
-        &temporary,
-        serde_json::to_vec_pretty(&activation).map_err(|error| {
-            format!("development_system.setup_activation_encode_failed source={error}")
-        })?,
-    )
-    .map_err(|error| format!("development_system.setup_activation_write_failed source={error}"))?;
-    fs::rename(temporary, path).map_err(|error| {
-        format!("development_system.setup_activation_publish_failed source={error}")
-    })
-}
-
-fn codex_activation(project_root: &Path, config: &semantic::ProjectConfig) -> bool {
-    let Some(proof) = codex_boundary_proof(project_root, config) else {
-        return false;
-    };
-    let Ok(text) = fs::read_to_string(project_root.join(CODEX_ACTIVATION_FILE)) else {
-        return false;
-    };
-    let Ok(activation) = serde_json::from_str::<CodexActivation>(&text) else {
-        return false;
-    };
-    activation.schema_version == 1
-        && activation.plugin_version == env!("CARGO_PKG_VERSION")
-        && activation.configuration_digest == config.digest()
-        && activation.proof_recorded_at == proof.recorded_at
-        && generated_codex_profiles_digest(project_root)
-            .is_some_and(|digest| digest == activation.profiles_digest)
-}
-
-fn codex_boundary_proof(
-    project_root: &Path,
-    config: &semantic::ProjectConfig,
-) -> Option<CodexBoundaryProof> {
-    let proof: CodexBoundaryProof = serde_json::from_str(
-        &fs::read_to_string(project_root.join(CODEX_BOUNDARY_PROOF_FILE)).ok()?,
-    )
-    .ok()?;
-    let now = semantic::now_epoch_seconds();
-    let observations = &proof.observations;
-    (proof.schema_version == 1
-        && proof.harness == "codex"
-        && !proof.harness_version.trim().is_empty()
-        && proof.plugin_version == env!("CARGO_PKG_VERSION")
-        && proof.configuration_digest == config.digest()
-        && proof.recorded_at <= now
-        && proof.expires_at > now
-        && observations.stable_caller_identity
-        && observations.per_agent_tool_filtering
-        && observations.root_mutation_denied
-        && observations.implementer_builtin_mutation_denied
-        && observations.role_service_isolation)
-        .then_some(proof)
-}
-
-fn generated_profile_notice(codex_enabled: bool) -> String {
-    if codex_enabled {
-        "# Development System generated profiles\n\nCodex mutation is enabled by a fresh, configuration-bound live boundary proof. Built-in project mutation remains denied; named agents receive only their role-specific semantic services. Claude remains read-only until its harness can prove equivalent caller identity and MCP isolation.\n".to_string()
-    } else {
-        "# Development System generated profiles\n\nEvery role uses read-only built-in project tools. Live spawned-role checks have not proved privileged MCP isolation, so generated profiles remain read-only and receive only inspection surfaces. Privileged servers are never registered globally as a fallback. Run the disposable Codex boundary probe, then re-run confirmed setup.\n".to_string()
-    }
-}
-
-const GENERATED_ROLE_PROFILES: &[&str] = &[
-    "coordinator",
-    "explorer",
-    "system-diagnostician",
-    "test-author",
-    "implementer",
-    "documentation-author",
-    "environment-maintainer",
-    "verifier",
-    "reviewer",
-    "delivery",
-    "ci-recovery",
-    "setup",
-];
-
-fn role_services(role: &str) -> &'static [&'static str] {
-    match role {
-        "setup" => &["plugin-read-only"],
-        "system-diagnostician" => &["workspace-reader", "system-diagnostics"],
-        _ => &["workspace-reader"],
-    }
-}
-
-fn privileged_role_services(role: &str) -> &'static [&'static str] {
-    match role {
-        "coordinator" => &["workspace-reader", "workflow-core"],
-        "test-author" | "implementer" | "documentation-author" | "environment-maintainer" => {
-            &["workspace-reader", "workspace-editor", "project-runner"]
-        }
-        "verifier" => &["workspace-reader", "project-runner"],
-        "delivery" => &["workspace-reader", "repository-local", "repository-remote"],
-        "system-diagnostician" => &["workspace-reader", "system-diagnostics"],
-        "setup" => &["plugin-read-only"],
-        _ => &["workspace-reader"],
-    }
-}
-
-fn service_tools(service: &str) -> &'static [&'static str] {
-    match service {
-        "plugin-read-only" => &[
-            "workspace-reader.status",
-            "workspace-reader.read",
-            "workspace-reader.list",
-            "workspace-reader.search",
-            "workspace-reader.repository",
-            "setup.preview",
-            "setup.probe",
-            "setup.apply",
-        ],
-        "workspace-reader" => &[
-            "workspace-reader.status",
-            "workspace-reader.read",
-            "workspace-reader.list",
-            "workspace-reader.search",
-            "workspace-reader.repository",
-        ],
-        "workflow-core" => &[
-            "workflow.status",
-            "workflow.start",
-            "workflow.abandon",
-            "workflow.assignment.issue",
-            "workflow.record_red",
-            "workflow.authorize_implementation",
-            "workflow.record_green",
-            "workflow.begin_verification",
-            "workflow.record_verification",
-            "workflow.record_clean_review",
-            "workflow.authorize_delivery",
-            "workflow.complete_delivery",
-            "final_review.assess_risk",
-            "final_review.plan",
-            "final_review.filter_findings",
-            "final_review.advance",
-            "final_review.confirm_split",
-            "final_review.clean_status",
-            "final_review.resume_latest",
-            "final_review.out_of_scope_report",
-        ],
-        "workspace-editor" => &[
-            "workspace-editor.create",
-            "workspace-editor.patch",
-            "workspace-editor.replace",
-            "workspace-editor.delete",
-            "workspace-editor.move",
-        ],
-        "project-runner" => &["project-runner.run"],
-        "repository-local" => &[
-            "repository-local.checkpoint",
-            "repository-local.create-signed-commit",
-            "repository-local.create-signed-tag",
-            "repository-local.preview-checkpoint-abort",
-            "repository-local.apply-checkpoint-abort",
-        ],
-        "repository-remote" => &[
-            "repository-remote.inspect",
-            "repository-remote.fetch-ref",
-            "repository-remote.push-ref",
-            "repository-remote.open-pr",
-            "repository-remote.update-pr",
-            "repository-remote.merge-pr",
-        ],
-        "system-diagnostics" => &["system-diagnostics.status"],
-        _ => &[],
-    }
-}
-
-const GENERATED_PROFILE_MARKER: &str = "# generated-by: development-system setup schema=3";
-
-fn generated_codex_agent_registry(project_root: &Path) -> Result<(), String> {
-    let path = project_root.join(".codex/config.toml");
-    let mut content = format!("{GENERATED_PROFILE_MARKER}\n");
-    for role in GENERATED_ROLE_PROFILES {
-        content.push_str(&format!(
-            "\n[agents.\"development-system-{role}\"]\ndescription = \"Development System {role} role\"\nconfig_file = \"agents/development-system-{role}.toml\"\n"
-        ));
-    }
-    write_generated_profile(&path, &content)
-}
-
-fn generated_codex_launcher(project_root: &Path) -> Result<String, String> {
-    let relative = ".development-system/codex";
-    let path = project_root.join(relative);
-    let content = format!(
-        "#!/bin/sh\n{GENERATED_PROFILE_MARKER}\nset -eu\nfor argument in \"$@\"; do\n  case \"$argument\" in\n    --dangerously-bypass-approvals-and-sandbox|--sandbox|--sandbox=*|-s)\n      echo 'development-system: sandbox overrides are forbidden; this launcher enforces read-only built-in tools' >&2\n      exit 2\n      ;;\n  esac\ndone\nexec codex --enable multi_agent_v2 --sandbox read-only \"$@\"\n"
-    );
-    write_generated_profile(&path, &content)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(&path)
-            .map_err(|error| {
-                format!("development_system.setup_launcher_metadata_failed source={error}")
-            })?
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&path, permissions).map_err(|error| {
-            format!("development_system.setup_launcher_permissions_failed source={error}")
-        })?;
-    }
-    Ok(format!("./{relative}"))
-}
-
-fn write_generated_profile(path: &Path, content: &str) -> Result<(), String> {
-    if let Ok(existing) = fs::read_to_string(path) {
-        if !existing.contains(GENERATED_PROFILE_MARKER) {
-            return Err(format!(
-                "development_system.setup_profile_conflict path={}",
-                path.display()
-            ));
-        }
-    }
-    fs::write(path, content)
-        .map_err(|error| format!("development_system.setup_policy_write_failed source={error}"))
-}
-
-fn generated_role_profiles(
-    project_root: &Path,
-    policy_directory: &Path,
-    codex_enabled: bool,
-) -> Result<Value, String> {
-    let executable = match env::var_os("DEVELOPMENT_SYSTEM_DISCIPLINE_LAUNCHER") {
-        Some(path) => PathBuf::from(path),
-        None => env::current_exe().map_err(|error| {
-            format!("development_system.setup_executable_failed source={error}")
-        })?,
-    };
-    let command = serde_json::to_string(&executable.to_string_lossy().as_ref())
-        .map_err(|error| format!("development_system.setup_policy_encode_failed source={error}"))?;
-    let mut claude = Vec::with_capacity(GENERATED_ROLE_PROFILES.len());
-    let mut codex = Vec::with_capacity(GENERATED_ROLE_PROFILES.len());
-    let claude_directory = project_root.join(".claude/agents");
-    let codex_directory = project_root.join(".codex/agents");
-    fs::create_dir_all(&claude_directory).map_err(|error| {
-        format!("development_system.setup_policy_directory_failed source={error}")
-    })?;
-    fs::create_dir_all(&codex_directory).map_err(|error| {
-        format!("development_system.setup_policy_directory_failed source={error}")
-    })?;
-    for role in GENERATED_ROLE_PROFILES {
-        let services = if codex_enabled {
-            privileged_role_services(role)
-        } else {
-            role_services(role)
-        };
-        let claude_path = claude_directory.join(format!("development-system-{role}.md"));
-        let claude_tools = service_tools("plugin-read-only")
-            .iter()
-            .filter(|tool| role == &"setup" || !tool.starts_with("setup."))
-            .map(|tool| {
-                format!(
-                    "mcp__plugin_development-system_development-discipline__{}",
-                    tool.replace('.', "_")
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        let claude_profile = format!(
-            "---\nname: development-system-{role}\ndescription: Development System {role} role; read-only because Claude privileged-subagent MCP isolation is unavailable.\ntools: Read,Grep,Glob{}\n---\n\n{GENERATED_PROFILE_MARKER}\n\nInspect through the plugin-wide workspace reader only. Mutation is unavailable in this Claude harness; do not substitute shell, Write, Edit, or a globally registered privileged MCP server.\n",
-            if claude_tools.is_empty() {
-                String::new()
-            } else {
-                format!(",{claude_tools}")
-            }
-        );
-        write_generated_profile(&claude_path, &claude_profile)?;
-        claude.push(format!(".claude/agents/development-system-{role}.md"));
-
-        let codex_path = codex_directory.join(format!("development-system-{role}.toml"));
-        let instructions = if codex_enabled {
-            format!("Act only as the {role} role. Use only the configured semantic services; built-in shell, apply-patch, and direct repository mutation are denied. Every mutation requires the current typed assignment.")
-        } else {
-            format!("Inspect only through the configured read-only services for the {role} role. Project mutation is unavailable in this harness.")
-        };
-        let sandbox_mode = "read-only";
-        let mut codex_profile = format!(
-            "{GENERATED_PROFILE_MARKER}\nsandbox_mode = \"{sandbox_mode}\"\ndeveloper_instructions = {instructions:?}\n"
-        );
-        for service in services {
-            let enabled = serde_json::to_string(service_tools(service)).map_err(|error| {
-                format!("development_system.setup_policy_encode_failed source={error}")
-            })?;
-            let server_id = service.replace('-', "_");
-            codex_profile.push_str(&format!(
-                "\n[mcp_servers.{server_id}]\ncommand = {command}\nargs = [\"--service\", \"{service}\"]\n{}{}enabled_tools = {enabled}\n",
-                if semantic_service_needs_ssh_agent(service) {
-                    "env = { GIT_SSH_COMMAND = \"ssh -F /dev/null\" }\nenv_vars = [\"SSH_AUTH_SOCK\"]\n"
-                } else {
-                    ""
-                },
-                if *service == "project-runner" {
-                    "tool_timeout_sec = 900\n"
-                } else {
-                    ""
-                }
-            ));
-        }
-        write_generated_profile(&codex_path, &codex_profile)?;
-        codex.push(format!(".codex/agents/development-system-{role}.toml"));
-
-        for provisional in [
-            policy_directory.join(format!("claude-{role}.md")),
-            policy_directory.join(format!("codex-{role}.toml")),
-        ] {
-            if provisional.is_file() {
-                fs::remove_file(&provisional).map_err(|error| {
-                    format!("development_system.setup_policy_cleanup_failed source={error}")
-                })?;
-            }
-        }
-    }
-    for provisional in ["claude-read-only.md", "codex-read-only.toml"] {
-        let provisional = policy_directory.join(provisional);
-        if provisional.is_file() {
-            fs::remove_file(&provisional).map_err(|error| {
-                format!("development_system.setup_policy_cleanup_failed source={error}")
-            })?;
-        }
-    }
-    Ok(json!({ "claude": claude, "codex": codex }))
-}
-
-fn semantic_service_needs_ssh_agent(service: &str) -> bool {
-    matches!(
-        service,
-        "workflow-core"
-            | "workspace-editor"
-            | "project-runner"
-            | "repository-local"
-            | "repository-remote"
-    )
 }
 
 fn workflow_project_root(arguments: &Value) -> Result<PathBuf, String> {

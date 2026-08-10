@@ -6,10 +6,9 @@
 //! assignment, configuration digest, scope, and expiry again immediately
 //! before performing its operation.
 //!
-//! The privileged service processes are intentionally not registered until the
-//! harness boundary proof is complete. Keep their shared core compiled and
-//! tested without advertising a capability that the current harness cannot
-//! safely isolate.
+//! Host plugins expose only the advisory reader/setup surface. Keep the other
+//! service cores compiled and tested for native use by standalone Tiber, which
+//! owns identity, authorization, isolation, and effect execution.
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::{BTreeMap, BTreeSet},
