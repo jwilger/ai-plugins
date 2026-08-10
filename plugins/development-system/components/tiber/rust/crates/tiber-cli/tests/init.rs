@@ -1,4 +1,4 @@
-mod support;
+pub mod support;
 
 use std::fs;
 use support::{assert_success, assert_success_ref, TempRepo};

@@ -63,7 +63,7 @@ teardown() {
   [[ "$output" == *"development_system.missing_option_value option=--project"* ]]
 }
 
-@test "personal-trunk setup previews without mutation and applies one commit" {
+@test "personal-trunk setup previews without mutation and directs apply through MCP" {
   git -C "$TEST_ROOT" init --initial-branch=main project
   git -C "$TEST_ROOT/project" config user.email test@example.com
   git -C "$TEST_ROOT/project" config user.name "Test User"
@@ -80,7 +80,7 @@ teardown() {
     --dry-run
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"write .development-system.toml"* ]]
+  [[ "$output" == *"use setup.preview followed by setup.apply confirmed=true through development-discipline MCP"* ]]
   [ ! -e "$TEST_ROOT/project/.development-system.toml" ]
   [ "$(git -C "$TEST_ROOT/project" rev-parse HEAD)" = "$before_head" ]
   [ "$(git -C "$TEST_ROOT/project" status --porcelain=v1)" = "$before_status" ]
@@ -92,10 +92,10 @@ teardown() {
     --apply \
     --yes
 
-  [ "$status" -eq 0 ]
-  [ -f "$TEST_ROOT/project/.development-system.toml" ]
-  [ "$(git -C "$TEST_ROOT/project" rev-list --count HEAD)" -eq 2 ]
-  [ "$(git -C "$TEST_ROOT/project" -c log.showSignature=false log -1 --format=%s)" = "chore: initialize development system" ]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.setup_mcp_required"* ]]
+  [ ! -e "$TEST_ROOT/project/.development-system.toml" ]
+  [ "$(git -C "$TEST_ROOT/project" rev-parse HEAD)" = "$before_head" ]
 }
 
 @test "setup preserves an unrelated file resembling its temporary config" {
@@ -114,7 +114,8 @@ teardown() {
     --apply \
     --yes
 
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.setup_mcp_required"* ]]
   [ "$(cat "$TEST_ROOT/project/.development-system.toml.development-system-tmp")" = "owned by user" ]
 }
 
@@ -135,7 +136,7 @@ teardown() {
     --yes
 
   [ "$status" -eq 2 ]
-  [[ "$output" == *"development_system.config_already_exists"* ]]
+  [[ "$output" == *"development_system.setup_mcp_required"* ]]
   [ -L "$TEST_ROOT/project/.development-system.toml" ]
   [ "$(readlink "$TEST_ROOT/project/.development-system.toml")" = "missing-target" ]
 }
@@ -236,7 +237,7 @@ teardown() {
     >/dev/null
 }
 
-@test "setup records delivery, optional features, and the worktree root" {
+@test "legacy setup flags are previewed but apply is delegated to MCP" {
   git -C "$TEST_ROOT" init --initial-branch=main project
   git -C "$TEST_ROOT/project" config user.email test@example.com
   git -C "$TEST_ROOT/project" config user.name "Test User"
@@ -253,12 +254,10 @@ teardown() {
     --apply \
     --yes
 
-  [ "$status" -eq 0 ]
-  grep -Fq 'mode = "pull-request"' "$TEST_ROOT/project/.development-system.toml"
-  grep -Fq 'schema_version = 2' "$TEST_ROOT/project/.development-system.toml"
-  grep -Fq 'root = ".worktrees"' "$TEST_ROOT/project/.development-system.toml"
-  grep -Fq 'agentic_systems = true' "$TEST_ROOT/project/.development-system.toml"
-  ! grep -Fq '[mcps]' "$TEST_ROOT/project/.development-system.toml"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"features tiber=true agentic_systems=true eval_case_reporting=false"* ]]
+  [[ "$output" == *"development_system.setup_mcp_required"* ]]
+  [ ! -e "$TEST_ROOT/project/.development-system.toml" ]
 }
 
 @test "tiber launcher refuses use when the project disables Tiber" {
@@ -268,11 +267,12 @@ teardown() {
   touch "$TEST_ROOT/disabled-tiber/README.md"
   git -C "$TEST_ROOT/disabled-tiber" add README.md
   git -C "$TEST_ROOT/disabled-tiber" commit -m "test: initialize fixture"
-  "$REPO_ROOT/plugins/development-system/bin/development-system" setup \
-    --project "$TEST_ROOT/disabled-tiber" \
-    --disable tiber \
-    --apply \
-    --yes
+  printf '%s\n' \
+    'schema_version = 3' \
+    '' \
+    '[features]' \
+    'tiber = false' \
+    >"$TEST_ROOT/disabled-tiber/.development-system.toml"
 
   run bash -c \
     'cd "$1" && "$2" list' \

@@ -1,11 +1,12 @@
 use crate::git_event_store::{GitEventStore, SynchronizeOutcome};
-use eventcore::{mapping, ModelInput, ModelOutput};
-use eventcore_types::{
-    BatchSize, Event, EventFilter, EventPage, EventReader, EventStore, EventStoreError, StreamId,
-    StreamVersion, StreamWrites,
+use eventcore::model::{ModelCommandLogic, Modeled, ModeledEvents};
+use eventcore::{
+    mapping, ModelCommand, ModelInput, ModelOutput, ModelState, RetryPolicy, StreamIdentity,
 };
+use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStoreError, StreamId};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
@@ -20,10 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiber_core::task::{ChecklistItem, Claim, Note, Subtask, Task, ValidationRepair};
-use tiber_core::{
-    events::TiberEvent, BoardSnapshot, DependencyGraph, OrderReconciliation, TaskDependencies,
-    TaskSnapshot, TaskTitle,
-};
+use tiber_core::{events::*, BoardSnapshot, OrderReconciliation, TaskSnapshot, TaskTitle};
 
 pub mod git_event_store;
 
@@ -79,23 +77,2225 @@ fn check_tiber_model() -> Result<eventcore::model::CheckReport, eventcore::model
     eventcore::model::check()
 }
 
-#[derive(Clone, Copy)]
-enum TaskMutation {
-    Create,
-    Transition,
-    Prioritize,
-    Dependencies,
-    AddSubtask,
-    CheckSubtask,
-    UpdateDetails,
-    UpdatePullRequest,
-    UpdateDetailsAndPullRequest,
-    AddAcceptance,
-    CheckAcceptance,
-    RemoveAcceptance,
-    AddNote,
-    ValidateRepair,
-    CloseFromTrailer,
+#[derive(Clone, Debug, Eq, PartialEq, StreamIdentity)]
+struct CiRecoveryStream(StreamId);
+
+// Compatibility events are origins from historical streams, not facts emitted
+// by fresh domain commands.
+#[derive(ModelInput)]
+struct LegacyTaskStatePublishedHistory {
+    #[model(origin)]
+    payload: TaskStatePublishedEvent,
+}
+
+mapping! {
+    LegacyTaskStatePublishedHistoryToEvent:
+        LegacyTaskStatePublishedHistory.payload => TiberEvent.LegacyTaskStatePublished
+        using clone;
+}
+
+#[derive(ModelInput)]
+struct LegacyRecoveryStatePublishedHistory {
+    #[model(origin)]
+    payload: CiRecoveryEvent,
+}
+
+#[derive(ModelInput)]
+struct LegacyTaskClaimChangedHistory {
+    #[model(origin)]
+    payload: TaskClaimChangedEvent,
+}
+
+mapping! {
+    LegacyTaskClaimChangedHistoryToEvent:
+        LegacyTaskClaimChangedHistory.payload => TiberEvent.LegacyTaskClaimChanged
+        using clone;
+}
+
+#[derive(ModelInput)]
+struct LegacyTaskRemovedHistory {
+    #[model(origin)]
+    payload: TaskStemEvent,
+}
+
+#[derive(ModelInput)]
+struct LegacyTaskClosedFromTrailerHistory {
+    #[model(origin)]
+    payload: TaskStemEvent,
+}
+
+mapping! {
+    LegacyTaskClosedFromTrailerHistoryToEvent:
+        LegacyTaskClosedFromTrailerHistory.payload => TiberEvent.LegacyTaskClosedFromTrailer
+        using clone;
+}
+
+mapping! {
+    LegacyTaskRemovedHistoryToEvent:
+        LegacyTaskRemovedHistory.payload => TiberEvent.LegacyTaskRemoved
+        using clone;
+}
+
+mapping! {
+    LegacyRecoveryStatePublishedHistoryToEvent:
+        LegacyRecoveryStatePublishedHistory.payload => TiberEvent.LegacyRecoveryStatePublished
+        using clone;
+}
+
+fn validate_historical_task_state_publication(payload: &TaskStatePublishedEvent) {
+    let input = LegacyTaskStatePublishedHistory::model_builder()
+        .payload(payload.clone())
+        .build();
+    let _ = LegacyTaskStatePublishedHistoryToEvent::apply(input.as_ref());
+}
+
+/// Typed boundary between persisted domain facts and the task/board/CI read
+/// projection. The projector below consumes this mapped value, so the checked
+/// model covers both sides of every durable fact rather than stopping at the
+/// command append boundary.
+#[derive(ModelOutput)]
+struct TiberProjectionEvent {
+    event: TiberEvent,
+}
+
+macro_rules! tiber_projection_mapping {
+    ($variant:ident, $payload:ty, $function:ident, $mapping:ident) => {
+        fn $function(payload: &$payload) -> TiberEvent {
+            TiberEvent::$variant(payload.clone())
+        }
+        mapping! { $mapping: TiberEvent.$variant => TiberProjectionEvent.event using $function; }
+    };
+}
+
+tiber_projection_mapping!(
+    RepositoryInitialized,
+    RepositoryInitializedEvent,
+    project_repository_initialized,
+    ProjectRepositoryInitialized
+);
+tiber_projection_mapping!(
+    TaskCreated,
+    TaskCreatedEvent,
+    project_task_created,
+    ProjectTaskCreated
+);
+tiber_projection_mapping!(
+    TaskTransitioned,
+    TaskTransitionedEvent,
+    project_task_transitioned,
+    ProjectTaskTransitioned
+);
+tiber_projection_mapping!(
+    TaskPriorityChanged,
+    TaskOrderEvent,
+    project_task_priority_changed,
+    ProjectTaskPriorityChanged
+);
+tiber_projection_mapping!(
+    TaskLinksChanged,
+    TaskLinksChangedEvent,
+    project_task_links_changed,
+    ProjectTaskLinksChanged
+);
+tiber_projection_mapping!(
+    TaskSubtaskAdded,
+    TaskSubtaskAddedEvent,
+    project_task_subtask_added,
+    ProjectTaskSubtaskAdded
+);
+tiber_projection_mapping!(
+    TaskSubtaskChecked,
+    TaskSubtaskCheckedEvent,
+    project_task_subtask_checked,
+    ProjectTaskSubtaskChecked
+);
+tiber_projection_mapping!(
+    TaskDetailsUpdated,
+    TaskDetailsUpdatedEvent,
+    project_task_details_updated,
+    ProjectTaskDetailsUpdated
+);
+tiber_projection_mapping!(
+    TaskPullRequestChanged,
+    TaskPullRequestChangedEvent,
+    project_task_pull_request_changed,
+    ProjectTaskPullRequestChanged
+);
+tiber_projection_mapping!(
+    TaskAcceptanceAdded,
+    TaskAcceptanceAddedEvent,
+    project_task_acceptance_added,
+    ProjectTaskAcceptanceAdded
+);
+tiber_projection_mapping!(
+    TaskAcceptanceChecked,
+    TaskAcceptanceCheckedEvent,
+    project_task_acceptance_checked,
+    ProjectTaskAcceptanceChecked
+);
+tiber_projection_mapping!(
+    TaskAcceptanceRemoved,
+    TaskAcceptanceRemovedEvent,
+    project_task_acceptance_removed,
+    ProjectTaskAcceptanceRemoved
+);
+tiber_projection_mapping!(
+    TaskNoteAdded,
+    TaskNoteAddedEvent,
+    project_task_note_added,
+    ProjectTaskNoteAdded
+);
+tiber_projection_mapping!(
+    LegacyTaskClaimChanged,
+    TaskClaimChangedEvent,
+    project_task_claim_changed,
+    ProjectLegacyTaskClaimChanged
+);
+tiber_projection_mapping!(
+    TaskValidationRepaired,
+    TaskValidationRepairedEvent,
+    project_task_validation_repaired,
+    ProjectTaskValidationRepaired
+);
+tiber_projection_mapping!(
+    TasksClosedFromCommitTrailers,
+    TasksClosedFromCommitTrailersEvent,
+    project_tasks_closed_from_commit_trailers,
+    ProjectTasksClosedFromCommitTrailers
+);
+tiber_projection_mapping!(
+    LegacyTaskClosedFromTrailer,
+    TaskStemEvent,
+    project_task_closed_from_trailer,
+    ProjectLegacyTaskClosedFromTrailer
+);
+tiber_projection_mapping!(
+    LegacyTaskRemoved,
+    TaskStemEvent,
+    project_task_removed,
+    ProjectLegacyTaskRemoved
+);
+tiber_projection_mapping!(
+    BoardReordered,
+    TaskOrderEvent,
+    project_board_reordered,
+    ProjectBoardReordered
+);
+tiber_projection_mapping!(
+    LegacyTaskStatePublished,
+    TaskStatePublishedEvent,
+    project_legacy_task_state_published,
+    ProjectLegacyTaskStatePublished
+);
+tiber_projection_mapping!(
+    CiRecoveryClaimed,
+    CiRecoveryClaimedEvent,
+    project_ci_recovery_claimed,
+    ProjectCiRecoveryClaimed
+);
+tiber_projection_mapping!(
+    CiRecoveryJoined,
+    CiRecoveryJoinedEvent,
+    project_ci_recovery_joined,
+    ProjectCiRecoveryJoined
+);
+tiber_projection_mapping!(
+    CiRecoveryTransferred,
+    CiRecoveryTransferredEvent,
+    project_ci_recovery_transferred,
+    ProjectCiRecoveryTransferred
+);
+tiber_projection_mapping!(
+    CiRecoveryTakenOver,
+    CiRecoveryTakenOverEvent,
+    project_ci_recovery_taken_over,
+    ProjectCiRecoveryTakenOver
+);
+tiber_projection_mapping!(
+    CiRecoveryAssigned,
+    CiRecoveryAssignedEvent,
+    project_ci_recovery_assigned,
+    ProjectCiRecoveryAssigned
+);
+tiber_projection_mapping!(
+    CiRecoveryReported,
+    CiRecoveryReportedEvent,
+    project_ci_recovery_reported,
+    ProjectCiRecoveryReported
+);
+tiber_projection_mapping!(
+    CiRecoveryHeartbeatRecorded,
+    CiRecoveryHeartbeatRecordedEvent,
+    project_ci_recovery_heartbeat,
+    ProjectCiRecoveryHeartbeat
+);
+tiber_projection_mapping!(
+    CiRecoveryDiagnosed,
+    CiRecoveryDiagnosedEvent,
+    project_ci_recovery_diagnosed,
+    ProjectCiRecoveryDiagnosed
+);
+tiber_projection_mapping!(
+    CiRecoveryActionChosen,
+    CiRecoveryActionChosenEvent,
+    project_ci_recovery_action,
+    ProjectCiRecoveryAction
+);
+tiber_projection_mapping!(
+    CiRecoveryReplacementRecorded,
+    CiRecoveryReplacementRecordedEvent,
+    project_ci_recovery_replacement,
+    ProjectCiRecoveryReplacement
+);
+tiber_projection_mapping!(
+    CiRecoveryResolved,
+    CiRecoveryResolvedEvent,
+    project_ci_recovery_resolved,
+    ProjectCiRecoveryResolved
+);
+tiber_projection_mapping!(
+    LegacyRecoveryStatePublished,
+    CiRecoveryEvent,
+    project_legacy_recovery_state,
+    ProjectLegacyRecoveryState
+);
+
+fn projection_event(event: &TiberEvent) -> TiberEvent {
+    macro_rules! project {
+        ($mapping:ident) => {
+            TiberProjectionEvent::model_builder()
+                .event($mapping::apply(event))
+                .build()
+                .into_inner()
+                .event
+        };
+    }
+    match event {
+        TiberEvent::RepositoryInitialized(_) => project!(ProjectRepositoryInitialized),
+        TiberEvent::TaskCreated(_) => project!(ProjectTaskCreated),
+        TiberEvent::TaskTransitioned(_) => project!(ProjectTaskTransitioned),
+        TiberEvent::TaskPriorityChanged(_) => project!(ProjectTaskPriorityChanged),
+        TiberEvent::TaskLinksChanged(_) => project!(ProjectTaskLinksChanged),
+        TiberEvent::TaskSubtaskAdded(_) => project!(ProjectTaskSubtaskAdded),
+        TiberEvent::TaskSubtaskChecked(_) => project!(ProjectTaskSubtaskChecked),
+        TiberEvent::TaskDetailsUpdated(_) => project!(ProjectTaskDetailsUpdated),
+        TiberEvent::LegacyTaskClaimChanged(_) => project!(ProjectLegacyTaskClaimChanged),
+        TiberEvent::TaskPullRequestChanged(_) => project!(ProjectTaskPullRequestChanged),
+        TiberEvent::TaskAcceptanceAdded(_) => project!(ProjectTaskAcceptanceAdded),
+        TiberEvent::TaskAcceptanceChecked(_) => project!(ProjectTaskAcceptanceChecked),
+        TiberEvent::TaskAcceptanceRemoved(_) => project!(ProjectTaskAcceptanceRemoved),
+        TiberEvent::TaskNoteAdded(_) => project!(ProjectTaskNoteAdded),
+        TiberEvent::TaskValidationRepaired(_) => project!(ProjectTaskValidationRepaired),
+        TiberEvent::TasksClosedFromCommitTrailers(_) => {
+            project!(ProjectTasksClosedFromCommitTrailers)
+        }
+        TiberEvent::LegacyTaskClosedFromTrailer(_) => {
+            project!(ProjectLegacyTaskClosedFromTrailer)
+        }
+        TiberEvent::LegacyTaskRemoved(_) => project!(ProjectLegacyTaskRemoved),
+        TiberEvent::BoardReordered(_) => project!(ProjectBoardReordered),
+        TiberEvent::LegacyTaskStatePublished(_) => project!(ProjectLegacyTaskStatePublished),
+        TiberEvent::CiRecoveryClaimed(_) => project!(ProjectCiRecoveryClaimed),
+        TiberEvent::CiRecoveryJoined(_) => project!(ProjectCiRecoveryJoined),
+        TiberEvent::CiRecoveryTransferred(_) => project!(ProjectCiRecoveryTransferred),
+        TiberEvent::CiRecoveryTakenOver(_) => project!(ProjectCiRecoveryTakenOver),
+        TiberEvent::CiRecoveryAssigned(_) => project!(ProjectCiRecoveryAssigned),
+        TiberEvent::CiRecoveryReported(_) => project!(ProjectCiRecoveryReported),
+        TiberEvent::CiRecoveryHeartbeatRecorded(_) => project!(ProjectCiRecoveryHeartbeat),
+        TiberEvent::CiRecoveryDiagnosed(_) => project!(ProjectCiRecoveryDiagnosed),
+        TiberEvent::CiRecoveryActionChosen(_) => project!(ProjectCiRecoveryAction),
+        TiberEvent::CiRecoveryReplacementRecorded(_) => project!(ProjectCiRecoveryReplacement),
+        TiberEvent::CiRecoveryResolved(_) => project!(ProjectCiRecoveryResolved),
+        TiberEvent::LegacyRecoveryStatePublished(_) => project!(ProjectLegacyRecoveryState),
+    }
+}
+
+/// Run compatibility mappings only for explicit legacy variants. Current facts
+/// have their own command and projection mappings and must never be routed
+/// through an adapter whose sole purpose is historical replay.
+fn fold_explicit_legacy_tiber_fact(event: &TiberEvent) {
+    match event {
+        TiberEvent::LegacyTaskStatePublished(payload) => {
+            validate_historical_task_state_publication(payload);
+        }
+        TiberEvent::LegacyRecoveryStatePublished(payload) => {
+            validate_historical_recovery_state_publication(payload);
+        }
+        TiberEvent::LegacyTaskClaimChanged(payload) => {
+            let input = LegacyTaskClaimChangedHistory::model_builder()
+                .payload(payload.clone())
+                .build();
+            let _ = LegacyTaskClaimChangedHistoryToEvent::apply(input.as_ref());
+        }
+        TiberEvent::LegacyTaskRemoved(payload) => {
+            let input = LegacyTaskRemovedHistory::model_builder()
+                .payload(payload.clone())
+                .build();
+            let _ = LegacyTaskRemovedHistoryToEvent::apply(input.as_ref());
+        }
+        TiberEvent::LegacyTaskClosedFromTrailer(payload) => {
+            let input = LegacyTaskClosedFromTrailerHistory::model_builder()
+                .payload(payload.clone())
+                .build();
+            let _ = LegacyTaskClosedFromTrailerHistoryToEvent::apply(input.as_ref());
+        }
+        _ => {}
+    }
+}
+
+fn validate_historical_recovery_state_publication(payload: &CiRecoveryEvent) {
+    let input = LegacyRecoveryStatePublishedHistory::model_builder()
+        .payload(payload.clone())
+        .build();
+    let _ = LegacyRecoveryStatePublishedHistoryToEvent::apply(input.as_ref());
+}
+
+#[derive(Clone)]
+struct ClaimCiRecoveryIntent {
+    incident_id: String,
+    schema_version: u32,
+    trigger: CiRecoveryTrigger,
+    owner: CiRecoveryParticipant,
+    lease_expires_at: u64,
+}
+
+#[derive(ModelInput)]
+struct ClaimCiRecoveryRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: ClaimCiRecoveryIntent,
+}
+
+#[derive(ModelCommand)]
+struct ClaimCiRecovery {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: ClaimCiRecoveryIntent,
+}
+
+mapping! {
+    ClaimCiRecoveryRequestToStream:
+        ClaimCiRecoveryRequest.stream => ClaimCiRecovery.stream
+        using clone;
+}
+
+mapping! {
+    ClaimCiRecoveryRequestToIntent:
+        ClaimCiRecoveryRequest.intent => ClaimCiRecovery.intent
+        using clone;
+}
+
+fn claim_ci_recovery_fact(
+    stream: &CiRecoveryStream,
+    intent: &ClaimCiRecoveryIntent,
+    _: &bool,
+) -> CiRecoveryClaimedEvent {
+    CiRecoveryClaimedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        schema_version: intent.schema_version,
+        incident_id: intent.incident_id.clone(),
+        trigger: intent.trigger.clone().into(),
+        owner: intent.owner.clone().into(),
+        lease_expires_at: intent.lease_expires_at,
+    }
+}
+
+mapping! {
+    ClaimCiRecoveryToFact:
+        (ClaimCiRecovery.stream, ClaimCiRecovery.intent, ClaimCiRecoveryState.active_incident) => TiberEvent.CiRecoveryClaimed
+        using claim_ci_recovery_fact;
+}
+
+#[derive(ModelState)]
+struct ClaimCiRecoveryState {
+    #[model(default)]
+    active_incident: bool,
+}
+
+impl ModelCommandLogic for ClaimCiRecovery {
+    type Event = TiberEvent;
+    type State = ClaimCiRecoveryState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(_) => state.active_incident = true,
+            TiberEvent::CiRecoveryResolved(_) => state.active_incident = false,
+            TiberEvent::LegacyRecoveryStatePublished(payload) => {
+                state.active_incident =
+                    payload.state.state != tiber_core::events::CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        if state.as_ref().active_incident {
+            return Err("ci_recovery_claim_already_active".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoveryclaimed(ClaimCiRecoveryToFact::apply((
+                self,
+                self,
+                state.as_ref(),
+            ))),
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct JoinCiRecoveryIntent {
+    trigger: Option<CiRecoveryTrigger>,
+    participant: Option<CiRecoveryParticipant>,
+}
+
+#[derive(ModelInput)]
+struct JoinCiRecoveryRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: JoinCiRecoveryIntent,
+}
+
+#[derive(ModelCommand)]
+struct JoinCiRecovery {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: JoinCiRecoveryIntent,
+}
+
+mapping! {
+    JoinCiRecoveryRequestToStream:
+        JoinCiRecoveryRequest.stream => JoinCiRecovery.stream
+        using clone;
+}
+
+mapping! {
+    JoinCiRecoveryRequestToIntent:
+        JoinCiRecoveryRequest.intent => JoinCiRecovery.intent
+        using clone;
+}
+
+fn join_ci_recovery_fact(
+    stream: &CiRecoveryStream,
+    intent: &JoinCiRecoveryIntent,
+    _: &bool,
+    triggers: &[CiRecoveryTrigger],
+    participants: &[CiRecoveryParticipant],
+    failed_replacement: &Option<CiRecoveryReplacement>,
+) -> CiRecoveryJoinedEvent {
+    let trigger = intent.trigger.as_ref().filter(|trigger| {
+        !triggers.contains(*trigger)
+            && failed_replacement.as_ref().is_some_and(|replacement| {
+                replacement.run_id == trigger.run_id
+                    && replacement.run_url == trigger.run_url
+                    && replacement.sha == trigger.failed_sha
+            })
+    });
+    let participant = intent
+        .participant
+        .as_ref()
+        .filter(|participant| !participants.contains(*participant));
+    CiRecoveryJoinedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        trigger: trigger.cloned().map(Into::into),
+        participant: participant.cloned().map(Into::into),
+    }
+}
+
+mapping! {
+    JoinCiRecoveryToFact:
+        (JoinCiRecovery.stream, JoinCiRecovery.intent, JoinCiRecoveryState.active_incident, JoinCiRecoveryState.triggers, JoinCiRecoveryState.participants, JoinCiRecoveryState.failed_replacement) => TiberEvent.CiRecoveryJoined
+        using join_ci_recovery_fact;
+}
+
+#[derive(ModelState)]
+struct JoinCiRecoveryState {
+    #[model(default)]
+    active_incident: bool,
+    #[model(default)]
+    triggers: Vec<CiRecoveryTrigger>,
+    #[model(default)]
+    participants: Vec<CiRecoveryParticipant>,
+    #[model(default)]
+    failed_replacement: Option<CiRecoveryReplacement>,
+}
+
+impl ModelCommandLogic for JoinCiRecovery {
+    type Event = TiberEvent;
+    type State = JoinCiRecoveryState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(payload) => {
+                state.active_incident = true;
+                state.triggers = vec![payload.trigger.clone().into()];
+                state.participants = vec![payload.owner.clone().into()];
+                state.failed_replacement = None;
+            }
+            TiberEvent::CiRecoveryJoined(payload) => {
+                if let Some(trigger) = &payload.trigger {
+                    let trigger = trigger.clone().into();
+                    if !state.triggers.contains(&trigger) {
+                        state.triggers.push(trigger);
+                    }
+                }
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryReplacementRecorded(payload) => {
+                let replacement: CiRecoveryReplacement = payload.replacement.clone().into();
+                state.failed_replacement = (replacement.status
+                    == CiRecoveryReplacementStatus::Failed)
+                    .then_some(replacement);
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.active_incident = false,
+            TiberEvent::LegacyRecoveryStatePublished(payload) => {
+                let legacy = CiRecoveryState::from_snapshot(&payload.state);
+                state.active_incident = legacy.state != CiRecoveryPhase::Resolved;
+                state.triggers = if legacy.triggers.is_empty() {
+                    vec![legacy.trigger]
+                } else {
+                    legacy.triggers
+                };
+                state.participants = legacy.participants;
+                state.failed_replacement = legacy.replacement.filter(|replacement| {
+                    replacement.status == CiRecoveryReplacementStatus::Failed
+                });
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if !state.active_incident {
+            return Err("ci_recovery_join_without_active_incident".into());
+        }
+        let trigger = self.intent.trigger.as_ref().filter(|trigger| {
+            !state.triggers.contains(*trigger)
+                && state
+                    .failed_replacement
+                    .as_ref()
+                    .is_some_and(|replacement| {
+                        replacement.run_id == trigger.run_id
+                            && replacement.run_url == trigger.run_url
+                            && replacement.sha == trigger.failed_sha
+                    })
+        });
+        let participant = self
+            .intent
+            .participant
+            .as_ref()
+            .filter(|participant| !state.participants.contains(*participant));
+        if trigger.is_none() && participant.is_none() {
+            return Err("ci_recovery_join_empty_or_duplicate_fact".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoveryjoined(JoinCiRecoveryToFact::apply((
+                self, self, state, state, state, state,
+            ))),
+        ))
+    }
+}
+
+/// The externally observed clock is an input to this pure command. The command
+/// decides the successor epoch and resulting ownership fact from the current
+/// incident facts; it does not receive a caller-built event.
+#[derive(Clone)]
+struct TransferCiRecoveryIntent {
+    incident_id: String,
+    expected_epoch: u64,
+    caller: CiRecoveryParticipant,
+    recipient: CiRecoveryParticipant,
+    observed_at: u64,
+    lease_expires_at: u64,
+}
+
+#[derive(ModelInput)]
+struct TransferCiRecoveryRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: TransferCiRecoveryIntent,
+}
+
+#[derive(ModelCommand)]
+struct TransferCiRecovery {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: TransferCiRecoveryIntent,
+}
+
+#[derive(Clone)]
+struct CiOwnershipDecisionContext {
+    incident_id: Option<String>,
+    owner: Option<CiRecoveryParticipant>,
+    epoch: u64,
+    lease_expires_at: u64,
+    participants: Vec<CiRecoveryParticipant>,
+    resolved: bool,
+}
+
+#[derive(ModelOutput)]
+struct CiOwnershipDecisionOutput {
+    context: CiOwnershipDecisionContext,
+}
+
+fn ownership_decision_context(
+    incident_id: &Option<String>,
+    owner: &Option<CiRecoveryParticipant>,
+    epoch: &u64,
+    lease_expires_at: &u64,
+    participants: &[CiRecoveryParticipant],
+    resolved: &bool,
+) -> CiOwnershipDecisionContext {
+    CiOwnershipDecisionContext {
+        incident_id: incident_id.clone(),
+        owner: owner.clone(),
+        epoch: *epoch,
+        lease_expires_at: *lease_expires_at,
+        participants: participants.to_vec(),
+        resolved: *resolved,
+    }
+}
+
+mapping! {
+    TransferCiRecoveryStateToDecisionContext:
+        (TransferCiRecoveryState.incident_id, TransferCiRecoveryState.owner, TransferCiRecoveryState.epoch, TransferCiRecoveryState.lease_expires_at, TransferCiRecoveryState.participants, TransferCiRecoveryState.resolved) => CiOwnershipDecisionOutput.context
+        using ownership_decision_context;
+}
+
+mapping! {
+    TransferCiRecoveryRequestToStream:
+        TransferCiRecoveryRequest.stream => TransferCiRecovery.stream
+        using clone;
+}
+
+mapping! {
+    TransferCiRecoveryRequestToIntent:
+        TransferCiRecoveryRequest.intent => TransferCiRecovery.intent
+        using clone;
+}
+
+fn transfer_ci_recovery_candidate_fact(
+    stream: &CiRecoveryStream,
+    intent: &TransferCiRecoveryIntent,
+    context: &CiOwnershipDecisionContext,
+) -> CiRecoveryTransferredEvent {
+    CiRecoveryTransferredEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        owner: intent.recipient.clone().into(),
+        epoch: intent.expected_epoch.saturating_add(1),
+        lease_expires_at: intent.lease_expires_at,
+        participant: (!context.participants.contains(&intent.recipient))
+            .then(|| intent.recipient.clone().into()),
+    }
+}
+
+// EventCore's checked mapping records the fact fields determined entirely by
+// the transfer intent. `decide` below removes the optional participant when
+// the folded incident facts show it has already joined.
+mapping! {
+    TransferCiRecoveryToCandidateFact:
+        (TransferCiRecovery.stream, TransferCiRecovery.intent, CiOwnershipDecisionOutput.context) => TiberEvent.CiRecoveryTransferred
+        using transfer_ci_recovery_candidate_fact;
+}
+
+#[derive(ModelState)]
+struct TransferCiRecoveryState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    owner: Option<CiRecoveryParticipant>,
+    #[model(default)]
+    epoch: u64,
+    #[model(default)]
+    lease_expires_at: u64,
+    #[model(default)]
+    participants: Vec<CiRecoveryParticipant>,
+    #[model(default)]
+    resolved: bool,
+}
+
+impl ModelCommandLogic for TransferCiRecovery {
+    type Event = TiberEvent;
+    type State = TransferCiRecoveryState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(payload) => {
+                state.incident_id = Some(payload.incident_id.clone());
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = 1;
+                state.lease_expires_at = payload.lease_expires_at;
+                state.participants = vec![payload.owner.clone().into()];
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryJoined(payload) => {
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryTransferred(payload) => {
+                let owner: CiRecoveryParticipant = payload.owner.clone().into();
+                state.owner = Some(owner.clone());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryTakenOver(payload) => {
+                let owner: CiRecoveryParticipant = payload.owner.clone().into();
+                state.owner = Some(owner.clone());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::LegacyRecoveryStatePublished(payload) => {
+                let legacy = CiRecoveryState::from_snapshot(&payload.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.owner = Some(legacy.owner);
+                state.epoch = legacy.epoch;
+                state.lease_expires_at = legacy.lease_expires_at;
+                state.participants = legacy.participants;
+                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_incident_resolved".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        if state.epoch != self.intent.expected_epoch {
+            return Err("ci_recovery_stale_epoch".into());
+        }
+        if state.owner.as_ref() != Some(&self.intent.caller) {
+            return Err("ci_recovery_not_owner".into());
+        }
+        if state.lease_expires_at <= self.intent.observed_at {
+            return Err("ci_recovery_lease_expired".into());
+        }
+        let decision = CiOwnershipDecisionOutput::model_builder()
+            .context(TransferCiRecoveryStateToDecisionContext::apply((
+                state, state, state, state, state, state,
+            )))
+            .build();
+        debug_assert_eq!(decision.as_ref().context.incident_id, state.incident_id);
+        debug_assert_eq!(decision.as_ref().context.owner, state.owner);
+        debug_assert_eq!(decision.as_ref().context.epoch, state.epoch);
+        debug_assert_eq!(
+            decision.as_ref().context.lease_expires_at,
+            state.lease_expires_at
+        );
+        debug_assert_eq!(decision.as_ref().context.resolved, state.resolved);
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoverytransferred(
+                TransferCiRecoveryToCandidateFact::apply((self, self, decision.as_ref())),
+            ),
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct TakeOverCiRecoveryIntent {
+    incident_id: String,
+    expected_epoch: u64,
+    successor: CiRecoveryParticipant,
+    observed_at: u64,
+    lease_expires_at: u64,
+}
+
+#[derive(ModelInput)]
+struct TakeOverCiRecoveryRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: TakeOverCiRecoveryIntent,
+}
+
+#[derive(ModelCommand)]
+struct TakeOverCiRecovery {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: TakeOverCiRecoveryIntent,
+}
+
+mapping! {
+    TakeOverCiRecoveryRequestToStream:
+        TakeOverCiRecoveryRequest.stream => TakeOverCiRecovery.stream
+        using clone;
+}
+
+mapping! {
+    TakeOverCiRecoveryRequestToIntent:
+        TakeOverCiRecoveryRequest.intent => TakeOverCiRecovery.intent
+        using clone;
+}
+
+fn takeover_ci_recovery_candidate_fact(
+    stream: &CiRecoveryStream,
+    intent: &TakeOverCiRecoveryIntent,
+    context: &CiOwnershipDecisionContext,
+) -> CiRecoveryTakenOverEvent {
+    CiRecoveryTakenOverEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        owner: intent.successor.clone().into(),
+        epoch: intent.expected_epoch.saturating_add(1),
+        lease_expires_at: intent.lease_expires_at,
+        participant: (!context.participants.contains(&intent.successor))
+            .then(|| intent.successor.clone().into()),
+    }
+}
+
+mapping! {
+    TakeOverCiRecoveryToCandidateFact:
+        (TakeOverCiRecovery.stream, TakeOverCiRecovery.intent, CiOwnershipDecisionOutput.context) => TiberEvent.CiRecoveryTakenOver
+        using takeover_ci_recovery_candidate_fact;
+}
+
+#[derive(ModelState)]
+struct TakeOverCiRecoveryState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    owner: Option<CiRecoveryParticipant>,
+    #[model(default)]
+    epoch: u64,
+    #[model(default)]
+    lease_expires_at: u64,
+    #[model(default)]
+    participants: Vec<CiRecoveryParticipant>,
+    #[model(default)]
+    resolved: bool,
+}
+
+mapping! {
+    TakeOverCiRecoveryStateToDecisionContext:
+        (TakeOverCiRecoveryState.incident_id, TakeOverCiRecoveryState.owner, TakeOverCiRecoveryState.epoch, TakeOverCiRecoveryState.lease_expires_at, TakeOverCiRecoveryState.participants, TakeOverCiRecoveryState.resolved) => CiOwnershipDecisionOutput.context
+        using ownership_decision_context;
+}
+
+impl ModelCommandLogic for TakeOverCiRecovery {
+    type Event = TiberEvent;
+    type State = TakeOverCiRecoveryState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(payload) => {
+                state.incident_id = Some(payload.incident_id.clone());
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = 1;
+                state.lease_expires_at = payload.lease_expires_at;
+                state.participants = vec![payload.owner.clone().into()];
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryJoined(payload) => {
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryTransferred(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryTakenOver(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::LegacyRecoveryStatePublished(payload) => {
+                let legacy = CiRecoveryState::from_snapshot(&payload.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.owner = Some(legacy.owner);
+                state.epoch = legacy.epoch;
+                state.lease_expires_at = legacy.lease_expires_at;
+                state.participants = legacy.participants;
+                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_incident_resolved".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        if state.epoch != self.intent.expected_epoch {
+            return Err("ci_recovery_stale_epoch".into());
+        }
+        if state.owner.as_ref() == Some(&self.intent.successor) {
+            return Err("ci_recovery_already_owner".into());
+        }
+        if state.lease_expires_at > self.intent.observed_at {
+            return Err("ci_recovery_lease_active".into());
+        }
+        let decision = CiOwnershipDecisionOutput::model_builder()
+            .context(TakeOverCiRecoveryStateToDecisionContext::apply((
+                state, state, state, state, state, state,
+            )))
+            .build();
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoverytakenover(
+                TakeOverCiRecoveryToCandidateFact::apply((self, self, decision.as_ref())),
+            ),
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct AssignCiRecoveryWorkIntent {
+    incident_id: String,
+    expected_epoch: u64,
+    caller: CiRecoveryParticipant,
+    assignment: CiRecoveryAssignment,
+    observed_at: u64,
+}
+
+#[derive(ModelInput)]
+struct AssignCiRecoveryWorkRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: AssignCiRecoveryWorkIntent,
+}
+
+#[derive(ModelCommand)]
+struct AssignCiRecoveryWork {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: AssignCiRecoveryWorkIntent,
+}
+
+#[derive(Clone)]
+struct CiAssignmentDecisionContext {
+    incident_id: Option<String>,
+    owner: Option<CiRecoveryParticipant>,
+    epoch: u64,
+    lease_expires_at: u64,
+    participants: Vec<CiRecoveryParticipant>,
+    assignment_count: usize,
+    resolved: bool,
+}
+
+#[derive(ModelOutput)]
+struct CiAssignmentDecisionOutput {
+    context: CiAssignmentDecisionContext,
+}
+
+fn assignment_decision_context(
+    incident_id: &Option<String>,
+    owner: &Option<CiRecoveryParticipant>,
+    epoch: &u64,
+    lease_expires_at: &u64,
+    participants: &[CiRecoveryParticipant],
+    assignment_count: &usize,
+    resolved: &bool,
+) -> CiAssignmentDecisionContext {
+    CiAssignmentDecisionContext {
+        incident_id: incident_id.clone(),
+        owner: owner.clone(),
+        epoch: *epoch,
+        lease_expires_at: *lease_expires_at,
+        participants: participants.to_vec(),
+        assignment_count: *assignment_count,
+        resolved: *resolved,
+    }
+}
+
+mapping! {
+    AssignCiRecoveryWorkStateToDecisionContext:
+        (AssignCiRecoveryWorkState.incident_id, AssignCiRecoveryWorkState.owner, AssignCiRecoveryWorkState.epoch, AssignCiRecoveryWorkState.lease_expires_at, AssignCiRecoveryWorkState.participants, AssignCiRecoveryWorkState.assignment_count, AssignCiRecoveryWorkState.resolved) => CiAssignmentDecisionOutput.context
+        using assignment_decision_context;
+}
+
+mapping! {
+    AssignCiRecoveryWorkRequestToStream:
+        AssignCiRecoveryWorkRequest.stream => AssignCiRecoveryWork.stream
+        using clone;
+}
+
+mapping! {
+    AssignCiRecoveryWorkRequestToIntent:
+        AssignCiRecoveryWorkRequest.intent => AssignCiRecoveryWork.intent
+        using clone;
+}
+
+fn assign_ci_recovery_work_fact(
+    stream: &CiRecoveryStream,
+    intent: &AssignCiRecoveryWorkIntent,
+    context: &CiAssignmentDecisionContext,
+) -> CiRecoveryAssignedEvent {
+    debug_assert_eq!(
+        context.incident_id.as_deref(),
+        Some(intent.incident_id.as_str())
+    );
+    debug_assert_eq!(context.owner.as_ref(), Some(&intent.caller));
+    debug_assert_eq!(context.epoch, intent.expected_epoch);
+    debug_assert!(context.lease_expires_at > intent.observed_at);
+    debug_assert!(context.participants.contains(&intent.assignment.assignee));
+    debug_assert!(!context.resolved);
+    let mut assignment: tiber_core::events::CiRecoveryAssignment = intent.assignment.clone().into();
+    assignment.id = format!("a{}", context.assignment_count.saturating_add(1));
+    CiRecoveryAssignedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        assignment,
+    }
+}
+
+mapping! {
+    AssignCiRecoveryWorkToFact:
+        (AssignCiRecoveryWork.stream, AssignCiRecoveryWork.intent, CiAssignmentDecisionOutput.context) => TiberEvent.CiRecoveryAssigned
+        using assign_ci_recovery_work_fact;
+}
+
+#[derive(ModelState)]
+struct AssignCiRecoveryWorkState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    owner: Option<CiRecoveryParticipant>,
+    #[model(default)]
+    epoch: u64,
+    #[model(default)]
+    lease_expires_at: u64,
+    #[model(default)]
+    participants: Vec<CiRecoveryParticipant>,
+    #[model(default)]
+    assignment_count: usize,
+    #[model(default)]
+    resolved: bool,
+}
+
+impl ModelCommandLogic for AssignCiRecoveryWork {
+    type Event = TiberEvent;
+    type State = AssignCiRecoveryWorkState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(payload) => {
+                state.incident_id = Some(payload.incident_id.clone());
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = 1;
+                state.lease_expires_at = payload.lease_expires_at;
+                state.participants = vec![payload.owner.clone().into()];
+                state.assignment_count = 0;
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryJoined(payload) => {
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryTransferred(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryTakenOver(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+                if let Some(participant) = &payload.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryAssigned(_) => {
+                state.assignment_count = state.assignment_count.saturating_add(1);
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::LegacyRecoveryStatePublished(payload) => {
+                let legacy = CiRecoveryState::from_snapshot(&payload.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.owner = Some(legacy.owner);
+                state.epoch = legacy.epoch;
+                state.lease_expires_at = legacy.lease_expires_at;
+                state.participants = legacy.participants;
+                state.assignment_count = legacy.assignments.len();
+                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_incident_resolved".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        if state.epoch != self.intent.expected_epoch {
+            return Err("ci_recovery_stale_epoch".into());
+        }
+        if state.owner.as_ref() != Some(&self.intent.caller) {
+            return Err("ci_recovery_not_owner".into());
+        }
+        if state.lease_expires_at <= self.intent.observed_at {
+            return Err("ci_recovery_lease_expired".into());
+        }
+        if !state
+            .participants
+            .contains(&self.intent.assignment.assignee)
+        {
+            return Err("ci_recovery_assignee_not_joined".into());
+        }
+        if self.intent.assignment.owner_epoch != state.epoch
+            || self.intent.assignment.report.is_some()
+        {
+            return Err("ci_recovery_assignment_authorization_invalid".into());
+        }
+        let decision = CiAssignmentDecisionOutput::model_builder()
+            .context(AssignCiRecoveryWorkStateToDecisionContext::apply((
+                state, state, state, state, state, state, state,
+            )))
+            .build();
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoveryassigned(AssignCiRecoveryWorkToFact::apply((
+                self,
+                self,
+                decision.as_ref(),
+            ))),
+        ))
+    }
+}
+
+/// Records the assignee's immutable result for one issued CI-recovery task.
+/// The folded state contains only the incident identity, current epoch, and
+/// issued assignments needed to decide whether that report is admissible.
+#[derive(Clone)]
+struct ReportCiRecoveryWorkIntent {
+    incident_id: String,
+    assignment_id: String,
+    assignee: CiRecoveryParticipant,
+    report: CiRecoveryReport,
+}
+
+#[derive(ModelInput)]
+struct ReportCiRecoveryWorkRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: ReportCiRecoveryWorkIntent,
+}
+
+#[derive(ModelCommand)]
+struct ReportCiRecoveryWork {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: ReportCiRecoveryWorkIntent,
+}
+
+mapping! {
+    ReportCiRecoveryWorkRequestToStream:
+        ReportCiRecoveryWorkRequest.stream => ReportCiRecoveryWork.stream
+        using clone;
+}
+
+mapping! {
+    ReportCiRecoveryWorkRequestToIntent:
+        ReportCiRecoveryWorkRequest.intent => ReportCiRecoveryWork.intent
+        using clone;
+}
+
+fn report_ci_recovery_work_fact(
+    stream: &CiRecoveryStream,
+    intent: &ReportCiRecoveryWorkIntent,
+    incident_id: &Option<String>,
+    epoch: &u64,
+    assignments: &[CiRecoveryAssignment],
+    resolved: &bool,
+) -> CiRecoveryReportedEvent {
+    debug_assert_eq!(incident_id.as_deref(), Some(intent.incident_id.as_str()));
+    debug_assert!(!resolved);
+    debug_assert!(assignments.iter().any(|assignment| {
+        assignment.id == intent.assignment_id
+            && assignment.owner_epoch == *epoch
+            && assignment.assignee == intent.assignee
+            && assignment.report.is_none()
+    }));
+    CiRecoveryReportedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        assignment_id: intent.assignment_id.clone(),
+        assignee: intent.assignee.clone().into(),
+        report: intent.report.clone().into(),
+    }
+}
+
+mapping! {
+    ReportCiRecoveryWorkToFact:
+        (ReportCiRecoveryWork.stream, ReportCiRecoveryWork.intent, ReportCiRecoveryWorkState.incident_id, ReportCiRecoveryWorkState.epoch, ReportCiRecoveryWorkState.assignments, ReportCiRecoveryWorkState.resolved) => TiberEvent.CiRecoveryReported
+        using report_ci_recovery_work_fact;
+}
+
+#[derive(ModelState)]
+struct ReportCiRecoveryWorkState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    epoch: u64,
+    #[model(default)]
+    assignments: Vec<CiRecoveryAssignment>,
+    #[model(default)]
+    resolved: bool,
+}
+
+impl ModelCommandLogic for ReportCiRecoveryWork {
+    type Event = TiberEvent;
+    type State = ReportCiRecoveryWorkState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(payload) => {
+                state.incident_id = Some(payload.incident_id.clone());
+                state.epoch = 1;
+                state.assignments.clear();
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryTransferred(payload) => state.epoch = payload.epoch,
+            TiberEvent::CiRecoveryTakenOver(payload) => state.epoch = payload.epoch,
+            TiberEvent::CiRecoveryAssigned(payload) => {
+                state.assignments.push(payload.assignment.clone().into());
+            }
+            TiberEvent::CiRecoveryReported(payload) => {
+                if let Some(assignment) = state
+                    .assignments
+                    .iter_mut()
+                    .find(|assignment| assignment.id == payload.assignment_id)
+                {
+                    assignment.report = Some(payload.report.clone().into());
+                }
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::LegacyRecoveryStatePublished(payload) => {
+                let legacy = CiRecoveryState::from_snapshot(&payload.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.epoch = legacy.epoch;
+                state.assignments = legacy.assignments;
+                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_incident_resolved".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        let Some(assignment) = state
+            .assignments
+            .iter()
+            .find(|assignment| assignment.id == self.intent.assignment_id)
+        else {
+            return Err("ci_recovery_assignment_missing".into());
+        };
+        if assignment.owner_epoch != state.epoch {
+            return Err("ci_recovery_assignment_stale".into());
+        }
+        if assignment.assignee != self.intent.assignee {
+            return Err("ci_recovery_assignment_not_assignee".into());
+        }
+        if assignment.report.is_some() {
+            return Err("ci_recovery_assignment_already_reported".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoveryreported(ReportCiRecoveryWorkToFact::apply((
+                self, self, state, state, state, state,
+            ))),
+        ))
+    }
+}
+
+/// Extends the active owner's lease using the observed clock supplied as input.
+#[derive(Clone)]
+struct RenewCiRecoveryLeaseIntent {
+    incident_id: String,
+    expected_epoch: u64,
+    owner: CiRecoveryParticipant,
+    observed_at: u64,
+    lease_expires_at: u64,
+}
+
+#[derive(ModelInput)]
+struct RenewCiRecoveryLeaseRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: RenewCiRecoveryLeaseIntent,
+}
+
+#[derive(ModelCommand)]
+struct RenewCiRecoveryLease {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: RenewCiRecoveryLeaseIntent,
+}
+
+mapping! {
+    RenewCiRecoveryLeaseRequestToStream:
+        RenewCiRecoveryLeaseRequest.stream => RenewCiRecoveryLease.stream
+        using clone;
+}
+
+mapping! {
+    RenewCiRecoveryLeaseRequestToIntent:
+        RenewCiRecoveryLeaseRequest.intent => RenewCiRecoveryLease.intent
+        using clone;
+}
+
+fn renew_ci_recovery_lease_fact(
+    stream: &CiRecoveryStream,
+    intent: &RenewCiRecoveryLeaseIntent,
+    incident_id: &Option<String>,
+    owner: &Option<CiRecoveryParticipant>,
+    epoch: &u64,
+    lease_expires_at: &u64,
+    resolved: &bool,
+) -> CiRecoveryHeartbeatRecordedEvent {
+    debug_assert_eq!(incident_id.as_deref(), Some(intent.incident_id.as_str()));
+    debug_assert_eq!(owner.as_ref(), Some(&intent.owner));
+    debug_assert_eq!(*epoch, intent.expected_epoch);
+    debug_assert!(*lease_expires_at > intent.observed_at);
+    debug_assert!(!resolved);
+    CiRecoveryHeartbeatRecordedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        epoch: intent.expected_epoch,
+        owner: intent.owner.clone().into(),
+        lease_expires_at: intent.lease_expires_at,
+    }
+}
+
+mapping! {
+    RenewCiRecoveryLeaseToFact:
+        (RenewCiRecoveryLease.stream, RenewCiRecoveryLease.intent, RenewCiRecoveryLeaseState.incident_id, RenewCiRecoveryLeaseState.owner, RenewCiRecoveryLeaseState.epoch, RenewCiRecoveryLeaseState.lease_expires_at, RenewCiRecoveryLeaseState.resolved) => TiberEvent.CiRecoveryHeartbeatRecorded
+        using renew_ci_recovery_lease_fact;
+}
+
+#[derive(ModelState)]
+struct RenewCiRecoveryLeaseState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    owner: Option<CiRecoveryParticipant>,
+    #[model(default)]
+    epoch: u64,
+    #[model(default)]
+    lease_expires_at: u64,
+    #[model(default)]
+    resolved: bool,
+}
+
+impl ModelCommandLogic for RenewCiRecoveryLease {
+    type Event = TiberEvent;
+    type State = RenewCiRecoveryLeaseState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(payload) => {
+                state.incident_id = Some(payload.incident_id.clone());
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = 1;
+                state.lease_expires_at = payload.lease_expires_at;
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryTransferred(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryTakenOver(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
+                state.lease_expires_at = payload.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::LegacyRecoveryStatePublished(payload) => {
+                let legacy = CiRecoveryState::from_snapshot(&payload.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.owner = Some(legacy.owner);
+                state.epoch = legacy.epoch;
+                state.lease_expires_at = legacy.lease_expires_at;
+                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_incident_resolved".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        if state.epoch != self.intent.expected_epoch {
+            return Err("ci_recovery_stale_epoch".into());
+        }
+        if state.owner.as_ref() != Some(&self.intent.owner) {
+            return Err("ci_recovery_not_owner".into());
+        }
+        if state.lease_expires_at <= self.intent.observed_at {
+            return Err("ci_recovery_lease_expired".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoveryheartbeatrecorded(
+                RenewCiRecoveryLeaseToFact::apply((self, self, state, state, state, state, state)),
+            ),
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct RecordCiRecoveryDiagnosisIntent {
+    incident_id: String,
+    expected_epoch: u64,
+    owner: CiRecoveryParticipant,
+    observed_at: u64,
+    failure_record: CiRecoveryFailureRecord,
+    diagnosis: CiRecoveryDiagnosis,
+}
+
+#[derive(ModelInput)]
+struct RecordCiRecoveryDiagnosisRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: RecordCiRecoveryDiagnosisIntent,
+}
+
+#[derive(ModelCommand)]
+struct RecordCiRecoveryDiagnosis {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: RecordCiRecoveryDiagnosisIntent,
+}
+
+mapping! {
+    RecordCiRecoveryDiagnosisRequestToStream:
+        RecordCiRecoveryDiagnosisRequest.stream => RecordCiRecoveryDiagnosis.stream
+        using clone;
+}
+mapping! {
+    RecordCiRecoveryDiagnosisRequestToIntent:
+        RecordCiRecoveryDiagnosisRequest.intent => RecordCiRecoveryDiagnosis.intent
+        using clone;
+}
+fn record_ci_recovery_diagnosis_fact(
+    stream: &CiRecoveryStream,
+    intent: &RecordCiRecoveryDiagnosisIntent,
+    incident_id: &Option<String>,
+    owner: &Option<CiRecoveryParticipant>,
+    epoch: &u64,
+    lease_expires_at: &u64,
+    resolved: &bool,
+) -> CiRecoveryDiagnosedEvent {
+    debug_assert_eq!(incident_id.as_deref(), Some(intent.incident_id.as_str()));
+    debug_assert_eq!(owner.as_ref(), Some(&intent.owner));
+    debug_assert_eq!(*epoch, intent.expected_epoch);
+    debug_assert!(*lease_expires_at > intent.observed_at);
+    debug_assert!(!resolved);
+    CiRecoveryDiagnosedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        epoch: intent.expected_epoch,
+        owner: intent.owner.clone().into(),
+        failure_record: intent.failure_record.clone().into(),
+        diagnosis: intent.diagnosis.clone().into(),
+    }
+}
+mapping! {
+    RecordCiRecoveryDiagnosisToFact:
+        (RecordCiRecoveryDiagnosis.stream, RecordCiRecoveryDiagnosis.intent, RecordCiRecoveryDiagnosisState.incident_id, RecordCiRecoveryDiagnosisState.owner, RecordCiRecoveryDiagnosisState.epoch, RecordCiRecoveryDiagnosisState.lease_expires_at, RecordCiRecoveryDiagnosisState.resolved) => TiberEvent.CiRecoveryDiagnosed
+        using record_ci_recovery_diagnosis_fact;
+}
+
+#[derive(ModelState)]
+struct RecordCiRecoveryDiagnosisState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    owner: Option<CiRecoveryParticipant>,
+    #[model(default)]
+    epoch: u64,
+    #[model(default)]
+    lease_expires_at: u64,
+    #[model(default)]
+    resolved: bool,
+}
+impl ModelCommandLogic for RecordCiRecoveryDiagnosis {
+    type Event = TiberEvent;
+    type State = RecordCiRecoveryDiagnosisState;
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(payload) => {
+                state.incident_id = Some(payload.incident_id.clone());
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = 1;
+                state.lease_expires_at = payload.lease_expires_at;
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryTransferred(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryTakenOver(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
+                state.lease_expires_at = payload.lease_expires_at
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::LegacyRecoveryStatePublished(payload) => {
+                let legacy = CiRecoveryState::from_snapshot(&payload.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.owner = Some(legacy.owner);
+                state.epoch = legacy.epoch;
+                state.lease_expires_at = legacy.lease_expires_at;
+                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_incident_resolved".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        if state.epoch != self.intent.expected_epoch {
+            return Err("ci_recovery_stale_epoch".into());
+        }
+        if state.owner.as_ref() != Some(&self.intent.owner) {
+            return Err("ci_recovery_not_owner".into());
+        }
+        if state.lease_expires_at <= self.intent.observed_at {
+            return Err("ci_recovery_lease_expired".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoverydiagnosed(RecordCiRecoveryDiagnosisToFact::apply(
+                (self, self, state, state, state, state, state),
+            )),
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct SelectCiRecoveryActionIntent {
+    incident_id: String,
+    expected_epoch: u64,
+    owner: CiRecoveryParticipant,
+    observed_at: u64,
+    action: CiRecoveryAction,
+}
+#[derive(ModelInput)]
+struct SelectCiRecoveryActionRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: SelectCiRecoveryActionIntent,
+}
+#[derive(ModelCommand)]
+struct SelectCiRecoveryAction {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: SelectCiRecoveryActionIntent,
+}
+
+#[derive(Clone)]
+struct CiOwnerDecisionContext {
+    incident_id: Option<String>,
+    owner: Option<CiRecoveryParticipant>,
+    epoch: u64,
+    lease_expires_at: u64,
+    resolved: bool,
+}
+
+#[derive(ModelOutput)]
+struct CiOwnerDecisionOutput {
+    context: CiOwnerDecisionContext,
+}
+
+fn owner_decision_context(
+    incident_id: &Option<String>,
+    owner: &Option<CiRecoveryParticipant>,
+    epoch: &u64,
+    lease_expires_at: &u64,
+    resolved: &bool,
+) -> CiOwnerDecisionContext {
+    CiOwnerDecisionContext {
+        incident_id: incident_id.clone(),
+        owner: owner.clone(),
+        epoch: *epoch,
+        lease_expires_at: *lease_expires_at,
+        resolved: *resolved,
+    }
+}
+mapping! { SelectCiRecoveryActionRequestToStream: SelectCiRecoveryActionRequest.stream => SelectCiRecoveryAction.stream using clone; }
+mapping! { SelectCiRecoveryActionRequestToIntent: SelectCiRecoveryActionRequest.intent => SelectCiRecoveryAction.intent using clone; }
+fn select_ci_recovery_action_fact(
+    stream: &CiRecoveryStream,
+    intent: &SelectCiRecoveryActionIntent,
+    context: &CiOwnerDecisionContext,
+    classification: &Option<CiRecoveryClassification>,
+) -> CiRecoveryActionChosenEvent {
+    debug_assert_eq!(
+        context.incident_id.as_deref(),
+        Some(intent.incident_id.as_str())
+    );
+    debug_assert_eq!(context.owner.as_ref(), Some(&intent.owner));
+    debug_assert_eq!(context.epoch, intent.expected_epoch);
+    debug_assert!(context.lease_expires_at > intent.observed_at);
+    debug_assert!(!context.resolved);
+    debug_assert!(classification.is_some());
+    CiRecoveryActionChosenEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        epoch: intent.expected_epoch,
+        owner: intent.owner.clone().into(),
+        action: intent.action.clone().into(),
+    }
+}
+mapping! { SelectCiRecoveryActionToFact:
+    (SelectCiRecoveryAction.stream, SelectCiRecoveryAction.intent, CiOwnerDecisionOutput.context, SelectCiRecoveryActionState.classification) => TiberEvent.CiRecoveryActionChosen
+    using select_ci_recovery_action_fact;
+}
+#[derive(ModelState)]
+struct SelectCiRecoveryActionState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    owner: Option<CiRecoveryParticipant>,
+    #[model(default)]
+    epoch: u64,
+    #[model(default)]
+    lease_expires_at: u64,
+    #[model(default)]
+    classification: Option<CiRecoveryClassification>,
+    #[model(default)]
+    resolved: bool,
+}
+mapping! {
+    SelectCiRecoveryActionStateToOwnerContext:
+        (SelectCiRecoveryActionState.incident_id, SelectCiRecoveryActionState.owner, SelectCiRecoveryActionState.epoch, SelectCiRecoveryActionState.lease_expires_at, SelectCiRecoveryActionState.resolved) => CiOwnerDecisionOutput.context
+        using owner_decision_context;
+}
+impl ModelCommandLogic for SelectCiRecoveryAction {
+    type Event = TiberEvent;
+    type State = SelectCiRecoveryActionState;
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(p) => {
+                state.incident_id = Some(p.incident_id.clone());
+                state.owner = Some(p.owner.clone().into());
+                state.epoch = 1;
+                state.lease_expires_at = p.lease_expires_at;
+                state.classification = None;
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryTransferred(p) => {
+                state.owner = Some(p.owner.clone().into());
+                state.epoch = p.epoch;
+                state.lease_expires_at = p.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryTakenOver(p) => {
+                state.owner = Some(p.owner.clone().into());
+                state.epoch = p.epoch;
+                state.lease_expires_at = p.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryHeartbeatRecorded(p) => {
+                state.lease_expires_at = p.lease_expires_at
+            }
+            TiberEvent::CiRecoveryDiagnosed(p) => {
+                state.classification = Some(p.diagnosis.classification.into())
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::LegacyRecoveryStatePublished(p) => {
+                let legacy = CiRecoveryState::from_snapshot(&p.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.owner = Some(legacy.owner);
+                state.epoch = legacy.epoch;
+                state.lease_expires_at = legacy.lease_expires_at;
+                state.classification = legacy.diagnosis.map(|d| d.classification);
+                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        };
+        Modeled::from_built(state)
+    }
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_incident_resolved".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        if state.epoch != self.intent.expected_epoch {
+            return Err("ci_recovery_stale_epoch".into());
+        }
+        if state.owner.as_ref() != Some(&self.intent.owner) {
+            return Err("ci_recovery_not_owner".into());
+        }
+        if state.lease_expires_at <= self.intent.observed_at {
+            return Err("ci_recovery_lease_expired".into());
+        }
+        let Some(classification) = state.classification else {
+            return Err("ci_recovery_diagnosis_required".into());
+        };
+        let allowed = matches!(
+            (classification, self.intent.action.kind),
+            (
+                CiRecoveryClassification::Caused,
+                CiRecoveryActionKind::Repair
+            ) | (
+                CiRecoveryClassification::Unrelated | CiRecoveryClassification::Transient,
+                CiRecoveryActionKind::Rerun
+            )
+        );
+        if !allowed {
+            return Err("ci_recovery_action_conflicts_diagnosis".into());
+        }
+        let decision = CiOwnerDecisionOutput::model_builder()
+            .context(SelectCiRecoveryActionStateToOwnerContext::apply((
+                state, state, state, state, state,
+            )))
+            .build();
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoveryactionchosen(SelectCiRecoveryActionToFact::apply(
+                (self, self, decision.as_ref(), state),
+            )),
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct RecordCiRecoveryReplacementIntent {
+    incident_id: String,
+    expected_epoch: u64,
+    owner: CiRecoveryParticipant,
+    observed_at: u64,
+    replacement: CiRecoveryReplacement,
+}
+#[derive(ModelInput)]
+struct RecordCiRecoveryReplacementRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: RecordCiRecoveryReplacementIntent,
+}
+#[derive(ModelCommand)]
+struct RecordCiRecoveryReplacement {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: RecordCiRecoveryReplacementIntent,
+}
+mapping! { RecordCiRecoveryReplacementRequestToStream: RecordCiRecoveryReplacementRequest.stream => RecordCiRecoveryReplacement.stream using clone; }
+mapping! { RecordCiRecoveryReplacementRequestToIntent: RecordCiRecoveryReplacementRequest.intent => RecordCiRecoveryReplacement.intent using clone; }
+fn record_ci_recovery_replacement_fact(
+    stream: &CiRecoveryStream,
+    intent: &RecordCiRecoveryReplacementIntent,
+    context: &CiOwnerDecisionContext,
+    action: &Option<CiRecoveryAction>,
+    failed_sha: &Option<String>,
+) -> CiRecoveryReplacementRecordedEvent {
+    debug_assert_eq!(
+        context.incident_id.as_deref(),
+        Some(intent.incident_id.as_str())
+    );
+    debug_assert_eq!(context.owner.as_ref(), Some(&intent.owner));
+    debug_assert_eq!(context.epoch, intent.expected_epoch);
+    debug_assert!(context.lease_expires_at > intent.observed_at);
+    debug_assert!(!context.resolved);
+    debug_assert!(action.is_some());
+    debug_assert!(
+        action
+            .as_ref()
+            .is_some_and(|action| action.kind != CiRecoveryActionKind::Rerun)
+            || failed_sha.as_deref() == Some(intent.replacement.sha.as_str())
+    );
+    CiRecoveryReplacementRecordedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        epoch: intent.expected_epoch,
+        owner: intent.owner.clone().into(),
+        replacement: intent.replacement.clone().into(),
+    }
+}
+mapping! { RecordCiRecoveryReplacementToFact:
+    (RecordCiRecoveryReplacement.stream, RecordCiRecoveryReplacement.intent, CiOwnerDecisionOutput.context, RecordCiRecoveryReplacementState.action, RecordCiRecoveryReplacementState.failed_sha) => TiberEvent.CiRecoveryReplacementRecorded
+    using record_ci_recovery_replacement_fact;
+}
+#[derive(ModelState)]
+struct RecordCiRecoveryReplacementState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    owner: Option<CiRecoveryParticipant>,
+    #[model(default)]
+    epoch: u64,
+    #[model(default)]
+    lease_expires_at: u64,
+    #[model(default)]
+    action: Option<CiRecoveryAction>,
+    #[model(default)]
+    failed_sha: Option<String>,
+    #[model(default)]
+    resolved: bool,
+}
+mapping! {
+    RecordCiRecoveryReplacementStateToOwnerContext:
+        (RecordCiRecoveryReplacementState.incident_id, RecordCiRecoveryReplacementState.owner, RecordCiRecoveryReplacementState.epoch, RecordCiRecoveryReplacementState.lease_expires_at, RecordCiRecoveryReplacementState.resolved) => CiOwnerDecisionOutput.context
+        using owner_decision_context;
+}
+impl ModelCommandLogic for RecordCiRecoveryReplacement {
+    type Event = TiberEvent;
+    type State = RecordCiRecoveryReplacementState;
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(p) => {
+                state.incident_id = Some(p.incident_id.clone());
+                state.owner = Some(p.owner.clone().into());
+                state.epoch = 1;
+                state.lease_expires_at = p.lease_expires_at;
+                state.failed_sha = Some(p.trigger.failed_sha.clone());
+                state.action = None;
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryTransferred(p) => {
+                state.owner = Some(p.owner.clone().into());
+                state.epoch = p.epoch;
+                state.lease_expires_at = p.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryTakenOver(p) => {
+                state.owner = Some(p.owner.clone().into());
+                state.epoch = p.epoch;
+                state.lease_expires_at = p.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryHeartbeatRecorded(p) => {
+                state.lease_expires_at = p.lease_expires_at
+            }
+            TiberEvent::CiRecoveryActionChosen(p) => state.action = Some(p.action.clone().into()),
+            TiberEvent::CiRecoveryReplacementRecorded(p) => {
+                if p.replacement.status == tiber_core::events::CiRecoveryReplacementStatus::Failed {
+                    state.action = None;
+                }
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::LegacyRecoveryStatePublished(p) => {
+                let legacy = CiRecoveryState::from_snapshot(&p.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.owner = Some(legacy.owner);
+                state.epoch = legacy.epoch;
+                state.lease_expires_at = legacy.lease_expires_at;
+                state.action = legacy.next_action;
+                state.failed_sha = Some(legacy.trigger.failed_sha);
+                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_incident_resolved".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        if state.epoch != self.intent.expected_epoch {
+            return Err("ci_recovery_stale_epoch".into());
+        }
+        if state.owner.as_ref() != Some(&self.intent.owner) {
+            return Err("ci_recovery_not_owner".into());
+        }
+        if state.lease_expires_at <= self.intent.observed_at {
+            return Err("ci_recovery_lease_expired".into());
+        }
+        let Some(action) = &state.action else {
+            return Err("ci_recovery_next_action_required".into());
+        };
+        if action.kind == CiRecoveryActionKind::Rerun
+            && state.failed_sha.as_deref() != Some(&self.intent.replacement.sha)
+        {
+            return Err("ci_recovery_rerun_sha_mismatch".into());
+        }
+        let decision = CiOwnerDecisionOutput::model_builder()
+            .context(RecordCiRecoveryReplacementStateToOwnerContext::apply((
+                state, state, state, state, state,
+            )))
+            .build();
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoveryreplacementrecorded(
+                RecordCiRecoveryReplacementToFact::apply((
+                    self,
+                    self,
+                    decision.as_ref(),
+                    state,
+                    state,
+                )),
+            ),
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct ResolveCiRecoveryIntent {
+    incident_id: String,
+    participant: CiRecoveryParticipant,
+    proof: CiRecoveryReleaseProof,
+}
+#[derive(ModelInput)]
+struct ResolveCiRecoveryRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: ResolveCiRecoveryIntent,
+}
+#[derive(ModelCommand)]
+struct ResolveCiRecovery {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: ResolveCiRecoveryIntent,
+}
+mapping! { ResolveCiRecoveryRequestToStream: ResolveCiRecoveryRequest.stream => ResolveCiRecovery.stream using clone; }
+mapping! { ResolveCiRecoveryRequestToIntent: ResolveCiRecoveryRequest.intent => ResolveCiRecovery.intent using clone; }
+fn resolve_ci_recovery_fact(
+    stream: &CiRecoveryStream,
+    intent: &ResolveCiRecoveryIntent,
+    incident_id: &Option<String>,
+    participants: &[CiRecoveryParticipant],
+    replacement: &Option<CiRecoveryReplacement>,
+    resolved: &bool,
+) -> CiRecoveryResolvedEvent {
+    debug_assert_eq!(incident_id.as_deref(), Some(intent.incident_id.as_str()));
+    debug_assert!(participants.contains(&intent.participant));
+    debug_assert!(!resolved);
+    debug_assert!(replacement.as_ref().is_some_and(|replacement| {
+        replacement.status != CiRecoveryReplacementStatus::Failed
+            && replacement.run_id == intent.proof.replacement_run_id
+            && replacement.run_url == intent.proof.replacement_run_url
+            && replacement.sha == intent.proof.sha
+    }));
+    CiRecoveryResolvedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        participant: intent.participant.clone().into(),
+        proof: intent.proof.clone().into(),
+    }
+}
+mapping! { ResolveCiRecoveryToFact:
+    (ResolveCiRecovery.stream, ResolveCiRecovery.intent, ResolveCiRecoveryState.incident_id, ResolveCiRecoveryState.participants, ResolveCiRecoveryState.replacement, ResolveCiRecoveryState.resolved) => TiberEvent.CiRecoveryResolved
+    using resolve_ci_recovery_fact;
+}
+#[derive(ModelState)]
+struct ResolveCiRecoveryState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    participants: Vec<CiRecoveryParticipant>,
+    #[model(default)]
+    replacement: Option<CiRecoveryReplacement>,
+    #[model(default)]
+    resolved: bool,
+}
+impl ModelCommandLogic for ResolveCiRecovery {
+    type Event = TiberEvent;
+    type State = ResolveCiRecoveryState;
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(p) => {
+                state.incident_id = Some(p.incident_id.clone());
+                state.participants = vec![p.owner.clone().into()];
+                state.replacement = None;
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryJoined(p) => {
+                if let Some(participant) = &p.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryTransferred(p) => {
+                if let Some(participant) = &p.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryTakenOver(p) => {
+                if let Some(participant) = &p.participant {
+                    let participant = participant.clone().into();
+                    if !state.participants.contains(&participant) {
+                        state.participants.push(participant);
+                    }
+                }
+            }
+            TiberEvent::CiRecoveryReplacementRecorded(p) => {
+                state.replacement = Some(p.replacement.clone().into())
+            }
+            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::LegacyRecoveryStatePublished(p) => {
+                let legacy = CiRecoveryState::from_snapshot(&p.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.participants = legacy.participants;
+                state.replacement = legacy.replacement;
+                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_incident_resolved".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        if !state.participants.contains(&self.intent.participant) {
+            return Err("ci_recovery_participant_required".into());
+        }
+        let Some(replacement) = &state.replacement else {
+            return Err("ci_recovery_replacement_required".into());
+        };
+        if replacement.status == CiRecoveryReplacementStatus::Failed {
+            return Err("ci_recovery_replacement_failed".into());
+        }
+        if replacement.run_id != self.intent.proof.replacement_run_id
+            || replacement.run_url != self.intent.proof.replacement_run_url
+            || replacement.sha != self.intent.proof.sha
+        {
+            return Err("ci_recovery_release_proof_mismatch".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoveryresolved(ResolveCiRecoveryToFact::apply((
+                self, self, state, state, state, state,
+            ))),
+        ))
+    }
 }
 
 #[derive(Clone, Default)]
@@ -104,7 +2304,6 @@ struct TiberProjection {
     tasks: std::collections::BTreeMap<String, Task>,
     order: Vec<String>,
     ci_recovery: Option<CiRecoveryState>,
-    versions: std::collections::HashMap<StreamId, StreamVersion>,
 }
 
 fn stream_id(value: impl Into<String>) -> Result<StreamId, Error> {
@@ -118,6 +2317,7 @@ where
 {
     let run = move || {
         tokio::runtime::Builder::new_current_thread()
+            .enable_time()
             .build()
             .expect("Tiber's bundled Tokio runtime must initialize")
             .block_on(future)
@@ -135,6 +2335,20 @@ fn event_store_error(_error: impl std::fmt::Display) -> Error {
     Error::Parse("event_store_failed source_redacted=true".to_string())
 }
 
+/// Preserve deliberately typed domain rejections while ensuring infrastructure
+/// errors cannot disclose remote URLs, local paths, or credential-bearing
+/// process output through a CLI/MCP response.
+fn eventcore_command_error(error: eventcore::CommandError) -> Error {
+    match error {
+        eventcore::CommandError::BusinessRuleViolation(error) => Error::Parse(error.to_string()),
+        eventcore::CommandError::ValidationError(error) => Error::Parse(error),
+        eventcore::CommandError::ConcurrencyError(_) => {
+            Error::Parse("event_version_conflict=true".to_string())
+        }
+        eventcore::CommandError::EventStoreError(error) => event_store_error(error),
+    }
+}
+
 fn load_tiber_projection(root: &Path) -> Result<TiberProjection, Error> {
     let store = GitEventStore::open(root).map_err(event_store_error)?;
     run_async(async move {
@@ -149,11 +2363,6 @@ fn load_tiber_projection(root: &Path) -> Result<TiberProjection, Error> {
                 break;
             }
             for (event, _) in &events {
-                let version = projection
-                    .versions
-                    .entry(event.stream_id().clone())
-                    .or_insert(StreamVersion::new(0));
-                *version = version.increment();
                 apply_tiber_event(&mut projection, event)?;
             }
             page = page.next(events.last().expect("nonempty page").1);
@@ -173,42 +2382,47 @@ fn task_mut<'a>(projection: &'a mut TiberProjection, stem: &str) -> Result<&'a m
 }
 
 fn apply_tiber_event(projection: &mut TiberProjection, event: &TiberEvent) -> Result<(), Error> {
+    fold_explicit_legacy_tiber_fact(event);
+    let projected_event = projection_event(event);
+    let event = &projected_event;
     match event {
-        TiberEvent::RepositoryInitialized { .. } => projection.initialized = true,
-        TiberEvent::TaskCreated { task, .. } => {
+        TiberEvent::RepositoryInitialized(_) => projection.initialized = true,
+        TiberEvent::TaskCreated(TaskCreatedEvent { task, .. }) => {
             projection.tasks.insert(task.stem.clone(), (**task).clone());
         }
-        TiberEvent::TaskTransitioned {
+        TiberEvent::TaskTransitioned(TaskTransitionedEvent {
             stem,
             status,
             claim,
             ..
-        } => {
+        }) => {
             let task = task_mut(projection, stem)?;
             task.status.clone_from(status);
             task.claim.clone_from(claim);
         }
-        TiberEvent::TaskPriorityChanged { order, .. }
-        | TiberEvent::BoardReordered { order, .. } => projection.order.clone_from(order),
-        TiberEvent::TaskLinksChanged {
+        TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+        | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+            projection.order.clone_from(order)
+        }
+        TiberEvent::TaskLinksChanged(TaskLinksChangedEvent {
             stem,
             blocks,
             blocked_by,
             ..
-        } => {
+        }) => {
             let task = task_mut(projection, stem)?;
             task.blocks.clone_from(blocks);
             task.blocked_by.clone_from(blocked_by);
         }
-        TiberEvent::TaskSubtaskAdded { stem, subtask, .. } => {
+        TiberEvent::TaskSubtaskAdded(TaskSubtaskAddedEvent { stem, subtask, .. }) => {
             task_mut(projection, stem)?.subtasks.push(subtask.clone())
         }
-        TiberEvent::TaskSubtaskChecked {
+        TiberEvent::TaskSubtaskChecked(TaskSubtaskCheckedEvent {
             stem,
             subtask_id,
             checked,
             ..
-        } => {
+        }) => {
             let item = task_mut(projection, stem)?
                 .subtasks
                 .iter_mut()
@@ -216,39 +2430,42 @@ fn apply_tiber_event(projection: &mut TiberProjection, event: &TiberEvent) -> Re
                 .ok_or_else(|| Error::Parse(format!("subtask_ref_missing ref={subtask_id}")))?;
             item.checked = *checked;
         }
-        TiberEvent::TaskDetailsUpdated {
+        TiberEvent::TaskDetailsUpdated(TaskDetailsUpdatedEvent {
             stem,
             title,
             tags,
             summary,
             context,
             ..
-        } => {
+        }) => {
             let task = task_mut(projection, stem)?;
             task.title.clone_from(title);
             task.tags.clone_from(tags);
             task.summary.clone_from(summary);
             task.context.clone_from(context);
         }
-        TiberEvent::TaskClaimChanged { stem, claim, .. } => {
+        TiberEvent::LegacyTaskClaimChanged(TaskClaimChangedEvent { stem, claim, .. }) => {
             task_mut(projection, stem)?.claim.clone_from(claim)
         }
-        TiberEvent::TaskPullRequestChanged {
-            stem, url, status, ..
-        } => {
+        TiberEvent::TaskPullRequestChanged(TaskPullRequestChangedEvent {
+            stem,
+            url,
+            status,
+            ..
+        }) => {
             let task = task_mut(projection, stem)?;
             task.pr_mr_url.clone_from(url);
             task.pr_mr_status.clone_from(status);
         }
-        TiberEvent::TaskAcceptanceAdded { stem, item, .. } => {
+        TiberEvent::TaskAcceptanceAdded(TaskAcceptanceAddedEvent { stem, item, .. }) => {
             task_mut(projection, stem)?.acceptance.push(item.clone())
         }
-        TiberEvent::TaskAcceptanceChecked {
+        TiberEvent::TaskAcceptanceChecked(TaskAcceptanceCheckedEvent {
             stem,
             index,
             checked,
             ..
-        } => {
+        }) => {
             let item = task_mut(projection, stem)?
                 .acceptance
                 .get_mut(*index)
@@ -257,7 +2474,7 @@ fn apply_tiber_event(projection: &mut TiberProjection, event: &TiberEvent) -> Re
                 })?;
             item.checked = *checked;
         }
-        TiberEvent::TaskAcceptanceRemoved { stem, index, .. } => {
+        TiberEvent::TaskAcceptanceRemoved(TaskAcceptanceRemovedEvent { stem, index, .. }) => {
             let task = task_mut(projection, stem)?;
             if *index >= task.acceptance.len() {
                 return Err(Error::Parse(format!(
@@ -267,335 +2484,3497 @@ fn apply_tiber_event(projection: &mut TiberProjection, event: &TiberEvent) -> Re
             }
             task.acceptance.remove(*index);
         }
-        TiberEvent::TaskNoteAdded { stem, note, .. } => {
+        TiberEvent::TaskNoteAdded(TaskNoteAddedEvent { stem, note, .. }) => {
             task_mut(projection, stem)?.notes.push(note.clone())
         }
-        TiberEvent::TaskValidationRepaired { .. } | TiberEvent::TaskStatePublished { .. } => {}
-        TiberEvent::TaskClosedFromTrailer { stem, .. } => {
+        TiberEvent::TaskValidationRepaired(TaskValidationRepairedEvent {
+            link_changes,
+            order_change,
+            ..
+        }) => {
+            for change in link_changes {
+                apply_tiber_event(projection, &TiberEvent::TaskLinksChanged(change.clone()))?;
+            }
+            if let Some(change) = order_change {
+                apply_tiber_event(projection, &TiberEvent::BoardReordered(change.clone()))?;
+            }
+        }
+        TiberEvent::LegacyTaskStatePublished(_) => {}
+        TiberEvent::TasksClosedFromCommitTrailers(TasksClosedFromCommitTrailersEvent {
+            stems,
+            order,
+            ..
+        }) => {
+            for stem in stems {
+                let task = task_mut(projection, stem)?;
+                task.status = "done".into();
+                task.claim = None;
+            }
+            projection.order = order.clone();
+        }
+        TiberEvent::LegacyTaskClosedFromTrailer(TaskStemEvent { stem, .. }) => {
             let task = task_mut(projection, stem)?;
             task.status = "done".into();
             task.claim = None;
         }
-        TiberEvent::TaskRemoved { stem, .. } => {
+        TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
             projection.tasks.remove(stem);
         }
-        TiberEvent::CiRecoveryClaimed { state, .. }
-        | TiberEvent::CiRecoveryJoined { state, .. }
-        | TiberEvent::CiRecoveryTransferred { state, .. }
-        | TiberEvent::CiRecoveryTakenOver { state, .. }
-        | TiberEvent::CiRecoveryAssigned { state, .. }
-        | TiberEvent::CiRecoveryReported { state, .. }
-        | TiberEvent::CiRecoveryHeartbeatRecorded { state, .. }
-        | TiberEvent::CiRecoveryDiagnosed { state, .. }
-        | TiberEvent::CiRecoveryActionChosen { state, .. }
-        | TiberEvent::CiRecoveryReplacementRecorded { state, .. }
-        | TiberEvent::CiRecoveryResolved { state, .. }
-        | TiberEvent::RecoveryStatePublished { state, .. } => {
-            projection.ci_recovery =
-                Some(serde_json::from_value((**state).clone()).map_err(|error| {
-                    Error::Parse(format!("ci_recovery_event_invalid source={error}"))
-                })?);
+        TiberEvent::CiRecoveryClaimed(CiRecoveryClaimedEvent {
+            schema_version,
+            incident_id,
+            trigger,
+            owner,
+            lease_expires_at,
+            ..
+        }) => {
+            projection.ci_recovery = Some(CiRecoveryState {
+                schema_version: *schema_version,
+                incident_id: incident_id.clone(),
+                state: CiRecoveryPhase::Diagnosing,
+                epoch: 1,
+                trigger: trigger.clone().into(),
+                triggers: vec![trigger.clone().into()],
+                owner: owner.clone().into(),
+                lease_expires_at: *lease_expires_at,
+                participants: vec![owner.clone().into()],
+                assignments: Vec::new(),
+                failure_record: None,
+                diagnosis: None,
+                next_action: None,
+                replacement: None,
+                release_proof: None,
+            });
+        }
+        TiberEvent::CiRecoveryJoined(CiRecoveryJoinedEvent {
+            trigger,
+            participant,
+            ..
+        }) => {
+            let state = projection
+                .ci_recovery
+                .as_mut()
+                .ok_or_else(|| Error::Parse("ci_recovery_join_without_claim=true".to_string()))?;
+            if trigger.is_none() && participant.is_none() {
+                return Err(Error::Parse("ci_recovery_join_empty_fact=true".to_string()));
+            }
+            if let Some(trigger) = trigger {
+                let trigger: CiRecoveryTrigger = trigger.clone().into();
+                state.trigger = trigger.clone();
+                if !state.triggers.contains(&trigger) {
+                    state.triggers.push(trigger);
+                }
+            }
+            if let Some(participant) = participant {
+                let participant: CiRecoveryParticipant = participant.clone().into();
+                if !state.participants.contains(&participant) {
+                    state.participants.push(participant);
+                }
+            }
+        }
+        TiberEvent::CiRecoveryTransferred(CiRecoveryTransferredEvent {
+            owner,
+            epoch,
+            lease_expires_at,
+            participant,
+            ..
+        })
+        | TiberEvent::CiRecoveryTakenOver(CiRecoveryTakenOverEvent {
+            owner,
+            epoch,
+            lease_expires_at,
+            participant,
+            ..
+        }) => {
+            let state = projection.ci_recovery.as_mut().ok_or_else(|| {
+                Error::Parse("ci_recovery_ownership_change_without_claim=true".to_string())
+            })?;
+            state.owner = owner.clone().into();
+            state.epoch = *epoch;
+            state.lease_expires_at = *lease_expires_at;
+            if let Some(participant) = participant {
+                let participant: CiRecoveryParticipant = participant.clone().into();
+                if !state.participants.contains(&participant) {
+                    state.participants.push(participant);
+                }
+            }
+        }
+        TiberEvent::CiRecoveryAssigned(CiRecoveryAssignedEvent { assignment, .. }) => {
+            let state = projection.ci_recovery.as_mut().ok_or_else(|| {
+                Error::Parse("ci_recovery_assignment_without_claim=true".to_string())
+            })?;
+            let assignment: CiRecoveryAssignment = assignment.clone().into();
+            if state
+                .assignments
+                .iter()
+                .any(|current| current.id == assignment.id)
+            {
+                return Err(Error::Parse(
+                    "ci_recovery_assignment_duplicate=true".to_string(),
+                ));
+            }
+            state.assignments.push(assignment);
+        }
+        TiberEvent::CiRecoveryReported(CiRecoveryReportedEvent {
+            assignment_id,
+            assignee,
+            report,
+            ..
+        }) => {
+            let state = projection
+                .ci_recovery
+                .as_mut()
+                .ok_or_else(|| Error::Parse("ci_recovery_report_without_claim=true".to_string()))?;
+            let assignment = state
+                .assignments
+                .iter_mut()
+                .find(|assignment| assignment.id == *assignment_id)
+                .ok_or_else(|| Error::Parse("ci_recovery_report_assignment_missing=true".into()))?;
+            if assignment.assignee != CiRecoveryParticipant::from(assignee.clone()) {
+                return Err(Error::Parse(
+                    "ci_recovery_report_assignee_invalid=true".into(),
+                ));
+            }
+            if assignment.report.is_some() {
+                return Err(Error::Parse("ci_recovery_report_duplicate=true".into()));
+            }
+            assignment.report = Some(report.clone().into());
+        }
+        TiberEvent::CiRecoveryHeartbeatRecorded(CiRecoveryHeartbeatRecordedEvent {
+            epoch,
+            owner,
+            lease_expires_at,
+            ..
+        }) => {
+            let state = projection.ci_recovery.as_mut().ok_or_else(|| {
+                Error::Parse("ci_recovery_heartbeat_without_claim=true".to_string())
+            })?;
+            if state.epoch != *epoch || state.owner != CiRecoveryParticipant::from(owner.clone()) {
+                return Err(Error::Parse(
+                    "ci_recovery_heartbeat_owner_invalid=true".into(),
+                ));
+            }
+            state.lease_expires_at = *lease_expires_at;
+        }
+        TiberEvent::CiRecoveryDiagnosed(CiRecoveryDiagnosedEvent {
+            epoch,
+            owner,
+            failure_record,
+            diagnosis,
+            ..
+        }) => {
+            let state = projection.ci_recovery.as_mut().ok_or_else(|| {
+                Error::Parse("ci_recovery_diagnosis_without_claim=true".to_string())
+            })?;
+            if state.epoch != *epoch || state.owner != CiRecoveryParticipant::from(owner.clone()) {
+                return Err(Error::Parse(
+                    "ci_recovery_diagnosis_owner_invalid=true".into(),
+                ));
+            }
+            state.failure_record = Some(failure_record.clone().into());
+            state.diagnosis = Some(diagnosis.clone().into());
+            state.next_action = None;
+            state.replacement = None;
+            state.release_proof = None;
+            state.state = CiRecoveryPhase::Diagnosing;
+        }
+        TiberEvent::CiRecoveryActionChosen(CiRecoveryActionChosenEvent {
+            epoch,
+            owner,
+            action,
+            ..
+        }) => {
+            let state = projection
+                .ci_recovery
+                .as_mut()
+                .ok_or_else(|| Error::Parse("ci_recovery_action_without_claim=true".to_string()))?;
+            if state.epoch != *epoch || state.owner != CiRecoveryParticipant::from(owner.clone()) {
+                return Err(Error::Parse("ci_recovery_action_owner_invalid=true".into()));
+            }
+            if state.diagnosis.is_none() {
+                return Err(Error::Parse(
+                    "ci_recovery_action_without_diagnosis=true".into(),
+                ));
+            }
+            state.next_action = Some(action.clone().into());
+            state.state = CiRecoveryPhase::ActionSelected;
+        }
+        TiberEvent::CiRecoveryReplacementRecorded(CiRecoveryReplacementRecordedEvent {
+            epoch,
+            owner,
+            replacement,
+            ..
+        }) => {
+            let state = projection.ci_recovery.as_mut().ok_or_else(|| {
+                Error::Parse("ci_recovery_replacement_without_claim=true".to_string())
+            })?;
+            if state.epoch != *epoch || state.owner != CiRecoveryParticipant::from(owner.clone()) {
+                return Err(Error::Parse(
+                    "ci_recovery_replacement_owner_invalid=true".into(),
+                ));
+            }
+            if state.next_action.is_none() {
+                return Err(Error::Parse(
+                    "ci_recovery_replacement_without_action=true".into(),
+                ));
+            }
+            let replacement: CiRecoveryReplacement = replacement.clone().into();
+            let failed = replacement.status == CiRecoveryReplacementStatus::Failed;
+            state.replacement = Some(replacement);
+            if failed {
+                state.state = CiRecoveryPhase::Diagnosing;
+                state.failure_record = None;
+                state.diagnosis = None;
+                state.next_action = None;
+            } else {
+                state.state = CiRecoveryPhase::WaitingCi;
+            }
+        }
+        TiberEvent::CiRecoveryResolved(CiRecoveryResolvedEvent {
+            participant, proof, ..
+        }) => {
+            let state = projection.ci_recovery.as_mut().ok_or_else(|| {
+                Error::Parse("ci_recovery_resolution_without_claim=true".to_string())
+            })?;
+            let participant: CiRecoveryParticipant = participant.clone().into();
+            if !state.participants.contains(&participant) {
+                return Err(Error::Parse(
+                    "ci_recovery_resolution_participant_invalid=true".into(),
+                ));
+            }
+            let replacement = state.replacement.as_ref().ok_or_else(|| {
+                Error::Parse("ci_recovery_resolution_without_replacement=true".into())
+            })?;
+            let proof: CiRecoveryReleaseProof = proof.clone().into();
+            if replacement.status == CiRecoveryReplacementStatus::Failed
+                || replacement.run_id != proof.replacement_run_id
+                || replacement.run_url != proof.replacement_run_url
+                || replacement.sha != proof.sha
+                || proof.terminal_status != "success"
+            {
+                return Err(Error::Parse(
+                    "ci_recovery_resolution_proof_invalid=true".into(),
+                ));
+            }
+            state.release_proof = Some(proof);
+            state.state = CiRecoveryPhase::Resolved;
+        }
+        TiberEvent::LegacyRecoveryStatePublished(payload) => {
+            projection.ci_recovery = Some(CiRecoveryState::from_snapshot(&payload.state));
         }
     }
     Ok(())
 }
 
-fn append_tiber_events(
-    root: &Path,
-    projection: &TiberProjection,
-    events: Vec<TiberEvent>,
-) -> Result<(), Error> {
-    if events.is_empty() {
-        return Ok(());
+/// A request to establish Tiber's repository authority. The request contains
+/// no event payload because the successful fact is fully determined by the
+/// domain intent and its repository stream.
+#[derive(ModelInput)]
+struct InitializeTiberRepositoryRequest {
+    #[model(origin)]
+    stream: TiberRepositoryStream,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, StreamIdentity)]
+struct TiberRepositoryStream(StreamId);
+
+#[derive(ModelCommand)]
+struct InitializeTiberRepository {
+    #[stream]
+    stream: TiberRepositoryStream,
+}
+
+mapping! { InitializeTiberRepositoryRequestToStream:
+InitializeTiberRepositoryRequest.stream => InitializeTiberRepository.stream using clone; }
+
+fn repository_initialized_fact(
+    stream: &TiberRepositoryStream,
+    _: &bool,
+) -> RepositoryInitializedEvent {
+    RepositoryInitializedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
     }
+}
+
+mapping! { InitializeTiberRepositoryToFact:
+(InitializeTiberRepository.stream, InitializeTiberRepositoryState.initialized) => TiberEvent.RepositoryInitialized using repository_initialized_fact; }
+
+/// Only the initialization fact can decide whether this intent is valid.
+#[derive(ModelState)]
+struct InitializeTiberRepositoryState {
+    #[model(default)]
+    initialized: bool,
+}
+
+/// Stable identity of the board authority stream. New task facts live here so
+/// task commands can make a complete decision from one declared stream while
+/// still discovering and replaying the older per-task streams.
+#[derive(Clone, Debug, Eq, PartialEq, StreamIdentity)]
+struct TiberBoardStream(StreamId);
+
+/// A creation request is domain intent, not a pre-computed task event. The
+/// command chooses the final human-facing stem after folding the current board
+/// and its related legacy task streams.
+#[derive(Clone)]
+struct CreateTaskIntent {
+    title: TaskTitle,
+    task_id: String,
+    recorded_at: String,
+    max_queued: Option<usize>,
+}
+
+#[derive(ModelInput)]
+struct CreateTaskRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: CreateTaskIntent,
+}
+
+#[derive(ModelCommand)]
+struct CreateTask {
+    #[stream]
+    board: TiberBoardStream,
+    intent: CreateTaskIntent,
+}
+
+mapping! { CreateTaskRequestToBoard:
+CreateTaskRequest.board => CreateTask.board using clone; }
+mapping! { CreateTaskRequestToIntent:
+CreateTaskRequest.intent => CreateTask.intent using clone; }
+
+/// The narrow state required by task creation. `board_task_stems` identifies
+/// current facts already stored in the board stream; any ordered task absent
+/// from it belongs to a legacy per-task stream and is discovered before the
+/// command decides.
+#[derive(ModelState)]
+struct CreateTaskState {
+    #[model(default)]
+    board_order: Vec<String>,
+    #[model(default)]
+    board_task_stems: BTreeSet<String>,
+    #[model(default)]
+    task_statuses: BTreeMap<String, String>,
+}
+
+fn task_stem_for_creation(state: &CreateTaskState, intent: &CreateTaskIntent) -> String {
+    let base = intent.title.file_stem();
+    let mut nickname = base.clone();
+    let mut suffix = 2;
+    while state
+        .task_statuses
+        .keys()
+        .any(|stem| stem.ends_with(&format!("-{nickname}")))
+    {
+        nickname = format!("{base}-{suffix}");
+        suffix += 1;
+    }
+    format!("{}-{nickname}", intent.task_id)
+}
+
+fn created_task_fact(
+    board: &TiberBoardStream,
+    intent: &CreateTaskIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    task_statuses: &BTreeMap<String, String>,
+) -> TaskCreatedEvent {
+    let state = CreateTaskState {
+        board_order: board_order.to_vec(),
+        board_task_stems: board_task_stems.clone(),
+        task_statuses: task_statuses.clone(),
+    };
+    let stem = task_stem_for_creation(&state, intent);
+    debug_assert!(!state.task_statuses.contains_key(&stem));
+    TaskCreatedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        task: Box::new(Task::new(
+            stem,
+            intent.title.as_str().to_string(),
+            intent.recorded_at.clone(),
+        )),
+    }
+}
+
+fn created_task_order_fact(
+    board: &TiberBoardStream,
+    intent: &CreateTaskIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    task_statuses: &BTreeMap<String, String>,
+) -> TaskOrderEvent {
+    let state = CreateTaskState {
+        board_order: board_order.to_vec(),
+        board_task_stems: board_task_stems.clone(),
+        task_statuses: task_statuses.clone(),
+    };
+    let mut order = state.board_order.clone();
+    order.push(task_stem_for_creation(&state, intent));
+    TaskOrderEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        order,
+    }
+}
+
+mapping! { CreateTaskToCreatedFact:
+    (CreateTask.board, CreateTask.intent, CreateTaskState.board_order, CreateTaskState.board_task_stems, CreateTaskState.task_statuses) => TiberEvent.TaskCreated
+    using created_task_fact;
+}
+mapping! { CreateTaskToOrderFact:
+    (CreateTask.board, CreateTask.intent, CreateTaskState.board_order, CreateTaskState.board_task_stems, CreateTaskState.task_statuses) => TiberEvent.BoardReordered
+    using created_task_order_fact;
+}
+
+impl ModelCommandLogic for CreateTask {
+    type Event = TiberEvent;
+    type State = CreateTaskState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::TaskCreated(TaskCreatedEvent { stream_id, task }) => {
+                if stream_id.as_ref() == BOARD_STREAM {
+                    state.board_task_stems.insert(task.stem.clone());
+                }
+                state
+                    .task_statuses
+                    .insert(task.stem.clone(), task.status.clone());
+            }
+            TiberEvent::TaskTransitioned(TaskTransitionedEvent { stem, status, .. }) => {
+                state.task_statuses.insert(stem.clone(), status.clone());
+            }
+            TiberEvent::LegacyTaskClosedFromTrailer(TaskStemEvent { stem, .. }) => {
+                state.task_statuses.insert(stem.clone(), "done".into());
+            }
+            TiberEvent::TasksClosedFromCommitTrailers(event) => {
+                for stem in &event.stems {
+                    state.task_statuses.insert(stem.clone(), "done".into());
+                }
+                state.board_order.clone_from(&event.order);
+            }
+            TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
+                state.task_statuses.remove(stem);
+                state.board_task_stems.remove(stem);
+            }
+            TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+            | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+                state.board_order.clone_from(order);
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        state
+            .as_ref()
+            .board_order
+            .iter()
+            .filter(|stem| !state.as_ref().board_task_stems.contains(*stem))
+            .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+            .collect()
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        let queued = state
+            .task_statuses
+            .values()
+            .filter(|status| status.as_str() == "backlog")
+            .count();
+        if let Some(max_queued) = self.intent.max_queued {
+            if !backlog_admission_allowed(queued, max_queued) {
+                return Err(format!(
+                    "tiber_backlog_capacity_exceeded queued={queued} max_queued={max_queued}"
+                )
+                .into());
+            }
+        }
+
+        let stem = task_stem_for_creation(state, &self.intent);
+        if state.task_statuses.contains_key(&stem) {
+            return Err("tiber_task_already_exists".into());
+        }
+        let mut facts = ModeledEvents::one(TiberEvent::model_variant_taskcreated(
+            CreateTaskToCreatedFact::apply((self, self, state, state, state)),
+        ));
+        facts.push(TiberEvent::model_variant_boardreordered(
+            CreateTaskToOrderFact::apply((self, self, state, state, state)),
+        ));
+        Ok(facts)
+    }
+}
+
+fn execute_create_task(root: &Path, title: TaskTitle) -> Result<TaskPath, Error> {
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let task_id = new_task_id();
+    let max_queued = repository.project_config()?.backlog.max_queued;
+    let intent = CreateTaskIntent {
+        title,
+        task_id: task_id.clone(),
+        recorded_at: command_recorded_at(),
+        max_queued,
+    };
+    let request = CreateTaskRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = CreateTask::model_builder()
+        .board(CreateTaskRequestToBoard::apply(request.as_ref()))
+        .intent(CreateTaskRequestToIntent::apply(request.as_ref()))
+        .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let mut writes = StreamWrites::new();
-    let mut declared = std::collections::HashSet::new();
-    for event in &events {
-        if declared.insert(event.stream_id().clone()) {
-            let expected = projection
-                .versions
-                .get(event.stream_id())
-                .copied()
-                .unwrap_or(StreamVersion::new(0));
-            writes = writes
-                .register_stream(event.stream_id().clone(), expected)
-                .map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => load_tiber_projection(root)?
+            .tasks
+            .keys()
+            .find(|stem| stem.starts_with(&format!("{task_id}-")))
+            .cloned()
+            .map(|path| TaskPath { path })
+            .ok_or_else(|| Error::Parse("eventcore_created_task_missing=true".into())),
+        Err(eventcore::CommandError::BusinessRuleViolation(error)) => {
+            let message = error.to_string();
+            let Some((queued, max_queued)) = message
+                .strip_prefix("tiber_backlog_capacity_exceeded queued=")
+                .and_then(|value| value.split_once(" max_queued="))
+                .and_then(|(queued, max_queued)| {
+                    Some((queued.parse().ok()?, max_queued.parse().ok()?))
+                })
+            else {
+                return Err(Error::Parse("eventcore_command_rejected=true".to_string()));
+            };
+            Err(Error::BacklogCapacityExceeded { queued, max_queued })
         }
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
     }
-    for event in events {
-        writes = writes.append(event).map_err(event_store_error)?;
+}
+
+#[derive(Clone)]
+struct TransitionTaskIntent {
+    stem: String,
+    status: String,
+    claim: Option<Claim>,
+    max_queued: Option<usize>,
+}
+
+#[derive(ModelInput)]
+struct TransitionTaskRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: TransitionTaskIntent,
+}
+
+#[derive(ModelCommand)]
+struct TransitionTask {
+    #[stream]
+    board: TiberBoardStream,
+    intent: TransitionTaskIntent,
+}
+
+mapping! { TransitionTaskRequestToBoard:
+TransitionTaskRequest.board => TransitionTask.board using clone; }
+mapping! { TransitionTaskRequestToIntent:
+TransitionTaskRequest.intent => TransitionTask.intent using clone; }
+
+/// Transitioning a task needs its current lifecycle fact, claim, and board
+/// membership—nothing from unrelated task fields.
+#[derive(ModelState)]
+struct TransitionTaskState {
+    #[model(default)]
+    board_order: Vec<String>,
+    #[model(default)]
+    board_task_stems: BTreeSet<String>,
+    #[model(default)]
+    task_statuses: BTreeMap<String, String>,
+    #[model(default)]
+    target_claim: Option<Option<Claim>>,
+}
+
+fn transitioned_task_fact(
+    board: &TiberBoardStream,
+    intent: &TransitionTaskIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    task_statuses: &BTreeMap<String, String>,
+    target_claim: &Option<Option<Claim>>,
+) -> TaskTransitionedEvent {
+    let _ = board_order;
+    debug_assert!(
+        board_task_stems.contains(&intent.stem) || task_statuses.contains_key(&intent.stem)
+    );
+    debug_assert!(task_statuses.contains_key(&intent.stem));
+    debug_assert!(target_claim.is_some());
+    TaskTransitionedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: intent.stem.clone(),
+        status: intent.status.clone(),
+        claim: intent.claim.clone(),
     }
-    match run_async(async move { store.append_events(writes).await }) {
-        Ok(_) => {}
-        Err(EventStoreError::VersionConflict { .. }) => {
-            return Err(Error::Parse("event_version_conflict=true".into()));
+}
+
+fn transitioned_task_order_fact(
+    board: &TiberBoardStream,
+    intent: &TransitionTaskIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    task_statuses: &BTreeMap<String, String>,
+    target_claim: &Option<Option<Claim>>,
+) -> TaskOrderEvent {
+    debug_assert!(
+        board_task_stems.contains(&intent.stem) || task_statuses.contains_key(&intent.stem)
+    );
+    debug_assert!(target_claim.is_some());
+    let mut order = board_order.to_vec();
+    if is_open_status(&intent.status) {
+        if !order.contains(&intent.stem) {
+            order.push(intent.stem.clone());
         }
-        Err(EventStoreError::StoreFailure { .. }) => {
-            return Err(Error::Parse(
-                "event_store_failed source_redacted=true event_store_authoritative_ref_retry=true"
-                    .into(),
+    } else {
+        order.retain(|entry| entry != &intent.stem);
+    }
+    TaskOrderEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        order,
+    }
+}
+
+mapping! { TransitionTaskToLifecycleFact:
+    (TransitionTask.board, TransitionTask.intent, TransitionTaskState.board_order, TransitionTaskState.board_task_stems, TransitionTaskState.task_statuses, TransitionTaskState.target_claim) => TiberEvent.TaskTransitioned
+    using transitioned_task_fact;
+}
+mapping! { TransitionTaskToOrderFact:
+    (TransitionTask.board, TransitionTask.intent, TransitionTaskState.board_order, TransitionTaskState.board_task_stems, TransitionTaskState.task_statuses, TransitionTaskState.target_claim) => TiberEvent.BoardReordered
+    using transitioned_task_order_fact;
+}
+
+impl ModelCommandLogic for TransitionTask {
+    type Event = TiberEvent;
+    type State = TransitionTaskState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::TaskCreated(TaskCreatedEvent { stream_id, task }) => {
+                if stream_id.as_ref() == BOARD_STREAM {
+                    state.board_task_stems.insert(task.stem.clone());
+                }
+                state
+                    .task_statuses
+                    .insert(task.stem.clone(), task.status.clone());
+                if task.stem == self.intent.stem {
+                    state.target_claim = Some(task.claim.clone());
+                }
+            }
+            TiberEvent::TaskTransitioned(TaskTransitionedEvent {
+                stem,
+                status,
+                claim,
+                ..
+            }) => {
+                state.task_statuses.insert(stem.clone(), status.clone());
+                if stem == &self.intent.stem {
+                    state.target_claim = Some(claim.clone());
+                }
+            }
+            TiberEvent::LegacyTaskClosedFromTrailer(TaskStemEvent { stem, .. }) => {
+                state.task_statuses.insert(stem.clone(), "done".into());
+                if stem == &self.intent.stem {
+                    state.target_claim = Some(None);
+                }
+            }
+            TiberEvent::TasksClosedFromCommitTrailers(event) => {
+                for stem in &event.stems {
+                    state.task_statuses.insert(stem.clone(), "done".into());
+                    if stem == &self.intent.stem {
+                        state.target_claim = Some(None);
+                    }
+                }
+                state.board_order.clone_from(&event.order);
+            }
+            TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
+                state.task_statuses.remove(stem);
+                if stem == &self.intent.stem {
+                    state.target_claim = None;
+                }
+                state.board_task_stems.remove(stem);
+            }
+            TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+            | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+                state.board_order.clone_from(order);
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        state
+            .as_ref()
+            .board_order
+            .iter()
+            .filter(|stem| !state.as_ref().board_task_stems.contains(*stem))
+            .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+            .collect()
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        let old_status = state
+            .task_statuses
+            .get(&self.intent.stem)
+            .ok_or("tiber_task_missing")?;
+        let old_claim = state.target_claim.clone().ok_or("tiber_task_missing")?;
+        let admits_to_backlog = self.intent.status == "backlog" && old_status != "backlog";
+        if admits_to_backlog {
+            let queued = state
+                .task_statuses
+                .values()
+                .filter(|status| status.as_str() == "backlog")
+                .count();
+            if let Some(max_queued) = self.intent.max_queued {
+                if !backlog_admission_allowed(queued, max_queued) {
+                    return Err(format!(
+                        "tiber_backlog_capacity_exceeded queued={queued} max_queued={max_queued}"
+                    )
+                    .into());
+                }
+            }
+        }
+
+        let mut order = state.board_order.clone();
+        if is_open_status(&self.intent.status) {
+            if !order.contains(&self.intent.stem) {
+                order.push(self.intent.stem.clone());
+            }
+        } else {
+            order.retain(|entry| entry != &self.intent.stem);
+        }
+        let status_changed = old_status != &self.intent.status || old_claim != self.intent.claim;
+        let order_changed = order != state.board_order;
+        if !status_changed && !order_changed {
+            return Ok(ModeledEvents::none(
+                "task already has requested lifecycle state",
             ));
         }
-        Err(error) => return Err(event_store_error(error)),
+
+        let mut facts = ModeledEvents::none("transition facts initialized");
+        if status_changed {
+            facts.push(TiberEvent::model_variant_tasktransitioned(
+                TransitionTaskToLifecycleFact::apply((self, self, state, state, state, state)),
+            ));
+        }
+        if order_changed {
+            facts.push(TiberEvent::model_variant_boardreordered(
+                TransitionTaskToOrderFact::apply((self, self, state, state, state, state)),
+            ));
+        }
+        Ok(facts)
     }
-    Ok(())
 }
 
-fn task_change_events(
-    before: &TiberProjection,
-    after: &TiberProjection,
-    mutation: TaskMutation,
-) -> Result<Vec<TiberEvent>, Error> {
-    let mut events = Vec::new();
-    let mut repairs = Vec::new();
-    if !before.initialized {
-        events.push(TiberEvent::RepositoryInitialized {
-            stream_id: stream_id(REPOSITORY_STREAM)?,
-        });
+fn resolve_task_stem_from_projection(
+    projection: &TiberProjection,
+    task_ref: &str,
+) -> Result<String, Error> {
+    if task_ref.contains('/') || task_ref.ends_with(".md") || task_ref.trim().is_empty() {
+        return Err(Error::Parse(format!("invalid_task_ref ref={task_ref}")));
     }
-    for (stem, task) in &after.tasks {
-        let id = stream_id(format!("tiber:task:{stem}"))?;
-        let Some(old) = before.tasks.get(stem) else {
-            events.push(TiberEvent::TaskCreated {
-                stream_id: id,
-                task: Box::new(task.clone()),
-            });
-            continue;
-        };
-        if old.status != task.status || old.claim != task.claim {
-            if matches!(mutation, TaskMutation::CloseFromTrailer) && task.status == "done" {
-                events.push(TiberEvent::TaskClosedFromTrailer {
-                    stream_id: id.clone(),
-                    stem: stem.clone(),
-                });
-            } else {
-                events.push(TiberEvent::TaskTransitioned {
-                    stream_id: id.clone(),
-                    stem: stem.clone(),
-                    status: task.status.clone(),
-                    claim: task.claim.clone(),
-                });
-            }
-        }
-        if old.blocks != task.blocks || old.blocked_by != task.blocked_by {
-            events.push(TiberEvent::TaskLinksChanged {
-                stream_id: id.clone(),
-                stem: stem.clone(),
-                blocks: task.blocks.clone(),
-                blocked_by: task.blocked_by.clone(),
-            });
-            if matches!(mutation, TaskMutation::ValidateRepair) {
-                for target in task
-                    .blocks
-                    .iter()
-                    .filter(|target| !old.blocks.contains(*target))
-                {
-                    repairs.push(ValidationRepair::ReciprocalLinkAdded {
-                        task: stem.clone(),
-                        field: "blocks".into(),
-                        target: target.clone(),
-                    });
-                }
-                for target in task
-                    .blocked_by
-                    .iter()
-                    .filter(|target| !old.blocked_by.contains(*target))
-                {
-                    repairs.push(ValidationRepair::ReciprocalLinkAdded {
-                        task: stem.clone(),
-                        field: "blocked_by".into(),
-                        target: target.clone(),
-                    });
-                }
-            }
-        }
-        if old.title != task.title
-            || old.tags != task.tags
-            || old.summary != task.summary
-            || old.context != task.context
-        {
-            events.push(TiberEvent::TaskDetailsUpdated {
-                stream_id: id.clone(),
-                stem: stem.clone(),
-                title: task.title.clone(),
-                tags: task.tags.clone(),
-                summary: task.summary.clone(),
-                context: task.context.clone(),
-            });
-        }
-        if old.pr_mr_url != task.pr_mr_url || old.pr_mr_status != task.pr_mr_status {
-            events.push(TiberEvent::TaskPullRequestChanged {
-                stream_id: id.clone(),
-                stem: stem.clone(),
-                url: task.pr_mr_url.clone(),
-                status: task.pr_mr_status.clone(),
-            });
-        }
-        if task.subtasks.len() == old.subtasks.len() + 1 && task.subtasks.starts_with(&old.subtasks)
-        {
-            events.push(TiberEvent::TaskSubtaskAdded {
-                stream_id: id.clone(),
-                stem: stem.clone(),
-                subtask: task.subtasks.last().expect("one appended subtask").clone(),
-            });
-        } else {
-            for (prior, current) in old.subtasks.iter().zip(&task.subtasks) {
-                if prior.id == current.id && prior.checked != current.checked {
-                    events.push(TiberEvent::TaskSubtaskChecked {
-                        stream_id: id.clone(),
-                        stem: stem.clone(),
-                        subtask_id: current.id.clone(),
-                        checked: current.checked,
-                    });
-                }
-            }
-        }
-        if task.acceptance.len() == old.acceptance.len() + 1
-            && task.acceptance.starts_with(&old.acceptance)
-        {
-            events.push(TiberEvent::TaskAcceptanceAdded {
-                stream_id: id.clone(),
-                stem: stem.clone(),
-                item: task
-                    .acceptance
-                    .last()
-                    .expect("one appended criterion")
-                    .clone(),
-            });
-        } else if old.acceptance.len() == task.acceptance.len() + 1 {
-            let index = (0..old.acceptance.len())
-                .find(|index| old.acceptance.get(*index + 1..) == task.acceptance.get(*index..))
-                .unwrap_or(old.acceptance.len() - 1);
-            events.push(TiberEvent::TaskAcceptanceRemoved {
-                stream_id: id.clone(),
-                stem: stem.clone(),
-                index,
-            });
-        } else {
-            for (index, (prior, current)) in old.acceptance.iter().zip(&task.acceptance).enumerate()
-            {
-                if prior.text == current.text && prior.checked != current.checked {
-                    events.push(TiberEvent::TaskAcceptanceChecked {
-                        stream_id: id.clone(),
-                        stem: stem.clone(),
-                        index,
-                        checked: current.checked,
-                    });
-                }
-            }
-        }
-        for note in task.notes.iter().skip(old.notes.len()) {
-            events.push(TiberEvent::TaskNoteAdded {
-                stream_id: id.clone(),
-                stem: stem.clone(),
-                note: note.clone(),
-            });
-        }
-    }
-    for stem in before
+    let mut matches = projection
         .tasks
         .keys()
-        .filter(|stem| !after.tasks.contains_key(*stem))
-    {
-        events.push(TiberEvent::TaskRemoved {
-            stream_id: stream_id(format!("tiber:task:{stem}"))?,
-            stem: stem.clone(),
-        });
+        .filter(|stem| {
+            let id = stem
+                .split_once('-')
+                .and_then(|(date, rest)| {
+                    rest.split_once('-')
+                        .map(|(code, _)| format!("{date}-{code}"))
+                })
+                .unwrap_or_default();
+            let nickname = stem
+                .split_once('-')
+                .and_then(|(_, rest)| rest.split_once('-'))
+                .map(|(_, nickname)| nickname)
+                .unwrap_or_default();
+            stem.as_str() == task_ref || id == task_ref || nickname == task_ref
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    matches.sort();
+    match matches.as_slice() {
+        [resolved] => Ok(resolved.clone()),
+        [] => Err(Error::Parse(format!("task_ref_missing ref={task_ref}"))),
+        _ => Err(Error::Parse(format!(
+            "ambiguous_task_ref ref={task_ref} matches={}",
+            matches.join(",")
+        ))),
     }
-    if before.order != after.order {
-        events.push(if matches!(mutation, TaskMutation::Prioritize) {
-            TiberEvent::TaskPriorityChanged {
-                stream_id: stream_id(BOARD_STREAM)?,
-                order: after.order.clone(),
+}
+
+fn execute_transition_task(root: &Path, task_ref: &str, status: &str) -> Result<TaskPath, Error> {
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let stem = resolve_task_stem_from_projection(&projection, task_ref)?;
+    let status = parse_status(status)?.to_string();
+    let intent = TransitionTaskIntent {
+        stem: stem.clone(),
+        claim: (status == "in-progress").then(|| Claim {
+            host: claim_host(),
+            session: claim_session(),
+        }),
+        status,
+        max_queued: repository.project_config()?.backlog.max_queued,
+    };
+    let request = TransitionTaskRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = TransitionTask::model_builder()
+        .board(TransitionTaskRequestToBoard::apply(request.as_ref()))
+        .intent(TransitionTaskRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(TaskPath { path: stem }),
+        Err(eventcore::CommandError::BusinessRuleViolation(error)) => {
+            let message = error.to_string();
+            let Some((queued, max_queued)) = message
+                .strip_prefix("tiber_backlog_capacity_exceeded queued=")
+                .and_then(|value| value.split_once(" max_queued="))
+                .and_then(|(queued, max_queued)| {
+                    Some((queued.parse().ok()?, max_queued.parse().ok()?))
+                })
+            else {
+                return Err(Error::Parse("eventcore_command_rejected=true".to_string()));
+            };
+            Err(Error::BacklogCapacityExceeded { queued, max_queued })
+        }
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct PrioritizeTaskIntent {
+    task_stem: String,
+    before_stem: String,
+}
+
+#[derive(ModelInput)]
+struct PrioritizeTaskRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: PrioritizeTaskIntent,
+}
+
+#[derive(ModelCommand)]
+struct PrioritizeTask {
+    #[stream]
+    board: TiberBoardStream,
+    intent: PrioritizeTaskIntent,
+}
+
+mapping! { PrioritizeTaskRequestToBoard:
+PrioritizeTaskRequest.board => PrioritizeTask.board using clone; }
+mapping! { PrioritizeTaskRequestToIntent:
+PrioritizeTaskRequest.intent => PrioritizeTask.intent using clone; }
+
+#[derive(ModelState)]
+struct PrioritizeTaskState {
+    #[model(default)]
+    board_order: Vec<String>,
+}
+
+fn prioritized_task_fact(
+    board: &TiberBoardStream,
+    intent: &PrioritizeTaskIntent,
+    board_order: &[String],
+) -> TaskOrderEvent {
+    let mut order = board_order.to_vec();
+    order.retain(|entry| entry != &intent.task_stem);
+    let before_index = order
+        .iter()
+        .position(|entry| entry == &intent.before_stem)
+        .expect("validated prioritization target must remain on the board");
+    order.insert(before_index, intent.task_stem.clone());
+    TaskOrderEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        order,
+    }
+}
+
+mapping! { PrioritizeTaskToFact:
+    (PrioritizeTask.board, PrioritizeTask.intent, PrioritizeTaskState.board_order) => TiberEvent.TaskPriorityChanged
+    using prioritized_task_fact;
+}
+
+impl ModelCommandLogic for PrioritizeTask {
+    type Event = TiberEvent;
+    type State = PrioritizeTaskState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        if let TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+        | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) = event
+        {
+            state.board_order.clone_from(order);
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let mut order = state.as_ref().board_order.clone();
+        order.retain(|entry| entry != &self.intent.task_stem);
+        let before_index = order
+            .iter()
+            .position(|entry| entry == &self.intent.before_stem)
+            .ok_or("tiber_prioritization_target_not_on_board")?;
+        order.insert(before_index, self.intent.task_stem.clone());
+        if order == state.as_ref().board_order {
+            return Ok(ModeledEvents::none("task already has requested priority"));
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_taskprioritychanged(PrioritizeTaskToFact::apply((
+                self,
+                self,
+                state.as_ref(),
+            ))),
+        ))
+    }
+}
+
+fn execute_prioritize_task(root: &Path, task_ref: &str, before_ref: &str) -> Result<(), Error> {
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let intent = PrioritizeTaskIntent {
+        task_stem: resolve_task_stem_from_projection(&projection, task_ref)?,
+        before_stem: resolve_task_stem_from_projection(&projection, before_ref)?,
+    };
+    let request = PrioritizeTaskRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = PrioritizeTask::model_builder()
+        .board(PrioritizeTaskRequestToBoard::apply(request.as_ref()))
+        .intent(PrioritizeTaskRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct TaskLinkIntent {
+    from_stem: String,
+    to_stem: String,
+}
+
+/// Linking decisions need only each endpoint's current links. Board membership
+/// is retained solely to discover legacy per-task streams.
+#[derive(ModelState)]
+struct TaskLinkState {
+    #[model(default)]
+    board_order: Vec<String>,
+    #[model(default)]
+    board_task_stems: BTreeSet<String>,
+    #[model(default)]
+    source_links: Option<(Vec<String>, Vec<String>)>,
+    #[model(default)]
+    target_links: Option<(Vec<String>, Vec<String>)>,
+}
+
+fn evolve_task_links(
+    mut state: TaskLinkState,
+    intent: &TaskLinkIntent,
+    event: &TiberEvent,
+) -> TaskLinkState {
+    match event {
+        TiberEvent::TaskCreated(TaskCreatedEvent { stream_id, task }) => {
+            if stream_id.as_ref() == BOARD_STREAM {
+                state.board_task_stems.insert(task.stem.clone());
+            }
+            let links = (task.blocks.clone(), task.blocked_by.clone());
+            if task.stem == intent.from_stem {
+                state.source_links = Some(links.clone());
+            }
+            if task.stem == intent.to_stem {
+                state.target_links = Some(links);
+            }
+        }
+        TiberEvent::TaskLinksChanged(TaskLinksChangedEvent {
+            stem,
+            blocks,
+            blocked_by,
+            ..
+        }) => {
+            let links = (blocks.clone(), blocked_by.clone());
+            if stem == &intent.from_stem {
+                state.source_links = Some(links.clone());
+            }
+            if stem == &intent.to_stem {
+                state.target_links = Some(links);
+            }
+        }
+        TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
+            if stem == &intent.from_stem {
+                state.source_links = None;
+            }
+            if stem == &intent.to_stem {
+                state.target_links = None;
+            }
+            state.board_task_stems.remove(stem);
+        }
+        TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+        | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+            state.board_order.clone_from(order);
+        }
+        _ => {}
+    }
+    state
+}
+
+fn discover_legacy_task_link_streams(state: &TaskLinkState) -> Vec<StreamId> {
+    state
+        .board_order
+        .iter()
+        .filter(|stem| !state.board_task_stems.contains(*stem))
+        .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+        .collect()
+}
+
+#[derive(ModelInput)]
+struct LinkTasksRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: TaskLinkIntent,
+}
+
+#[derive(ModelCommand)]
+struct LinkTasks {
+    #[stream]
+    board: TiberBoardStream,
+    intent: TaskLinkIntent,
+}
+
+mapping! { LinkTasksRequestToBoard:
+LinkTasksRequest.board => LinkTasks.board using clone; }
+mapping! { LinkTasksRequestToIntent:
+LinkTasksRequest.intent => LinkTasks.intent using clone; }
+
+enum TaskLinkFactChange {
+    LinkSource,
+    LinkTarget,
+    UnlinkSource,
+    UnlinkTarget,
+}
+
+fn changed_task_link_fact(
+    board: &TiberBoardStream,
+    intent: &TaskLinkIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    source_links: &Option<(Vec<String>, Vec<String>)>,
+    target_links: &Option<(Vec<String>, Vec<String>)>,
+    change: TaskLinkFactChange,
+) -> TaskLinksChangedEvent {
+    let (link, target) = match change {
+        TaskLinkFactChange::LinkSource => (true, false),
+        TaskLinkFactChange::LinkTarget => (true, true),
+        TaskLinkFactChange::UnlinkSource => (false, false),
+        TaskLinkFactChange::UnlinkTarget => (false, true),
+    };
+    debug_assert!(board_order.contains(&intent.from_stem) || source_links.is_some());
+    debug_assert!(board_order.contains(&intent.to_stem) || target_links.is_some());
+    debug_assert!(board_task_stems.contains(&intent.from_stem) || source_links.is_some());
+    let stem = if target {
+        &intent.to_stem
+    } else {
+        &intent.from_stem
+    };
+    let (mut blocks, mut blocked_by) = if target { target_links } else { source_links }
+        .as_ref()
+        .cloned()
+        .expect("validated task link endpoint must exist");
+    if target || intent.from_stem == intent.to_stem {
+        if link {
+            if !blocked_by.contains(&intent.from_stem) {
+                blocked_by.push(intent.from_stem.clone());
             }
         } else {
-            TiberEvent::BoardReordered {
-                stream_id: stream_id(BOARD_STREAM)?,
-                order: after.order.clone(),
-            }
-        });
-        if matches!(mutation, TaskMutation::ValidateRepair) {
-            for task in after
-                .order
-                .iter()
-                .filter(|task| !before.order.contains(*task))
-            {
-                repairs.push(ValidationRepair::BoardEntryAdded { task: task.clone() });
-            }
-            for task in before
-                .order
-                .iter()
-                .filter(|task| !after.order.contains(*task))
-            {
-                repairs.push(ValidationRepair::BoardEntryRemoved { task: task.clone() });
-            }
+            blocked_by.retain(|entry| entry != &intent.from_stem);
         }
     }
-    if matches!(mutation, TaskMutation::ValidateRepair) && !repairs.is_empty() {
-        events.push(TiberEvent::TaskValidationRepaired {
-            stream_id: stream_id(BOARD_STREAM)?,
-            repairs,
-        });
+    if !target {
+        if link {
+            if !blocks.contains(&intent.to_stem) {
+                blocks.push(intent.to_stem.clone());
+            }
+        } else {
+            blocks.retain(|entry| entry != &intent.to_stem);
+        }
     }
-    if events
+    TaskLinksChangedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: stem.clone(),
+        blocks,
+        blocked_by,
+    }
+}
+
+fn linked_source_fact(
+    board: &TiberBoardStream,
+    intent: &TaskLinkIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    source_links: &Option<(Vec<String>, Vec<String>)>,
+    target_links: &Option<(Vec<String>, Vec<String>)>,
+) -> TaskLinksChangedEvent {
+    changed_task_link_fact(
+        board,
+        intent,
+        board_order,
+        board_task_stems,
+        source_links,
+        target_links,
+        TaskLinkFactChange::LinkSource,
+    )
+}
+fn linked_target_fact(
+    board: &TiberBoardStream,
+    intent: &TaskLinkIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    source_links: &Option<(Vec<String>, Vec<String>)>,
+    target_links: &Option<(Vec<String>, Vec<String>)>,
+) -> TaskLinksChangedEvent {
+    changed_task_link_fact(
+        board,
+        intent,
+        board_order,
+        board_task_stems,
+        source_links,
+        target_links,
+        TaskLinkFactChange::LinkTarget,
+    )
+}
+fn unlinked_source_fact(
+    board: &TiberBoardStream,
+    intent: &TaskLinkIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    source_links: &Option<(Vec<String>, Vec<String>)>,
+    target_links: &Option<(Vec<String>, Vec<String>)>,
+) -> TaskLinksChangedEvent {
+    changed_task_link_fact(
+        board,
+        intent,
+        board_order,
+        board_task_stems,
+        source_links,
+        target_links,
+        TaskLinkFactChange::UnlinkSource,
+    )
+}
+fn unlinked_target_fact(
+    board: &TiberBoardStream,
+    intent: &TaskLinkIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    source_links: &Option<(Vec<String>, Vec<String>)>,
+    target_links: &Option<(Vec<String>, Vec<String>)>,
+) -> TaskLinksChangedEvent {
+    changed_task_link_fact(
+        board,
+        intent,
+        board_order,
+        board_task_stems,
+        source_links,
+        target_links,
+        TaskLinkFactChange::UnlinkTarget,
+    )
+}
+
+mapping! { LinkTasksToSourceFact:
+    (LinkTasks.board, LinkTasks.intent, TaskLinkState.board_order, TaskLinkState.board_task_stems, TaskLinkState.source_links, TaskLinkState.target_links) => TiberEvent.TaskLinksChanged
+    using linked_source_fact;
+}
+mapping! { LinkTasksToTargetFact:
+    (LinkTasks.board, LinkTasks.intent, TaskLinkState.board_order, TaskLinkState.board_task_stems, TaskLinkState.source_links, TaskLinkState.target_links) => TiberEvent.TaskLinksChanged
+    using linked_target_fact;
+}
+
+impl ModelCommandLogic for LinkTasks {
+    type Event = TiberEvent;
+    type State = TaskLinkState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        Modeled::from_built(evolve_task_links(state.into_inner(), &self.intent, event))
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        discover_legacy_task_link_streams(state.as_ref())
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        let (from_blocks, _from_blocked_by) = state
+            .source_links
+            .as_ref()
+            .ok_or("tiber_link_source_missing")?;
+        let (_to_blocks, to_blocked_by) = state
+            .target_links
+            .as_ref()
+            .ok_or("tiber_link_target_missing")?;
+        let mut next_from_blocks = from_blocks.clone();
+        if !next_from_blocks.contains(&self.intent.to_stem) {
+            next_from_blocks.push(self.intent.to_stem.clone());
+        }
+        let mut next_to_blocked_by = to_blocked_by.clone();
+        if !next_to_blocked_by.contains(&self.intent.from_stem) {
+            next_to_blocked_by.push(self.intent.from_stem.clone());
+        }
+        if &next_from_blocks == from_blocks && &next_to_blocked_by == to_blocked_by {
+            return Ok(ModeledEvents::none("dependency already exists"));
+        }
+        if self.intent.from_stem == self.intent.to_stem {
+            return Ok(ModeledEvents::one(
+                TiberEvent::model_variant_tasklinkschanged(LinkTasksToSourceFact::apply((
+                    self, self, state, state, state, state,
+                ))),
+            ));
+        }
+        let mut facts = ModeledEvents::none("link facts initialized");
+        if &next_from_blocks != from_blocks {
+            facts.push(TiberEvent::model_variant_tasklinkschanged(
+                LinkTasksToSourceFact::apply((self, self, state, state, state, state)),
+            ));
+        }
+        if &next_to_blocked_by != to_blocked_by {
+            facts.push(TiberEvent::model_variant_tasklinkschanged(
+                LinkTasksToTargetFact::apply((self, self, state, state, state, state)),
+            ));
+        }
+        Ok(facts)
+    }
+}
+
+#[derive(ModelInput)]
+struct UnlinkTasksRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: TaskLinkIntent,
+}
+
+#[derive(ModelCommand)]
+struct UnlinkTasks {
+    #[stream]
+    board: TiberBoardStream,
+    intent: TaskLinkIntent,
+}
+
+mapping! { UnlinkTasksRequestToBoard:
+UnlinkTasksRequest.board => UnlinkTasks.board using clone; }
+mapping! { UnlinkTasksRequestToIntent:
+UnlinkTasksRequest.intent => UnlinkTasks.intent using clone; }
+mapping! { UnlinkTasksToSourceFact:
+    (UnlinkTasks.board, UnlinkTasks.intent, TaskLinkState.board_order, TaskLinkState.board_task_stems, TaskLinkState.source_links, TaskLinkState.target_links) => TiberEvent.TaskLinksChanged
+    using unlinked_source_fact;
+}
+mapping! { UnlinkTasksToTargetFact:
+    (UnlinkTasks.board, UnlinkTasks.intent, TaskLinkState.board_order, TaskLinkState.board_task_stems, TaskLinkState.source_links, TaskLinkState.target_links) => TiberEvent.TaskLinksChanged
+    using unlinked_target_fact;
+}
+
+impl ModelCommandLogic for UnlinkTasks {
+    type Event = TiberEvent;
+    type State = TaskLinkState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        Modeled::from_built(evolve_task_links(state.into_inner(), &self.intent, event))
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        discover_legacy_task_link_streams(state.as_ref())
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        let (from_blocks, _from_blocked_by) = state
+            .source_links
+            .as_ref()
+            .ok_or("tiber_link_source_missing")?;
+        let (_to_blocks, to_blocked_by) = state
+            .target_links
+            .as_ref()
+            .ok_or("tiber_link_target_missing")?;
+        let next_from_blocks = from_blocks
+            .iter()
+            .filter(|entry| *entry != &self.intent.to_stem)
+            .cloned()
+            .collect::<Vec<_>>();
+        let next_to_blocked_by = to_blocked_by
+            .iter()
+            .filter(|entry| *entry != &self.intent.from_stem)
+            .cloned()
+            .collect::<Vec<_>>();
+        if &next_from_blocks == from_blocks && &next_to_blocked_by == to_blocked_by {
+            return Ok(ModeledEvents::none("dependency does not exist"));
+        }
+        if self.intent.from_stem == self.intent.to_stem {
+            return Ok(ModeledEvents::one(
+                TiberEvent::model_variant_tasklinkschanged(UnlinkTasksToSourceFact::apply((
+                    self, self, state, state, state, state,
+                ))),
+            ));
+        }
+        let mut facts = ModeledEvents::none("unlink facts initialized");
+        if &next_from_blocks != from_blocks {
+            facts.push(TiberEvent::model_variant_tasklinkschanged(
+                UnlinkTasksToSourceFact::apply((self, self, state, state, state, state)),
+            ));
+        }
+        if &next_to_blocked_by != to_blocked_by {
+            facts.push(TiberEvent::model_variant_tasklinkschanged(
+                UnlinkTasksToTargetFact::apply((self, self, state, state, state, state)),
+            ));
+        }
+        Ok(facts)
+    }
+}
+
+fn execute_link_blocks(root: &Path, from_ref: &str, to_ref: &str) -> Result<(), Error> {
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let intent = TaskLinkIntent {
+        from_stem: resolve_task_stem_from_projection(&projection, from_ref)?,
+        to_stem: resolve_task_stem_from_projection(&projection, to_ref)?,
+    };
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let request = LinkTasksRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = LinkTasks::model_builder()
+        .board(LinkTasksRequestToBoard::apply(request.as_ref()))
+        .intent(LinkTasksRequestToIntent::apply(request.as_ref()))
+        .build();
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_unlink_blocks(root: &Path, from_ref: &str, to_ref: &str) -> Result<(), Error> {
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let intent = TaskLinkIntent {
+        from_stem: resolve_task_stem_from_projection(&projection, from_ref)?,
+        to_stem: resolve_task_stem_from_projection(&projection, to_ref)?,
+    };
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let request = UnlinkTasksRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = UnlinkTasks::model_builder()
+        .board(UnlinkTasksRequestToBoard::apply(request.as_ref()))
+        .intent(UnlinkTasksRequestToIntent::apply(request.as_ref()))
+        .build();
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct AddSubtaskIntent {
+    stem: String,
+    title: String,
+    after: Vec<String>,
+}
+
+#[derive(ModelInput)]
+struct AddSubtaskRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: AddSubtaskIntent,
+}
+
+#[derive(ModelCommand)]
+struct AddSubtask {
+    #[stream]
+    board: TiberBoardStream,
+    intent: AddSubtaskIntent,
+}
+
+mapping! { AddSubtaskRequestToBoard:
+AddSubtaskRequest.board => AddSubtask.board using clone; }
+mapping! { AddSubtaskRequestToIntent:
+AddSubtaskRequest.intent => AddSubtask.intent using clone; }
+
+/// Subtask decisions fold only the addressed task's list. Board membership is
+/// retained solely to discover a legacy per-task stream when necessary.
+#[derive(ModelState)]
+struct AddSubtaskState {
+    #[model(default)]
+    board_order: Vec<String>,
+    #[model(default)]
+    board_task_stems: BTreeSet<String>,
+    #[model(default)]
+    target_subtasks: Option<Vec<Subtask>>,
+}
+
+fn added_subtask_fact(
+    board: &TiberBoardStream,
+    intent: &AddSubtaskIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    target_subtasks: &Option<Vec<Subtask>>,
+) -> TaskSubtaskAddedEvent {
+    debug_assert!(board_order.contains(&intent.stem) || target_subtasks.is_some());
+    debug_assert!(board_task_stems.contains(&intent.stem) || target_subtasks.is_some());
+    let items = target_subtasks
+        .as_ref()
+        .expect("validated subtask target must exist");
+    let next_id = items
         .iter()
-        .any(|event| !matches!(event, TiberEvent::RepositoryInitialized { .. }))
-    {
-        events.push(TiberEvent::TaskStatePublished {
-            stream_id: stream_id(BOARD_STREAM)?,
-        });
+        .filter_map(|item| item.id.strip_prefix('s')?.parse::<usize>().ok())
+        .max()
+        .unwrap_or(0)
+        + 1;
+    TaskSubtaskAddedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: intent.stem.clone(),
+        subtask: Subtask {
+            id: format!("s{next_id}"),
+            checked: false,
+            title: intent.title.clone(),
+            after: intent.after.clone(),
+        },
     }
-    Ok(events)
 }
 
-fn ci_recovery_event(
-    message: &str,
-    stream_id: StreamId,
-    state: &CiRecoveryState,
-) -> Result<TiberEvent, Error> {
-    let state = Box::new(
-        serde_json::to_value(state)
-            .map_err(|error| Error::Parse(format!("ci_recovery_event_invalid source={error}")))?,
-    );
-    Ok(match message {
-        "Claim CI recovery" => TiberEvent::CiRecoveryClaimed { stream_id, state },
-        "Join CI recovery" => TiberEvent::CiRecoveryJoined { stream_id, state },
-        "Transfer CI recovery" => TiberEvent::CiRecoveryTransferred { stream_id, state },
-        "Take over CI recovery" => TiberEvent::CiRecoveryTakenOver { stream_id, state },
-        "Assign CI recovery helper" => TiberEvent::CiRecoveryAssigned { stream_id, state },
-        "Report CI recovery helper result" => TiberEvent::CiRecoveryReported { stream_id, state },
-        "Renew CI recovery lease" => TiberEvent::CiRecoveryHeartbeatRecorded { stream_id, state },
-        "Diagnose CI recovery" => TiberEvent::CiRecoveryDiagnosed { stream_id, state },
-        "Choose CI recovery action" => TiberEvent::CiRecoveryActionChosen { stream_id, state },
-        "Record CI replacement" => TiberEvent::CiRecoveryReplacementRecorded { stream_id, state },
-        "Resolve CI recovery" => TiberEvent::CiRecoveryResolved { stream_id, state },
-        _ => {
-            return Err(Error::Parse(format!(
-                "ci_recovery_transition_unknown message={message:?}"
-            )))
+mapping! { AddSubtaskToFact:
+    (AddSubtask.board, AddSubtask.intent, AddSubtaskState.board_order, AddSubtaskState.board_task_stems, AddSubtaskState.target_subtasks) => TiberEvent.TaskSubtaskAdded
+    using added_subtask_fact;
+}
+
+fn evolve_subtask_state(
+    mut state: AddSubtaskState,
+    target_stem: &str,
+    event: &TiberEvent,
+) -> AddSubtaskState {
+    match event {
+        TiberEvent::TaskCreated(TaskCreatedEvent { stream_id, task }) => {
+            if stream_id.as_ref() == BOARD_STREAM {
+                state.board_task_stems.insert(task.stem.clone());
+            }
+            if task.stem == target_stem {
+                state.target_subtasks = Some(task.subtasks.clone());
+            }
         }
-    })
+        TiberEvent::TaskSubtaskAdded(TaskSubtaskAddedEvent { stem, subtask, .. }) => {
+            if stem == target_stem {
+                state
+                    .target_subtasks
+                    .get_or_insert_with(Vec::new)
+                    .push(subtask.clone());
+            }
+        }
+        TiberEvent::TaskSubtaskChecked(TaskSubtaskCheckedEvent {
+            stem,
+            subtask_id,
+            checked,
+            ..
+        }) => {
+            if stem == target_stem {
+                if let Some(item) = state
+                    .target_subtasks
+                    .get_or_insert_with(Vec::new)
+                    .iter_mut()
+                    .find(|item| item.id == *subtask_id)
+                {
+                    item.checked = *checked;
+                }
+            }
+        }
+        TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
+            if stem == target_stem {
+                state.target_subtasks = None;
+            }
+            state.board_task_stems.remove(stem);
+        }
+        TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+        | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+            state.board_order.clone_from(order);
+        }
+        _ => {}
+    }
+    state
 }
 
-fn ci_recovery_state_published(
-    stream_id: StreamId,
-    state: &CiRecoveryState,
-) -> Result<TiberEvent, Error> {
-    Ok(TiberEvent::RecoveryStatePublished {
-        stream_id,
-        state: Box::new(
-            serde_json::to_value(state).map_err(|error| {
-                Error::Parse(format!("ci_recovery_event_invalid source={error}"))
-            })?,
-        ),
-    })
+impl ModelCommandLogic for AddSubtask {
+    type Event = TiberEvent;
+    type State = AddSubtaskState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        Modeled::from_built(evolve_subtask_state(
+            state.into_inner(),
+            &self.intent.stem,
+            event,
+        ))
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        state
+            .as_ref()
+            .board_order
+            .iter()
+            .filter(|stem| !state.as_ref().board_task_stems.contains(*stem))
+            .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+            .collect()
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        if state.as_ref().target_subtasks.is_none() {
+            return Err("tiber_subtask_task_missing".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_tasksubtaskadded(AddSubtaskToFact::apply((
+                self,
+                self,
+                state.as_ref(),
+                state.as_ref(),
+                state.as_ref(),
+            ))),
+        ))
+    }
 }
+
+fn execute_add_subtask(
+    root: &Path,
+    task_ref: &str,
+    title: &str,
+    after_refs: &[String],
+) -> Result<(), Error> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(Error::Parse("subtask_title_empty=true".into()));
+    }
+    if title.chars().any(char::is_control) {
+        return Err(Error::Parse("subtask_title_invalid=true".into()));
+    }
+    let after = after_refs
+        .iter()
+        .map(|value| parse_subtask_ref(value))
+        .collect::<Result<Vec<_>, Error>>()?;
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let request = AddSubtaskRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(AddSubtaskIntent {
+            stem: resolve_task_stem_from_projection(&projection, task_ref)?,
+            title: title.to_string(),
+            after,
+        })
+        .build();
+    let command = AddSubtask::model_builder()
+        .board(AddSubtaskRequestToBoard::apply(request.as_ref()))
+        .intent(AddSubtaskRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct SetSubtaskCheckedIntent {
+    stem: String,
+    subtask_id: String,
+    checked: bool,
+}
+
+#[derive(ModelInput)]
+struct SetSubtaskCheckedRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: SetSubtaskCheckedIntent,
+}
+
+#[derive(ModelCommand)]
+struct SetSubtaskChecked {
+    #[stream]
+    board: TiberBoardStream,
+    intent: SetSubtaskCheckedIntent,
+}
+
+mapping! { SetSubtaskCheckedRequestToBoard:
+SetSubtaskCheckedRequest.board => SetSubtaskChecked.board using clone; }
+mapping! { SetSubtaskCheckedRequestToIntent:
+SetSubtaskCheckedRequest.intent => SetSubtaskChecked.intent using clone; }
+
+fn checked_subtask_fact(
+    board: &TiberBoardStream,
+    intent: &SetSubtaskCheckedIntent,
+) -> TaskSubtaskCheckedEvent {
+    TaskSubtaskCheckedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: intent.stem.clone(),
+        subtask_id: intent.subtask_id.clone(),
+        checked: intent.checked,
+    }
+}
+
+mapping! { SetSubtaskCheckedToFact:
+    (SetSubtaskChecked.board, SetSubtaskChecked.intent) => TiberEvent.TaskSubtaskChecked
+    using checked_subtask_fact;
+}
+
+impl ModelCommandLogic for SetSubtaskChecked {
+    type Event = TiberEvent;
+    type State = AddSubtaskState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        Modeled::from_built(evolve_subtask_state(
+            state.into_inner(),
+            &self.intent.stem,
+            event,
+        ))
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        state
+            .as_ref()
+            .board_order
+            .iter()
+            .filter(|stem| !state.as_ref().board_task_stems.contains(*stem))
+            .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+            .collect()
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let item = state
+            .as_ref()
+            .target_subtasks
+            .as_ref()
+            .and_then(|items| items.iter().find(|item| item.id == self.intent.subtask_id))
+            .ok_or("tiber_subtask_missing")?;
+        if item.checked == self.intent.checked {
+            return Ok(ModeledEvents::none(
+                "subtask already has requested checked state",
+            ));
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_tasksubtaskchecked(SetSubtaskCheckedToFact::apply((
+                self, self,
+            ))),
+        ))
+    }
+}
+
+fn execute_set_subtask_checked(
+    root: &Path,
+    task_ref: &str,
+    index: &str,
+    checked: bool,
+) -> Result<(), Error> {
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let request = SetSubtaskCheckedRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(SetSubtaskCheckedIntent {
+            stem: resolve_task_stem_from_projection(&projection, task_ref)?,
+            subtask_id: parse_subtask_ref(index)?,
+            checked,
+        })
+        .build();
+    let command = SetSubtaskChecked::model_builder()
+        .board(SetSubtaskCheckedRequestToBoard::apply(request.as_ref()))
+        .intent(SetSubtaskCheckedRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct UpdateTaskIntent {
+    stem: String,
+    title: Option<String>,
+    tags: Option<Vec<String>>,
+    summary: Option<String>,
+    context: Option<String>,
+    pr_mr_url: Option<Option<String>>,
+    pr_mr_status: Option<Option<String>>,
+}
+
+#[derive(Clone)]
+struct TaskUpdateFacts {
+    title: String,
+    tags: Vec<String>,
+    summary: String,
+    context: String,
+    pr_mr_url: Option<String>,
+    pr_mr_status: Option<String>,
+}
+
+#[derive(ModelInput)]
+struct UpdateTaskRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: UpdateTaskIntent,
+}
+
+#[derive(ModelCommand)]
+struct UpdateTask {
+    #[stream]
+    board: TiberBoardStream,
+    intent: UpdateTaskIntent,
+}
+
+mapping! { UpdateTaskRequestToBoard:
+UpdateTaskRequest.board => UpdateTask.board using clone; }
+mapping! { UpdateTaskRequestToIntent:
+UpdateTaskRequest.intent => UpdateTask.intent using clone; }
+
+/// Updating task metadata requires only the addressed task's mutable facts.
+/// Board membership is retained solely for legacy stream discovery.
+#[derive(ModelState)]
+struct UpdateTaskState {
+    #[model(default)]
+    board_order: Vec<String>,
+    #[model(default)]
+    board_task_stems: BTreeSet<String>,
+    #[model(default)]
+    target_task: Option<TaskUpdateFacts>,
+}
+
+fn updated_task_details_fact(
+    board: &TiberBoardStream,
+    intent: &UpdateTaskIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    target_task: &Option<TaskUpdateFacts>,
+) -> TaskDetailsUpdatedEvent {
+    debug_assert!(board_order.contains(&intent.stem) || target_task.is_some());
+    debug_assert!(board_task_stems.contains(&intent.stem) || target_task.is_some());
+    let current = target_task
+        .as_ref()
+        .expect("validated update target must exist");
+    TaskDetailsUpdatedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: intent.stem.clone(),
+        title: intent
+            .title
+            .clone()
+            .unwrap_or_else(|| current.title.clone()),
+        tags: intent.tags.clone().unwrap_or_else(|| current.tags.clone()),
+        summary: intent
+            .summary
+            .clone()
+            .unwrap_or_else(|| current.summary.clone()),
+        context: intent
+            .context
+            .clone()
+            .unwrap_or_else(|| current.context.clone()),
+    }
+}
+
+fn updated_task_pull_request_fact(
+    board: &TiberBoardStream,
+    intent: &UpdateTaskIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    target_task: &Option<TaskUpdateFacts>,
+) -> TaskPullRequestChangedEvent {
+    debug_assert!(board_order.contains(&intent.stem) || target_task.is_some());
+    debug_assert!(board_task_stems.contains(&intent.stem) || target_task.is_some());
+    let current = target_task
+        .as_ref()
+        .expect("validated update target must exist");
+    TaskPullRequestChangedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: intent.stem.clone(),
+        url: intent
+            .pr_mr_url
+            .clone()
+            .unwrap_or_else(|| current.pr_mr_url.clone()),
+        status: intent
+            .pr_mr_status
+            .clone()
+            .unwrap_or_else(|| current.pr_mr_status.clone()),
+    }
+}
+
+mapping! { UpdateTaskToDetailsFact:
+    (UpdateTask.board, UpdateTask.intent, UpdateTaskState.board_order, UpdateTaskState.board_task_stems, UpdateTaskState.target_task) => TiberEvent.TaskDetailsUpdated
+    using updated_task_details_fact;
+}
+mapping! { UpdateTaskToPullRequestFact:
+    (UpdateTask.board, UpdateTask.intent, UpdateTaskState.board_order, UpdateTaskState.board_task_stems, UpdateTaskState.target_task) => TiberEvent.TaskPullRequestChanged
+    using updated_task_pull_request_fact;
+}
+
+impl ModelCommandLogic for UpdateTask {
+    type Event = TiberEvent;
+    type State = UpdateTaskState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::TaskCreated(TaskCreatedEvent { stream_id, task }) => {
+                if stream_id.as_ref() == BOARD_STREAM {
+                    state.board_task_stems.insert(task.stem.clone());
+                }
+                if task.stem == self.intent.stem {
+                    state.target_task = Some(TaskUpdateFacts {
+                        title: task.title.clone(),
+                        tags: task.tags.clone(),
+                        summary: task.summary.clone(),
+                        context: task.context.clone(),
+                        pr_mr_url: task.pr_mr_url.clone(),
+                        pr_mr_status: task.pr_mr_status.clone(),
+                    });
+                }
+            }
+            TiberEvent::TaskDetailsUpdated(TaskDetailsUpdatedEvent {
+                stem,
+                title,
+                tags,
+                summary,
+                context,
+                ..
+            }) => {
+                if stem == &self.intent.stem {
+                    if let Some(task) = state.target_task.as_mut() {
+                        task.title.clone_from(title);
+                        task.tags.clone_from(tags);
+                        task.summary.clone_from(summary);
+                        task.context.clone_from(context);
+                    }
+                }
+            }
+            TiberEvent::TaskPullRequestChanged(TaskPullRequestChangedEvent {
+                stem,
+                url,
+                status,
+                ..
+            }) => {
+                if stem == &self.intent.stem {
+                    if let Some(task) = state.target_task.as_mut() {
+                        task.pr_mr_url.clone_from(url);
+                        task.pr_mr_status.clone_from(status);
+                    }
+                }
+            }
+            TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
+                if stem == &self.intent.stem {
+                    state.target_task = None;
+                }
+                state.board_task_stems.remove(stem);
+            }
+            TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+            | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+                state.board_order.clone_from(order);
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        state
+            .as_ref()
+            .board_order
+            .iter()
+            .filter(|stem| !state.as_ref().board_task_stems.contains(*stem))
+            .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+            .collect()
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let current = state
+            .as_ref()
+            .target_task
+            .as_ref()
+            .ok_or("tiber_update_task_missing")?;
+        let next_title = self.intent.title.as_ref().unwrap_or(&current.title);
+        let next_tags = self.intent.tags.as_ref().unwrap_or(&current.tags);
+        let next_summary = self.intent.summary.as_ref().unwrap_or(&current.summary);
+        let next_context = self.intent.context.as_ref().unwrap_or(&current.context);
+        let next_url = self.intent.pr_mr_url.as_ref().unwrap_or(&current.pr_mr_url);
+        let next_status = self
+            .intent
+            .pr_mr_status
+            .as_ref()
+            .unwrap_or(&current.pr_mr_status);
+        let details_changed = next_title != &current.title
+            || next_tags != &current.tags
+            || next_summary != &current.summary
+            || next_context != &current.context;
+        let pr_changed = next_url != &current.pr_mr_url || next_status != &current.pr_mr_status;
+        if !details_changed && !pr_changed {
+            return Ok(ModeledEvents::none(
+                "task metadata already has requested values",
+            ));
+        }
+        let mut facts = ModeledEvents::none("task update facts initialized");
+        if details_changed {
+            facts.push(TiberEvent::model_variant_taskdetailsupdated(
+                UpdateTaskToDetailsFact::apply((
+                    self,
+                    self,
+                    state.as_ref(),
+                    state.as_ref(),
+                    state.as_ref(),
+                )),
+            ));
+        }
+        if pr_changed {
+            facts.push(TiberEvent::model_variant_taskpullrequestchanged(
+                UpdateTaskToPullRequestFact::apply((
+                    self,
+                    self,
+                    state.as_ref(),
+                    state.as_ref(),
+                    state.as_ref(),
+                )),
+            ));
+        }
+        Ok(facts)
+    }
+}
+
+fn execute_update_task(root: &Path, task_ref: &str, update: TaskUpdate<'_>) -> Result<(), Error> {
+    let title = update.title.map(TaskTitle::parse).transpose()?;
+    let summary = update.summary.map(parse_task_section_body).transpose()?;
+    let context = update.context.map(parse_task_section_body).transpose()?;
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let request = UpdateTaskRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(UpdateTaskIntent {
+            stem: resolve_task_stem_from_projection(&projection, task_ref)?,
+            title: title.map(|value| value.as_str().to_string()),
+            tags: update.tags,
+            summary,
+            context,
+            pr_mr_url: update.pr_mr_url.map(nonempty_option),
+            pr_mr_status: update.pr_mr_status.map(nonempty_option),
+        })
+        .build();
+    let command = UpdateTask::model_builder()
+        .board(UpdateTaskRequestToBoard::apply(request.as_ref()))
+        .intent(UpdateTaskRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct AddAcceptanceIntent {
+    stem: String,
+    text: String,
+}
+
+#[derive(ModelInput)]
+struct AddAcceptanceRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: AddAcceptanceIntent,
+}
+
+#[derive(ModelCommand)]
+struct AddAcceptance {
+    #[stream]
+    board: TiberBoardStream,
+    intent: AddAcceptanceIntent,
+}
+
+mapping! { AddAcceptanceRequestToBoard:
+AddAcceptanceRequest.board => AddAcceptance.board using clone; }
+mapping! { AddAcceptanceRequestToIntent:
+AddAcceptanceRequest.intent => AddAcceptance.intent using clone; }
+
+/// Acceptance decisions fold only the addressed task's checklist. Board
+/// membership is retained solely for legacy stream discovery.
+#[derive(ModelState)]
+struct AddAcceptanceState {
+    #[model(default)]
+    board_order: Vec<String>,
+    #[model(default)]
+    board_task_stems: BTreeSet<String>,
+    #[model(default)]
+    target_acceptance: Option<Vec<ChecklistItem>>,
+}
+
+fn added_acceptance_fact(
+    board: &TiberBoardStream,
+    intent: &AddAcceptanceIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    target_acceptance: &Option<Vec<ChecklistItem>>,
+) -> TaskAcceptanceAddedEvent {
+    debug_assert!(board_order.contains(&intent.stem) || target_acceptance.is_some());
+    debug_assert!(board_task_stems.contains(&intent.stem) || target_acceptance.is_some());
+    debug_assert!(target_acceptance.is_some());
+    TaskAcceptanceAddedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: intent.stem.clone(),
+        item: ChecklistItem {
+            checked: false,
+            text: intent.text.clone(),
+        },
+    }
+}
+
+mapping! { AddAcceptanceToFact:
+    (AddAcceptance.board, AddAcceptance.intent, AddAcceptanceState.board_order, AddAcceptanceState.board_task_stems, AddAcceptanceState.target_acceptance) => TiberEvent.TaskAcceptanceAdded
+    using added_acceptance_fact;
+}
+
+impl ModelCommandLogic for AddAcceptance {
+    type Event = TiberEvent;
+    type State = AddAcceptanceState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        Modeled::from_built(evolve_acceptance_state(
+            state.into_inner(),
+            &self.intent.stem,
+            event,
+        ))
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        acceptance_related_streams(state.as_ref())
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        if state.as_ref().target_acceptance.is_none() {
+            return Err("tiber_acceptance_task_missing".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_taskacceptanceadded(AddAcceptanceToFact::apply((
+                self,
+                self,
+                state.as_ref(),
+                state.as_ref(),
+                state.as_ref(),
+            ))),
+        ))
+    }
+}
+
+fn evolve_acceptance_state(
+    mut state: AddAcceptanceState,
+    target_stem: &str,
+    event: &TiberEvent,
+) -> AddAcceptanceState {
+    match event {
+        TiberEvent::TaskCreated(TaskCreatedEvent { stream_id, task }) => {
+            if stream_id.as_ref() == BOARD_STREAM {
+                state.board_task_stems.insert(task.stem.clone());
+            }
+            if task.stem == target_stem {
+                state.target_acceptance = Some(task.acceptance.clone());
+            }
+        }
+        TiberEvent::TaskAcceptanceAdded(TaskAcceptanceAddedEvent { stem, item, .. }) => {
+            if stem == target_stem {
+                state
+                    .target_acceptance
+                    .get_or_insert_with(Vec::new)
+                    .push(item.clone());
+            }
+        }
+        TiberEvent::TaskAcceptanceChecked(TaskAcceptanceCheckedEvent {
+            stem,
+            index,
+            checked,
+            ..
+        }) => {
+            if stem == target_stem {
+                if let Some(item) = state
+                    .target_acceptance
+                    .get_or_insert_with(Vec::new)
+                    .get_mut(*index)
+                {
+                    item.checked = *checked;
+                }
+            }
+        }
+        TiberEvent::TaskAcceptanceRemoved(TaskAcceptanceRemovedEvent { stem, index, .. }) => {
+            if stem == target_stem {
+                let items = state.target_acceptance.get_or_insert_with(Vec::new);
+                if *index < items.len() {
+                    items.remove(*index);
+                }
+            }
+        }
+        TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
+            if stem == target_stem {
+                state.target_acceptance = None;
+            }
+            state.board_task_stems.remove(stem);
+        }
+        TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+        | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+            state.board_order.clone_from(order);
+        }
+        _ => {}
+    }
+    state
+}
+
+fn acceptance_related_streams(state: &AddAcceptanceState) -> Vec<StreamId> {
+    state
+        .board_order
+        .iter()
+        .filter(|stem| !state.board_task_stems.contains(*stem))
+        .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+        .collect()
+}
+
+fn execute_add_acceptance(root: &Path, task_ref: &str, criterion: &str) -> Result<(), Error> {
+    let criterion = parse_nonempty_text(criterion, "acceptance")?;
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let request = AddAcceptanceRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(AddAcceptanceIntent {
+            stem: resolve_task_stem_from_projection(&projection, task_ref)?,
+            text: criterion.to_string(),
+        })
+        .build();
+    let command = AddAcceptance::model_builder()
+        .board(AddAcceptanceRequestToBoard::apply(request.as_ref()))
+        .intent(AddAcceptanceRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct SetAcceptanceCheckedIntent {
+    stem: String,
+    index: usize,
+    checked: bool,
+}
+
+#[derive(ModelInput)]
+struct SetAcceptanceCheckedRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: SetAcceptanceCheckedIntent,
+}
+
+#[derive(ModelCommand)]
+struct SetAcceptanceChecked {
+    #[stream]
+    board: TiberBoardStream,
+    intent: SetAcceptanceCheckedIntent,
+}
+
+mapping! { SetAcceptanceCheckedRequestToBoard:
+SetAcceptanceCheckedRequest.board => SetAcceptanceChecked.board using clone; }
+mapping! { SetAcceptanceCheckedRequestToIntent:
+SetAcceptanceCheckedRequest.intent => SetAcceptanceChecked.intent using clone; }
+
+fn checked_acceptance_fact(
+    board: &TiberBoardStream,
+    intent: &SetAcceptanceCheckedIntent,
+) -> TaskAcceptanceCheckedEvent {
+    TaskAcceptanceCheckedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: intent.stem.clone(),
+        index: intent.index,
+        checked: intent.checked,
+    }
+}
+
+mapping! { SetAcceptanceCheckedToFact:
+    (SetAcceptanceChecked.board, SetAcceptanceChecked.intent) => TiberEvent.TaskAcceptanceChecked
+    using checked_acceptance_fact;
+}
+
+impl ModelCommandLogic for SetAcceptanceChecked {
+    type Event = TiberEvent;
+    type State = AddAcceptanceState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        Modeled::from_built(evolve_acceptance_state(
+            state.into_inner(),
+            &self.intent.stem,
+            event,
+        ))
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        acceptance_related_streams(state.as_ref())
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let item = state
+            .as_ref()
+            .target_acceptance
+            .as_ref()
+            .and_then(|items| items.get(self.intent.index))
+            .ok_or("tiber_acceptance_missing")?;
+        if item.checked == self.intent.checked {
+            return Ok(ModeledEvents::none(
+                "acceptance already has requested checked state",
+            ));
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_taskacceptancechecked(SetAcceptanceCheckedToFact::apply((
+                self, self,
+            ))),
+        ))
+    }
+}
+
+fn execute_set_acceptance_checked(
+    root: &Path,
+    task_ref: &str,
+    index: &str,
+    checked: bool,
+) -> Result<(), Error> {
+    let index = parse_one_based_usize(index, "acceptance")? - 1;
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let request = SetAcceptanceCheckedRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(SetAcceptanceCheckedIntent {
+            stem: resolve_task_stem_from_projection(&projection, task_ref)?,
+            index,
+            checked,
+        })
+        .build();
+    let command = SetAcceptanceChecked::model_builder()
+        .board(SetAcceptanceCheckedRequestToBoard::apply(request.as_ref()))
+        .intent(SetAcceptanceCheckedRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct RemoveAcceptanceIntent {
+    stem: String,
+    index: usize,
+}
+
+#[derive(ModelInput)]
+struct RemoveAcceptanceRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: RemoveAcceptanceIntent,
+}
+
+#[derive(ModelCommand)]
+struct RemoveAcceptance {
+    #[stream]
+    board: TiberBoardStream,
+    intent: RemoveAcceptanceIntent,
+}
+
+mapping! { RemoveAcceptanceRequestToBoard:
+RemoveAcceptanceRequest.board => RemoveAcceptance.board using clone; }
+mapping! { RemoveAcceptanceRequestToIntent:
+RemoveAcceptanceRequest.intent => RemoveAcceptance.intent using clone; }
+
+fn removed_acceptance_fact(
+    board: &TiberBoardStream,
+    intent: &RemoveAcceptanceIntent,
+) -> TaskAcceptanceRemovedEvent {
+    TaskAcceptanceRemovedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: intent.stem.clone(),
+        index: intent.index,
+    }
+}
+
+mapping! { RemoveAcceptanceToFact:
+    (RemoveAcceptance.board, RemoveAcceptance.intent) => TiberEvent.TaskAcceptanceRemoved
+    using removed_acceptance_fact;
+}
+
+impl ModelCommandLogic for RemoveAcceptance {
+    type Event = TiberEvent;
+    type State = AddAcceptanceState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        Modeled::from_built(evolve_acceptance_state(
+            state.into_inner(),
+            &self.intent.stem,
+            event,
+        ))
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        acceptance_related_streams(state.as_ref())
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        if state
+            .as_ref()
+            .target_acceptance
+            .as_ref()
+            .and_then(|items| items.get(self.intent.index))
+            .is_none()
+        {
+            return Err("tiber_acceptance_missing".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_taskacceptanceremoved(RemoveAcceptanceToFact::apply((
+                self, self,
+            ))),
+        ))
+    }
+}
+
+fn execute_remove_acceptance(root: &Path, task_ref: &str, index: &str) -> Result<(), Error> {
+    let index = parse_one_based_usize(index, "acceptance")? - 1;
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let request = RemoveAcceptanceRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(RemoveAcceptanceIntent {
+            stem: resolve_task_stem_from_projection(&projection, task_ref)?,
+            index,
+        })
+        .build();
+    let command = RemoveAcceptance::model_builder()
+        .board(RemoveAcceptanceRequestToBoard::apply(request.as_ref()))
+        .intent(RemoveAcceptanceRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct AddTaskNoteIntent {
+    stem: String,
+    note: Note,
+}
+
+#[derive(ModelInput)]
+struct AddTaskNoteRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: AddTaskNoteIntent,
+}
+
+#[derive(ModelCommand)]
+struct AddTaskNote {
+    #[stream]
+    board: TiberBoardStream,
+    intent: AddTaskNoteIntent,
+}
+
+mapping! { AddTaskNoteRequestToBoard:
+AddTaskNoteRequest.board => AddTaskNote.board using clone; }
+mapping! { AddTaskNoteRequestToIntent:
+AddTaskNoteRequest.intent => AddTaskNote.intent using clone; }
+
+#[derive(ModelState)]
+struct AddTaskNoteState {
+    #[model(default)]
+    board_order: Vec<String>,
+    #[model(default)]
+    board_task_stems: BTreeSet<String>,
+    #[model(default)]
+    task_stems: BTreeSet<String>,
+}
+
+fn added_task_note_fact(
+    board: &TiberBoardStream,
+    intent: &AddTaskNoteIntent,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    task_stems: &BTreeSet<String>,
+) -> TaskNoteAddedEvent {
+    debug_assert!(board_order.contains(&intent.stem) || task_stems.contains(&intent.stem));
+    debug_assert!(board_task_stems.contains(&intent.stem) || task_stems.contains(&intent.stem));
+    debug_assert!(task_stems.contains(&intent.stem));
+    TaskNoteAddedEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stem: intent.stem.clone(),
+        note: intent.note.clone(),
+    }
+}
+
+mapping! { AddTaskNoteToFact:
+    (AddTaskNote.board, AddTaskNote.intent, AddTaskNoteState.board_order, AddTaskNoteState.board_task_stems, AddTaskNoteState.task_stems) => TiberEvent.TaskNoteAdded
+    using added_task_note_fact;
+}
+
+impl ModelCommandLogic for AddTaskNote {
+    type Event = TiberEvent;
+    type State = AddTaskNoteState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::TaskCreated(TaskCreatedEvent { stream_id, task }) => {
+                state.task_stems.insert(task.stem.clone());
+                if stream_id.as_ref() == BOARD_STREAM {
+                    state.board_task_stems.insert(task.stem.clone());
+                }
+            }
+            TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
+                state.task_stems.remove(stem);
+                state.board_task_stems.remove(stem);
+            }
+            TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+            | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+                state.board_order.clone_from(order);
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        state
+            .as_ref()
+            .board_order
+            .iter()
+            .filter(|stem| !state.as_ref().board_task_stems.contains(*stem))
+            .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+            .collect()
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        if !state.as_ref().task_stems.contains(&self.intent.stem) {
+            return Err("tiber_note_task_missing".into());
+        }
+        Ok(ModeledEvents::one(TiberEvent::model_variant_tasknoteadded(
+            AddTaskNoteToFact::apply((self, self, state.as_ref(), state.as_ref(), state.as_ref())),
+        )))
+    }
+}
+
+fn execute_add_task_note(root: &Path, task_ref: &str, note: &str) -> Result<(), Error> {
+    let text = parse_nonempty_text(note, "note")?;
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let request = AddTaskNoteRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(AddTaskNoteIntent {
+            stem: resolve_task_stem_from_projection(&projection, task_ref)?,
+            note: Note {
+                date: current_date_string(),
+                text: text.to_string(),
+            },
+        })
+        .build();
+    let command = AddTaskNote::model_builder()
+        .board(AddTaskNoteRequestToBoard::apply(request.as_ref()))
+        .intent(AddTaskNoteRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(ModelInput)]
+struct ValidateTaskBoardRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+}
+
+#[derive(ModelCommand)]
+struct ValidateTaskBoard {
+    #[stream]
+    board: TiberBoardStream,
+}
+
+mapping! { ValidateTaskBoardRequestToBoard:
+ValidateTaskBoardRequest.board => ValidateTaskBoard.board using clone; }
+
+/// Board reconciliation needs lifecycle status, dependency links, ordering,
+/// and enough membership information to discover legacy per-task streams.
+#[derive(ModelState)]
+struct ValidateTaskBoardState {
+    #[model(default)]
+    board_order: Vec<String>,
+    #[model(default)]
+    board_task_stems: BTreeSet<String>,
+    #[model(default)]
+    task_statuses: BTreeMap<String, String>,
+    #[model(default)]
+    task_links: BTreeMap<String, (Vec<String>, Vec<String>)>,
+}
+
+#[derive(Clone)]
+struct TaskBoardRepairPlan {
+    stream_id: StreamId,
+    link_changes: Vec<TaskLinksChangedEvent>,
+    order_change: Option<TaskOrderEvent>,
+    repairs: Vec<ValidationRepair>,
+}
+
+#[derive(ModelOutput)]
+struct TaskBoardRepairOutput {
+    plan: TaskBoardRepairPlan,
+}
+
+fn task_board_repair_plan(
+    board: &TiberBoardStream,
+    board_order: &[String],
+    board_task_stems: &BTreeSet<String>,
+    task_statuses: &BTreeMap<String, String>,
+    task_links: &BTreeMap<String, (Vec<String>, Vec<String>)>,
+) -> TaskBoardRepairPlan {
+    debug_assert!(board_task_stems
+        .iter()
+        .all(|stem| task_statuses.contains_key(stem) && task_links.contains_key(stem)));
+    let stream_id = eventcore::model::StreamIdentity::as_stream_id(board).clone();
+    let mut repaired_links = task_links.clone();
+    let link_snapshot = task_links.clone();
+    for (stem, (blocks, blocked_by)) in link_snapshot {
+        for blocked in blocks {
+            if let Some((_target_blocks, target_blocked_by)) = repaired_links.get_mut(&blocked) {
+                if !target_blocked_by.contains(&stem) {
+                    target_blocked_by.push(stem.clone());
+                }
+            }
+        }
+        for blocker in blocked_by {
+            if let Some((target_blocks, _target_blocked_by)) = repaired_links.get_mut(&blocker) {
+                if !target_blocks.contains(&stem) {
+                    target_blocks.push(stem.clone());
+                }
+            }
+        }
+    }
+    let open = task_statuses
+        .iter()
+        .filter(|(_stem, status)| is_open_status(status))
+        .map(|(stem, _status)| stem.clone())
+        .collect::<Vec<_>>();
+    let reconciliation = OrderReconciliation::reconcile(board_order.to_vec(), open);
+    let mut link_changes = Vec::new();
+    let mut repairs = Vec::new();
+    for (stem, (repaired_blocks, repaired_blocked_by)) in &repaired_links {
+        let (original_blocks, original_blocked_by) = task_links
+            .get(stem)
+            .expect("repaired task must originate in folded task state");
+        if original_blocks != repaired_blocks || original_blocked_by != repaired_blocked_by {
+            for target in repaired_blocks
+                .iter()
+                .filter(|target| !original_blocks.contains(*target))
+            {
+                repairs.push(ValidationRepair::ReciprocalLinkAdded {
+                    task: stem.clone(),
+                    field: "blocks".into(),
+                    target: target.clone(),
+                });
+            }
+            for target in repaired_blocked_by
+                .iter()
+                .filter(|target| !original_blocked_by.contains(*target))
+            {
+                repairs.push(ValidationRepair::ReciprocalLinkAdded {
+                    task: stem.clone(),
+                    field: "blocked_by".into(),
+                    target: target.clone(),
+                });
+            }
+            link_changes.push(TaskLinksChangedEvent {
+                stream_id: stream_id.clone(),
+                stem: stem.clone(),
+                blocks: repaired_blocks.clone(),
+                blocked_by: repaired_blocked_by.clone(),
+            });
+        }
+    }
+    let order_change = (board_order != reconciliation.entries()).then(|| {
+        for task in reconciliation
+            .entries()
+            .iter()
+            .filter(|task| !board_order.contains(*task))
+        {
+            repairs.push(ValidationRepair::BoardEntryAdded { task: task.clone() });
+        }
+        for task in board_order
+            .iter()
+            .filter(|task| !reconciliation.entries().contains(*task))
+        {
+            repairs.push(ValidationRepair::BoardEntryRemoved { task: task.clone() });
+        }
+        TaskOrderEvent {
+            stream_id,
+            order: reconciliation.entries().to_vec(),
+        }
+    });
+    TaskBoardRepairPlan {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        link_changes,
+        order_change,
+        repairs,
+    }
+}
+
+fn task_validation_repaired_fact(plan: &TaskBoardRepairPlan) -> TaskValidationRepairedEvent {
+    TaskValidationRepairedEvent {
+        stream_id: plan.stream_id.clone(),
+        link_changes: plan.link_changes.clone(),
+        order_change: plan.order_change.clone(),
+        repairs: plan.repairs.clone(),
+    }
+}
+
+mapping! { ValidateTaskBoardStateToRepairPlan:
+    (ValidateTaskBoard.board, ValidateTaskBoardState.board_order, ValidateTaskBoardState.board_task_stems, ValidateTaskBoardState.task_statuses, ValidateTaskBoardState.task_links) => TaskBoardRepairOutput.plan
+    using task_board_repair_plan;
+}
+mapping! { TaskBoardRepairPlanToFact:
+    TaskBoardRepairOutput.plan => TiberEvent.TaskValidationRepaired
+    using task_validation_repaired_fact;
+}
+
+impl ModelCommandLogic for ValidateTaskBoard {
+    type Event = TiberEvent;
+    type State = ValidateTaskBoardState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        Modeled::from_built(evolve_task_board_state(state.into_inner(), event))
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        state
+            .as_ref()
+            .board_order
+            .iter()
+            .filter(|stem| !state.as_ref().board_task_stems.contains(*stem))
+            .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+            .collect()
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let output = TaskBoardRepairOutput::model_builder()
+            .plan(ValidateTaskBoardStateToRepairPlan::apply((
+                self,
+                state.as_ref(),
+                state.as_ref(),
+                state.as_ref(),
+                state.as_ref(),
+            )))
+            .build();
+        if output.as_ref().plan.repairs.is_empty() {
+            return Ok(ModeledEvents::none("task board is already reconciled"));
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_taskvalidationrepaired(TaskBoardRepairPlanToFact::apply(
+                output.as_ref(),
+            )),
+        ))
+    }
+}
+
+fn evolve_task_board_state(
+    mut state: ValidateTaskBoardState,
+    event: &TiberEvent,
+) -> ValidateTaskBoardState {
+    match event {
+        TiberEvent::TaskCreated(TaskCreatedEvent { stream_id, task }) => {
+            state
+                .task_statuses
+                .insert(task.stem.clone(), task.status.clone());
+            state.task_links.insert(
+                task.stem.clone(),
+                (task.blocks.clone(), task.blocked_by.clone()),
+            );
+            if stream_id.as_ref() == BOARD_STREAM {
+                state.board_task_stems.insert(task.stem.clone());
+            }
+        }
+        TiberEvent::TaskTransitioned(TaskTransitionedEvent { stem, status, .. }) => {
+            if let Some(current) = state.task_statuses.get_mut(stem) {
+                current.clone_from(status);
+            }
+        }
+        TiberEvent::LegacyTaskClosedFromTrailer(TaskStemEvent { stem, .. }) => {
+            if let Some(current) = state.task_statuses.get_mut(stem) {
+                *current = "done".into();
+            }
+        }
+        TiberEvent::TasksClosedFromCommitTrailers(event) => {
+            for stem in &event.stems {
+                if let Some(current) = state.task_statuses.get_mut(stem) {
+                    *current = "done".into();
+                }
+            }
+            state.board_order.clone_from(&event.order);
+        }
+        TiberEvent::TaskLinksChanged(TaskLinksChangedEvent {
+            stem,
+            blocks,
+            blocked_by,
+            ..
+        }) => {
+            if let Some((current_blocks, current_blocked_by)) = state.task_links.get_mut(stem) {
+                current_blocks.clone_from(blocks);
+                current_blocked_by.clone_from(blocked_by);
+            }
+        }
+        TiberEvent::TaskValidationRepaired(TaskValidationRepairedEvent {
+            link_changes,
+            order_change,
+            ..
+        }) => {
+            for change in link_changes {
+                if let Some((current_blocks, current_blocked_by)) =
+                    state.task_links.get_mut(&change.stem)
+                {
+                    current_blocks.clone_from(&change.blocks);
+                    current_blocked_by.clone_from(&change.blocked_by);
+                }
+            }
+            if let Some(change) = order_change {
+                state.board_order.clone_from(&change.order);
+            }
+        }
+        TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
+            state.task_statuses.remove(stem);
+            state.task_links.remove(stem);
+            state.board_task_stems.remove(stem);
+        }
+        TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+        | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+            state.board_order.clone_from(order);
+        }
+        _ => {}
+    }
+    state
+}
+
+fn execute_validate_task_board(root: &Path) -> Result<Vec<ValidationMessage>, Error> {
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    execute_initialize_tiber_repository(root)?;
+    let request = ValidateTaskBoardRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .build();
+    let command = ValidateTaskBoard::model_builder()
+        .board(ValidateTaskBoardRequestToBoard::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(Vec::new()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+#[derive(Clone)]
+struct CloseTasksFromCommitTrailersIntent {
+    stems: Vec<String>,
+}
+
+#[derive(ModelInput)]
+struct CloseTasksFromCommitTrailersRequest {
+    #[model(origin)]
+    board: TiberBoardStream,
+    #[model(origin)]
+    intent: CloseTasksFromCommitTrailersIntent,
+}
+
+#[derive(ModelCommand)]
+struct CloseTasksFromCommitTrailers {
+    #[stream]
+    board: TiberBoardStream,
+    intent: CloseTasksFromCommitTrailersIntent,
+}
+
+mapping! { CloseTasksFromCommitTrailersRequestToBoard:
+CloseTasksFromCommitTrailersRequest.board => CloseTasksFromCommitTrailers.board using clone; }
+mapping! { CloseTasksFromCommitTrailersRequestToIntent:
+CloseTasksFromCommitTrailersRequest.intent => CloseTasksFromCommitTrailers.intent using clone; }
+
+/// Trailer closure only needs to know the current board ordering and whether a
+/// referenced task exists and is already done. Keeping full task documents,
+/// links, notes, and claims in this command state would couple it to the board
+/// board-reconciliation command state for no decision-making benefit.
+#[derive(ModelState)]
+struct CloseTasksFromCommitTrailersState {
+    #[model(default)]
+    board_order: Vec<String>,
+    #[model(default)]
+    board_task_stems: BTreeSet<String>,
+    #[model(default)]
+    task_statuses: BTreeMap<String, String>,
+}
+
+fn evolve_close_tasks_from_commit_trailers_state(
+    mut state: CloseTasksFromCommitTrailersState,
+    event: &TiberEvent,
+) -> CloseTasksFromCommitTrailersState {
+    match event {
+        TiberEvent::TaskCreated(TaskCreatedEvent { stream_id, task }) => {
+            state
+                .task_statuses
+                .insert(task.stem.clone(), task.status.clone());
+            if stream_id.as_ref() == BOARD_STREAM {
+                state.board_task_stems.insert(task.stem.clone());
+            }
+        }
+        TiberEvent::TaskTransitioned(TaskTransitionedEvent { stem, status, .. }) => {
+            if let Some(current) = state.task_statuses.get_mut(stem) {
+                current.clone_from(status);
+            }
+        }
+        TiberEvent::LegacyTaskClosedFromTrailer(TaskStemEvent { stem, .. }) => {
+            if let Some(current) = state.task_statuses.get_mut(stem) {
+                *current = "done".into();
+            }
+        }
+        TiberEvent::TasksClosedFromCommitTrailers(event) => {
+            for stem in &event.stems {
+                if let Some(current) = state.task_statuses.get_mut(stem) {
+                    *current = "done".into();
+                }
+            }
+            state.board_order.clone_from(&event.order);
+        }
+        TiberEvent::LegacyTaskRemoved(TaskStemEvent { stem, .. }) => {
+            state.task_statuses.remove(stem);
+            state.board_task_stems.remove(stem);
+        }
+        TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
+        | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
+            state.board_order.clone_from(order);
+        }
+        _ => {}
+    }
+    state
+}
+
+fn closed_tasks_from_trailers_fact(
+    intent: &CloseTasksFromCommitTrailersIntent,
+    board: &TiberBoardStream,
+    board_order: &[String],
+    _board_task_stems: &BTreeSet<String>,
+    task_statuses: &BTreeMap<String, String>,
+) -> TasksClosedFromCommitTrailersEvent {
+    let closed = intent
+        .stems
+        .iter()
+        .filter(|stem| {
+            task_statuses
+                .get(*stem)
+                .is_some_and(|status| status != "done")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let closed_set = closed.iter().cloned().collect::<BTreeSet<_>>();
+    TasksClosedFromCommitTrailersEvent {
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(board).clone(),
+        stems: closed,
+        order: board_order
+            .iter()
+            .filter(|stem| !closed_set.contains(*stem))
+            .cloned()
+            .collect(),
+    }
+}
+mapping! { CloseTasksFromCommitTrailersToFact:
+(CloseTasksFromCommitTrailers.intent, CloseTasksFromCommitTrailers.board, CloseTasksFromCommitTrailersState.board_order, CloseTasksFromCommitTrailersState.board_task_stems, CloseTasksFromCommitTrailersState.task_statuses) => TiberEvent.TasksClosedFromCommitTrailers using closed_tasks_from_trailers_fact; }
+
+impl ModelCommandLogic for CloseTasksFromCommitTrailers {
+    type Event = TiberEvent;
+    type State = CloseTasksFromCommitTrailersState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        Modeled::from_built(evolve_close_tasks_from_commit_trailers_state(
+            state.into_inner(),
+            event,
+        ))
+    }
+
+    fn discover_related_streams(&self, state: &Modeled<Self::State>) -> Vec<StreamId> {
+        state
+            .as_ref()
+            .board_order
+            .iter()
+            .filter(|stem| !state.as_ref().board_task_stems.contains(*stem))
+            .filter_map(|stem| stream_id(format!("tiber:task:{stem}")).ok())
+            .collect()
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        for stem in &self.intent.stems {
+            state
+                .as_ref()
+                .task_statuses
+                .get(stem)
+                .ok_or("tiber_trailer_task_missing")?;
+        }
+        let has_open_task = self.intent.stems.iter().any(|stem| {
+            state
+                .as_ref()
+                .task_statuses
+                .get(stem)
+                .is_some_and(|status| status != "done")
+        });
+        if !has_open_task {
+            return Ok(ModeledEvents::none(
+                "trailer-referenced tasks are already closed",
+            ));
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_tasksclosedfromcommittrailers(
+                CloseTasksFromCommitTrailersToFact::apply((
+                    self,
+                    self,
+                    state.as_ref(),
+                    state.as_ref(),
+                    state.as_ref(),
+                )),
+            ),
+        ))
+    }
+}
+
+fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, Error> {
+    let repository = GitRepository::at(root);
+    let _lock = repository.acquire_lock()?;
+    let log = repository.git(["log", "-1", "--format=%B"])?;
+    let requested = closes_trailers(&log);
+    if requested.is_empty() {
+        return Ok(Vec::new());
+    }
+    execute_initialize_tiber_repository(root)?;
+    let projection = load_tiber_projection(root)?;
+    let mut stems = requested
+        .iter()
+        .map(|task_ref| resolve_task_stem_from_projection(&projection, task_ref))
+        .collect::<Result<Vec<_>, _>>()?;
+    stems.sort();
+    stems.dedup();
+    let request = CloseTasksFromCommitTrailersRequest::model_builder()
+        .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
+        .intent(CloseTasksFromCommitTrailersIntent {
+            stems: stems.clone(),
+        })
+        .build();
+    let command = CloseTasksFromCommitTrailers::model_builder()
+        .board(CloseTasksFromCommitTrailersRequestToBoard::apply(
+            request.as_ref(),
+        ))
+        .intent(CloseTasksFromCommitTrailersRequestToIntent::apply(
+            request.as_ref(),
+        ))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(stems),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+impl ModelCommandLogic for InitializeTiberRepository {
+    type Event = TiberEvent;
+    type State = InitializeTiberRepositoryState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        if matches!(event, TiberEvent::RepositoryInitialized(_)) {
+            state.initialized = true;
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        if state.as_ref().initialized {
+            return Err("tiber_repository_already_initialized".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_repositoryinitialized(
+                InitializeTiberRepositoryToFact::apply((self, state.as_ref())),
+            ),
+        ))
+    }
+}
+
+fn execute_initialize_tiber_repository(root: &Path) -> Result<(), Error> {
+    let request = InitializeTiberRepositoryRequest::model_builder()
+        .stream(TiberRepositoryStream(stream_id(REPOSITORY_STREAM)?))
+        .build();
+    let command = InitializeTiberRepository::model_builder()
+        .stream(InitializeTiberRepositoryRequestToStream::apply(
+            request.as_ref(),
+        ))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        // Initialization is idempotent. A retry may reload a transaction that
+        // was durably published before this caller observed its outcome.
+        Err(eventcore::CommandError::ValidationError(message))
+            if message == "tiber_repository_already_initialized" =>
+        {
+            Ok(())
+        }
+        Err(eventcore::CommandError::BusinessRuleViolation(error))
+            if error.to_string() == "tiber_repository_already_initialized" =>
+        {
+            Ok(())
+        }
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_claim_ci_recovery(root: &Path, intent: ClaimCiRecoveryIntent) -> Result<(), Error> {
+    let request = ClaimCiRecoveryRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = ClaimCiRecovery::model_builder()
+        .stream(ClaimCiRecoveryRequestToStream::apply(request.as_ref()))
+        .intent(ClaimCiRecoveryRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let outcome =
+        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_join_ci_recovery(root: &Path, intent: JoinCiRecoveryIntent) -> Result<(), Error> {
+    let request = JoinCiRecoveryRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = JoinCiRecovery::model_builder()
+        .stream(JoinCiRecoveryRequestToStream::apply(request.as_ref()))
+        .intent(JoinCiRecoveryRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let outcome =
+        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_transfer_ci_recovery(
+    root: &Path,
+    intent: TransferCiRecoveryIntent,
+) -> Result<(), Error> {
+    let request = TransferCiRecoveryRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = TransferCiRecovery::model_builder()
+        .stream(TransferCiRecoveryRequestToStream::apply(request.as_ref()))
+        .intent(TransferCiRecoveryRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let outcome =
+        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_takeover_ci_recovery(
+    root: &Path,
+    intent: TakeOverCiRecoveryIntent,
+) -> Result<(), Error> {
+    let request = TakeOverCiRecoveryRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = TakeOverCiRecovery::model_builder()
+        .stream(TakeOverCiRecoveryRequestToStream::apply(request.as_ref()))
+        .intent(TakeOverCiRecoveryRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let outcome =
+        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_assign_ci_recovery_work(
+    root: &Path,
+    intent: AssignCiRecoveryWorkIntent,
+) -> Result<String, Error> {
+    let expected_assignment = intent.assignment.clone();
+    let request = AssignCiRecoveryWorkRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = AssignCiRecoveryWork::model_builder()
+        .stream(AssignCiRecoveryWorkRequestToStream::apply(request.as_ref()))
+        .intent(AssignCiRecoveryWorkRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let outcome =
+        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    match outcome {
+        Ok(_) => load_tiber_projection(root)?
+            .ci_recovery
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".into()))?
+            .assignments
+            .iter()
+            .rev()
+            .find(|assignment| {
+                assignment.owner_epoch == expected_assignment.owner_epoch
+                    && assignment.assignee == expected_assignment.assignee
+                    && assignment.capabilities == expected_assignment.capabilities
+                    && assignment.scope == expected_assignment.scope
+                    && assignment.report.is_none()
+            })
+            .map(|assignment| assignment.id.clone())
+            .ok_or_else(|| Error::Parse("ci_recovery_assignment_commit_missing=true".into())),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_report_ci_recovery_work(
+    root: &Path,
+    intent: ReportCiRecoveryWorkIntent,
+) -> Result<(), Error> {
+    let request = ReportCiRecoveryWorkRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = ReportCiRecoveryWork::model_builder()
+        .stream(ReportCiRecoveryWorkRequestToStream::apply(request.as_ref()))
+        .intent(ReportCiRecoveryWorkRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let outcome =
+        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_renew_ci_recovery_lease(
+    root: &Path,
+    intent: RenewCiRecoveryLeaseIntent,
+) -> Result<(), Error> {
+    let request = RenewCiRecoveryLeaseRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = RenewCiRecoveryLease::model_builder()
+        .stream(RenewCiRecoveryLeaseRequestToStream::apply(request.as_ref()))
+        .intent(RenewCiRecoveryLeaseRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let outcome =
+        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_record_ci_recovery_diagnosis(
+    root: &Path,
+    intent: RecordCiRecoveryDiagnosisIntent,
+) -> Result<(), Error> {
+    let request = RecordCiRecoveryDiagnosisRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = RecordCiRecoveryDiagnosis::model_builder()
+        .stream(RecordCiRecoveryDiagnosisRequestToStream::apply(
+            request.as_ref(),
+        ))
+        .intent(RecordCiRecoveryDiagnosisRequestToIntent::apply(
+            request.as_ref(),
+        ))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let outcome =
+        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_select_ci_recovery_action(
+    root: &Path,
+    intent: SelectCiRecoveryActionIntent,
+) -> Result<(), Error> {
+    let request = SelectCiRecoveryActionRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = SelectCiRecoveryAction::model_builder()
+        .stream(SelectCiRecoveryActionRequestToStream::apply(
+            request.as_ref(),
+        ))
+        .intent(SelectCiRecoveryActionRequestToIntent::apply(
+            request.as_ref(),
+        ))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_record_ci_recovery_replacement(
+    root: &Path,
+    intent: RecordCiRecoveryReplacementIntent,
+) -> Result<(), Error> {
+    let request = RecordCiRecoveryReplacementRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = RecordCiRecoveryReplacement::model_builder()
+        .stream(RecordCiRecoveryReplacementRequestToStream::apply(
+            request.as_ref(),
+        ))
+        .intent(RecordCiRecoveryReplacementRequestToIntent::apply(
+            request.as_ref(),
+        ))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
+fn execute_resolve_ci_recovery(root: &Path, intent: ResolveCiRecoveryIntent) -> Result<(), Error> {
+    let request = ResolveCiRecoveryRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = ResolveCiRecovery::model_builder()
+        .stream(ResolveCiRecoveryRequestToStream::apply(request.as_ref()))
+        .intent(ResolveCiRecoveryRequestToIntent::apply(request.as_ref()))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
 const WORKFLOW_BLOCKER_FILE: &str = "workflow-blocker.json";
 
 thread_local! {
     static MCP_CI_RECOVERY_SESSION: RefCell<Option<String>> = const { RefCell::new(None) };
-    static COMMAND_TASK_IDS: RefCell<Option<(Vec<String>, usize)>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -620,113 +5999,6 @@ pub fn with_mcp_ci_recovery_session<T>(session: &str, operation: impl FnOnce() -
         slot.replace(previous);
         result
     })
-}
-
-pub fn workflow_guard(hook_input: &str) -> Result<Option<String>, Error> {
-    let input: serde_json::Value = serde_json::from_str(hook_input)
-        .map_err(|error| Error::Parse(format!("workflow_hook_input_invalid source={error}")))?;
-    let cwd = input
-        .get("cwd")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or(".");
-    let repo = GitRepository::at(cwd);
-    let path = repo
-        .git_common_dir()?
-        .join("tiber")
-        .join(WORKFLOW_BLOCKER_FILE);
-    let contents = match fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(Error::Io(error)),
-    };
-    let blocker: WorkflowBlocker = match serde_json::from_str(&contents) {
-        Ok(blocker) => blocker,
-        Err(_) => return Ok(Some(
-            "tiber.workflow_blocker_invalid workflow_blocked=true required_action=\"repair the Tiber workflow blocker before continuing\". Do not diagnose, edit, test, rerun, push, or perform unrelated work."
-                .to_string(),
-        )),
-    };
-    let tool_name = input
-        .get("tool_name")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    let recovery = [
-        "tiber.ci_recovery.claim",
-        "tiber.ci_recovery.status",
-        "tiber.sync",
-    ];
-    if recovery.iter().any(|allowed| tool_name.ends_with(allowed)) || exact_cli_recovery(&input) {
-        return Ok(None);
-    }
-    Ok(Some(format!(
-        "tiber.workflow_blocked workflow_blocked=true error_code={} required_action=\"{}\". Do not diagnose, edit, test, rerun, push, or perform unrelated work.",
-        blocker.error_code, blocker.required_action
-    )))
-}
-
-fn exact_cli_recovery(input: &serde_json::Value) -> bool {
-    let command = input
-        .pointer("/tool_input/command")
-        .or_else(|| input.pointer("/tool_input/cmd"))
-        .and_then(serde_json::Value::as_str);
-    let Some(command) = command else {
-        return false;
-    };
-    if command.contains("$(")
-        || command
-            .chars()
-            .any(|character| matches!(character, ';' | '|' | '&' | '<' | '>' | '\n' | '\r' | '`'))
-    {
-        return false;
-    }
-    let Some(tokens) = shlex::split(command) else {
-        return false;
-    };
-    let Some(executable) = tokens.first() else {
-        return false;
-    };
-    if Path::new(executable).file_name() != Some(OsStr::new("tiber")) {
-        return false;
-    }
-    match tokens.get(1..).unwrap_or_default() {
-        [command] if command == "sync" => true,
-        [group, command] if group == "ci-recovery" && command == "status" => true,
-        [group, command, arguments @ ..] if group == "ci-recovery" && command == "claim" => {
-            exact_claim_arguments(arguments)
-        }
-        _ => false,
-    }
-}
-
-fn exact_claim_arguments(arguments: &[String]) -> bool {
-    const OPTIONS: &[&str] = &[
-        "--run-id",
-        "--run-url",
-        "--failed-sha",
-        "--workflow",
-        "--ref",
-    ];
-    let mut seen = Vec::new();
-    let mut index = 0;
-    while index < arguments.len() {
-        let argument = &arguments[index];
-        let (option, has_value) = match argument.split_once('=') {
-            Some((option, value)) => (option, !value.is_empty()),
-            None => {
-                index += 1;
-                (
-                    argument.as_str(),
-                    arguments.get(index).is_some_and(|value| !value.is_empty()),
-                )
-            }
-        };
-        if !has_value || !OPTIONS.contains(&option) || seen.contains(&option) {
-            return false;
-        }
-        seen.push(option);
-        index += 1;
-    }
-    seen.len() == OPTIONS.len()
 }
 
 fn record_workflow_blocker(repo: &GitRepository, blocker: WorkflowBlocker) -> Result<(), Error> {
@@ -832,6 +6104,16 @@ pub fn ci_recovery_status_at(root: impl Into<PathBuf>) -> Result<CiRecoveryStatu
     GitRepository::at(root).ci_recovery_status()
 }
 
+/// Reads only whether the shared CI-recovery authority currently blocks
+/// delivery. Unlike `ci_recovery_status_at`, an absent incident is a normal
+/// `false` result rather than an error; store and replay failures remain typed
+/// errors so callers cannot silently fail open.
+pub fn ci_recovery_hold_at(root: impl AsRef<Path>) -> Result<bool, Error> {
+    Ok(load_tiber_projection(root.as_ref())?
+        .ci_recovery
+        .is_some_and(|state| state.state != CiRecoveryPhase::Resolved))
+}
+
 pub fn assert_ci_recovery_owner(
     incident_id: &str,
     epoch: u64,
@@ -931,9 +6213,7 @@ pub fn ci_recovery_status() -> Result<CiRecoveryStatus, Error> {
 
 pub fn create_task_at(root: impl Into<PathBuf>, title: &str) -> Result<TaskPath, Error> {
     let repo = GitRepository::at(root);
-    repo.with_task_workspace(TaskMutation::Create, |repo| {
-        repo.create_task(TaskTitle::parse(title)?)
-    })
+    execute_create_task(&repo.root, TaskTitle::parse(title)?)
 }
 
 pub fn list_tasks_at(root: impl Into<PathBuf>) -> Result<Vec<TaskSummary>, Error> {
@@ -973,9 +6253,7 @@ pub fn prioritize_before_at(
     before_ref: &str,
 ) -> Result<(), Error> {
     let repo = GitRepository::at(root);
-    repo.with_task_workspace(TaskMutation::Prioritize, |repo| {
-        repo.prioritize_before(task_ref, before_ref)
-    })
+    execute_prioritize_task(&repo.root, task_ref, before_ref)
 }
 
 #[doc(hidden)]
@@ -985,17 +6263,13 @@ pub fn transition_task_at(
     status: &str,
 ) -> Result<TaskPath, Error> {
     let repo = GitRepository::at(root);
-    repo.with_task_workspace(TaskMutation::Transition, |repo| {
-        repo.transition_task(task_ref, status)
-    })
+    execute_transition_task(&repo.root, task_ref, status)
 }
 
 #[doc(hidden)]
 pub fn link_blocks_at(root: impl Into<PathBuf>, from_ref: &str, to_ref: &str) -> Result<(), Error> {
     let repo = GitRepository::at(root);
-    repo.with_task_workspace(TaskMutation::Dependencies, |repo| {
-        repo.link_blocks(from_ref, to_ref)
-    })
+    execute_link_blocks(&repo.root, from_ref, to_ref)
 }
 
 #[doc(hidden)]
@@ -1004,18 +6278,8 @@ pub fn update_task_at(
     task_ref: &str,
     update: TaskUpdate<'_>,
 ) -> Result<(), Error> {
-    let details = update.title.is_some()
-        || update.summary.is_some()
-        || update.context.is_some()
-        || update.tags.is_some();
-    let pull_request = update.pr_mr_url.is_some() || update.pr_mr_status.is_some();
-    let mutation = match (details, pull_request) {
-        (true, true) => TaskMutation::UpdateDetailsAndPullRequest,
-        (false, true) => TaskMutation::UpdatePullRequest,
-        _ => TaskMutation::UpdateDetails,
-    };
     let repo = GitRepository::at(root);
-    repo.with_task_workspace(mutation, |repo| repo.update_task(task_ref, update.clone()))
+    execute_update_task(&repo.root, task_ref, update)
 }
 
 pub fn task_documents_at(root: impl Into<PathBuf>) -> Result<Vec<TaskDocument>, Error> {
@@ -1038,13 +6302,7 @@ impl GitRepository {
         let _lock = self.acquire_lock()?;
         let projection = load_tiber_projection(&self.root)?;
         if !projection.initialized {
-            append_tiber_events(
-                &self.root,
-                &projection,
-                vec![TiberEvent::RepositoryInitialized {
-                    stream_id: stream_id(REPOSITORY_STREAM)?,
-                }],
-            )?;
+            execute_initialize_tiber_repository(&self.root)?;
         }
         Ok(())
     }
@@ -1071,7 +6329,7 @@ impl GitRepository {
                 ));
             }
             if let Some(mut state) = active_state {
-                if state.state != "resolved" {
+                if state.state != CiRecoveryPhase::Resolved {
                     let role = if state.owner == participant {
                         CiRecoveryRole::Owner
                     } else {
@@ -1081,10 +6339,15 @@ impl GitRepository {
                     if state.triggers.is_empty() {
                         state.triggers.push(state.trigger.clone());
                     }
+                    let join_intent = JoinCiRecoveryIntent {
+                        trigger: (!state.triggers.contains(&input)).then(|| input.clone()),
+                        participant: (!state.participants.contains(&participant))
+                            .then(|| participant.clone()),
+                    };
                     if !state.triggers.contains(&input) {
                         let matches_failed_replacement =
                             state.replacement.as_ref().is_some_and(|replacement| {
-                                replacement.status == "failed"
+                                replacement.status == CiRecoveryReplacementStatus::Failed
                                     && replacement.run_id == input.run_id
                                     && replacement.run_url == input.run_url
                                     && replacement.sha == input.failed_sha
@@ -1106,11 +6369,7 @@ impl GitRepository {
                     if !changed {
                         return Ok(CiRecoveryClaim::from_state(state, role));
                     }
-                    match self.push_ci_recovery_state(
-                        &state,
-                        remote_parent.as_deref(),
-                        "Join CI recovery",
-                    ) {
+                    match execute_join_ci_recovery(&self.root, join_intent) {
                         Ok(()) => {
                             return Ok(CiRecoveryClaim::from_state(state, role));
                         }
@@ -1127,7 +6386,7 @@ impl GitRepository {
             let state = CiRecoveryState {
                 schema_version: 1,
                 incident_id: ci_recovery_incident_id(&input.run_id),
-                state: "diagnosing".to_string(),
+                state: CiRecoveryPhase::Diagnosing,
                 epoch: 1,
                 trigger: input.clone(),
                 triggers: vec![input.clone()],
@@ -1141,8 +6400,14 @@ impl GitRepository {
                 replacement: None,
                 release_proof: None,
             };
-            match self.push_ci_recovery_state(&state, remote_parent.as_deref(), "Claim CI recovery")
-            {
+            let intent = ClaimCiRecoveryIntent {
+                incident_id: state.incident_id.clone(),
+                schema_version: state.schema_version,
+                trigger: state.trigger.clone(),
+                owner: state.owner.clone(),
+                lease_expires_at: state.lease_expires_at,
+            };
+            match execute_claim_ci_recovery(&self.root, intent) {
                 Ok(()) => {
                     return Ok(CiRecoveryClaim::from_state(state, CiRecoveryRole::Owner));
                 }
@@ -1210,41 +6475,21 @@ impl GitRepository {
         let caller = ci_recovery_participant()?;
         let recipient = ci_recovery_participant_from(to_host, to_session)?;
         let now = unix_timestamp()?;
-
-        for attempt in 1..=MAX_SYNC_ATTEMPTS {
-            let parent = self.fetch_coordination_branch()?.ok_or_else(|| {
-                Error::Parse("ci_recovery_incident_missing active=false".to_string())
-            })?;
-            let mut state = self
-                .read_active_ci_recovery(Some(&parent))?
-                .ok_or_else(|| {
-                    Error::Parse("ci_recovery_incident_missing active=false".to_string())
-                })?;
-            ensure_ci_recovery_owner(&state, incident_id, epoch, &caller)?;
-            ensure_ci_recovery_not_resolved(&state)?;
-            ensure_ci_recovery_lease_active(&state, now)?;
-            state.owner = recipient.clone();
-            if !state.participants.contains(&recipient) {
-                state.participants.push(recipient.clone());
-            }
-            state.epoch = state.epoch.saturating_add(1);
-            state.lease_expires_at = now.saturating_add(CI_RECOVERY_LEASE_SECONDS);
-
-            match self.push_ci_recovery_state(&state, Some(&parent), "Transfer CI recovery") {
-                Ok(()) => {
-                    return Ok(CiRecoveryTransfer {
-                        incident_id: state.incident_id,
-                        epoch: state.epoch,
-                        lease_expires_at: state.lease_expires_at,
-                    });
-                }
-                Err(error) if is_retryable_push_failure(&error) && attempt < MAX_SYNC_ATTEMPTS => {
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        unreachable!("CI recovery transfer attempts always return")
+        let lease_expires_at = now.saturating_add(CI_RECOVERY_LEASE_SECONDS);
+        let intent = TransferCiRecoveryIntent {
+            incident_id: incident_id.to_string(),
+            expected_epoch: epoch,
+            caller,
+            recipient,
+            observed_at: now,
+            lease_expires_at,
+        };
+        execute_transfer_ci_recovery(&self.root, intent)?;
+        Ok(CiRecoveryTransfer {
+            incident_id: incident_id.to_string(),
+            epoch: epoch.saturating_add(1),
+            lease_expires_at,
+        })
     }
 
     fn takeover_ci_recovery(
@@ -1255,52 +6500,20 @@ impl GitRepository {
         let _lock = self.acquire_lock()?;
         let successor = ci_recovery_participant()?;
         let now = unix_timestamp()?;
-
-        for attempt in 1..=MAX_SYNC_ATTEMPTS {
-            let parent = self.fetch_coordination_branch()?.ok_or_else(|| {
-                Error::Parse("ci_recovery_incident_missing active=false".to_string())
-            })?;
-            let mut state = self
-                .read_active_ci_recovery(Some(&parent))?
-                .ok_or_else(|| {
-                    Error::Parse("ci_recovery_incident_missing active=false".to_string())
-                })?;
-            ensure_ci_recovery_incident_epoch(&state, incident_id, epoch)?;
-            ensure_ci_recovery_not_resolved(&state)?;
-            if state.owner == successor {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_already_owner incident_id={} epoch={}",
-                    state.incident_id, state.epoch
-                )));
-            }
-            if state.lease_expires_at > now {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_lease_active incident_id={} epoch={} expires_at={}",
-                    state.incident_id, state.epoch, state.lease_expires_at
-                )));
-            }
-            state.owner = successor.clone();
-            if !state.participants.contains(&successor) {
-                state.participants.push(successor.clone());
-            }
-            state.epoch = state.epoch.saturating_add(1);
-            state.lease_expires_at = now.saturating_add(CI_RECOVERY_LEASE_SECONDS);
-
-            match self.push_ci_recovery_state(&state, Some(&parent), "Take over CI recovery") {
-                Ok(()) => {
-                    return Ok(CiRecoveryTransfer {
-                        incident_id: state.incident_id,
-                        epoch: state.epoch,
-                        lease_expires_at: state.lease_expires_at,
-                    });
-                }
-                Err(error) if is_retryable_push_failure(&error) && attempt < MAX_SYNC_ATTEMPTS => {
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        unreachable!("CI recovery takeover attempts always return")
+        let lease_expires_at = now.saturating_add(CI_RECOVERY_LEASE_SECONDS);
+        let intent = TakeOverCiRecoveryIntent {
+            incident_id: incident_id.to_string(),
+            expected_epoch: epoch,
+            successor,
+            observed_at: now,
+            lease_expires_at,
+        };
+        execute_takeover_ci_recovery(&self.root, intent)?;
+        Ok(CiRecoveryTransfer {
+            incident_id: incident_id.to_string(),
+            epoch: epoch.saturating_add(1),
+            lease_expires_at,
+        })
     }
 
     fn assign_ci_recovery(
@@ -1331,29 +6544,28 @@ impl GitRepository {
             ));
         }
         let scope = required_ci_recovery_text("assignment_scope", &input.scope)?;
-        self.mutate_ci_recovery("Assign CI recovery helper", |state, now| {
-            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
-            ensure_ci_recovery_lease_active(state, now)?;
-            if !state.participants.contains(&assignee) {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_assignee_not_joined host={} session={}",
-                    assignee.host, assignee.session
-                )));
-            }
-            let assignment_id = format!("a{}", state.assignments.len().saturating_add(1));
-            state.assignments.push(CiRecoveryAssignment {
-                id: assignment_id.clone(),
-                owner_epoch: state.epoch,
-                assignee: assignee.clone(),
-                capabilities: capabilities.clone(),
-                scope: scope.clone(),
+        let now = unix_timestamp()?;
+        let intent = AssignCiRecoveryWorkIntent {
+            incident_id: incident_id.to_string(),
+            expected_epoch: epoch,
+            caller,
+            assignment: CiRecoveryAssignment {
+                // The command's folded assignment count decides the durable
+                // sequential identifier. This placeholder is never emitted.
+                id: String::new(),
+                owner_epoch: epoch,
+                assignee,
+                capabilities,
+                scope,
                 report: None,
-            });
-            Ok(CiRecoveryAssignmentResult {
-                incident_id: state.incident_id.clone(),
-                assignment_id,
-                epoch: state.epoch,
-            })
+            },
+            observed_at: now,
+        };
+        let assignment_id = execute_assign_ci_recovery_work(&self.root, intent)?;
+        Ok(CiRecoveryAssignmentResult {
+            incident_id: incident_id.to_string(),
+            assignment_id,
+            epoch,
         })
     }
 
@@ -1367,42 +6579,25 @@ impl GitRepository {
         let caller = ci_recovery_participant()?;
         let summary = required_ci_recovery_text("assignment_summary", summary)?;
         let evidence = required_ci_recovery_text("assignment_evidence", evidence)?;
-        self.mutate_ci_recovery("Report CI recovery helper result", |state, _now| {
-            if state.incident_id != incident_id {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_incident_mismatch expected={} actual={incident_id}",
-                    state.incident_id
-                )));
-            }
-            let assignment = state
-                .assignments
-                .iter_mut()
-                .find(|assignment| assignment.id == assignment_id)
-                .ok_or_else(|| {
-                    Error::Parse(format!(
-                        "ci_recovery_assignment_missing assignment_id={assignment_id}"
-                    ))
-                })?;
-            if assignment.owner_epoch != state.epoch {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_assignment_stale assignment_epoch={} active_epoch={}",
-                    assignment.owner_epoch, state.epoch
-                )));
-            }
-            if assignment.assignee != caller {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_assignment_not_assignee assignment_id={assignment_id}"
-                )));
-            }
-            assignment.report = Some(CiRecoveryReport {
-                summary: summary.clone(),
-                evidence: evidence.clone(),
-            });
-            Ok(CiRecoveryAssignmentResult {
-                incident_id: state.incident_id.clone(),
+        let epoch = load_tiber_projection(&self.root)?
+            .ci_recovery
+            .as_ref()
+            .filter(|state| state.incident_id == incident_id)
+            .map(|state| state.epoch)
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".into()))?;
+        execute_report_ci_recovery_work(
+            &self.root,
+            ReportCiRecoveryWorkIntent {
+                incident_id: incident_id.to_string(),
                 assignment_id: assignment_id.to_string(),
-                epoch: state.epoch,
-            })
+                assignee: caller,
+                report: CiRecoveryReport { summary, evidence },
+            },
+        )?;
+        Ok(CiRecoveryAssignmentResult {
+            incident_id: incident_id.to_string(),
+            assignment_id: assignment_id.to_string(),
+            epoch,
         })
     }
 
@@ -1412,16 +6607,23 @@ impl GitRepository {
         epoch: u64,
     ) -> Result<CiRecoveryAssertion, Error> {
         let caller = ci_recovery_participant()?;
-        self.mutate_ci_recovery("Renew CI recovery lease", |state, now| {
-            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
-            ensure_ci_recovery_lease_active(state, now)?;
-            state.lease_expires_at = now.saturating_add(CI_RECOVERY_LEASE_SECONDS);
-            Ok(CiRecoveryAssertion {
-                allowed: true,
-                incident_id: state.incident_id.clone(),
-                epoch: state.epoch,
-                lease_expires_at: state.lease_expires_at,
-            })
+        let now = unix_timestamp()?;
+        let lease_expires_at = now.saturating_add(CI_RECOVERY_LEASE_SECONDS);
+        execute_renew_ci_recovery_lease(
+            &self.root,
+            RenewCiRecoveryLeaseIntent {
+                incident_id: incident_id.to_string(),
+                expected_epoch: epoch,
+                owner: caller,
+                observed_at: now,
+                lease_expires_at,
+            },
+        )?;
+        Ok(CiRecoveryAssertion {
+            allowed: true,
+            incident_id: incident_id.to_string(),
+            epoch,
+            lease_expires_at,
         })
     }
 
@@ -1495,7 +6697,7 @@ impl GitRepository {
             if state.epoch != epoch {
                 return Ok(CiRecoveryWait::from_state(&state, "epoch-changed", None));
             }
-            if state.state == "resolved" {
+            if state.state == CiRecoveryPhase::Resolved {
                 return Ok(CiRecoveryWait::from_state(&state, "resolved", None));
             }
             if let Some(assignment) = state.assignments.iter().find(|assignment| {
@@ -1527,33 +6729,35 @@ impl GitRepository {
         record: CiRecoveryDiagnosisInput,
     ) -> Result<CiRecoveryStatus, Error> {
         let caller = ci_recovery_participant()?;
-        let classification = parse_ci_recovery_choice(
-            "classification",
-            &record.classification,
-            &["caused", "unrelated", "transient"],
-        )?;
+        let classification = CiRecoveryClassification::parse(&record.classification)?;
         let job = required_ci_recovery_text("job", &record.job)?;
         let step = required_ci_recovery_text("step", &record.step)?;
         let log_evidence = required_ci_recovery_text("log_evidence", &record.log_evidence)?;
         let cause = required_ci_recovery_text("cause", &record.cause)?;
-        self.mutate_ci_recovery("Diagnose CI recovery", |state, now| {
-            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
-            ensure_ci_recovery_lease_active(state, now)?;
-            state.failure_record = Some(CiRecoveryFailureRecord {
-                job: job.clone(),
-                step: step.clone(),
-                log_evidence: log_evidence.clone(),
-            });
-            state.diagnosis = Some(CiRecoveryDiagnosis {
-                cause: cause.clone(),
-                classification: classification.clone(),
-            });
-            state.next_action = None;
-            state.replacement = None;
-            state.release_proof = None;
-            state.state = "diagnosing".to_string();
-            Ok(CiRecoveryStatus::from_state(state))
-        })
+        execute_record_ci_recovery_diagnosis(
+            &self.root,
+            RecordCiRecoveryDiagnosisIntent {
+                incident_id: incident_id.to_string(),
+                expected_epoch: epoch,
+                owner: caller,
+                observed_at: unix_timestamp()?,
+                failure_record: CiRecoveryFailureRecord {
+                    job: job.clone(),
+                    step: step.clone(),
+                    log_evidence: log_evidence.clone(),
+                },
+                diagnosis: CiRecoveryDiagnosis {
+                    cause,
+                    classification,
+                },
+            },
+        )?;
+        load_tiber_projection(&self.root)?
+            .ci_recovery
+            .as_ref()
+            .filter(|state| state.incident_id == incident_id)
+            .map(CiRecoveryStatus::from_state)
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".into()))
     }
 
     fn choose_ci_recovery_action(
@@ -1564,32 +6768,24 @@ impl GitRepository {
         description: &str,
     ) -> Result<CiRecoveryStatus, Error> {
         let caller = ci_recovery_participant()?;
-        let kind = parse_ci_recovery_choice("action", kind, &["repair", "rerun"])?;
+        let kind = CiRecoveryActionKind::parse(kind)?;
         let description = required_ci_recovery_text("description", description)?;
-        self.mutate_ci_recovery("Choose CI recovery action", |state, now| {
-            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
-            ensure_ci_recovery_lease_active(state, now)?;
-            let diagnosis = state
-                .diagnosis
-                .as_ref()
-                .ok_or_else(|| Error::Parse("ci_recovery_diagnosis_required=true".to_string()))?;
-            let permitted = matches!(
-                (diagnosis.classification.as_str(), kind.as_str()),
-                ("caused", "repair") | ("unrelated", "rerun") | ("transient", "rerun")
-            );
-            if !permitted {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_action_conflicts classification={} action={kind}",
-                    diagnosis.classification
-                )));
-            }
-            state.next_action = Some(CiRecoveryAction {
-                kind: kind.clone(),
-                description: description.clone(),
-            });
-            state.state = "action-selected".to_string();
-            Ok(CiRecoveryStatus::from_state(state))
-        })
+        execute_select_ci_recovery_action(
+            &self.root,
+            SelectCiRecoveryActionIntent {
+                incident_id: incident_id.to_string(),
+                expected_epoch: epoch,
+                owner: caller,
+                observed_at: unix_timestamp()?,
+                action: CiRecoveryAction { kind, description },
+            },
+        )?;
+        load_tiber_projection(&self.root)?
+            .ci_recovery
+            .as_ref()
+            .filter(|state| state.incident_id == incident_id)
+            .map(CiRecoveryStatus::from_state)
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".into()))
     }
 
     fn record_ci_recovery_replacement(
@@ -1599,48 +6795,31 @@ impl GitRepository {
         replacement: CiRecoveryReplacementInput,
     ) -> Result<CiRecoveryStatus, Error> {
         let caller = ci_recovery_participant()?;
-        let status = parse_ci_recovery_choice(
-            "replacement_status",
-            &replacement.status,
-            &["queued", "running", "failed"],
-        )?;
+        let status = CiRecoveryReplacementStatus::parse(&replacement.status)?;
         let run_id = required_ci_recovery_text("replacement_run_id", &replacement.run_id)?;
         let run_url = required_ci_recovery_text("replacement_run_url", &replacement.run_url)?;
         let sha = required_ci_recovery_text("replacement_sha", &replacement.sha)?;
-        self.mutate_ci_recovery("Record CI replacement", |state, now| {
-            ensure_ci_recovery_owner(state, incident_id, epoch, &caller)?;
-            ensure_ci_recovery_lease_active(state, now)?;
-            if state.next_action.is_none() {
-                return Err(Error::Parse(
-                    "ci_recovery_next_action_required=true".to_string(),
-                ));
-            }
-            if state
-                .next_action
-                .as_ref()
-                .is_some_and(|action| action.kind == "rerun")
-                && sha != state.trigger.failed_sha
-            {
-                return Err(Error::Parse(
-                    "ci_recovery_rerun_sha_mismatch expected=failed_sha".to_string(),
-                ));
-            }
-            state.replacement = Some(CiRecoveryReplacement {
-                run_id: run_id.clone(),
-                run_url: run_url.clone(),
-                sha: sha.clone(),
-                status: status.clone(),
-            });
-            if status == "failed" {
-                state.state = "diagnosing".to_string();
-                state.failure_record = None;
-                state.diagnosis = None;
-                state.next_action = None;
-            } else {
-                state.state = "waiting-ci".to_string();
-            }
-            Ok(CiRecoveryStatus::from_state(state))
-        })
+        execute_record_ci_recovery_replacement(
+            &self.root,
+            RecordCiRecoveryReplacementIntent {
+                incident_id: incident_id.to_string(),
+                expected_epoch: epoch,
+                owner: caller,
+                observed_at: unix_timestamp()?,
+                replacement: CiRecoveryReplacement {
+                    run_id,
+                    run_url,
+                    sha,
+                    status,
+                },
+            },
+        )?;
+        load_tiber_projection(&self.root)?
+            .ci_recovery
+            .as_ref()
+            .filter(|state| state.incident_id == incident_id)
+            .map(CiRecoveryStatus::from_state)
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".into()))
     }
 
     fn resolve_ci_recovery(
@@ -1660,46 +6839,25 @@ impl GitRepository {
         let replacement_run_url =
             required_ci_recovery_text("replacement_run_url", &proof.replacement_run_url)?;
         let sha = required_ci_recovery_text("replacement_sha", &proof.sha)?;
-        self.mutate_ci_recovery("Resolve CI recovery", |state, _now| {
-            if state.incident_id != incident_id {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_incident_mismatch expected={} actual={incident_id}",
-                    state.incident_id
-                )));
-            }
-            if !state.participants.contains(&participant) {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_participant_required incident_id={}",
-                    state.incident_id
-                )));
-            }
-            let replacement = state
-                .replacement
-                .as_ref()
-                .ok_or_else(|| Error::Parse("ci_recovery_replacement_required=true".to_string()))?;
-            if replacement.status == "failed" {
-                return Err(Error::Parse(format!(
-                    "ci_recovery_replacement_failed run_id={}",
-                    replacement.run_id
-                )));
-            }
-            if replacement.run_id != replacement_run_id
-                || replacement.run_url != replacement_run_url
-                || replacement.sha != sha
-            {
-                return Err(Error::Parse(
-                    "ci_recovery_release_proof_mismatch=true".to_string(),
-                ));
-            }
-            state.release_proof = Some(CiRecoveryReleaseProof {
-                replacement_run_id: replacement_run_id.clone(),
-                replacement_run_url: replacement_run_url.clone(),
-                sha: sha.clone(),
-                terminal_status: "success".to_string(),
-            });
-            state.state = "resolved".to_string();
-            Ok(CiRecoveryStatus::from_state(state))
-        })
+        execute_resolve_ci_recovery(
+            &self.root,
+            ResolveCiRecoveryIntent {
+                incident_id: incident_id.to_string(),
+                participant,
+                proof: CiRecoveryReleaseProof {
+                    replacement_run_id,
+                    replacement_run_url,
+                    sha,
+                    terminal_status: "success".to_string(),
+                },
+            },
+        )?;
+        load_tiber_projection(&self.root)?
+            .ci_recovery
+            .as_ref()
+            .filter(|state| state.incident_id == incident_id)
+            .map(CiRecoveryStatus::from_state)
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".into()))
     }
 
     fn ci_recovery_status(&self) -> Result<CiRecoveryStatus, Error> {
@@ -1711,35 +6869,6 @@ impl GitRepository {
             .read_active_ci_recovery(Some(&parent))?
             .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".to_string()))?;
         Ok(CiRecoveryStatus::from_state(&state))
-    }
-
-    fn mutate_ci_recovery<T>(
-        &self,
-        message: &str,
-        mut operation: impl FnMut(&mut CiRecoveryState, u64) -> Result<T, Error>,
-    ) -> Result<T, Error> {
-        let _lock = self.acquire_lock()?;
-        let now = unix_timestamp()?;
-        for attempt in 1..=MAX_SYNC_ATTEMPTS {
-            let parent = self.fetch_coordination_branch()?.ok_or_else(|| {
-                Error::Parse("ci_recovery_incident_missing active=false".to_string())
-            })?;
-            let mut state = self
-                .read_active_ci_recovery(Some(&parent))?
-                .ok_or_else(|| {
-                    Error::Parse("ci_recovery_incident_missing active=false".to_string())
-                })?;
-            ensure_ci_recovery_not_resolved(&state)?;
-            let result = operation(&mut state, now)?;
-            match self.push_ci_recovery_state(&state, Some(&parent), message) {
-                Ok(()) => return Ok(result),
-                Err(error) if is_retryable_push_failure(&error) && attempt < MAX_SYNC_ATTEMPTS => {
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        unreachable!("CI recovery mutation attempts always return")
     }
 
     fn fetch_coordination_branch(&self) -> Result<Option<String>, Error> {
@@ -1756,16 +6885,10 @@ impl GitRepository {
             ));
         }
         let projection = load_tiber_projection(&self.root)?;
-        Ok(projection.ci_recovery.as_ref().map(|_| {
-            usize::from(
-                projection
-                    .versions
-                    .get(&stream_id(CI_RECOVERY_STREAM).expect("valid stream"))
-                    .copied()
-                    .unwrap_or(StreamVersion::new(0)),
-            )
-            .to_string()
-        }))
+        Ok(projection
+            .ci_recovery
+            .as_ref()
+            .map(|state| state.incident_id.clone()))
     }
 
     fn read_active_ci_recovery(
@@ -1776,43 +6899,6 @@ impl GitRepository {
             return Ok(None);
         };
         Ok(load_tiber_projection(&self.root)?.ci_recovery)
-    }
-
-    fn push_ci_recovery_state(
-        &self,
-        state: &CiRecoveryState,
-        parent: Option<&str>,
-        message: &str,
-    ) -> Result<(), Error> {
-        let projection = load_tiber_projection(&self.root)?;
-        let expected = projection
-            .versions
-            .get(&stream_id(CI_RECOVERY_STREAM)?)
-            .copied()
-            .unwrap_or(StreamVersion::new(0));
-        if parent
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0)
-            != usize::from(expected)
-        {
-            return Err(Error::Parse("ci_recovery_version_conflict=true".into()));
-        }
-        let mut events = Vec::new();
-        if !projection.initialized {
-            events.push(TiberEvent::RepositoryInitialized {
-                stream_id: stream_id(REPOSITORY_STREAM)?,
-            });
-        }
-        events.push(ci_recovery_event(
-            message,
-            stream_id(CI_RECOVERY_STREAM)?,
-            state,
-        )?);
-        events.push(ci_recovery_state_published(
-            stream_id(CI_RECOVERY_STREAM)?,
-            state,
-        )?);
-        append_tiber_events(&self.root, &projection, events)
     }
 }
 
@@ -1831,11 +6917,114 @@ pub struct CiRecoveryParticipant {
     pub session: String,
 }
 
+/// Closed lifecycle vocabulary folded by the repository-wide CI-recovery commands.
+/// The wire adapter retains the established lower-case strings, while the
+/// domain and eventual EventCore fold cannot manufacture an unknown phase.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum CiRecoveryPhase {
+    Diagnosing,
+    ActionSelected,
+    WaitingCi,
+    Resolved,
+}
+
+impl CiRecoveryPhase {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Diagnosing => "diagnosing",
+            Self::ActionSelected => "action-selected",
+            Self::WaitingCi => "waiting-ci",
+            Self::Resolved => "resolved",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CiRecoveryClassification {
+    Caused,
+    Unrelated,
+    Transient,
+}
+
+impl CiRecoveryClassification {
+    fn parse(value: &str) -> Result<Self, Error> {
+        match value {
+            "caused" => Ok(Self::Caused),
+            "unrelated" => Ok(Self::Unrelated),
+            "transient" => Ok(Self::Transient),
+            _ => Err(Error::Parse(format!(
+                "ci_recovery_choice_invalid field=classification value={value} allowed=caused,unrelated,transient"
+            ))),
+        }
+    }
+}
+
+impl std::fmt::Display for CiRecoveryClassification {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Caused => "caused",
+            Self::Unrelated => "unrelated",
+            Self::Transient => "transient",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CiRecoveryActionKind {
+    Repair,
+    Rerun,
+}
+
+impl CiRecoveryActionKind {
+    fn parse(value: &str) -> Result<Self, Error> {
+        match value {
+            "repair" => Ok(Self::Repair),
+            "rerun" => Ok(Self::Rerun),
+            _ => Err(Error::Parse(format!(
+                "ci_recovery_choice_invalid field=action value={value} allowed=repair,rerun"
+            ))),
+        }
+    }
+}
+
+impl std::fmt::Display for CiRecoveryActionKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Repair => "repair",
+            Self::Rerun => "rerun",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CiRecoveryReplacementStatus {
+    Queued,
+    Running,
+    Failed,
+}
+
+impl CiRecoveryReplacementStatus {
+    fn parse(value: &str) -> Result<Self, Error> {
+        match value {
+            "queued" => Ok(Self::Queued),
+            "running" => Ok(Self::Running),
+            "failed" => Ok(Self::Failed),
+            _ => Err(Error::Parse(format!(
+                "ci_recovery_choice_invalid field=replacement_status value={value} allowed=queued,running,failed"
+            ))),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct CiRecoveryState {
     schema_version: u32,
     incident_id: String,
-    state: String,
+    state: CiRecoveryPhase,
     epoch: u64,
     trigger: CiRecoveryTrigger,
     #[serde(default)]
@@ -1858,6 +7047,50 @@ struct CiRecoveryState {
     release_proof: Option<CiRecoveryReleaseProof>,
 }
 
+impl CiRecoveryState {
+    #[cfg(test)]
+    fn snapshot(&self) -> tiber_core::events::CiRecoverySnapshot {
+        use tiber_core::events as core;
+        core::CiRecoverySnapshot {
+            schema_version: self.schema_version,
+            incident_id: self.incident_id.clone(),
+            state: self.state.into(),
+            epoch: self.epoch,
+            trigger: self.trigger.clone().into(),
+            triggers: self.triggers.iter().cloned().map(Into::into).collect(),
+            owner: self.owner.clone().into(),
+            lease_expires_at: self.lease_expires_at,
+            participants: self.participants.iter().cloned().map(Into::into).collect(),
+            assignments: self.assignments.iter().cloned().map(Into::into).collect(),
+            failure_record: self.failure_record.clone().map(Into::into),
+            diagnosis: self.diagnosis.clone().map(Into::into),
+            next_action: self.next_action.clone().map(Into::into),
+            replacement: self.replacement.clone().map(Into::into),
+            release_proof: self.release_proof.clone().map(Into::into),
+        }
+    }
+
+    fn from_snapshot(value: &tiber_core::events::CiRecoverySnapshot) -> Self {
+        Self {
+            schema_version: value.schema_version,
+            incident_id: value.incident_id.clone(),
+            state: value.state.into(),
+            epoch: value.epoch,
+            trigger: value.trigger.clone().into(),
+            triggers: value.triggers.iter().cloned().map(Into::into).collect(),
+            owner: value.owner.clone().into(),
+            lease_expires_at: value.lease_expires_at,
+            participants: value.participants.iter().cloned().map(Into::into).collect(),
+            assignments: value.assignments.iter().cloned().map(Into::into).collect(),
+            failure_record: value.failure_record.clone().map(Into::into),
+            diagnosis: value.diagnosis.clone().map(Into::into),
+            next_action: value.next_action.clone().map(Into::into),
+            replacement: value.replacement.clone().map(Into::into),
+            release_proof: value.release_proof.clone().map(Into::into),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CiRecoveryFailureRecord {
     pub job: String,
@@ -1868,12 +7101,12 @@ pub struct CiRecoveryFailureRecord {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CiRecoveryDiagnosis {
     pub cause: String,
-    pub classification: String,
+    pub classification: CiRecoveryClassification,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CiRecoveryAction {
-    pub kind: String,
+    pub kind: CiRecoveryActionKind,
     pub description: String,
 }
 
@@ -1882,7 +7115,7 @@ pub struct CiRecoveryReplacement {
     pub run_id: String,
     pub run_url: String,
     pub sha: String,
-    pub status: String,
+    pub status: CiRecoveryReplacementStatus,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1907,6 +7140,211 @@ pub struct CiRecoveryAssignment {
 pub struct CiRecoveryReport {
     pub summary: String,
     pub evidence: String,
+}
+
+macro_rules! ci_recovery_enum_conversion {
+    ($local:ty, $core:path, { $($local_variant:ident => $core_variant:ident),+ $(,)? }) => {
+        impl From<$local> for $core {
+            fn from(value: $local) -> Self {
+                match value { $(<$local>::$local_variant => <$core>::$core_variant),+ }
+            }
+        }
+        impl From<$core> for $local {
+            fn from(value: $core) -> Self {
+                match value { $(<$core>::$core_variant => <$local>::$local_variant),+ }
+            }
+        }
+    };
+}
+
+ci_recovery_enum_conversion!(
+    CiRecoveryPhase,
+    tiber_core::events::CiRecoveryPhase,
+    { Diagnosing => Diagnosing, ActionSelected => ActionSelected, WaitingCi => WaitingCi, Resolved => Resolved }
+);
+ci_recovery_enum_conversion!(
+    CiRecoveryClassification,
+    tiber_core::events::CiRecoveryClassification,
+    { Caused => Caused, Unrelated => Unrelated, Transient => Transient }
+);
+ci_recovery_enum_conversion!(
+    CiRecoveryActionKind,
+    tiber_core::events::CiRecoveryActionKind,
+    { Repair => Repair, Rerun => Rerun }
+);
+ci_recovery_enum_conversion!(
+    CiRecoveryReplacementStatus,
+    tiber_core::events::CiRecoveryReplacementStatus,
+    { Queued => Queued, Running => Running, Failed => Failed }
+);
+
+impl From<CiRecoveryTrigger> for tiber_core::events::CiRecoveryTrigger {
+    fn from(value: CiRecoveryTrigger) -> Self {
+        Self {
+            run_id: value.run_id,
+            run_url: value.run_url,
+            failed_sha: value.failed_sha,
+            workflow: value.workflow,
+            git_ref: value.git_ref,
+        }
+    }
+}
+impl From<tiber_core::events::CiRecoveryTrigger> for CiRecoveryTrigger {
+    fn from(value: tiber_core::events::CiRecoveryTrigger) -> Self {
+        Self {
+            run_id: value.run_id,
+            run_url: value.run_url,
+            failed_sha: value.failed_sha,
+            workflow: value.workflow,
+            git_ref: value.git_ref,
+        }
+    }
+}
+impl From<CiRecoveryParticipant> for tiber_core::events::CiRecoveryParticipant {
+    fn from(value: CiRecoveryParticipant) -> Self {
+        Self {
+            host: value.host,
+            session: value.session,
+        }
+    }
+}
+impl From<tiber_core::events::CiRecoveryParticipant> for CiRecoveryParticipant {
+    fn from(value: tiber_core::events::CiRecoveryParticipant) -> Self {
+        Self {
+            host: value.host,
+            session: value.session,
+        }
+    }
+}
+impl From<CiRecoveryReport> for tiber_core::events::CiRecoveryReport {
+    fn from(value: CiRecoveryReport) -> Self {
+        Self {
+            summary: value.summary,
+            evidence: value.evidence,
+        }
+    }
+}
+impl From<tiber_core::events::CiRecoveryReport> for CiRecoveryReport {
+    fn from(value: tiber_core::events::CiRecoveryReport) -> Self {
+        Self {
+            summary: value.summary,
+            evidence: value.evidence,
+        }
+    }
+}
+impl From<CiRecoveryAssignment> for tiber_core::events::CiRecoveryAssignment {
+    fn from(value: CiRecoveryAssignment) -> Self {
+        Self {
+            id: value.id,
+            owner_epoch: value.owner_epoch,
+            assignee: value.assignee.into(),
+            capabilities: value.capabilities,
+            scope: value.scope,
+            report: value.report.map(Into::into),
+        }
+    }
+}
+impl From<tiber_core::events::CiRecoveryAssignment> for CiRecoveryAssignment {
+    fn from(value: tiber_core::events::CiRecoveryAssignment) -> Self {
+        Self {
+            id: value.id,
+            owner_epoch: value.owner_epoch,
+            assignee: value.assignee.into(),
+            capabilities: value.capabilities,
+            scope: value.scope,
+            report: value.report.map(Into::into),
+        }
+    }
+}
+impl From<CiRecoveryFailureRecord> for tiber_core::events::CiRecoveryFailureRecord {
+    fn from(value: CiRecoveryFailureRecord) -> Self {
+        Self {
+            job: value.job,
+            step: value.step,
+            log_evidence: value.log_evidence,
+        }
+    }
+}
+impl From<tiber_core::events::CiRecoveryFailureRecord> for CiRecoveryFailureRecord {
+    fn from(value: tiber_core::events::CiRecoveryFailureRecord) -> Self {
+        Self {
+            job: value.job,
+            step: value.step,
+            log_evidence: value.log_evidence,
+        }
+    }
+}
+impl From<CiRecoveryDiagnosis> for tiber_core::events::CiRecoveryDiagnosis {
+    fn from(value: CiRecoveryDiagnosis) -> Self {
+        Self {
+            cause: value.cause,
+            classification: value.classification.into(),
+        }
+    }
+}
+impl From<tiber_core::events::CiRecoveryDiagnosis> for CiRecoveryDiagnosis {
+    fn from(value: tiber_core::events::CiRecoveryDiagnosis) -> Self {
+        Self {
+            cause: value.cause,
+            classification: value.classification.into(),
+        }
+    }
+}
+impl From<CiRecoveryAction> for tiber_core::events::CiRecoveryAction {
+    fn from(value: CiRecoveryAction) -> Self {
+        Self {
+            kind: value.kind.into(),
+            description: value.description,
+        }
+    }
+}
+impl From<tiber_core::events::CiRecoveryAction> for CiRecoveryAction {
+    fn from(value: tiber_core::events::CiRecoveryAction) -> Self {
+        Self {
+            kind: value.kind.into(),
+            description: value.description,
+        }
+    }
+}
+impl From<CiRecoveryReplacement> for tiber_core::events::CiRecoveryReplacement {
+    fn from(value: CiRecoveryReplacement) -> Self {
+        Self {
+            run_id: value.run_id,
+            run_url: value.run_url,
+            sha: value.sha,
+            status: value.status.into(),
+        }
+    }
+}
+impl From<tiber_core::events::CiRecoveryReplacement> for CiRecoveryReplacement {
+    fn from(value: tiber_core::events::CiRecoveryReplacement) -> Self {
+        Self {
+            run_id: value.run_id,
+            run_url: value.run_url,
+            sha: value.sha,
+            status: value.status.into(),
+        }
+    }
+}
+impl From<CiRecoveryReleaseProof> for tiber_core::events::CiRecoveryReleaseProof {
+    fn from(value: CiRecoveryReleaseProof) -> Self {
+        Self {
+            replacement_run_id: value.replacement_run_id,
+            replacement_run_url: value.replacement_run_url,
+            sha: value.sha,
+            terminal_status: value.terminal_status,
+        }
+    }
+}
+impl From<tiber_core::events::CiRecoveryReleaseProof> for CiRecoveryReleaseProof {
+    fn from(value: tiber_core::events::CiRecoveryReleaseProof) -> Self {
+        Self {
+            replacement_run_id: value.replacement_run_id,
+            replacement_run_url: value.replacement_run_url,
+            sha: value.sha,
+            terminal_status: value.terminal_status,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2028,7 +7466,7 @@ impl CiRecoveryWait {
     ) -> Self {
         Self {
             incident_id: state.incident_id.clone(),
-            state: state.state.clone(),
+            state: state.state.as_str().to_string(),
             epoch: state.epoch,
             wake_reason: wake_reason.to_string(),
             assignment_id,
@@ -2041,10 +7479,10 @@ impl CiRecoveryStatus {
         Self {
             schema_version: state.schema_version,
             incident_id: state.incident_id.clone(),
-            state: state.state.clone(),
+            state: state.state.as_str().to_string(),
             epoch: state.epoch,
             lease_expires_at: state.lease_expires_at,
-            hold_released: state.state == "resolved",
+            hold_released: state.state == CiRecoveryPhase::Resolved,
             trigger_count: if state.triggers.is_empty() {
                 1
             } else {
@@ -2068,7 +7506,7 @@ impl CiRecoveryClaim {
     fn from_state(state: CiRecoveryState, role: CiRecoveryRole) -> Self {
         Self {
             incident_id: state.incident_id,
-            state: state.state,
+            state: state.state.as_str().to_string(),
             role,
             epoch: state.epoch,
             lease_expires_at: state.lease_expires_at,
@@ -2141,57 +7579,11 @@ fn ci_recovery_participant_from(host: &str, session: &str) -> Result<CiRecoveryP
     Ok(CiRecoveryParticipant { host, session })
 }
 
-fn ensure_ci_recovery_owner(
-    state: &CiRecoveryState,
-    incident_id: &str,
-    epoch: u64,
-    participant: &CiRecoveryParticipant,
-) -> Result<(), Error> {
-    ensure_ci_recovery_incident_epoch(state, incident_id, epoch)?;
-    if &state.owner != participant {
-        return Err(Error::Parse(format!(
-            "ci_recovery_not_owner incident_id={} epoch={}",
-            state.incident_id, state.epoch
-        )));
-    }
-    Ok(())
-}
-
-fn ensure_ci_recovery_incident_epoch(
-    state: &CiRecoveryState,
-    incident_id: &str,
-    epoch: u64,
-) -> Result<(), Error> {
-    if state.incident_id != incident_id {
-        return Err(Error::Parse(format!(
-            "ci_recovery_incident_mismatch expected={} actual={incident_id}",
-            state.incident_id
-        )));
-    }
-    if state.epoch != epoch {
-        return Err(Error::Parse(format!(
-            "ci_recovery_stale_epoch expected={} actual={epoch}",
-            state.epoch
-        )));
-    }
-    Ok(())
-}
-
 fn ensure_ci_recovery_lease_active(state: &CiRecoveryState, now: u64) -> Result<(), Error> {
     if state.lease_expires_at <= now {
         return Err(Error::Parse(format!(
             "ci_recovery_lease_expired incident_id={} epoch={}",
             state.incident_id, state.epoch
-        )));
-    }
-    Ok(())
-}
-
-fn ensure_ci_recovery_not_resolved(state: &CiRecoveryState) -> Result<(), Error> {
-    if state.state == "resolved" {
-        return Err(Error::Parse(format!(
-            "ci_recovery_incident_resolved incident_id={} mutation=false",
-            state.incident_id
         )));
     }
     Ok(())
@@ -2226,18 +7618,6 @@ fn required_ci_recovery_text(field: &str, value: &str) -> Result<String, Error> 
     Ok(value.to_string())
 }
 
-fn parse_ci_recovery_choice(field: &str, value: &str, allowed: &[&str]) -> Result<String, Error> {
-    let value = value.trim();
-    if allowed.contains(&value) {
-        Ok(value.to_string())
-    } else {
-        Err(Error::Parse(format!(
-            "ci_recovery_choice_invalid field={field} value={value} allowed={}",
-            allowed.join(",")
-        )))
-    }
-}
-
 pub fn sync_repository() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
     repo.sync_repository()?;
@@ -2250,14 +7630,6 @@ pub fn sync_repository() -> Result<(), Error> {
 pub fn record_publication_failure() -> Result<(), Error> {
     let repo = GitRepository::discover()?;
     record_publication_failure_for(&repo)
-}
-
-pub(crate) fn record_publication_failure_at(repository: &Path) -> Result<(), Error> {
-    record_publication_failure_for(&GitRepository::at(repository))
-}
-
-pub(crate) fn clear_publication_failure_at(repository: &Path) -> Result<(), Error> {
-    clear_workflow_blocker(&GitRepository::at(repository), "publication_failed")
 }
 
 fn record_publication_failure_for(repo: &GitRepository) -> Result<(), Error> {
@@ -2276,9 +7648,7 @@ fn record_publication_failure_for(repo: &GitRepository) -> Result<(), Error> {
 
 pub fn create_task(title: &str) -> Result<TaskPath, Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::Create, |repo| {
-        repo.create_task(TaskTitle::parse(title)?)
-    })
+    execute_create_task(&repo.root, TaskTitle::parse(title)?)
 }
 
 pub fn list_tasks() -> Result<Vec<TaskSummary>, Error> {
@@ -2323,100 +7693,67 @@ pub fn next_task() -> Result<Option<TaskSummary>, Error> {
 
 pub fn transition_task(task_ref: &str, status: &str) -> Result<TaskPath, Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::Transition, |repo| {
-        repo.transition_task(task_ref, status)
-    })
+    execute_transition_task(&repo.root, task_ref, status)
 }
 
 pub fn prioritize_before(task_ref: &str, before_ref: &str) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::Prioritize, |repo| {
-        repo.prioritize_before(task_ref, before_ref)
-    })
+    execute_prioritize_task(&repo.root, task_ref, before_ref)
 }
 
 pub fn link_blocks(from_ref: &str, to_ref: &str) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::Dependencies, |repo| {
-        repo.link_blocks(from_ref, to_ref)
-    })
+    execute_link_blocks(&repo.root, from_ref, to_ref)
 }
 
 pub fn unlink_blocks(from_ref: &str, to_ref: &str) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::Dependencies, |repo| {
-        repo.unlink_blocks(from_ref, to_ref)
-    })
+    execute_unlink_blocks(&repo.root, from_ref, to_ref)
 }
 
 pub fn add_subtask(task_ref: &str, title: &str, after_refs: &[String]) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::AddSubtask, |repo| {
-        repo.add_subtask(task_ref, title, after_refs)
-    })
+    execute_add_subtask(&repo.root, task_ref, title, after_refs)
 }
 
 pub fn set_subtask_checked(task_ref: &str, index: &str, checked: bool) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::CheckSubtask, |repo| {
-        repo.set_subtask_checked(task_ref, index, checked)
-    })
+    execute_set_subtask_checked(&repo.root, task_ref, index, checked)
 }
 
 pub fn update_task(task_ref: &str, update: TaskUpdate<'_>) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    let details = update.title.is_some()
-        || update.summary.is_some()
-        || update.context.is_some()
-        || update.tags.is_some();
-    let pull_request = update.pr_mr_url.is_some() || update.pr_mr_status.is_some();
-    let mutation = match (details, pull_request) {
-        (true, true) => TaskMutation::UpdateDetailsAndPullRequest,
-        (false, true) => TaskMutation::UpdatePullRequest,
-        _ => TaskMutation::UpdateDetails,
-    };
-    repo.with_task_workspace(mutation, |repo| repo.update_task(task_ref, update.clone()))
+    execute_update_task(&repo.root, task_ref, update)
 }
 
 pub fn add_acceptance(task_ref: &str, criterion: &str) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::AddAcceptance, |repo| {
-        repo.add_acceptance(task_ref, criterion)
-    })
+    execute_add_acceptance(&repo.root, task_ref, criterion)
 }
 
 pub fn set_acceptance_checked(task_ref: &str, index: &str, checked: bool) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::CheckAcceptance, |repo| {
-        repo.set_acceptance_checked(task_ref, index, checked)
-    })
+    execute_set_acceptance_checked(&repo.root, task_ref, index, checked)
 }
 
 pub fn remove_acceptance(task_ref: &str, index: &str) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::RemoveAcceptance, |repo| {
-        repo.remove_acceptance(task_ref, index)
-    })
+    execute_remove_acceptance(&repo.root, task_ref, index)
 }
 
 pub fn add_note(task_ref: &str, note: &str) -> Result<(), Error> {
     let repo = GitRepository::discover()?;
-    let date = current_date_string();
-    repo.with_task_workspace(TaskMutation::AddNote, |repo| {
-        repo.add_note_at(task_ref, note, &date)
-    })
+    execute_add_task_note(&repo.root, task_ref, note)
 }
 
 pub fn validate_fix() -> Result<Vec<ValidationMessage>, Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::ValidateRepair, |repo| repo.validate_fix())
+    execute_validate_task_board(&repo.root)
 }
 
 pub fn close_from_trailers() -> Result<Vec<String>, Error> {
     let repo = GitRepository::discover()?;
-    repo.with_task_workspace(TaskMutation::CloseFromTrailer, |repo| {
-        repo.close_from_trailers()
-    })
+    execute_close_tasks_from_commit_trailers(&repo.root)
 }
 
 pub fn scaffold_repo(apply: bool, replace_conflicts: bool) -> Result<Vec<String>, Error> {
@@ -2689,44 +8026,6 @@ impl GitRepository {
         }
     }
 
-    fn with_task_workspace<T>(
-        &self,
-        mutation: TaskMutation,
-        mut operation: impl FnMut(&GitRepository) -> Result<T, Error>,
-    ) -> Result<T, Error> {
-        let _lock = self.acquire_lock()?;
-        COMMAND_TASK_IDS.with(|ids| *ids.borrow_mut() = Some((Vec::new(), 0)));
-        let outcome = (|| {
-            for attempt in 1..=MAX_SYNC_ATTEMPTS {
-                COMMAND_TASK_IDS.with(|ids| {
-                    if let Some((_, cursor)) = ids.borrow_mut().as_mut() {
-                        *cursor = 0;
-                    }
-                });
-                let projection = load_tiber_projection(&self.root)?;
-                let working = Rc::new(RefCell::new(projection.clone()));
-                let repo = self.with_task_projection(Rc::clone(&working));
-                let result = operation(&repo)?;
-                let after = working.borrow();
-                let events = task_change_events(&projection, &after, mutation)?;
-                match append_tiber_events(&self.root, &projection, events) {
-                    Ok(()) => return Ok(result),
-                    Err(Error::Parse(message))
-                        if (message.starts_with("event_version_conflict=")
-                            || message.contains("event_store_authoritative_ref_retry=true"))
-                            && attempt < MAX_SYNC_ATTEMPTS =>
-                    {
-                        continue
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-            unreachable!("task command retry loop returns")
-        })();
-        COMMAND_TASK_IDS.with(|ids| *ids.borrow_mut() = None);
-        outcome
-    }
-
     fn with_task_snapshot_workspace<T>(
         &self,
         operation: impl FnOnce(&GitRepository) -> Result<T, Error>,
@@ -2766,78 +8065,6 @@ impl GitRepository {
         }
     }
 
-    fn sync_repository_unlocked(&self) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn sync_repository_with_admission_unlocked(
-        &self,
-        admits_to_backlog: bool,
-    ) -> Result<(), Error> {
-        if admits_to_backlog {
-            self.ensure_backlog_not_over_capacity()?;
-        }
-        Ok(())
-    }
-
-    fn create_task(&self, title: TaskTitle) -> Result<TaskPath, Error> {
-        let task_path = self.create_task_unlocked(title)?;
-        self.sync_repository_with_admission_unlocked(true)?;
-        Ok(task_path)
-    }
-
-    fn create_task_unlocked(&self, title: TaskTitle) -> Result<TaskPath, Error> {
-        self.ensure_backlog_capacity()?;
-        let nickname = self.unique_nickname(&title.file_stem())?;
-        let id = new_task_id();
-        let stem = format!("{id}-{nickname}");
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        projection.tasks.insert(
-            stem.clone(),
-            Task::new(
-                stem.clone(),
-                title.as_str().to_string(),
-                command_recorded_at(),
-            ),
-        );
-        projection.order.push(stem.clone());
-
-        Ok(TaskPath { path: stem })
-    }
-
-    fn ensure_backlog_capacity(&self) -> Result<(), Error> {
-        let Some(max_queued) = self.project_config()?.backlog.max_queued else {
-            return Ok(());
-        };
-        let queued = self.backlog_count()?;
-        if !backlog_admission_allowed(queued, max_queued) {
-            return Err(Error::BacklogCapacityExceeded { queued, max_queued });
-        }
-        Ok(())
-    }
-
-    fn ensure_backlog_not_over_capacity(&self) -> Result<(), Error> {
-        let Some(max_queued) = self.project_config()?.backlog.max_queued else {
-            return Ok(());
-        };
-        let queued = self.backlog_count()?;
-        if queued > max_queued {
-            return Err(Error::BacklogCapacityExceeded { queued, max_queued });
-        }
-        Ok(())
-    }
-
-    fn backlog_count(&self) -> Result<usize, Error> {
-        Ok(self
-            .task_projection()?
-            .borrow()
-            .tasks
-            .values()
-            .filter(|task| task.status == "backlog")
-            .count())
-    }
-
     fn project_config(&self) -> Result<ProjectConfig, Error> {
         let path = self.root.join(CONFIG_FILE);
         let contents = match fs::read_to_string(&path) {
@@ -2850,25 +8077,6 @@ impl GitRepository {
         toml::from_str(&contents).map_err(|error| {
             Error::Parse(format!("config_invalid file={CONFIG_FILE} source={error}"))
         })
-    }
-
-    fn unique_nickname(&self, base: &str) -> Result<String, Error> {
-        let mut nickname = base.to_string();
-        let mut suffix = 2;
-        while self.nickname_exists(&nickname)? {
-            nickname = format!("{base}-{suffix}");
-            suffix += 1;
-        }
-        Ok(nickname)
-    }
-
-    fn nickname_exists(&self, nickname: &str) -> Result<bool, Error> {
-        Ok(self
-            .task_projection()?
-            .borrow()
-            .tasks
-            .keys()
-            .any(|stem| stem.ends_with(&format!("-{nickname}"))))
     }
 
     fn list_tasks(&self) -> Result<Vec<TaskSummary>, Error> {
@@ -3020,345 +8228,6 @@ impl GitRepository {
             }
         }
         Ok(None)
-    }
-
-    fn transition_task(&self, task_ref: &str, status: &str) -> Result<TaskPath, Error> {
-        let (task_path, admits_to_backlog) = self.transition_task_unlocked(task_ref, status)?;
-        self.sync_repository_with_admission_unlocked(admits_to_backlog)?;
-        Ok(task_path)
-    }
-
-    fn transition_task_unlocked(
-        &self,
-        task_ref: &str,
-        status: &str,
-    ) -> Result<(TaskPath, bool), Error> {
-        let stem = self.resolve_task_stem(task_ref)?;
-        let status = parse_status(status)?;
-        let projection = self.task_projection()?;
-        let old_status = projection
-            .borrow()
-            .tasks
-            .get(&stem)
-            .expect("resolved task")
-            .status
-            .clone();
-        let admits_to_backlog = status == "backlog" && old_status != "backlog";
-        if admits_to_backlog {
-            self.ensure_backlog_capacity()?;
-        }
-        let mut projection = projection.borrow_mut();
-        let task = projection.tasks.get_mut(&stem).expect("resolved task");
-        task.status = status.to_string();
-        task.claim = (status == "in-progress").then(|| Claim {
-            host: claim_host(),
-            session: claim_session(),
-        });
-        if is_open_status(status) {
-            if !projection.order.contains(&stem) {
-                projection.order.push(stem.clone());
-            }
-        } else {
-            projection.order.retain(|entry| entry != &stem);
-        }
-        Ok((TaskPath { path: stem }, admits_to_backlog))
-    }
-
-    fn prioritize_before(&self, task_ref: &str, before_ref: &str) -> Result<(), Error> {
-        self.prioritize_before_unlocked(task_ref, before_ref)?;
-        self.sync_repository_unlocked()
-    }
-
-    fn prioritize_before_unlocked(&self, task_ref: &str, before_ref: &str) -> Result<(), Error> {
-        let task_ref = self.resolve_task_stem(task_ref)?;
-        let before_ref = self.resolve_task_stem(before_ref)?;
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        let mut order = projection
-            .order
-            .iter()
-            .filter(|&entry| entry != &task_ref)
-            .cloned()
-            .collect::<Vec<_>>();
-        let before_index = order
-            .iter()
-            .position(|entry| entry == &before_ref)
-            .ok_or_else(|| Error::Parse(format!("task_ref_missing ref={before_ref}")))?;
-        order.insert(before_index, task_ref);
-        projection.order = order;
-        Ok(())
-    }
-
-    fn link_blocks(&self, from_ref: &str, to_ref: &str) -> Result<(), Error> {
-        self.link_blocks_unlocked(from_ref, to_ref)?;
-        self.sync_repository_unlocked()
-    }
-
-    fn link_blocks_unlocked(&self, from_ref: &str, to_ref: &str) -> Result<(), Error> {
-        let from_ref = self.resolve_task_stem(from_ref)?;
-        let to_ref = self.resolve_task_stem(to_ref)?;
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        add_unique(
-            &mut projection
-                .tasks
-                .get_mut(&from_ref)
-                .expect("resolved task")
-                .blocks,
-            &to_ref,
-        );
-        add_unique(
-            &mut projection
-                .tasks
-                .get_mut(&to_ref)
-                .expect("resolved task")
-                .blocked_by,
-            &from_ref,
-        );
-        Ok(())
-    }
-
-    fn unlink_blocks(&self, from_ref: &str, to_ref: &str) -> Result<(), Error> {
-        self.unlink_blocks_unlocked(from_ref, to_ref)?;
-        self.sync_repository_unlocked()
-    }
-
-    fn unlink_blocks_unlocked(&self, from_ref: &str, to_ref: &str) -> Result<(), Error> {
-        let from_ref = self.resolve_task_stem(from_ref)?;
-        let to_ref = self.resolve_task_stem(to_ref)?;
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        projection
-            .tasks
-            .get_mut(&from_ref)
-            .expect("resolved task")
-            .blocks
-            .retain(|item| item != &to_ref);
-        projection
-            .tasks
-            .get_mut(&to_ref)
-            .expect("resolved task")
-            .blocked_by
-            .retain(|item| item != &from_ref);
-        Ok(())
-    }
-
-    fn add_subtask(&self, task_ref: &str, title: &str, after_refs: &[String]) -> Result<(), Error> {
-        self.add_subtask_unlocked(task_ref, title, after_refs)?;
-        self.sync_repository_unlocked()
-    }
-
-    fn add_subtask_unlocked(
-        &self,
-        task_ref: &str,
-        title: &str,
-        after_refs: &[String],
-    ) -> Result<(), Error> {
-        let title = title.trim();
-        if title.is_empty() {
-            return Err(Error::Parse("subtask_title_empty=true".to_string()));
-        }
-        if title.chars().any(char::is_control) {
-            return Err(Error::Parse("subtask_title_invalid=true".to_string()));
-        }
-        let after_refs = after_refs
-            .iter()
-            .map(|after_ref| parse_subtask_ref(after_ref))
-            .collect::<Result<Vec<_>, Error>>()?;
-        let stem = self.resolve_task_stem(task_ref)?;
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        let task = projection.tasks.get_mut(&stem).expect("resolved task");
-        let subtask_id = task
-            .subtasks
-            .iter()
-            .filter_map(|item| item.id.strip_prefix('s')?.parse::<usize>().ok())
-            .max()
-            .unwrap_or(0)
-            + 1;
-        task.subtasks.push(Subtask {
-            id: format!("s{subtask_id}"),
-            checked: false,
-            title: title.to_string(),
-            after: after_refs,
-        });
-        Ok(())
-    }
-
-    fn set_subtask_checked(&self, task_ref: &str, index: &str, checked: bool) -> Result<(), Error> {
-        self.set_subtask_checked_unlocked(task_ref, index, checked)?;
-        self.sync_repository_unlocked()
-    }
-
-    fn set_subtask_checked_unlocked(
-        &self,
-        task_ref: &str,
-        index: &str,
-        checked: bool,
-    ) -> Result<(), Error> {
-        let task_ref = self.resolve_task_stem(task_ref)?;
-        let subtask_ref = parse_subtask_ref(index)?;
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        let item = projection
-            .tasks
-            .get_mut(&task_ref)
-            .expect("resolved task")
-            .subtasks
-            .iter_mut()
-            .find(|item| item.id == subtask_ref)
-            .ok_or_else(|| Error::Parse(format!("subtask_ref_missing ref={subtask_ref}")))?;
-        item.checked = checked;
-        Ok(())
-    }
-
-    fn update_task(&self, task_ref: &str, update: TaskUpdate<'_>) -> Result<(), Error> {
-        let task_ref = self.resolve_task_stem(task_ref)?;
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        let task = projection.tasks.get_mut(&task_ref).expect("resolved task");
-        if let Some(title) = update.title {
-            let title = TaskTitle::parse(title)?;
-            task.title = title.as_str().to_string();
-        }
-        if let Some(tags) = update.tags {
-            task.tags = tags.to_vec();
-        }
-        if let Some(pr_mr_url) = update.pr_mr_url {
-            task.pr_mr_url = nonempty_option(pr_mr_url);
-        }
-        if let Some(pr_mr_status) = update.pr_mr_status {
-            task.pr_mr_status = nonempty_option(pr_mr_status);
-        }
-        if let Some(summary) = update.summary {
-            task.summary = parse_task_section_body(summary)?;
-        }
-        if let Some(context) = update.context {
-            task.context = parse_task_section_body(context)?;
-        }
-        self.sync_repository_unlocked()
-    }
-
-    fn add_acceptance(&self, task_ref: &str, criterion: &str) -> Result<(), Error> {
-        let criterion = parse_nonempty_text(criterion, "acceptance")?;
-        let task_ref = self.resolve_task_stem(task_ref)?;
-        self.task_projection()?
-            .borrow_mut()
-            .tasks
-            .get_mut(&task_ref)
-            .expect("resolved task")
-            .acceptance
-            .push(ChecklistItem {
-                checked: false,
-                text: criterion.to_string(),
-            });
-        self.sync_repository_unlocked()
-    }
-
-    fn set_acceptance_checked(
-        &self,
-        task_ref: &str,
-        index: &str,
-        checked: bool,
-    ) -> Result<(), Error> {
-        let index = parse_one_based_usize(index, "acceptance")? - 1;
-        let task_ref = self.resolve_task_stem(task_ref)?;
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        let item = projection
-            .tasks
-            .get_mut(&task_ref)
-            .expect("resolved task")
-            .acceptance
-            .get_mut(index)
-            .ok_or_else(|| Error::Parse(format!("acceptance_index_missing index={}", index + 1)))?;
-        item.checked = checked;
-        self.sync_repository_unlocked()
-    }
-
-    fn remove_acceptance(&self, task_ref: &str, index: &str) -> Result<(), Error> {
-        let index = parse_one_based_usize(index, "acceptance")? - 1;
-        let task_ref = self.resolve_task_stem(task_ref)?;
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        let items = &mut projection
-            .tasks
-            .get_mut(&task_ref)
-            .expect("resolved task")
-            .acceptance;
-        if index >= items.len() {
-            return Err(Error::Parse(format!(
-                "acceptance_index_missing index={}",
-                index + 1
-            )));
-        }
-        items.remove(index);
-        self.sync_repository_unlocked()
-    }
-
-    fn add_note_at(&self, task_ref: &str, note: &str, date: &str) -> Result<(), Error> {
-        let note = parse_nonempty_text(note, "note")?;
-        let task_ref = self.resolve_task_stem(task_ref)?;
-        self.task_projection()?
-            .borrow_mut()
-            .tasks
-            .get_mut(&task_ref)
-            .expect("resolved task")
-            .notes
-            .push(Note {
-                date: date.to_string(),
-                text: note.to_string(),
-            });
-        self.sync_repository_unlocked()
-    }
-
-    fn validate_fix(&self) -> Result<Vec<ValidationMessage>, Error> {
-        let messages = self.validate_fix_unlocked()?;
-        self.sync_repository_unlocked()?;
-        Ok(messages)
-    }
-
-    fn validate_fix_unlocked(&self) -> Result<Vec<ValidationMessage>, Error> {
-        let mut messages = Vec::new();
-        let projection = self.task_projection()?;
-        let mut projection = projection.borrow_mut();
-        repair_typed_links(&mut projection.tasks, &mut messages);
-        report_typed_cycles(&projection.tasks, &mut messages);
-        let open = projection
-            .tasks
-            .values()
-            .filter(|task| is_open_status(&task.status))
-            .map(|task| task.stem.clone())
-            .collect::<Vec<_>>();
-        let reconciliation = OrderReconciliation::reconcile(projection.order.clone(), open);
-        messages.extend(
-            reconciliation
-                .messages()
-                .iter()
-                .cloned()
-                .map(ValidationMessage),
-        );
-        projection.order = reconciliation.entries().to_vec();
-        Ok(messages)
-    }
-
-    fn close_from_trailers(&self) -> Result<Vec<String>, Error> {
-        let log = self.git(["log", "-1", "--format=%B"])?;
-        let requested = closes_trailers(&log);
-        if requested.is_empty() {
-            return Ok(Vec::new());
-        }
-        self.sync_repository_unlocked()?;
-        let mut closed = Vec::new();
-        for task_ref in requested {
-            let resolved = self.resolve_task_stem(&task_ref)?;
-            let (done, _) = self.transition_task_unlocked(&resolved, "done")?;
-            closed.push(done.path);
-        }
-        closed.sort();
-        closed.dedup();
-        self.sync_repository_unlocked()?;
-        Ok(closed)
     }
 
     fn scaffold_repo(&self, apply: bool, replace_conflicts: bool) -> Result<Vec<String>, Error> {
@@ -3920,68 +8789,6 @@ fn nonempty_option(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-fn add_unique(values: &mut Vec<String>, value: &str) {
-    if !values.iter().any(|item| item == value) {
-        values.push(value.to_string());
-    }
-}
-
-fn repair_typed_links(
-    tasks: &mut std::collections::BTreeMap<String, Task>,
-    messages: &mut Vec<ValidationMessage>,
-) {
-    let snapshot = tasks.clone();
-    for (stem, task) in &snapshot {
-        for blocked in &task.blocks {
-            if let Some(target) = tasks.get_mut(blocked) {
-                if !target.blocked_by.contains(stem) {
-                    target.blocked_by.push(stem.clone());
-                    messages.push(ValidationMessage(format!(
-                        "fixed reciprocal blocked_by {blocked} <- {stem}"
-                    )));
-                }
-            }
-        }
-        for blocker in &task.blocked_by {
-            if let Some(target) = tasks.get_mut(blocker) {
-                if !target.blocks.contains(stem) {
-                    target.blocks.push(stem.clone());
-                    messages.push(ValidationMessage(format!(
-                        "fixed reciprocal blocks {blocker} -> {stem}"
-                    )));
-                }
-            }
-        }
-    }
-}
-
-fn report_typed_cycles(
-    tasks: &std::collections::BTreeMap<String, Task>,
-    messages: &mut Vec<ValidationMessage>,
-) {
-    let graph = DependencyGraph::from_tasks(
-        tasks
-            .values()
-            .map(|task| TaskDependencies::new(task.stem.clone(), task.blocks.clone()))
-            .collect(),
-    );
-    messages.extend(graph.cycle_messages().into_iter().map(ValidationMessage));
-    for task in tasks.values() {
-        let graph = DependencyGraph::from_tasks(
-            task.subtasks
-                .iter()
-                .map(|item| TaskDependencies::new(item.id.clone(), item.after.clone()))
-                .collect(),
-        );
-        messages.extend(
-            graph
-                .cycle_messages_with_label("subtask")
-                .into_iter()
-                .map(|message| ValidationMessage(format!("{message} task={}", task.stem))),
-        );
-    }
-}
-
 fn atomic_write(destination: &Path, contents: &[u8]) -> Result<(), Error> {
     static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -4372,22 +9179,7 @@ fn trim_unquoted_comment(value: &str) -> &str {
 }
 
 fn new_task_id() -> String {
-    if let Some(value) = COMMAND_TASK_IDS.with(|ids| {
-        let mut state = ids.borrow_mut();
-        let (values, cursor) = state.as_mut()?;
-        let value = values.get(*cursor).cloned();
-        *cursor += 1;
-        value
-    }) {
-        return value;
-    }
-    let value = generate_task_id();
-    COMMAND_TASK_IDS.with(|ids| {
-        if let Some((values, _)) = ids.borrow_mut().as_mut() {
-            values.push(value.clone());
-        }
-    });
-    value
+    generate_task_id()
 }
 
 fn command_recorded_at() -> String {
@@ -4445,7 +9237,10 @@ fn is_retryable_push_failure(error: &Error) -> bool {
     match error {
         Error::Parse(message)
             if message.starts_with("event_version_conflict=")
-                || message.contains("event_store_authoritative_ref_retry=true") =>
+                || message.contains("event_store_authoritative_ref_retry=true")
+                // EventCore may have retried a concurrent claim internally.
+                // The outer claim protocol then reloads and joins the winner.
+                || message.contains("ci_recovery_claim_already_active") =>
         {
             true
         }
@@ -4812,12 +9607,643 @@ mod lock_tests {
     use super::*;
 
     #[test]
-    fn checked_backlog_model_proves_capacity_gate() {
-        let report = check_tiber_model().expect("model check completes");
+    fn checked_model_has_registered_mappings_for_current_and_legacy_events() {
+        let report = check_tiber_model().expect("registered Tiber event mappings");
 
         assert_eq!(report.status, eventcore::model::CheckStatus::Verified);
+        assert!(
+            report.warnings.is_empty(),
+            "complete Tiber model must have no unconsumed provenance or other warnings: {:#?}",
+            report.warnings
+        );
         assert!(backlog_admission_allowed(4, 5));
         assert!(!backlog_admission_allowed(5, 5));
+    }
+
+    #[test]
+    fn ci_recovery_phase_rejects_unmodeled_persisted_values() {
+        assert_eq!(
+            serde_json::from_str::<CiRecoveryPhase>("\"waiting-ci\"").unwrap(),
+            CiRecoveryPhase::WaitingCi
+        );
+        assert!(serde_json::from_str::<CiRecoveryPhase>("\"paused\"").is_err());
+    }
+
+    #[test]
+    fn trailer_closure_decides_from_task_statuses_not_full_task_documents() {
+        let board = TiberBoardStream(stream_id(BOARD_STREAM).expect("board stream"));
+        let request = CloseTasksFromCommitTrailersRequest::model_builder()
+            .board(board.clone())
+            .intent(CloseTasksFromCommitTrailersIntent {
+                stems: vec!["task-a".into()],
+            })
+            .build();
+        let command = CloseTasksFromCommitTrailers::model_builder()
+            .board(CloseTasksFromCommitTrailersRequestToBoard::apply(
+                request.as_ref(),
+            ))
+            .intent(CloseTasksFromCommitTrailersRequestToIntent::apply(
+                request.as_ref(),
+            ))
+            .build();
+        let created = TiberEvent::TaskCreated(TaskCreatedEvent {
+            stream_id: eventcore::model::StreamIdentity::as_stream_id(&board).clone(),
+            task: Box::new(Task::new(
+                "task-a".into(),
+                "Original title".into(),
+                "now".into(),
+            )),
+        });
+        let ordered = TiberEvent::BoardReordered(TaskOrderEvent {
+            stream_id: eventcore::model::StreamIdentity::as_stream_id(&board).clone(),
+            order: vec!["task-a".into()],
+        });
+        let state = eventcore::model::ModelCommandLogic::evolve(
+            command.as_ref(),
+            Default::default(),
+            &created,
+        );
+        let state = eventcore::model::ModelCommandLogic::evolve(command.as_ref(), state, &ordered);
+        let emitted: Vec<TiberEvent> = eventcore::CommandLogic::handle(&command, state)
+            .expect("open trailer-referenced task may close")
+            .into();
+
+        assert!(matches!(
+            emitted.as_slice(),
+            [TiberEvent::TasksClosedFromCommitTrailers(
+                TasksClosedFromCommitTrailersEvent { stems, order, .. }
+            )] if stems == &["task-a"] && order.is_empty()
+        ));
+    }
+
+    #[test]
+    fn task_collection_states_fold_only_the_command_target() {
+        let board_stream = stream_id(BOARD_STREAM).expect("board stream");
+        let mut target = Task::new("task-a".into(), "Target".into(), "now".into());
+        target.subtasks.push(Subtask {
+            id: "s1".into(),
+            checked: false,
+            title: "target subtask".into(),
+            after: vec![],
+        });
+        target.acceptance.push(ChecklistItem {
+            checked: false,
+            text: "target criterion".into(),
+        });
+        let mut unrelated = Task::new("task-b".into(), "Unrelated".into(), "now".into());
+        unrelated.subtasks.push(Subtask {
+            id: "s9".into(),
+            checked: false,
+            title: "unrelated subtask".into(),
+            after: vec![],
+        });
+        unrelated.acceptance.push(ChecklistItem {
+            checked: false,
+            text: "unrelated criterion".into(),
+        });
+        let target_created = TiberEvent::TaskCreated(TaskCreatedEvent {
+            stream_id: board_stream.clone(),
+            task: Box::new(target),
+        });
+        let unrelated_created = TiberEvent::TaskCreated(TaskCreatedEvent {
+            stream_id: board_stream,
+            task: Box::new(unrelated),
+        });
+
+        let subtask_state = evolve_subtask_state(
+            evolve_subtask_state(
+                AddSubtaskState {
+                    board_order: Vec::new(),
+                    board_task_stems: BTreeSet::new(),
+                    target_subtasks: None,
+                },
+                "task-a",
+                &target_created,
+            ),
+            "task-a",
+            &unrelated_created,
+        );
+        let acceptance_state = evolve_acceptance_state(
+            evolve_acceptance_state(
+                AddAcceptanceState {
+                    board_order: Vec::new(),
+                    board_task_stems: BTreeSet::new(),
+                    target_acceptance: None,
+                },
+                "task-a",
+                &target_created,
+            ),
+            "task-a",
+            &unrelated_created,
+        );
+
+        assert_eq!(
+            subtask_state
+                .target_subtasks
+                .expect("target subtasks")
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["s1"]
+        );
+        assert_eq!(
+            acceptance_state
+                .target_acceptance
+                .expect("target acceptance")
+                .iter()
+                .map(|item| item.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["target criterion"]
+        );
+    }
+
+    #[test]
+    fn board_validation_decides_from_status_and_link_facts() {
+        let board = TiberBoardStream(stream_id(BOARD_STREAM).expect("board stream"));
+        let statuses = BTreeMap::from([
+            ("task-a".into(), "backlog".into()),
+            ("task-b".into(), "backlog".into()),
+        ]);
+        let links = BTreeMap::from([
+            ("task-a".into(), (vec!["task-b".into()], vec![])),
+            ("task-b".into(), (vec![], vec![])),
+        ]);
+
+        let plan = task_board_repair_plan(
+            &board,
+            &["task-a".into(), "task-b".into()],
+            &BTreeSet::from(["task-a".into(), "task-b".into()]),
+            &statuses,
+            &links,
+        );
+
+        assert!(plan.order_change.is_none());
+        assert!(matches!(
+            plan.link_changes.as_slice(),
+            [TaskLinksChangedEvent {
+                stem,
+                blocked_by,
+                ..
+            }] if stem == "task-b" && blocked_by == &["task-a"]
+        ));
+        assert!(matches!(
+            plan.repairs.as_slice(),
+            [ValidationRepair::ReciprocalLinkAdded { task, field, target }]
+                if task == "task-b" && field == "blocked_by" && target == "task-a"
+        ));
+    }
+
+    fn recovery_state_for_event_test() -> CiRecoveryState {
+        CiRecoveryState {
+            schema_version: 1,
+            incident_id: "ci-123".into(),
+            state: CiRecoveryPhase::Diagnosing,
+            epoch: 1,
+            trigger: CiRecoveryTrigger {
+                run_id: "123".into(),
+                run_url: "https://example.invalid/runs/123".into(),
+                failed_sha: "abcdef".into(),
+                workflow: "CI".into(),
+                git_ref: "refs/heads/main".into(),
+            },
+            triggers: vec![],
+            owner: CiRecoveryParticipant {
+                host: "owner".into(),
+                session: "session-1".into(),
+            },
+            lease_expires_at: 60,
+            participants: vec![],
+            assignments: vec![],
+            failure_record: None,
+            diagnosis: None,
+            next_action: None,
+            replacement: None,
+            release_proof: None,
+        }
+    }
+
+    fn claimed_event(stream_id: StreamId, state: &CiRecoveryState) -> TiberEvent {
+        TiberEvent::CiRecoveryClaimed(CiRecoveryClaimedEvent {
+            stream_id,
+            schema_version: state.schema_version,
+            incident_id: state.incident_id.clone(),
+            trigger: state.trigger.clone().into(),
+            owner: state.owner.clone().into(),
+            lease_expires_at: state.lease_expires_at,
+        })
+    }
+
+    fn claim_command(state: &CiRecoveryState) -> eventcore::model::ModeledCommand<ClaimCiRecovery> {
+        let request = ClaimCiRecoveryRequest::model_builder()
+            .stream(CiRecoveryStream(
+                stream_id(CI_RECOVERY_STREAM).expect("recovery stream"),
+            ))
+            .intent(ClaimCiRecoveryIntent {
+                incident_id: state.incident_id.clone(),
+                schema_version: state.schema_version,
+                trigger: state.trigger.clone(),
+                owner: state.owner.clone(),
+                lease_expires_at: state.lease_expires_at,
+            })
+            .build();
+        ClaimCiRecovery::model_builder()
+            .stream(ClaimCiRecoveryRequestToStream::apply(request.as_ref()))
+            .intent(ClaimCiRecoveryRequestToIntent::apply(request.as_ref()))
+            .build()
+    }
+
+    fn transfer_command(
+        state: &CiRecoveryState,
+        recipient: CiRecoveryParticipant,
+        observed_at: u64,
+    ) -> eventcore::model::ModeledCommand<TransferCiRecovery> {
+        let request = TransferCiRecoveryRequest::model_builder()
+            .stream(CiRecoveryStream(
+                stream_id(CI_RECOVERY_STREAM).expect("recovery stream"),
+            ))
+            .intent(TransferCiRecoveryIntent {
+                incident_id: state.incident_id.clone(),
+                expected_epoch: state.epoch,
+                caller: state.owner.clone(),
+                recipient,
+                observed_at,
+                lease_expires_at: observed_at + CI_RECOVERY_LEASE_SECONDS,
+            })
+            .build();
+        TransferCiRecovery::model_builder()
+            .stream(TransferCiRecoveryRequestToStream::apply(request.as_ref()))
+            .intent(TransferCiRecoveryRequestToIntent::apply(request.as_ref()))
+            .build()
+    }
+
+    fn takeover_command(
+        state: &CiRecoveryState,
+        successor: CiRecoveryParticipant,
+        observed_at: u64,
+    ) -> eventcore::model::ModeledCommand<TakeOverCiRecovery> {
+        let request = TakeOverCiRecoveryRequest::model_builder()
+            .stream(CiRecoveryStream(
+                stream_id(CI_RECOVERY_STREAM).expect("recovery stream"),
+            ))
+            .intent(TakeOverCiRecoveryIntent {
+                incident_id: state.incident_id.clone(),
+                expected_epoch: state.epoch,
+                successor,
+                observed_at,
+                lease_expires_at: observed_at + CI_RECOVERY_LEASE_SECONDS,
+            })
+            .build();
+        TakeOverCiRecovery::model_builder()
+            .stream(TakeOverCiRecoveryRequestToStream::apply(request.as_ref()))
+            .intent(TakeOverCiRecoveryRequestToIntent::apply(request.as_ref()))
+            .build()
+    }
+
+    #[test]
+    fn claim_ci_recovery_decides_the_opening_fact_from_minimal_folded_state() {
+        let state = recovery_state_for_event_test();
+        let command = claim_command(&state);
+        let emitted: Vec<TiberEvent> =
+            eventcore::CommandLogic::handle(&command, Default::default())
+                .expect("first claim is allowed")
+                .into();
+        assert!(matches!(
+            emitted.as_slice(),
+            [TiberEvent::CiRecoveryClaimed(CiRecoveryClaimedEvent { incident_id, .. })]
+                if incident_id == &state.incident_id
+        ));
+
+        let folded = eventcore::model::ModelCommandLogic::evolve(
+            command.as_ref(),
+            Default::default(),
+            &emitted[0],
+        );
+        let error = match eventcore::CommandLogic::handle(&command, folded) {
+            Ok(_) => panic!("second active claim is rejected"),
+            Err(error) => error,
+        };
+        assert!(error
+            .to_string()
+            .contains("ci_recovery_claim_already_active"));
+    }
+
+    #[test]
+    fn transfer_ci_recovery_decides_its_ownership_fact_from_incident_facts() {
+        let state = recovery_state_for_event_test();
+        let successor = CiRecoveryParticipant {
+            host: "successor".into(),
+            session: "session-2".into(),
+        };
+        let command = transfer_command(&state, successor.clone(), 30);
+        let claim = claimed_event(
+            stream_id(CI_RECOVERY_STREAM).expect("recovery stream"),
+            &state,
+        );
+        let folded = eventcore::model::ModelCommandLogic::evolve(
+            command.as_ref(),
+            Default::default(),
+            &claim,
+        );
+        let emitted: Vec<TiberEvent> = eventcore::CommandLogic::handle(&command, folded)
+            .expect("owner with an active lease can transfer")
+            .into();
+        assert!(matches!(
+            emitted.as_slice(),
+            [TiberEvent::CiRecoveryTransferred(CiRecoveryTransferredEvent {
+                owner,
+                epoch: 2,
+                lease_expires_at,
+                participant: Some(participant),
+                ..
+            })] if CiRecoveryParticipant::from(owner.clone()) == successor
+                && CiRecoveryParticipant::from(participant.clone()) == successor
+                && *lease_expires_at == 30 + CI_RECOVERY_LEASE_SECONDS
+        ));
+
+        let expired = transfer_command(&state, successor, state.lease_expires_at);
+        let folded = eventcore::model::ModelCommandLogic::evolve(
+            expired.as_ref(),
+            Default::default(),
+            &claim,
+        );
+        let error = match eventcore::CommandLogic::handle(&expired, folded) {
+            Ok(_) => panic!("an expired owner cannot transfer"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("ci_recovery_lease_expired"));
+    }
+
+    #[test]
+    fn takeover_ci_recovery_decides_its_ownership_fact_only_after_lease_expiry() {
+        let state = recovery_state_for_event_test();
+        let successor = CiRecoveryParticipant {
+            host: "successor".into(),
+            session: "session-2".into(),
+        };
+        let claim = claimed_event(
+            stream_id(CI_RECOVERY_STREAM).expect("recovery stream"),
+            &state,
+        );
+        let active = takeover_command(&state, successor.clone(), state.lease_expires_at - 1);
+        let folded = eventcore::model::ModelCommandLogic::evolve(
+            active.as_ref(),
+            Default::default(),
+            &claim,
+        );
+        let error = match eventcore::CommandLogic::handle(&active, folded) {
+            Ok(_) => panic!("an active lease cannot be taken over"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("ci_recovery_lease_active"));
+
+        let expired = takeover_command(&state, successor.clone(), state.lease_expires_at);
+        let folded = eventcore::model::ModelCommandLogic::evolve(
+            expired.as_ref(),
+            Default::default(),
+            &claim,
+        );
+        let emitted: Vec<TiberEvent> = eventcore::CommandLogic::handle(&expired, folded)
+            .expect("a joined successor can take over after the lease expires")
+            .into();
+        assert!(matches!(
+            emitted.as_slice(),
+            [TiberEvent::CiRecoveryTakenOver(CiRecoveryTakenOverEvent {
+                owner,
+                epoch: 2,
+                participant: Some(participant),
+                ..
+            })] if CiRecoveryParticipant::from(owner.clone()) == successor
+                && CiRecoveryParticipant::from(participant.clone()) == successor
+        ));
+    }
+
+    #[test]
+    fn typed_claim_and_join_facts_rebuild_the_recovery_projection() {
+        let state = recovery_state_for_event_test();
+        let stream = stream_id(CI_RECOVERY_STREAM).expect("recovery stream");
+        let claim = claimed_event(stream.clone(), &state);
+        let helper = CiRecoveryParticipant {
+            host: "helper".into(),
+            session: "session-2".into(),
+        };
+        let mut joined_state = state.clone();
+        joined_state.participants.push(helper.clone());
+        let join = TiberEvent::CiRecoveryJoined(CiRecoveryJoinedEvent {
+            stream_id: stream.clone(),
+            trigger: None,
+            participant: Some(helper.clone().into()),
+        });
+        let mut transferred_state = joined_state.clone();
+        transferred_state.owner = helper.clone();
+        transferred_state.epoch = 2;
+        transferred_state.lease_expires_at = 120;
+        let transfer = TiberEvent::CiRecoveryTransferred(CiRecoveryTransferredEvent {
+            stream_id: stream.clone(),
+            owner: helper.clone().into(),
+            epoch: 2,
+            lease_expires_at: 120,
+            participant: None,
+        });
+        let successor = CiRecoveryParticipant {
+            host: "successor".into(),
+            session: "session-3".into(),
+        };
+        let mut takeover_state = transferred_state.clone();
+        takeover_state.owner = successor.clone();
+        takeover_state.epoch = 3;
+        takeover_state.lease_expires_at = 180;
+        takeover_state.participants.push(successor.clone());
+        let takeover = TiberEvent::CiRecoveryTakenOver(CiRecoveryTakenOverEvent {
+            stream_id: stream,
+            owner: successor.clone().into(),
+            epoch: 3,
+            lease_expires_at: 180,
+            participant: Some(successor.clone().into()),
+        });
+
+        let mut projection = TiberProjection::default();
+        apply_tiber_event(&mut projection, &claim).expect("fold claim");
+        apply_tiber_event(&mut projection, &join).expect("fold join");
+        apply_tiber_event(&mut projection, &transfer).expect("fold transfer");
+        apply_tiber_event(&mut projection, &takeover).expect("fold takeover");
+        let recovery = projection.ci_recovery.expect("recovery projection");
+        assert_eq!(recovery.incident_id, "ci-123");
+        assert_eq!(recovery.owner, successor);
+        assert_eq!(recovery.epoch, 3);
+        assert_eq!(recovery.lease_expires_at, 180);
+        assert_eq!(recovery.participants, vec![state.owner, helper, successor]);
+        assert!(matches!(claim, TiberEvent::CiRecoveryClaimed(_)));
+        assert!(matches!(join, TiberEvent::CiRecoveryJoined(_)));
+        assert!(matches!(transfer, TiberEvent::CiRecoveryTransferred(_)));
+        assert!(matches!(takeover, TiberEvent::CiRecoveryTakenOver(_)));
+    }
+
+    #[test]
+    fn typed_ci_transition_facts_rebuild_a_completed_recovery_without_snapshots() {
+        let stream = stream_id(CI_RECOVERY_STREAM).expect("recovery stream");
+        let opening = recovery_state_for_event_test();
+        let claim = claimed_event(stream.clone(), &opening);
+
+        let mut assigned_state = opening.clone();
+        assigned_state.assignments.push(CiRecoveryAssignment {
+            id: "a1".into(),
+            owner_epoch: 1,
+            assignee: opening.owner.clone(),
+            capabilities: vec!["inspect".into()],
+            scope: "failed job".into(),
+            report: None,
+        });
+        let assigned = TiberEvent::CiRecoveryAssigned(CiRecoveryAssignedEvent {
+            stream_id: stream.clone(),
+            assignment: assigned_state.assignments[0].clone().into(),
+        });
+
+        let mut reported_state = assigned_state.clone();
+        reported_state.assignments[0].report = Some(CiRecoveryReport {
+            summary: "reproduced".into(),
+            evidence: "log line".into(),
+        });
+        let reported = TiberEvent::CiRecoveryReported(CiRecoveryReportedEvent {
+            stream_id: stream.clone(),
+            assignment_id: "a1".into(),
+            assignee: opening.owner.clone().into(),
+            report: reported_state.assignments[0]
+                .report
+                .clone()
+                .expect("report present")
+                .into(),
+        });
+
+        let mut diagnosed_state = reported_state.clone();
+        diagnosed_state.failure_record = Some(CiRecoveryFailureRecord {
+            job: "test".into(),
+            step: "run".into(),
+            log_evidence: "failure".into(),
+        });
+        diagnosed_state.diagnosis = Some(CiRecoveryDiagnosis {
+            cause: "test regression".into(),
+            classification: CiRecoveryClassification::Caused,
+        });
+        let diagnosed = TiberEvent::CiRecoveryDiagnosed(CiRecoveryDiagnosedEvent {
+            stream_id: stream.clone(),
+            epoch: 1,
+            owner: opening.owner.clone().into(),
+            failure_record: diagnosed_state
+                .failure_record
+                .clone()
+                .expect("failure present")
+                .into(),
+            diagnosis: diagnosed_state
+                .diagnosis
+                .clone()
+                .expect("diagnosis present")
+                .into(),
+        });
+
+        let mut action_state = diagnosed_state.clone();
+        action_state.next_action = Some(CiRecoveryAction {
+            kind: CiRecoveryActionKind::Repair,
+            description: "repair the regression".into(),
+        });
+        action_state.state = CiRecoveryPhase::ActionSelected;
+        let action = TiberEvent::CiRecoveryActionChosen(CiRecoveryActionChosenEvent {
+            stream_id: stream.clone(),
+            epoch: 1,
+            owner: opening.owner.clone().into(),
+            action: action_state
+                .next_action
+                .clone()
+                .expect("action present")
+                .into(),
+        });
+
+        let mut replacement_state = action_state.clone();
+        replacement_state.replacement = Some(CiRecoveryReplacement {
+            run_id: "124".into(),
+            run_url: "https://example.invalid/runs/124".into(),
+            sha: "fedcba".into(),
+            status: CiRecoveryReplacementStatus::Running,
+        });
+        replacement_state.state = CiRecoveryPhase::WaitingCi;
+        let replacement =
+            TiberEvent::CiRecoveryReplacementRecorded(CiRecoveryReplacementRecordedEvent {
+                stream_id: stream.clone(),
+                epoch: 1,
+                owner: opening.owner.clone().into(),
+                replacement: replacement_state
+                    .replacement
+                    .clone()
+                    .expect("replacement present")
+                    .into(),
+            });
+
+        let mut resolved_state = replacement_state.clone();
+        resolved_state.release_proof = Some(CiRecoveryReleaseProof {
+            replacement_run_id: "124".into(),
+            replacement_run_url: "https://example.invalid/runs/124".into(),
+            sha: "fedcba".into(),
+            terminal_status: "success".into(),
+        });
+        resolved_state.state = CiRecoveryPhase::Resolved;
+        let resolved = TiberEvent::CiRecoveryResolved(CiRecoveryResolvedEvent {
+            stream_id: stream,
+            participant: opening.owner.clone().into(),
+            proof: resolved_state
+                .release_proof
+                .clone()
+                .expect("proof present")
+                .into(),
+        });
+
+        let events = [
+            claim,
+            assigned,
+            reported,
+            diagnosed,
+            action,
+            replacement,
+            resolved,
+        ];
+        let mut projection = TiberProjection::default();
+        for event in &events {
+            assert!(
+                !matches!(event, TiberEvent::LegacyRecoveryStatePublished(_)),
+                "fresh transition must not write a snapshot"
+            );
+            apply_tiber_event(&mut projection, event).expect("fold typed fact");
+        }
+        let recovery = projection.ci_recovery.expect("recovery projection");
+        assert_eq!(recovery.state, CiRecoveryPhase::Resolved);
+        assert_eq!(
+            recovery.assignments[0]
+                .report
+                .as_ref()
+                .expect("report")
+                .summary,
+            "reproduced"
+        );
+        assert_eq!(
+            recovery.release_proof.expect("proof").terminal_status,
+            "success"
+        );
+    }
+
+    #[test]
+    fn legacy_ci_snapshot_events_remain_replayable() {
+        let state = recovery_state_for_event_test();
+        let event = TiberEvent::LegacyRecoveryStatePublished(CiRecoveryEvent {
+            stream_id: stream_id(CI_RECOVERY_STREAM).expect("recovery stream"),
+            state: Box::new(state.snapshot()),
+        });
+        let mut projection = TiberProjection::default();
+        apply_tiber_event(&mut projection, &event).expect("fold legacy snapshot");
+        assert_eq!(
+            projection
+                .ci_recovery
+                .expect("recovery projection")
+                .incident_id,
+            "ci-123"
+        );
     }
 
     fn temporary_repository(label: &str) -> PathBuf {
@@ -4887,41 +10313,5 @@ mod lock_tests {
 
         assert!(!path.exists(), "unfinished sentinel must roll back");
         fs::remove_dir_all(root).expect("remove temporary repository");
-    }
-
-    #[test]
-    fn entering_active_work_emits_typed_transition_and_publication_events() {
-        let stem = "20260805-test-claimed".to_string();
-        let mut before = TiberProjection {
-            initialized: true,
-            ..TiberProjection::default()
-        };
-        before.tasks.insert(
-            stem.clone(),
-            Task::new(stem.clone(), "Claimed".into(), "now".into()),
-        );
-        before.order.push(stem.clone());
-        let mut after = before.clone();
-        let task = after.tasks.get_mut(&stem).unwrap();
-        task.status = "in-progress".into();
-        task.claim = Some(Claim {
-            host: "test".into(),
-            session: "test".into(),
-        });
-        let events = task_change_events(&before, &after, TaskMutation::Transition).unwrap();
-        let names = events
-            .iter()
-            .map(|event| serde_json::to_value(event).unwrap()["event"].clone())
-            .collect::<Vec<_>>();
-        assert!(names.contains(&serde_json::Value::String("task_transitioned".into())));
-        assert!(names.contains(&serde_json::Value::String("task_state_published".into())));
-        let transition = events
-            .iter()
-            .find(|event| matches!(event, TiberEvent::TaskTransitioned { .. }))
-            .unwrap();
-        assert_eq!(
-            serde_json::to_value(transition).unwrap()["claim"]["session"],
-            "test"
-        );
     }
 }

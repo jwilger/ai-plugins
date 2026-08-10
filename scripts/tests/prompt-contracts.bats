@@ -63,9 +63,11 @@ teardown() {
     workflow.record_red \
     workflow.authorize_implementation \
     workflow.record_green \
-    workflow.authorize_review \
+    workflow.begin_verification \
+    workflow.record_verification \
     workflow.record_clean_review \
-    workflow.authorize_delivery; do
+    workflow.authorize_delivery \
+    workflow.complete_delivery; do
     grep -Fq "\`$tool\`" "$workflow_skill"
   done
 }

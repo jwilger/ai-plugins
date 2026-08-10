@@ -253,9 +253,13 @@ impl std::error::Error for CoreError {}
 
 #[cfg(test)]
 mod tests {
-    use crate::events::TiberEvent;
+    use crate::events::{
+        CiRecoveryClaimedEvent, CiRecoveryJoinedEvent, CiRecoveryParticipant, CiRecoveryTrigger,
+        TiberEvent,
+    };
     use crate::task::{ChecklistItem, Claim, Note, Subtask, Task};
     use eventcore_types::Event;
+    use eventcore_types::StreamId;
 
     use super::{
         BoardSnapshot, CoreError, DependencyGraph, OrderReconciliation, TaskDependencies,
@@ -265,6 +269,65 @@ mod tests {
     #[test]
     fn domain_event_type_name_is_stable() {
         assert_eq!(TiberEvent::event_type_name(), "tiber.domain_event");
+    }
+
+    #[test]
+    fn ci_recovery_claim_serializes_only_the_opening_facts() {
+        let event = TiberEvent::CiRecoveryClaimed(CiRecoveryClaimedEvent {
+            stream_id: StreamId::try_new("tiber:ci-recovery".to_string()).expect("stream"),
+            schema_version: 1,
+            incident_id: "ci-123".into(),
+            trigger: CiRecoveryTrigger {
+                run_id: "123".into(),
+                run_url: "https://example.invalid/runs/123".into(),
+                failed_sha: "abcdef".into(),
+                workflow: "CI".into(),
+                git_ref: "refs/heads/main".into(),
+            },
+            owner: CiRecoveryParticipant {
+                host: "host".into(),
+                session: "session".into(),
+            },
+            lease_expires_at: 1,
+        });
+        let encoded = serde_json::to_value(&event).expect("serialize");
+        assert_eq!(encoded["event"], "ci_recovery_claimed");
+        assert_eq!(encoded["incident_id"], "ci-123");
+        assert!(encoded.get("state").is_none());
+        assert!(matches!(
+            serde_json::from_value::<TiberEvent>(encoded).expect("deserialize"),
+            TiberEvent::CiRecoveryClaimed(CiRecoveryClaimedEvent { stream_id, .. })
+                if stream_id.as_ref() == "tiber:ci-recovery"
+        ));
+    }
+
+    #[test]
+    fn ci_recovery_join_serializes_only_new_contributed_facts() {
+        let event = TiberEvent::CiRecoveryJoined(CiRecoveryJoinedEvent {
+            stream_id: StreamId::try_new("tiber:ci-recovery".to_string()).expect("stream"),
+            trigger: None,
+            participant: Some(CiRecoveryParticipant {
+                host: "helper".into(),
+                session: "session-2".into(),
+            }),
+        });
+        let encoded = serde_json::to_value(&event).expect("serialize");
+        assert_eq!(encoded["event"], "ci_recovery_joined");
+        assert_eq!(encoded["participant"]["session"], "session-2");
+        assert!(encoded.get("state").is_none());
+    }
+
+    #[test]
+    fn legacy_task_state_publication_remains_readable_but_is_explicitly_legacy() {
+        let encoded = serde_json::json!({
+            "event": "task_state_published",
+            "stream_id": "tiber:board"
+        });
+
+        assert!(matches!(
+            serde_json::from_value::<TiberEvent>(encoded).expect("deserialize legacy event"),
+            TiberEvent::LegacyTaskStatePublished(_)
+        ));
     }
 
     #[test]

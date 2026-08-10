@@ -36,9 +36,7 @@ require_primary_checkout() {
 setup_command() {
   local project=.
   local preset=personal-trunk
-  local delivery=direct-to-trunk
   local mode=dry-run
-  local confirmed=false
   local feature_tiber=true
   local feature_agentic_systems=false
   local feature_eval_case_reporting=false
@@ -54,7 +52,9 @@ setup_command() {
         elif [[ "$option" == "--preset" ]]; then
           preset=$2
         elif [[ "$option" == "--delivery" ]]; then
-          delivery=$2
+          # Delivery is now a semantic repository-remote policy. Keep parsing
+          # this legacy flag only to provide a typed migration response.
+          :
         elif [[ "$option" == "--enable" || "$option" == "--disable" ]]; then
           local selected=true
           if [[ "$option" == "--disable" ]]; then
@@ -78,7 +78,7 @@ setup_command() {
         shift
         ;;
       --yes)
-        confirmed=true
+        :
         shift
         ;;
       *)
@@ -91,58 +91,14 @@ setup_command() {
   if [[ "$preset" != "personal-trunk" ]]; then
     die "development_system.unsupported_preset preset=$preset"
   fi
-  case "$delivery" in
-    direct-to-trunk | pull-request | local-only) ;;
-    *) die "development_system.unsupported_delivery mode=$delivery" ;;
-  esac
   printf 'development_system.setup_preview project=%s\n' "$project"
-  printf 'delivery %s\n' "$delivery"
   printf 'features tiber=%s agentic_systems=%s eval_case_reporting=%s\n' \
     "$feature_tiber" "$feature_agentic_systems" "$feature_eval_case_reporting"
-  printf 'write .development-system.toml\n'
+  printf 'use setup.preview followed by setup.apply confirmed=true through development-discipline MCP\n'
   if [[ "$mode" == "dry-run" ]]; then
     return
   fi
-  if [[ "$confirmed" != "true" ]]; then
-    die "development_system.setup_requires_confirmation"
-  fi
-  if [[ -n "$(git -C "$project" status --porcelain=v1 --untracked-files=no)" ]]; then
-    die "development_system.setup_tracked_changes_present"
-  fi
-
-  local config_path=$project/.development-system.toml
-  local config_tmp
-  if [[ -e "$config_path" || -L "$config_path" ]]; then
-    die "development_system.config_already_exists path=$config_path"
-  fi
-  config_tmp="$(mktemp "$project/.development-system.toml.tmp.XXXXXX")" ||
-    die "development_system.config_temp_failed project=$project"
-  trap 'rm -f -- "$config_tmp"' EXIT
-  {
-    printf 'schema_version = 2\n\n'
-    printf '[delivery]\n'
-    printf 'mode = "%s"\n' "$delivery"
-    printf 'trunk_branch = "main"\n\n'
-    printf '[features]\n'
-    printf 'tiber = %s\n' "$feature_tiber"
-    printf 'agentic_systems = %s\n' "$feature_agentic_systems"
-    printf 'eval_case_reporting = %s\n\n' "$feature_eval_case_reporting"
-    printf '[worktrees]\n'
-    printf 'root = ".worktrees"\n\n'
-    printf '[tiber]\n'
-    printf 'max_queued = 5\n'
-  } >"$config_tmp"
-  mv -- "$config_tmp" "$config_path"
-  git -C "$project" add -- .development-system.toml
-  if ! git -C "$project" commit \
-    -m "chore: initialize development system" \
-    -m "Record the project workflow and optional integrations in one authoritative configuration."; then
-    git -C "$project" reset -q HEAD -- .development-system.toml
-    rm -f -- "$config_path"
-    die "development_system.setup_commit_failed"
-  fi
-  trap - EXIT
-  printf 'development_system.setup_applied commit=%s\n' "$(git -C "$project" rev-parse HEAD)"
+  die "development_system.setup_mcp_required"
 }
 
 inspect_conflicts() {

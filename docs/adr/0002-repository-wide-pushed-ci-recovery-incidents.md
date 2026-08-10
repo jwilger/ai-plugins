@@ -23,12 +23,12 @@ release condition.
 
 ## Decision
 
-Store one active CI-recovery incident in a dedicated remote
-`tiber-coordination` branch. Every agent that sees a terminal failed pushed run
-must claim or join it before acting. The claim grants one owner a 60-minute,
-epoch-fenced lease; all other agents wait in bounded intervals unless the owner
-assigns inspect, reproduce, edit, or test work. Helpers cannot push, rerun,
-or choose a recovery action; proof closure is not a helper assignment.
+Store CI-recovery facts in Tiber's EventCore Git store on the authoritative
+`tiber` branch. Every agent that sees a terminal failed pushed run must claim or
+join its one active incident before acting. The claim grants one owner a
+60-minute, epoch-fenced lease; all other agents wait in bounded intervals unless
+the owner assigns inspect, reproduce, edit, or test work. Helpers cannot push,
+rerun, or choose a recovery action; proof closure is not a helper assignment.
 
 The owner records the failed SHA/run, exact job and step, a bounded explicitly
 sanitized log summary or authoritative-log reference, causal explanation, and
@@ -42,11 +42,13 @@ participant may record exact matching replacement-run proof with terminal
 success; it is the only repository-wide hold release and does not grant owner
 authority.
 
-The coordination client fetches and compares the remote branch, publishes only
-normal fast-forward updates, and retries after concurrent updates. It never
-force-pushes. If Tiber or the remote is unavailable, recovery fails closed:
-agents retain the hold and restore shared coordination before choosing an
-action, pushing, rerunning, or releasing.
+Tiber's EventCore store fetches and compares the remote branch, publishes only
+normal fast-forward updates, and retries pure named commands after concurrent
+updates. It never force-pushes. Development Discipline reads only Tiber's
+unresolved hold when authorizing delivery; it has no CI-recovery event stream,
+snapshot, or mutation API. If Tiber or the remote is unavailable, recovery
+fails closed: agents retain the hold and restore shared coordination before
+choosing an action, pushing, rerunning, or releasing.
 
 ## Consequences
 
@@ -64,7 +66,8 @@ action, pushing, rerunning, or releasing.
 - A transient remote outage blocks recovery mutations and may delay a repair.
 - Agents must report enough incident data to make ownership and takeover
   auditable.
-- The separate branch adds operational state alongside the task-board branch.
+- CI recovery shares Tiber's durable EventCore publication path, so a
+  Tiber-enabled project is required when this delivery hold is enabled.
 
 ## Alternatives Considered
 
@@ -73,10 +76,11 @@ action, pushing, rerunning, or releasing.
 Rejected because concurrent reruns and repairs race, and local notes cannot
 fence stale sessions or establish a single release condition.
 
-### Use the task board alone
+### Use a separate workflow CI store
 
-Rejected because task transitions do not model a short lease, owner epoch,
-replacement-run evidence, or safe expiry takeover.
+Rejected because two event authorities for one incident can diverge on owner,
+epoch, replacement, or release. Tiber now models the recovery facts directly;
+Development Discipline is only a consumer of the resulting delivery hold.
 
 ### Permit force-push conflict resolution
 
@@ -93,5 +97,5 @@ replace the Git coordination branch.
 ## Related
 
 - ADR-0001
-- `plugins/development-system/components/development-discipline/skills/ci-failure-follow-up/SKILL.md`
 - `plugins/development-system/components/tiber/skills/tiber/SKILL.md`
+- `plugins/development-system/components/development-discipline/skills/ci-failure-follow-up/SKILL.md`

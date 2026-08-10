@@ -1,19 +1,6 @@
 {
   "description": "Warn about conflicting development plugins, harness settings, and user-managed MCPs.",
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/development-discipline-mcp\" workflow-guard",
-            "timeout": 5,
-            "statusMessage": "Checking development workflow gates"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "matcher": "*",

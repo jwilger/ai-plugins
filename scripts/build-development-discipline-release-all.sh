@@ -60,6 +60,7 @@ fi
 
 build_target() {
   rustup run "$toolchain" cargo zigbuild \
+    --locked \
     --release \
     --manifest-path "$manifest" \
     --bin "$binary_name" \

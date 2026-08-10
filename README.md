@@ -23,9 +23,9 @@ user-managed MCPs that need compatibility review.
 
 ## Plugin catalog
 
-| Plugin                                                     | Harnesses          | Description                                                         | Version |
-| ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | One configurable development workflow with on-demand skill routing. | 3.2.1   |
+| Plugin                                                     | Harnesses          | Description                                                                  | Version |
+| ---------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------- | ------- |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | Semantic, capability-separated development workflow with read-only fallback. | 3.3.0   |
 
 ## Using the marketplace (Claude Code)
 

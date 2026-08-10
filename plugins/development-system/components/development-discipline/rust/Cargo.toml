@@ -7,12 +7,14 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 eventcore = { version = "1.1.1", features = ["experimental-modeling"] }
 eventcore-sqlite = "1.1.1"
+eventcore-types = "1.1.1"
+futures = "0.3"
 fs2 = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-shlex = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 toml = "0.8"
+tiber-git = { path = "../../tiber/rust/crates/tiber-git" }
 
 [[bin]]
 name = "development-discipline-mcp"

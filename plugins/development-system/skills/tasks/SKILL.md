@@ -52,6 +52,9 @@ For operational requests, preserve these exact boundaries:
   resolves every `Closes:` trailer from current `HEAD`, prints each closed task,
   and leaves each named task no longer open.
 
-When a task-board request coincides with a pushed-CI failure, route recovery
-through `development-system:development-workflow`. Tiber remains a task board;
-it neither grants nor releases the workflow hold.
+When a task-board request coincides with a pushed-CI failure, use Tiber's
+semantic CI-recovery operations. Tiber is the single durable authority for the
+incident, owner lease, diagnosis, selected action, replacement, and
+terminal-success proof. Development Discipline only reads Tiber's unresolved
+hold before delivery; it neither maintains a second incident nor grants or
+releases that hold.

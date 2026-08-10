@@ -178,9 +178,13 @@ const planResponse = await request({
     arguments: {
       ...mainRiskArguments,
       risk_assessment: mainRiskAssessment,
+      unrelated_finding_policy: { default: "report" },
     },
   },
 });
+if (!planResponse.result?.content?.[0]?.text) {
+  throw new Error(`main plan failed: ${JSON.stringify(planResponse)}`);
+}
 const plan = JSON.parse(planResponse.result.content[0].text);
 const state = plan.state;
 if (state.lenses.length !== 1 || state.lenses[0] !== "correctness-behavior") {
@@ -288,6 +292,11 @@ const verifierRequiredResponse = await request({
     },
   },
 });
+if (!verifierRequiredResponse.result?.content?.[0]?.text) {
+  throw new Error(
+    `verifier request failed: ${JSON.stringify(verifierRequiredResponse)}`,
+  );
+}
 const verifierAssignment = JSON.parse(
   verifierRequiredResponse.result.content[0].text,
 ).verifier_assignment;

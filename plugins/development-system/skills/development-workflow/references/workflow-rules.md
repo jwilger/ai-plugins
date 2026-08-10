@@ -56,8 +56,9 @@ For a terminal pushed-CI failure, retain four records:
   context, tradeoff, or the failure it prevents. Reject subject-only messages
   and bodies that merely restate the subject or diff.
 - Never add `Co-Authored-By` trailers.
-- A terminal pushed-CI failure creates a repository-wide hold. The Development
-  Discipline workflow coordinator records the exact failure, chooses either one
-  causal repair or an unchanged-SHA rerun, and releases the hold only after
-  terminal-success proof. This coordination is independent of Tiber and works
-  in repositories that have no task board.
+- A terminal pushed-CI failure creates a repository-wide hold. Tiber records
+  the exact failure, ownership lease, diagnosis, either one causal repair or an
+  unchanged-SHA rerun, and terminal-success proof. Development Discipline reads
+  that unresolved Tiber hold when authorizing delivery; it never stores a
+  parallel incident. Projects that need CI-recovery enforcement therefore
+  enable Tiber rather than silently falling back to a second workflow store.

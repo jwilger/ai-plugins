@@ -2,7 +2,7 @@
 //!
 //! `eventcore-fs` is a disposable staging engine, not the authority. An append
 //! succeeds only after one signed candidate commit containing the immutable
-//! transaction is confirmed on `refs/heads/tiber`. A conclusive concurrent
+//! transaction is confirmed on its selected semantic authority ref. A conclusive concurrent
 //! advance is translated to EventCore's version conflict so pure command logic
 //! may rerun with invocation-stable IDs and timestamps. An ambiguous push never
 //! reruns domain logic: the exact candidate is retained under Git's common
@@ -32,15 +32,59 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use wait_timeout::ChildExt;
 
-/// The single authoritative ref used for every new Tiber event stream.
+/// The default authoritative ref used for every new Tiber event stream.
 pub const TIBER_BRANCH: &str = "tiber";
-const LOCAL_REF: &str = "refs/heads/tiber";
+#[cfg(test)]
 const REMOTE_REF: &str = "refs/remotes/origin/tiber";
+#[cfg(test)]
 const REMOTE_HEAD: &str = "refs/heads/tiber";
 const STORE_DIRECTORY: &str = "eventstore";
 const PUBLICATION_RETRIES: usize = 3;
+// Loading a new disposable stage can briefly contend with another writer's
+// ref update.  This remains deliberately bounded, but is independent from
+// publication retries: retrying a read does not replay a domain command.
+const STAGE_LOAD_RETRIES: usize = 8;
 const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const PENDING_VERSION: u32 = 1;
+
+/// A closed set of independent Git authorities supported by this EventCore
+/// adapter.  Keeping this an enum rather than accepting ref names from a
+/// caller prevents an MCP request from selecting an arbitrary Git ref.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GitEventStoreAuthority {
+    Tiber,
+    DevelopmentWorkflow,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AuthorityConfig {
+    local_ref: &'static str,
+    remote_ref: &'static str,
+    remote_head: &'static str,
+    state_directory: &'static str,
+    commit_message: &'static str,
+}
+
+impl GitEventStoreAuthority {
+    fn config(self) -> AuthorityConfig {
+        match self {
+            Self::Tiber => AuthorityConfig {
+                local_ref: "refs/heads/tiber",
+                remote_ref: "refs/remotes/origin/tiber",
+                remote_head: "refs/heads/tiber",
+                state_directory: "tiber",
+                commit_message: "tiber event transaction",
+            },
+            Self::DevelopmentWorkflow => AuthorityConfig {
+                local_ref: "refs/heads/development-workflow",
+                remote_ref: "refs/remotes/origin/development-workflow",
+                remote_head: "refs/heads/development-workflow",
+                state_directory: "development-workflow",
+                commit_message: "development workflow event transaction",
+            },
+        }
+    }
+}
 
 /// Failure to open or refresh the Git-backed store.
 #[derive(Debug, thiserror::Error)]
@@ -63,11 +107,12 @@ struct Stage {
 }
 
 /// EventCore store whose successful append means the candidate is confirmed
-/// on the authoritative `tiber` ref.
+/// on its selected semantic authority ref.
 #[derive(Clone, Debug)]
 pub struct GitEventStore {
     repository: PathBuf,
     common_directory: PathBuf,
+    authority: GitEventStoreAuthority,
     stage: Arc<Mutex<Stage>>,
     operation: Arc<Mutex<()>>,
 }
@@ -88,9 +133,57 @@ struct PendingPublication {
     authority: String,
 }
 
+/// A bounded, local recovery marker. This is deliberately not an event-store
+/// fact: the authoritative append is either confirmed on the selected Git ref
+/// or unresolved. Synchronization re-derives and removes this marker only
+/// after resolving that authority.
+#[derive(Debug, Serialize)]
+struct PublicationBlocker<'a> {
+    schema_version: u8,
+    kind: &'a str,
+    error_code: &'a str,
+    required_action: &'a str,
+    created_at: u64,
+}
+
+/// Serializes Git ref updates for stores that share one Git common directory.
+/// Remote compare-and-swap remains the cross-clone authority boundary; this
+/// lock only prevents two cooperative local store instances from racing over
+/// the shared remote-tracking ref while they perform fetch/push reconciliation.
+struct EventStoreOperationLock {
+    _file: fs::File,
+}
+
+impl EventStoreOperationLock {
+    fn acquire(
+        common_directory: &Path,
+        authority: GitEventStoreAuthority,
+    ) -> Result<Self, GitEventStoreOpenError> {
+        let directory = common_directory.join(authority.config().state_directory);
+        fs::create_dir_all(&directory)?;
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(directory.join("eventstore-operation.lock"))?;
+        file.lock()?;
+        Ok(Self { _file: file })
+    }
+}
+
 impl GitEventStore {
     /// Opens a repository-backed store. An absent branch is an empty store.
     pub fn open(repository: impl AsRef<Path>) -> Result<Self, GitEventStoreOpenError> {
+        Self::open_for_authority(repository, GitEventStoreAuthority::Tiber)
+    }
+
+    /// Opens a store for one fixed semantic authority.  Authorities never
+    /// share refs, replica IDs, pending-publication receipts, or state paths.
+    pub fn open_for_authority(
+        repository: impl AsRef<Path>,
+        authority: GitEventStoreAuthority,
+    ) -> Result<Self, GitEventStoreOpenError> {
         let repository = repository.as_ref().to_path_buf();
         let common_directory = git_path(&repository, ["rev-parse", "--git-common-dir"])?;
         let common_directory = if common_directory.is_absolute() {
@@ -98,10 +191,11 @@ impl GitEventStore {
         } else {
             repository.join(common_directory)
         };
-        let stage = load_stage(&repository, &common_directory)?;
+        let stage = load_stage(&repository, &common_directory, authority)?;
         Ok(Self {
             repository,
             common_directory,
+            authority,
             stage: Arc::new(Mutex::new(stage)),
             operation: Arc::new(Mutex::new(())),
         })
@@ -109,12 +203,30 @@ impl GitEventStore {
 
     fn pending_publication_path(&self) -> PathBuf {
         self.common_directory
-            .join("tiber")
+            .join(self.authority.config().state_directory)
             .join("pending-publication")
     }
 
+    fn publication_blocker_path(&self) -> PathBuf {
+        self.common_directory
+            .join(self.authority.config().state_directory)
+            .join("workflow-blocker.json")
+    }
+
+    async fn lock_common_operation(
+        &self,
+    ) -> Result<EventStoreOperationLock, GitEventStoreOpenError> {
+        let common_directory = self.common_directory.clone();
+        let authority = self.authority;
+        tokio::task::spawn_blocking(move || {
+            EventStoreOperationLock::acquire(&common_directory, authority)
+        })
+        .await
+        .map_err(|error| GitEventStoreOpenError::Git(format!("operation lock failed: {error}")))?
+    }
+
     async fn refresh(&self, operation: Operation) -> Result<(), EventStoreError> {
-        let refreshed = load_stage(&self.repository, &self.common_directory)
+        let refreshed = load_stage(&self.repository, &self.common_directory, self.authority)
             .map_err(|_| store_failure(operation))?;
         *self.stage.lock().await = refreshed;
         Ok(())
@@ -122,11 +234,12 @@ impl GitEventStore {
 
     pub async fn synchronize(&self) -> Result<SynchronizeOutcome, GitEventStoreOpenError> {
         let _operation = self.operation.lock().await;
+        let _common_operation = self.lock_common_operation().await?;
         let path = self.pending_publication_path();
         if !path.exists() {
-            *self.stage.lock().await = load_stage(&self.repository, &self.common_directory)?;
-            super::clear_publication_failure_at(&self.repository)
-                .map_err(|error| GitEventStoreOpenError::Git(error.to_string()))?;
+            *self.stage.lock().await =
+                load_stage(&self.repository, &self.common_directory, self.authority)?;
+            clear_publication_failure(&self.publication_blocker_path())?;
             return Ok(SynchronizeOutcome::Current);
         }
         let pending = read_pending(&path)?;
@@ -140,9 +253,9 @@ impl GitEventStore {
             ));
         }
         let head = if has_origin {
-            refresh_remote(&self.repository)?
+            refresh_remote(&self.repository, self.authority)?
         } else {
-            resolve_optional_ref(&self.repository, LOCAL_REF)?
+            resolve_optional_ref(&self.repository, self.authority.config().local_ref)?
         };
         let outcome = if head
             .as_deref()
@@ -155,12 +268,14 @@ impl GitEventStore {
                     &self.repository,
                     &pending.candidate,
                     pending.base.as_deref(),
+                    self.authority,
                 )?
             } else {
                 publish_local(
                     &self.repository,
                     &pending.candidate,
                     pending.base.as_deref(),
+                    self.authority,
                 )?
             } {
                 Publication::Confirmed => SynchronizeOutcome::PublishedPending,
@@ -170,9 +285,9 @@ impl GitEventStore {
             SynchronizeOutcome::DiscardedUnpublished
         };
         remove_pending(&path)?;
-        *self.stage.lock().await = load_stage(&self.repository, &self.common_directory)?;
-        super::clear_publication_failure_at(&self.repository)
-            .map_err(|error| GitEventStoreOpenError::Git(error.to_string()))?;
+        *self.stage.lock().await =
+            load_stage(&self.repository, &self.common_directory, self.authority)?;
+        clear_publication_failure(&self.publication_blocker_path())?;
         Ok(outcome)
     }
 }
@@ -183,6 +298,10 @@ impl EventStore for GitEventStore {
         stream_id: StreamId,
     ) -> Result<EventStream<E>, EventStoreError> {
         let _operation = self.operation.lock().await;
+        let _common_operation = self
+            .lock_common_operation()
+            .await
+            .map_err(|_| store_failure(Operation::ReadStream))?;
         self.refresh(Operation::ReadStream).await?;
         self.stage.lock().await.store.read_stream(stream_id).await
     }
@@ -192,6 +311,10 @@ impl EventStore for GitEventStore {
         writes: StreamWrites,
     ) -> Result<EventStreamSlice, EventStoreError> {
         let _operation = self.operation.lock().await;
+        let _common_operation = self
+            .lock_common_operation()
+            .await
+            .map_err(|_| store_failure(Operation::AppendEvents))?;
         if self.pending_publication_path().exists() {
             return Err(store_failure(Operation::AppendEvents));
         }
@@ -201,29 +324,41 @@ impl EventStore for GitEventStore {
             .iter()
             .map(|(stream_id, version)| (stream_id.clone(), *version))
             .collect::<Vec<_>>();
-        let stage = load_stage_with_retry(&self.repository, &self.common_directory)
+        let stage = load_stage_with_retry(&self.repository, &self.common_directory, self.authority)
             .map_err(|_| store_failure(Operation::AppendEvents))?;
         let appended = stage.store.append_events(writes).await?;
-        let candidate = create_candidate(&self.repository, &stage)
+        let candidate = create_candidate(&self.repository, &stage, self.authority)
             .map_err(|_| store_failure(Operation::AppendEvents))?;
         #[cfg(test)]
         run_before_initial_publish_hook(&self.repository);
 
         let publication = if stage.has_origin {
-            publish_remote(&self.repository, &candidate, stage.base.as_deref())
+            publish_remote(
+                &self.repository,
+                &candidate,
+                stage.base.as_deref(),
+                self.authority,
+            )
         } else {
-            publish_local(&self.repository, &candidate, stage.base.as_deref())
+            publish_local(
+                &self.repository,
+                &candidate,
+                stage.base.as_deref(),
+                self.authority,
+            )
         };
 
         match publication {
             Ok(Publication::Confirmed) => {
-                *self.stage.lock().await = load_stage(&self.repository, &self.common_directory)
-                    .map_err(|_| store_failure(Operation::AppendEvents))?;
+                *self.stage.lock().await =
+                    load_stage(&self.repository, &self.common_directory, self.authority)
+                        .map_err(|_| store_failure(Operation::AppendEvents))?;
                 Ok(appended)
             }
             Ok(Publication::Conflict) => {
-                let mut refreshed = load_stage(&self.repository, &self.common_directory)
-                    .map_err(|_| store_failure(Operation::AppendEvents))?;
+                let mut refreshed =
+                    load_stage(&self.repository, &self.common_directory, self.authority)
+                        .map_err(|_| store_failure(Operation::AppendEvents))?;
                 for _ in 0..PUBLICATION_RETRIES {
                     match actual_conflict(&refreshed.store, &expected_versions).await {
                         Ok(conflict) => {
@@ -236,32 +371,56 @@ impl EventStore for GitEventStore {
                     // The conflict probe intentionally appends to its disposable stage.
                     // Reload the exact authority that will be unioned, and repeat the
                     // version check if authority moved between the probe and reload.
-                    let merge_base = load_stage(&self.repository, &self.common_directory)
-                        .map_err(|_| store_failure(Operation::AppendEvents))?;
+                    let merge_base =
+                        load_stage(&self.repository, &self.common_directory, self.authority)
+                            .map_err(|_| store_failure(Operation::AppendEvents))?;
                     if merge_base.base != refreshed.base {
                         refreshed = merge_base;
                         continue;
                     }
-                    let merged = merge_disjoint_stage(&self.common_directory, merge_base, &stage)
-                        .map_err(|_| store_failure(Operation::AppendEvents))?;
-                    let rebased_candidate = create_candidate(&self.repository, &merged)
-                        .map_err(|_| store_failure(Operation::AppendEvents))?;
+                    let merged = merge_disjoint_stage(
+                        &self.common_directory,
+                        merge_base,
+                        &stage,
+                        self.authority,
+                    )
+                    .map_err(|_| store_failure(Operation::AppendEvents))?;
+                    let rebased_candidate =
+                        create_candidate(&self.repository, &merged, self.authority)
+                            .map_err(|_| store_failure(Operation::AppendEvents))?;
                     #[cfg(test)]
                     run_before_rebased_publish_hook(&self.repository);
                     match if merged.has_origin {
-                        publish_remote(&self.repository, &rebased_candidate, merged.base.as_deref())
+                        publish_remote(
+                            &self.repository,
+                            &rebased_candidate,
+                            merged.base.as_deref(),
+                            self.authority,
+                        )
                     } else {
-                        publish_local(&self.repository, &rebased_candidate, merged.base.as_deref())
+                        publish_local(
+                            &self.repository,
+                            &rebased_candidate,
+                            merged.base.as_deref(),
+                            self.authority,
+                        )
                     } {
                         Ok(Publication::Confirmed) => {
-                            *self.stage.lock().await =
-                                load_stage(&self.repository, &self.common_directory)
-                                    .map_err(|_| store_failure(Operation::AppendEvents))?;
+                            *self.stage.lock().await = load_stage(
+                                &self.repository,
+                                &self.common_directory,
+                                self.authority,
+                            )
+                            .map_err(|_| store_failure(Operation::AppendEvents))?;
                             return Ok(appended);
                         }
                         Ok(Publication::Conflict) => {
-                            refreshed = load_stage(&self.repository, &self.common_directory)
-                                .map_err(|_| store_failure(Operation::AppendEvents))?;
+                            refreshed = load_stage(
+                                &self.repository,
+                                &self.common_directory,
+                                self.authority,
+                            )
+                            .map_err(|_| store_failure(Operation::AppendEvents))?;
                         }
                         Err(_) => {
                             persist_indeterminate(self, &rebased_candidate, &merged)?;
@@ -315,6 +474,10 @@ impl EventReader for GitEventStore {
         page: EventPage,
     ) -> Result<Vec<(E, StreamPosition)>, Self::Error> {
         let _operation = self.operation.lock().await;
+        let _common_operation = self
+            .lock_common_operation()
+            .await
+            .map_err(|_| store_failure(Operation::ReadStream))?;
         self.refresh(Operation::ReadStream).await?;
         self.stage
             .lock()
@@ -331,14 +494,18 @@ enum Publication {
     Conflict,
 }
 
-fn load_stage(repository: &Path, common_directory: &Path) -> Result<Stage, GitEventStoreOpenError> {
+fn load_stage(
+    repository: &Path,
+    common_directory: &Path,
+    authority: GitEventStoreAuthority,
+) -> Result<Stage, GitEventStoreOpenError> {
     let has_origin = git(repository, ["remote", "get-url", "origin"])
         .map(|output| output.status.success())
         .unwrap_or(false);
     let base = if has_origin {
-        refresh_remote(repository)?
+        refresh_remote(repository, authority)?
     } else {
-        resolve_optional_ref(repository, LOCAL_REF)?
+        resolve_optional_ref(repository, authority.config().local_ref)?
     };
 
     let directory = TempDir::new()?;
@@ -349,7 +516,7 @@ fn load_stage(repository: &Path, common_directory: &Path) -> Result<Stage, GitEv
     }
     let store = FileEventStore::open_with_config(
         FsConfig::new(work_tree.join(STORE_DIRECTORY))
-            .with_replica_id(load_or_create_replica_id(common_directory)?),
+            .with_replica_id(load_or_create_replica_id(common_directory, authority)?),
     )?;
     Ok(Stage {
         _directory: directory,
@@ -363,10 +530,11 @@ fn load_stage(repository: &Path, common_directory: &Path) -> Result<Stage, GitEv
 fn load_stage_with_retry(
     repository: &Path,
     common_directory: &Path,
+    authority: GitEventStoreAuthority,
 ) -> Result<Stage, GitEventStoreOpenError> {
     let mut last = None;
-    for _ in 0..PUBLICATION_RETRIES {
-        match load_stage(repository, common_directory) {
+    for _ in 0..STAGE_LOAD_RETRIES {
+        match load_stage(repository, common_directory, authority) {
             Ok(stage) => return Ok(stage),
             Err(error) => {
                 last = Some(error);
@@ -381,6 +549,7 @@ fn merge_disjoint_stage(
     common_directory: &Path,
     refreshed: Stage,
     original: &Stage,
+    authority: GitEventStoreAuthority,
 ) -> Result<Stage, GitEventStoreOpenError> {
     let source = original.work_tree.join(STORE_DIRECTORY).join("events");
     let destination = refreshed.work_tree.join(STORE_DIRECTORY).join("events");
@@ -404,7 +573,7 @@ fn merge_disjoint_stage(
     drop(store);
     let store = FileEventStore::open_with_config(
         FsConfig::new(work_tree.join(STORE_DIRECTORY))
-            .with_replica_id(load_or_create_replica_id(common_directory)?),
+            .with_replica_id(load_or_create_replica_id(common_directory, authority)?),
     )?;
     Ok(Stage {
         _directory,
@@ -430,14 +599,78 @@ fn persist_indeterminate(
         },
     )
     .map_err(|_| store_failure(Operation::AppendEvents))?;
-    super::record_publication_failure_at(&event_store.repository)
-        .map_err(|_| store_failure(Operation::AppendEvents))
+    record_publication_failure(
+        &event_store.publication_blocker_path(),
+        event_store.authority,
+    )
+    .map_err(|_| store_failure(Operation::AppendEvents))
 }
 
-fn refresh_remote(repository: &Path) -> Result<Option<String>, GitEventStoreOpenError> {
+fn record_publication_failure(
+    path: &Path,
+    authority: GitEventStoreAuthority,
+) -> Result<(), GitEventStoreOpenError> {
+    let (error_code, required_action) = match authority {
+        GitEventStoreAuthority::Tiber => (
+            "tiber.publication_failed",
+            "run Tiber sync until authoritative publication is resolved",
+        ),
+        GitEventStoreAuthority::DevelopmentWorkflow => (
+            "development_workflow.publication_failed",
+            "synchronize Development Workflow until authoritative publication is resolved",
+        ),
+    };
+    let marker = PublicationBlocker {
+        schema_version: 1,
+        kind: "publication_failed",
+        error_code,
+        required_action,
+        created_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(std::io::Error::other)?
+            .as_secs(),
+    };
+    let parent = path.parent().ok_or_else(|| {
+        GitEventStoreOpenError::Git("publication blocker has no parent directory".to_owned())
+    })?;
+    fs::create_dir_all(parent)?;
+    let temporary = path.with_extension("tmp");
+    fs::write(
+        &temporary,
+        serde_json::to_vec(&marker).map_err(std::io::Error::other)?,
+    )?;
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+fn clear_publication_failure(path: &Path) -> Result<(), GitEventStoreOpenError> {
+    let contents = match fs::read(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let kind = serde_json::from_slice::<serde_json::Value>(&contents)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        });
+    if kind.as_deref() == Some("publication_failed") {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn refresh_remote(
+    repository: &Path,
+    authority: GitEventStoreAuthority,
+) -> Result<Option<String>, GitEventStoreOpenError> {
+    let authority = authority.config();
     let advertised = git(
         repository,
-        ["ls-remote", "--exit-code", "origin", REMOTE_HEAD],
+        ["ls-remote", "--exit-code", "origin", authority.remote_head],
     )?;
     match advertised.status.code() {
         Some(0) => {
@@ -447,10 +680,10 @@ fn refresh_remote(repository: &Path) -> Result<Option<String>, GitEventStoreOpen
                     "fetch",
                     "--no-tags",
                     "origin",
-                    &format!("+{REMOTE_HEAD}:{REMOTE_REF}"),
+                    &format!("+{}:{}", authority.remote_head, authority.remote_ref),
                 ],
             )?)?;
-            resolve_optional_ref(repository, REMOTE_REF)
+            resolve_optional_ref(repository, authority.remote_ref)
         }
         Some(2) => Ok(None),
         _ => Err(git_error("refresh authoritative tiber ref", &advertised)),
@@ -479,7 +712,11 @@ fn checkout_tree(
     Ok(())
 }
 
-fn create_candidate(repository: &Path, stage: &Stage) -> Result<String, GitEventStoreOpenError> {
+fn create_candidate(
+    repository: &Path,
+    stage: &Stage,
+    authority: GitEventStoreAuthority,
+) -> Result<String, GitEventStoreOpenError> {
     let index = stage.work_tree.join("candidate-index");
     let index_env = [("GIT_INDEX_FILE", index.as_os_str())];
     if let Some(base) = &stage.base {
@@ -509,7 +746,7 @@ fn create_candidate(repository: &Path, stage: &Stage) -> Result<String, GitEvent
     if signing.status.success() && output_text(signing) == "true" {
         arguments.push("-S");
     }
-    arguments.extend(["-m", "tiber event transaction"]);
+    arguments.extend(["-m", authority.config().commit_message]);
     if let Some(base) = &stage.base {
         arguments.extend(["-p", base.as_str()]);
     }
@@ -524,13 +761,19 @@ fn publish_remote(
     repository: &Path,
     candidate: &str,
     base: Option<&str>,
+    authority: GitEventStoreAuthority,
 ) -> Result<Publication, GitEventStoreOpenError> {
+    let authority_config = authority.config();
     for _ in 0..PUBLICATION_RETRIES {
         let push = git(
             repository,
-            ["push", "origin", &format!("{candidate}:{REMOTE_HEAD}")],
+            [
+                "push",
+                "origin",
+                &format!("{candidate}:{}", authority_config.remote_head),
+            ],
         )?;
-        let remote = refresh_remote(repository)?;
+        let remote = refresh_remote(repository, authority)?;
         if remote
             .as_deref()
             .is_some_and(|head| is_ancestor(repository, candidate, head))
@@ -553,13 +796,18 @@ fn publish_local(
     repository: &Path,
     candidate: &str,
     base: Option<&str>,
+    authority: GitEventStoreAuthority,
 ) -> Result<Publication, GitEventStoreOpenError> {
+    let authority = authority.config();
     let expected = base.unwrap_or("0000000000000000000000000000000000000000");
-    let update = git(repository, ["update-ref", LOCAL_REF, candidate, expected])?;
+    let update = git(
+        repository,
+        ["update-ref", authority.local_ref, candidate, expected],
+    )?;
     if update.status.success() {
         return Ok(Publication::Confirmed);
     }
-    let current = resolve_optional_ref(repository, LOCAL_REF)?;
+    let current = resolve_optional_ref(repository, authority.local_ref)?;
     if current
         .as_deref()
         .is_some_and(|head| is_ancestor(repository, candidate, head))
@@ -655,8 +903,11 @@ fn remove_pending(path: &Path) -> Result<(), std::io::Error> {
     }
 }
 
-fn load_or_create_replica_id(common_directory: &Path) -> Result<Uuid, GitEventStoreOpenError> {
-    let directory = common_directory.join("tiber");
+fn load_or_create_replica_id(
+    common_directory: &Path,
+    authority: GitEventStoreAuthority,
+) -> Result<Uuid, GitEventStoreOpenError> {
+    let directory = common_directory.join(authority.config().state_directory);
     fs::create_dir_all(&directory)?;
     let path = directory.join("replica-id");
     if let Ok(value) = fs::read_to_string(&path) {
@@ -1008,5 +1259,69 @@ mod tests {
         );
         assert_eq!(parent, authority);
         assert!(repository.join(".git/tiber/workflow-blocker.json").exists());
+    }
+
+    #[tokio::test]
+    async fn authorities_keep_refs_replica_state_and_streams_independent() {
+        let directory = TempDir::new().unwrap();
+        let repository = directory.path().join("repository");
+        require_git(directory.path(), &["init", repository.to_str().unwrap()]);
+        require_git(&repository, &["config", "user.name", "Event Store Test"]);
+        require_git(
+            &repository,
+            &["config", "user.email", "event-store@example.invalid"],
+        );
+
+        let stream = StreamId::try_new("workflow:shared-stream-name").unwrap();
+        GitEventStore::open(&repository)
+            .unwrap()
+            .append_events(writes(&stream))
+            .await
+            .unwrap();
+        GitEventStore::open_for_authority(&repository, GitEventStoreAuthority::DevelopmentWorkflow)
+            .unwrap()
+            .append_events(writes(&stream))
+            .await
+            .unwrap();
+
+        assert!(!require_git(&repository, &["rev-parse", "refs/heads/tiber"]).is_empty());
+        assert!(!require_git(
+            &repository,
+            &["rev-parse", "refs/heads/development-workflow"],
+        )
+        .is_empty());
+        assert!(repository.join(".git/tiber/replica-id").exists());
+        assert!(repository
+            .join(".git/development-workflow/replica-id")
+            .exists());
+
+        let workflow_blocker = repository.join(".git/development-workflow/workflow-blocker.json");
+        record_publication_failure(
+            &workflow_blocker,
+            GitEventStoreAuthority::DevelopmentWorkflow,
+        )
+        .unwrap();
+        assert!(workflow_blocker.exists());
+        assert!(!repository.join(".git/tiber/workflow-blocker.json").exists());
+        clear_publication_failure(&workflow_blocker).unwrap();
+        assert!(!workflow_blocker.exists());
+
+        let development_workflow = GitEventStore::open_for_authority(
+            &repository,
+            GitEventStoreAuthority::DevelopmentWorkflow,
+        )
+        .unwrap();
+        assert_eq!(
+            collect_events(
+                development_workflow
+                    .read_stream::<TestEvent>(stream)
+                    .await
+                    .unwrap()
+            )
+            .await
+            .unwrap()
+            .len(),
+            1
+        );
     }
 }

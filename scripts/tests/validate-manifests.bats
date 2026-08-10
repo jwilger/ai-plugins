@@ -191,6 +191,18 @@ manifest_for() {
   [[ "$output" == *"codex-mcp-manifest-not-declared"* ]]
 }
 
+@test "accepts a Codex-specific MCP manifest alongside Claude's root MCP manifest" {
+  make_plugin alpha
+  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/.mcp.json"
+  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/.codex-mcp.json"
+  jq '.mcpServers="./.codex-mcp.json"' \
+    "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
+  mv "$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
+  write_manifests "alpha" "alpha"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
 @test "fails when codex MCP cache version differs from plugin version" {
   make_plugin alpha alpha alpha 1.2.3 1.2.4
   rm -rf "$ROOT/plugins/alpha/.claude-plugin"

@@ -29,7 +29,7 @@ setup() {
     sha256sum "$NIX_STORE_CLOSURE" | cut -d' ' -f1
   )"
   export CODE_QUALITY_SYSTEMD_RUN_BIN
-  CODE_QUALITY_SYSTEMD_RUN_BIN="$(realpath "$(command -v systemd-run)")"
+  CODE_QUALITY_SYSTEMD_RUN_BIN="$(realpath "${AI_PLUGINS_SYSTEMD_RUN_BIN:-$(command -v systemd-run)}")"
   export CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256
   CODE_QUALITY_SYSTEMD_RUN_EXPECTED_SHA256="$(
     sha256sum "$CODE_QUALITY_SYSTEMD_RUN_BIN" | cut -d' ' -f1

@@ -1,8 +1,8 @@
 name = "model-routing-substantive-worker"
-description = "Worker for reversible implementation and ordinary review with explicit acceptance criteria, mutation targets, and no activated strong-responsibility predicate."
+description = "Read-only implementation planner that prepares structured workspace-editor requests."
 model = "gpt-5.6-terra"
 model_reasoning_effort = "medium"
-sandbox_mode = "workspace-write"
+sandbox_mode = "read-only"
 developer_instructions = """
 Perform the task stated by the parent only while its acceptance criteria and mutation targets remain explicit, the edits remain reversible through normal version control, and it introduces no destructive operation, unresolved architecture decision, authentication/authorization or sensitive-data boundary, human-safety boundary, or blocking/disputed verification. You may edit files inside the authorized workspace when the task requires it. Return the result and evidence to the accountable parent. The parent retains authorization gates and user communication, but the analysis and recommendation behind final verification and every completion or readiness claim require a confirmed Sol assignment.
 

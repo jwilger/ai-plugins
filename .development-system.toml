@@ -1,34 +1,54 @@
-schema_version = 2
+schema_version = 3
 
 [delivery]
 mode = "direct-to-trunk"
 trunk_branch = "main"
 
 [features]
-tiber = true
 agentic_systems = true
 eval_case_reporting = true
+tiber = true
 
-[worktrees]
-root = ".worktrees"
+[final_review.models]
+lens_review = "substantive-worker"
+post_filter = "bounded-helper"
+pre_filter = "strong-reviewer"
+verifier = "strong-reviewer"
+
+[final_review.models.claude]
+lens_review = "sonnet"
+post_filter = "haiku"
+pre_filter = "opus"
+verifier = "opus"
+
+[final_review.models.codex]
+lens_review = "gpt-5.6-terra"
+post_filter = "gpt-5.6-luna"
+pre_filter = "gpt-5.6-sol"
+verifier = "gpt-5.6-sol"
+
+[scopes.build_output]
+category = "build_output"
+include = ["target/**", "dist/**", "build/**", ".evals/**"]
+
+[scopes.developer_environment]
+category = "developer_environment"
+include = [".github/**", "scripts/**", "flake.nix", "flake.lock", "justfile", "package.json", "Cargo.toml"]
+
+[scopes.documentation]
+category = "documentation"
+include = ["docs/**", "README.md", "CHANGELOG.md", "**/docs/**", "**/README.md", "**/CHANGELOG.md"]
+
+[scopes.source]
+category = "source"
+include = ["src/**", "lib/**", "app/**", "**/src/**", "**/lib/**", "**/app/**"]
+
+[scopes.tests]
+category = "tests"
+include = ["test/**", "tests/**", "spec/**", "specs/**", "**/test/**", "**/tests/**", "**/spec/**", "**/specs/**"]
 
 [tiber]
 max_queued = 5
 
-[final_review.models]
-pre_filter = "strong-reviewer"
-lens_review = "substantive-worker"
-post_filter = "bounded-helper"
-verifier = "strong-reviewer"
-
-[final_review.models.codex]
-pre_filter = "gpt-5.6-sol"
-lens_review = "gpt-5.6-terra"
-post_filter = "gpt-5.6-luna"
-verifier = "gpt-5.6-sol"
-
-[final_review.models.claude]
-pre_filter = "opus"
-lens_review = "sonnet"
-post_filter = "haiku"
-verifier = "opus"
+[worktrees]
+root = ".worktrees"

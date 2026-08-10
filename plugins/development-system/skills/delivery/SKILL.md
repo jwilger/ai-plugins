@@ -5,7 +5,10 @@ description: Use when committing, pushing, opening or babysitting a PR/MR, mergi
 
 # Delivery
 
-Read `[delivery]` in `.development-system.toml`.
+Use the configured semantic repository-local and repository-remote services
+when their generated profile is available. Do not use raw Git or forge argv.
+If the services are unavailable, report the capability gap; do not substitute
+shell commands.
 
 For ongoing PR/MR monitoring through merge or an external-intervention blocker,
 load the retained [babysit PR
@@ -15,14 +18,11 @@ When the configured value is unavailable, do not choose a mode. State that
 `.development-system.toml` is authoritative and summarize all three modes so
 the user knows what evidence is missing.
 
-- `direct-to-trunk`: commit verified semantic increments and push the configured
-  trunk branch. Treat failed pushed CI as blocking recovery work.
-- `pull-request`: publish a branch, create or update one PR/MR, and monitor the
-  current head revision. Re-evaluate required checks, current reviews, unresolved
-  change requests or threads, mergeability, branch-update rules, and queue state
-  after every head change. Finish only at the repository's configured terminal
-  state; pending checks or a merge-queue wait are not terminal blockers.
-- `local-only`: do not commit or publish unless explicitly authorized.
+- A semantic commit/tag operation must consume a clean workflow checkpoint and
+  return a signed receipt when signing is required.
+- A semantic push/PR/merge operation must return an idempotent remote receipt.
+- Failed pushed CI is blocking recovery work; the CI-recovery service performs
+  only typed recovery actions.
 
 For a PR/MR check failure, inspect the failed job and step before acting.
 Classify it as change-caused, transient/flaky, or infrastructure/external; route

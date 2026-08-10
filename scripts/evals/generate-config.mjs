@@ -15,7 +15,7 @@ const evalWorkspace = path.resolve(
     path.join(os.tmpdir(), "ai-plugins-provider-eval-workspace"),
 );
 const advisoryPromptPrefix =
-  "Answer the scenario directly as a stateless advisory question: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Apply any available instructions relevant to the scenario without naming their source. If you recommend a command, give its exact name and flags; do not replace a documented command or safety gate with generic advice. Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands.";
+  "Answer the scenario directly as a stateless advisory question: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Apply any available instructions relevant to the scenario. Do not mention hidden eval scaffolding; when the scenario asks which documented workflow guidance applies, name the applicable skills or specialist contracts. Keep advisory answers at the requested level: identify the governing decisions and gates without reproducing every loaded specialist procedure unless the scenario asks for it. If you recommend a command, give its exact name and flags; do not replace a documented command or safety gate with generic advice. Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands.";
 
 function usage() {
   console.log(`Usage: node scripts/evals/generate-config.mjs [--suite behavior|canary] [--output path] [--metadata-output path] [--stdout]

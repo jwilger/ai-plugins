@@ -1,4 +1,4 @@
-mod support;
+pub mod support;
 
 use std::io::ErrorKind;
 use std::io::{BufRead, BufReader};

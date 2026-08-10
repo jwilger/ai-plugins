@@ -235,14 +235,12 @@ state automatically, the read continues with the merged board. If the sync canno
 be resolved automatically, the read fails instead of returning stale or locally
 divergent task data.
 
-## CI Recovery Is Workflow-Owned
+## CI Recovery Is Tiber-Owned
 
-Tiber is only the task board. The Development Discipline MCP coordinates
-pushed-CI recovery on its independent `origin/development-workflow` authority;
-that hold applies whether or not a project has a Tiber board. Existing
-`tiber ci-recovery` commands remain temporary compatibility support for an
-already-active legacy incident, but new recovery work must use
-`workflow.ci_recovery.*`.
+Tiber is the sole authority for pushed-CI recovery as well as task-board facts.
+Its typed EventCore facts are stored on the shared Git-backed Tiber authority.
+Development Discipline reads Tiber's unresolved hold only to gate delivery; it
+does not keep a second incident, lease, assignment, receipt, or CI state ref.
 
 ## Stdio MCP
 
@@ -252,16 +250,10 @@ Tiber exposes the same task operations over stdio MCP:
 tiber mcp stdio
 ```
 
-The plugin manifest registers this server through an absolute `/bin/sh` launcher
-that resolves the installed `bin/tiber` from Claude's `${CLAUDE_PLUGIN_ROOT}`
-when that variable is set, or from the exact `development-system/3.2.1` Codex
-plugin cache
-when running under Codex. If `${CLAUDE_PLUGIN_ROOT}` is set but does not contain
-an executable `bin/tiber`, startup fails with
-`tiber.mcp_claude_plugin_root_invalid` rather than falling back to another
-cache. If `${CODEX_HOME}` is set but the exact Codex cache entry is missing,
-startup fails with `tiber.mcp_codex_cache_missing`; only sessions without an
-explicit `${CODEX_HOME}` fall back to `$HOME/.codex`.
+The plugin manifest invokes its installed `bin/tiber` entrypoint directly. The
+entrypoint selects the shipped native binary for the current supported target
+and otherwise invokes the repository's pinned Rust build; MCP configuration
+does not use a shell command string or a harness-cache fallback path.
 
 The Codex MCP registration forwards `SSH_AUTH_SOCK` so Git SSH signing can use
 the user's existing agent, including 1Password SSH agent setups. If an older

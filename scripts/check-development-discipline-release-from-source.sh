@@ -31,7 +31,7 @@ fi
 
 DEVELOPMENT_DISCIPLINE_SOURCE_FINGERPRINT="$source_fingerprint" \
   CARGO_TARGET_DIR="$target_dir" \
-  rustup run "$toolchain" cargo build --manifest-path "$manifest" --release
+  rustup run "$toolchain" cargo build --locked --manifest-path "$manifest" --release
 
 source "$plugin_root/scripts/detect-target.sh"
 release_target="$(detect_development_discipline_target)"
@@ -42,7 +42,8 @@ dist_output="$(mktemp)"
 source_normalized="$(mktemp)"
 dist_normalized="$(mktemp)"
 project_root="$(mktemp -d)"
-trap 'rm -rf "$source_output" "$dist_output" "$source_normalized" "$dist_normalized" "$project_root"' EXIT
+routing_root="$(mktemp -d)"
+trap 'rm -rf "$source_output" "$dist_output" "$source_normalized" "$dist_normalized" "$project_root" "$routing_root"' EXIT
 
 mkdir -p "$project_root/.development-discipline"
 git -C "$project_root" init --quiet
@@ -60,17 +61,35 @@ printf '%s\n' \
   'verifier = "config-verify"' \
   >"$project_root/.development-discipline/final-review.toml"
 
+# Exercise harness-specific routing in a disposable repository.  The review
+# service may create its own durable event store and snapshots, so never point
+# this release test at the checked-out source repository.
+mkdir -p "$routing_root/.development-discipline"
+git -C "$routing_root" init --quiet
+git -C "$routing_root" config user.name "Final Review Routing Fixture"
+git -C "$routing_root" config user.email "final-review-routing@example.test"
+git -C "$routing_root" config commit.gpgsign false
+git -C "$routing_root" commit --allow-empty --quiet -m "Initialize routing fixture"
+mkdir -p "$routing_root/plugins/development-system/components/development-discipline/rust/src"
+printf '%s\n' 'routing fixture change' >"$routing_root/plugins/development-system/components/development-discipline/rust/src/main.rs"
+cp "$root/.development-discipline/final-review.toml" "$routing_root/.development-discipline/final-review.toml"
+
 parity_state_root="$project_root/.development-discipline-state-parity"
 run_flow() {
   local binary="$1" output="$2"
   FINAL_REVIEW_TEST_PROJECT_ROOT="$project_root" \
-    FINAL_REVIEW_ROUTING_PROJECT_ROOT="$root" \
+    FINAL_REVIEW_ROUTING_PROJECT_ROOT="$routing_root" \
     FINAL_REVIEW_TEST_STATE_ROOT="$parity_state_root" \
-    node "$flow_script" "$binary" >"$output"
+    node "$flow_script" "$binary" --service workflow-core >"$output"
 }
 
 run_flow "$source_binary" "$source_output"
 rm -rf "$parity_state_root"
+# Source and packaged binaries must exercise equivalent, independent authority
+# histories. Both repositories are disposable fixtures; reset only their
+# Development Workflow authority refs before the packaged run.
+git -C "$project_root" update-ref -d refs/heads/development-workflow
+git -C "$routing_root" update-ref -d refs/heads/development-workflow
 run_flow "$dist_binary" "$dist_output"
 if ! node "$parity_normalizer" "$source_output" >"$source_normalized"; then
   echo "development-discipline-release-parity-normalization-failed=true side=source" >&2

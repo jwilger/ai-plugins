@@ -45,6 +45,17 @@ This plugin intentionally does not import upstream `using-superpowers`,
 `using-git-worktrees`, or `finishing-a-development-branch`. Those workflows
 conflict with or duplicate existing local practice.
 
+## Capability boundary
+
+The plugin is inert without a valid root `.development-system.toml`. Its
+plugin-wide MCP surface is read/setup-only: `workspace-reader.status`,
+`setup.preview`, and explicitly confirmed `setup.apply`. It does not inspect
+arbitrary shell commands, tool names, patches, or Git arguments. Privileged
+editor, runner, local-repository, remote-repository, and diagnostics services
+are withheld until a project proves per-agent MCP isolation and an OS write
+boundary for its selected harness. This is deliberate fail-closed behavior, not
+a fallback to writable agents or command classification.
+
 ## Harnesses
 
 Claude Code and Codex consume the same canonical routing policy from `skills/`.
@@ -63,11 +74,15 @@ fallback remains available for source-tree development. Release checks validate
 each artifact's target format, checksum, and embedded source/toolchain
 fingerprint.
 
-The caller carries final-review state between requests, while the MCP records
-semantic final-review events through EventCore in a project-scoped local SQLite
-store. SQLite is intentionally local: these short-lived review sessions do not
-benefit from Git sharing. A restarted MCP reconstructs exact state, reports,
-and pending assignments from the event history. Mutated, stale, or concurrently
+The caller currently carries final-review state between requests, while the MCP
+records the transition history through EventCore in a project-scoped local
+SQLite store. SQLite is intentionally local: these short-lived review sessions
+do not benefit from Git sharing. This lane is still under migration: fresh
+review events retain snapshot-shaped JSON and therefore do not yet satisfy the
+repository's typed domain-intent EventCore rule. Treat SQLite tables as
+rebuildable projections and legacy snapshots as replay/import inputs only; do
+not describe the lane as complete until named review-intent commands decide
+typed facts from minimal folded state. Mutated, stale, or concurrently
 superseded state and post-completion transitions fail closed with sanitized
 recovery diagnostics; active sessions and retained review history are bounded.
 
@@ -75,7 +90,7 @@ The same MCP mechanically enforces the checked development lifecycle: a
 repository mutation must first enter a production or explicit-exemption
 lifecycle; a production change requires observed RED evidence, authorized
 implementation, observed GREEN evidence, a completed authoritative final-review
-state, and a delivery gate. Pushed-CI recovery is coordinated independently of Tiber on the repository's
-`origin/development-workflow` ref through epoch-fenced leases. An unresolved
-remote incident blocks all unrelated hook activity across clones, and only
-matching terminal-success replacement evidence releases delivery.
+state, and a delivery gate. Tiber is the sole pushed-CI recovery authority on
+its Git-backed EventCore store. Development Discipline reads its unresolved
+incident hold when authorizing delivery; matching terminal-success replacement
+evidence in Tiber releases that hold.

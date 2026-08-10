@@ -1,6 +1,6 @@
 ---
 name: ci-failure-follow-up
-description: Use when a pushed CI run fails or before later work or pushes; coordinate multiple agents through the workflow-owned CI-recovery owner/lease, reproduce the exact recovery record, permit only a causal repair or unchanged-SHA rerun, and require terminal success.
+description: Use when a pushed CI run fails or before later work or pushes; coordinate multiple agents through Tiber's CI-recovery owner/lease, reproduce the exact recovery record, permit only a causal repair or unchanged-SHA rerun, and require terminal success.
 ---
 
 # CI Failure Follow-up
@@ -10,22 +10,22 @@ remediation, ticket work, and all pushes except the one recovery action
 selected below. Keep the hold until the failure is diagnosed and its
 replacement run reaches terminal success.
 
-Multi-agent ownership is coordinated only through the epoch-fenced incident on
-the authoritative `origin/development-workflow` branch, never through local
-notes or a task board. If that remote state is unavailable, fail closed
-and take no recovery action.
+Multi-agent ownership is coordinated only through Tiber's epoch-fenced incident
+on the authoritative `origin/tiber` branch, never through local notes or a
+second workflow store. If that remote state is unavailable, fail closed and
+take no recovery action.
 
 ## Claim the Repository-Wide Incident
 
 Every agent that detects a terminal failed pushed-CI run claims it before
 diagnosis, a rerun, a push, or a release:
 
-Call `workflow.ci_recovery.claim` on the Development Discipline MCP with
+Call `tiber.ci_recovery.claim` with
 `run_id`, `run_url`, `failed_sha`, `workflow`, and `git_ref`.
 
 The result identifies the single incident, current epoch, and role. Only the
 epoch-fenced owner diagnoses and selects the recovery action. Nonowners hold
-and make bounded `workflow.ci_recovery.wait` calls; they may help only through an
+and make bounded `tiber.ci_recovery.wait` calls; they may help only through an
 owner assignment limited to inspect, reproduce, edit, or test. Helpers report
 evidence and never push, rerun, or choose an action. Proof closure is not
 helper work, but any joined participant may independently record exact matching
@@ -39,10 +39,9 @@ reports that the server-timed lease expired; do not decide expiry from a local
 wall clock. Transfer or takeover creates a new epoch, invalidating the former
 owner's authority.
 
-Development Discipline synchronizes this state on `origin/development-workflow`,
-separate from any task board. It fetches and compares, publishes lease-fenced
-updates, and retries after concurrent updates. Never force-push the branch. If
-Development Discipline or `origin` is unavailable,
+Tiber synchronizes this state on `origin/tiber`. It fetches and compares,
+publishes lease-fenced updates, and retries after concurrent updates. Never
+force-push the branch. If Tiber or `origin` is unavailable,
 fail closed: preserve the global hold and do not diagnose, push, rerun, choose
 an action, or release until shared coordination is restored. Local notes
 preserve observations only; they do not grant ownership.

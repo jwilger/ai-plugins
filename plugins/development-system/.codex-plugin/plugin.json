@@ -1,6 +1,6 @@
 {
   "name": "development-system",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
   "author": {
     "name": "John Wilger",
@@ -8,7 +8,7 @@
   },
   "license": "AGPL-3.0-or-later",
   "keywords": ["development", "workflow", "worktrees", "tiber", "quality"],
-  "mcpServers": "./.mcp.json",
+  "mcpServers": "./.codex-mcp.json",
   "hooks": "./hooks/codex.json",
   "interface": {
     "displayName": "Development System",
@@ -16,7 +16,7 @@
     "longDescription": "Use Development System for John's consolidated development discipline, engineering standards, worktree isolation, Tiber coordination, final review, and optional agentic-system workflows.",
     "developerName": "John Wilger",
     "category": "Developer Tools",
-    "capabilities": ["Read", "Write"],
+    "capabilities": ["Read"],
     "websiteURL": "https://git.johnwilger.com/Slipstream/ai-plugins",
     "privacyPolicyURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",
     "termsOfServiceURL": "https://git.johnwilger.com/Slipstream/ai-plugins/src/branch/main/README.md",

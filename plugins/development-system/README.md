@@ -2,29 +2,21 @@
 
 The single personal development plugin for Codex and Claude Code.
 
-It defaults to direct-to-trunk delivery with Tiber and on-demand linked
-worktrees for concurrent mutable work. One
-project file, `.development-system.toml`, selects optional agentic-system and
-eval-reporting capabilities.
+It is inert outside a Git repository or without a valid schema-3
+`.development-system.toml`. Read-only repository inspection remains available
+in every state. Start configuration through the structured `setup.preview`
+tool, review the discovered path scopes and named command catalog, then
+explicitly confirm `setup.apply`. Setup never stages or commits configuration.
 
-Run setup from the primary checkout:
-
-```shell
-development-system setup --project . --preset personal-trunk --dry-run
-development-system setup --project . --preset personal-trunk --apply --yes
-```
-
-Setup refuses linked worktrees, previews before mutation, requires explicit
-confirmation, and creates exactly one initialization commit. Existing projects
-are configured from scratch; there is no legacy migration path.
-
-Use `--delivery` plus repeatable `--enable` and `--disable` options to select
-Tiber, agentic-system guidance, and eval reporting. Worktree support is always
-available and does not reserve the primary checkout.
-
-`development-system doctor --project .` reports conflicting plugins, disabled
-hook settings, managed-only hook policies, and user-managed MCP configuration.
-The SessionStart hook runs the same check automatically in both harnesses.
+The plugin-wide Development Discipline MCP surface is deliberately limited to
+reader and setup tools. Project mutation is available only through separate,
+structured Development Discipline services after the selected harness has
+proved per-agent MCP isolation, a stable caller identity, and an OS-enforced
+write boundary. Until that proof is recorded, generated profiles are read-only;
+Development Discipline provides no Bash, `apply_patch`, raw Git, or
+forge-command fallback. Tiber remains an independently governed structured MCP
+integration. A harness's own built-in tools remain outside this plugin's
+authority and are part of the boundary proof.
 
 The strong recommendation is to install only this plugin. Third-party plugin
 marketplaces add unnecessary supply-chain exposure. The plugin owns its bundled
@@ -39,10 +31,12 @@ the public plugin owns or wraps. Those component directory and manifest names
 remain valid internal identities; they are not separate marketplace install
 targets or public routing labels.
 
-The top-level plugin manifest starts the always-on development-discipline and
-Tiber MCP servers. Development Discipline stores local final-review events in
-SQLite and coordinates shared CI recovery on its independent
-`development-workflow` Git branch; Tiber publishes task events on `tiber`.
+The top-level plugin manifest starts the read/setup-only Development Discipline
+surface and the independent Tiber MCP server. Development Discipline stores
+local final-review events in SQLite and uses `development-workflow` only for
+its workflow authority; it reads Tiber's unresolved CI hold when gating
+delivery. Tiber is the sole CI-incident and receipt authority on `tiber`, in
+addition to publishing task events there.
 Promptfoo remains an optional MCP owned by the
 agentic-systems-engineering component and is intentionally excluded from the
 top-level manifest because projects may disable that capability and must supply

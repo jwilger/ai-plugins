@@ -116,7 +116,7 @@ function requirePinnedSystemdRun() {
     ) ||
     !metadata.isFile() ||
     metadata.isSymbolicLink() ||
-    metadata.uid !== 0 ||
+    ![0, 65534].includes(metadata.uid) ||
     (metadata.mode & 0o022) !== 0
   ) {
     operational("systemd-run-not-flake-selected");

@@ -20,7 +20,6 @@ pub fn assert_success_ref(output: &Output) {
     );
 }
 
-#[allow(dead_code)]
 pub fn task_stem(repo: &TempRepo, status: &str, nickname: &str) -> String {
     let list = repo.tiber(["list", "--status", status]);
     assert_success_ref(&list);
@@ -41,6 +40,12 @@ pub fn task_stem(repo: &TempRepo, status: &str, nickname: &str) -> String {
 
 pub struct TempRepo {
     path: PathBuf,
+}
+
+impl Default for TempRepo {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TempRepo {
@@ -71,7 +76,6 @@ impl TempRepo {
         repo
     }
 
-    #[allow(dead_code)]
     pub fn bare_with_rejecting_hook() -> (Self, PathBuf) {
         let origin = Self::new();
         origin.git(["init", "--bare"]);
@@ -91,7 +95,6 @@ impl TempRepo {
         &self.path
     }
 
-    #[allow(dead_code)]
     pub fn tiber<I, S>(&self, args: I) -> Output
     where
         I: IntoIterator<Item = S>,
@@ -100,7 +103,6 @@ impl TempRepo {
         self.command(env!("CARGO_BIN_EXE_tiber"), args)
     }
 
-    #[allow(dead_code)]
     pub fn tiber_at<I, S>(&self, directory: &Path, args: I) -> Output
     where
         I: IntoIterator<Item = S>,
@@ -113,7 +115,6 @@ impl TempRepo {
             .expect("run tiber")
     }
 
-    #[allow(dead_code)]
     pub fn tiber_with_env<I, S, E, K, V>(&self, args: I, envs: E) -> Output
     where
         I: IntoIterator<Item = S>,
@@ -155,7 +156,6 @@ impl TempRepo {
         self.command("git", args)
     }
 
-    #[allow(dead_code)]
     pub fn task_file(&self, status: &str, stem: &str) -> String {
         let output = self.tiber(["show", stem]);
         assert_success_ref(&output);
@@ -170,7 +170,6 @@ impl TempRepo {
         String::from_utf8(output.stdout).expect("task file should be utf8")
     }
 
-    #[allow(dead_code)]
     pub fn order_file(&self) -> String {
         let output = self.tiber(["list"]);
         assert_success_ref(&output);

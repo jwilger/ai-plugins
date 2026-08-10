@@ -28,7 +28,7 @@ github-actions:
 tiber-rust:
     cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
     cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
-    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml
+    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml -- --test-threads=1
 
 # Rust gates for the development-discipline MCP coordinator.
 development-discipline-rust:
@@ -39,7 +39,7 @@ development-discipline-rust:
 development-discipline-release-complete:
     cd plugins/development-system/components/development-discipline && sha256sum --check release-binaries.sha256
     bash scripts/check-development-discipline-release-complete.sh
-    version="$(jq -r '.version' plugins/development-system/.codex-plugin/plugin.json)" && rg "development-system/${version}/bin/development-discipline-mcp" plugins/development-system/components/development-discipline/.mcp.json
+    jq -e '.mcpServers["development-discipline"] | .command == "./bin/development-discipline-mcp" and .args == ["--service", "plugin-read-only"]' plugins/development-system/components/development-discipline/.mcp.json >/dev/null
 
 development-discipline-release-from-source:
     bash scripts/check-development-discipline-release-from-source.sh

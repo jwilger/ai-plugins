@@ -1,19 +1,13 @@
 {
   "mcpServers": {
     "development-discipline": {
-      "command": "/bin/sh",
-      "args": [
-        "-c",
-        "set -eu; if [ -n \"${PATH:-}\" ]; then PATH=\"$PATH:/bin:/usr/bin:/run/current-system/sw/bin\"; else PATH=\"/bin:/usr/bin:/run/current-system/sw/bin\"; fi; export PATH; plugin_root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ -n \"$plugin_root\" ]; then candidate=\"$plugin_root/bin/development-discipline-mcp\"; if [ -x \"$candidate\" ]; then exec \"$candidate\"; fi; echo \"development_system.plugin_root_invalid component=development-discipline\" >&2; exit 127; fi; if [ -n \"${CODEX_HOME:-}\" ]; then candidate=\"$CODEX_HOME/plugins/cache/ai-plugins/development-system/3.2.1/bin/development-discipline-mcp\"; if [ -x \"$candidate\" ]; then exec \"$candidate\"; fi; fi; if [ -n \"${HOME:-}\" ]; then candidate=\"$HOME/.codex/plugins/cache/ai-plugins/development-system/3.2.1/bin/development-discipline-mcp\"; if [ -x \"$candidate\" ]; then exec \"$candidate\"; fi; fi; echo \"development_system.codex_cache_missing component=development-discipline\" >&2; exit 127"
-      ],
-      "description": "Mechanically checked development lifecycle, cross-clone CI recovery, and final-review coordination."
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/development-discipline-mcp",
+      "args": ["--service", "plugin-read-only"],
+      "description": "Read-only Development System reader and explicit setup surface. Privileged workflow, editor, runner, repository, and diagnostics services require a generated, harness-proven profile."
     },
     "tiber": {
-      "command": "/bin/sh",
-      "args": [
-        "-c",
-        "set -eu; if [ -n \"${PATH:-}\" ]; then PATH=\"$PATH:/bin:/usr/bin:/run/current-system/sw/bin\"; else PATH=\"/bin:/usr/bin:/run/current-system/sw/bin\"; fi; export PATH; plugin_root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ -n \"$plugin_root\" ]; then candidate=\"$plugin_root/bin/tiber\"; if [ -x \"$candidate\" ]; then exec \"$candidate\" mcp stdio; fi; echo \"development_system.plugin_root_invalid component=tiber\" >&2; exit 127; fi; if [ -n \"${CODEX_HOME:-}\" ]; then candidate=\"$CODEX_HOME/plugins/cache/ai-plugins/development-system/3.2.1/bin/tiber\"; if [ -x \"$candidate\" ]; then exec \"$candidate\" mcp stdio; fi; fi; if [ -n \"${HOME:-}\" ]; then candidate=\"$HOME/.codex/plugins/cache/ai-plugins/development-system/3.2.1/bin/tiber\"; if [ -x \"$candidate\" ]; then exec \"$candidate\" mcp stdio; fi; fi; echo \"development_system.codex_cache_missing component=tiber\" >&2; exit 127"
-      ],
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/tiber",
+      "args": ["mcp", "stdio"],
       "env_vars": ["SSH_AUTH_SOCK"],
       "description": "Git-backed task tracking and bounded backlog coordination."
     }

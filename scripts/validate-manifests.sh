@@ -102,10 +102,21 @@ for dir in "$root"/plugins/*/; do
 	    [ "$codex_marketplace_version" = "$cx_version" ] || fail "codex-marketplace-version-mismatch: $name marketplace=$codex_marketplace_version plugin=$cx_version"
 
 	    mcp_ref="$(jq -r '.mcpServers // empty' "$cx")"
-	    if [ -f "${dir}.mcp.json" ] && [ -z "$mcp_ref" ]; then
+	    # A dual-harness plugin may ship Claude's conventional `.mcp.json` and
+	    # a separate Codex manifest. In that case the Codex manifest is the
+	    # authoritative declaration; do not mistake Claude's file for a stale
+	    # Codex surface.
+	    codex_default_mcp="${dir}.codex-mcp.json"
+	    if [ -f "$codex_default_mcp" ] && [ -z "$mcp_ref" ]; then
+	      fail "codex-mcp-manifest-not-declared: $name path=./.codex-mcp.json"
+	    fi
+	    if [ -f "$codex_default_mcp" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.codex-mcp.json" ]; then
+	      fail "codex-mcp-manifest-not-declared: $name path=./.codex-mcp.json declared=$mcp_ref"
+	    fi
+	    if [ ! -f "$codex_default_mcp" ] && [ -f "${dir}.mcp.json" ] && [ -z "$mcp_ref" ]; then
 	      fail "codex-mcp-manifest-not-declared: $name path=./.mcp.json"
 	    fi
-	    if [ -f "${dir}.mcp.json" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.mcp.json" ]; then
+	    if [ ! -f "$codex_default_mcp" ] && [ -f "${dir}.mcp.json" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.mcp.json" ]; then
 	      fail "codex-mcp-manifest-not-declared: $name path=./.mcp.json declared=$mcp_ref"
 	    fi
 	    if [ -n "$mcp_ref" ]; then

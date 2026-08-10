@@ -7,8 +7,8 @@ description: Use whenever Tiber or origin/tiber is mentioned, including reposito
 
 Use Tiber for repository-local task boards backed by EventCore and eventcore-fs
 on the shared Git `tiber` branch. Markdown task files are no longer persistent
-state. Pushed-CI recovery belongs to Development Discipline's independent
-workflow coordinator, not this task board.
+state. Tiber is also the sole EventCore authority for pushed-CI recovery;
+Development Discipline consumes its unresolved hold only for delivery gating.
 The bundled launcher is `<plugin-root>/bin/tiber`; resolve `<plugin-root>`
 relative to this skill file and prefer that launcher before probing `PATH`.
 
@@ -123,9 +123,9 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 
 ## Pushed-CI Incident Coordination
 
-Tiber does not coordinate CI recovery. Load Development Discipline's
-`ci-failure-follow-up` skill and use `workflow.ci_recovery.*`; its independent
-workflow authority applies to projects with and without Tiber.
+Use Tiber's semantic `tiber.ci_recovery.*` operations for pushed-CI recovery.
+Development Discipline reads the resulting unresolved hold when deciding
+whether delivery may proceed; it does not maintain a parallel incident.
 
 ## Commands
 
