@@ -4969,8 +4969,12 @@ fn workflow_stream_id_read(root: &Path) -> Result<StreamId, String> {
     crate::workflow::workflow_authority_stream_id(root)
 }
 
-fn workflow_runtime() -> Result<&'static tokio::runtime::Runtime, String> {
-    crate::workflow::lifecycle_runtime()
+fn workflow_runtime() -> Result<tokio::runtime::Runtime, String> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .map_err(|error| format!("development_system.workflow_runtime_failed source={error}"))
 }
 
 fn legacy_semantic_import_at(root: &Path) -> Result<Option<LegacySemanticImport>, String> {
