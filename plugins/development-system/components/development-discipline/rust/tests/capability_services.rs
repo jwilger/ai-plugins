@@ -72,6 +72,18 @@ fn git(root: &std::path::Path, arguments: &[&str]) {
     assert!(status.success(), "git {arguments:?}");
 }
 
+fn test_executable(program: &str) -> String {
+    std::env::var_os("PATH")
+        .and_then(|path| {
+            std::env::split_paths(&path)
+                .map(|directory| directory.join(program))
+                .find(|candidate| candidate.is_file())
+        })
+        .unwrap_or_else(|| panic!("test executable {program} should be available on PATH"))
+        .display()
+        .to_string()
+}
+
 #[test]
 fn semantic_reader_is_inert_without_configuration_and_invalid_config_fails_closed() {
     let root = TempDir::new().expect("repository");
@@ -676,7 +688,10 @@ fn failed_named_command_receipt_is_required_to_record_red() {
     git(root.path(), &["init", "--quiet"]);
     fs::write(
         root.path().join(".development-system.toml"),
-        "schema_version = 3\n\n[scopes.tests]\ncategory = \"tests\"\ninclude = [\"tests/**\"]\n\n[commands.red]\nargv = [\"/run/current-system/sw/bin/false\"]\ncapability = \"tests\"\n",
+        format!(
+            "schema_version = 3\n\n[scopes.tests]\ncategory = \"tests\"\ninclude = [\"tests/**\"]\n\n[commands.red]\nargv = [\"{}\"]\ncapability = \"tests\"\n",
+            test_executable("false")
+        ),
     )
     .expect("configuration");
     let started = mcp_call_with_surface(
@@ -777,7 +792,11 @@ fn successful_named_command_receipt_is_required_to_record_green() {
     git(root.path(), &["init", "--quiet"]);
     fs::write(
         root.path().join(".development-system.toml"),
-        "schema_version = 3\n\n[scopes.tests]\ncategory = \"tests\"\ninclude = [\"tests/**\"]\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n\n[commands.red]\nargv = [\"/run/current-system/sw/bin/false\"]\ncapability = \"tests\"\n\n[commands.green]\nargv = [\"/run/current-system/sw/bin/true\"]\ncapability = \"implementation\"\n",
+        format!(
+            "schema_version = 3\n\n[scopes.tests]\ncategory = \"tests\"\ninclude = [\"tests/**\"]\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n\n[commands.red]\nargv = [\"{}\"]\ncapability = \"tests\"\n\n[commands.green]\nargv = [\"{}\"]\ncapability = \"implementation\"\n",
+            test_executable("false"),
+            test_executable("true")
+        ),
     )
     .expect("configuration");
     let call = |name: &str, arguments: Value, surface: &str| {
@@ -884,7 +903,10 @@ fn checkpoint_abort_archives_implementation_and_preserves_unrelated_index_entrie
     git(root.path(), &["init", "--quiet"]);
     fs::write(
         root.path().join(".development-system.toml"),
-        "schema_version = 3\n\n[scopes.tests]\ncategory = \"tests\"\ninclude = [\"tests/**\"]\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n\n[commands.red]\nargv = [\"/run/current-system/sw/bin/false\"]\ncapability = \"tests\"\n",
+        format!(
+            "schema_version = 3\n\n[scopes.tests]\ncategory = \"tests\"\ninclude = [\"tests/**\"]\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n\n[commands.red]\nargv = [\"{}\"]\ncapability = \"tests\"\n",
+            test_executable("false")
+        ),
     )
     .expect("configuration");
     fs::write(root.path().join("notes.txt"), "unrelated staged content\n")
