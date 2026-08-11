@@ -195,6 +195,21 @@ async fn first_append_creates_one_signed_authoritative_branch() {
         ["cat-file", "commit", candidate.trim()],
     );
     assert!(commit.contains("gpgsig -----BEGIN SSH SIGNATURE-----"));
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            [
+                "show",
+                "--no-patch",
+                "--no-show-signature",
+                "--format=%an <%ae>|%cn <%ce>",
+                candidate.trim(),
+            ],
+        )
+        .trim(),
+        "Tiber Contract Test <tiber-contract@example.invalid>|\
+         Tiber Contract Test <tiber-contract@example.invalid>"
+    );
 
     let refs = git_output(
         fixture.origin.parent().expect("origin parent"),

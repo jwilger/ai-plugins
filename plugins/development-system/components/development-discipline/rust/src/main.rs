@@ -2282,6 +2282,7 @@ fn parse_final_review_advance_intent(
 #[derive(Clone)]
 struct ConfirmReviewSplitIntent {
     input: ConfirmReviewSplitInput,
+    tracker_mutation_authorized: bool,
     now_epoch_seconds: u64,
 }
 
@@ -9233,10 +9234,13 @@ fn build_confirm_final_review_split_events(
         .and_then(Value::as_object_mut)
         .expect("validated contract has typed split facts");
     risk_plan.insert("confirmation_required".to_string(), json!(false));
-    risk_plan.insert("tracker_mutation_authorized".to_string(), json!(true));
+    risk_plan.insert(
+        "tracker_mutation_authorized".to_string(),
+        json!(intent.tracker_mutation_authorized),
+    );
     risk_plan.insert(
         "blocking_dependencies_authorized".to_string(),
-        json!(blocking),
+        json!(intent.tracker_mutation_authorized && blocking),
     );
     risk_plan.insert(
         "confirmed_representation".to_string(),
@@ -9832,7 +9836,7 @@ struct ReviewCoordinator {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ServiceSurface {
     Full,
-    PluginReadOnly,
+    PluginAdvisory,
     WorkspaceReader,
     WorkflowCore,
     WorkspaceEditor,
@@ -9842,12 +9846,52 @@ enum ServiceSurface {
     SystemDiagnostics,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReviewPersistence {
+    WorkflowAuthority,
+    PluginAdvisoryLocal,
+}
+
+impl ReviewPersistence {
+    const fn namespace(self) -> &'static str {
+        match self {
+            Self::WorkflowAuthority => "workflow-authority",
+            Self::PluginAdvisoryLocal => "plugin-advisory-local",
+        }
+    }
+
+    #[cfg(not(test))]
+    const fn authority(self) -> tiber_git::git_event_store::GitEventStoreAuthority {
+        match self {
+            Self::WorkflowAuthority => {
+                tiber_git::git_event_store::GitEventStoreAuthority::DevelopmentWorkflow
+            }
+            Self::PluginAdvisoryLocal => {
+                tiber_git::git_event_store::GitEventStoreAuthority::PluginAdvisoryFinalReview
+            }
+        }
+    }
+}
+
 impl ServiceSurface {
+    const fn review_persistence(self) -> ReviewPersistence {
+        match self {
+            Self::PluginAdvisory => ReviewPersistence::PluginAdvisoryLocal,
+            Self::Full | Self::WorkflowCore => ReviewPersistence::WorkflowAuthority,
+            Self::WorkspaceReader
+            | Self::WorkspaceEditor
+            | Self::ProjectRunner
+            | Self::RepositoryLocal
+            | Self::RepositoryRemote
+            | Self::SystemDiagnostics => ReviewPersistence::PluginAdvisoryLocal,
+        }
+    }
+
     fn from_dispatch_arguments(
         mut arguments: impl Iterator<Item = String>,
     ) -> Result<Self, String> {
         let Some(flag) = arguments.next() else {
-            return Ok(Self::current());
+            return Self::from_environment();
         };
         if flag != "--service" {
             return Err("development_system.dispatcher_argument_invalid".to_string());
@@ -9858,13 +9902,12 @@ impl ServiceSurface {
         if arguments.next().is_some() {
             return Err("development_system.dispatcher_argument_invalid".to_string());
         }
-        Self::from_name(&name)
-            .ok_or_else(|| "development_system.dispatcher_service_unknown".to_string())
+        Self::from_name(&name).ok_or_else(|| Self::unknown_service_error(&name))
     }
 
     fn from_name(name: &str) -> Option<Self> {
         match name {
-            "plugin-read-only" => Some(Self::PluginReadOnly),
+            "plugin-advisory" => Some(Self::PluginAdvisory),
             "workspace-reader" => Some(Self::WorkspaceReader),
             "workflow-core" => Some(Self::WorkflowCore),
             "workspace-editor" => Some(Self::WorkspaceEditor),
@@ -9880,27 +9923,41 @@ impl ServiceSurface {
         if cfg!(test) {
             Self::Full
         } else {
-            env::var("DEVELOPMENT_SYSTEM_SERVICE")
-                .ok()
-                .as_deref()
-                .and_then(Self::from_name)
-                .unwrap_or(Self::PluginReadOnly)
+            Self::PluginAdvisory
         }
+    }
+
+    fn from_environment() -> Result<Self, String> {
+        match env::var("DEVELOPMENT_SYSTEM_SERVICE") {
+            Ok(name) => Self::from_name(&name).ok_or_else(|| Self::unknown_service_error(&name)),
+            Err(env::VarError::NotPresent) => Ok(Self::PluginAdvisory),
+            Err(env::VarError::NotUnicode(_)) => {
+                Err("development_system.dispatcher_service_invalid".to_string())
+            }
+        }
+    }
+
+    fn unknown_service_error(name: &str) -> String {
+        format!(
+            "development_system.dispatcher_service_unknown requested={name} recovery=use_plugin-advisory_or_update_plugin_registration"
+        )
     }
 
     fn allows(self, name: &str) -> bool {
         match self {
             Self::Full => true,
-            Self::PluginReadOnly => matches!(
-                name,
-                "workspace-reader.status"
-                    | "workspace-reader.read"
-                    | "workspace-reader.list"
-                    | "workspace-reader.search"
-                    | "workspace-reader.repository"
-                    | "setup.preview"
-                    | "setup.apply"
-            ),
+            Self::PluginAdvisory => {
+                matches!(
+                    name,
+                    "workspace-reader.status"
+                        | "workspace-reader.read"
+                        | "workspace-reader.list"
+                        | "workspace-reader.search"
+                        | "workspace-reader.repository"
+                        | "setup.preview"
+                        | "setup.apply"
+                ) || is_advisory_review_tool(name)
+            }
             Self::WorkspaceReader => name.starts_with("workspace-reader."),
             Self::WorkflowCore => {
                 name.starts_with("workflow.") || name.starts_with("final_review.")
@@ -9918,8 +9975,8 @@ impl ServiceSurface {
             Self::Full | Self::WorkflowCore => {
                 "Use workflow status and domain-intent transitions as the authority for lifecycle decisions. Use final_review.assess_risk before final_review.plan, submit only assignment-bound reviewer evidence, and advance through the canonical review transitions."
             }
-            Self::PluginReadOnly => {
-                "Inspect repositories through workspace-reader tools. Use setup.preview and confirmed setup.apply for deterministic repository-local configuration. This plugin is advisory and does not restrict ordinary Codex tools."
+            Self::PluginAdvisory => {
+                "Inspect repositories, coordinate structured multi-agent final review, and use confirmed setup.apply only for deterministic repository-local configuration. This plugin is advisory: it does not expose the native workflow lifecycle or project-mutation services, execute project mutations, restrict ordinary harness tools, or authorize external actions."
             }
             Self::WorkspaceReader => {
                 "Inspect files and repository state through workspace-reader tools. This service has no project mutation capability."
@@ -10222,7 +10279,10 @@ impl ReviewCoordinator {
                     }
                 }
                 if name == "final_review.out_of_scope_report" {
-                    if let Err(error) = repair_projection_before_read(&arguments) {
+                    if let Err(error) = repair_projection_before_read(
+                        &arguments,
+                        self.service_surface.review_persistence(),
+                    ) {
                         return Ok(error_response(id, -32603, &error));
                     }
                 }
@@ -10500,7 +10560,11 @@ impl ReviewCoordinator {
             if let Some(work_item_id) = state_ref.get("work_item_id") {
                 lookup["work_item_id"] = work_item_id.clone();
             }
-            if let Some(restored) = load_authoritative_session(&lookup, session_id)? {
+            if let Some(restored) = load_authoritative_session(
+                &lookup,
+                session_id,
+                self.service_surface.review_persistence(),
+            )? {
                 self.session_revisions
                     .insert(session_id.to_string(), restored.revision);
                 self.sessions.insert(session_id.to_string(), restored.state);
@@ -10550,7 +10614,12 @@ impl ReviewCoordinator {
             if let Some(work_item_id) = state_ref.get("work_item_id") {
                 lookup["work_item_id"] = work_item_id.clone();
             }
-            let restored = load_authoritative_session(&lookup, &session_id)?.ok_or_else(|| {
+            let restored = load_authoritative_session(
+                &lookup,
+                &session_id,
+                self.service_surface.review_persistence(),
+            )?
+            .ok_or_else(|| {
                 "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
                     .to_string()
             })?;
@@ -10566,15 +10635,22 @@ impl ReviewCoordinator {
             }
         }
         let state = self.resolve_reference(&state_ref)?;
+        let complete = review_state_complete(&state);
+        let next_tool = if complete {
+            if matches!(self.service_surface, ServiceSurface::PluginAdvisory) {
+                Value::Null
+            } else {
+                json!("workflow.record_clean_review")
+            }
+        } else {
+            json!("final_review.advance")
+        };
         Ok(text_content(
             json!({
                 "state_ref": state_reference(&state)?,
-                "complete": review_state_complete(&state),
-                "next_tool": if review_state_complete(&state) {
-                    "workflow.record_clean_review"
-                } else {
-                    "final_review.advance"
-                }
+                "complete": complete,
+                "next_tool": next_tool,
+                "terminal": complete && matches!(self.service_surface, ServiceSurface::PluginAdvisory)
             })
             .to_string(),
         ))
@@ -10593,7 +10669,11 @@ impl ReviewCoordinator {
             .and_then(Value::as_str)
             .ok_or_else(|| "review_session_id_required=true".to_string())?;
         if !self.sessions.contains_key(session_id) {
-            if let Some(restored) = load_authoritative_session(state, session_id)? {
+            if let Some(restored) = load_authoritative_session(
+                state,
+                session_id,
+                self.service_surface.review_persistence(),
+            )? {
                 self.session_revisions
                     .insert(session_id.to_string(), restored.revision);
                 self.sessions.insert(session_id.to_string(), restored.state);
@@ -10714,11 +10794,20 @@ impl ReviewCoordinator {
             caller_state,
             self.session_revisions.get(&session_id).copied(),
             intent,
+            self.service_surface.review_persistence(),
         )?;
-        let projected = load_authoritative_session(caller_state, &session_id)?
-            .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
-        let response =
-            load_committed_iteration_response(caller_state, &session_id, projected.revision)?;
+        let projected = load_authoritative_session(
+            caller_state,
+            &session_id,
+            self.service_surface.review_persistence(),
+        )?
+        .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
+        let response = load_committed_iteration_response(
+            caller_state,
+            &session_id,
+            projected.revision,
+            self.service_surface.review_persistence(),
+        )?;
         let projected_verifier_request = projected.pending_verifier.is_some();
         let projected_delta_request = projected.pending_delta_risk.is_some();
         let state = projected.state;
@@ -10814,11 +10903,20 @@ impl ReviewCoordinator {
             caller_state,
             self.session_revisions.get(&session_id).copied(),
             intent.clone(),
+            self.service_surface.review_persistence(),
         )?;
-        let projected = load_authoritative_session(caller_state, &session_id)?
-            .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
-        let response =
-            load_committed_iteration_response(caller_state, &session_id, projected.revision)?;
+        let projected = load_authoritative_session(
+            caller_state,
+            &session_id,
+            self.service_surface.review_persistence(),
+        )?
+        .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
+        let response = load_committed_iteration_response(
+            caller_state,
+            &session_id,
+            projected.revision,
+            self.service_surface.review_persistence(),
+        )?;
         let state = projected.state;
         self.session_revisions
             .insert(session_id.clone(), projected.revision);
@@ -10862,11 +10960,20 @@ impl ReviewCoordinator {
             caller_state,
             self.session_revisions.get(&session_id).copied(),
             intent.clone(),
+            self.service_surface.review_persistence(),
         )?;
-        let projected = load_authoritative_session(caller_state, &session_id)?
-            .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
-        let response =
-            load_committed_delta_risk_response(caller_state, &session_id, projected.revision)?;
+        let projected = load_authoritative_session(
+            caller_state,
+            &session_id,
+            self.service_surface.review_persistence(),
+        )?
+        .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
+        let response = load_committed_delta_risk_response(
+            caller_state,
+            &session_id,
+            projected.revision,
+            self.service_surface.review_persistence(),
+        )?;
         self.session_revisions
             .insert(session_id.clone(), projected.revision);
         self.sessions
@@ -10899,9 +11006,14 @@ impl ReviewCoordinator {
             caller_state,
             self.session_revisions.get(&session_id).copied(),
             intent,
+            self.service_surface.review_persistence(),
         )?;
-        let projected = load_authoritative_session(caller_state, &session_id)?
-            .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
+        let projected = load_authoritative_session(
+            caller_state,
+            &session_id,
+            self.service_surface.review_persistence(),
+        )?
+        .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
         let state = projected.state;
         self.session_revisions
             .insert(session_id.clone(), projected.revision);
@@ -10933,7 +11045,8 @@ impl ReviewCoordinator {
 
     fn plan_review(&mut self, arguments: &Value, now_epoch_seconds: u64) -> Result<Value, String> {
         let input = parse_plan_review_input(arguments, true)?;
-        let observation = observe_review_plan(arguments)?;
+        let observation =
+            observe_review_plan_for(arguments, self.service_surface.review_persistence())?;
         let decision = plan_decision_from_observation(&input, now_epoch_seconds, &observation)?;
         let planned_state = decision.state.to_wire();
         let session_id = decision.state.identity.session_id.clone();
@@ -10966,11 +11079,28 @@ impl ReviewCoordinator {
                 observation,
                 now_epoch_seconds,
             },
+            self.service_surface.review_persistence(),
         )?;
-        let projected = load_authoritative_session(&planned_state, &session_id)?
-            .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
+        let projected = load_authoritative_session(
+            &planned_state,
+            &session_id,
+            self.service_surface.review_persistence(),
+        )?
+        .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
         let mut response = decision.response;
         response["state"] = projected.state.clone();
+        if matches!(self.service_surface, ServiceSurface::PluginAdvisory)
+            && response.get("complete").and_then(Value::as_bool) == Some(true)
+        {
+            response
+                .as_object_mut()
+                .expect("plan response object")
+                .remove("next_tool");
+            response["terminal"] = json!(true);
+            response["calling_agent_responsibility"] = json!(
+                "Final review is complete. This advisory plugin has no native workflow handoff; use ordinary host delivery tools only with the owner's authorization."
+            );
+        }
         self.session_revisions
             .insert(session_id.clone(), projected.revision);
         self.sessions.insert(session_id.clone(), projected.state);
@@ -10992,18 +11122,25 @@ impl ReviewCoordinator {
     ) -> Result<Value, String> {
         let parsed = parse_confirm_review_split_input(arguments)?;
         let session_id = parsed.supplied_state.identity.session_id.clone();
-        let decision = confirm_scope_split_input(&parsed.input, parsed.supplied_state)?;
+        let advisory = matches!(self.service_surface, ServiceSurface::PluginAdvisory);
+        let decision = confirm_scope_split_input(&parsed.input, parsed.supplied_state, !advisory)?;
         let expected_revision = self.session_revisions.get(&session_id).copied();
         execute_confirm_review_split(
             &decision.state.to_wire(),
             expected_revision,
             ConfirmReviewSplitIntent {
                 input: parsed.input,
+                tracker_mutation_authorized: !advisory,
                 now_epoch_seconds,
             },
+            self.service_surface.review_persistence(),
         )?;
-        let projected = load_authoritative_session(&decision.state.to_wire(), &session_id)?
-            .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
+        let projected = load_authoritative_session(
+            &decision.state.to_wire(),
+            &session_id,
+            self.service_surface.review_persistence(),
+        )?
+        .ok_or_else(|| "review_session_projection_missing_after_execution=true".to_string())?;
         let blocking = decision.blocking_dependencies_authorized;
         let state = projected.state;
         self.session_revisions
@@ -11013,16 +11150,30 @@ impl ReviewCoordinator {
         self.pending_delta_risks.remove(&session_id);
         self.touch_session(&session_id);
         self.enforce_active_session_limit();
+        let mut response_state = state.clone();
+        if advisory {
+            response_state["risk_plan"]["scope_split"]["tracker_mutation_authorized"] =
+                json!(false);
+            response_state["risk_plan"]["scope_split"]["blocking_dependencies_authorized"] =
+                json!(false);
+        }
+        let response_scope_split = response_state["risk_plan"]["scope_split"].clone();
         Ok(text_content(json!({
-            "state": state,
+            "state": response_state,
             "transition_status": "ticket_split_required",
             "advance_kind": "scope_split_hold",
-            "scope_split": state["risk_plan"]["scope_split"],
-            "tracker_mutation_authorized": true,
-            "blocking_dependencies_authorized": blocking,
+            "scope_split": response_scope_split,
+            "tracker_mutation_authorized": !advisory,
+            "blocking_dependencies_authorized": !advisory && blocking,
             "complete": false,
             "assignments": [],
-            "instruction": if blocking { "Create only the explicitly confirmed delivery tickets and blocking dependencies." } else { "Create only the explicitly confirmed delivery tickets; do not create blocking dependencies." }
+            "instruction": if advisory {
+                "The split choice is recorded as advisory state. Any tracker mutation remains the caller's responsibility and requires the owner's separate authorization."
+            } else if blocking {
+                "Create only the explicitly confirmed delivery tickets and blocking dependencies."
+            } else {
+                "Create only the explicitly confirmed delivery tickets; do not create blocking dependencies."
+            }
         }).to_string()))
     }
 
@@ -11646,8 +11797,64 @@ fn tools_for(surface: ServiceSurface) -> Value {
                     .and_then(Value::as_str)
                     .is_some_and(|name| surface.allows(name))
             })
+            .map(|mut tool| {
+                let is_advisory_coordination = matches!(surface, ServiceSurface::PluginAdvisory)
+                    && tool
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| {
+                            is_advisory_review_tool(name)
+                        });
+                if is_advisory_coordination {
+                    rewrite_advisory_language(&mut tool);
+                    if let Some(description) = tool.get_mut("description") {
+                        let original = description.as_str().unwrap_or_default();
+                        *description = Value::String(format!(
+                            "Advisory coordination only: this records process state but does not enforce harness capabilities or authorize external actions. {original}"
+                        ));
+                    }
+                }
+                tool
+            })
             .collect(),
     )
+}
+
+const ADVISORY_REVIEW_TOOLS: [&str; 8] = [
+    "final_review.plan",
+    "final_review.filter_findings",
+    "final_review.advance",
+    "final_review.confirm_split",
+    "final_review.clean_status",
+    "final_review.out_of_scope_report",
+    "final_review.resume_latest",
+    "final_review.assess_risk",
+];
+
+fn is_advisory_review_tool(name: &str) -> bool {
+    ADVISORY_REVIEW_TOOLS.contains(&name)
+}
+
+fn rewrite_advisory_language(value: &mut Value) {
+    match value {
+        Value::String(text) => {
+            *text = text
+                .replace("authoritative", "coordinator-owned")
+                .replace("Authoritative", "Coordinator-owned")
+                .replace(
+                    "mechanical development lifecycle gate",
+                    "advisory development lifecycle record",
+                )
+                .replace("delivery gating", "delivery-readiness recording")
+                .replace(
+                    "The assignee's editor/runner service revalidates it immediately before every mutation.",
+                    "Standalone Tiber's native mutation services may revalidate it; this plugin does not execute mutations.",
+                );
+        }
+        Value::Array(items) => items.iter_mut().for_each(rewrite_advisory_language),
+        Value::Object(fields) => fields.values_mut().for_each(rewrite_advisory_language),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
 }
 
 fn semantic_tools() -> Vec<Value> {
@@ -11973,8 +12180,9 @@ fn call_tool_at(name: &str, arguments: &Value, now_epoch_seconds: u64) -> Result
     }
 }
 
-/// Plugin-wide semantic surface. This is intentionally read/setup-only until
-/// a harness proves per-agent MCP filtering and a separate OS write boundary.
+/// Semantic adapters shared by the advisory coordinator and Tiber's future
+/// capability-separated native services. The selected surface filters every
+/// request before dispatch.
 fn call_semantic_tool(name: &str, arguments: &Value) -> Result<Value, String> {
     if name == "workspace-editor.patch"
         && arguments.get("assignment_id").and_then(Value::as_str) == Some("probe-invalid")
@@ -12960,8 +13168,6 @@ fn git_command(project_root: &Path) -> ProcessCommand {
         .env("GIT_COMMITTER_NAME", "Development Discipline")
         .env("GIT_COMMITTER_EMAIL", "development-discipline@localhost")
         .env("GIT_COMMITTER_DATE", "@0 +0000");
-    #[cfg(test)]
-    configure_test_git_object_overlay(&mut command, project_root);
     command
 }
 
@@ -12994,38 +13200,63 @@ fn test_temp_root() -> &'static Path {
         .as_path()
 }
 
-#[cfg(test)]
-fn test_git_object_overlay(project_root: &Path) -> PathBuf {
-    test_temp_root()
-        .join("git-objects")
+fn scope_snapshot_object_directory(project_root: &Path) -> Result<PathBuf, String> {
+    #[cfg(test)]
+    let state_root = test_temp_root().join("state");
+    #[cfg(not(test))]
+    let state_root = durable_report_state_root(
+        env::var_os("XDG_STATE_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
+        env::var_os("HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
+    )?;
+    let canonical_root = project_root
+        .canonicalize()
+        .map_err(|error| format!("scope_snapshot_project_root_resolve_failed source={error}"))?;
+    let directory = state_root
+        .join("development-discipline/final-review-snapshot-objects")
         .join(stable_storage_digest(&[
-            "development-discipline-test-git-overlay-v1",
-            &project_root.to_string_lossy(),
-        ]))
+            "development-discipline-final-review-snapshot-v1",
+            &canonical_root.to_string_lossy(),
+        ]));
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("scope_snapshot_object_directory_failed source={error}"))?;
+    Ok(directory)
 }
 
-#[cfg(test)]
-fn configure_test_git_object_overlay(command: &mut ProcessCommand, project_root: &Path) {
-    let common_dir = ProcessCommand::new("git")
+fn configure_scope_snapshot_objects(
+    command: &mut ProcessCommand,
+    project_root: &Path,
+) -> Result<(), String> {
+    let output = ProcessCommand::new("git")
         .arg("-C")
         .arg(project_root)
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|path| PathBuf::from(path.trim()));
-    let Some(common_dir) = common_dir else {
-        return;
-    };
-    let source_objects = common_dir.join("objects");
-    let overlay = test_git_object_overlay(project_root);
-    if fs::create_dir_all(&overlay).is_err() {
-        return;
+        .map_err(|error| format!("scope_snapshot_common_dir_spawn_failed source={error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "scope_snapshot_common_dir_failed detail={}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
+    let common_dir = String::from_utf8(output.stdout)
+        .map_err(|error| format!("scope_snapshot_common_dir_utf8_failed source={error}"))?;
+    let common_dir = PathBuf::from(common_dir.trim());
+    let source_objects = common_dir.join("objects");
+    let overlay = scope_snapshot_object_directory(project_root)?;
     command
         .env("GIT_OBJECT_DIRECTORY", overlay)
         .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", source_objects);
+    Ok(())
+}
+
+fn snapshot_git_command(project_root: &Path) -> Result<ProcessCommand, String> {
+    let mut command = git_command(project_root);
+    configure_scope_snapshot_objects(&mut command, project_root)?;
+    Ok(command)
 }
 
 fn run_git(
@@ -13076,6 +13307,59 @@ fn git_text(
     label: &str,
 ) -> Result<String, String> {
     let output = run_git(project_root, args, index_file, stdin, label)?;
+    String::from_utf8(output)
+        .map(|value| value.trim().to_string())
+        .map_err(|error| format!("{label}_utf8_failed source={error}"))
+}
+
+fn run_snapshot_git(
+    project_root: &Path,
+    args: &[String],
+    index_file: Option<&Path>,
+    stdin: Option<&[u8]>,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let mut command = snapshot_git_command(project_root)?;
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(index_file) = index_file {
+        command.env("GIT_INDEX_FILE", index_file);
+    }
+    if stdin.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("{label}_spawn_failed source={error}"))?;
+    if let Some(input) = stdin {
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| format!("{label}_stdin_missing=true"))?
+            .write_all(input)
+            .map_err(|error| format!("{label}_stdin_failed source={error}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("{label}_wait_failed source={error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.chars().take(2048).collect::<String>();
+        return Err(format!("{label}_failed detail={}", stderr.trim()));
+    }
+    Ok(output.stdout)
+}
+
+fn snapshot_git_text(
+    project_root: &Path,
+    args: &[String],
+    index_file: Option<&Path>,
+    stdin: Option<&[u8]>,
+    label: &str,
+) -> Result<String, String> {
+    let output = run_snapshot_git(project_root, args, index_file, stdin, label)?;
     String::from_utf8(output)
         .map(|value| value.trim().to_string())
         .map_err(|error| format!("{label}_utf8_failed source={error}"))
@@ -13150,7 +13434,7 @@ fn create_scope_snapshot_commit(
     ));
     let lock_file = PathBuf::from(format!("{}.lock", index_file.to_string_lossy()));
     let result = (|| {
-        run_git(
+        run_snapshot_git(
             project_root,
             &["read-tree".to_string(), parent.clone()],
             Some(&index_file),
@@ -13166,7 +13450,7 @@ fn create_scope_snapshot_commit(
                 "--".to_string(),
             ];
             args.extend(chunk.iter().map(|path| format!(":(literal){path}")));
-            let output = run_git(
+            let output = run_snapshot_git(
                 project_root,
                 &args,
                 Some(&index_file),
@@ -13194,7 +13478,7 @@ fn create_scope_snapshot_commit(
         for chunk in path_chunks(&included) {
             let mut args = vec!["add".to_string(), "-A".to_string(), "--".to_string()];
             args.extend(chunk.iter().map(|path| format!(":(literal){path}")));
-            run_git(
+            run_snapshot_git(
                 project_root,
                 &args,
                 Some(&index_file),
@@ -13202,14 +13486,14 @@ fn create_scope_snapshot_commit(
                 "scope_snapshot_add",
             )?;
         }
-        let tree = git_text(
+        let tree = snapshot_git_text(
             project_root,
             &["write-tree".to_string()],
             Some(&index_file),
             None,
             "scope_snapshot_write_tree",
         )?;
-        git_text(
+        snapshot_git_text(
             project_root,
             &["commit-tree".to_string(), tree, "-p".to_string(), parent],
             None,
@@ -13272,7 +13556,7 @@ fn generated_delta_evidence(
     let patch_path = evidence_dir.join(format!("{}-{counter}.patch", std::process::id()));
     let patch_file = fs::File::create(&patch_path)
         .map_err(|error| format!("delta_evidence_create_failed source={error}"))?;
-    let mut command = git_command(project_root);
+    let mut command = snapshot_git_command(project_root)?;
     let output = command
         .args(&range_args)
         .stdout(Stdio::from(patch_file))
@@ -13301,7 +13585,7 @@ fn generated_delta_evidence(
             .iter()
             .map(|path| format!(":(literal){path}")),
     );
-    let changed_paths_output = run_git(
+    let changed_paths_output = run_snapshot_git(
         project_root,
         &changed_path_args,
         None,
@@ -16389,6 +16673,7 @@ struct ConfirmScopeSplitResult {
 fn confirm_scope_split_input(
     input: &ConfirmReviewSplitInput,
     mut state: ReviewSessionState,
+    tracker_mutation_authorized: bool,
 ) -> Result<ConfirmScopeSplitResult, String> {
     if !review_contract_is_valid(&state.to_wire()) {
         return Err("review_contract_invalid=true".to_string());
@@ -16439,8 +16724,8 @@ fn confirm_scope_split_input(
         None
     };
     scope_split.confirmation_required = false;
-    scope_split.tracker_mutation_authorized = true;
-    scope_split.blocking_dependencies_authorized = blocking;
+    scope_split.tracker_mutation_authorized = tracker_mutation_authorized;
+    scope_split.blocking_dependencies_authorized = tracker_mutation_authorized && blocking;
     scope_split.confirmed_representation = Some(match representation {
         TrackerRepresentationFacts::DeliveryTickets => "delivery-tickets".to_string(),
         TrackerRepresentationFacts::DeliveryTicketsWithBlockingDependencies => {
@@ -16457,7 +16742,7 @@ fn confirm_scope_split_input(
     }
     Ok(ConfirmScopeSplitResult {
         state,
-        blocking_dependencies_authorized: blocking,
+        blocking_dependencies_authorized: tracker_mutation_authorized && blocking,
     })
 }
 
@@ -16487,7 +16772,7 @@ fn confirm_scope_split_response(result: ConfirmScopeSplitResult) -> String {
 
 fn confirm_scope_split(arguments: &Value) -> Result<String, String> {
     let parsed = parse_confirm_review_split_input(arguments)?;
-    confirm_scope_split_input(&parsed.input, parsed.supplied_state)
+    confirm_scope_split_input(&parsed.input, parsed.supplied_state, true)
         .map(confirm_scope_split_response)
 }
 
@@ -16678,7 +16963,7 @@ fn execute_advance_via_dispatcher_at(
             .is_ok()
         })
     {
-        run_git(
+        run_snapshot_git(
             &fixture_root,
             &["init".to_string(), "--quiet".to_string()],
             None,
@@ -16696,19 +16981,19 @@ fn execute_advance_via_dispatcher_at(
             None,
             "review_fixture_source_common_dir",
         )?);
-        let source_overlay = test_temp_root()
-            .join("git-objects")
-            .join(stable_storage_digest(&[
-                "development-discipline-test-git-overlay-v1",
-                &source_root.to_string_lossy(),
-            ]));
-        let fixture_overlay = test_temp_root()
-            .join("git-objects")
-            .join(stable_storage_digest(&[
-                "development-discipline-test-git-overlay-v1",
-                &fixture_root.to_string_lossy(),
-            ]));
-        let alternates = fixture_overlay.join("info/alternates");
+        let source_overlay = scope_snapshot_object_directory(&source_root)?;
+        let fixture_common_dir = PathBuf::from(git_text(
+            &fixture_root,
+            &[
+                "rev-parse".to_string(),
+                "--path-format=absolute".to_string(),
+                "--git-common-dir".to_string(),
+            ],
+            None,
+            None,
+            "review_fixture_common_dir",
+        )?);
+        let alternates = fixture_common_dir.join("objects/info/alternates");
         fs::create_dir_all(alternates.parent().expect("fixture alternates parent"))
             .map_err(|error| format!("review_fixture_alternates_create_failed source={error}"))?;
         fs::write(
@@ -16916,7 +17201,12 @@ fn execute_advance_via_dispatcher_at(
             },
         },
     )?;
-    project_committed_review(&path, Some(&fixture_root), &session_id);
+    project_committed_review(
+        &path,
+        Some(&fixture_root),
+        &session_id,
+        ReviewPersistence::WorkflowAuthority,
+    );
 
     let mut coordinator = ReviewCoordinator {
         now_epoch_seconds: Box::new(move || now_epoch_seconds),
@@ -17640,6 +17930,18 @@ fn durable_report_database_path(
     project_root: &str,
     work_item_id: Option<&str>,
 ) -> Result<PathBuf, String> {
+    durable_report_database_path_for(
+        project_root,
+        work_item_id,
+        ReviewPersistence::WorkflowAuthority,
+    )
+}
+
+fn durable_report_database_path_for(
+    project_root: &str,
+    work_item_id: Option<&str>,
+    persistence: ReviewPersistence,
+) -> Result<PathBuf, String> {
     #[cfg(test)]
     let state_root = test_temp_root().join("state");
     #[cfg(not(test))]
@@ -17651,11 +17953,19 @@ fn durable_report_database_path(
             .filter(|value| !value.is_empty())
             .map(PathBuf::from),
     )?;
-    let storage_key = stable_storage_digest(&[
-        "development-discipline-final-review-report-v1",
-        project_root,
-        work_item_id.unwrap_or(""),
-    ]);
+    let storage_key = match persistence {
+        ReviewPersistence::WorkflowAuthority => stable_storage_digest(&[
+            "development-discipline-final-review-report-v1",
+            project_root,
+            work_item_id.unwrap_or(""),
+        ]),
+        ReviewPersistence::PluginAdvisoryLocal => stable_storage_digest(&[
+            "development-discipline-final-review-report-v2",
+            persistence.namespace(),
+            project_root,
+            work_item_id.unwrap_or(""),
+        ]),
+    };
     Ok(state_root
         .join("development-discipline/final-review-reports")
         .join(format!("{storage_key}.sqlite")))
@@ -17831,6 +18141,7 @@ macro_rules! define_final_review_executor {
             state: &Value,
             expected_revision: Option<u64>,
             intent: $intent,
+            persistence: ReviewPersistence,
         ) -> Result<u64, String> {
             let project_root = state
                 .pointer("/scope/project_root")
@@ -17840,15 +18151,18 @@ macro_rules! define_final_review_executor {
                 .get("session_id")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "review_session_id_required=true".to_string())?;
-            let path = durable_report_database_path(
+            let path = durable_report_database_path_for(
                 project_root,
                 state.get("work_item_id").and_then(Value::as_str),
+                persistence,
             )?;
-            remove_legacy_report_artifacts(
-                &path,
-                project_root,
-                state.get("work_item_id").and_then(Value::as_str),
-            )?;
+            if matches!(persistence, ReviewPersistence::WorkflowAuthority) {
+                remove_legacy_report_artifacts(
+                    &path,
+                    project_root,
+                    state.get("work_item_id").and_then(Value::as_str),
+                )?;
+            }
             let directory = path
                 .parent()
                 .ok_or_else(|| "review_session_directory_missing=true".to_string())?;
@@ -17873,11 +18187,11 @@ macro_rules! define_final_review_executor {
             {
                 let session_stream = FinalReviewStream(review_stream_id(session_id)?);
                 let catalog_stream = FinalReviewStream(catalog_stream_id()?);
-                let store =
-                    crate::workflow::open_development_workflow_event_store(Path::new(project_root))
-                        .map_err(|error| {
-                            format!("review_event_store_open_failed source={error}")
-                        })?;
+                let store = crate::workflow::open_final_review_event_store(
+                    Path::new(project_root),
+                    persistence.authority(),
+                )
+                .map_err(|error| format!("review_event_store_open_failed source={error}"))?;
                 let policy = RetryPolicy::new().max_retries(4);
                 let runtime = review_runtime()?;
                 let request = $request::model_builder()
@@ -17894,13 +18208,23 @@ macro_rules! define_final_review_executor {
                     .build();
                 let result = runtime.block_on(execute(store, command, policy));
                 result.map_err(|error| format!("review_event_command_failed source={error}"))?;
-                project_committed_review(&path, Some(Path::new(project_root)), session_id);
+                project_committed_review(
+                    &path,
+                    Some(Path::new(project_root)),
+                    session_id,
+                    persistence,
+                );
                 Ok(next_revision)
             }
             #[cfg(test)]
             {
                 $test_executor(&path, session_id, intent)?;
-                project_committed_review(&path, Some(Path::new(project_root)), session_id);
+                project_committed_review(
+                    &path,
+                    Some(Path::new(project_root)),
+                    session_id,
+                    persistence,
+                );
                 Ok(next_revision)
             }
         }
@@ -17977,36 +18301,45 @@ define_final_review_executor!(
 fn load_authoritative_session(
     caller_state: &Value,
     session_id: &str,
+    persistence: ReviewPersistence,
 ) -> Result<Option<RestoredReviewSession>, String> {
     let project_root = caller_state
         .pointer("/scope/project_root")
         .and_then(Value::as_str)
         .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
-    let path = durable_report_database_path(
+    let path = durable_report_database_path_for(
         project_root,
         caller_state.get("work_item_id").and_then(Value::as_str),
+        persistence,
     )?;
     if !path.exists() {
         return Ok(None);
     }
-    load_authoritative_session_from_path(&path, Some(Path::new(project_root)), session_id)
+    load_authoritative_session_from_path(
+        &path,
+        Some(Path::new(project_root)),
+        session_id,
+        persistence,
+    )
 }
 
 fn load_committed_iteration_response(
     caller_state: &Value,
     session_id: &str,
     revision: u64,
+    persistence: ReviewPersistence,
 ) -> Result<ReviewIterationResponseFacts, String> {
     let project_root = caller_state
         .pointer("/scope/project_root")
         .and_then(Value::as_str)
         .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
-    let path = durable_report_database_path(
+    let path = durable_report_database_path_for(
         project_root,
         caller_state.get("work_item_id").and_then(Value::as_str),
+        persistence,
     )?;
     let stream = review_stream_id(session_id)?;
-    read_review_stream(&path, Some(Path::new(project_root)), stream)?
+    read_review_stream(&path, Some(Path::new(project_root)), stream, persistence)?
         .into_iter()
         .rev()
         .find_map(|event| match event {
@@ -18034,17 +18367,19 @@ fn load_committed_delta_risk_response(
     caller_state: &Value,
     session_id: &str,
     revision: u64,
+    persistence: ReviewPersistence,
 ) -> Result<DeltaRiskResponseFacts, String> {
     let project_root = caller_state
         .pointer("/scope/project_root")
         .and_then(Value::as_str)
         .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
-    let path = durable_report_database_path(
+    let path = durable_report_database_path_for(
         project_root,
         caller_state.get("work_item_id").and_then(Value::as_str),
+        persistence,
     )?;
     let stream = review_stream_id(session_id)?;
-    read_review_stream(&path, Some(Path::new(project_root)), stream)?
+    read_review_stream(&path, Some(Path::new(project_root)), stream, persistence)?
         .into_iter()
         .rev()
         .find_map(|event| match event {
@@ -18062,10 +18397,11 @@ fn load_authoritative_session_from_path(
     path: &Path,
     project_root: Option<&Path>,
     session_id: &str,
+    persistence: ReviewPersistence,
 ) -> Result<Option<RestoredReviewSession>, String> {
     let _lock = lock_review_database(path)?;
     initialize_event_store(path)?;
-    rebuild_review_projections(path, project_root, Some(session_id))?;
+    rebuild_review_projections(path, project_root, Some(session_id), persistence)?;
     if let Some(restored) = read_projected_session(path, session_id)? {
         return Ok(Some(restored));
     }
@@ -18114,7 +18450,12 @@ fn load_authoritative_session_from_path(
             },
         },
     )?;
-    rebuild_review_projections(path, None, Some(session_id))?;
+    rebuild_review_projections(
+        path,
+        None,
+        Some(session_id),
+        ReviewPersistence::WorkflowAuthority,
+    )?;
     read_projected_session(path, session_id)
 }
 
@@ -18513,7 +18854,10 @@ fn projection_pending_path(path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.projection-pending", path.to_string_lossy()))
 }
 
-fn repair_projection_before_read(arguments: &Value) -> Result<(), String> {
+fn repair_projection_before_read(
+    arguments: &Value,
+    persistence: ReviewPersistence,
+) -> Result<(), String> {
     let state = arguments
         .get("state")
         .ok_or_else(|| "state is required".to_string())?;
@@ -18525,13 +18869,19 @@ fn repair_projection_before_read(arguments: &Value) -> Result<(), String> {
         .get("session_id")
         .and_then(Value::as_str)
         .ok_or_else(|| "review_session_id_required=true".to_string())?;
-    let path = durable_report_database_path(
+    let path = durable_report_database_path_for(
         project_root,
         state.get("work_item_id").and_then(Value::as_str),
+        persistence,
     )?;
     let _lock = lock_review_database(&path)?;
-    rebuild_review_projections(&path, Some(Path::new(project_root)), Some(session_id))
-        .map_err(|error| format!("review_projection_repair_required=true source={error}"))?;
+    rebuild_review_projections(
+        &path,
+        Some(Path::new(project_root)),
+        Some(session_id),
+        persistence,
+    )
+    .map_err(|error| format!("review_projection_repair_required=true source={error}"))?;
     match fs::remove_file(projection_pending_path(&path)) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -18541,9 +18891,14 @@ fn repair_projection_before_read(arguments: &Value) -> Result<(), String> {
     }
 }
 
-fn project_committed_review(path: &Path, project_root: Option<&Path>, session_id: &str) {
+fn project_committed_review(
+    path: &Path,
+    project_root: Option<&Path>,
+    session_id: &str,
+    persistence: ReviewPersistence,
+) {
     let marker = projection_pending_path(path);
-    match rebuild_review_projections(path, project_root, Some(session_id)) {
+    match rebuild_review_projections(path, project_root, Some(session_id), persistence) {
         Ok(()) => {
             let _ = fs::remove_file(marker);
         }
@@ -18560,7 +18915,10 @@ fn read_review_stream(
     _path: &Path,
     _project_root: Option<&Path>,
     stream: StreamId,
+    persistence: ReviewPersistence,
 ) -> Result<Vec<FinalReviewEvent>, String> {
+    #[cfg(test)]
+    let _ = persistence;
     #[cfg(test)]
     {
         let connection = open_review_connection(_path)?;
@@ -18580,8 +18938,9 @@ fn read_review_stream(
     }
     #[cfg(not(test))]
     {
-        let store = crate::workflow::open_development_workflow_event_store(
+        let store = crate::workflow::open_final_review_event_store(
             _project_root.ok_or_else(|| "review_event_project_root_required=true".to_string())?,
+            persistence.authority(),
         )
         .map_err(|error| format!("review_event_store_open_failed source={error}"))?;
         review_runtime()?.block_on(async move {
@@ -18604,6 +18963,7 @@ fn rebuild_review_projections(
     path: &Path,
     project_root: Option<&Path>,
     addressed_session: Option<&str>,
+    persistence: ReviewPersistence,
 ) -> Result<(), String> {
     #[cfg(test)]
     if FAIL_NEXT_REVIEW_PROJECTION_REBUILD.swap(false, Ordering::SeqCst) {
@@ -18611,7 +18971,7 @@ fn rebuild_review_projections(
     }
     let catalog_stream = catalog_stream_id()?;
     let mut catalog = HashMap::<String, (u64, u64)>::new();
-    for event in read_review_stream(path, project_root, catalog_stream)? {
+    for event in read_review_stream(path, project_root, catalog_stream, persistence)? {
         match event {
             FinalReviewEvent::CatalogSessionTouched(CatalogSessionTouchedEvent {
                 session_id,
@@ -18636,7 +18996,7 @@ fn rebuild_review_projections(
             |session_id| -> Result<Option<ReviewSessionProjection>, String> {
                 let stream = review_stream_id(session_id)?;
                 let mut projected = ReviewEventState::default();
-                for event in read_review_stream(path, project_root, stream.clone())? {
+                for event in read_review_stream(path, project_root, stream.clone(), persistence)? {
                     projected = apply_review_event(projected, &stream, &event);
                 }
                 Ok(projected.session)
@@ -20139,14 +20499,15 @@ fn scope_split_contract_is_valid(
             && reason.is_some_and(Value::is_null)
     } else {
         confirmation_required == Some(false)
-            && tracker_authorized == Some(true)
+            && matches!(tracker_authorized, Some(true | false))
             && matches!(
                 representation,
                 Some("delivery-tickets" | "delivery-tickets-with-blocking-dependencies")
             )
             && (blocking_authorized == Some(true))
-                == (representation == Some("delivery-tickets-with-blocking-dependencies"))
-            && if blocking_authorized == Some(true) {
+                == (tracker_authorized == Some(true)
+                    && representation == Some("delivery-tickets-with-blocking-dependencies"))
+            && if representation == Some("delivery-tickets-with-blocking-dependencies") {
                 reason
                     .and_then(Value::as_str)
                     .is_some_and(|reason| !reason.trim().is_empty())
@@ -21346,12 +21707,20 @@ fn parse_plan_scope_input(arguments: &Value) -> Result<PlanScopeInput, String> {
 }
 
 fn observe_review_plan(arguments: &Value) -> Result<ReviewPlanObservation, String> {
+    observe_review_plan_for(arguments, ReviewPersistence::WorkflowAuthority)
+}
+
+fn observe_review_plan_for(
+    arguments: &Value,
+    persistence: ReviewPersistence,
+) -> Result<ReviewPlanObservation, String> {
     let project_root = resolved_project_root_string(arguments)?;
-    let report_database_path = durable_report_database_path(
+    let report_database_path = durable_report_database_path_for(
         &project_root,
         string_opt(arguments, "work_item_id")
             .filter(|value| !value.trim().is_empty())
             .as_deref(),
+        persistence,
     )?
     .to_string_lossy()
     .to_string();
@@ -22850,6 +23219,25 @@ mod tests {
             .expect("state root"),
             PathBuf::from("/home/tester/.local/state")
         );
+    }
+
+    #[test]
+    fn advisory_and_native_review_projections_use_distinct_storage() {
+        let project_root = "/tmp/review-persistence-namespace";
+        let workflow = durable_report_database_path_for(
+            project_root,
+            Some("ticket-1"),
+            ReviewPersistence::WorkflowAuthority,
+        )
+        .expect("workflow projection path");
+        let advisory = durable_report_database_path_for(
+            project_root,
+            Some("ticket-1"),
+            ReviewPersistence::PluginAdvisoryLocal,
+        )
+        .expect("advisory projection path");
+
+        assert_ne!(workflow, advisory);
     }
 
     #[test]
@@ -31074,10 +31462,14 @@ pre_filter = "project-pre"
         .expect("plan json");
         let state = plan["state"].clone();
         assert_eq!(
-            load_authoritative_session(&state, "json-rpc-budget-checkpoint")
-                .expect("event projection load")
-                .expect("event projection")
-                .state,
+            load_authoritative_session(
+                &state,
+                "json-rpc-budget-checkpoint",
+                ReviewPersistence::WorkflowAuthority,
+            )
+            .expect("event projection load")
+            .expect("event projection")
+            .state,
             state
         );
         clock.store(5_500, Ordering::SeqCst);
@@ -31108,14 +31500,18 @@ pre_filter = "project-pre"
             coordinator.sessions.get("json-rpc-budget-checkpoint"),
             Some(&checkpoint["state"])
         );
-        let checkpoint_projection =
-            load_authoritative_session(&checkpoint["state"], "json-rpc-budget-checkpoint")
-                .expect("checkpoint projection load")
-                .expect("checkpoint projection");
+        let checkpoint_projection = load_authoritative_session(
+            &checkpoint["state"],
+            "json-rpc-budget-checkpoint",
+            ReviewPersistence::WorkflowAuthority,
+        )
+        .expect("checkpoint projection load")
+        .expect("checkpoint projection");
         let checkpoint_receipt = load_committed_iteration_response(
             &checkpoint["state"],
             "json-rpc-budget-checkpoint",
             checkpoint_projection.revision,
+            ReviewPersistence::WorkflowAuthority,
         )
         .expect("committed iteration response facts");
         assert!(checkpoint_receipt.budget_requested);
@@ -31151,9 +31547,13 @@ pre_filter = "project-pre"
         .expect("ship json");
         assert_eq!(shipped["advance_kind"], "review_budget_decision");
         assert_eq!(shipped["complete"], true);
-        let committed = load_authoritative_session(&shipped["state"], "json-rpc-budget-checkpoint")
-            .expect("committed budget projection load")
-            .expect("committed budget projection");
+        let committed = load_authoritative_session(
+            &shipped["state"],
+            "json-rpc-budget-checkpoint",
+            ReviewPersistence::WorkflowAuthority,
+        )
+        .expect("committed budget projection load")
+        .expect("committed budget projection");
         assert_eq!(
             shipped["state"], committed.state,
             "the public success response must be serialized from the committed EventCore projection"
@@ -31598,6 +31998,63 @@ pre_filter = "project-pre"
             replay["error"]["message"],
             "review_scope_split_already_confirmed=true"
         );
+    }
+
+    #[test]
+    fn advisory_split_confirmation_never_authorizes_tracker_mutation() {
+        let arguments = initial_scope_split_arguments("advisory-confirmed-scope-split");
+        let mut coordinator =
+            ReviewCoordinator::with_service_surface(ServiceSurface::PluginAdvisory);
+        let planned = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": arguments }
+            }))
+            .expect("advisory split preview response");
+        let preview: Value = serde_json::from_str(
+            planned["result"]["content"][0]["text"]
+                .as_str()
+                .expect("advisory split preview text"),
+        )
+        .expect("advisory split preview json");
+        let confirmed = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.confirm_split",
+                    "arguments": {
+                        "state": preview["state"],
+                        "confirmation_id": preview["scope_split"]["confirmation_id"],
+                        "explicit_user_confirmation": true,
+                        "tracker_representation": "delivery-tickets-with-blocking-dependencies",
+                        "blocking_dependencies_reason": "The delivery split requires ordered dependencies."
+                    }
+                }
+            }))
+            .expect("advisory split confirmation response");
+        let confirmation_text = confirmed["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| panic!("advisory split confirmation text: {confirmed}"));
+        let confirmation: Value =
+            serde_json::from_str(confirmation_text).expect("advisory split confirmation json");
+
+        assert_eq!(confirmation["tracker_mutation_authorized"], false);
+        assert_eq!(confirmation["blocking_dependencies_authorized"], false);
+        assert_eq!(
+            confirmation["scope_split"]["tracker_mutation_authorized"],
+            false
+        );
+        assert_eq!(
+            confirmation["scope_split"]["blocking_dependencies_authorized"],
+            false
+        );
+        assert!(confirmation["instruction"]
+            .as_str()
+            .is_some_and(|instruction| instruction.contains("separate authorization")));
     }
 
     #[test]
@@ -32948,6 +33405,78 @@ pre_filter = "project-pre"
         assert!(patch.contains("-old transition"));
         assert!(patch.contains("+new transition"));
         assert!(!patch.contains("unrelated.txt"));
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn review_scope_snapshots_do_not_write_target_repository_objects() {
+        let project_root = test_project_root("isolated-review-snapshot-objects");
+        fs::create_dir_all(project_root.join("src")).expect("source directory");
+        fs::write(
+            project_root.join("src/lib.rs"),
+            "uncommitted review content\n",
+        )
+        .expect("write review content");
+        let baseline = git_text(
+            &project_root,
+            &["rev-parse".to_string(), "HEAD".to_string()],
+            None,
+            None,
+            "test_snapshot_baseline",
+        )
+        .expect("baseline");
+        let before = git_text(
+            &project_root,
+            &["count-objects".to_string(), "-v".to_string()],
+            None,
+            None,
+            "test_snapshot_objects_before",
+        )
+        .expect("object inventory before");
+
+        let snapshot =
+            create_scope_snapshot_commit(&project_root, &baseline, &["src/lib.rs".to_string()])
+                .expect("isolated snapshot");
+
+        let after = git_text(
+            &project_root,
+            &["count-objects".to_string(), "-v".to_string()],
+            None,
+            None,
+            "test_snapshot_objects_after",
+        )
+        .expect("object inventory after");
+        assert_eq!(
+            after, before,
+            "target Git object database must be unchanged"
+        );
+        assert!(
+            run_git(
+                &project_root,
+                &[
+                    "cat-file".to_string(),
+                    "-e".to_string(),
+                    format!("{snapshot}^{{commit}}"),
+                ],
+                None,
+                None,
+                "test_snapshot_absent_from_target",
+            )
+            .is_err(),
+            "snapshot commit must not be readable from the target object database"
+        );
+        snapshot_git_text(
+            &project_root,
+            &[
+                "cat-file".to_string(),
+                "-e".to_string(),
+                format!("{snapshot}^{{commit}}"),
+            ],
+            None,
+            None,
+            "test_snapshot_present_in_overlay",
+        )
+        .expect("snapshot remains available from the persistent overlay");
         let _ = fs::remove_dir_all(project_root);
     }
 
@@ -36184,6 +36713,48 @@ pre_filter = "project-pre"
             }))
             .expect("clean review response");
         assert!(recorded.get("result").is_some(), "{recorded}");
+
+        let mut advisory = ReviewCoordinator::with_service_surface(ServiceSurface::PluginAdvisory);
+        let advisory_response = advisory
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.plan",
+                    "arguments": assessed_plan_arguments_for_diff_at_root(
+                        "zero-assignment-advisory-review",
+                        "zero-assignment-advisory-diff",
+                        "low",
+                        &[],
+                        json!([]),
+                        Some(&project_root),
+                    )
+                }
+            }))
+            .expect("advisory plan response");
+        let advisory_planned: Value = serde_json::from_str(
+            advisory_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("advisory plan text"),
+        )
+        .expect("advisory plan json");
+        assert_eq!(advisory_planned["complete"], true);
+        assert_eq!(advisory_planned["terminal"], true);
+        assert!(advisory_planned.get("next_tool").is_none());
+
+        let resumed = advisory
+            .resume_latest(&advisory_planned["state_ref"])
+            .expect("resume advisory completion");
+        let resumed: Value = serde_json::from_str(
+            resumed["content"][0]["text"]
+                .as_str()
+                .expect("advisory resume text"),
+        )
+        .expect("advisory resume json");
+        assert_eq!(resumed["complete"], true);
+        assert_eq!(resumed["terminal"], true);
+        assert_eq!(resumed["next_tool"], Value::Null);
     }
 
     fn event_sourced_test_state(_root: &Path, session_id: &str) -> Value {
@@ -36491,7 +37062,13 @@ pre_filter = "project-pre"
 
         execute_plan_final_review_for_test(&path, "semantic-review", plan_intent())
             .expect("plan command");
-        rebuild_review_projections(&path, None, Some("semantic-review")).expect("plan projection");
+        rebuild_review_projections(
+            &path,
+            None,
+            Some("semantic-review"),
+            ReviewPersistence::WorkflowAuthority,
+        )
+        .expect("plan projection");
 
         let stale = execute_plan_final_review_for_test(&path, "semantic-review", plan_intent())
             .expect_err("duplicate plan");
@@ -36536,8 +37113,13 @@ pre_filter = "project-pre"
             2,
             "one atomic command emits session and catalog events"
         );
-        rebuild_review_projections(&path, None, Some("semantic-review"))
-            .expect("replay projection");
+        rebuild_review_projections(
+            &path,
+            None,
+            Some("semantic-review"),
+            ReviewPersistence::WorkflowAuthority,
+        )
+        .expect("replay projection");
         assert_eq!(
             read_projected_session(&path, "semantic-review")
                 .expect("projected read")
@@ -36601,6 +37183,7 @@ pre_filter = "project-pre"
                     blocking_dependencies_reason: None,
                     supplied_field_count: 0,
                 },
+                tracker_mutation_authorized: true,
                 now_epoch_seconds: 11,
             },
         };
@@ -37003,7 +37586,12 @@ pre_filter = "project-pre"
         .expect("committed plan");
 
         FAIL_NEXT_REVIEW_PROJECTION_REBUILD.store(true, Ordering::SeqCst);
-        project_committed_review(&path, None, &session_id);
+        project_committed_review(
+            &path,
+            None,
+            &session_id,
+            ReviewPersistence::WorkflowAuthority,
+        );
         assert!(projection_pending_path(&path).exists());
         let connection = open_review_connection(&path).expect("committed database");
         let committed: u64 = connection
@@ -37028,7 +37616,12 @@ pre_filter = "project-pre"
             .session_revisions
             .insert(session_id.to_string(), 1);
         let repaired_state = valid_state.clone();
-        project_committed_review(&path, None, &session_id);
+        project_committed_review(
+            &path,
+            None,
+            &session_id,
+            ReviewPersistence::WorkflowAuthority,
+        );
         assert!(!projection_pending_path(&path).exists());
         assert_eq!(
             read_projected_session(&path, &session_id)
@@ -37072,17 +37665,27 @@ pre_filter = "project-pre"
             .expect("legacy row");
         drop(connection);
         assert_eq!(
-            load_authoritative_session_from_path(&path, None, "legacy-review")
-                .expect("first addressed load")
-                .expect("imported session")
-                .revision,
+            load_authoritative_session_from_path(
+                &path,
+                None,
+                "legacy-review",
+                ReviewPersistence::WorkflowAuthority,
+            )
+            .expect("first addressed load")
+            .expect("imported session")
+            .revision,
             3
         );
         assert_eq!(
-            load_authoritative_session_from_path(&path, None, "legacy-review")
-                .expect("second addressed load")
-                .expect("projected session")
-                .revision,
+            load_authoritative_session_from_path(
+                &path,
+                None,
+                "legacy-review",
+                ReviewPersistence::WorkflowAuthority,
+            )
+            .expect("second addressed load")
+            .expect("projected session")
+            .revision,
             3
         );
 
@@ -37195,7 +37798,13 @@ pre_filter = "project-pre"
             .expect("all event count");
         assert_eq!(catalog_touches, 1);
         assert_eq!(all_events, 2, "replay must not append any duplicate facts");
-        rebuild_review_projections(&path, None, Some(session_id)).expect("projection replay");
+        rebuild_review_projections(
+            &path,
+            None,
+            Some(session_id),
+            ReviewPersistence::WorkflowAuthority,
+        )
+        .expect("projection replay");
         assert_eq!(
             read_projected_session(&path, session_id)
                 .expect("projected session read")

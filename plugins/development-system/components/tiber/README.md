@@ -208,6 +208,8 @@ reported for deliberate resolution.
 
 Tiber appends semantic events through EventCore, commits eventcore-fs files to
 the `tiber` branch, and pushes that branch when an `origin` remote exists.
+Signed event commits retain Git's configured author and committer identity so
+repository signature-verification rules can attribute them to the owner.
 
 Confirmed concurrent publication is handled as an EventCore version conflict:
 Tiber refreshes the authoritative branch and retries the pure command with its

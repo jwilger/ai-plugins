@@ -2,8 +2,8 @@
   "mcpServers": {
     "development-discipline": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/development-discipline-mcp",
-      "args": ["--service", "plugin-read-only"],
-      "description": "Read-only Development System reader and explicit setup surface. Privileged workflow, editor, runner, repository, and diagnostics services require a generated, harness-proven profile."
+      "args": ["--service", "plugin-advisory"],
+      "description": "Advisory repository inspection, setup, and structured multi-agent review coordination. Native workflow lifecycle and project mutation services are not exposed."
     },
     "tiber": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/tiber",

@@ -39,7 +39,7 @@ development-discipline-rust:
 development-discipline-release-complete:
     cd plugins/development-system/components/development-discipline && sha256sum --check release-binaries.sha256
     bash scripts/check-development-discipline-release-complete.sh
-    jq -e '.mcpServers["development-discipline"] | .command == "./bin/development-discipline-mcp" and .args == ["--service", "plugin-read-only"]' plugins/development-system/components/development-discipline/.mcp.json >/dev/null
+    jq -e '.mcpServers["development-discipline"] | .command == "./bin/development-discipline-mcp" and .args == ["--service", "plugin-advisory"]' plugins/development-system/components/development-discipline/.mcp.json >/dev/null
 
 development-discipline-release-from-source:
     bash scripts/check-development-discipline-release-from-source.sh

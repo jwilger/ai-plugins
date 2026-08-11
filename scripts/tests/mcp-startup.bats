@@ -33,6 +33,19 @@ initialize_server() {
       "$command" "$@"
 }
 
+list_server_tools() {
+  local command=$1
+  shift
+
+  printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' |
+    env -i \
+      PATH="$PATH" \
+      HOME="$TMPROOT/home" \
+      CODEX_HOME="$TMPROOT/codex-home" \
+      SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+      "$command" "$@"
+}
+
 initialize_codex_plugin_server() {
   local manifest=$1
   local server=$2
@@ -110,7 +123,7 @@ initialize_codex_plugin_server() {
   [[ "$output" == *'"tools":{}'* ]]
 }
 
-@test "development-discipline component manifest initializes the read-only plugin service" {
+@test "development-discipline component manifest initializes the advisory plugin service" {
   local manifest="$ROOT/plugins/development-system/components/development-discipline/.mcp.json"
   local command
   local args
@@ -155,14 +168,47 @@ initialize_codex_plugin_server() {
   [[ "$output" == *'"name":"tiber"'* ]]
 }
 
-@test "packaged read-only development-discipline does not expose privileged final-review tools" {
+@test "Claude plugin MCP manifest starts the advisory coordination service" {
+  local manifest="$ROOT/plugins/development-system/.mcp.json"
+  local command="$ROOT/plugins/development-system/bin/development-discipline-mcp"
+  local args
+  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$manifest")
+
+  run list_server_tools "$command" "${args[@]}"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name":"final_review.plan"'* ]]
+  [[ "$output" != *'"name":"workflow.start"'* ]]
+}
+
+@test "packaged advisory development-discipline exposes review coordination without project mutation tools" {
   local command="$ROOT/plugins/development-system/bin/development-discipline-mcp"
   mkdir -p "$TMPROOT/codex-home"
 
-  run initialize_server "$command" --service plugin-read-only
+  run list_server_tools "$command" --service plugin-advisory
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"name":"development-discipline"'* ]]
-  [[ "$output" != *'"name":"final_review.plan"'* ]]
+  [[ "$output" == *'"name":"final_review.plan"'* ]]
   [[ "$output" != *'"name":"workflow.start"'* ]]
+  run jq -e '
+    [.result.tools[].name] as $names |
+    all($names[];
+      . == "workspace-reader.status" or
+      . == "workspace-reader.read" or
+      . == "workspace-reader.list" or
+      . == "workspace-reader.search" or
+      . == "workspace-reader.repository" or
+      . == "setup.preview" or
+      . == "setup.apply" or
+      . == "final_review.plan" or
+      . == "final_review.filter_findings" or
+      . == "final_review.advance" or
+      . == "final_review.confirm_split" or
+      . == "final_review.clean_status" or
+      . == "final_review.out_of_scope_report" or
+      . == "final_review.resume_latest" or
+      . == "final_review.assess_risk"
+    )
+  ' <<<"$output"
+  [ "$status" -eq 0 ]
 }

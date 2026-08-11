@@ -2175,6 +2175,18 @@ pub(crate) fn open_development_workflow_event_store(
     open_event_store(project_root)
 }
 
+/// Opens the fixed Git authority selected by the final-review adapter. The
+/// plugin advisory authority is deliberately local-only and separate from the
+/// remotely published native workflow authority.
+#[cfg(not(test))]
+pub(crate) fn open_final_review_event_store(
+    project_root: &Path,
+    authority: GitEventStoreAuthority,
+) -> Result<GitEventStore, String> {
+    GitEventStore::open_for_authority(project_root, authority)
+        .map_err(|error| format!("final_review.event_store_open_failed source={error}"))
+}
+
 fn legacy_lifecycle_stream_id() -> Result<StreamId, String> {
     StreamId::try_new(LEGACY_LIFECYCLE_STREAM)
         .map_err(|error| format!("development_workflow.stream_invalid source={error}"))

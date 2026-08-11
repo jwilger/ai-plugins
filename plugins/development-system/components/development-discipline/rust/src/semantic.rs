@@ -6,7 +6,7 @@
 //! assignment, configuration digest, scope, and expiry again immediately
 //! before performing its operation.
 //!
-//! Host plugins expose only the advisory reader/setup surface. Keep the other
+//! Host plugins expose advisory reader, setup, lifecycle, and review surfaces. Keep the other
 //! service cores compiled and tested for native use by standalone Tiber, which
 //! owns identity, authorization, isolation, and effect execution.
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -46,8 +46,6 @@ const PUBLICATION_RETRIES: usize = 3;
 const STAGE_LOAD_RETRIES: usize = 8;
 const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const PENDING_VERSION: u32 = 1;
-const EVENT_STORE_GIT_NAME: &str = "Tiber Event Store";
-const EVENT_STORE_GIT_EMAIL: &str = "tiber-event-store@localhost.invalid";
 
 /// A closed set of independent Git authorities supported by this EventCore
 /// adapter.  Keeping this an enum rather than accepting ref names from a
@@ -56,15 +54,21 @@ const EVENT_STORE_GIT_EMAIL: &str = "tiber-event-store@localhost.invalid";
 pub enum GitEventStoreAuthority {
     Tiber,
     DevelopmentWorkflow,
+    PluginAdvisoryFinalReview,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct AuthorityConfig {
     local_ref: &'static str,
-    remote_ref: &'static str,
-    remote_head: &'static str,
+    remote: Option<RemoteAuthorityConfig>,
     state_directory: &'static str,
     commit_message: &'static str,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RemoteAuthorityConfig {
+    tracking_ref: &'static str,
+    head: &'static str,
 }
 
 impl GitEventStoreAuthority {
@@ -72,17 +76,27 @@ impl GitEventStoreAuthority {
         match self {
             Self::Tiber => AuthorityConfig {
                 local_ref: "refs/heads/tiber",
-                remote_ref: "refs/remotes/origin/tiber",
-                remote_head: "refs/heads/tiber",
+                remote: Some(RemoteAuthorityConfig {
+                    tracking_ref: "refs/remotes/origin/tiber",
+                    head: "refs/heads/tiber",
+                }),
                 state_directory: "tiber",
                 commit_message: "tiber event transaction",
             },
             Self::DevelopmentWorkflow => AuthorityConfig {
                 local_ref: "refs/heads/development-workflow",
-                remote_ref: "refs/remotes/origin/development-workflow",
-                remote_head: "refs/heads/development-workflow",
+                remote: Some(RemoteAuthorityConfig {
+                    tracking_ref: "refs/remotes/origin/development-workflow",
+                    head: "refs/heads/development-workflow",
+                }),
                 state_directory: "development-workflow",
                 commit_message: "development workflow event transaction",
+            },
+            Self::PluginAdvisoryFinalReview => AuthorityConfig {
+                local_ref: "refs/tiber/plugin-advisory-final-review",
+                remote: None,
+                state_directory: "plugin-advisory-final-review",
+                commit_message: "plugin advisory final review event transaction",
             },
         }
     }
@@ -105,7 +119,7 @@ struct Stage {
     work_tree: PathBuf,
     store: FileEventStore,
     base: Option<String>,
-    has_origin: bool,
+    has_remote_authority: bool,
 }
 
 /// EventCore store whose successful append means the candidate is confirmed
@@ -246,15 +260,18 @@ impl GitEventStore {
         }
         let pending = read_pending(&path)?;
         validate_pending(&self.repository, &pending)?;
-        let has_origin = git(&self.repository, ["remote", "get-url", "origin"])
-            .is_ok_and(|output| output.status.success());
-        let expected_authority = if has_origin { "origin" } else { "local" };
+        let has_remote_authority = remote_authority_is_available(&self.repository, self.authority);
+        let expected_authority = if has_remote_authority {
+            "origin"
+        } else {
+            "local"
+        };
         if pending.authority != expected_authority {
             return Err(GitEventStoreOpenError::Git(
                 "pending publication authority changed".into(),
             ));
         }
-        let head = if has_origin {
+        let head = if has_remote_authority {
             refresh_remote(&self.repository, self.authority)?
         } else {
             resolve_optional_ref(&self.repository, self.authority.config().local_ref)?
@@ -273,7 +290,7 @@ impl GitEventStore {
         {
             SynchronizeOutcome::PublishedPending
         } else if head == pending.base {
-            match if has_origin {
+            match if has_remote_authority {
                 publish_remote(
                     &self.repository,
                     &pending.candidate,
@@ -345,7 +362,7 @@ impl EventStore for GitEventStore {
         #[cfg(test)]
         run_before_initial_publish_hook(&self.repository);
 
-        let publication = if stage.has_origin {
+        let publication = if stage.has_remote_authority {
             publish_remote(
                 &self.repository,
                 &candidate,
@@ -407,7 +424,7 @@ impl EventStore for GitEventStore {
                     };
                     #[cfg(test)]
                     run_before_rebased_publish_hook(&self.repository);
-                    match if merged.has_origin {
+                    match if merged.has_remote_authority {
                         publish_remote(
                             &self.repository,
                             &rebased_candidate,
@@ -511,15 +528,19 @@ enum Publication {
     Conflict,
 }
 
+fn remote_authority_is_available(repository: &Path, authority: GitEventStoreAuthority) -> bool {
+    authority.config().remote.is_some()
+        && git(repository, ["remote", "get-url", "origin"])
+            .is_ok_and(|output| output.status.success())
+}
+
 fn load_stage(
     repository: &Path,
     common_directory: &Path,
     authority: GitEventStoreAuthority,
 ) -> Result<Stage, GitEventStoreOpenError> {
-    let has_origin = git(repository, ["remote", "get-url", "origin"])
-        .map(|output| output.status.success())
-        .unwrap_or(false);
-    let base = if has_origin {
+    let has_remote_authority = remote_authority_is_available(repository, authority);
+    let base = if has_remote_authority {
         refresh_remote(repository, authority)?
     } else {
         resolve_optional_ref(repository, authority.config().local_ref)?
@@ -540,7 +561,7 @@ fn load_stage(
         work_tree,
         store,
         base,
-        has_origin,
+        has_remote_authority,
     })
 }
 
@@ -585,7 +606,7 @@ fn merge_disjoint_stage(
         work_tree,
         store,
         base,
-        has_origin,
+        has_remote_authority,
     } = refreshed;
     drop(store);
     let store = FileEventStore::open_with_config(
@@ -597,7 +618,7 @@ fn merge_disjoint_stage(
         work_tree,
         store,
         base,
-        has_origin,
+        has_remote_authority,
     })
 }
 
@@ -612,7 +633,12 @@ fn persist_indeterminate(
             version: PENDING_VERSION,
             candidate: candidate.to_owned(),
             base: stage.base.clone(),
-            authority: if stage.has_origin { "origin" } else { "local" }.to_owned(),
+            authority: if stage.has_remote_authority {
+                "origin"
+            } else {
+                "local"
+            }
+            .to_owned(),
         },
     )
     .map_err(|_| store_failure(Operation::AppendEvents))?;
@@ -635,6 +661,10 @@ fn record_publication_failure(
         GitEventStoreAuthority::DevelopmentWorkflow => (
             "development_workflow.publication_failed",
             "synchronize Development Workflow until authoritative publication is resolved",
+        ),
+        GitEventStoreAuthority::PluginAdvisoryFinalReview => (
+            "plugin_advisory_final_review.publication_failed",
+            "synchronize plugin advisory final review until local publication is resolved",
         ),
     };
     let marker = PublicationBlocker {
@@ -684,10 +714,12 @@ fn refresh_remote(
     repository: &Path,
     authority: GitEventStoreAuthority,
 ) -> Result<Option<String>, GitEventStoreOpenError> {
-    let authority = authority.config();
+    let authority = authority.config().remote.ok_or_else(|| {
+        GitEventStoreOpenError::Git("selected authority has no remote publication ref".to_owned())
+    })?;
     let advertised = git(
         repository,
-        ["ls-remote", "--exit-code", "origin", authority.remote_head],
+        ["ls-remote", "--exit-code", "origin", authority.head],
     )?;
     match advertised.status.code() {
         Some(0) => {
@@ -697,10 +729,10 @@ fn refresh_remote(
                     "fetch",
                     "--no-tags",
                     "origin",
-                    &format!("+{}:{}", authority.remote_head, authority.remote_ref),
+                    &format!("+{}:{}", authority.head, authority.tracking_ref),
                 ],
             )?)?;
-            resolve_optional_ref(repository, authority.remote_ref)
+            resolve_optional_ref(repository, authority.tracking_ref)
         }
         Some(2) => Ok(None),
         _ => Err(git_error("refresh authoritative tiber ref", &advertised)),
@@ -777,13 +809,7 @@ fn create_candidate(
     if let Some(base) = &stage.base {
         arguments.extend(["-p", base.as_str()]);
     }
-    let commit_environment = [
-        ("GIT_INDEX_FILE", index.as_os_str()),
-        ("GIT_AUTHOR_NAME", OsStr::new(EVENT_STORE_GIT_NAME)),
-        ("GIT_AUTHOR_EMAIL", OsStr::new(EVENT_STORE_GIT_EMAIL)),
-        ("GIT_COMMITTER_NAME", OsStr::new(EVENT_STORE_GIT_NAME)),
-        ("GIT_COMMITTER_EMAIL", OsStr::new(EVENT_STORE_GIT_EMAIL)),
-    ];
+    let commit_environment = [("GIT_INDEX_FILE", index.as_os_str())];
     let candidate = output_text(require_success(git_with(
         repository,
         None,
@@ -808,14 +834,16 @@ fn publish_remote(
     base: Option<&str>,
     authority: GitEventStoreAuthority,
 ) -> Result<Publication, GitEventStoreOpenError> {
-    let authority_config = authority.config();
+    let authority_config = authority.config().remote.ok_or_else(|| {
+        GitEventStoreOpenError::Git("selected authority has no remote publication ref".to_owned())
+    })?;
     for _ in 0..PUBLICATION_RETRIES {
         let push = git(
             repository,
             [
                 "push",
                 "origin",
-                &format!("{candidate}:{}", authority_config.remote_head),
+                &format!("{candidate}:{}", authority_config.head),
             ],
         )?;
         let remote = refresh_remote(repository, authority)?;
@@ -1164,11 +1192,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn event_transactions_use_the_adapter_owned_git_identity() {
+    async fn event_transactions_use_the_repository_git_identity() {
         let _serial = TEST_SERIAL.lock().await;
         let directory = TempDir::new().unwrap();
         let repository = directory.path().join("repository");
         require_git(directory.path(), &["init", repository.to_str().unwrap()]);
+        require_git(&repository, &["config", "user.name", "Verified Owner"]);
+        require_git(
+            &repository,
+            &["config", "user.email", "verified-owner@example.com"],
+        );
 
         let stream = StreamId::try_new("tiber:task:adapter-identity").unwrap();
         GitEventStore::open(&repository)
@@ -1177,6 +1210,10 @@ mod tests {
             .await
             .unwrap();
 
+        let expected_author_name =
+            std::env::var("GIT_AUTHOR_NAME").unwrap_or_else(|_| "Verified Owner".to_owned());
+        let expected_author_email = std::env::var("GIT_AUTHOR_EMAIL")
+            .unwrap_or_else(|_| "verified-owner@example.com".to_owned());
         assert_eq!(
             require_git(
                 &repository,
@@ -1189,8 +1226,8 @@ mod tests {
                 ],
             ),
             format!(
-                "{EVENT_STORE_GIT_NAME} <{EVENT_STORE_GIT_EMAIL}>|\
-                 {EVENT_STORE_GIT_NAME} <{EVENT_STORE_GIT_EMAIL}>"
+                "{expected_author_name} <{expected_author_email}>|\
+                 Verified Owner <verified-owner@example.com>"
             )
         );
     }
@@ -1509,6 +1546,103 @@ mod tests {
             .unwrap()
             .len(),
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_advisory_final_review_stays_local_while_workflow_publishes() {
+        let _serial = TEST_SERIAL.lock().await;
+        let directory = TempDir::new().unwrap();
+        let repository = directory.path().join("repository");
+        let origin = directory.path().join("origin.git");
+        require_git(
+            directory.path(),
+            &["init", "--bare", origin.to_str().unwrap()],
+        );
+        require_git(directory.path(), &["init", repository.to_str().unwrap()]);
+        require_git(&repository, &["config", "user.name", "Event Store Test"]);
+        require_git(
+            &repository,
+            &["config", "user.email", "event-store@example.invalid"],
+        );
+        require_git(
+            &repository,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+
+        let advisory_stream = StreamId::try_new("review:plugin-advisory").unwrap();
+        GitEventStore::open_for_authority(
+            &repository,
+            GitEventStoreAuthority::PluginAdvisoryFinalReview,
+        )
+        .unwrap()
+        .append_events(writes(&advisory_stream))
+        .await
+        .unwrap();
+
+        assert!(!require_git(
+            &repository,
+            &["rev-parse", "refs/tiber/plugin-advisory-final-review"],
+        )
+        .is_empty());
+        assert!(
+            git(&origin, ["show-ref"]).unwrap().stdout.is_empty(),
+            "advisory review must not publish any remote ref"
+        );
+        assert!(repository
+            .join(".git/plugin-advisory-final-review/replica-id")
+            .exists());
+        assert!(!repository
+            .join(".git/development-workflow/replica-id")
+            .exists());
+
+        let workflow_stream = StreamId::try_new("workflow:remote-authority").unwrap();
+        GitEventStore::open_for_authority(&repository, GitEventStoreAuthority::DevelopmentWorkflow)
+            .unwrap()
+            .append_events(writes(&workflow_stream))
+            .await
+            .unwrap();
+
+        assert!(
+            !require_git(&origin, &["rev-parse", "refs/heads/development-workflow"],).is_empty()
+        );
+        assert!(!require_git(
+            &repository,
+            &["rev-parse", "refs/remotes/origin/development-workflow"],
+        )
+        .is_empty());
+        assert!(repository
+            .join(".git/development-workflow/replica-id")
+            .exists());
+
+        let advisory = GitEventStore::open_for_authority(
+            &repository,
+            GitEventStoreAuthority::PluginAdvisoryFinalReview,
+        )
+        .unwrap();
+        assert_eq!(
+            collect_events(
+                advisory
+                    .read_stream::<TestEvent>(advisory_stream)
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .len(),
+            1
+        );
+        assert_eq!(
+            collect_events(
+                advisory
+                    .read_stream::<TestEvent>(workflow_stream)
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .len(),
+            0
         );
     }
 }

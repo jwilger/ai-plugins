@@ -58,8 +58,12 @@ iterations are bounded to 3-10 to cap assignment fanout.
 The coordinator returns both the legacy full `state` and a compact `state_ref`.
 Prefer `state_ref` between calls; it contains only session identity, storage
 scope, and the authoritative-state fingerprint. Never summarize or reconstruct
-the legacy state. The coordinator stores the full project-scoped authoritative
-copy in its local SQLite state database. A new stdio MCP process resolves a
+the legacy state. The coordinator stores full project-scoped state as EventCore
+facts. The advisory plugin uses a separate local-only Git authority under the
+repository's Git metadata and never publishes those review facts to a remote;
+standalone Tiber's native workflow service uses its configured Development
+Workflow authority. SQLite in user state is a rebuildable report/projection,
+not the decision authority. A new stdio MCP process resolves a
 valid reference, including pending verifier and delta-risk assignments. If a
 caller loses the latest handoff, `final_review.resume_latest` returns the latest
 reference from `session_id`, `project_root`, and optional `work_item_id` without
@@ -72,10 +76,12 @@ completed session also fails. Each process retains at most 32 active sessions,
 and durable storage is bounded independently.
 
 When `final_review.plan` selects no lenses and returns `assignments: []`, the
-state is already complete. The response names
-`next_tool: workflow.record_clean_review`; pass its `state_ref` as
-`review_state_ref`. Calling `final_review.advance` for this terminal state is a
-protocol error.
+state is already complete. Calling `final_review.advance` for this terminal
+state is a protocol error. The plugin's advisory surface returns no next tool;
+stop without calling a native workflow handoff. Standalone Tiber may name
+`next_tool: workflow.record_clean_review`; only when that native workflow
+service is actually available, pass the plan's `state_ref` as
+`review_state_ref`.
 When an advance returns `verifier_required`, the server retains the pending
 assignment ID and exact core pre-verifier arguments. Until the caller resubmits
 the same lens, scope, and caller-decision arguments plus the matching

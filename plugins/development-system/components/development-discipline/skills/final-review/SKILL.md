@@ -63,9 +63,12 @@ running build does not mask an earlier hold or disappear in another mode.
 Use the plugin's `development-discipline` stdio MCP when available:
 `final_review.plan` assigns reviewers and returns a compact `state_ref` for
 subsequent calls. `final_review.advance` is the canonical filter/state
-transition when the plan has assignments. A plan with `assignments: []`,
-`complete: true`, and `next_tool: workflow.record_clean_review` is already
-terminal; record it directly and do not call `final_review.advance`. If the MCP
+transition when the plan has assignments. A plan with `assignments: []` and
+`complete: true` is already terminal; do not call `final_review.advance`. On the
+plugin's advisory surface, stop there without calling a native workflow tool.
+Standalone Tiber may instead return `next_tool: workflow.record_clean_review`;
+when that native workflow service is actually available, pass the plan's
+`state_ref` to it as `review_state_ref`. If the MCP
 is unavailable, a manual pass may produce review
 observations, but it does not satisfy this final-review gate and cannot support a
 PR, merge, or readiness claim. Disclose that enforcement is unavailable and
@@ -353,13 +356,17 @@ behavior.
 
 When the review is for a tracked ticket, pass its stable tracker ID as
 `work_item_id` to `final_review.plan` (for example, the active Tiber task ID).
-The coordinator stores one current SQLite snapshot per worktree and
-work item in user state (`$XDG_STATE_HOME`, or `~/.local/state` as fallback),
-not in the reviewed repository or in per-session files. Each completed review
-transition replaces that binding's old lens rows, including stale conditional
-lenses; the returned `out_of_scope_report_artifact` path is the single report
-location. Without a tracker ID, the coordinator uses a stable worktree/scope/
-base binding so restarted non-ticketed reviews also replace stale rows.
+The coordinator stores decisions as EventCore facts. The advisory plugin uses a
+separate local-only Git authority under repository Git metadata and never
+publishes those review facts to a remote; standalone Tiber's native workflow
+service uses its configured Development Workflow authority. One rebuildable
+SQLite report/projection per worktree and work item lives in user state
+(`$XDG_STATE_HOME`, or `~/.local/state` as fallback), not in the worktree or in
+per-session files. Each completed review transition replaces that binding's old
+lens rows, including stale conditional lenses; the returned
+`out_of_scope_report_artifact` path is the single report location. Without a
+tracker ID, the coordinator uses a stable worktree/scope/base binding so
+restarted non-ticketed reviews also replace stale rows.
 Use `final_review.out_of_scope_report` with the authoritative review `state` to
 read that current snapshot; it returns the complete retained findings without
 requiring a separate SQLite client.
@@ -421,9 +428,12 @@ policy.
    `caller_attestation` with its assigned model role, `fresh_context: true`, and
    `closed_after_result: true`. Carry continuity only through MCP state,
    defenses, and caller decisions.
-3. If the plan is already complete with no assignments, pass its `state_ref` to
-   `workflow.record_clean_review` as `review_state_ref` and stop this loop.
-   Otherwise call `final_review.filter_findings` with the returned `state_ref` and complete
+3. If the plan is already complete with no assignments, stop this loop. On the
+   plugin's advisory surface, do not call a native workflow handoff. In
+   standalone Tiber, when the response names
+   `next_tool: workflow.record_clean_review` and that native service is
+   available, pass its `state_ref` as `review_state_ref`. Otherwise call
+   `final_review.filter_findings` with the returned `state_ref` and complete
    `lens_results`. Prepare any applicable `caller_decisions` from its retained
    findings before the first `final_review.advance` call; include those
    decisions on that initial call, which may return `verifier_required`.

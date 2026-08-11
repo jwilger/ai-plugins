@@ -8,18 +8,20 @@ in every state. Start configuration through the structured `setup.preview`
 tool, review the discovered path scopes and named command catalog, then
 explicitly confirm `setup.apply`. Setup never stages or commits configuration.
 
-The plugin-wide Development Discipline MCP surface is deliberately limited to
-repository inspection and deterministic setup. Its workflow guidance and Codex
-hooks are advisory: they do not establish agent identity, isolate tools, or
-deny ordinary host capabilities. `setup.apply` writes only repository-local
-configuration. It does not generate privileged agents or profiles and never
-changes global Codex, Claude, marketplace, MCP, shell, or SSH settings.
+The plugin-wide Development Discipline MCP surface provides bounded repository
+inspection, deterministic setup, and multi-agent final review. Those services
+and the Codex hooks are advisory: they
+do not establish agent identity, isolate project tools, execute project
+mutations, or deny ordinary host capabilities. `setup.apply` writes only
+repository-local configuration. It does not generate privileged agents or
+profiles and never changes global Codex, Claude, marketplace, MCP, shell, or
+SSH settings.
 
-The semantic workflow, editor, runner, repository, and diagnostic services are
-retained as reusable components for the standalone Tiber harness. Ordinary
-Codex remains able to inspect, edit, verify, commit, and push while Tiber is
-being bootstrapped. Tiber, rather than this plugin, will own authoritative
-identity, isolation, workflow, memory, verification, and delivery.
+The editor, runner, repository, and diagnostic services are retained as
+unexposed reusable components for the standalone Tiber harness. Ordinary Codex
+remains able to inspect, edit, verify, commit, and push while Tiber is being
+bootstrapped. Tiber, rather than this plugin, will own authoritative identity,
+isolation, workflow, memory, verification, and delivery.
 
 Codex MCP launchers resolve relative to the installed plugin root and must work
 from an arbitrary caller directory. A global `[mcp_servers.*]` compatibility
@@ -38,12 +40,14 @@ the public plugin owns or wraps. Those component directory and manifest names
 remain valid internal identities; they are not separate marketplace install
 targets or public routing labels.
 
-The top-level plugin manifest starts the read/setup-only Development Discipline
-surface and the independent Tiber MCP server. Development Discipline stores
-local final-review events in SQLite and uses `development-workflow` only for
-its workflow authority; it reads Tiber's unresolved CI hold when gating
-delivery. Tiber is the sole CI-incident and receipt authority on `tiber`, in
-addition to publishing task events there.
+The top-level plugin manifest starts the advisory Development Discipline
+inspection, setup, and multi-agent final-review surface plus the independent
+Tiber MCP server. The advisory surface stores final-review transitions on a
+separate local-only Git-backed EventCore authority and never publishes them to
+`development-workflow`; the standalone workflow service retains that remote
+authority. Development Discipline reads Tiber's unresolved CI hold when
+evaluating delivery readiness. Tiber is the sole CI-incident and receipt
+authority on `tiber`, in addition to publishing task events there.
 Promptfoo remains an optional MCP owned by the
 agentic-systems-engineering component and is intentionally excluded from the
 top-level manifest because projects may disable that capability and must supply

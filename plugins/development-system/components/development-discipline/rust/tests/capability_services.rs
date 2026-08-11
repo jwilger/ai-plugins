@@ -1148,14 +1148,14 @@ fn workflow_assignment_uses_the_git_common_directory_from_a_linked_worktree() {
 }
 
 #[test]
-fn plugin_surface_hides_and_denies_privileged_tools_before_dispatch() {
+fn plugin_surface_exposes_advisory_coordination_and_denies_project_mutation_tools() {
     let root = TempDir::new().expect("repository");
     git(root.path(), &["init", "--quiet"]);
     let denied = mcp_call_with_surface(
         root.path(),
-        "workflow.start",
-        json!({ "project_root": root.path(), "change_kind": "production" }),
-        Some("plugin-read-only"),
+        "workspace-editor.patch",
+        json!({}),
+        Some("plugin-advisory"),
     );
     assert_eq!(
         denied.pointer("/error/message"),
@@ -1163,7 +1163,7 @@ fn plugin_surface_hides_and_denies_privileged_tools_before_dispatch() {
     );
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_development-discipline-mcp"));
-    command.env("DEVELOPMENT_SYSTEM_SERVICE", "plugin-read-only");
+    command.env("DEVELOPMENT_SYSTEM_SERVICE", "plugin-advisory");
     let mut child = command
         .current_dir(root.path())
         .stdin(Stdio::piped())
@@ -1188,18 +1188,60 @@ fn plugin_surface_hides_and_denies_privileged_tools_before_dispatch() {
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        vec![
-            "workspace-reader.status",
-            "workspace-reader.read",
-            "workspace-reader.list",
-            "workspace-reader.search",
-            "workspace-reader.repository",
-            "setup.preview",
-            "setup.apply"
-        ]
-    );
+    assert!(names.contains(&"workspace-reader.status"));
+    assert!(names.contains(&"setup.preview"));
+    assert!(names.contains(&"final_review.plan"));
+    assert!(!names.iter().any(|name| name.starts_with("workflow.")));
+    assert!(names.iter().all(|name| {
+        matches!(
+            *name,
+            "workspace-reader.status"
+                | "workspace-reader.read"
+                | "workspace-reader.list"
+                | "workspace-reader.search"
+                | "workspace-reader.repository"
+                | "setup.preview"
+                | "setup.apply"
+        ) || matches!(
+            *name,
+            "final_review.plan"
+                | "final_review.filter_findings"
+                | "final_review.advance"
+                | "final_review.confirm_split"
+                | "final_review.clean_status"
+                | "final_review.out_of_scope_report"
+                | "final_review.resume_latest"
+                | "final_review.assess_risk"
+        )
+    }));
+    for tool in listed["result"]["tools"].as_array().expect("tools") {
+        let Some(name) = tool["name"].as_str() else {
+            continue;
+        };
+        if name.starts_with("final_review.") {
+            let serialized = tool.to_string().to_ascii_lowercase();
+            assert!(serialized.contains("advisory coordination"));
+            assert!(!serialized.contains("authoritative"));
+            assert!(!serialized.contains("mechanical development lifecycle gate"));
+        }
+    }
+}
+
+#[test]
+fn stale_environment_service_name_fails_with_an_actionable_error() {
+    let root = TempDir::new().expect("repository");
+    git(root.path(), &["init", "--quiet"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_development-discipline-mcp"))
+        .env("DEVELOPMENT_SYSTEM_SERVICE", "plugin-read-only")
+        .current_dir(root.path())
+        .output()
+        .expect("run dispatcher");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("development_system.dispatcher_service_unknown"));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("recovery=use_plugin-advisory_or_update_plugin_registration"));
 }
 
 #[test]

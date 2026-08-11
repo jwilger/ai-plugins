@@ -2,9 +2,9 @@
   "mcpServers": {
     "development-discipline": {
       "command": "./bin/development-discipline-mcp",
-      "args": ["--service", "plugin-read-only"],
+      "args": ["--service", "plugin-advisory"],
       "cwd": ".",
-      "description": "Advisory Development System reader and deterministic repository-local setup surface."
+      "description": "Advisory repository inspection, deterministic repository-local setup, and structured multi-agent final-review coordination."
     },
     "tiber": {
       "command": "./bin/tiber",
