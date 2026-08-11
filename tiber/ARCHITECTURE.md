@@ -2,14 +2,16 @@
 
 ## System context
 
-Tiber is the local authority between a repository owner, OpenAI's
-`codex app-server`, repositories and processes, third-party MCP servers,
-memory, and remote delivery systems.
+Tiber is designed as the local authority between a repository owner, an
+authority-compatible inference transport, repositories and processes,
+third-party MCP servers, memory, and remote delivery systems. No inference
+transport is currently accepted; the original app-server design failed its
+Phase 1 gate.
 
 ```text
 owner -> Tiber TUI -> application state machines -> closed TiberEffect set
                                                 -> imperative interpreters
-codex app-server <-> inference adapter           -> repositories/processes
+blocked inference port                           -> repositories/processes
 third-party MCP <-> external-tool adapter         -> Hindsight
 EventCore store <-> domain authority              -> forge/CI
 ```
@@ -31,7 +33,7 @@ reconciliation, and terminal workflow outcome.
 - **Ports:** `InferenceGateway`, `MemoryBackend`, `TaskService`,
   `WorkflowService`, `ExternalToolService`, `RepositoryService`,
   `ProcessService`, `VerificationService`, and `DeliveryService`.
-- **Adapters:** app-server protocol, native Tiber Tasks, native development
+- **Adapters:** a future approved inference transport, native Tiber Tasks, native development
   workflow, RMCP client, Hindsight HTTP, Git/forge, Linux isolation, and
   verification runners.
 
@@ -106,21 +108,19 @@ Agents terminate on success, terminal error, cancellation, any budget, or
 no-progress. A handoff transfers an explicit artifact and authority scope; it
 does not share ambient identity.
 
-## Inference through codex app-server
+## Rejected app-server inference design
 
-`codex app-server` is the sole inference transport. It owns subscription and
-API-key-mode authentication, credential storage and refresh, account and
-endpoint selection, protocol streaming, and authentication diagnostics. Tiber
-never handles credential material.
+The original design selected `codex app-server` as the sole inference
+transport so it could own subscription and API-key-mode authentication,
+credential storage and refresh, account and endpoint selection, protocol
+streaming, and authentication diagnostics without Tiber handling credentials.
 
-The adapter starts app-server with a Tiber-owned isolated Codex home, a pinned
-compatible protocol range, and only Tiber-declared tool metadata. It parses
-text and tool requests into typed observations. Tool requests remain inert
-until the Tiber core independently authorizes an effect.
-
-The Phase 1 spike is a hard authority gate: if an undeclared built-in operation
-can be advertised or executed, development stops after the spike and the
-inference decision is revisited.
+That design required an isolated Codex home, a pinned compatible protocol, and
+a guarantee that only Tiber-declared tool requests reached the model and
+remained inert until Tiber authorized an effect. The Phase 1 spike could not
+verify that guarantee for Codex 0.147.0, so no inference adapter or conversation
+runtime is implemented. ADR-0005 records the rejection and the condition for
+reconsideration.
 
 ## Native workflow and Tiber Tasks
 
@@ -185,6 +185,24 @@ push, pull-request, CI observation, and the single fenced CI-recovery incident.
 Remote writes are idempotent where possible and otherwise enter typed
 reconciliation.
 
+## Review orchestration
+
+Review is a durable Tiber workflow, not a presentation feature and not a
+single model call. A risk-assessment step selects independent review lenses and
+verifier routes. Each lens is assigned to a separate reviewer agent in a fresh
+context. The reviewer receives a bounded assignment, closes after returning one
+typed finding artifact with provenance, and never shares ambient conversational
+state with another lens. EventCore facts own assignment,
+completion, cancellation, supersession, and clean-review decisions.
+
+Any material delta after assessment invalidates affected evidence and triggers
+bounded reassessment. Delivery cannot cross the clean-review gate until every
+required lens and verifier has a current terminal result and all blocking
+findings are resolved. The existing advisory plugin orchestration remains the
+bootstrap behavior until this contract is implemented natively; migration must
+preserve its risk assessment, independent lenses, verifier routing, durable
+state, delta reassessment, and clean-review gating.
+
 ## Observability and stochastic evaluation
 
 Trace spans cover inference, context, policy, tools, memory, handoffs,
@@ -205,3 +223,11 @@ invocation opens the TUI; tasks live only at `tiber tasks …`. Ambiguous task
 crates use `tiber-tasks-*`. There are no legacy aliases, compatibility crates,
 deprecated paths, or transition window. Existing EventCore history and the
 `tiber` Git branch are preserved.
+
+## Phase 1 compatibility result
+
+The Codex 0.147.0 app-server protocol fails the inference authority gate: it
+contains command-execution and file-change thread items but supplies no
+documented built-in-tool disable or allowlist contract. ADR-0005 records the failed spike.
+Construction beyond the compatibility probe is paused until the inference
+transport decision is replaced or app-server gains the required contract.

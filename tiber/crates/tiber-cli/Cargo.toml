@@ -1,0 +1,12 @@
+[package]
+name = "tiber"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+tiber-app-server = { path = "../tiber-app-server" }
+
+[lints]
+workspace = true

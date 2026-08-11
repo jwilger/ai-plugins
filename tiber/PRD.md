@@ -3,8 +3,10 @@
 ## Product
 
 Tiber is a standalone, local-first development harness for one repository
-owner. OpenAI provides inference through `codex app-server`; Tiber owns the
-authoritative state and execution of development work.
+owner. Tiber owns the authoritative state and execution of development work.
+Its original `codex app-server` inference design is blocked by the Phase 1
+authority spike and remains a conditional target rather than implemented v1
+behavior.
 
 The v1 product and executable are named `tiber`. The existing task board is
 named Tiber Tasks. Running `tiber` without arguments opens the interactive
@@ -19,8 +21,9 @@ agent identity, isolate a process, reconcile an ambiguous write, or resume a
 partially completed delivery after a crash.
 
 Tiber gives an individual developer one inspectable authority for those
-concerns while retaining Codex's subscription-backed inference and familiar
-terminal interaction.
+concerns. The intended product retains Codex's subscription-backed inference
+and familiar terminal interaction only after an inference transport satisfies
+the authority gate.
 
 ## Target user
 
@@ -34,8 +37,8 @@ compromised trusted toolchain are outside the v1 threat model.
 
 ## Primary workflows
 
-1. Start `tiber`, resume or create a session, select a Tiber Task, and converse
-   with streaming Codex inference.
+1. After the inference authority blocker is resolved, start `tiber`, resume or
+   create a session, select a Tiber Task, and converse with streaming inference.
 2. Inspect the model's proposed tools, apply Tiber policy and owner approvals,
    execute authorized effects, and retain durable receipts.
 3. Delegate bounded assignments to typed agents while Tiber owns identity,
@@ -60,10 +63,12 @@ memory, and integration health plus `/tasks`, `/memory`, and
 - Create invariant-carrying agent, session, assignment, attempt, effect, task,
   and workflow identities.
 - Construct bounded context with provenance and explicit trust labels.
-- Use `codex app-server` as the sole inference transport and delegate
+- Conditional on a replacement authority proof, use `codex app-server` as the
+  sole inference transport and delegate
   login, credential storage, refresh, account selection, endpoint selection,
   headers, streaming, and authentication errors to it.
-- Run app-server with a Tiber-owned isolated Codex home that cannot load the
+- If that proof becomes available, run app-server with a Tiber-owned isolated
+  Codex home that cannot load the
   user's Codex plugins, hooks, agents, MCP servers, tools, or global settings.
 - Parse streamed text and structured tool requests; never let the model execute
   a tool.
@@ -96,10 +101,12 @@ memory, and integration health plus `/tasks`, `/memory`, and
 
 ## Acceptance criteria
 
-- A deterministic fixture and opt-in live smoke test prove isolated app-server
-  conversation streaming and inert tool calls.
-- No undeclared app-server operation is advertised or executable. Failure of
-  this contract stops the roadmap after the spike and amends the inference ADR.
+- A deterministic fixture evaluates the app-server authority contract before
+  conversation construction. The Codex 0.147.0 fixture fails that gate and
+  stops the roadmap after the spike.
+- Resuming construction requires evidence that no undeclared app-server
+  operation is advertised or executable, or a separately approved replacement
+  inference ADR.
 - Native tasks, workflow, repository, process, verification, and delivery
   services operate without MCP or shell loopback into Tiber.
 - MCP denial, cancellation, ambiguous-write, hostile-input, and capability

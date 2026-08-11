@@ -7,12 +7,16 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace github-actions tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
+ci: validate-marketplace github-actions tiber-harness-rust tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
 
 # The developer gate runs before every commit. It deliberately excludes
 # acceptance, release, browser, mutation, and shell suites; CI owns those after
 # the push. It still runs formatting, linting, and every Rust unit-test target.
 pre-commit: validate-marketplace github-actions
+    bash tiber/scripts/check-lint-policy.sh
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo fmt --manifest-path tiber/Cargo.toml --all --check
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo clippy --manifest-path tiber/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo test --manifest-path tiber/Cargo.toml --workspace --all-features
     cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
     cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
     cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --workspace --lib
@@ -24,11 +28,22 @@ pre-commit: validate-marketplace github-actions
 github-actions:
     actionlint
 
+# Rust gates for the standalone Tiber harness workspace.
+tiber-harness-rust:
+    bash tiber/scripts/check-lint-policy.sh
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo fmt --manifest-path tiber/Cargo.toml --all --check
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo clippy --manifest-path tiber/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo test --manifest-path tiber/Cargo.toml --workspace --all-features
+
+# Verify the pinned app-server authority fixture against a locally generated schema.
+tiber-app-server-fixture-check schema:
+    bash tiber/scripts/check-app-server-authority-fixture.sh "{{schema}}"
+
 # Rust gates for the tiber plugin workspace.
 tiber-rust:
-    cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
-    cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
-    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml -- --test-threads=1
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-plugin" cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-plugin" cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-plugin" cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml -- --test-threads=1
 
 # Rust gates for the development-discipline MCP coordinator.
 development-discipline-rust:
