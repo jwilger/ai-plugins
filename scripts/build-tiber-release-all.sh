@@ -9,10 +9,7 @@ export PATH="$CARGO_HOME/bin:$PATH"
 toolchain="${TIBER_RELEASE_TOOLCHAIN:-stable}"
 manifest="$root/plugins/development-system/components/tiber/rust/Cargo.toml"
 targets=(
-  aarch64-unknown-linux-gnu
   x86_64-unknown-linux-gnu
-  x86_64-apple-darwin
-  aarch64-apple-darwin
 )
 
 if ! rustup toolchain list | grep -Eq "^${toolchain}(-| )"; then
@@ -58,8 +55,6 @@ copy_binary() {
 }
 
 build_target x86_64-unknown-linux-gnu
-build_target aarch64-unknown-linux-gnu
-build_target universal2-apple-darwin
 
 target_dir="$(
   cargo metadata \
@@ -70,9 +65,6 @@ target_dir="$(
 )"
 
 copy_binary "$target_dir/x86_64-unknown-linux-gnu/release/tiber" x86_64-unknown-linux-gnu
-copy_binary "$target_dir/aarch64-unknown-linux-gnu/release/tiber" aarch64-unknown-linux-gnu
-copy_binary "$target_dir/universal2-apple-darwin/release/tiber" x86_64-apple-darwin
-copy_binary "$target_dir/universal2-apple-darwin/release/tiber" aarch64-apple-darwin
 
 checksums="$root/plugins/development-system/components/tiber/release-binaries.sha256"
 : >"$checksums"

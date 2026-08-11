@@ -7,11 +7,25 @@ use std::process::{Command, Stdio};
 use support::{assert_success, task_stem, TempRepo};
 
 #[test]
-fn mcp_uses_inherited_pwd_when_the_host_sets_an_installed_plugin_cwd() {
+fn mcp_uses_codex_sandbox_metadata_when_started_from_an_installed_plugin_root() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
     assert_success(repo.tiber(["create", "Inherited repository root"]));
     let plugin_root = tempfile::tempdir().expect("create installed plugin root");
+    assert_success(
+        Command::new("git")
+            .args(["init"])
+            .current_dir(plugin_root.path())
+            .output()
+            .expect("initialize plugin-root repository"),
+    );
+    assert_success(
+        Command::new(env!("CARGO_BIN_EXE_tiber"))
+            .arg("init")
+            .current_dir(plugin_root.path())
+            .output()
+            .expect("initialize plugin-root Tiber board"),
+    );
     std::fs::create_dir_all(plugin_root.path().join(".codex-plugin"))
         .expect("create Codex plugin manifest directory");
     std::fs::write(
@@ -22,7 +36,7 @@ fn mcp_uses_inherited_pwd_when_the_host_sets_an_installed_plugin_cwd() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
         .args(["mcp", "stdio"])
         .current_dir(plugin_root.path())
-        .env("PWD", repo.path())
+        .env("PWD", plugin_root.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -33,7 +47,34 @@ fn mcp_uses_inherited_pwd_when_the_host_sets_an_installed_plugin_cwd() {
 
     write_message(
         &mut stdin,
-        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tiber.list","arguments":{"status":"backlog"}}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"codex","version":"0.147.0"}}}"#,
+    );
+    let initialize = read_json_message(&mut stdout);
+    assert!(
+        initialize["result"]["capabilities"]["experimental"]
+            .get("codex/sandbox-state-meta")
+            .is_some(),
+        "Tiber must request Codex's per-call sandbox metadata"
+    );
+
+    let repository_uri = format!("file://{}", repo.path().display());
+    write_message(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "tiber.list",
+                "arguments": {"status": "backlog"},
+                "_meta": {
+                    "codex/sandbox-state-meta": {
+                        "sandboxCwd": repository_uri
+                    }
+                }
+            }
+        })
+        .to_string(),
     );
     let response = read_message(&mut stdout);
 

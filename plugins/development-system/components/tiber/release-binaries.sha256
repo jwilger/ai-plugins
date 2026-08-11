@@ -1,4 +1,1 @@
-d21eb280d64bf7ebe71856dc69e653182d61c0172bc6b0d1691cab13215af83e  dist/x86_64-unknown-linux-gnu/tiber
-b1e064f7342e905f3edb845cd5a9153263f9748661e937bcd976e06dbb1dbd52  dist/aarch64-unknown-linux-gnu/tiber
-1ca5916351fc27738b3ea5d097c711b25cdc692e3a87c7e20fb10691f8fa8fbf  dist/x86_64-apple-darwin/tiber
-1ca5916351fc27738b3ea5d097c711b25cdc692e3a87c7e20fb10691f8fa8fbf  dist/aarch64-apple-darwin/tiber
+ebd7a6d261f06f1bdbd33c570897d32418ed63e73a953df000064cd030994c7e  dist/x86_64-unknown-linux-gnu/tiber

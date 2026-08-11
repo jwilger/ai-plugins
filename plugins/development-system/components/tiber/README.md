@@ -255,6 +255,12 @@ entrypoint selects the shipped native binary for the current supported target
 and otherwise invokes the repository's pinned Rust build; MCP configuration
 does not use a shell command string or a harness-cache fallback path.
 
+Codex starts that entrypoint from the installed plugin root. Tiber advertises
+Codex's sandbox-state metadata capability and resolves each task operation from
+the active call's local `sandboxCwd`, so the authoritative board belongs to the
+caller's repository rather than the plugin cache. A later call from another
+workspace replaces the process-local repository selection.
+
 The Codex MCP registration forwards `SSH_AUTH_SOCK` so Git SSH signing can use
 the user's existing agent, including 1Password SSH agent setups. If an older
 installed plugin still reports `Couldn't get agent socket?` during
@@ -266,11 +272,10 @@ project-controlled executable. Codex plugin MCP policy overlays under
 `[plugins."tiber@ai-plugins".mcp_servers.tiber]` cannot change transport
 environment variables; they only control enablement and tool policy.
 
-It intentionally does not execute repo-relative launchers such as `./bin/tiber`
-or `./plugins/development-system/components/tiber/bin/tiber`, so the same MCP configuration is safe to load
-from any checkout. Reinstall or upgrade the plugin from marketplace version
-`0.6.1` or newer if Codex reports `No such file or directory` or one of the
-`tiber.mcp_*` startup sentinel errors while starting the `tiber` MCP server.
+The manifest's `./bin/tiber` command is resolved only against the installed
+plugin root, never the caller checkout. Reinstall or upgrade the plugin if Codex
+reports `No such file or directory`, `tiber.repository_not_found`, or one of the
+`tiber.mcp_*` startup sentinel errors while using the `tiber` MCP server.
 
 Tool names use the `tiber.*` namespace, for example `tiber.create`,
 `tiber.list`, `tiber.search`, `tiber.transition`, `tiber.update`, `tiber.acceptance.add`,
@@ -371,7 +376,8 @@ The plugin ships:
 
 - Rust source under `rust/`
 - a `bin/tiber` launcher
-- prebuilt binaries under `dist/<target>/tiber`
+- a prebuilt x86_64 Linux binary under
+  `dist/x86_64-unknown-linux-gnu/tiber`
 - release metadata in `release-binaries.json`
 - checksum provenance in `release-binaries.sha256`
 
@@ -379,6 +385,9 @@ The launcher prefers a matching bundled binary and falls back to
 `cargo run --manifest-path rust/Cargo.toml --bin tiber` for development.
 Generate the release metadata and checksums with
 `scripts/build-tiber-release-all.sh`.
+
+Tiber v1 supports and packages x86_64 Linux only. Other operating systems and
+architectures fail with an explicit unsupported-host diagnostic.
 
 ## Harness Support
 

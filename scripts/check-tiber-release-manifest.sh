@@ -6,12 +6,7 @@ manifest="$root/plugins/development-system/components/tiber/release-binaries.jso
 
 if ! jq -e '
   (.binaries | type == "array") and
-  ([.binaries[].target] | sort) == ([
-    "aarch64-apple-darwin",
-    "aarch64-unknown-linux-gnu",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu"
-  ] | sort) and
+  [.binaries[].target] == ["x86_64-unknown-linux-gnu"] and
   all(.binaries[]; .path == ("dist/" + .target + "/tiber"))
 ' "$manifest" >/dev/null; then
   echo "invalid-release-manifest-shape path=$manifest" >&2

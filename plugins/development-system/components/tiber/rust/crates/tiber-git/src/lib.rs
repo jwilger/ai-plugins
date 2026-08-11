@@ -5978,6 +5978,7 @@ const WORKFLOW_BLOCKER_FILE: &str = "workflow-blocker.json";
 
 thread_local! {
     static MCP_CI_RECOVERY_SESSION: RefCell<Option<String>> = const { RefCell::new(None) };
+    static MCP_REPOSITORY_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -5998,6 +5999,15 @@ pub struct WorkflowBlockerData {
 pub fn with_mcp_ci_recovery_session<T>(session: &str, operation: impl FnOnce() -> T) -> T {
     MCP_CI_RECOVERY_SESSION.with(|slot| {
         let previous = slot.replace(Some(session.to_string()));
+        let result = operation();
+        slot.replace(previous);
+        result
+    })
+}
+
+pub fn with_mcp_repository_root<T>(root: Option<&Path>, operation: impl FnOnce() -> T) -> T {
+    MCP_REPOSITORY_ROOT.with(|slot| {
+        let previous = slot.replace(root.map(Path::to_path_buf));
         let result = operation();
         slot.replace(previous);
         result
@@ -7996,6 +8006,16 @@ impl GitRepository {
     }
 
     fn discover() -> Result<Self, Error> {
+        if let Some(repository_root) =
+            MCP_REPOSITORY_ROOT.with(|slot| slot.borrow().as_ref().cloned())
+        {
+            return Self::discover_from(Some(&repository_root)).map_err(|error| {
+                Error::Usage(format!(
+                    "tiber.repository_root_invalid source=mcp_sandbox_cwd error={error}"
+                ))
+            });
+        }
+
         let current_directory_error = match Self::discover_from(None) {
             Ok(repository) => return Ok(repository),
             Err(error) => error,

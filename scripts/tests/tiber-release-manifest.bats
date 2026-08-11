@@ -105,14 +105,14 @@ host_release_path() {
   [ "$status" -eq 0 ]
 }
 
-@test "complete release check fails when any target binary is missing" {
+@test "complete release check fails when the supported binary is missing" {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/development-system/components/tiber"
   cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   copy_detect_target_helper "$fixture"
   copy_launcher_helper "$fixture"
   while IFS= read -r binary_path; do
-    if [ "$binary_path" = "dist/aarch64-apple-darwin/tiber" ]; then
+    if [ "$binary_path" = "dist/x86_64-unknown-linux-gnu/tiber" ]; then
       continue
     fi
     mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
@@ -125,10 +125,10 @@ host_release_path() {
 
   rm -rf "$fixture"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"missing-release-binary target=aarch64-apple-darwin"* ]]
+  [[ "$output" == *"missing-host-release-binary target=x86_64-unknown-linux-gnu"* ]]
 }
 
-@test "complete release check fails when any target binary is empty" {
+@test "complete release check fails when the supported binary is empty" {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/development-system/components/tiber"
   cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
@@ -136,7 +136,7 @@ host_release_path() {
   copy_launcher_helper "$fixture"
   while IFS= read -r binary_path; do
     mkdir -p "$fixture/plugins/development-system/components/tiber/$(dirname "$binary_path")"
-    if [ "$binary_path" != "dist/aarch64-apple-darwin/tiber" ]; then
+    if [ "$binary_path" != "dist/x86_64-unknown-linux-gnu/tiber" ]; then
       printf '#!/usr/bin/env sh\nexit 0\n' >"$fixture/plugins/development-system/components/tiber/$binary_path"
     else
       touch "$fixture/plugins/development-system/components/tiber/$binary_path"
@@ -149,7 +149,7 @@ host_release_path() {
 
   rm -rf "$fixture"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"invalid-release-binary target=aarch64-apple-darwin"* ]]
+  [[ "$output" == *"invalid-host-release-binary target=x86_64-unknown-linux-gnu"* ]]
 }
 
 @test "complete release check reports unsupported host target" {
@@ -248,13 +248,13 @@ SH
     cp "$ROOT/plugins/development-system/components/tiber/$binary_path" "$fixture/plugins/development-system/components/tiber/$binary_path"
   done < <(jq -r '.binaries[].path' "$ROOT/plugins/development-system/components/tiber/release-binaries.json")
   write_release_checksums "$fixture"
-  printf '\n# stale binary\n' >>"$fixture/plugins/development-system/components/tiber/dist/aarch64-apple-darwin/tiber"
+  printf '\n# stale binary\n' >>"$fixture/plugins/development-system/components/tiber/dist/x86_64-unknown-linux-gnu/tiber"
 
   run bash "$COMPLETE_SCRIPT" "$fixture"
 
   rm -rf "$fixture"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"stale-release-binary target=aarch64-apple-darwin"* ]]
+  [[ "$output" == *"stale-release-binary target=x86_64-unknown-linux-gnu"* ]]
 }
 
 @test "complete release check fails when checksum sidecar has stale entries" {
@@ -300,11 +300,7 @@ if [ "$1" = "toolchain" ] && [ "$2" = "install" ]; then
   exit 42
 fi
 if [ "$1" = "target" ] && [ "$2" = "list" ]; then
-  printf '%s\n' \
-    aarch64-unknown-linux-gnu \
-    x86_64-unknown-linux-gnu \
-    x86_64-apple-darwin \
-    aarch64-apple-darwin
+  printf '%s\n' x86_64-unknown-linux-gnu
   exit 0
 fi
 if [ "$1" = "run" ]; then
@@ -355,7 +351,7 @@ EOF
 
   run env RUSTUP_HOME="$rustup_home" CARGO_HOME="$cargo_home" bash "$fixture/scripts/build-tiber-release-all.sh"
 
-  for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin; do
+  for target in x86_64-unknown-linux-gnu; do
     [ -x "$fixture/plugins/development-system/components/tiber/dist/$target/tiber" ]
   done
   [ -s "$fixture/plugins/development-system/components/tiber/release-binaries.sha256" ]

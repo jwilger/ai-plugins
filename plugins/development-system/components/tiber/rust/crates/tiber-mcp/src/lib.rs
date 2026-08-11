@@ -1,4 +1,5 @@
 use std::io::{BufRead, Write};
+use std::path::PathBuf;
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -40,6 +41,7 @@ pub fn run_stdio(input: impl BufRead, mut output: impl Write) -> Result<(), tibe
             .unwrap_or_default()
             .as_nanos()
     );
+    let mut repository_root = None;
     for line in input.lines() {
         let line = match line {
             Ok(line) => line,
@@ -72,9 +74,20 @@ pub fn run_stdio(input: impl BufRead, mut output: impl Write) -> Result<(), tibe
             continue;
         }
         let id = request.get("id").cloned().unwrap_or(Value::Null);
-        let response = match tiber_git::with_mcp_ci_recovery_session(&fallback_session, || {
-            handle_json_rpc(&request)
-        }) {
+        let operation_result = match codex_sandbox_cwd(&request) {
+            Ok(root) => {
+                if root.is_some() {
+                    repository_root = root;
+                }
+                tiber_git::with_mcp_ci_recovery_session(&fallback_session, || {
+                    tiber_git::with_mcp_repository_root(repository_root.as_deref(), || {
+                        handle_json_rpc(&request)
+                    })
+                })
+            }
+            Err(error) => Err(error),
+        };
+        let response = match operation_result {
             Ok(response) => response,
             Err(error) => {
                 let message = error.to_string();
@@ -102,7 +115,10 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
             "protocolVersion": "2025-11-25",
             "capabilities": {
                 "tools": {},
-                "resources": {}
+                "resources": {},
+                "experimental": {
+                    "codex/sandbox-state-meta": {}
+                }
             },
             "serverInfo": {
                 "name": "tiber",
@@ -150,6 +166,33 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
         "id": id,
         "result": result
     }))
+}
+
+fn codex_sandbox_cwd(request: &Value) -> Result<Option<PathBuf>, tiber_git::Error> {
+    let Some(value) = request
+        .pointer("/params/_meta/codex~1sandbox-state-meta/sandboxCwd")
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let encoded_path = value.strip_prefix("file://").ok_or_else(|| {
+        tiber_git::Error::Parse(
+            "mcp_sandbox_cwd_invalid reason=local_file_uri_required".to_string(),
+        )
+    })?;
+    if !encoded_path.starts_with('/') {
+        return Err(tiber_git::Error::Parse(
+            "mcp_sandbox_cwd_invalid reason=local_file_uri_required".to_string(),
+        ));
+    }
+    let path = percent_encoding::percent_decode_str(encoded_path)
+        .decode_utf8()
+        .map_err(|error| {
+            tiber_git::Error::Parse(format!(
+                "mcp_sandbox_cwd_invalid reason=utf8_path_required source={error}"
+            ))
+        })?;
+    Ok(Some(PathBuf::from(path.as_ref())))
 }
 
 fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {

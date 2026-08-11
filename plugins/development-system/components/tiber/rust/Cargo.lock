@@ -1160,6 +1160,7 @@ dependencies = [
 name = "tiber-mcp"
 version = "0.10.0"
 dependencies = [
+ "percent-encoding",
  "serde",
  "serde_json",
  "tiber-git",
