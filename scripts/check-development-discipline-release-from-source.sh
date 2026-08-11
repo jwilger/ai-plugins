@@ -40,14 +40,25 @@ project_root="$(mktemp -d)"
 routing_root="$(mktemp -d)"
 signing_root="$(mktemp -d)"
 signing_key="$signing_root/release-signing-key"
-trap 'rm -rf "$source_output" "$dist_output" "$source_normalized" "$dist_normalized" "$project_root" "$routing_root" "$signing_root"' EXIT
+signing_agent_pid=""
+cleanup() {
+  if [ -n "$signing_agent_pid" ]; then
+    kill "$signing_agent_pid" 2>/dev/null || true
+    wait "$signing_agent_pid" 2>/dev/null || true
+  fi
+  rm -rf "$source_output" "$dist_output" "$source_normalized" "$dist_normalized" "$project_root" "$routing_root" "$signing_root"
+}
+trap cleanup EXIT
 
 ssh-keygen -q -t ed25519 -N '' -f "$signing_key"
+eval "$(ssh-agent -s)" >/dev/null
+signing_agent_pid="$SSH_AGENT_PID"
+ssh-add "$signing_key" >/dev/null
 
 mkdir -p "$project_root/.development-discipline"
 git -C "$project_root" init --quiet
 git -C "$project_root" config gpg.format ssh
-git -C "$project_root" config user.signingkey "$signing_key"
+git -C "$project_root" config user.signingkey "$signing_key.pub"
 git -C "$project_root" config commit.gpgsign true
 git -C "$project_root" -c user.name="Final Review Fixture" \
   -c user.email="final-review-fixture@example.test" \
@@ -68,7 +79,7 @@ printf '%s\n' \
 mkdir -p "$routing_root/.development-discipline"
 git -C "$routing_root" init --quiet
 git -C "$routing_root" config gpg.format ssh
-git -C "$routing_root" config user.signingkey "$signing_key"
+git -C "$routing_root" config user.signingkey "$signing_key.pub"
 git -C "$routing_root" config commit.gpgsign true
 git -C "$routing_root" -c user.name="Final Review Routing Fixture" \
   -c user.email="final-review-routing@example.test" \
@@ -105,13 +116,25 @@ run_flow "$source_binary" "$source_output"
 
 run_advisory_flow() {
   local binary="$1" session_id="$2" state_root="$3"
-  FINAL_REVIEW_TEST_PROJECT_ROOT="$project_root" \
-  FINAL_REVIEW_TEST_BASELINE_COMMIT="$(git -C "$project_root" rev-parse HEAD)" \
-  FINAL_REVIEW_TEST_SESSION_ID="$session_id" \
-  XDG_STATE_HOME="$state_root" \
-  TIBER_EVENT_STORE_DIAGNOSTICS=1 \
-  GIT_CONFIG_GLOBAL=/dev/null \
-    node "$advisory_flow_script" "$binary" --service plugin-advisory >/dev/null
+  local manifest="$root/plugins/development-system/.codex-mcp.json"
+  local -a forwarded_environment=()
+  local variable
+  while IFS= read -r variable; do
+    if [ -n "${!variable:-}" ]; then
+      forwarded_environment+=("$variable=${!variable}")
+    fi
+  done < <(jq -r '.mcpServers["development-discipline"].env_vars[]?' "$manifest")
+  env -i \
+    PATH="$PATH" \
+    HOME="$HOME" \
+    "${forwarded_environment[@]}" \
+    FINAL_REVIEW_TEST_PROJECT_ROOT="$project_root" \
+    FINAL_REVIEW_TEST_BASELINE_COMMIT="$(git -C "$project_root" rev-parse HEAD)" \
+    FINAL_REVIEW_TEST_SESSION_ID="$session_id" \
+    XDG_STATE_HOME="$state_root" \
+    TIBER_EVENT_STORE_DIAGNOSTICS=1 \
+    GIT_CONFIG_GLOBAL=/dev/null \
+      node "$advisory_flow_script" "$binary" --service plugin-advisory >/dev/null
   assert_review_commit_is_signed_ref "$project_root" refs/tiber/plugin-advisory-final-review
   [ "$(git -C "$project_root" rev-parse refs/heads/development-workflow)" = "$workflow_ref_before_advisory" ]
   [ "$(git -C "$advisory_origin" for-each-ref --format='%(refname) %(objectname)')" = "$advisory_origin_refs_before" ]

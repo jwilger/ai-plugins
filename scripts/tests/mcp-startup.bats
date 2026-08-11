@@ -54,6 +54,8 @@ initialize_codex_plugin_server() {
   local command
   local cwd
   local args
+  local env_args
+  local env_var
 
   version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
   installed_root="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system/$version"
@@ -62,6 +64,16 @@ initialize_codex_plugin_server() {
   command="$(jq -r ".mcpServers[\"$server\"].command" "$manifest")"
   cwd="$(jq -r ".mcpServers[\"$server\"].cwd // empty" "$manifest")"
   mapfile -t args < <(jq -r ".mcpServers[\"$server\"].args[]" "$manifest")
+  env_args=(
+    "PATH=$PATH"
+    "HOME=$TMPROOT/home"
+    "CODEX_HOME=$TMPROOT/codex-home"
+  )
+  while IFS= read -r env_var; do
+    if [ -n "$env_var" ] && [ -n "${!env_var+x}" ]; then
+      env_args+=("$env_var=${!env_var}")
+    fi
+  done < <(jq -r ".mcpServers[\"$server\"].env_vars[]?" "$manifest")
 
   (
     if [ "$cwd" = "." ]; then
@@ -71,10 +83,7 @@ initialize_codex_plugin_server() {
     fi
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
       env -i \
-        PATH="$PATH" \
-        HOME="$TMPROOT/home" \
-        CODEX_HOME="$TMPROOT/codex-home" \
-        SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+        "${env_args[@]}" \
         "$command" "${args[@]}"
   )
 }
@@ -156,8 +165,12 @@ initialize_codex_plugin_server() {
   [ "$(jq -r '.mcpServers["development-discipline"].command' "$manifest")" = \
     "./bin/development-discipline-mcp" ]
   [ "$(jq -r '.mcpServers["development-discipline"].cwd' "$manifest")" = "." ]
+  [ "$(jq -c '.mcpServers["development-discipline"].env_vars' "$manifest")" = \
+    '["SSH_AUTH_SOCK"]' ]
   [ "$(jq -r '.mcpServers.tiber.command' "$manifest")" = "./bin/tiber" ]
   [ "$(jq -r '.mcpServers.tiber.cwd' "$manifest")" = "." ]
+  [ "$(jq -c '.mcpServers.tiber.env_vars' "$manifest")" = \
+    '["SSH_AUTH_SOCK"]' ]
 
   run initialize_codex_plugin_server "$manifest" development-discipline
   [ "$status" -eq 0 ]

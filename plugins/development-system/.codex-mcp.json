@@ -4,6 +4,7 @@
       "command": "./bin/development-discipline-mcp",
       "args": ["--service", "plugin-advisory"],
       "cwd": ".",
+      "env_vars": ["SSH_AUTH_SOCK"],
       "description": "Advisory repository inspection, deterministic repository-local setup, and structured multi-agent final-review coordination."
     },
     "tiber": {

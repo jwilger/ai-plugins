@@ -27,6 +27,11 @@ Codex MCP launchers resolve relative to the installed plugin root and must work
 from an arbitrary caller directory. A global `[mcp_servers.*]` compatibility
 override is neither required nor part of supported setup.
 
+The Codex manifest explicitly forwards the owner's `SSH_AUTH_SOCK` to both
+trusted installed-root MCP launchers so their EventCore commits remain signed.
+If a signed append reports that the signing agent is unavailable, upgrade or
+reinstall the plugin before restarting Codex; no signing fallback is supported.
+
 The strong recommendation is to install only this plugin. Third-party plugin
 marketplaces add unnecessary supply-chain exposure. The plugin owns its bundled
 MCP integrations; user-added MCPs are warned about for compatibility review,
