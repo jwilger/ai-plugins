@@ -18,13 +18,7 @@ fi
 
 jq -e '.binaries | type == "array" and length > 0' "$manifest" >/dev/null
 
-expected_source_fingerprint="$(
-  cd "$plugin_root/rust"
-  {
-    sha256sum Cargo.toml Cargo.lock rust-toolchain.toml
-    find src -type f -name '*.rs' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
-  } | sha256sum | awk '{ print $1 }'
-)"
+expected_source_fingerprint="$("$root/scripts/development-discipline-source-fingerprint.sh")"
 manifest_source_fingerprint="$(jq -r '.source_fingerprint // empty' "$manifest")"
 if [ "$manifest_source_fingerprint" != "$expected_source_fingerprint" ]; then
   echo "release-source-fingerprint-mismatch" >&2

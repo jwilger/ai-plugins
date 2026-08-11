@@ -16,14 +16,9 @@ export PATH="$CARGO_HOME/bin:$PATH"
 target_dir="${CARGO_TARGET_DIR:-$root/.dependencies/cargo-target/development-discipline-release}"
 source_binary="$target_dir/release/development-discipline-mcp"
 flow_script="$root/scripts/tests/development-discipline-mcp-flow.mjs"
+advisory_flow_script="$root/scripts/tests/development-discipline-advisory-persistence.mjs"
 parity_normalizer="$root/scripts/tests/development-discipline-parity-normalize.mjs"
-source_fingerprint="$(
-  cd "$plugin_root/rust"
-  {
-    sha256sum Cargo.toml Cargo.lock rust-toolchain.toml
-    find src -type f -name '*.rs' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
-  } | sha256sum | awk '{ print $1 }'
-)"
+source_fingerprint="$("$root/scripts/development-discipline-source-fingerprint.sh")"
 
 if ! rustup toolchain list | grep -Eq "^${toolchain}(-| )"; then
   rustup toolchain install "$toolchain" --profile minimal
@@ -43,14 +38,20 @@ source_normalized="$(mktemp)"
 dist_normalized="$(mktemp)"
 project_root="$(mktemp -d)"
 routing_root="$(mktemp -d)"
-trap 'rm -rf "$source_output" "$dist_output" "$source_normalized" "$dist_normalized" "$project_root" "$routing_root"' EXIT
+signing_root="$(mktemp -d)"
+signing_key="$signing_root/release-signing-key"
+trap 'rm -rf "$source_output" "$dist_output" "$source_normalized" "$dist_normalized" "$project_root" "$routing_root" "$signing_root"' EXIT
+
+ssh-keygen -q -t ed25519 -N '' -f "$signing_key"
 
 mkdir -p "$project_root/.development-discipline"
 git -C "$project_root" init --quiet
-git -C "$project_root" config user.name "Final Review Fixture"
-git -C "$project_root" config user.email "final-review-fixture@example.test"
-git -C "$project_root" config commit.gpgsign false
-git -C "$project_root" commit --allow-empty --quiet -m "Initialize final-review fixture"
+git -C "$project_root" config gpg.format ssh
+git -C "$project_root" config user.signingkey "$signing_key"
+git -C "$project_root" config commit.gpgsign true
+git -C "$project_root" -c user.name="Final Review Fixture" \
+  -c user.email="final-review-fixture@example.test" \
+  commit --allow-empty --quiet -m "Initialize final-review fixture"
 mkdir -p "$project_root/src"
 printf '%s\n' 'fixture change' >"$project_root/src/new.rs"
 printf '%s\n' \
@@ -66,10 +67,12 @@ printf '%s\n' \
 # this release test at the checked-out source repository.
 mkdir -p "$routing_root/.development-discipline"
 git -C "$routing_root" init --quiet
-git -C "$routing_root" config user.name "Final Review Routing Fixture"
-git -C "$routing_root" config user.email "final-review-routing@example.test"
-git -C "$routing_root" config commit.gpgsign false
-git -C "$routing_root" commit --allow-empty --quiet -m "Initialize routing fixture"
+git -C "$routing_root" config gpg.format ssh
+git -C "$routing_root" config user.signingkey "$signing_key"
+git -C "$routing_root" config commit.gpgsign true
+git -C "$routing_root" -c user.name="Final Review Routing Fixture" \
+  -c user.email="final-review-routing@example.test" \
+  commit --allow-empty --quiet -m "Initialize routing fixture"
 mkdir -p "$routing_root/plugins/development-system/components/development-discipline/rust/src"
 printf '%s\n' 'routing fixture change' >"$routing_root/plugins/development-system/components/development-discipline/rust/src/main.rs"
 cp "$root/.development-discipline/final-review.toml" "$routing_root/.development-discipline/final-review.toml"
@@ -78,12 +81,42 @@ parity_state_root="$project_root/.development-discipline-state-parity"
 run_flow() {
   local binary="$1" output="$2"
   FINAL_REVIEW_TEST_PROJECT_ROOT="$project_root" \
-    FINAL_REVIEW_ROUTING_PROJECT_ROOT="$routing_root" \
-    FINAL_REVIEW_TEST_STATE_ROOT="$parity_state_root" \
+  FINAL_REVIEW_ROUTING_PROJECT_ROOT="$routing_root" \
+  FINAL_REVIEW_TEST_STATE_ROOT="$parity_state_root" \
+  TIBER_EVENT_STORE_DIAGNOSTICS=1 \
+  GIT_CONFIG_GLOBAL=/dev/null \
     node "$flow_script" "$binary" --service workflow-core >"$output"
 }
 
+assert_review_commit_is_signed_ref() {
+  local repository="$1" ref="$2"
+  local commit
+  while IFS= read -r commit; do
+    git -C "$repository" cat-file -p "$commit" | grep -q '^gpgsig '
+  done < <(git -C "$repository" rev-list "$ref")
+}
+
+assert_review_commit_is_signed() {
+  local repository="$1"
+  assert_review_commit_is_signed_ref "$repository" refs/heads/development-workflow
+}
+
 run_flow "$source_binary" "$source_output"
+
+run_advisory_flow() {
+  local binary="$1" session_id="$2" state_root="$3"
+  FINAL_REVIEW_TEST_PROJECT_ROOT="$project_root" \
+  FINAL_REVIEW_TEST_BASELINE_COMMIT="$(git -C "$project_root" rev-parse HEAD)" \
+  FINAL_REVIEW_TEST_SESSION_ID="$session_id" \
+  XDG_STATE_HOME="$state_root" \
+  TIBER_EVENT_STORE_DIAGNOSTICS=1 \
+  GIT_CONFIG_GLOBAL=/dev/null \
+    node "$advisory_flow_script" "$binary" --service plugin-advisory >/dev/null
+  assert_review_commit_is_signed_ref "$project_root" refs/tiber/plugin-advisory-final-review
+  [ "$(git -C "$project_root" rev-parse refs/heads/development-workflow)" = "$workflow_ref_before_advisory" ]
+  [ "$(git -C "$advisory_origin" for-each-ref --format='%(refname) %(objectname)')" = "$advisory_origin_refs_before" ]
+}
+
 rm -rf "$parity_state_root"
 # Source and packaged binaries must exercise equivalent, independent authority
 # histories. Both repositories are disposable fixtures; reset only their
@@ -142,3 +175,14 @@ jq -s -e '
       and .model_roles.post_filter == "gpt-5.6-luna"
       and .model_roles.verifier == "gpt-5.6-sol")
 ' "$dist_output" >/dev/null
+
+assert_review_commit_is_signed "$project_root"
+assert_review_commit_is_signed "$routing_root"
+advisory_origin="$signing_root/advisory-origin.git"
+git init --bare --quiet "$advisory_origin"
+git -C "$project_root" remote add origin "$advisory_origin"
+advisory_origin_refs_before="$(git -C "$advisory_origin" for-each-ref --format='%(refname) %(objectname)')"
+workflow_ref_before_advisory="$(git -C "$project_root" rev-parse refs/heads/development-workflow)"
+run_advisory_flow "$source_binary" signed-advisory-source "$signing_root/advisory-source-state"
+git -C "$project_root" update-ref -d refs/tiber/plugin-advisory-final-review
+run_advisory_flow "$dist_binary" signed-advisory-dist "$signing_root/advisory-dist-state"

@@ -21,14 +21,25 @@ setup() {
 @test "development-discipline release fingerprint covers every Rust module" {
   local fixture_root="$BATS_TEST_TMPDIR/release-fingerprint-fixture"
   mkdir -p "$fixture_root/scripts" "$fixture_root/plugins/development-system/components"
-  cp "$COMPLETE_CHECK" "$fixture_root/scripts/"
+  cp "$COMPLETE_CHECK" "$ROOT/scripts/development-discipline-source-fingerprint.sh" \
+    "$fixture_root/scripts/"
   cp -R "$ROOT/plugins/development-system/components/development-discipline" \
+    "$ROOT/plugins/development-system/components/tiber" \
     "$fixture_root/plugins/development-system/components/"
 
   run "$fixture_root/scripts/check-development-discipline-release-complete.sh"
   [ "$status" -eq 0 ]
 
   printf '%s\n' '// changed after release' >>"$fixture_root/plugins/development-system/components/development-discipline/rust/src/workflow.rs"
+  run "$fixture_root/scripts/check-development-discipline-release-complete.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"release-source-fingerprint-mismatch"* ]]
+
+  cp "$ROOT/plugins/development-system/components/development-discipline/rust/src/workflow.rs" \
+    "$fixture_root/plugins/development-system/components/development-discipline/rust/src/workflow.rs"
+  cp "$ROOT/plugins/development-system/components/development-discipline/release-binaries.json" \
+    "$fixture_root/plugins/development-system/components/development-discipline/release-binaries.json"
+  printf '%s\n' '// changed path dependency after release' >>"$fixture_root/plugins/development-system/components/tiber/rust/crates/tiber-git/src/lib.rs"
   run "$fixture_root/scripts/check-development-discipline-release-complete.sh"
   [ "$status" -ne 0 ]
   [[ "$output" == *"release-source-fingerprint-mismatch"* ]]
@@ -459,13 +470,7 @@ detect_target() {
   local actual
   local binary_path
 
-  expected="$(
-    cd "$ROOT/plugins/development-system/components/development-discipline/rust"
-    {
-      sha256sum Cargo.toml Cargo.lock rust-toolchain.toml
-      find src -type f -name '*.rs' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
-    } | sha256sum | awk '{ print $1 }'
-  )"
+  expected="$("$ROOT/scripts/development-discipline-source-fingerprint.sh")"
   actual="$(jq -r '.source_fingerprint' "$ROOT/plugins/development-system/components/development-discipline/release-binaries.json")"
   [ "$actual" = "$expected" ]
 

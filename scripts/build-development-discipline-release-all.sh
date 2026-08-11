@@ -25,13 +25,7 @@ if [ -z "$toolchain" ]; then
   exit 1
 fi
 binary_name="development-discipline-mcp"
-source_fingerprint="$(
-  cd "$plugin_root/rust"
-  {
-    sha256sum Cargo.toml Cargo.lock rust-toolchain.toml
-    find src -type f -name '*.rs' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
-  } | sha256sum | awk '{ print $1 }'
-)"
+source_fingerprint="$("$root/scripts/development-discipline-source-fingerprint.sh")"
 export DEVELOPMENT_DISCIPLINE_SOURCE_FINGERPRINT="$source_fingerprint"
 targets=(
   aarch64-unknown-linux-musl
