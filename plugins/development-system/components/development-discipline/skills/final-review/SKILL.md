@@ -41,6 +41,41 @@ and submits the required caller attestation naming the assigned model role plus
 Run a local, fresh-context review cycle before creating a pull request, merging,
 or claiming a change is ready.
 
+## One-way delivery boundary
+
+Final review approves the final source-content snapshot, not a particular Git
+staging partition or commit object. Complete the review while that snapshot is
+still inspectable, then cross the delivery boundary in one direction: create
+the authorized commit, verify the exact commit, and push it. Do not start a
+second full source review merely because committing moved identical reviewed
+content from the index or worktree into `HEAD`, changed the stage-aware scope
+hash, or introduced commit metadata or a signature.
+
+Before committing, retain the completed review's pinned baseline, requested
+scope, exact path inventory, and each path's reviewed content and mode. After
+committing, compare that source-content snapshot with the commit. The completed
+review remains valid only when the commit contains exactly the same reviewed
+paths, contents, and modes, including content that was untracked during review,
+and the pinned baseline and requested scope are unchanged. A path addition,
+removal, rename, mode change, content change, newly in-scope untracked file,
+different baseline, or different requested scope invalidates the completed
+review and starts a new risk assessment. Commit-message text, author or
+committer identity, timestamps, signatures, parent/object IDs, and the movement
+of bytes among `HEAD`, index, and worktree are delivery metadata; verify them in
+the delivery phase instead of repeating source-content review.
+
+This exception begins only after the coordinator reports terminal completion.
+During an active review, continue to rerun the bundled stage-aware scope hash
+before every advance and treat a changed hash as the protocol requires. Never
+use the delivery boundary to excuse a staged, unstaged, mode, path, or untracked
+content change while review is active.
+
+Post-commit verification is mandatory even for a content-identical commit.
+Bind repository-required gates to the exact commit, verify its required commit
+message and signature, and after push bind required remote CI to the exact
+pushed revision. Passing these delivery checks does not replace source review;
+source review likewise does not prove the commit or push.
+
 This is the ticket-completion gate, not the gate for preserving each green
 implementation increment. Start it after the ticket's actual acceptance
 criteria are implemented, no prior failed-run hold remains, and apply the

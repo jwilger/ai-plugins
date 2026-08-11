@@ -1,0 +1,25 @@
+{
+  "scenario": "content-identical-commit-boundary",
+  "selectedMode": "direct-to-trunk",
+  "remoteActions": ["push"],
+  "ci": { "required": true, "status": "terminal-success" },
+  "reviewEvidence": ["terminal final review of the exact source snapshot"],
+  "stageAwareHashChanged": true,
+  "reviewedSourceChanged": false,
+  "sourceReviewRestartRequired": false,
+  "postCommitGateRequired": false,
+  "postCommitGateExactRevision": false,
+  "commitMetadataChecksPhase": "source-review",
+  "invalidatesReview": {
+    "paths": true,
+    "content": true,
+    "modes": true,
+    "untracked": true,
+    "baseline": true,
+    "requestedScope": true,
+    "stagingPartition": false,
+    "head": false,
+    "signature": false,
+    "commitMetadata": false
+  }
+}

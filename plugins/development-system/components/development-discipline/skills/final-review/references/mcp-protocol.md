@@ -50,6 +50,30 @@ assignment alone intentionally does not duplicate all caller-owned review
 context. If the scope changes, recompute the scope hash and start a fresh risk
 assessment rather than retrying a stale handoff.
 
+## Completed review and delivery
+
+The scope hash is deliberately stage-aware during an active review. Moving
+unchanged content between the worktree, index, and `HEAD` can therefore change
+the hash, and callers must continue sending the fresh helper output on every
+`final_review.advance` call. Do not weaken or replace that contract.
+
+After a review reaches terminal completion, delivery is a one-way boundary.
+Retain the terminal review's pinned baseline, requested scope, exact path
+inventory, and reviewed path content/modes. A newly created commit may consume
+that completed review without replanning only when its source-content snapshot
+is identical: the baseline and requested scope are unchanged and the commit has
+exactly the reviewed paths, bytes, and modes, including formerly untracked
+content. A hash change caused solely by the new `HEAD`, staging
+partition, commit object, signature, identities, timestamps, or message is not
+a scope change and must not be submitted as a new review iteration.
+
+Any changed reviewed path, content, mode, untracked content, pinned baseline,
+or requested scope invalidates terminal completion and requires a fresh risk
+assessment. Regardless of content identity, run the repository's post-commit
+gates against the exact commit and verify commit-message and signature policy
+there. After push, bind required remote checks to that exact revision. This
+delivery verification is mandatory and is distinct from source-content review.
+
 `final_review.advance` also validates scope state; when `current_diff_hash`
 differs from the stored hash, provide `current_changed_files` so the next review
 iteration sees the current diff.

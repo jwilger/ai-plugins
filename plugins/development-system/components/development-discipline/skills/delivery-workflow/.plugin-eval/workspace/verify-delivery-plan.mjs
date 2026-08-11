@@ -85,6 +85,70 @@ switch (plan.scenario) {
       fail("mode-specific review evidence or PR hold is incorrect");
     }
     break;
+  case "content-identical-commit-boundary": {
+    if (plan.selectedMode !== "direct-to-trunk")
+      fail("content-identical delivery must retain direct-to-trunk mode");
+    if (!plan.remoteActions.includes("push"))
+      fail("content-identical delivery must still plan the authorized push");
+    if (
+      plan.stageAwareHashChanged !== true ||
+      plan.reviewedSourceChanged !== false ||
+      plan.sourceReviewRestartRequired !== false
+    ) {
+      fail(
+        "Git partition changes alone must not restart completed source review",
+      );
+    }
+    if (
+      plan.postCommitGateRequired !== true ||
+      plan.postCommitGateExactRevision !== true ||
+      plan.commitMetadataChecksPhase !== "delivery-verification"
+    ) {
+      fail(
+        "exact-commit gates, message, and signature checks remain mandatory",
+      );
+    }
+    if (plan.ci.required !== true || plan.ci.status !== "terminal-success") {
+      fail("required pushed CI must bind to terminal success");
+    }
+    const invalidates = plan.invalidatesReview;
+    for (const key of [
+      "paths",
+      "content",
+      "modes",
+      "untracked",
+      "baseline",
+      "requestedScope",
+    ]) {
+      if (invalidates?.[key] !== true)
+        fail(`${key} changes must invalidate completed source review`);
+    }
+    for (const key of [
+      "stagingPartition",
+      "head",
+      "signature",
+      "commitMetadata",
+    ]) {
+      if (invalidates?.[key] !== false)
+        fail(`${key} alone must remain delivery verification`);
+    }
+    break;
+  }
+  case "source-change-invalidates-review": {
+    if (
+      plan.reviewedSourceChanged !== true ||
+      plan.sourceReviewRestartRequired !== true
+    ) {
+      fail("a real source change must restart final review");
+    }
+    if (
+      plan.postCommitGateRequired !== true ||
+      plan.postCommitGateExactRevision !== true
+    ) {
+      fail("the replacement snapshot still requires exact-commit gates");
+    }
+    break;
+  }
   default:
     fail("unknown scenario");
 }

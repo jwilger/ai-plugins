@@ -51,10 +51,18 @@ policy-selected trunk ref without creating a
 PR/MR. Preserve repository-required branch or worktree topology; direct-to-trunk
 describes the delivery destination, not where development must occur. After pushing, bind the delivery evidence to the exact
 pushed revision and verify its required CI run reaches the state the repository
-requires. If a rejected push, rebase, merge, or conflict resolution changes the
-candidate revision, the prior local evidence is stale: rerun the
-repository-required checks and final review against the new revision before
-retrying the push.
+requires. Treat final source review, commit, and push as a one-way delivery
+boundary. Creating a commit from the content-identical reviewed snapshot does
+not require another full review merely because `HEAD`, staging state, signature,
+or commit metadata changed. It does require post-commit repository gates,
+commit-message validation, and signature verification against that exact
+commit. If a rejected push, rebase, merge, conflict resolution, hook, formatter,
+or other delivery step changes any reviewed path, content, mode, formerly
+untracked content, adds a newly in-scope untracked path, changes the pinned
+baseline, or changes the requested scope, the prior review is
+stale: rerun the repository-required checks and final review against the new
+source snapshot before retrying the push. A metadata-only revision change stays
+in delivery verification and does not reopen source review.
 
 ### PR/MR
 
@@ -80,6 +88,14 @@ gate.
   non-empty body explaining why the change exists. Capture the motivation,
   decision context, tradeoff, or failure being prevented; reject a subject-only
   message and a body that merely restates the subject or diff.
+- After creating the commit, prove that its paths, contents, and modes are
+  identical to the terminally reviewed source snapshot. Then run every required
+  post-commit gate against the exact commit and verify its message and signature.
+  The stage-aware review hash may change at this boundary without reopening
+  review; source identity, not Git partition or metadata identity, decides that
+  question. Before terminal completion, preserve the stage-aware contract:
+  recompute and submit the fresh `current_diff_hash` on every review advance and
+  handle every mismatch through final-review rather than this delivery exception.
 - Treat a user request or standing repository authorization as permission only
   for the externally visible operations it actually covers.
 - Use additive commits for repairs, review follow-ups, and later corrections by

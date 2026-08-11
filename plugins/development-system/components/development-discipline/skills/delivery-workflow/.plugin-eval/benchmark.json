@@ -12,7 +12,7 @@
     "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
   },
   "workspace": {
-    "sourcePath": "plugins/development-discipline/skills/delivery-workflow/.plugin-eval/workspace",
+    "sourcePath": "plugins/development-system/components/development-discipline/skills/delivery-workflow/.plugin-eval/workspace",
     "setupMode": "copy",
     "preserve": "on-failure"
   },
@@ -58,6 +58,27 @@
         "delivery-plan.json uses local evidence for unpushed direct-to-trunk and local-only review without fabricating a push.",
         "The failed PR remains held under CI failure follow-up until replacement terminal success.",
         "The plan says changing modes cannot erase a known failed-run hold."
+      ]
+    },
+    {
+      "id": "content-identical-commit-boundary",
+      "title": "Cross the final-review delivery boundary once",
+      "purpose": "Verify that a content-identical commit does not reopen source review while real source changes do and exact-commit gates remain mandatory.",
+      "userInput": "Use delivery-workflow. Final review completed against the final uncommitted source snapshot. A signed commit contains identical paths, bytes, and modes with the same pinned baseline and requested scope, but the stage-aware review hash changed because HEAD and the staging partition changed. Do not perform remote actions. Write delivery-plan.json with scenario=content-identical-commit-boundary, selectedMode=direct-to-trunk, remoteActions=[push], a nonempty reviewEvidence array, stageAwareHashChanged, reviewedSourceChanged, sourceReviewRestartRequired, postCommitGateRequired, postCommitGateExactRevision, commitMetadataChecksPhase, invalidatesReview keys paths/content/modes/untracked/baseline/requestedScope/stagingPartition/head/signature/commitMetadata, and ci.required/status.",
+      "successChecklist": [
+        "The content-identical commit does not reopen the completed source review solely because Git partition or metadata changed.",
+        "Every real source or requested-scope change invalidates review, while active-review hashing remains stage-aware.",
+        "Post-commit gates, message/signature checks, push, and required CI bind to the exact commit."
+      ]
+    },
+    {
+      "id": "source-change-invalidates-review",
+      "title": "Restart review after a real source change",
+      "purpose": "Verify the delivery boundary cannot preserve a completed review after reviewed source content or paths change.",
+      "userInput": "Use delivery-workflow. Final review completed, then a delivery hook added a new in-scope untracked source path. Do not perform remote actions. Write delivery-plan.json with scenario=source-change-invalidates-review, reviewedSourceChanged=true, sourceReviewRestartRequired=true, postCommitGateRequired=true, and postCommitGateExactRevision=true.",
+      "successChecklist": [
+        "The new in-scope source path invalidates the completed review.",
+        "The replacement reviewed snapshot still crosses the exact-commit verification gate before push."
       ]
     }
   ]

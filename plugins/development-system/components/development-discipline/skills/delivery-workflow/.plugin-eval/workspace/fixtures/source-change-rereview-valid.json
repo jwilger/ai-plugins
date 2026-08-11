@@ -1,0 +1,10 @@
+{
+  "scenario": "source-change-invalidates-review",
+  "remoteActions": ["push"],
+  "reviewEvidence": ["replacement source snapshot received terminal review"],
+  "ci": { "required": true, "status": "terminal-success" },
+  "reviewedSourceChanged": true,
+  "sourceReviewRestartRequired": true,
+  "postCommitGateRequired": true,
+  "postCommitGateExactRevision": true
+}

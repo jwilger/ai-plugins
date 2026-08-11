@@ -2073,6 +2073,34 @@
     }
   },
   {
+    "case_id": "final-review-content-identical-commit-crosses-delivery-boundary-once",
+    "behavior": "Preserves a completed source review across a content-identical commit while retaining exact-commit delivery gates.",
+    "prompt": "A direct-to-trunk change completed final review against its final uncommitted source snapshot. Creating the signed commit changes the stage-aware review hash because the same bytes move from the index/worktree into HEAD, but the committed paths, contents, and modes are identical and the pinned baseline and requested scope are unchanged. Must you run another full final review before pushing? Contrast that with a commit hook changing one reviewed file and an additional in-scope untracked file appearing. State what remains mandatory after commit and why stage-aware hashing must remain unchanged during an active review.",
+    "tags": [
+      "development-discipline",
+      "final-review",
+      "delivery",
+      "scope-boundary"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["delivery", "development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "state-transition", "close-boundary"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response defines a one-way sequence of final source-content review, commit, exact-commit verification, and push. It must say the content-identical commit does not require a second full review solely because HEAD, index/worktree partition, signature, identities, timestamps, message, or commit object changed, while post-commit repository gates plus commit-message and signature verification remain mandatory against the exact commit and required remote CI remains bound to the exact pushed revision. It must restart final review for the hook-caused content change and for the new in-scope untracked path/content, and name path, content, mode, untracked content, pinned baseline, or requested-scope changes as invalidators. It must preserve the existing stage-aware hash and fresh current_diff_hash behavior during every active review advance. Fail if it repeats review after every commit metadata/hash change, skips exact-commit gates because source review passed, treats the hook or untracked change as metadata-only, or weakens the active-review hash.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Do not reopen the completed source review for a content-identical commit. Verify that the commit has the reviewed paths, bytes, and modes, then run required post-commit gates and check its message/signature before pushing and binding CI to the pushed SHA. Reopen review for either the hook's source edit or the new in-scope untracked file. During an active review, keep using the stage-aware helper on every advance."
+      ],
+      "fail": [
+        "Because the scope hash changed after commit, repeat the full review. Once that passes, the commit needs no separate signature or post-commit gate checks."
+      ]
+    }
+  },
+  {
     "case_id": "final-review-threat-model-requires-in-model-causal-path",
     "behavior": "Distinguishes an out-of-model generic hardening concern from an in-model trust-boundary failure with a causal path.",
     "prompt": "A final-review security lens raises two concerns. First, a local single-owner developer helper invokes a repository-pinned command through the owner's trusted PATH; the reviewer imagines a malicious local process replacing the tool, but this repository's threat model explicitly trusts the owner, local processes, PATH, and installed toolchain. Second, the diff changes a shared service so an unauthenticated request parameter selects another tenant's export file. For each concern, state causality, precondition, actor/input, boundary, asset, intended deployment, impact, and disposition.",

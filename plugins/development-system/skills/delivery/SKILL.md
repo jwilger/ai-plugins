@@ -38,5 +38,18 @@ it must not merely restate the subject or summarize the diff. Reject a
 subject-only message. Never add `Co-Authored-By` or another AI-attribution
 trailer.
 
+Treat final source review, commit, and push as a one-way delivery boundary. A
+commit that contains exactly the terminally reviewed paths, contents, and modes
+does not trigger another full source review solely because staging state,
+`HEAD`, signature, identities, timestamps, or other commit metadata changed.
+Still run the repository-required post-commit gates against the exact commit,
+verify its message and signature, and bind required pushed CI to that revision.
+If delivery changes a reviewed path, content, mode, formerly untracked content,
+adds a newly in-scope untracked path, changes the pinned baseline, or changes
+the requested scope, return to final review for the changed
+source snapshot. This boundary applies only after terminal review; while review
+is active, keep the stage-aware helper unchanged and submit its fresh
+`current_diff_hash` on every advance.
+
 Always state each protected action explicitly: never infer permission to
 force-push, merge, or delete remote state.

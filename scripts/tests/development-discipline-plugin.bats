@@ -20,6 +20,21 @@ setup() {
 
   run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/direct-to-trunk-invalid.json"
   [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/content-identical-commit-valid.json"
+  [ "$status" -eq 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/source-change-rereview-valid.json"
+  [ "$status" -eq 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/content-identical-commit-rereview-invalid.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/content-change-no-rereview-invalid.json"
+  [ "$status" -ne 0 ]
+
+  run node "$workspace/verify-delivery-plan.mjs" "$workspace/fixtures/content-identical-commit-gate-invalid.json"
+  [ "$status" -ne 0 ]
 }
 
 @test "development-workflow benchmark verifies lifecycle routing and stop boundaries" {
