@@ -259,7 +259,15 @@ impl GitEventStore {
         } else {
             resolve_optional_ref(&self.repository, self.authority.config().local_ref)?
         };
-        let outcome = if head
+        let pending_is_noop = if let Some(base) = pending.base.as_deref() {
+            commit_tree_id(&self.repository, &pending.candidate)?
+                == commit_tree_id(&self.repository, base)?
+        } else {
+            false
+        };
+        let outcome = if pending_is_noop {
+            SynchronizeOutcome::Current
+        } else if head
             .as_deref()
             .is_some_and(|head| is_ancestor(&self.repository, &pending.candidate, head))
         {
@@ -329,8 +337,11 @@ impl EventStore for GitEventStore {
         let stage = load_stage_with_retry(&self.repository, &self.common_directory, self.authority)
             .map_err(|error| diagnosed_store_failure(Operation::AppendEvents, &error))?;
         let appended = stage.store.append_events(writes).await?;
-        let candidate = create_candidate(&self.repository, &stage, self.authority)
-            .map_err(|error| diagnosed_store_failure(Operation::AppendEvents, &error))?;
+        let Some(candidate) = create_candidate(&self.repository, &stage, self.authority)
+            .map_err(|error| diagnosed_store_failure(Operation::AppendEvents, &error))?
+        else {
+            return Ok(appended);
+        };
         #[cfg(test)]
         run_before_initial_publish_hook(&self.repository);
 
@@ -387,9 +398,13 @@ impl EventStore for GitEventStore {
                         self.authority,
                     )
                     .map_err(|_| store_failure(Operation::AppendEvents))?;
-                    let rebased_candidate =
+                    let Some(rebased_candidate) =
                         create_candidate(&self.repository, &merged, self.authority)
-                            .map_err(|_| store_failure(Operation::AppendEvents))?;
+                            .map_err(|_| store_failure(Operation::AppendEvents))?
+                    else {
+                        *self.stage.lock().await = merged;
+                        return Ok(appended);
+                    };
                     #[cfg(test)]
                     run_before_rebased_publish_hook(&self.repository);
                     match if merged.has_origin {
@@ -718,7 +733,7 @@ fn create_candidate(
     repository: &Path,
     stage: &Stage,
     authority: GitEventStoreAuthority,
-) -> Result<String, GitEventStoreOpenError> {
+) -> Result<Option<String>, GitEventStoreOpenError> {
     let index = stage.work_tree.join("candidate-index");
     let index_env = [("GIT_INDEX_FILE", index.as_os_str())];
     if let Some(base) = &stage.base {
@@ -731,6 +746,12 @@ fn create_candidate(
             ["read-tree", "--empty"],
         )?)?;
     }
+    let baseline_tree = output_text(require_success(git_with(
+        repository,
+        None,
+        index_env,
+        ["write-tree"],
+    )?)?);
     require_success(git_with(
         repository,
         Some(&stage.work_tree),
@@ -743,6 +764,10 @@ fn create_candidate(
         index_env,
         ["write-tree"],
     )?)?);
+    if tree == baseline_tree {
+        let _ = fs::remove_file(index);
+        return Ok(None);
+    }
     let signing = git(repository, ["config", "--bool", "commit.gpgsign"])?;
     let mut arguments = vec!["commit-tree", tree.as_str()];
     if signing.status.success() && output_text(signing) == "true" {
@@ -766,7 +791,15 @@ fn create_candidate(
         arguments,
     )?)?);
     let _ = fs::remove_file(index);
-    Ok(candidate)
+    Ok(Some(candidate))
+}
+
+fn commit_tree_id(repository: &Path, commit: &str) -> Result<String, GitEventStoreOpenError> {
+    let tree_expression = format!("{commit}^{{tree}}");
+    Ok(output_text(require_success(git(
+        repository,
+        ["rev-parse", "--verify", tree_expression.as_str()],
+    )?)?))
 }
 
 fn publish_remote(
@@ -1109,6 +1142,12 @@ mod tests {
             .unwrap()
     }
 
+    fn empty_writes(stream: &StreamId) -> StreamWrites {
+        StreamWrites::new()
+            .register_stream(stream.clone(), StreamVersion::new(0))
+            .unwrap()
+    }
+
     fn require_git(repository: &Path, arguments: &[&str]) -> String {
         let output = Command::new("git")
             .arg("-C")
@@ -1313,6 +1352,100 @@ mod tests {
         );
         assert_eq!(parent, authority);
         assert!(repository.join(".git/tiber/workflow-blocker.json").exists());
+    }
+
+    #[tokio::test]
+    async fn no_op_append_does_not_create_an_empty_authority() {
+        let _serial = TEST_SERIAL.lock().await;
+        let directory = TempDir::new().unwrap();
+        let repository = directory.path().join("repository");
+        require_git(directory.path(), &["init", repository.to_str().unwrap()]);
+        require_git(&repository, &["config", "user.name", "Tiber Test"]);
+        require_git(
+            &repository,
+            &["config", "user.email", "tiber@example.invalid"],
+        );
+        require_git(&repository, &["config", "commit.gpgsign", "false"]);
+
+        let stream = StreamId::try_new("tiber:task:no-op").unwrap();
+        let store = GitEventStore::open(&repository).unwrap();
+        store.append_events(empty_writes(&stream)).await.unwrap();
+        assert!(!require_git(
+            &repository,
+            &[
+                "cat-file",
+                "--batch-all-objects",
+                "--batch-check=%(objecttype)"
+            ]
+        )
+        .lines()
+        .any(|object_type| object_type == "commit"));
+        assert!(!git(
+            &repository,
+            ["show-ref", "--verify", store.authority.config().local_ref]
+        )
+        .unwrap()
+        .status
+        .success());
+        assert!(!store.pending_publication_path().exists());
+        assert!(!store.publication_blocker_path().exists());
+    }
+
+    #[tokio::test]
+    async fn synchronize_clears_a_legacy_pending_candidate_with_an_unchanged_tree() {
+        let _serial = TEST_SERIAL.lock().await;
+        let directory = TempDir::new().unwrap();
+        let repository = directory.path().join("repository");
+        require_git(directory.path(), &["init", repository.to_str().unwrap()]);
+        require_git(&repository, &["config", "user.name", "Tiber Test"]);
+        require_git(
+            &repository,
+            &["config", "user.email", "tiber@example.invalid"],
+        );
+        require_git(&repository, &["config", "commit.gpgsign", "false"]);
+
+        let stream = StreamId::try_new("tiber:task:authority").unwrap();
+        let store = GitEventStore::open(&repository).unwrap();
+        store.append_events(writes(&stream)).await.unwrap();
+        let local_ref = store.authority.config().local_ref;
+        let authority = require_git(&repository, &["rev-parse", local_ref]);
+        let tree = require_git(
+            &repository,
+            &["rev-parse", &format!("{authority}^{{tree}}")],
+        );
+        let candidate = require_git(
+            &repository,
+            &[
+                "commit-tree",
+                &tree,
+                "-p",
+                &authority,
+                "-m",
+                "legacy no-op candidate",
+            ],
+        );
+        persist_pending(
+            &store.pending_publication_path(),
+            &PendingPublication {
+                version: PENDING_VERSION,
+                candidate,
+                base: Some(authority.clone()),
+                authority: "local".to_owned(),
+            },
+        )
+        .unwrap();
+        record_publication_failure(&store.publication_blocker_path(), store.authority).unwrap();
+
+        assert_eq!(
+            store.synchronize().await.unwrap(),
+            SynchronizeOutcome::Current
+        );
+        assert_eq!(
+            require_git(&repository, &["rev-parse", local_ref]),
+            authority
+        );
+        assert!(!store.pending_publication_path().exists());
+        assert!(!store.publication_blocker_path().exists());
     }
 
     #[tokio::test]
