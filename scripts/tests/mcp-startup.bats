@@ -220,6 +220,7 @@ initialize_codex_plugin_server() {
       . == "final_review.clean_status" or
       . == "final_review.out_of_scope_report" or
       . == "final_review.resume_latest" or
+      . == "final_review.pending_assignments" or
       . == "final_review.assess_risk"
     )
   ' <<<"$output"

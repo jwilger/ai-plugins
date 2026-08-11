@@ -51,6 +51,12 @@ second full source review merely because committing moved identical reviewed
 content from the index or worktree into `HEAD`, changed the stage-aware scope
 hash, or introduced commit metadata or a signature.
 
+Only the pinned Git baseline and the in-repository changed-file inventory define
+the reviewed source scope and its hash. Coordinator EventCore facts, snapshots,
+state files, and projections are bookkeeping outside that inventory. Their
+creation or update cannot reopen source review or enter the reviewed-content
+hash.
+
 Before committing, retain the completed review's pinned baseline, requested
 scope, exact path inventory, and each path's reviewed content and mode. After
 committing, compare that source-content snapshot with the commit. The completed
@@ -429,7 +435,12 @@ policy.
    summarized or edited. Keep the stdio MCP process alive when practical. After
    an ordinary process restart or a lost handoff, call
    `final_review.resume_latest` with `session_id`, `project_root`, and optional
-   `work_item_id` to obtain the current `state_ref` without advancing the review.
+   `work_item_id` to obtain the current `state_ref` and compact pending
+   assignments without advancing the review. If a plan response is too large or
+   truncated, call `final_review.pending_assignments` with that `state_ref`;
+   never reconstruct assignment keys, roles, or schemas from memory. The
+   summary is read-only and stable. Pass one exact `subagent_key` back to the
+   same tool only when its full prompt and result schema are needed.
    `final_review.plan` rejects any call that omits
    the bound scout assessment, baseline, or shared evidence.
 
@@ -455,7 +466,10 @@ policy.
    exceptional. Only dimensions explicitly assessed as exceptional receive a
    second independent pass.
 
-2. For every assignment, start a fresh subagent with the complete MCP-generated
+2. For every assignment, use the compact summary's exact lens, iteration,
+   `subagent_key`, `model_role`, close policy, shared-evidence ID, and schema
+   version. Retrieve that assignment's full prompt individually, then start a
+   fresh subagent with the complete MCP-generated
    assignment prompt, including its baseline, diff, relevant files, user
    request, acceptance criteria, explicit concerns, and prior defenses. Exclude
    unrelated conversation context. Return the assigned schema and exact
@@ -463,6 +477,9 @@ policy.
    `caller_attestation` with its assigned model role, `fresh_context: true`, and
    `closed_after_result: true`. Carry continuity only through MCP state,
    defenses, and caller decisions.
+   If advance reports `caller_attestation_model_role_mismatch`, rerun only the
+   named lens in fresh context with `expected_model_role` and resubmit it.
+   Preserve unrelated clean lens results; do not restart the review.
 3. If the plan is already complete with no assignments, stop this loop. On the
    plugin's advisory surface, do not call a native workflow handoff. In
    standalone Tiber, when the response names

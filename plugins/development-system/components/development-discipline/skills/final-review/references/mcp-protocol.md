@@ -52,6 +52,12 @@ assessment rather than retrying a stale handoff.
 
 ## Completed review and delivery
 
+The pinned Git baseline plus the exact in-repository changed-file inventory are
+the only inputs to reviewed source scope and its hash. Coordinator events,
+snapshots, state files, and projections are bookkeeping outside that inventory.
+A coordinator write, snapshot update, content-identical commit, or
+staging-partition change cannot by itself start another source-content review.
+
 The scope hash is deliberately stage-aware during an active review. Moving
 unchanged content between the worktree, index, and `HEAD` can therefore change
 the hash, and callers must continue sending the fresh helper output on every
@@ -69,9 +75,10 @@ a scope change and must not be submitted as a new review iteration.
 
 Any changed reviewed path, content, mode, untracked content, pinned baseline,
 or requested scope invalidates terminal completion and requires a fresh risk
-assessment. Regardless of content identity, run the repository's post-commit
-gates against the exact commit and verify commit-message and signature policy
-there. After push, bind required remote checks to that exact revision. This
+assessment. Regardless of content identity, run the repository's fresh
+post-commit full gate against the exact commit and verify commit-message and
+signature policy there, then push or otherwise deliver. After push, bind
+required remote checks to that exact revision. This
 delivery verification is mandatory and is distinct from source-content review.
 
 `final_review.advance` also validates scope state; when `current_diff_hash`
@@ -90,8 +97,25 @@ Workflow authority. SQLite in user state is a rebuildable report/projection,
 not the decision authority. A new stdio MCP process resolves a
 valid reference, including pending verifier and delta-risk assignments. If a
 caller loses the latest handoff, `final_review.resume_latest` returns the latest
-reference from `session_id`, `project_root`, and optional `work_item_id` without
-advancing the review. Creation is insert-only and every
+reference plus the compact pending-assignment summary from `session_id`,
+`project_root`, and optional `work_item_id` without advancing the review.
+
+Call `final_review.pending_assignments` with `state_ref` when a plan or advance
+response was truncated or too large to retain. Its versioned compact summary
+returns each required lens's iteration, exact `subagent_key`, exact
+`model_role`, `close_after_result`, shared-test-evidence ID, result-schema
+version, and prompt reference. It never returns full prompts in the summary.
+Pass one exact `subagent_key` with the same `state_ref` to retrieve only that
+assignment's full prompt and result schema. Repeated summary or prompt retrieval
+is idempotent: it appends no event, changes no revision, fingerprint, scope, or
+hash, and never reassigns a lens or model role.
+
+On `caller_attestation_model_role_mismatch`, use the reported `subagent_key`,
+`expected_model_role`, and `received_model_role`. Rerun only that lens in fresh
+context with the assigned role, close it, and resubmit. Preserve unrelated clean
+lenses instead of restarting them.
+
+Creation is insert-only and every
 transition uses a durable revision compare-and-swap, so concurrent processes
 cannot admit duplicate sessions or overwrite each other's progress. Unknown,
 evicted, stale, or mutated state fails closed with sanitized expected/received

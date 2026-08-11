@@ -1211,6 +1211,7 @@ fn plugin_surface_exposes_advisory_coordination_and_denies_project_mutation_tool
                 | "final_review.clean_status"
                 | "final_review.out_of_scope_report"
                 | "final_review.resume_latest"
+                | "final_review.pending_assignments"
                 | "final_review.assess_risk"
         )
     }));

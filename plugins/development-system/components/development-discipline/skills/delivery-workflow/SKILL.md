@@ -54,9 +54,11 @@ pushed revision and verify its required CI run reaches the state the repository
 requires. Treat final source review, commit, and push as a one-way delivery
 boundary. Creating a commit from the content-identical reviewed snapshot does
 not require another full review merely because `HEAD`, staging state, signature,
-or commit metadata changed. It does require post-commit repository gates,
+commit metadata, or coordinator event/snapshot/state bookkeeping changed. That
+bookkeeping never enters the reviewed source inventory or hash. It does require
+a fresh post-commit full gate,
 commit-message validation, and signature verification against that exact
-commit. If a rejected push, rebase, merge, conflict resolution, hook, formatter,
+commit before push. If a rejected push, rebase, merge, conflict resolution, hook, formatter,
 or other delivery step changes any reviewed path, content, mode, formerly
 untracked content, adds a newly in-scope untracked path, changes the pinned
 baseline, or changes the requested scope, the prior review is

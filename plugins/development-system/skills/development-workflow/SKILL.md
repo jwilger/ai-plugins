@@ -39,6 +39,28 @@ Load the retained specialist contract only when its intent matches:
 - Authoring or reviewing a skill: [writing
   skills](../../components/development-discipline/skills/writing-skills/SKILL.md).
 
+When a `final_review.plan` handoff is truncated, recover it instead of
+replanning. Call `final_review.pending_assignments` with the retained
+`state_ref`; its compact summary is authoritative for each pending lens's
+iteration, exact `subagent_key`, exact `model_role`, `close_after_result`,
+shared-test-evidence ID, and result-schema version. Pass one exact
+`subagent_key` back to that tool to retrieve only that assignment's full prompt
+and schema. An incomplete `final_review.resume_latest` returns the same compact
+summary. These retrievals are read-only and idempotent: they append no event,
+change no revision, fingerprint, scope, or hash, and never reassign a lens or
+role. On a role mismatch, rerun only the named assignment in fresh context with
+the reported expected role, then resubmit it without restarting unrelated clean
+lenses.
+
+The pinned Git baseline plus in-repository paths, contents, modes, and untracked
+inventory define reviewed source scope. Coordinator events, snapshots, state
+files, and projections are bookkeeping outside that hash. After terminal source
+review, a content-identical commit does not reopen review merely because HEAD,
+staging partition, signature, or commit metadata changed. Real path, content,
+mode, untracked-content, pinned-baseline, or requested-scope changes do reopen
+it. The one-way delivery sequence remains: source-content review, commit, a
+fresh full gate bound to that exact commit, then push and exact-revision CI.
+
 Load `delivery-workflow` before the first implementation increment so the
 configured delivery mode and green-increment preservation cadence are known
 before any commit or push. Recheck it after final review for final delivery.

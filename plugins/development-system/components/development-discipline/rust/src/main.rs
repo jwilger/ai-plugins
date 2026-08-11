@@ -116,6 +116,8 @@ static SNAPSHOT_INDEX_COUNTER: AtomicU64 = AtomicU64::new(0);
 const MAX_PROMPT_CHANGED_FILES: usize = 24;
 const MAX_PRIOR_DEFENSE_PROMPT_CHARS: usize = 8 * 1024;
 const MAX_DEFERRED_FINDINGS_PER_LENS_PROMPT: usize = MAX_FINDINGS_PER_LENS;
+const PENDING_ASSIGNMENT_SUMMARY_VERSION: &str = "final-review-pending-assignments-v1";
+const LENS_RESULT_SCHEMA_VERSION: &str = "final-review-lens-result-v1";
 const BUILD_SOURCE_FINGERPRINT: &str =
     match option_env!("DEVELOPMENT_DISCIPLINE_SOURCE_FINGERPRINT") {
         Some(fingerprint) => fingerprint,
@@ -4622,7 +4624,10 @@ fn validate_record_verifier_result(
         return Err("verifier_result_subagent_key_mismatch=true".to_string());
     }
     if result.model_role != verifier_role {
-        return Err("verifier_result_model_role_mismatch=true".to_string());
+        return Err(format!(
+            "verifier_result_model_role_mismatch subagent_key={expected_subagent_key} expected_model_role={verifier_role} received_model_role={} recovery=rerun_only_this_assignment_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
+            result.model_role
+        ));
     }
     if caller_attestation_required {
         let attestation = result.caller_attestation.as_ref().ok_or_else(|| {
@@ -4630,7 +4635,8 @@ fn validate_record_verifier_result(
         })?;
         if attestation.model_role != verifier_role {
             return Err(format!(
-                "caller_attestation_model_role_mismatch subagent_key={expected_subagent_key}"
+                "caller_attestation_model_role_mismatch subagent_key={expected_subagent_key} expected_model_role={verifier_role} received_model_role={} recovery=rerun_only_this_lens_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
+                attestation.model_role
             ));
         }
         if !attestation.fresh_context {
@@ -7314,7 +7320,13 @@ fn validate_typed_verifier_result(
         return Err("verifier_result_subagent_key_mismatch=true".to_string());
     }
     if expected["model_role"].as_str() != Some(&result.model_role) {
-        return Err("verifier_result_model_role_mismatch=true".to_string());
+        let expected_model_role = expected["model_role"]
+            .as_str()
+            .ok_or_else(|| "verifier_assignment_model_role_missing=true".to_string())?;
+        return Err(format!(
+            "verifier_result_model_role_mismatch subagent_key={} expected_model_role={expected_model_role} received_model_role={} recovery=rerun_only_this_assignment_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
+            result.subagent_key, result.model_role
+        ));
     }
     if expected["assignment_id"].as_str() != Some(&result.assignment_id) {
         return Err("verifier_assignment_id_mismatch=true".to_string());
@@ -7328,8 +7340,8 @@ fn validate_typed_verifier_result(
         })?;
         if attestation.model_role != result.model_role {
             return Err(format!(
-                "caller_attestation_model_role_mismatch subagent_key={}",
-                result.subagent_key
+                "caller_attestation_model_role_mismatch subagent_key={} expected_model_role={} received_model_role={} recovery=rerun_only_this_lens_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
+                result.subagent_key, result.model_role, attestation.model_role
             ));
         }
         if !attestation.fresh_context {
@@ -7754,8 +7766,8 @@ fn validate_iteration_lens_attestations(
         })?;
         if attestation.model_role != expected_role {
             return Err(format!(
-                "caller_attestation_model_role_mismatch subagent_key={}",
-                result.subagent_key
+                "caller_attestation_model_role_mismatch subagent_key={} expected_model_role={} received_model_role={} recovery=rerun_only_this_lens_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
+                result.subagent_key, expected_role, attestation.model_role
             ));
         }
         if !attestation.fresh_context {
@@ -10270,6 +10282,12 @@ impl ReviewCoordinator {
                         Err(error) => Ok(error_response(id, -32602, &error)),
                     };
                 }
+                if name == "final_review.pending_assignments" {
+                    return match self.pending_assignments(&arguments) {
+                        Ok(result) => Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result })),
+                        Err(error) => Ok(error_response(id, -32602, &error)),
+                    };
+                }
                 if !matches!(name, "final_review.plan" | "final_review.assess_risk") {
                     if let Err(error) = self.resolve_state_reference(&mut arguments) {
                         return Ok(error_response(id, -32602, &error));
@@ -10547,6 +10565,22 @@ impl ReviewCoordinator {
     }
 
     fn resolve_reference(&mut self, state_ref: &Value) -> Result<Value, String> {
+        self.resolve_reference_with_loader(state_ref, load_authoritative_session)
+    }
+
+    fn resolve_reference_read_only(&mut self, state_ref: &Value) -> Result<Value, String> {
+        self.resolve_reference_with_loader(state_ref, load_authoritative_session_read_only)
+    }
+
+    fn resolve_reference_with_loader(
+        &mut self,
+        state_ref: &Value,
+        loader: fn(
+            &Value,
+            &str,
+            ReviewPersistence,
+        ) -> Result<Option<RestoredReviewSession>, String>,
+    ) -> Result<Value, String> {
         let session_id = state_ref
             .get("session_id")
             .and_then(Value::as_str)
@@ -10560,7 +10594,7 @@ impl ReviewCoordinator {
             if let Some(work_item_id) = state_ref.get("work_item_id") {
                 lookup["work_item_id"] = work_item_id.clone();
             }
-            if let Some(restored) = load_authoritative_session(
+            if let Some(restored) = loader(
                 &lookup,
                 session_id,
                 self.service_surface.review_persistence(),
@@ -10614,7 +10648,7 @@ impl ReviewCoordinator {
             if let Some(work_item_id) = state_ref.get("work_item_id") {
                 lookup["work_item_id"] = work_item_id.clone();
             }
-            let restored = load_authoritative_session(
+            let restored = load_authoritative_session_read_only(
                 &lookup,
                 &session_id,
                 self.service_surface.review_persistence(),
@@ -10634,7 +10668,7 @@ impl ReviewCoordinator {
                 self.pending_delta_risks.insert(session_id, pending);
             }
         }
-        let state = self.resolve_reference(&state_ref)?;
+        let state = self.resolve_reference_read_only(&state_ref)?;
         let complete = review_state_complete(&state);
         let next_tool = if complete {
             if matches!(self.service_surface, ServiceSurface::PluginAdvisory) {
@@ -10645,15 +10679,121 @@ impl ReviewCoordinator {
         } else {
             json!("final_review.advance")
         };
+        let state_ref = state_reference(&state)?;
+        let pending = self.pending_assignment_summary(&state, &state_ref, None)?;
         Ok(text_content(
             json!({
-                "state_ref": state_reference(&state)?,
+                "state_ref": state_ref,
                 "complete": complete,
                 "next_tool": next_tool,
-                "terminal": complete && matches!(self.service_surface, ServiceSurface::PluginAdvisory)
+                "terminal": complete && matches!(self.service_surface, ServiceSurface::PluginAdvisory),
+                "pending_assignments": pending["assignments"],
+                "pending_assignment_summary": pending,
+                "pending_assignment_summary_version": PENDING_ASSIGNMENT_SUMMARY_VERSION,
+                "pending_phase": pending["pending_phase"],
+                "result_schema_version": LENS_RESULT_SCHEMA_VERSION,
+                "prompt_retrieval_tool": "final_review.pending_assignments"
             })
             .to_string(),
         ))
+    }
+
+    fn pending_assignments(&mut self, arguments: &Value) -> Result<Value, String> {
+        let state_ref = arguments
+            .get("state_ref")
+            .ok_or_else(|| "review_state_ref_required=true".to_string())?;
+        let state = self.resolve_reference_read_only(state_ref)?;
+        let requested_key = arguments.get("subagent_key").and_then(Value::as_str);
+        let payload = self.pending_assignment_summary(&state, state_ref, requested_key)?;
+        Ok(text_content(payload.to_string()))
+    }
+
+    fn pending_assignment_summary(
+        &self,
+        state: &Value,
+        state_ref: &Value,
+        requested_key: Option<&str>,
+    ) -> Result<Value, String> {
+        let complete = review_state_complete(state);
+        let session_id = state
+            .get("session_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "review_session_id_required=true".to_string())?;
+        let pending_phase = if complete {
+            "complete"
+        } else if self.pending_delta_risks.contains_key(session_id) {
+            "delta-risk"
+        } else if self.pending_verifiers.contains_key(session_id) {
+            "verifier"
+        } else if scope_split_hold_active(state) {
+            "scope-split-confirmation"
+        } else if review_budget_hold_active(state) {
+            "review-budget"
+        } else {
+            "lens-review"
+        };
+        let full_assignments = if pending_phase == "lens-review" {
+            let typed = ReviewSessionState::parse_legacy_wire(state)?;
+            build_typed_review_assignments(ReviewAssignmentMaterial {
+                iteration: typed.progress.iteration_index,
+                session_id: &typed.identity.session_id,
+                lenses: &typed.progress.lenses,
+                lens_objectives: &typed.model_routing.lens_objectives,
+                model_roles: &typed.model_routing.roles,
+                scope: &typed.scope,
+                context: &typed.context,
+                defenses: &typed.defenses.current_by_lens,
+                deferred_findings: &typed.initial_state.deferred_findings,
+                shared_test_evidence: typed.evidence.shared_test_evidence.as_ref(),
+            })?
+        } else {
+            Vec::new()
+        };
+        if let Some(subagent_key) = requested_key {
+            let assignment = full_assignments
+                .into_iter()
+                .find(|assignment| assignment["subagent_key"] == subagent_key)
+                .ok_or_else(|| {
+                    format!(
+                        "pending_assignment_not_found subagent_key={subagent_key} recovery=retrieve_compact_pending_assignments_and_use_an_exact_subagent_key"
+                    )
+                })?;
+            return Ok(json!({
+                "assignment_summary_version": PENDING_ASSIGNMENT_SUMMARY_VERSION,
+                "result_schema_version": LENS_RESULT_SCHEMA_VERSION,
+                "state_ref": state_ref,
+                "complete": complete,
+                "pending_phase": pending_phase,
+                "assignment": assignment
+            }));
+        }
+        let assignments = full_assignments
+            .iter()
+            .map(|assignment| {
+                json!({
+                    "lens": assignment["lens"],
+                    "iteration": assignment["iteration"],
+                    "subagent_key": assignment["subagent_key"],
+                    "model_role": assignment["model_role"],
+                    "close_after_result": assignment["close_after_result"],
+                    "shared_test_evidence_id": assignment.pointer("/shared_test_evidence/id").cloned().unwrap_or(Value::Null),
+                    "result_schema_version": LENS_RESULT_SCHEMA_VERSION,
+                    "prompt_ref": {
+                        "tool": "final_review.pending_assignments",
+                        "subagent_key": assignment["subagent_key"]
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "assignment_summary_version": PENDING_ASSIGNMENT_SUMMARY_VERSION,
+            "result_schema_version": LENS_RESULT_SCHEMA_VERSION,
+            "state_ref": state_ref,
+            "complete": complete,
+            "pending_phase": pending_phase,
+            "prompt_retrieval_tool": "final_review.pending_assignments",
+            "assignments": assignments
+        }))
     }
 
     fn validate_authoritative_state(
@@ -11605,7 +11745,7 @@ fn tools() -> Value {
         },
         {
             "name": "final_review.resume_latest",
-            "description": "Return a fresh compact state_ref for the latest server-authoritative state of a review session. Use this after losing or truncating caller-carried state; it does not advance the review.",
+            "description": "Return a fresh compact state_ref and the compact pending-assignment summary for the latest server-authoritative review state. Use this after losing or truncating caller-carried state; it does not advance the review.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -11614,6 +11754,19 @@ fn tools() -> Value {
                     "work_item_id": { "type": "string", "maxLength": MAX_WORK_ITEM_ID_CHARS, "pattern": "^[A-Za-z0-9._:-]+$" }
                 },
                 "required": ["session_id", "project_root"],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "final_review.pending_assignments",
+            "description": "Read the stable compact pending lens assignments for an incomplete review without appending events or changing scope. Pass one exact subagent_key to retrieve only that assignment's full prompt and result schema.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "state_ref": state_reference_schema(),
+                    "subagent_key": { "type": "string", "minLength": 1, "maxLength": 512 }
+                },
+                "required": ["state_ref"],
                 "additionalProperties": false
             }
         },
@@ -11820,7 +11973,7 @@ fn tools_for(surface: ServiceSurface) -> Value {
     )
 }
 
-const ADVISORY_REVIEW_TOOLS: [&str; 8] = [
+const ADVISORY_REVIEW_TOOLS: [&str; 9] = [
     "final_review.plan",
     "final_review.filter_findings",
     "final_review.advance",
@@ -11828,6 +11981,7 @@ const ADVISORY_REVIEW_TOOLS: [&str; 8] = [
     "final_review.clean_status",
     "final_review.out_of_scope_report",
     "final_review.resume_latest",
+    "final_review.pending_assignments",
     "final_review.assess_risk",
 ];
 
@@ -18303,6 +18457,23 @@ fn load_authoritative_session(
     session_id: &str,
     persistence: ReviewPersistence,
 ) -> Result<Option<RestoredReviewSession>, String> {
+    load_authoritative_session_with_legacy_policy(caller_state, session_id, persistence, true)
+}
+
+fn load_authoritative_session_read_only(
+    caller_state: &Value,
+    session_id: &str,
+    persistence: ReviewPersistence,
+) -> Result<Option<RestoredReviewSession>, String> {
+    load_authoritative_session_with_legacy_policy(caller_state, session_id, persistence, false)
+}
+
+fn load_authoritative_session_with_legacy_policy(
+    caller_state: &Value,
+    session_id: &str,
+    persistence: ReviewPersistence,
+    import_legacy: bool,
+) -> Result<Option<RestoredReviewSession>, String> {
     let project_root = caller_state
         .pointer("/scope/project_root")
         .and_then(Value::as_str)
@@ -18320,6 +18491,7 @@ fn load_authoritative_session(
         Some(Path::new(project_root)),
         session_id,
         persistence,
+        import_legacy,
     )
 }
 
@@ -18398,6 +18570,7 @@ fn load_authoritative_session_from_path(
     project_root: Option<&Path>,
     session_id: &str,
     persistence: ReviewPersistence,
+    import_legacy: bool,
 ) -> Result<Option<RestoredReviewSession>, String> {
     let _lock = lock_review_database(path)?;
     initialize_event_store(path)?;
@@ -18425,6 +18598,9 @@ fn load_authoritative_session_from_path(
     let Some(legacy) = legacy else {
         return Ok(None);
     };
+    if !import_legacy {
+        return Ok(Some(legacy));
+    }
     let stream = review_stream_id(session_id)?;
     execute_legacy_review_import(
         path,
@@ -23910,7 +24086,27 @@ mod tests {
                 "project_root": project_root
             }))
             .expect("committed plan remains recoverable after transport rejection");
-        assert!(resumed.pointer("/content/0/text").is_some());
+        let resumed: Value = serde_json::from_str(
+            resumed
+                .pointer("/content/0/text")
+                .and_then(Value::as_str)
+                .expect("resume text"),
+        )
+        .expect("resume json");
+        assert_eq!(resumed["pending_phase"], "lens-review");
+        assert_eq!(
+            resumed["pending_assignments"]
+                .as_array()
+                .expect("compact assignments")
+                .len(),
+            selected_lenses.len()
+        );
+        assert!(resumed.to_string().len() < 32 * 1024);
+        assert!(resumed["pending_assignments"]
+            .as_array()
+            .expect("assignments")
+            .iter()
+            .all(|assignment| assignment.get("prompt").is_none()));
     }
 
     #[test]
@@ -30584,6 +30780,7 @@ pre_filter = "project-pre"
         );
         for name in [
             "final_review.out_of_scope_report",
+            "final_review.pending_assignments",
             "final_review.resume_latest",
             "final_review.assess_risk",
             "workflow.start",
@@ -36620,6 +36817,316 @@ pre_filter = "project-pre"
         assert_eq!(resumed["state_ref"], planned["state_ref"]);
         assert_eq!(resumed["complete"], false);
         assert_eq!(resumed["next_tool"], "final_review.advance");
+        assert_eq!(
+            resumed["pending_assignment_summary_version"],
+            PENDING_ASSIGNMENT_SUMMARY_VERSION
+        );
+        assert_eq!(resumed["pending_phase"], "lens-review");
+        assert!(!resumed["pending_assignments"]
+            .as_array()
+            .expect("pending assignments")
+            .is_empty());
+    }
+
+    #[test]
+    fn pending_assignments_recover_exact_roles_and_support_valid_attestation() {
+        let mut coordinator = ReviewCoordinator::default();
+        let mut arguments = assessed_plan_arguments(
+            "pending-role-recovery",
+            "medium",
+            &[
+                ("correctness-behavior", "medium"),
+                ("security-safety", "medium"),
+            ],
+            json!([]),
+        );
+        arguments["lens_review_model_role"] = json!("ordinary-reviewer");
+        arguments["verifier_model_role"] = json!("strong-reviewer");
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": arguments }
+            }))
+            .expect("plan response");
+        let planned: Value = serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+        let revision = coordinator.session_revisions["pending-role-recovery"];
+        let scope_before = coordinator.sessions["pending-role-recovery"]["scope"].clone();
+
+        let retrieve = |coordinator: &mut ReviewCoordinator, id| {
+            let response = coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.pending_assignments",
+                        "arguments": { "state_ref": planned["state_ref"] }
+                    }
+                }))
+                .expect("pending assignment response");
+            serde_json::from_str::<Value>(
+                response["result"]["content"][0]["text"]
+                    .as_str()
+                    .expect("pending assignment text"),
+            )
+            .expect("pending assignment json")
+        };
+        let first = retrieve(&mut coordinator, 2);
+        let second = retrieve(&mut coordinator, 3);
+        assert_eq!(first, second, "retrieval must be idempotent");
+        assert_eq!(
+            coordinator.session_revisions["pending-role-recovery"],
+            revision
+        );
+        assert_eq!(
+            coordinator.sessions["pending-role-recovery"]["scope"],
+            scope_before
+        );
+        assert_eq!(first["pending_phase"], "lens-review");
+        assert_eq!(first["result_schema_version"], LENS_RESULT_SCHEMA_VERSION);
+        assert!(first.to_string().len() < 16 * 1024);
+        let assignments = first["assignments"].as_array().expect("assignments");
+        let correctness = assignments
+            .iter()
+            .find(|assignment| assignment["lens"] == "correctness-behavior")
+            .expect("correctness assignment");
+        let security = assignments
+            .iter()
+            .find(|assignment| assignment["lens"] == "security-safety")
+            .expect("security assignment");
+        assert_eq!(correctness["model_role"], "ordinary-reviewer");
+        assert_eq!(security["model_role"], "strong-reviewer");
+        assert!(assignments
+            .iter()
+            .all(|assignment| assignment.get("prompt").is_none()));
+
+        let prompt = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.pending_assignments",
+                    "arguments": {
+                        "state_ref": planned["state_ref"],
+                        "subagent_key": security["subagent_key"]
+                    }
+                }
+            }))
+            .expect("prompt response");
+        let prompt: Value = serde_json::from_str(
+            prompt["result"]["content"][0]["text"]
+                .as_str()
+                .expect("prompt text"),
+        )
+        .expect("prompt json");
+        assert_eq!(
+            prompt["assignment"]["subagent_key"],
+            security["subagent_key"]
+        );
+        assert!(prompt["assignment"]["prompt"].is_string());
+        assert!(prompt["assignment"]["result_schema"].is_object());
+
+        let lens_results = assignments
+            .iter()
+            .map(|assignment| {
+                json!({
+                    "lens": assignment["lens"],
+                    "subagent_key": assignment["subagent_key"],
+                    "status": "clean",
+                    "shared_test_evidence_id": assignment["shared_test_evidence_id"],
+                    "additional_broad_test_run": false,
+                    "caller_attestation": {
+                        "model_role": assignment["model_role"],
+                        "fresh_context": true,
+                        "closed_after_result": true
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let advanced = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state_ref": planned["state_ref"],
+                        "lens_results": lens_results,
+                        "current_diff_hash": "pending-role-recovery-diff"
+                    }
+                }
+            }))
+            .expect("advance response");
+        assert!(advanced.get("result").is_some(), "{advanced}");
+    }
+
+    #[test]
+    fn role_mismatch_diagnostic_exposes_exact_targeted_recovery() {
+        let planned: Value = serde_json::from_str(&plan(&json!({
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "role-diagnostic",
+            "session_id": "role-diagnostic",
+            "lens_review_model_role": "assigned-reviewer"
+        })))
+        .expect("plan json");
+        let mut lens_results = clean_lens_results_for(&planned["state"]);
+        let result = lens_results
+            .as_array_mut()
+            .expect("lens results")
+            .first_mut()
+            .expect("lens result");
+        let subagent_key = result["subagent_key"].as_str().expect("key").to_string();
+        result["caller_attestation"]["model_role"] = json!("wrong-reviewer");
+        let error = execute_advance_fixture(&json!({
+            "state": planned["state"],
+            "lens_results": lens_results,
+            "current_diff_hash": "role-diagnostic"
+        }))
+        .expect_err("wrong role must be rejected");
+
+        assert!(error.contains(&format!("subagent_key={subagent_key}")));
+        assert!(error.contains("expected_model_role=assigned-reviewer"));
+        assert!(error.contains("received_model_role=wrong-reviewer"));
+        assert!(error.contains("rerun_only_this_lens_in_fresh_context"));
+        assert!(error.contains("do_not_restart_unrelated_clean_lenses"));
+
+        let verifier_result: AdvanceVerifierResultInput = serde_json::from_value(json!({
+            "subagent_key": "role-diagnostic:1:verifier",
+            "assignment_id": "assignment",
+            "model_role": "wrong-verifier",
+            "status": "failed",
+            "rationale": "Unable to verify."
+        }))
+        .expect("verifier result");
+        let verifier_error = validate_record_verifier_result(
+            "role-diagnostic",
+            1,
+            "assigned-verifier",
+            false,
+            &verifier_result,
+            RecordedVerifierStatus::Failed,
+        )
+        .expect_err("wrong verifier role must be rejected");
+        assert!(verifier_error.contains("subagent_key=role-diagnostic:1:verifier"));
+        assert!(verifier_error.contains("expected_model_role=assigned-verifier"));
+        assert!(verifier_error.contains("received_model_role=wrong-verifier"));
+        assert!(verifier_error.contains("rerun_only_this_assignment_in_fresh_context"));
+        assert!(verifier_error.contains("do_not_restart_unrelated_clean_lenses"));
+    }
+
+    #[test]
+    fn content_identical_commit_keeps_completed_review_terminal() {
+        let project_root = test_project_root("content-identical-terminal-review");
+        fs::create_dir_all(project_root.join("src")).expect("source directory");
+        fs::write(project_root.join("src/lib.rs"), "pub fn reviewed() {}\n")
+            .expect("reviewed source");
+        let mut coordinator = ReviewCoordinator::default();
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.plan",
+                    "arguments": assessed_plan_arguments_for_diff_at_root(
+                        "content-identical-terminal-review",
+                        "content-identical-source-hash",
+                        "medium",
+                        &[("correctness-behavior", "medium")],
+                        json!([]),
+                        Some(&project_root),
+                    )
+                }
+            }))
+            .expect("plan response");
+        let mut planned: Value = serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+        loop {
+            let state = planned["state"].clone();
+            let advanced = coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.advance",
+                        "arguments": {
+                            "state": state,
+                            "lens_results": clean_lens_results_for(&planned["state"]),
+                            "current_diff_hash": "content-identical-source-hash"
+                        }
+                    }
+                }))
+                .expect("advance response");
+            planned = serde_json::from_str(
+                advanced["result"]["content"][0]["text"]
+                    .as_str()
+                    .expect("advance text"),
+            )
+            .expect("advance json");
+            if planned["complete"] == true {
+                break;
+            }
+        }
+        let completed_ref = planned["state_ref"].clone();
+        run_git(
+            &project_root,
+            &["add".to_string(), "src/lib.rs".to_string()],
+            None,
+            None,
+            "content_identical_stage",
+        )
+        .expect("stage reviewed content");
+        let commit = ProcessCommand::new("git")
+            .arg("-C")
+            .arg(&project_root)
+            .args([
+                "-c",
+                "user.name=Development Discipline Tests",
+                "-c",
+                "user.email=development-discipline-tests@localhost",
+                "commit",
+                "--quiet",
+                "--no-gpg-sign",
+                "-m",
+                "commit reviewed content",
+            ])
+            .output()
+            .expect("commit reviewed content");
+        assert!(
+            commit.status.success(),
+            "{}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+
+        drop(coordinator);
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = restarted
+            .resume_latest(&json!({
+                "session_id": "content-identical-terminal-review",
+                "project_root": project_root
+            }))
+            .expect("resume completed review");
+        let resumed: Value =
+            serde_json::from_str(resumed["content"][0]["text"].as_str().expect("resume text"))
+                .expect("resume json");
+        assert_eq!(resumed["state_ref"], completed_ref);
+        assert_eq!(resumed["complete"], true);
+        assert_eq!(resumed["pending_phase"], "complete");
+        assert_eq!(resumed["pending_assignments"], json!([]));
     }
 
     #[test]
@@ -37670,6 +38177,7 @@ pre_filter = "project-pre"
                 None,
                 "legacy-review",
                 ReviewPersistence::WorkflowAuthority,
+                true,
             )
             .expect("first addressed load")
             .expect("imported session")
@@ -37682,6 +38190,7 @@ pre_filter = "project-pre"
                 None,
                 "legacy-review",
                 ReviewPersistence::WorkflowAuthority,
+                true,
             )
             .expect("second addressed load")
             .expect("projected session")
@@ -37715,6 +38224,49 @@ pre_filter = "project-pre"
             .revision,
             3
         );
+    }
+
+    #[test]
+    fn read_only_legacy_session_recovery_never_appends_an_import_event() {
+        let directory = tempfile::tempdir().expect("temporary legacy store");
+        let path = directory.path().join("review.sqlite");
+        let state = event_sourced_test_state(directory.path(), "legacy-read-only");
+        let connection = open_review_connection(&path).expect("legacy database");
+        initialize_durable_report_schema(&connection).expect("legacy schema");
+        connection
+            .execute(
+                "INSERT INTO final_review_session (session_id, state_json, updated_at, revision) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    "legacy-read-only",
+                    serde_json::to_string(&state).unwrap(),
+                    7,
+                    3
+                ],
+            )
+            .expect("legacy row");
+        drop(connection);
+
+        for _ in 0..2 {
+            let restored = load_authoritative_session_from_path(
+                &path,
+                None,
+                "legacy-read-only",
+                ReviewPersistence::WorkflowAuthority,
+                false,
+            )
+            .expect("read-only load")
+            .expect("legacy session");
+            assert_eq!(restored.revision, 3);
+            assert_eq!(restored.state, state);
+        }
+
+        let connection = open_review_connection(&path).expect("read-only database");
+        let event_count: u64 = connection
+            .query_row("SELECT COUNT(*) FROM eventcore_events", [], |row| {
+                row.get(0)
+            })
+            .expect("event count");
+        assert_eq!(event_count, 0);
     }
 
     #[test]

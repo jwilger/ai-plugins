@@ -2129,6 +2129,34 @@
     }
   },
   {
+    "case_id": "final-review-recovers-truncated-assignment-provenance",
+    "behavior": "Recovers exact pending review assignments without replanning or repeating unrelated clean lenses.",
+    "prompt": "Using the Development System final-review guidance, a final_review.plan response was too large and the caller retained only its state_ref. Explain how the caller recovers each pending lens's exact assignment and full prompt, what resume_latest must expose, what assignment retrieval is allowed to change, and how to recover when advance reports a model-role mismatch for one lens. Also distinguish coordinator bookkeeping and a content-identical commit from real source-scope changes, and end with the exact source-review-to-push delivery sequence.",
+    "tags": [
+      "development-discipline",
+      "final-review",
+      "assignment-provenance",
+      "recovery"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "state-transition", "close-boundary"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response calls final_review.pending_assignments with the retained state_ref, uses its compact per-lens lens, iteration, exact subagent_key, exact model_role, close_after_result, shared evidence ID, and schema version, and retrieves only an individual full prompt by that exact key when needed. It must say an incomplete resume_latest returns the same compact summary; retrieval is read-only and idempotent and cannot append events, alter scope/hash, reassign a lens, or change its role. For a role mismatch it must rerun only the named lens in fresh context with the expected role and resubmit while preserving unrelated accepted clean lenses. It must say baseline plus in-repository paths/content/modes/untracked inventory define source scope, while coordinator state/events/snapshots and a content-identical commit do not reopen completed source review; real path/content/mode/untracked/baseline/requested-scope changes do. It must preserve the delivery sequence source review, commit, fresh exact-commit full gate, push. Fail if it replans, guesses provenance, restarts all lenses, treats bookkeeping as source, repeats review for commit metadata alone, or skips the post-commit gate.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Use final_review.pending_assignments({state_ref}) or the identical summary returned by resume_latest, then fetch only the needed assignment prompt by exact subagent_key. Retrieval changes no review state. A mismatch reruns only that lens with its expected role. Coordinator bookkeeping and a content-identical commit do not reopen source review; actual source-scope changes do, and the exact commit still needs the fresh full gate before push."
+      ],
+      "fail": [
+        "Call plan again to regenerate assignments, guess the reviewer roles, and repeat every lens after the commit changes the hash."
+      ]
+    }
+  },
+  {
     "case_id": "writing-skills-replaces-gating-adjectives-with-predicates",
     "behavior": "Rewrites vague gate-changing adjectives as operational predicates without academicizing the prose.",
     "prompt": "Improve this proposed agent instruction: `Use a stronger model for significant risky changes, run appropriate tests, and stop when evidence is inadequate.` Preserve its intent, make every gate executable, and say which behavior fixtures are required.",
