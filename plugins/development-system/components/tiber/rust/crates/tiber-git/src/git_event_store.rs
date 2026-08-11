@@ -46,6 +46,8 @@ const PUBLICATION_RETRIES: usize = 3;
 const STAGE_LOAD_RETRIES: usize = 8;
 const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const PENDING_VERSION: u32 = 1;
+const FALLBACK_GIT_NAME: &str = "Tiber Event Store";
+const FALLBACK_GIT_EMAIL: &str = "tiber-event-store@localhost.invalid";
 
 /// A closed set of independent Git authorities supported by this EventCore
 /// adapter.  Keeping this an enum rather than accepting ref names from a
@@ -809,7 +811,21 @@ fn create_candidate(
     if let Some(base) = &stage.base {
         arguments.extend(["-p", base.as_str()]);
     }
-    let commit_environment = [("GIT_INDEX_FILE", index.as_os_str())];
+    let author_identity = git(repository, ["var", "GIT_AUTHOR_IDENT"])?;
+    let committer_identity = git(repository, ["var", "GIT_COMMITTER_IDENT"])?;
+    let mut commit_environment = vec![("GIT_INDEX_FILE", index.as_os_str())];
+    if !author_identity.status.success() {
+        commit_environment.extend([
+            ("GIT_AUTHOR_NAME", OsStr::new(FALLBACK_GIT_NAME)),
+            ("GIT_AUTHOR_EMAIL", OsStr::new(FALLBACK_GIT_EMAIL)),
+        ]);
+    }
+    if !committer_identity.status.success() {
+        commit_environment.extend([
+            ("GIT_COMMITTER_NAME", OsStr::new(FALLBACK_GIT_NAME)),
+            ("GIT_COMMITTER_EMAIL", OsStr::new(FALLBACK_GIT_EMAIL)),
+        ]);
+    }
     let candidate = output_text(require_success(git_with(
         repository,
         None,
