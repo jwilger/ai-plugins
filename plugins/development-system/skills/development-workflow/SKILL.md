@@ -55,8 +55,12 @@ actions.
 
 The retained native lifecycle is for standalone Tiber. There, assignment-bound
 editor and runner receipts support the mechanical RED, GREEN, verification,
-review, and delivery transitions. Do not call or emulate those native
-transitions through the advisory bootstrap surface.
+review, and delivery transitions: `workflow.record_red`,
+`workflow.authorize_implementation`, `workflow.record_green`,
+`workflow.begin_verification`, `workflow.record_verification`,
+`workflow.record_clean_review`, `workflow.authorize_delivery`, and
+`workflow.complete_delivery`. Do not call or emulate those native transitions
+through the advisory bootstrap surface.
 
 Before a new task, inspect forge CI. Require a successful completed run for the
 candidate revision; queued/running is not terminal evidence, and any completed
