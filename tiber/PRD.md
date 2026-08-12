@@ -92,7 +92,9 @@ memory, and integration health plus `/tasks`, `/memory`, and
   unconsumed provenance in checked models.
 - Rust Edition 2024, forbidden unsafe code, strict workspace Clippy inheritance,
   and warnings denied in CI.
-- Secrets never read, copied, decoded, logged, retained, or included in traces.
+- Credentials are never logged, decoded, retained by Tiber, or included in
+  traces. An explicit API-key login forwards the ephemeral owner-supplied value
+  once to app-server and does not persist or reuse it.
 - Observable model, context, policy, tool, memory, and delivery decisions with
   sensitive data redacted.
 - Reproducible x86_64 Linux packaging and clean-machine installation.

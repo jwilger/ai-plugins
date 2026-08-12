@@ -105,6 +105,16 @@ authentication delegation, and TUI work. Every supported Codex upgrade must
 pass the pinned schema check and live effective-authority probe before Tiber
 widens the compatible protocol range.
 
+The next checked increment added that transport boundary in Rust. The adapter
+starts an isolated child, completes browser-login handoff and account
+operations through app-server, forwards explicit API-key login without
+retaining the key, streams assistant deltas, and returns each dynamic-tool call
+as inert typed data after sending an unsuccessful/no-effect response. Its
+fake-server tests also prove typed timeout and child cleanup behavior. This is
+a source-level executable spike in the standalone `tiber/` workspace; it is not
+yet wired into repository release packaging and is not the Codex-compatible
+TUI or durable harness conversation lifecycle.
+
 ## Review-orchestration invariant
 
 This decision does not remove or narrow review orchestration. The native

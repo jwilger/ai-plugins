@@ -111,9 +111,11 @@ does not share ambient identity.
 ## App-server inference boundary
 
 Tiber uses `codex app-server` as the sole inference
-transport so it could own subscription and API-key-mode authentication,
+transport so app-server can own subscription and API-key-mode authentication,
 credential storage and refresh, account and endpoint selection, protocol
-streaming, and authentication diagnostics without Tiber handling credentials.
+streaming, and authentication diagnostics. Tiber forwards an API key only in
+the explicit login request that app-server defines; it never persists, logs,
+decodes, or reuses that value.
 
 App-server runs in an isolated Codex home with a pinned protocol and a named
 permission profile. Its filesystem is read-only, command and hosted-search
@@ -135,6 +137,14 @@ dynamic tool reaches the client as inert structured data. Tiber alone validates
 identity and policy, executes an authorized effect, and returns its observation.
 Every app-server upgrade reruns both schema drift checks and the live
 effective-authority probe.
+
+The first Rust adapter now implements the imperative transport boundary. It
+creates the isolated home deterministically, starts app-server over stdio,
+initializes the protocol, delegates account status/browser login/logout and
+API-key-mode login, streams assistant text, returns dynamic-tool requests as
+inert typed data, applies bounded request deadlines, and terminates its child on
+drop. The deterministic fake-server contract covers those behaviors; the TUI
+and durable conversation state remain subsequent vertical slices.
 
 ## Native workflow and Tiber Tasks
 

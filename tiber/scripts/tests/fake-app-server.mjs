@@ -4,7 +4,11 @@ import readline from "node:readline";
 
 let threadId = "thread-fixture";
 let nextTurn = 0;
-const fixtureMode = process.env.TIBER_FIXTURE_MODE ?? "success";
+let account = null;
+const fixtureMode =
+  process.env.TIBER_FIXTURE_MODE ??
+  process.argv.find((argument) => argument.startsWith("--mode="))?.slice(7) ??
+  "success";
 const input = readline.createInterface({ input: process.stdin });
 
 if (fixtureMode === "ignored-term") {
@@ -34,6 +38,11 @@ input.on("line", (line) => {
   }
   const message = JSON.parse(line);
   if (message.method === "initialize") {
+    if (fixtureMode === "chatty") {
+      const timer = setInterval(() => send({ method: "fixture/progress" }), 25);
+      setTimeout(() => clearInterval(timer), 5_000);
+      return;
+    }
     send({
       id: message.id,
       result: {
@@ -41,7 +50,10 @@ input.on("line", (line) => {
           fixtureMode === "wrong-home" ? "/unexpected" : process.env.CODEX_HOME,
         platformFamily: "unix",
         platformOs: "linux",
-        userAgent: "fixture/0.147.0",
+        userAgent:
+          fixtureMode === "wrong-version"
+            ? "fixture/0.148.0 compatibility/0.147.0"
+            : "fixture/0.147.0",
       },
     });
   } else if (message.method === "permissionProfile/list") {
@@ -57,7 +69,48 @@ input.on("line", (line) => {
         ],
       },
     });
+  } else if (message.method === "account/read") {
+    send({ id: message.id, result: { account, requiresOpenaiAuth: true } });
+  } else if (message.method === "account/login/start") {
+    if (message.params.type === "apiKey") {
+      if (fixtureMode === "credential-rejection") {
+        send({
+          error: { code: -32602, message: `invalid ${message.params.apiKey}` },
+          id: message.id,
+        });
+        return;
+      }
+      account = { type: "apiKey" };
+      send({ id: message.id, result: { type: "apiKey" } });
+    } else {
+      send({
+        id: message.id,
+        result: {
+          authUrl: "https://example.invalid/login",
+          loginId: "login-fixture",
+          type: "chatgpt",
+        },
+      });
+      send({
+        method: "account/login/completed",
+        params:
+          fixtureMode === "idless-login-failure"
+            ? { error: "fixture login denied", success: false }
+            : { loginId: "login-fixture", success: true },
+      });
+    }
+  } else if (message.method === "account/logout") {
+    account = null;
+    send({ id: message.id, result: {} });
   } else if (message.method === "thread/start") {
+    if (fixtureMode === "id-collision") {
+      send({
+        id: message.id,
+        method: "item/commandExecution/requestApproval",
+        params: { threadId, turnId: "turn-1" },
+      });
+      return;
+    }
     send({
       id: message.id,
       result: {
@@ -99,6 +152,37 @@ input.on("line", (line) => {
     const turnId = `turn-${nextTurn}`;
     send({ id: message.id, result: { turn: { id: turnId } } });
     send({
+      method: "item/agentMessage/delta",
+      params: {
+        delta: "foreign text",
+        itemId: "foreign-assistant",
+        threadId: "foreign-thread",
+        turnId: "foreign-turn",
+      },
+    });
+    if (fixtureMode !== "success") {
+      send({
+        id: "foreign-dynamic",
+        method: "item/tool/call",
+        params: {
+          arguments: { foreign: true },
+          callId: "foreign-call",
+          threadId: "foreign-thread",
+          tool: "tiber_effect",
+          turnId: "foreign-turn",
+        },
+      });
+    }
+    send({
+      method: "item/agentMessage/delta",
+      params: {
+        delta: "hello from Tiber",
+        itemId: `assistant-${nextTurn}`,
+        threadId,
+        turnId,
+      },
+    });
+    send({
       method: "item/started",
       params: {
         item: { id: `user-${nextTurn}`, type: "userMessage" },
@@ -128,5 +212,16 @@ input.on("line", (line) => {
   } else if (message.id === "dynamic-fixture") {
     if (message.result?.success !== false) process.exitCode = 1;
     completeTurn("turn-1");
+  } else if (fixtureMode === "id-collision" && message.result?.decision === "decline") {
+    send({
+      id: message.id,
+      result: {
+        activePermissionProfile: { extends: null, id: "tiber-inference" },
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
+        sandbox: { networkAccess: false, type: "readOnly" },
+        thread: { id: threadId },
+      },
+    });
   }
 });
