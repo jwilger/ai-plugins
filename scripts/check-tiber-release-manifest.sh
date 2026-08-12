@@ -5,6 +5,7 @@ root="${1:-.}"
 manifest="$root/plugins/development-system/components/tiber/release-binaries.json"
 
 if ! jq -e '
+  (.source_fingerprint | type == "string" and length == 64) and
   (.binaries | type == "array") and
   [.binaries[].target] == ["x86_64-unknown-linux-gnu"] and
   all(.binaries[]; .path == ("dist/" + .target + "/tiber"))

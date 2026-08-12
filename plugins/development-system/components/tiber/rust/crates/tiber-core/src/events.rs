@@ -426,10 +426,10 @@ pub enum TiberEvent {
 
 #[expect(
     non_snake_case,
-    reason = "EventCore 1.1.1 mapping! requires getters named after ModelEvent variants"
+    reason = "EventCore 2.0.0 mapping! requires getters named after ModelEvent variants"
 )]
 impl TiberEvent {
-    // EventCore 1.1.1's checked `mapping!` expansion uses the same generated
+    // EventCore 2.0.0's checked `mapping!` expansion uses the same generated
     // getter convention for struct fields and enum payload variants, while its
     // `ModelEvent` derive currently emits only variant constructors. Keep the
     // missing typed accessors next to the event vocabulary until the derive

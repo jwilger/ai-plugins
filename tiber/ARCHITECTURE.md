@@ -87,7 +87,15 @@ durable.
 
 ## EventCore domains and fact ownership
 
-Commands express durable decisions against command-specific folded state.
+Commands express business-domain intent. Each command folds its own state from
+the relevant facts in the event stream, and that state contains only the data
+needed to make that command's decision. Tiber does not use aggregate objects,
+shared write models, or a generic whole-session replay state as EventCore write
+authority. Commands emit typed domain facts; separate projections serve reads.
+
+Every shipping modeled command is registered with EventCore's experimental
+checked-model graph. The repository gate requires a verified graph with no
+unconsumed command origins, state/event fields, or provenance warnings.
 Facts, not UI or adapter caches, own the truth. Checked models consume all
 provenance and reject stale epochs, invalid identity relationships, duplicate
 non-idempotent effects, and terminal-state mutation.
@@ -235,6 +243,17 @@ findings are resolved. The existing advisory plugin orchestration remains the
 bootstrap behavior until this contract is implemented natively; migration must
 preserve its risk assessment, independent lenses, verifier routing, durable
 state, delta reassessment, and clean-review gating.
+
+The source-level `tiber-review` crate makes that native contract executable. It
+defines semantic session, source-snapshot, lens, agent, role, assignment, and
+evidence identities; a closed serializable review-fact vocabulary; deterministic
+command-specific event folds; exact assignment-provenance checks; bounded
+material-delta iterations; verified finding resolution; and the clean-review
+transition. It is a pure domain crate with no inference, filesystem, process,
+network, UI, MCP, or store dependency. Ticket 4 will bind these commands to the
+native scheduler; the contract intentionally lands first so that migration
+cannot collapse the shipped multi-agent behavior into one model call or ambient
+shared context.
 
 ## Observability and stochastic evaluation
 

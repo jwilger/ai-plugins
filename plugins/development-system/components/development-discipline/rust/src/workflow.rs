@@ -2469,6 +2469,11 @@ mod tests {
     fn modeled_lifecycle_has_complete_provenance_without_assumptions() {
         let report = eventcore::model::check().expect("complete EventCore workflow model");
         assert_eq!(report.status, eventcore::model::CheckStatus::Verified);
+        assert!(
+            report.warnings.is_empty(),
+            "verified workflow model still has unconsumed provenance: {:#?}",
+            report.warnings
+        );
     }
 
     #[test]

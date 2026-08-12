@@ -1261,7 +1261,7 @@ macro_rules! final_review_event_getter {
 
 #[expect(
     non_snake_case,
-    reason = "EventCore 1.1.1 mapping! requires getters named after ModelEvent variants"
+    reason = "EventCore 2.0.0 mapping! requires getters named after ModelEvent variants"
 )]
 impl FinalReviewEvent {
     final_review_event_getter!(
@@ -22850,6 +22850,11 @@ mod tests {
     fn checked_model_catalog_includes_the_complete_final_review_event_vocabulary() {
         let report = eventcore::model::check().expect("complete EventCore modeled vocabulary");
         assert_eq!(report.status, eventcore::model::CheckStatus::Verified);
+        assert!(
+            report.warnings.is_empty(),
+            "verified final-review model still has unconsumed provenance: {:#?}",
+            report.warnings
+        );
     }
 
     use std::io::{BufReader, Cursor};

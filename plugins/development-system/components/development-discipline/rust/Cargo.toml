@@ -5,9 +5,9 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
-eventcore = { version = "1.1.1", features = ["experimental-modeling"] }
-eventcore-sqlite = "1.1.1"
-eventcore-types = "1.1.1"
+eventcore = { version = "=2.0.0", features = ["experimental-modeling"] }
+eventcore-sqlite = "=2.0.0"
+eventcore-types = "=2.0.0"
 futures = "0.3"
 fs2 = "0.4"
 serde = { version = "1", features = ["derive"] }
@@ -21,6 +21,6 @@ name = "development-discipline-mcp"
 path = "src/main.rs"
 
 [dev-dependencies]
-eventcore = { version = "1.1.1", features = ["experimental-model-check"] }
+eventcore = { version = "=2.0.0", features = ["experimental-model-check"] }
 libc = "0.2.189"
 tempfile = "3"

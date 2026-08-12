@@ -18,8 +18,9 @@
 
 use eventcore_fs::{FileEventStore, FsConfig, FsEventStoreError};
 use eventcore_types::{
-    Event, EventFilter, EventPage, EventReader, EventStore, EventStoreError, EventStream,
-    EventStreamSlice, Operation, StreamId, StreamPosition, StreamVersion, StreamWrites,
+    CommandStateSnapshot, CommandStateSnapshotId, Event, EventFilter, EventPage, EventReader,
+    EventStore, EventStoreError, EventStream, EventStreamSlice, Operation, StreamId,
+    StreamPosition, StreamVersion, StreamWrites,
 };
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
@@ -229,6 +230,19 @@ impl GitEventStore {
         self.common_directory
             .join(self.authority.config().state_directory)
             .join("workflow-blocker.json")
+    }
+
+    fn command_state_snapshot_path(&self, snapshot_id: &CommandStateSnapshotId) -> PathBuf {
+        let encoded = snapshot_id
+            .as_ref()
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        self.common_directory
+            .join(self.authority.config().state_directory)
+            .join("command-state-snapshots")
+            .join(encoded)
     }
 
     async fn lock_common_operation(
@@ -473,6 +487,59 @@ impl EventStore for GitEventStore {
                 Err(store_failure(Operation::AppendEvents))
             }
         }
+    }
+
+    async fn load_command_state_snapshot(
+        &self,
+        snapshot_id: CommandStateSnapshotId,
+    ) -> Result<Option<CommandStateSnapshot>, EventStoreError> {
+        let _operation = self.operation.lock().await;
+        let _common_operation = self
+            .lock_common_operation()
+            .await
+            .map_err(|_| store_failure(Operation::ReadStream))?;
+        let path = self.command_state_snapshot_path(&snapshot_id);
+        match fs::read_to_string(path) {
+            Ok(body) => match serde_json::from_str(&body) {
+                Ok(snapshot) => Ok(Some(snapshot)),
+                Err(_) => Ok(None),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_) => Err(store_failure(Operation::ReadStream)),
+        }
+    }
+
+    async fn save_command_state_snapshot(
+        &self,
+        snapshot_id: CommandStateSnapshotId,
+        snapshot: CommandStateSnapshot,
+    ) -> Result<(), EventStoreError> {
+        let _operation = self.operation.lock().await;
+        let _common_operation = self
+            .lock_common_operation()
+            .await
+            .map_err(|_| store_failure(Operation::AppendEvents))?;
+        let path = self.command_state_snapshot_path(&snapshot_id);
+        if let Ok(body) = fs::read_to_string(&path) {
+            if let Ok(stored) = serde_json::from_str::<CommandStateSnapshot>(&body) {
+                if !snapshot.covers(&stored) {
+                    return Ok(());
+                }
+            }
+        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| store_failure(Operation::AppendEvents))?;
+        fs::create_dir_all(parent).map_err(|_| store_failure(Operation::AppendEvents))?;
+        let snapshot_name = path
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .ok_or_else(|| store_failure(Operation::AppendEvents))?;
+        let temporary = parent.join(format!(".{snapshot_name}.staging"));
+        let body =
+            serde_json::to_vec(&snapshot).map_err(|_| store_failure(Operation::AppendEvents))?;
+        fs::write(&temporary, body).map_err(|_| store_failure(Operation::AppendEvents))?;
+        fs::rename(&temporary, path).map_err(|_| store_failure(Operation::AppendEvents))
     }
 }
 

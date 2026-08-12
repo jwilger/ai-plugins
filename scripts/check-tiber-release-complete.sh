@@ -2,11 +2,18 @@
 set -euo pipefail
 
 root="$(cd "${1:-.}" && pwd -P)"
+script_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 manifest="$root/plugins/development-system/components/tiber/release-binaries.json"
 checksums="$root/plugins/development-system/components/tiber/release-binaries.sha256"
 launcher="$root/plugins/development-system/components/tiber/bin/tiber"
+expected_source_fingerprint="$("$script_root/tiber-source-fingerprint.sh")"
+actual_source_fingerprint="$(jq -r '.source_fingerprint // empty' "$manifest")"
+if [ "$actual_source_fingerprint" != "$expected_source_fingerprint" ]; then
+  echo "release-source-fingerprint-mismatch component=tiber expected=$expected_source_fingerprint actual=$actual_source_fingerprint" >&2
+  exit 1
+fi
 
-"$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/check-tiber-release-manifest.sh" "$root"
+"$script_root/check-tiber-release-manifest.sh" "$root"
 
 # shellcheck source=/dev/null
 source "$root/plugins/development-system/components/tiber/scripts/detect-target.sh"
@@ -80,14 +87,22 @@ jq -r '.binaries[] | "\(.target)\t\(.path)"' "$manifest" |
       echo "stale-release-binary target=$target path=plugins/development-system/components/tiber/$binary_path" >&2
       exit 1
     fi
+    if ! grep -aFq "$expected_source_fingerprint" "$absolute_binary_path"; then
+      echo "release-binary-source-fingerprint-mismatch target=$target" >&2
+      exit 1
+    fi
   done
 
 smoke_repo="$(mktemp -d)"
+signing_key="$smoke_repo/tiber-release-signing-key"
+ssh-keygen -q -t ed25519 -N '' -f "$signing_key"
 
 git -C "$smoke_repo" init >/dev/null
 git -C "$smoke_repo" config user.email tiber-release-smoke@example.invalid
 git -C "$smoke_repo" config user.name "Tiber Release Smoke"
-git -C "$smoke_repo" config commit.gpgsign false
+git -C "$smoke_repo" config gpg.format ssh
+git -C "$smoke_repo" config user.signingkey "$signing_key"
+git -C "$smoke_repo" config commit.gpgsign true
 
 (
   cd "$smoke_repo"

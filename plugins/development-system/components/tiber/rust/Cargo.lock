@@ -325,9 +325,9 @@ dependencies = [
 
 [[package]]
 name = "eventcore"
-version = "1.1.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37c734e0ce5c982db6cd0c23b53392adf0d4c2e2971ef36d2884b74fe5550fe0"
+checksum = "80f05bcad5f8644c851dabd5b916b737ced03d2edd19178ec64b8fdf5617c24d"
 dependencies = [
  "chrono",
  "eventcore-macros",
@@ -345,9 +345,9 @@ dependencies = [
 
 [[package]]
 name = "eventcore-fs"
-version = "1.1.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "947b89891d2368e2fa314ee3b3f21319d1d6e997a3debe40babee1069fa3ffdd"
+checksum = "30a195c70096754e456b90cc199bd677f0edc1fc9459ffffc5e28176ececf771"
 dependencies = [
  "chrono",
  "eventcore-types",
@@ -365,9 +365,9 @@ dependencies = [
 
 [[package]]
 name = "eventcore-macros"
-version = "1.1.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4ee48c3cf4d6acf226f046e9b5a23a583f9f5990d662fa8db0ce896f8c65e62"
+checksum = "3cde04832aaaea20f691d51bf861c2d40d9bee01598044cad711a1a56fe275d5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -376,9 +376,9 @@ dependencies = [
 
 [[package]]
 name = "eventcore-memory"
-version = "1.1.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b64248a28eb67cc49e2c1b9d6dbf13ae64a392ae4ddb570f6accc6ec5099f53e"
+checksum = "408461c2d943553f12e85c3c49e2ec26782a31e1bff28811357fba3b6ec8d47f"
 dependencies = [
  "eventcore-types",
  "futures",
@@ -390,9 +390,9 @@ dependencies = [
 
 [[package]]
 name = "eventcore-testing"
-version = "1.1.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8f35e67d64a4779f46795f42e78d8c992075a6a99fe0a4f877280984fc0cecf"
+checksum = "cdc19787abbd07186674f62d51b52d3866ed34d937e9f3eec4a18447516882d7"
 dependencies = [
  "eventcore",
  "eventcore-memory",
@@ -401,15 +401,16 @@ dependencies = [
  "nutype",
  "rand",
  "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
 
 [[package]]
 name = "eventcore-types"
-version = "1.1.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3cd3f35341d6bb66399156c07aaeecc51c6c44efa761d6362b750483b2d202c"
+checksum = "10a79a48287210e83c70b31d3e7b189b8e8401faa80c02f85fc74c4279d2b184"
 dependencies = [
  "futures",
  "glob",

@@ -38,6 +38,8 @@ fi
 
 build_target() {
   local target="$1"
+  local source_fingerprint="$2"
+  TIBER_SOURCE_FINGERPRINT="$source_fingerprint" \
   cargo zigbuild \
     --release \
     --manifest-path "$manifest" \
@@ -54,7 +56,8 @@ copy_binary() {
   echo "built $destination"
 }
 
-build_target x86_64-unknown-linux-gnu
+source_fingerprint="$("$root/scripts/tiber-source-fingerprint.sh")"
+build_target x86_64-unknown-linux-gnu "$source_fingerprint"
 
 target_dir="$(
   cargo metadata \
@@ -66,9 +69,15 @@ target_dir="$(
 
 copy_binary "$target_dir/x86_64-unknown-linux-gnu/release/tiber" x86_64-unknown-linux-gnu
 
+manifest_path="$root/plugins/development-system/components/tiber/release-binaries.json"
+manifest_tmp="$(mktemp)"
+jq --arg fingerprint "$source_fingerprint" \
+  '.source_fingerprint = $fingerprint' "$manifest_path" >"$manifest_tmp"
+mv "$manifest_tmp" "$manifest_path"
+
 checksums="$root/plugins/development-system/components/tiber/release-binaries.sha256"
 : >"$checksums"
-jq -r '.binaries[].path' "$root/plugins/development-system/components/tiber/release-binaries.json" |
+jq -r '.binaries[].path' "$manifest_path" |
   while IFS= read -r binary_path; do
     sha256sum "$root/plugins/development-system/components/tiber/$binary_path" |
       awk -v path="$binary_path" '{ print $1 "  " path }' >>"$checksums"

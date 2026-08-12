@@ -19,9 +19,15 @@ copy_launcher_helper() {
 
 write_release_checksums() {
   local fixture="$1"
+  local fingerprint
+  fingerprint="$(jq -r '.source_fingerprint' "$fixture/plugins/development-system/components/tiber/release-binaries.json")"
   : >"$fixture/plugins/development-system/components/tiber/release-binaries.sha256"
   while IFS= read -r binary_path; do
     if [ -e "$fixture/plugins/development-system/components/tiber/$binary_path" ]; then
+      if [ -s "$fixture/plugins/development-system/components/tiber/$binary_path" ] \
+        && ! grep -aFq "$fingerprint" "$fixture/plugins/development-system/components/tiber/$binary_path"; then
+        printf '\n%s\n' "$fingerprint" >>"$fixture/plugins/development-system/components/tiber/$binary_path"
+      fi
       sha256sum "$fixture/plugins/development-system/components/tiber/$binary_path" |
         awk -v path="$binary_path" '{ print $1 "  " path }' >>"$fixture/plugins/development-system/components/tiber/release-binaries.sha256"
     else
@@ -42,6 +48,40 @@ host_release_path() {
 @test "real release manifest has an executable host binary" {
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -eq 0 ]
+}
+
+@test "source fingerprint changes with shipping Rust source" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/plugins/development-system/components/tiber"
+  cp -R "$ROOT/plugins/development-system/components/tiber/rust" \
+    "$fixture/plugins/development-system/components/tiber/rust"
+
+  before="$(bash "$ROOT/scripts/tiber-source-fingerprint.sh" "$fixture")"
+  printf '\n// fingerprint mutation fixture\n' >> \
+    "$fixture/plugins/development-system/components/tiber/rust/crates/tiber-core/src/lib.rs"
+  after="$(bash "$ROOT/scripts/tiber-source-fingerprint.sh" "$fixture")"
+
+  rm -rf "$fixture"
+  [ "$before" != "$after" ]
+}
+
+@test "source fingerprint ignores checkout location and cache noise" {
+  first="$(mktemp -d)"
+  second="$(mktemp -d)"
+  for fixture in "$first" "$second"; do
+    mkdir -p "$fixture/plugins/development-system/components/tiber"
+    cp -R "$ROOT/plugins/development-system/components/tiber/rust" \
+      "$fixture/plugins/development-system/components/tiber/rust"
+  done
+  mkdir -p "$second/plugins/development-system/components/tiber/rust/.dependencies/cache"
+  printf 'ignored cache noise\n' > \
+    "$second/plugins/development-system/components/tiber/rust/.dependencies/cache/noise.rs"
+
+  first_fingerprint="$(bash "$ROOT/scripts/tiber-source-fingerprint.sh" "$first")"
+  second_fingerprint="$(bash "$ROOT/scripts/tiber-source-fingerprint.sh" "$second")"
+
+  rm -rf "$first" "$second"
+  [ "$first_fingerprint" = "$second_fingerprint" ]
 }
 
 @test "release manifest check fails when the host binary is missing" {
@@ -257,6 +297,27 @@ SH
   [[ "$output" == *"stale-release-binary target=x86_64-unknown-linux-gnu"* ]]
 }
 
+@test "complete release check rejects a stale binary with refreshed manifest and checksum" {
+  fixture="$(mktemp -d)"
+  mkdir -p "$fixture/plugins/development-system/components/tiber/dist/x86_64-unknown-linux-gnu"
+  cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" \
+    "$fixture/plugins/development-system/components/tiber/release-binaries.json"
+  copy_detect_target_helper "$fixture"
+  copy_launcher_helper "$fixture"
+  stale="$fixture/plugins/development-system/components/tiber/dist/x86_64-unknown-linux-gnu/tiber"
+  printf '#!/usr/bin/env sh\nexit 0\n' >"$stale"
+  chmod +x "$stale"
+  hash="$(sha256sum "$stale" | awk '{ print $1 }')"
+  printf '%s  %s\n' "$hash" 'dist/x86_64-unknown-linux-gnu/tiber' > \
+    "$fixture/plugins/development-system/components/tiber/release-binaries.sha256"
+
+  run bash "$COMPLETE_SCRIPT" "$fixture"
+
+  rm -rf "$fixture"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"release-binary-source-fingerprint-mismatch"* ]]
+}
+
 @test "complete release check fails when checksum sidecar has stale entries" {
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/plugins/development-system/components/tiber"
@@ -281,7 +342,15 @@ SH
   fixture="$(mktemp -d)"
   mkdir -p "$fixture/scripts"
   cp "$BUILD_ALL_SCRIPT" "$fixture/scripts/build-tiber-release-all.sh"
+  cp "$ROOT/scripts/tiber-source-fingerprint.sh" "$fixture/scripts/tiber-source-fingerprint.sh"
   mkdir -p "$fixture/plugins/development-system/components/tiber"
+  mkdir -p "$fixture/plugins/development-system/components/tiber/rust"
+  printf '[workspace]\n' >"$fixture/plugins/development-system/components/tiber/rust/Cargo.toml"
+  : >"$fixture/plugins/development-system/components/tiber/rust/Cargo.lock"
+  mkdir -p "$fixture/plugins/development-system/components/tiber/rust/crates/fixture/src"
+  printf '[package]\nname="fixture"\nversion="0.0.0"\n' > \
+    "$fixture/plugins/development-system/components/tiber/rust/crates/fixture/Cargo.toml"
+  : >"$fixture/plugins/development-system/components/tiber/rust/crates/fixture/src/lib.rs"
   cp "$ROOT/plugins/development-system/components/tiber/release-binaries.json" "$fixture/plugins/development-system/components/tiber/release-binaries.json"
   cargo_home="$fixture/cargo"
   rustup_home="$fixture/rustup"
@@ -331,7 +400,7 @@ if [ "\$1" = "zigbuild" ]; then
     shift
   done
   mkdir -p "\$target_dir/\$target/release"
-  touch "\$target_dir/\$target/release/tiber"
+  printf '%s\n' "\${TIBER_SOURCE_FINGERPRINT:?}" >"\$target_dir/\$target/release/tiber"
   chmod +x "\$target_dir/\$target/release/tiber"
   exit 0
 fi

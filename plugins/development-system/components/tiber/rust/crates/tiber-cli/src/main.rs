@@ -13,6 +13,11 @@ use clap::{error::ErrorKind, ArgGroup, Args, CommandFactory, Parser, Subcommand}
 
 const ESCAPED_SUBTASK_TITLE_PREFIX: &str = "\0tiber-subtask-title\0";
 const EXPLICIT_INSTALL_TARGET_PREFIX: &str = "\0tiber-install-target\0";
+const BUILD_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "+source.",
+    env!("TIBER_SOURCE_FINGERPRINT")
+);
 
 #[derive(Clone)]
 struct CommaSeparatedValues(Vec<String>);
@@ -86,7 +91,11 @@ impl FromStr for InstallTargetDir {
 }
 
 #[derive(Parser)]
-#[command(name = "tiber", about = "Repository-local task board")]
+#[command(
+    name = "tiber",
+    about = "Repository-local task board",
+    version = BUILD_VERSION
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

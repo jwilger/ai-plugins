@@ -3,8 +3,9 @@
 use eventcore_fs::{FileCheckpointStore, FileProjectorCoordinator};
 use eventcore_testing::contract::{backend_contract_tests, ContractTestEvent};
 use eventcore_types::{
-    collect_events, BatchSize, CheckpointStore, EventFilter, EventPage, EventReader, EventStore,
-    ProjectorCoordinator, StreamId, StreamPosition, StreamVersion, StreamWrites,
+    collect_events, BatchSize, CheckpointStore, CommandStateSnapshot, CommandStateSnapshotId,
+    EventFilter, EventPage, EventReader, EventStore, ProjectorCoordinator, StreamId,
+    StreamPosition, StreamVersion, StreamWrites,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,6 +33,23 @@ impl eventcore_types::EventStore for TempGitStore {
         writes: eventcore_types::StreamWrites,
     ) -> Result<eventcore_types::EventStreamSlice, eventcore_types::EventStoreError> {
         self.inner.append_events(writes).await
+    }
+
+    async fn load_command_state_snapshot(
+        &self,
+        snapshot_id: CommandStateSnapshotId,
+    ) -> Result<Option<CommandStateSnapshot>, eventcore_types::EventStoreError> {
+        self.inner.load_command_state_snapshot(snapshot_id).await
+    }
+
+    async fn save_command_state_snapshot(
+        &self,
+        snapshot_id: CommandStateSnapshotId,
+        snapshot: CommandStateSnapshot,
+    ) -> Result<(), eventcore_types::EventStoreError> {
+        self.inner
+            .save_command_state_snapshot(snapshot_id, snapshot)
+            .await
     }
 }
 
@@ -229,6 +247,49 @@ async fn first_append_creates_one_signed_authoritative_branch() {
     assert!(tree
         .lines()
         .all(|path| path.starts_with("eventstore/events/")));
+}
+
+#[tokio::test]
+async fn corrupt_command_state_snapshot_is_discarded_and_rebuilt() {
+    let fixture = make_store();
+    let snapshot_id = CommandStateSnapshotId::try_new("contract:corrupt-recovery".to_owned())
+        .expect("valid snapshot id");
+    let snapshot = CommandStateSnapshot::new(
+        serde_json::json!({"decision": "ready"}),
+        std::collections::HashMap::new(),
+    );
+    fixture
+        .inner
+        .save_command_state_snapshot(snapshot_id.clone(), snapshot.clone())
+        .await
+        .expect("initial snapshot save");
+    let directory = fixture
+        .repository
+        .join(".git/tiber/command-state-snapshots");
+    let path = fs::read_dir(&directory)
+        .expect("snapshot directory")
+        .next()
+        .expect("snapshot entry")
+        .expect("read snapshot entry")
+        .path();
+    fs::write(&path, b"{truncated").expect("corrupt reconstructible snapshot");
+    assert!(fixture
+        .inner
+        .load_command_state_snapshot(snapshot_id.clone())
+        .await
+        .expect("corrupt cache is not authoritative")
+        .is_none());
+    fixture
+        .inner
+        .save_command_state_snapshot(snapshot_id.clone(), snapshot)
+        .await
+        .expect("reconstructed snapshot replaces corruption");
+    assert!(fixture
+        .inner
+        .load_command_state_snapshot(snapshot_id)
+        .await
+        .expect("rebuilt snapshot loads")
+        .is_some());
 }
 
 #[tokio::test]
