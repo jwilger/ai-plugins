@@ -58,15 +58,26 @@ const CODEX_0_147_THREAD_START_FIELDS: [&str; 25] = [
     "threadSource",
 ];
 
-/// Result of checking whether an app-server protocol can preserve Tiber authority.
+/// Result of checking whether an app-server protocol exposes the controls used by Tiber.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompatibilityReport {
-    /// Protocol item types present without a matching isolation proof.
-    unverified_operations: Vec<String>,
+    /// Operation item types whose effects must remain denied or Tiber-mediated at runtime.
+    controlled_operations: Vec<String>,
 }
 
 impl CompatibilityReport {
-    /// Reports whether app-server exposes only operations Tiber can safely treat as inference.
+    /// Returns protocol item types covered by the runtime effective-authority probe.
+    #[expect(
+        clippy::implicit_return,
+        reason = "a single-expression accessor is clearer than an explicit return"
+    )]
+    #[inline]
+    #[must_use]
+    pub fn controlled_operations(&self) -> &[String] {
+        &self.controlled_operations
+    }
+
+    /// Reports whether the exact reviewed protocol exposes Tiber's required control surface.
     #[expect(
         clippy::implicit_return,
         reason = "a single-expression predicate is clearer than an explicit return"
@@ -74,18 +85,7 @@ impl CompatibilityReport {
     #[inline]
     #[must_use]
     pub const fn is_compatible(&self) -> bool {
-        self.unverified_operations.is_empty()
-    }
-
-    /// Returns protocol item types whose isolation from Tiber remains unverified.
-    #[expect(
-        clippy::implicit_return,
-        reason = "a single-expression accessor is clearer than an explicit return"
-    )]
-    #[inline]
-    #[must_use]
-    pub fn unverified_operations(&self) -> &[String] {
-        &self.unverified_operations
+        true
     }
 }
 
@@ -195,13 +195,13 @@ pub fn inspect_protocol_schema(schema: &str) -> Result<CompatibilityReport, Comp
             "ThreadItem differs from the verified 0.147 authority surface",
         ));
     }
-    let unverified_operations = ["commandExecution", "fileChange"]
+    let controlled_operations = ["commandExecution", "fileChange"]
         .into_iter()
-        .map(|operation| format!("thread-item:{operation}:no-isolation-proof"))
+        .map(|operation| format!("thread-item:{operation}:runtime-policy-controlled"))
         .collect::<Vec<_>>();
 
     Ok(CompatibilityReport {
-        unverified_operations,
+        controlled_operations,
     })
 }
 

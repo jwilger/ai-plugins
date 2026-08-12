@@ -31,6 +31,7 @@ github-actions:
 # Rust gates for the standalone Tiber harness workspace.
 tiber-harness-rust:
     bash tiber/scripts/check-lint-policy.sh
+    node tiber/scripts/tests/probe-app-server-effective-authority.test.mjs
     CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo fmt --manifest-path tiber/Cargo.toml --all --check
     CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo clippy --manifest-path tiber/Cargo.toml --workspace --all-targets --all-features -- -D warnings
     CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo test --manifest-path tiber/Cargo.toml --workspace --all-features

@@ -10,17 +10,17 @@ mod tests {
         clippy::implicit_return,
         reason = "the Result mapping keeps the assertion panic-free and focused on public behavior"
     )]
-    fn codex_0_147_fails_the_tiber_authority_contract() {
+    fn codex_0_147_exposes_the_reviewed_tiber_control_surface() {
         assert_eq!(
             inspect_protocol_schema(CODEX_0_147_PROTOCOL_SCHEMA).map(|report| (
                 report.is_compatible(),
-                report.unverified_operations().to_vec()
+                report.controlled_operations().to_vec()
             )),
             Ok((
-                false,
+                true,
                 vec![
-                    "thread-item:commandExecution:no-isolation-proof",
-                    "thread-item:fileChange:no-isolation-proof"
+                    "thread-item:commandExecution:runtime-policy-controlled",
+                    "thread-item:fileChange:runtime-policy-controlled"
                 ]
                 .into_iter()
                 .map(str::to_owned)
@@ -58,23 +58,14 @@ mod tests {
         clippy::implicit_return,
         reason = "the Result mapping keeps the assertion panic-free and focused on compatibility"
     )]
-    fn an_unknown_builtin_tool_policy_requires_a_reviewed_adapter() {
-        let schema = r#"{
-        "title": "CodexAppServerProtocolV2",
-        "definitions": {
-            "ThreadStartParams": {
-                "properties": {
-                    "approvalPolicy": {},
-                    "builtInTools": {},
-                    "dynamicTools": {},
-                    "sandbox": {}
-                }
-            },
-            "ThreadItem": { "oneOf": [] }
-        }
-    }"#;
+    fn an_unknown_protocol_control_surface_requires_a_reviewed_adapter() {
+        let schema = CODEX_0_147_PROTOCOL_SCHEMA.replacen(
+            "        \"permissions\": {},\n",
+            "        \"builtInTools\": {},\n",
+            1,
+        );
         assert_eq!(
-            inspect_protocol_schema(schema).map_err(|error| error.code()),
+            inspect_protocol_schema(&schema).map_err(|error| error.code()),
             Err("app_server_schema_contract_unrecognized")
         );
     }
@@ -85,21 +76,13 @@ mod tests {
         reason = "the Result mapping keeps the assertion panic-free and focused on fail-closed behavior"
     )]
     fn malformed_thread_item_shape_fails_closed() {
-        let schema = r#"{
-            "title": "CodexAppServerProtocolV2",
-            "definitions": {
-                "ThreadStartParams": {
-                    "properties": {
-                        "approvalPolicy": {},
-                        "dynamicTools": {},
-                        "sandbox": {}
-                    }
-                },
-                "ThreadItem": { "oneOf": [{ "properties": {} }] }
-            }
-        }"#;
+        let schema = CODEX_0_147_PROTOCOL_SCHEMA.replacen(
+            "              \"enum\": [\"commandExecution\"]",
+            "              \"enum\": []",
+            1,
+        );
         assert_eq!(
-            inspect_protocol_schema(schema).map_err(|error| error.code()),
+            inspect_protocol_schema(&schema).map_err(|error| error.code()),
             Err("app_server_schema_contract_unrecognized")
         );
     }

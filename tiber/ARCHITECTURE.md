@@ -2,16 +2,15 @@
 
 ## System context
 
-Tiber is designed as the local authority between a repository owner, an
-authority-compatible inference transport, repositories and processes,
-third-party MCP servers, memory, and remote delivery systems. No inference
-transport is currently accepted; the original app-server design failed its
-Phase 1 gate.
+Tiber is designed as the local authority between a repository owner, Codex
+app-server inference, repositories and processes, third-party MCP servers,
+memory, and remote delivery systems. The Phase 1 effective-authority spike
+accepts app-server behind a Tiber-owned read-only, offline permission profile.
 
 ```text
 owner -> Tiber TUI -> application state machines -> closed TiberEffect set
                                                 -> imperative interpreters
-blocked inference port                           -> repositories/processes
+app-server inference port                        -> repositories/processes
 third-party MCP <-> external-tool adapter         -> Hindsight
 EventCore store <-> domain authority              -> forge/CI
 ```
@@ -29,13 +28,14 @@ reconciliation, and terminal workflow outcome.
 - **EventCore domains:** authoritative facts for sessions, agents, tasks,
   workflow, integrations, mutations, verification, delivery, and CI recovery.
 - **Scheduler and context builder:** owns typed identities, leases, budgets,
-  provenance, trust labels, context selection, and no-progress termination.
+  provenance, trust labels, authoritative context construction, the bounded
+  observation policy, and no-progress termination.
 - **Ports:** `InferenceGateway`, `MemoryBackend`, `TaskService`,
   `WorkflowService`, `ExternalToolService`, `RepositoryService`,
   `ProcessService`, `VerificationService`, and `DeliveryService`.
-- **Adapters:** a future approved inference transport, native Tiber Tasks, native development
-  workflow, RMCP client, Hindsight HTTP, Git/forge, Linux isolation, and
-  verification runners.
+- **Adapters:** Codex app-server inference, native Tiber Tasks, native
+  development workflow, RMCP client, Hindsight HTTP, Git/forge, Linux
+  isolation, and verification runners.
 
 ## Trust and authority boundaries
 
@@ -108,19 +108,33 @@ Agents terminate on success, terminal error, cancellation, any budget, or
 no-progress. A handoff transfers an explicit artifact and authority scope; it
 does not share ambient identity.
 
-## Rejected app-server inference design
+## App-server inference boundary
 
-The original design selected `codex app-server` as the sole inference
+Tiber uses `codex app-server` as the sole inference
 transport so it could own subscription and API-key-mode authentication,
 credential storage and refresh, account and endpoint selection, protocol
 streaming, and authentication diagnostics without Tiber handling credentials.
 
-That design required an isolated Codex home, a pinned compatible protocol, and
-a guarantee that only Tiber-declared tool requests reached the model and
-remained inert until Tiber authorized an effect. The Phase 1 spike could not
-verify that guarantee for Codex 0.147.0, so no inference adapter or conversation
-runtime is implemented. ADR-0005 records the rejection and the condition for
-reconsideration.
+App-server runs in an isolated Codex home with a pinned protocol and a named
+permission profile. Its filesystem is read-only, command and hosted-search
+network paths are disabled, and approval policy never escalates a rejected
+operation. Tiber resolves the exact app-server executable and generates a
+read-only grant for that file because Codex uses its own executable as the
+Linux sandbox helper; it does not grant the surrounding home directory. Tiber
+disables shell, permission requests, apps, browser, Computer
+Use, image generation, subagents, and other nonessential host surfaces.
+Read-only, non-shell repository observation is an explicitly permitted
+inference capability: its output is untrusted context, never an authoritative
+fact, durable decision, or permission to produce an effect. Tiber still owns
+authoritative context construction, the bounded observation policy, and every
+mutation, process, network, and workflow action.
+
+Protocol operation types may remain present. Authority is defined by effective
+effects: a denied built-in operation is harmless, while a Tiber-declared
+dynamic tool reaches the client as inert structured data. Tiber alone validates
+identity and policy, executes an authorized effect, and returns its observation.
+Every app-server upgrade reruns both schema drift checks and the live
+effective-authority probe.
 
 ## Native workflow and Tiber Tasks
 
@@ -226,8 +240,12 @@ deprecated paths, or transition window. Existing EventCore history and the
 
 ## Phase 1 compatibility result
 
-The Codex 0.147.0 app-server protocol fails the inference authority gate: it
-contains command-execution and file-change thread items but supplies no
-documented built-in-tool disable or allowlist contract. ADR-0005 records the failed spike.
-Construction beyond the compatibility probe is paused until the inference
-transport decision is replaced or app-server gains the required contract.
+Codex 0.147.0 passes the revised effective-authority gate on x86_64 Linux. The
+schema exposes named permission profiles, client-mediated dynamic tools, and
+approval requests. The live probe proves the selected profile is read-only and
+offline: the probe's known Node executable first succeeds without mutation,
+the same executable's `command/exec` write attempt then fails and produces no
+file,
+hosted web search is disabled separately, and a declared Tiber tool remains
+client-owned inert data. Construction may proceed while these controls remain
+pinned and continuously verified.

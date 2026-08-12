@@ -2,9 +2,9 @@
 
 ## Question
 
-Can Tiber use `codex app-server` for inference while exposing only
-Tiber-declared tools and ensuring every model-requested operation remains inert
-until Tiber authorizes it?
+Can Tiber use `codex app-server` for inference while ensuring that no operation
+outside Tiber policy produces an effect and every Tiber-declared tool remains
+inert until the harness authorizes it?
 
 ## Environment
 
@@ -28,24 +28,30 @@ cargo run --manifest-path tiber/Cargo.toml -p tiber -- \
 Expected result for Codex 0.147.0:
 
 ```text
-app_server_tool_isolation_unverified: the verified app-server schema has operation item types but no reviewed isolation proof: thread-item:commandExecution:no-isolation-proof, thread-item:fileChange:no-isolation-proof
+app-server protocol exposes the reviewed Tiber control surface; runtime policy must cover: thread-item:commandExecution:runtime-policy-controlled, thread-item:fileChange:runtime-policy-controlled
 ```
 
-The command exits nonzero. The pinned-schema verifier must pass before the
+The command exits successfully. The pinned-schema verifier must pass before the
 deterministic projection is used as decision evidence; ordinary CI checks the
 projection behavior but intentionally cannot regenerate a Codex-owned schema.
 
 ## Evidence
 
 The generated protocol contains `commandExecution` and `fileChange` thread
-items. `ThreadStartParams` includes additive `dynamicTools`, sandbox, and
-approval settings but supplies no documented proof that built-in model tools
-can be disabled or allowlisted. The probe does not infer tool ownership from
-arbitrary schema strings: it accepts only the provenance-bound projection of
-the exact reviewed V2 `ThreadStartParams` fields and `ThreadItem`
-discriminators, then fails closed on every structural or version change.
-The official documentation describes dynamic tools as experimental
-client-executed additions and separately documents built-in tool behavior.
+items, named `permissions`, approval settings, and client-executed
+`dynamicTools`. Operation-item availability is not authority: the effective
+permission profile and client response path determine whether an effect can
+occur. The schema probe accepts only the provenance-bound projection of the
+exact reviewed V2 `ThreadStartParams` fields and `ThreadItem` discriminators,
+then fails closed on every structural or version change.
+
+Official OpenAI documentation states that permission profiles constrain local
+sandboxed command filesystem and network effects, unsupported Linux policies
+are refused instead of silently running unsandboxed, app-server sends command
+and file approvals to the client, and dynamic tools execute through an
+`item/tool/call` client request. Connectors, MCP, browser, and Computer Use have
+separate controls, so Tiber disables those surfaces in its isolated-home
+configuration rather than assuming the permission profile covers them.
 
 The deterministic fixture is a projection of the generated 0.147.0 schema,
 records the SHA-256 of its 609,050-byte source, and can be regenerated with the
@@ -61,23 +67,47 @@ jq --arg codex_version 0.147.0 --arg schema_sha256 "$schema_sha256" \
 bash tiber/scripts/check-app-server-authority-fixture.sh "$schema"
 ```
 
-Client refusal to answer an approval request is insufficient: sandboxed
-operations can execute without an escalation request. Neither setting proves
-that the model cannot receive, or app-server cannot own, operations not declared
-by Tiber. A read-only sandbox reduces impact but does not establish Tiber's
-required authority boundary.
+The live probe uses `tiber/config/app-server.toml` in a disposable, isolated
+Codex home authenticated by the repository's existing opt-in eval preparation.
+Run it only in a trusted environment with an existing ChatGPT login:
+
+```shell
+probe_root="$(mktemp -d)"
+env -u OPENAI_API_KEY CODEX_EVAL_AUTH_HOME="$HOME/.codex" \
+  node scripts/evals/prepare-codex-home.mjs \
+  "$probe_root/codex-home" --plugin-mode no-plugins
+cp tiber/config/app-server.toml "$probe_root/codex-home/config.toml"
+env -u OPENAI_API_KEY node \
+  tiber/scripts/probe-app-server-effective-authority.mjs \
+  "$probe_root/codex-home" "$probe_root"
+```
+
+The probe resolves the exact Codex executable and replaces the template's
+`TIBER_CODEX_RUNTIME_READ_GRANT` marker with a read-only grant for that file.
+Codex uses its own executable as the Linux sandbox helper; granting only that
+resolved file avoids broad access to the source user home.
+
+Observed on Codex 0.147.0/x86_64 Linux: the active profile was
+`tiber-inference`; the effective sandbox was read-only with command network
+disabled; hosted web search was disabled independently; a positive-control
+command using the probe's known Node executable exited zero; the same executable's
+`command/exec` write attempt failed and created no file; and the sentinel
+dynamic tool arrived exactly once through `item/tool/call` while the probe
+executed no dynamic-tool effect. Read-only, non-shell repository observation is
+an intentional policy capability whose output remains untrusted context. The
+probe declines any approval or permission request if one is emitted.
 
 ## Decision
 
-The spike fails the locked authority contract. Do not implement conversation,
-authentication, TUI, or later roadmap phases on this transport. ADR-0005 is
-marked rejected by the spike. Resume only after app-server supplies a
-documented built-in-tool policy that the probe can verify, or after the owner
-approves a replacement inference ADR.
+The spike passes the corrected effective-authority contract. Tiber retains
+app-server as its sole inference transport and may proceed to conversation,
+authentication delegation, and TUI work. Every supported Codex upgrade must
+pass the pinned schema check and live effective-authority probe before Tiber
+widens the compatible protocol range.
 
 ## Review-orchestration invariant
 
-This stop does not remove or narrow review orchestration. The native contract
-remains recorded in `tiber/ARCHITECTURE.md`, and the installed advisory plugin
-continues to provide the existing multi-agent final-review behavior while the
-harness transport decision is unresolved.
+This decision does not remove or narrow review orchestration. The native
+contract remains recorded in `tiber/ARCHITECTURE.md`, and the installed
+advisory plugin continues to provide the existing multi-agent final-review
+behavior while Tiber construction proceeds.

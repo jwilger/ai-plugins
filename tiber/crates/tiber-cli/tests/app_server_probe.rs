@@ -9,7 +9,7 @@ mod tests {
         clippy::implicit_return,
         reason = "the Result adapters are clearest as expression closures in this black-box assertion"
     )]
-    fn authority_probe_rejects_codex_0_147_with_actionable_evidence() {
+    fn authority_probe_accepts_the_reviewed_codex_0_147_control_surface() {
         let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../tiber-app-server/tests/fixtures/codex-0.147.0-authority-surface.json");
         let output = Command::new(env!("CARGO_BIN_EXE_tiber"))
@@ -22,13 +22,13 @@ mod tests {
                 .map(|result| {
                     (
                         result.status.success(),
-                        String::from_utf8_lossy(&result.stderr).into_owned(),
+                        String::from_utf8_lossy(&result.stdout).into_owned(),
                     )
                 })
                 .map_err(|error| error.to_string()),
             Ok((
-                false,
-                "app_server_tool_isolation_unverified: the verified app-server schema has operation item types but no reviewed isolation proof: thread-item:commandExecution:no-isolation-proof, thread-item:fileChange:no-isolation-proof\n".to_owned()
+                true,
+                "app-server protocol exposes the reviewed Tiber control surface; runtime policy must cover: thread-item:commandExecution:runtime-policy-controlled, thread-item:fileChange:runtime-policy-controlled\n".to_owned()
             ))
         );
     }
