@@ -8,5 +8,9 @@ version.workspace = true
 [dependencies]
 serde_json.workspace = true
 
+[dev-dependencies]
+ratatui.workspace = true
+tiber-tui = { path = "../tiber-tui" }
+
 [lints]
 workspace = true

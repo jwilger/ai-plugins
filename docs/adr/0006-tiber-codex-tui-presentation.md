@@ -18,7 +18,10 @@ tools would bypass Tiber authority.
 Adapt the presentation layer from `codex-tui` commit
 `d06dc73290729d2bcb464b955a4cfd9992abc35d`. Preserve licenses and notices;
 remove runtime configuration, plugin, tool, sandbox, workflow, and session
-dependencies. The TUI consumes projections and emits intents only.
+dependencies. The TUI consumes projections and emits intents only. Extract
+vertical presentation slices instead of importing the complete Codex runtime
+dependency graph; record each adapted upstream area and modification in
+`tiber/third_party/codex-tui/README.md`.
 
 ## Consequences
 

@@ -1,13 +1,21 @@
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    expect(
+        clippy::items_after_test_module,
+        reason = "binary-shell tests stay beside their private worker seam while small path and usage helpers follow"
+    )
+)]
 #![expect(
     clippy::absolute_paths,
+    clippy::arbitrary_source_item_ordering,
     clippy::exit,
     clippy::implicit_return,
     clippy::return_and_then,
     clippy::shadow_reuse,
     clippy::single_call_fn,
     clippy::std_instead_of_core,
-    reason = "the thin command adapter uses process exits, OS arguments, and one-shot dispatch helpers at the imperative boundary"
+    reason = "the thin command adapter keeps lifecycle types beside the TUI shell and uses process exits, OS arguments, and one-shot dispatch helpers at the imperative boundary"
 )]
 
 use std::{
@@ -15,13 +23,24 @@ use std::{
     io::Read as _,
     path::{Path, PathBuf},
     process,
+    sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    thread::{self, JoinHandle},
     time::Duration,
 };
 
-use tiber_app_server::{AccountStatus, AppServerClient, AppServerConfig, inspect_protocol_schema};
+use ratatui::crossterm::event::{self, Event};
+use tiber_app_server::{
+    AccountStatus, AppServerClient, AppServerConfig, OperationCancellation, TurnEvent,
+    inspect_protocol_schema,
+};
+use tiber_tui::{ComposerIntent, ConversationProjection, ProjectionEvent};
 
 /// Reviewed isolated app-server configuration template.
 const ISOLATED_CONFIG: &str = include_str!("../../../config/app-server.toml");
+/// Maximum time the shell waits before checking terminal input again.
+const TUI_POLL_INTERVAL: Duration = Duration::from_millis(25);
+/// Maximum observations applied before terminal input is polled again.
+const MAX_OBSERVATIONS_PER_FRAME: usize = 16;
 #[expect(
     clippy::print_stderr,
     reason = "a command-line adapter intentionally writes its result and diagnostics"
@@ -30,8 +49,8 @@ fn main() {
     let mut arguments = env::args_os();
     let _executable = arguments.next();
     let Some(command) = arguments.next() else {
-        usage();
-        process::exit(2);
+        run_tui();
+        return;
     };
     match command.to_string_lossy().as_ref() {
         "app-server-probe" => run_schema_probe(arguments),
@@ -41,6 +60,209 @@ fn main() {
             eprintln!("unknown command: {}", command.to_string_lossy());
             usage();
             process::exit(2);
+        }
+    }
+}
+
+/// Runs the interactive projection-only terminal presentation.
+#[expect(
+    clippy::print_stderr,
+    reason = "terminal startup and adapter failures use stable owner-facing diagnostics"
+)]
+fn run_tui() {
+    let client = start_default_client();
+    let mut worker = InferenceWorker::start(client);
+    let mut projection = ConversationProjection::new();
+    let mut terminal = ratatui::try_init().unwrap_or_else(|error| {
+        eprintln!("tiber_tui_initialize_failed: {error}");
+        process::exit(1);
+    });
+    let result = run_tui_loop(&mut terminal, &mut worker, &mut projection);
+    worker.stop();
+    ratatui::restore();
+    result.unwrap_or_else(|error| {
+        eprintln!("tiber_tui_failed: {error}");
+        process::exit(1);
+    });
+}
+
+/// Drives terminal intents and app-server observations without granting UI authority.
+#[expect(
+    clippy::question_mark_used,
+    reason = "the imperative terminal shell propagates sanitized I/O failures to one owner-facing boundary"
+)]
+fn run_tui_loop(
+    terminal: &mut ratatui::DefaultTerminal,
+    worker: &mut InferenceWorker,
+    projection: &mut ConversationProjection,
+) -> Result<(), String> {
+    let mut dirty = true;
+    loop {
+        for _observation in 0..MAX_OBSERVATIONS_PER_FRAME {
+            match worker.observations.try_recv() {
+                Ok(observation) => {
+                    projection.apply(observation);
+                    dirty = true;
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    return Err("inference worker stopped unexpectedly".to_owned());
+                }
+            }
+        }
+        if dirty {
+            terminal
+                .draw(|frame| tiber_tui::render(frame, projection))
+                .map_err(|error| error.to_string())?;
+            dirty = false;
+        }
+        if !event::poll(TUI_POLL_INTERVAL).map_err(|error| error.to_string())? {
+            continue;
+        }
+        let input = event::read().map_err(|error| error.to_string())?;
+        let Event::Key(key) = input else {
+            continue;
+        };
+        match projection.handle_key(key) {
+            ComposerIntent::None => {}
+            ComposerIntent::Quit => {
+                worker.cancellation.cancel();
+                return Ok(());
+            }
+            ComposerIntent::Submit(prompt) => {
+                projection.apply(ProjectionEvent::PromptSubmitted {
+                    text: prompt.clone(),
+                });
+                worker.submit(prompt)?;
+            }
+        }
+        dirty = true;
+    }
+}
+
+/// Commands accepted by the inference-owning imperative worker.
+enum InferenceCommand {
+    /// Start one owner-submitted turn.
+    Submit(String),
+    /// Stop after cancelling any active operation.
+    Stop,
+}
+
+/// Keeps blocking app-server protocol work outside the terminal input loop.
+struct InferenceWorker {
+    /// Command channel owned by the terminal shell.
+    commands: SyncSender<InferenceCommand>,
+    /// Presentation-only observations returned by the adapter owner.
+    observations: Receiver<ProjectionEvent>,
+    /// Cooperative cancellation observed during bounded protocol waits.
+    cancellation: OperationCancellation,
+    /// Worker lifecycle handle.
+    thread: Option<JoinHandle<()>>,
+}
+
+impl InferenceWorker {
+    /// Starts one worker that exclusively owns the app-server client.
+    fn start(mut client: AppServerClient) -> Self {
+        let cancellation = client.cancellation_handle();
+        let worker_cancellation = cancellation.clone();
+        let (command_sender, command_receiver) = mpsc::sync_channel(1);
+        let (observation_sender, observations) = mpsc::sync_channel(32);
+        let thread = thread::spawn(move || {
+            while let Ok(command) = command_receiver.recv() {
+                let InferenceCommand::Submit(prompt) = command else {
+                    break;
+                };
+                let turn = match client.start_turn(&prompt) {
+                    Ok(turn) => turn,
+                    Err(error) => {
+                        if !send_observation(
+                            &observation_sender,
+                            &worker_cancellation,
+                            ProjectionEvent::TurnFailed {
+                                code: error.code().to_owned(),
+                                message: error.to_string(),
+                                retryable: error.is_retryable(),
+                            },
+                        ) {
+                            break;
+                        }
+                        continue;
+                    }
+                };
+                loop {
+                    let observation = match client.poll_turn_event(&turn, TUI_POLL_INTERVAL) {
+                        Ok(None) => continue,
+                        Ok(Some(TurnEvent::AssistantDelta(text))) => {
+                            ProjectionEvent::AssistantDelta { text }
+                        }
+                        Ok(Some(TurnEvent::InertToolRequested(request))) => {
+                            ProjectionEvent::InertToolRequested {
+                                arguments: request.arguments,
+                                call_id: request.call_id,
+                                tool: request.tool,
+                            }
+                        }
+                        Ok(Some(TurnEvent::Completed)) => ProjectionEvent::TurnCompleted,
+                        Err(error) => ProjectionEvent::TurnFailed {
+                            code: error.code().to_owned(),
+                            message: error.to_string(),
+                            retryable: error.is_retryable(),
+                        },
+                    };
+                    let terminal = matches!(
+                        observation,
+                        ProjectionEvent::TurnCompleted | ProjectionEvent::TurnFailed { .. }
+                    );
+                    if !send_observation(&observation_sender, &worker_cancellation, observation)
+                        || terminal
+                    {
+                        break;
+                    }
+                }
+            }
+        });
+        Self {
+            commands: command_sender,
+            observations,
+            cancellation,
+            thread: Some(thread),
+        }
+    }
+
+    /// Submits one prompt without blocking terminal input.
+    fn submit(&self, prompt: String) -> Result<(), String> {
+        self.commands
+            .send(InferenceCommand::Submit(prompt))
+            .map_err(|_error| "inference worker stopped unexpectedly".to_owned())
+    }
+
+    /// Cancels the current operation and joins the worker.
+    fn stop(&mut self) {
+        self.cancellation.cancel();
+        let _ignored = self.commands.send(InferenceCommand::Stop);
+        if let Some(thread) = self.thread.take() {
+            let _join_result = thread.join();
+        }
+    }
+}
+
+/// Delivers one bounded observation while remaining responsive to owner cancellation.
+fn send_observation(
+    sender: &SyncSender<ProjectionEvent>,
+    cancellation: &OperationCancellation,
+    mut observation: ProjectionEvent,
+) -> bool {
+    loop {
+        match sender.try_send(observation) {
+            Ok(()) => return true,
+            Err(TrySendError::Disconnected(_observation)) => return false,
+            Err(TrySendError::Full(returned)) => {
+                if cancellation.is_cancelled() {
+                    return false;
+                }
+                observation = returned;
+                thread::sleep(TUI_POLL_INTERVAL);
+            }
         }
     }
 }
@@ -198,6 +420,98 @@ fn start_default_client() -> AppServerClient {
     })
 }
 
+#[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "binary-shell integration fixtures use fail-fast assertions and fixed event sequences"
+)]
+mod tests {
+    use std::{
+        path::PathBuf,
+        time::{Instant, SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+
+    /// Builds the deterministic fake app-server configuration used by the CLI shell.
+    fn fixture_client(mode: &str) -> AppServerClient {
+        let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("Tiber workspace should canonicalize");
+        let node = PathBuf::from("/usr/bin/env");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("test clock should follow Unix epoch")
+            .as_nanos();
+        let config = AppServerConfig::new(
+            node,
+            vec![
+                "node".to_owned(),
+                repository
+                    .join("scripts/tests/fake-app-server.mjs")
+                    .to_string_lossy()
+                    .into_owned(),
+                format!("--mode={mode}"),
+            ],
+            std::env::temp_dir().join(format!("tiber-cli-worker-{}-{nonce}", process::id())),
+            repository,
+            Duration::from_secs(2),
+        )
+        .expect("fixture configuration should be valid");
+        AppServerClient::start(config, ISOLATED_CONFIG).expect("fixture should initialize")
+    }
+
+    #[test]
+    fn inference_worker_streams_typed_observations_and_stops() {
+        let mut worker = InferenceWorker::start(fixture_client("split-stream"));
+        worker
+            .submit("exercise the default TUI shell".to_owned())
+            .expect("worker should accept one prompt");
+        let observations = std::iter::repeat_with(|| {
+            worker
+                .observations
+                .recv_timeout(Duration::from_secs(1))
+                .expect("worker observation should arrive")
+        })
+        .take(4)
+        .collect::<Vec<_>>();
+        assert!(matches!(
+            observations.first(),
+            Some(ProjectionEvent::AssistantDelta { text }) if text == "hello "
+        ));
+        assert!(matches!(
+            observations.get(1),
+            Some(ProjectionEvent::AssistantDelta { text }) if text == "from Tiber"
+        ));
+        assert!(matches!(
+            observations.get(2),
+            Some(ProjectionEvent::InertToolRequested { call_id, tool, arguments })
+                if call_id == "call-fixture"
+                    && tool == "tiber_authority_probe"
+                    && arguments.pointer("/action").and_then(|value| value.as_str())
+                        == Some("sentinel")
+        ));
+        assert!(matches!(
+            observations.last(),
+            Some(ProjectionEvent::TurnCompleted)
+        ));
+        worker.stop();
+    }
+
+    #[test]
+    fn inference_worker_cancels_delayed_start_and_joins_promptly() {
+        let mut worker = InferenceWorker::start(fixture_client("delayed-start"));
+        worker
+            .submit("cancel the delayed start".to_owned())
+            .expect("worker should accept one prompt");
+        thread::sleep(Duration::from_millis(75));
+        let started = Instant::now();
+        worker.stop();
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+}
+
 /// Resolves one executable from `PATH` without invoking a shell.
 fn resolve_executable(name: &str) -> Option<PathBuf> {
     env::var_os("PATH").and_then(|path| {
@@ -222,6 +536,6 @@ fn tiber_codex_home() -> Option<PathBuf> {
 /// Prints the supported command grammar.
 fn usage() {
     eprintln!(
-        "usage: tiber app-server-probe <authority-surface.json> | auth <status|login|login-api-key|logout> | converse <prompt>"
+        "usage: tiber [app-server-probe <authority-surface.json> | auth <status|login|login-api-key|logout> | converse <prompt>]"
     );
 }

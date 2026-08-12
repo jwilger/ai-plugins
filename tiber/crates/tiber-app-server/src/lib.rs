@@ -261,15 +261,18 @@ fn parse_thread_item_types(document: &serde_json::Value) -> Result<Vec<&str>, Co
 )]
 /// Isolated app-server transport implementation.
 mod runtime {
-    use alloc::{collections::VecDeque, string::String, vec::Vec};
-    use core::time::Duration;
+    use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
+    use core::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
+    };
     use std::{
         fs,
-        io::{BufRead, BufReader, Write},
+        io::{self, BufRead, BufReader, Write},
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
         process::{Child, ChildStdin, Command, Stdio},
-        sync::mpsc::{self, Receiver, RecvTimeoutError},
+        sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
         thread,
         time::Instant,
     };
@@ -286,6 +289,12 @@ mod runtime {
     const MAX_MESSAGE_BYTES: usize = 32 * 1024;
     /// Maximum user prompt bytes reserved within the protocol envelope.
     const MAX_PROMPT_BYTES: usize = 16 * 1024;
+    /// Maximum assistant bytes accumulated by the convenience collector.
+    const MAX_COLLECTED_TEXT_BYTES: usize = 256 * 1024;
+    /// Maximum inert tool requests accumulated by the convenience collector.
+    const MAX_COLLECTED_TOOL_REQUESTS: usize = 256;
+    /// Maximum wait before rechecking cooperative cancellation.
+    const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
     /// Configuration for one isolated app-server child process.
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -412,6 +421,48 @@ mod runtime {
         pub arguments: serde_json::Value,
     }
 
+    /// Correlation and deadline state for one active inference turn.
+    #[derive(Clone, Debug)]
+    pub struct TurnHandle {
+        /// Absolute deadline shared by every observation in this turn.
+        deadline: Instant,
+        /// App-server thread identity.
+        thread_id: String,
+        /// App-server turn identity.
+        turn_id: String,
+    }
+
+    /// Cooperative cancellation shared with an application-shell owner.
+    #[derive(Clone, Debug)]
+    pub struct OperationCancellation {
+        /// Cancellation flag observed by bounded transport waits.
+        cancelled: Arc<AtomicBool>,
+    }
+
+    impl OperationCancellation {
+        /// Requests cancellation of the current adapter operation.
+        pub fn cancel(&self) {
+            self.cancelled.store(true, Ordering::Release);
+        }
+
+        /// Reports whether the owner requested cancellation.
+        #[must_use]
+        pub fn is_cancelled(&self) -> bool {
+            self.cancelled.load(Ordering::Acquire)
+        }
+    }
+
+    /// One typed observation from an active inference turn.
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub enum TurnEvent {
+        /// Assistant text arrived in delivery order.
+        AssistantDelta(String),
+        /// A model-requested tool was rejected and retained as inert data.
+        InertToolRequested(InertToolRequest),
+        /// The correlated turn completed successfully.
+        Completed,
+    }
+
     /// Completed minimal conversation observation.
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct ConversationResult {
@@ -435,6 +486,8 @@ mod runtime {
         next_request_id: u64,
         /// Validated process configuration.
         config: AppServerConfig,
+        /// Cooperative cancellation for application-shell responsiveness.
+        cancellation: OperationCancellation,
     }
 
     impl AppServerClient {
@@ -442,6 +495,12 @@ mod runtime {
         #[must_use]
         pub fn child_process_id(&self) -> u32 {
             self.child.id()
+        }
+
+        /// Returns the cooperative cancellation handle for the application shell.
+        #[must_use]
+        pub fn cancellation_handle(&self) -> OperationCancellation {
+            self.cancellation.clone()
         }
 
         /// Creates the isolated home, starts app-server, and completes initialization.
@@ -485,7 +544,7 @@ mod runtime {
                     false,
                 )
             })?;
-            let (sender, output) = mpsc::channel();
+            let (sender, output) = mpsc::sync_channel(MAX_QUEUED_MESSAGES);
             thread::spawn(move || read_messages(stdout, &sender));
             let mut client = Self {
                 child,
@@ -494,6 +553,9 @@ mod runtime {
                 queued: VecDeque::new(),
                 next_request_id: 1,
                 config,
+                cancellation: OperationCancellation {
+                    cancelled: Arc::new(AtomicBool::new(false)),
+                },
             };
             let initialized = client.request(
             "initialize",
@@ -648,6 +710,47 @@ mod runtime {
         ///
         /// Returns a typed transport, stream, protocol, or terminal-turn error.
         pub fn converse(&mut self, prompt: &str) -> Result<ConversationResult, AppServerError> {
+            let turn = self.start_turn(prompt)?;
+            let mut text = String::new();
+            let mut inert_tool_requests = Vec::new();
+            loop {
+                match self.next_turn_event(&turn)? {
+                    TurnEvent::AssistantDelta(delta) => {
+                        if text.len().saturating_add(delta.len()) > MAX_COLLECTED_TEXT_BYTES {
+                            return Err(AppServerError::new(
+                                "app_server_turn_output_too_large",
+                                "assistant output exceeded the bounded turn collector",
+                                false,
+                            ));
+                        }
+                        text.push_str(&delta);
+                    }
+                    TurnEvent::InertToolRequested(request) => {
+                        if inert_tool_requests.len() >= MAX_COLLECTED_TOOL_REQUESTS {
+                            return Err(AppServerError::new(
+                                "app_server_turn_tool_limit_exceeded",
+                                "model tool requests exceeded the bounded turn collector",
+                                false,
+                            ));
+                        }
+                        inert_tool_requests.push(request);
+                    }
+                    TurnEvent::Completed => {
+                        return Ok(ConversationResult {
+                            text,
+                            inert_tool_requests,
+                        });
+                    }
+                }
+            }
+        }
+
+        /// Starts one bounded inference turn without consuming its stream.
+        ///
+        /// # Errors
+        ///
+        /// Returns a typed transport, protocol, policy-profile, or input error.
+        pub fn start_turn(&mut self, prompt: &str) -> Result<TurnHandle, AppServerError> {
             if prompt.is_empty() {
                 return Err(AppServerError::new(
                     "app_server_prompt_empty",
@@ -709,30 +812,71 @@ mod runtime {
                     .ok_or_else(|| protocol_error("turn/start omitted turn"))?,
                 "id",
             )?;
-            self.collect_turn(&thread_id, &turn_id)
+            Ok(TurnHandle {
+                deadline: deadline_after(self.config.request_timeout)?,
+                thread_id,
+                turn_id,
+            })
         }
 
-        /// Collects one correlated turn until its terminal observation.
-        fn collect_turn(
+        /// Returns the next presentation-safe observation for one active turn.
+        ///
+        /// Approval and permission requests are declined internally and are never
+        /// surfaced as executable presentation actions.
+        ///
+        /// # Errors
+        ///
+        /// Returns a typed transport, stream, protocol, or terminal-turn error.
+        pub fn next_turn_event(&mut self, turn: &TurnHandle) -> Result<TurnEvent, AppServerError> {
+            self.next_turn_event_before(turn, turn.deadline)
+        }
+
+        /// Polls one active turn for at most `wait`, preserving its absolute deadline.
+        ///
+        /// `None` means no presentation observation arrived during this poll. It is
+        /// not a terminal turn result.
+        ///
+        /// # Errors
+        ///
+        /// Returns a typed transport, stream, protocol, or terminal-turn error.
+        pub fn poll_turn_event(
             &mut self,
-            thread_id: &str,
-            turn_id: &str,
-        ) -> Result<ConversationResult, AppServerError> {
-            let deadline = deadline_after(self.config.request_timeout)?;
-            let mut text = String::new();
-            let mut inert_tool_requests = Vec::new();
+            turn: &TurnHandle,
+            wait: Duration,
+        ) -> Result<Option<TurnEvent>, AppServerError> {
+            let poll_deadline = Instant::now()
+                .checked_add(wait)
+                .map_or(turn.deadline, |deadline| deadline.min(turn.deadline));
+            match self.next_turn_event_before(turn, poll_deadline) {
+                Ok(event) => Ok(Some(event)),
+                Err(error)
+                    if error.code() == "app_server_timeout" && poll_deadline < turn.deadline =>
+                {
+                    Ok(None)
+                }
+                Err(error) => Err(error),
+            }
+        }
+
+        /// Consumes messages for one turn until an observation or deadline.
+        fn next_turn_event_before(
+            &mut self,
+            turn: &TurnHandle,
+            deadline: Instant,
+        ) -> Result<TurnEvent, AppServerError> {
             loop {
+                self.ensure_not_cancelled()?;
                 let message = self.receive_before(deadline)?;
                 match message.get("method").and_then(serde_json::Value::as_str) {
                     Some("item/agentMessage/delta") => {
-                        if !belongs_to_turn(&message, thread_id, turn_id) {
+                        if !belongs_to_turn(&message, &turn.thread_id, &turn.turn_id) {
                             continue;
                         }
                         if let Some(delta) = message
                             .pointer("/params/delta")
                             .and_then(serde_json::Value::as_str)
                         {
-                            text.push_str(delta);
+                            return Ok(TurnEvent::AssistantDelta(delta.to_owned()));
                         }
                     }
                     Some("item/tool/call") => {
@@ -743,20 +887,25 @@ mod runtime {
                         let params = message
                             .get("params")
                             .ok_or_else(|| protocol_error("tool call omitted params"))?;
-                        if belongs_to_turn(&message, thread_id, turn_id) {
-                            inert_tool_requests.push(InertToolRequest {
-                                call_id: required_string(params, "callId")?,
-                                tool: required_string(params, "tool")?,
-                                arguments: params
-                                    .get("arguments")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null),
-                            });
-                        }
+                        let request = belongs_to_turn(&message, &turn.thread_id, &turn.turn_id)
+                            .then(|| {
+                                Ok::<_, AppServerError>(InertToolRequest {
+                                    call_id: required_string(params, "callId")?,
+                                    tool: required_string(params, "tool")?,
+                                    arguments: params
+                                        .get("arguments")
+                                        .cloned()
+                                        .unwrap_or(serde_json::Value::Null),
+                                })
+                            })
+                            .transpose()?;
                         self.respond(request_id, serde_json::json!({
                         "contentItems": [{ "text": "Tiber spike records model-requested tools as inert data.", "type": "inputText" }],
                         "success": false
                     }))?;
+                        if let Some(request) = request {
+                            return Ok(TurnEvent::InertToolRequested(request));
+                        }
                     }
                     Some(
                         "item/commandExecution/requestApproval" | "item/fileChange/requestApproval",
@@ -783,7 +932,9 @@ mod runtime {
                         let completed_thread = message
                             .pointer("/params/threadId")
                             .and_then(serde_json::Value::as_str);
-                        if completed_thread == Some(thread_id) && completed_turn == Some(turn_id) {
+                        if completed_thread == Some(turn.thread_id.as_str())
+                            && completed_turn == Some(turn.turn_id.as_str())
+                        {
                             let status = message
                                 .pointer("/params/turn/status")
                                 .and_then(serde_json::Value::as_str);
@@ -797,10 +948,7 @@ mod runtime {
                                     status == Some("failed"),
                                 ));
                             }
-                            return Ok(ConversationResult {
-                                text,
-                                inert_tool_requests,
-                            });
+                            return Ok(TurnEvent::Completed);
                         }
                     }
                     Some("error") => {
@@ -828,6 +976,7 @@ mod runtime {
             })?;
             self.send(&serde_json::json!({ "id": id, "method": method, "params": params }))?;
             loop {
+                self.ensure_not_cancelled()?;
                 let message = if let Some(position) = self.queued.iter().position(|message| {
                     message.get("method").is_none()
                         && message.get("id").and_then(serde_json::Value::as_u64) == Some(id)
@@ -836,7 +985,18 @@ mod runtime {
                         .remove(position)
                         .ok_or_else(|| protocol_error("queued response disappeared"))?
                 } else {
-                    self.receive_output_before(deadline)?
+                    let slice_deadline = Instant::now()
+                        .checked_add(CANCELLATION_POLL_INTERVAL)
+                        .map_or(deadline, |candidate| candidate.min(deadline));
+                    match self.receive_output_before(slice_deadline) {
+                        Err(error)
+                            if error.code() == "app_server_timeout"
+                                && slice_deadline < deadline =>
+                        {
+                            continue;
+                        }
+                        result => result?,
+                    }
                 };
                 if message.get("method").is_some() && message.get("id").is_some() {
                     self.reject_server_request(&message)?;
@@ -983,6 +1143,18 @@ mod runtime {
                 )),
             }
         }
+
+        /// Fails the current operation after an owner-requested cancellation.
+        fn ensure_not_cancelled(&self) -> Result<(), AppServerError> {
+            if self.cancellation.cancelled.load(Ordering::Acquire) {
+                return Err(AppServerError::new(
+                    "app_server_cancelled",
+                    "app-server operation cancelled by the owner",
+                    false,
+                ));
+            }
+            Ok(())
+        }
     }
 
     impl Drop for AppServerClient {
@@ -1036,25 +1208,70 @@ mod runtime {
     /// Decodes newline-delimited server messages on the reader thread.
     fn read_messages(
         stdout: impl std::io::Read,
-        sender: &mpsc::Sender<Result<serde_json::Value, AppServerError>>,
+        sender: &SyncSender<Result<serde_json::Value, AppServerError>>,
     ) {
-        for line in BufReader::new(stdout).lines() {
-            let message = match line {
-                Ok(line) => serde_json::from_str(&line).map_err(|error| {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let message = match read_bounded_line(&mut reader) {
+                Ok(Some(line)) => serde_json::from_slice(&line).map_err(|error| {
                     AppServerError::new(
                         "app_server_message_invalid",
                         format!("app-server emitted invalid JSON: {error}"),
                         false,
                     )
                 }),
+                Ok(None) => break,
+                Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+                    Err(AppServerError::new(
+                        "app_server_message_too_large",
+                        "app-server emitted a message larger than the bounded transport envelope",
+                        false,
+                    ))
+                }
                 Err(error) => Err(AppServerError::new(
                     "app_server_read_failed",
                     format!("failed to read app-server output: {error}"),
                     true,
                 )),
             };
-            if sender.send(message).is_err() {
+            let terminal = message.is_err();
+            if sender.send(message).is_err() || terminal {
                 break;
+            }
+        }
+    }
+
+    /// Reads one newline-delimited envelope without allocating past the wire bound.
+    fn read_bounded_line(reader: &mut impl BufRead) -> io::Result<Option<Vec<u8>>> {
+        let mut line = Vec::new();
+        loop {
+            let buffer = reader.fill_buf()?;
+            if buffer.is_empty() {
+                return if line.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(line))
+                };
+            }
+            let available = buffer
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .and_then(|position| position.checked_add(1))
+                .unwrap_or(buffer.len());
+            if line.len().saturating_add(available) > MAX_MESSAGE_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "app-server message exceeds transport bound",
+                ));
+            }
+            let chunk = buffer.get(..available).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid buffered line boundary")
+            })?;
+            line.extend_from_slice(chunk);
+            reader.consume(available);
+            if line.last() == Some(&b'\n') {
+                line.pop();
+                return Ok(Some(line));
             }
         }
     }
@@ -1114,7 +1331,8 @@ mod runtime {
 
 pub use runtime::{
     AccountStatus, AppServerClient, AppServerConfig, AppServerError, ConversationResult,
-    INFERENCE_PERMISSION_PROFILE, InertToolRequest, LoginHandoff, SUPPORTED_CODEX_VERSION,
+    INFERENCE_PERMISSION_PROFILE, InertToolRequest, LoginHandoff, OperationCancellation,
+    SUPPORTED_CODEX_VERSION, TurnEvent, TurnHandle,
 };
 
 /// Builds the stable fail-closed error for an unknown schema structure.

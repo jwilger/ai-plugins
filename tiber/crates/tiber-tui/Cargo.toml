@@ -1,14 +1,13 @@
 [package]
-name = "tiber"
+name = "tiber-tui"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-tiber-app-server = { path = "../tiber-app-server" }
-tiber-tui = { path = "../tiber-tui" }
 ratatui.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

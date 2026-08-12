@@ -5,8 +5,10 @@
 Tiber is a standalone, local-first development harness for one repository
 owner. Tiber owns the authoritative state and execution of development work.
 Its `codex app-server` inference design passed the corrected Phase 1
-effective-authority spike and is the accepted v1 transport. The conversation
-runtime remains to be implemented.
+effective-authority spike and is the accepted v1 transport. A source-level
+interactive transcript/composer slice now consumes streamed typed app-server
+events; durable sessions and the complete terminal interaction remain to be
+implemented.
 
 The v1 product and executable are named `tiber`. The existing task board is
 named Tiber Tasks. Running `tiber` without arguments opens the interactive

@@ -138,13 +138,16 @@ identity and policy, executes an authorized effect, and returns its observation.
 Every app-server upgrade reruns both schema drift checks and the live
 effective-authority probe.
 
-The first Rust adapter now implements the imperative transport boundary. It
+The Rust adapter implements the imperative transport boundary. It
 creates the isolated home deterministically, starts app-server over stdio,
 initializes the protocol, delegates account status/browser login/logout and
 API-key-mode login, streams assistant text, returns dynamic-tool requests as
-inert typed data, applies bounded request deadlines, and terminates its child on
-drop. The deterministic fake-server contract covers those behaviors; the TUI
-and durable conversation state remain subsequent vertical slices.
+inert typed turn events, applies bounded request deadlines, and terminates its
+child on drop. The deterministic fake-server contract covers those behaviors.
+The initial TUI slice renders those typed events and emits only typed composer
+intents. A cancellable inference worker keeps terminal input responsive during
+turn startup and streaming; durable conversation state and protocol-level turn
+interruption remain subsequent vertical slices.
 
 ## Native workflow and Tiber Tasks
 
@@ -182,10 +185,16 @@ requires memory.
 
 ## TUI
 
-The presentation is initially derived from `codex-tui` at commit
+The presentation is derived from `codex-tui` at commit
 `d06dc73290729d2bcb464b955a4cfd9992abc35d`, preserving Apache-2.0,
 NOTICE, Ratatui attribution, and modification notices. Direct Codex config,
 plugin, tool, sandbox, workflow, and session dependencies are removed.
+
+The first extracted vertical slice retains the transcript, streaming status,
+composer, typed failure display, and inert-tool proposal display behind a
+projection-in/intent-out API. The CLI alone connects those intents to the
+app-server adapter. The presentation crate has no app-server, filesystem,
+process, network, plugin, task, workflow, or EventCore dependency.
 
 Projection state includes transcript, stream, composer, Plan mode, side
 conversations, resume, diff, status surfaces, workflow phase, task, assignment,

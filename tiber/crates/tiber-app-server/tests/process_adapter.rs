@@ -15,10 +15,13 @@ mod tests {
 
     use std::{
         path::PathBuf,
+        thread,
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
-    use tiber_app_server::{AccountStatus, AppServerClient, AppServerConfig};
+    use ratatui::{Terminal, backend::TestBackend};
+    use tiber_app_server::{AccountStatus, AppServerClient, AppServerConfig, TurnEvent};
+    use tiber_tui::{ConversationProjection, ProjectionEvent};
 
     const ISOLATED_CONFIG: &str = include_str!("../../../config/app-server.toml");
 
@@ -87,6 +90,130 @@ mod tests {
 
         client.logout().expect("fixture logout should succeed");
         assert_eq!(client.account_status(), Ok(AccountStatus::SignedOut));
+    }
+
+    #[test]
+    fn turn_events_are_observable_before_completion_and_tools_stay_inert() {
+        let mut client =
+            AppServerClient::start(fixture_config(Some("split-stream")), ISOLATED_CONFIG)
+                .expect("fixture app-server should initialize");
+        let turn = client
+            .start_turn("show streaming presentation")
+            .expect("fixture turn should start");
+
+        assert_eq!(
+            client.next_turn_event(&turn),
+            Ok(TurnEvent::AssistantDelta("hello ".to_owned()))
+        );
+        assert_eq!(
+            client.next_turn_event(&turn),
+            Ok(TurnEvent::AssistantDelta("from Tiber".to_owned()))
+        );
+        let tool = client
+            .next_turn_event(&turn)
+            .expect("tool request should be returned as data");
+        assert!(matches!(tool, TurnEvent::InertToolRequested(_)));
+        assert_eq!(client.next_turn_event(&turn), Ok(TurnEvent::Completed));
+    }
+
+    #[test]
+    fn turn_polling_is_nonterminal_until_an_observation_arrives() {
+        let mut client =
+            AppServerClient::start(fixture_config(Some("delayed-stream")), ISOLATED_CONFIG)
+                .expect("fixture app-server should initialize");
+        let turn = client
+            .start_turn("wait for a delayed observation")
+            .expect("fixture turn should start");
+
+        assert_eq!(
+            client.poll_turn_event(&turn, Duration::from_millis(10)),
+            Ok(None)
+        );
+        assert_eq!(
+            client.poll_turn_event(&turn, Duration::from_millis(250)),
+            Ok(Some(TurnEvent::AssistantDelta(
+                "hello from Tiber".to_owned()
+            )))
+        );
+    }
+
+    #[test]
+    fn oversized_incoming_line_fails_at_the_transport_bound() {
+        let mut client =
+            AppServerClient::start(fixture_config(Some("oversized-line")), ISOLATED_CONFIG)
+                .expect("fixture app-server should initialize");
+        let error = client
+            .start_turn("reject oversized output")
+            .expect_err("oversized unterminated output must fail closed");
+        assert_eq!(error.code(), "app_server_message_too_large");
+        let follow_up = client
+            .start_turn("do not repeat a poisoned record")
+            .expect_err("fatal framing failure must close the reader");
+        assert_eq!(follow_up.code(), "app_server_stream_closed");
+    }
+
+    #[test]
+    fn owner_cancellation_interrupts_a_stalled_turn_start() {
+        let mut client =
+            AppServerClient::start(fixture_config(Some("delayed-start")), ISOLATED_CONFIG)
+                .expect("fixture app-server should initialize");
+        let cancellation = client.cancellation_handle();
+        let operation = thread::spawn(move || client.start_turn("cancel startup"));
+        thread::sleep(Duration::from_millis(75));
+        cancellation.cancel();
+
+        let error = operation
+            .join()
+            .expect("fixture operation should not panic")
+            .expect_err("cancelled startup must fail promptly");
+        assert_eq!(error.code(), "app_server_cancelled");
+    }
+
+    #[test]
+    fn isolated_fake_server_stream_renders_through_the_tui_projection() {
+        let mut client =
+            AppServerClient::start(fixture_config(Some("split-stream")), ISOLATED_CONFIG)
+                .expect("fixture app-server should initialize");
+        let mut projection = ConversationProjection::new();
+        let prompt = "render the isolated stream";
+        projection.apply(ProjectionEvent::PromptSubmitted {
+            text: prompt.to_owned(),
+        });
+        let turn = client
+            .start_turn(prompt)
+            .expect("fixture turn should start");
+        loop {
+            match client
+                .next_turn_event(&turn)
+                .expect("fixture observation should remain typed")
+            {
+                TurnEvent::AssistantDelta(text) => {
+                    projection.apply(ProjectionEvent::AssistantDelta { text });
+                }
+                TurnEvent::InertToolRequested(request) => {
+                    projection.apply(ProjectionEvent::InertToolRequested {
+                        arguments: request.arguments,
+                        call_id: request.call_id,
+                        tool: request.tool,
+                    });
+                }
+                TurnEvent::Completed => {
+                    projection.apply(ProjectionEvent::TurnCompleted);
+                    break;
+                }
+            }
+        }
+
+        let backend = TestBackend::new(72, 18);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| tiber_tui::render(frame, &projection))
+            .expect("completed projection should render");
+        let frame = terminal.backend().to_string();
+        assert!(frame.contains("hello from Tiber"));
+        assert!(frame.contains("tool proposal \u{b7} not executed"));
+        assert!(frame.contains("tiber_authority_probe \u{b7} call-fixture"));
+        assert!(frame.contains("ready"));
     }
 
     #[test]

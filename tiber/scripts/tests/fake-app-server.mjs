@@ -29,7 +29,7 @@ function completeTurn(turnId) {
   });
 }
 
-input.on("line", (line) => {
+input.on("line", async (line) => {
   if (fixtureMode === "silent" || fixtureMode === "ignored-term") return;
   if (fixtureMode === "early-close") process.exit(3);
   if (fixtureMode === "malformed") {
@@ -103,6 +103,10 @@ input.on("line", (line) => {
     account = null;
     send({ id: message.id, result: {} });
   } else if (message.method === "thread/start") {
+    if (fixtureMode === "oversized-line") {
+      process.stdout.write("x".repeat(40 * 1024));
+      return;
+    }
     if (fixtureMode === "id-collision") {
       send({
         id: message.id,
@@ -110,6 +114,9 @@ input.on("line", (line) => {
         params: { threadId, turnId: "turn-1" },
       });
       return;
+    }
+    if (fixtureMode === "delayed-start") {
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
     send({
       id: message.id,
@@ -173,15 +180,24 @@ input.on("line", (line) => {
         },
       });
     }
-    send({
-      method: "item/agentMessage/delta",
-      params: {
-        delta: "hello from Tiber",
-        itemId: `assistant-${nextTurn}`,
-        threadId,
-        turnId,
-      },
-    });
+    const assistantDeltas =
+      fixtureMode === "split-stream"
+        ? ["hello ", "from Tiber"]
+        : ["hello from Tiber"];
+    if (fixtureMode === "delayed-stream") {
+      await new Promise((resolve) => setTimeout(resolve, 75));
+    }
+    for (const delta of assistantDeltas) {
+      send({
+        method: "item/agentMessage/delta",
+        params: {
+          delta,
+          itemId: `assistant-${nextTurn}`,
+          threadId,
+          turnId,
+        },
+      });
+    }
     send({
       method: "item/started",
       params: {
