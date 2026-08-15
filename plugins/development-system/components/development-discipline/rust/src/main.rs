@@ -12802,11 +12802,36 @@ fn mcp_binary_directory() -> Result<PathBuf, String> {
             return Ok(path);
         }
     }
-    env::current_exe()
+    let executable = env::current_exe()
         .map_err(|error| format!("development_system.mcp_binary_path_unavailable source={error}"))?
         .parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| "development_system.mcp_binary_path_unavailable".to_string())
+        .ok_or_else(|| "development_system.mcp_binary_path_unavailable".to_string())?;
+    Ok(stable_host_binary_directory(executable))
+}
+
+fn stable_host_binary_directory(executable_directory: PathBuf) -> PathBuf {
+    let Some(version_directory) = executable_directory.parent() else {
+        return executable_directory;
+    };
+    let Some(staging_name) = executable_directory.file_name().and_then(OsStr::to_str) else {
+        return executable_directory;
+    };
+    let Some(staging_name) = staging_name.strip_prefix('.') else {
+        return executable_directory;
+    };
+    let Some((host, nonce)) = staging_name.split_once(".staging.") else {
+        return executable_directory;
+    };
+    if host.is_empty() || nonce.is_empty() {
+        return executable_directory;
+    }
+
+    let stable_directory = version_directory.join(host);
+    match fs::symlink_metadata(&stable_directory) {
+        Ok(metadata) if metadata.file_type().is_symlink() => stable_directory,
+        _ => executable_directory,
+    }
 }
 
 fn toml_string(value: &str) -> String {

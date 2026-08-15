@@ -25,7 +25,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses          | Description                                                                                          | Version |
 | ---------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 5.2.0   |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 5.2.5   |
 
 ## Using the marketplace (Claude Code)
 

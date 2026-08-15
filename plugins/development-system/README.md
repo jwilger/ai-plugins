@@ -16,6 +16,9 @@ The command builds only the current host and atomically installs `tiber` and
 `$XDG_DATA_HOME/ai-plugins/development-system/<plugin-version>/<host>/`.
 When `XDG_DATA_HOME` is unset, it uses `~/.local/share`. Re-running the command
 is safe; a newer plugin version is installed alongside previous versions.
+Project-local MCP configuration always uses these stable host-directory paths,
+so a same-version reinstall can atomically replace its staging target without
+leaving a project pointed at it.
 The published plugin intentionally carries no bootstrap MCP manifest. During
 project setup, it writes only the current harness's project-local MCP
 configuration—`.codex/config.toml` for Codex or `.mcp.json` for Claude Code.

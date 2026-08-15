@@ -348,6 +348,48 @@ initialize_codex_plugin_server() {
   [[ "$output" == *'"name":"tiber"'* ]]
 }
 
+@test "setup writes stable host-local MCP paths that survive reinstall" {
+  local project="$TMPROOT/setup-project"
+  local tiber_path
+  local discipline_path
+  local request
+  local config
+  local expected_discipline
+  local expected_tiber
+
+  mkdir -p "$project"
+  git -C "$project" init --quiet
+  printf 'ci:\n    true\n' >"$project/justfile"
+  source "$ROOT/plugins/development-system/lib/installed-binary.sh"
+  tiber_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" tiber)"
+  discipline_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" development-discipline-mcp)"
+  expected_discipline="$discipline_path"
+  expected_tiber="$tiber_path"
+  request="$(jq -cn --arg project_root "$project" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"setup.apply",arguments:{project_root:$project_root,confirmed:true,selected_command_ids:["just-ci"],harness:"codex"}}}')"
+
+  run bash -c 'printf "%s\\n" "$2" | "$1" --service plugin-advisory' _ "$discipline_path" "$request"
+  [ "$status" -eq 0 ]
+
+  config="$(<"$project/.codex/config.toml")"
+  [[ "$config" == *"command = \"$expected_discipline\""* ]]
+  [[ "$config" == *"command = \"$expected_tiber\""* ]]
+  [[ "$config" != *".staging."* ]]
+
+  request="$(jq -cn --arg project_root "$project" '{jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"setup.apply",arguments:{project_root:$project_root,confirmed:true,harness:"claude"}}}')"
+  run bash -c 'printf "%s\\n" "$2" | "$1" --service plugin-advisory' _ "$discipline_path" "$request"
+  [ "$status" -eq 0 ]
+  run jq -e --arg discipline "$expected_discipline" --arg tiber "$expected_tiber" '
+    .mcpServers["development-discipline"].command == $discipline and
+    .mcpServers.tiber.command == $tiber
+  ' "$project/.mcp.json"
+  [ "$status" -eq 0 ]
+
+  run just --justfile "$ROOT/justfile" install-development-system-binaries
+  [ "$status" -eq 0 ]
+  [ -x "$expected_discipline" ]
+  [ -x "$expected_tiber" ]
+}
+
 @test "installed direct development-discipline binary exposes advisory coordination" {
   source "$ROOT/plugins/development-system/lib/installed-binary.sh"
   local command
@@ -379,6 +421,7 @@ initialize_codex_plugin_server() {
       . == "workspace-reader.repository" or
       . == "setup.preview" or
       . == "setup.apply" or
+      . == "development_system.codex_sandbox_setup" or
       . == "final_review.plan" or
       . == "final_review.filter_findings" or
       . == "final_review.advance" or

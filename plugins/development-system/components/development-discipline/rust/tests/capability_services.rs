@@ -1264,6 +1264,7 @@ fn plugin_surface_exposes_advisory_coordination_and_denies_project_mutation_tool
                 | "workspace-reader.repository"
                 | "setup.preview"
                 | "setup.apply"
+                | "development_system.codex_sandbox_setup"
         ) || matches!(
             *name,
             "final_review.plan"
