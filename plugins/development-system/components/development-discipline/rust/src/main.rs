@@ -21,6 +21,7 @@
 mod semantic;
 mod workflow;
 
+use std::cell::RefCell;
 use std::collections::{
     hash_map::{DefaultHasher, RandomState},
     BTreeMap, HashMap, HashSet, VecDeque,
@@ -109,6 +110,9 @@ const MAX_SPLIT_DELIVERY_EVIDENCE_CHARS: usize = 512;
 const MAX_SPLIT_CANDIDATE_CRITERIA: usize = 32;
 const MAX_SPLIT_CANDIDATE_PATHS: usize = 256;
 static OPAQUE_FINGERPRINT_HASHER: OnceLock<RandomState> = OnceLock::new();
+thread_local! {
+    static MCP_REPOSITORY_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
 static SNAPSHOT_INDEX_COUNTER: AtomicU64 = AtomicU64::new(0);
 // This inventory is repeated once per lens assignment, while the full list is
 // retained in session state. Keep it small enough that a maximum-size scope can
@@ -9772,6 +9776,7 @@ fn run_stdio_with_surface(
     service_surface: ServiceSurface,
 ) -> io::Result<()> {
     let mut coordinator = ReviewCoordinator::with_service_surface(service_surface);
+    let mut repository_root = None;
     while let Some(line) = read_request_line(&mut input)? {
         let line = match line {
             RequestLine::Data(line) => line,
@@ -9804,13 +9809,61 @@ fn run_stdio_with_surface(
             continue;
         }
         let id = request.get("id").cloned().unwrap_or(Value::Null);
-        let response = match coordinator.handle_json_rpc(&request) {
-            Ok(response) => response,
+        let response = match codex_sandbox_cwd(&request) {
+            Ok(root) => {
+                if root.is_some() {
+                    repository_root = root;
+                }
+                match with_mcp_repository_root(repository_root.as_deref(), || {
+                    coordinator.handle_json_rpc(&request)
+                }) {
+                    Ok(response) => response,
+                    Err(error) => error_response(id, -32603, &error),
+                }
+            }
             Err(error) => error_response(id, -32603, &error),
         };
         write_json_rpc_response(&mut output, response)?;
     }
     Ok(())
+}
+
+fn with_mcp_repository_root<T>(root: Option<&Path>, operation: impl FnOnce() -> T) -> T {
+    MCP_REPOSITORY_ROOT.with(|slot| {
+        let previous = slot.replace(root.map(Path::to_path_buf));
+        let result = operation();
+        slot.replace(previous);
+        result
+    })
+}
+
+fn mcp_repository_root() -> Option<PathBuf> {
+    MCP_REPOSITORY_ROOT.with(|slot| slot.borrow().as_ref().cloned())
+}
+
+/// Resolves Codex's per-request sandbox working directory for the shared Git
+/// EventStore. This mirrors Tiber's MCP transport contract: the installed
+/// binary may start from a plugin directory, while EventCore must operate on
+/// the repository selected by the Codex request.
+fn codex_sandbox_cwd(request: &Value) -> Result<Option<PathBuf>, String> {
+    let Some(value) = request
+        .pointer("/params/_meta/codex~1sandbox-state-meta/sandboxCwd")
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let encoded_path = value
+        .strip_prefix("file://")
+        .ok_or_else(|| "mcp_sandbox_cwd_invalid reason=local_file_uri_required".to_string())?;
+    if !encoded_path.starts_with('/') {
+        return Err("mcp_sandbox_cwd_invalid reason=local_file_uri_required".to_string());
+    }
+    let path = percent_encoding::percent_decode_str(encoded_path)
+        .decode_utf8()
+        .map_err(|error| {
+            format!("mcp_sandbox_cwd_invalid reason=utf8_path_required source={error}")
+        })?;
+    Ok(Some(PathBuf::from(path.as_ref())))
 }
 
 fn write_json_rpc_response(output: &mut impl Write, response: Value) -> io::Result<()> {
@@ -9964,6 +10017,7 @@ impl ServiceSurface {
                         | "workspace-reader.repository"
                         | "setup.preview"
                         | "setup.apply"
+                        | "development_system.codex_sandbox_setup"
                 ) || is_advisory_review_tool(name)
             }
             Self::WorkspaceReader => name.starts_with("workspace-reader."),
@@ -9984,7 +10038,7 @@ impl ServiceSurface {
                 "Use workflow status and domain-intent transitions as the authority for lifecycle decisions. Use final_review.assess_risk before final_review.plan, submit only assignment-bound reviewer evidence, and advance through the canonical review transitions."
             }
             Self::PluginAdvisory => {
-                "Inspect repositories, coordinate structured multi-agent final review, and use confirmed setup.apply only for deterministic repository-local configuration. This plugin is advisory: it does not expose the native workflow lifecycle or project-mutation services, execute project mutations, restrict ordinary harness tools, or authorize external actions."
+                "Inspect repositories, coordinate structured multi-agent final review, and use confirmed setup.apply only for deterministic repository-local configuration. This plugin is advisory: it does not expose the native workflow lifecycle or project-mutation services, execute project mutations, restrict ordinary harness tools, or authorize external actions. If a Git-backed final-review write is blocked by the Codex sandbox, call development_system.codex_sandbox_setup and retry the same structured MCP operation."
             }
             Self::WorkspaceReader => {
                 "Inspect files and repository state through workspace-reader tools. This service has no project mutation capability."
@@ -10283,6 +10337,13 @@ impl ReviewCoordinator {
                         Ok(result) => Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result })),
                         Err(error) => Ok(error_response(id, -32602, &error)),
                     };
+                }
+                if name == "development_system.codex_sandbox_setup" {
+                    return Ok(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": text_content(codex_sandbox_setup())
+                    }));
                 }
                 if !matches!(name, "final_review.plan" | "final_review.assess_risk") {
                     if let Err(error) = self.resolve_state_reference(&mut arguments) {
@@ -11481,7 +11542,12 @@ fn initialize_response(request: &Value, id: Value, service_surface: ServiceSurfa
         "id": id,
         "result": {
             "protocolVersion": requested,
-            "capabilities": { "tools": {} },
+            "capabilities": {
+                "tools": {},
+                "experimental": {
+                    "codex/sandbox-state-meta": {}
+                }
+            },
             "serverInfo": {
                 "name": "development-discipline",
                 "version": env!("CARGO_PKG_VERSION"),
@@ -12204,6 +12270,11 @@ fn semantic_tools() -> Vec<Value> {
             "description": "Apply the exact setup.preview configuration after explicit confirmation. With a harness, it also writes only that harness's project-local MCP entries. It never stages, commits, or changes global harness settings.",
             "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 }, "harness": { "type": "string", "enum": ["codex", "claude"] } }, "required": ["confirmed"], "additionalProperties": false }
         }),
+        json!({
+            "name": "development_system.codex_sandbox_setup",
+            "description": "Preview the narrow Codex approval guidance for Development Discipline's Git-backed EventCore final-review writes.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }),
     ]
 }
 
@@ -12328,6 +12399,26 @@ fn call_tool_at(name: &str, arguments: &Value, now_epoch_seconds: u64) -> Result
         "final_review.assess_risk" => Ok(text_content(risk_assessment_result(arguments)?)),
         other => Err(format!("unsupported tool: {other}")),
     }
+}
+
+fn codex_sandbox_setup() -> String {
+    [
+        "Development Discipline Codex sandbox setup preview",
+        "",
+        "Prefer the narrowest approval that can retry the same structured Development Discipline MCP operation.",
+        "Do not run the whole development-discipline MCP server outside the sandbox.",
+        "",
+        "Request approvals only when a Git-backed final-review call fails because Git cannot write objects, trees, commits, refs, or the local authority state from the Codex sandbox:",
+        "- case-by-case approval for git hash-object",
+        "- case-by-case approval for git mktree",
+        "- case-by-case approval for git commit-tree",
+        "- case-by-case approval for the exact final-review MCP call that persists the EventCore transaction",
+        "",
+        "Persist approval only when the harness can scope it to this exact Development Discipline operation, not to a raw git prefix or the whole MCP server.",
+        "After approval, retry the same structured final-review MCP operation.",
+        "",
+    ]
+    .join("\n")
 }
 
 /// Semantic adapters shared by the advisory coordinator and Tiber's future
@@ -12744,7 +12835,7 @@ fn write_project_mcp_configuration(project_root: &Path, harness: &str) -> Result
                 _ => existing,
             };
             let block = format!(
-                "{begin}\n[mcp_servers.development-discipline]\ncommand = {}\nargs = [\"--service\", \"plugin-advisory\"]\n\n[mcp_servers.tiber]\ncommand = {}\nargs = [\"mcp\", \"stdio\"]\n{end}\n",
+                "{begin}\n[mcp_servers.development-discipline]\ncommand = {}\nargs = [\"--service\", \"plugin-advisory\"]\nenv_vars = [\"SSH_AUTH_SOCK\"]\n\n[mcp_servers.tiber]\ncommand = {}\nargs = [\"mcp\", \"stdio\"]\nenv_vars = [\"SSH_AUTH_SOCK\"]\n{end}\n",
                 toml_string(discipline.to_string_lossy().as_ref()),
                 toml_string(tiber.to_string_lossy().as_ref()),
             );
@@ -13296,8 +13387,10 @@ fn workflow_project_root(arguments: &Value) -> Result<PathBuf, String> {
     match arguments.get("project_root") {
         Some(Value::String(path)) if !path.trim().is_empty() => Ok(PathBuf::from(path)),
         Some(_) => Err("development_workflow.project_root_invalid".to_string()),
-        None => env::current_dir().map_err(|error| {
-            format!("development_workflow.project_root_current_dir_failed source={error}")
+        None => mcp_repository_root().map(Ok).unwrap_or_else(|| {
+            env::current_dir().map_err(|error| {
+                format!("development_workflow.project_root_current_dir_failed source={error}")
+            })
         }),
     }
 }
@@ -22667,6 +22760,7 @@ fn resolved_project_root(arguments: &Value) -> Result<PathBuf, String> {
     let root = string_opt(arguments, "project_root")
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
+        .or_else(mcp_repository_root)
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let normalized = if root.is_absolute() {
         normalize_config_path(&root).ok_or_else(|| "project_root_must_not_escape=true".to_string())
@@ -35678,6 +35772,9 @@ pre_filter = "project-pre"
         }))
         .expect("supported initialize response");
         assert_eq!(supported["result"]["protocolVersion"], "2024-11-05");
+        assert!(supported["result"]["capabilities"]["experimental"]
+            .get("codex/sandbox-state-meta")
+            .is_some());
         assert!(supported["result"]["instructions"]
             .as_str()
             .unwrap()
@@ -35718,6 +35815,102 @@ pre_filter = "project-pre"
             .as_array()
             .unwrap()
             .contains(&json!("2024-11-05")));
+    }
+
+    #[test]
+    fn codex_sandbox_cwd_accepts_a_local_file_uri() {
+        let request = json!({
+            "params": {
+                "_meta": {
+                    "codex/sandbox-state-meta": {
+                        "sandboxCwd": "file:///tmp/review%20repository"
+                    }
+                }
+            }
+        });
+
+        assert_eq!(
+            codex_sandbox_cwd(&request).expect("sandbox cwd"),
+            Some(PathBuf::from("/tmp/review repository"))
+        );
+    }
+
+    #[test]
+    fn codex_sandbox_cwd_rejects_non_local_uris() {
+        let request = json!({
+            "params": {
+                "_meta": {
+                    "codex/sandbox-state-meta": {
+                        "sandboxCwd": "https://example.test/repository"
+                    }
+                }
+            }
+        });
+
+        assert_eq!(
+            codex_sandbox_cwd(&request).expect_err("non-local URI is rejected"),
+            "mcp_sandbox_cwd_invalid reason=local_file_uri_required"
+        );
+    }
+
+    #[test]
+    fn stdio_uses_codex_sandbox_cwd_for_implicit_project_root() {
+        let project_root = test_project_root("stdio-sandbox-cwd");
+        fs::write(
+            project_root.join(".development-system.toml"),
+            "schema_version = 3\n\n[commands.test]\nargv = [\"true\"]\ncapability = \"tests\"\nnetwork = \"denied\"\n",
+        )
+        .expect("write project configuration");
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "setup.preview",
+                "arguments": {},
+                "_meta": {
+                    "codex/sandbox-state-meta": {
+                        "sandboxCwd": format!("file://{}", project_root.display())
+                    }
+                }
+            }
+        });
+        let mut output = Vec::new();
+
+        run_stdio_with_surface(
+            Cursor::new(format!("{request}\n")),
+            &mut output,
+            ServiceSurface::PluginAdvisory,
+        )
+        .expect("stdio response");
+
+        let response: Value = serde_json::from_slice(&output).expect("json response");
+        let content = response["result"]["content"][0]["text"]
+            .as_str()
+            .expect("content text");
+        let preview: Value = serde_json::from_str(content).expect("preview JSON");
+        assert_eq!(
+            preview["project_root"],
+            Value::String(project_root.to_string_lossy().to_string())
+        );
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn codex_mcp_configuration_forwards_the_ssh_agent_to_git_backed_services() {
+        let project_root = test_project_root("codex-mcp-ssh-agent");
+
+        write_project_mcp_configuration(&project_root, "codex")
+            .expect("write Codex MCP configuration");
+        let configuration = fs::read_to_string(project_root.join(".codex/config.toml"))
+            .expect("read Codex MCP configuration");
+
+        assert_eq!(
+            configuration.matches("env_vars = [\"SSH_AUTH_SOCK\"]").count(),
+            2,
+            "Development Discipline and Tiber both need the SSH agent for signed Git EventCore writes"
+        );
+        let _ = fs::remove_dir_all(project_root);
     }
 
     #[test]
