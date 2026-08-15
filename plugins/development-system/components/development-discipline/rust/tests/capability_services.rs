@@ -269,6 +269,68 @@ fn setup_requires_confirmation_and_writes_only_repository_configuration() {
 }
 
 #[test]
+fn setup_apply_writes_only_the_current_harness_project_mcp_configuration() {
+    let root = TempDir::new().expect("repository");
+    let binaries = TempDir::new().expect("binaries");
+    git(root.path(), &["init", "--quiet"]);
+    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
+    fs::create_dir_all(root.path().join(".codex")).expect("Codex directory");
+    fs::write(
+        root.path().join(".codex/config.toml"),
+        "model = \"gpt-5.6\"\n",
+    )
+    .expect("Codex config");
+    fs::write(
+        root.path().join(".mcp.json"),
+        r#"{"mcpServers":{"custom":{"command":"custom-mcp"}}}"#,
+    )
+    .expect("Claude config");
+
+    let codex = mcp_call_with_environment(
+        root.path(),
+        "setup.apply",
+        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["just-ci"], "harness": "codex" }),
+        &[("DEVELOPMENT_SYSTEM_MCP_BINARY_DIRECTORY", binaries.path())],
+    );
+    assert_eq!(
+        codex.pointer("/result/structuredContent/restart_required"),
+        Some(&json!(true))
+    );
+    let codex_config =
+        fs::read_to_string(root.path().join(".codex/config.toml")).expect("Codex config");
+    assert!(codex_config.contains("model = \"gpt-5.6\""));
+    assert!(codex_config.contains("[mcp_servers.development-discipline]"));
+    assert!(codex_config.contains(binaries.path().to_string_lossy().as_ref()));
+    assert!(!root.path().join(".claude").exists());
+
+    let claude = mcp_call_with_environment(
+        root.path(),
+        "setup.apply",
+        json!({ "project_root": root.path(), "confirmed": true, "harness": "claude" }),
+        &[("DEVELOPMENT_SYSTEM_MCP_BINARY_DIRECTORY", binaries.path())],
+    );
+    assert_eq!(
+        claude.pointer("/result/structuredContent/restart_required"),
+        Some(&json!(true))
+    );
+    let claude_config: Value = serde_json::from_str(
+        &fs::read_to_string(root.path().join(".mcp.json")).expect("Claude config"),
+    )
+    .expect("Claude JSON");
+    assert_eq!(
+        claude_config.pointer("/mcpServers/custom/command"),
+        Some(&json!("custom-mcp"))
+    );
+    assert_eq!(
+        claude_config.pointer("/mcpServers/tiber/command"),
+        Some(&json!(binaries.path().join("tiber")))
+    );
+    assert!(claude_config
+        .pointer("/mcpServers/tiber/env_vars")
+        .is_none());
+}
+
+#[test]
 fn setup_apply_migrates_legacy_configuration_without_dropping_project_policy() {
     let root = TempDir::new().expect("repository");
     git(root.path(), &["init", "--quiet"]);

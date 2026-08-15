@@ -113,9 +113,6 @@ for dir in "$root"/plugins/*/; do
 	    if [ -f "$codex_default_mcp" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.codex-mcp.json" ]; then
 	      fail "codex-mcp-manifest-not-declared: $name path=./.codex-mcp.json declared=$mcp_ref"
 	    fi
-	    if [ ! -f "$codex_default_mcp" ] && [ -f "${dir}.mcp.json" ] && [ -z "$mcp_ref" ]; then
-	      fail "codex-mcp-manifest-not-declared: $name path=./.mcp.json"
-	    fi
 	    if [ ! -f "$codex_default_mcp" ] && [ -f "${dir}.mcp.json" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.mcp.json" ]; then
 	      fail "codex-mcp-manifest-not-declared: $name path=./.mcp.json declared=$mcp_ref"
 	    fi

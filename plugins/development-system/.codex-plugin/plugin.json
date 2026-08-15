@@ -1,6 +1,6 @@
 {
   "name": "development-system",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
   "author": {
     "name": "John Wilger",
@@ -8,7 +8,6 @@
   },
   "license": "AGPL-3.0-or-later",
   "keywords": ["development", "workflow", "worktrees", "tiber", "quality"],
-  "mcpServers": "./.codex-mcp.json",
   "hooks": "./hooks/codex.json",
   "interface": {
     "displayName": "Development System",

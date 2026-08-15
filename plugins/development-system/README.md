@@ -16,8 +16,12 @@ The command builds only the current host and atomically installs `tiber` and
 `$XDG_DATA_HOME/ai-plugins/development-system/<plugin-version>/<host>/`.
 When `XDG_DATA_HOME` is unset, it uses `~/.local/share`. Re-running the command
 is safe; a newer plugin version is installed alongside previous versions.
-Launchers execute only that installed binary. They never run Cargo and report
-this command when the matching host/version binary is missing.
+The published plugin intentionally carries no bootstrap MCP manifest. During
+project setup, it writes only the current harness's project-local MCP
+configuration—`.codex/config.toml` for Codex or `.mcp.json` for Claude Code.
+Those entries launch the installed binaries by their absolute XDG paths; they
+do not launch a plugin-relative shell wrapper. Re-run setup after an upgrade,
+then start a new harness session.
 The bootstrap requires a working Cargo environment; the repository's Nix
 devshell is optional. If `just` is unavailable, run
 `scripts/install-development-system-binaries.sh` from the marketplace checkout.
@@ -47,14 +51,14 @@ remains able to inspect, edit, verify, commit, and push while Tiber is being
 bootstrapped. Tiber, rather than this plugin, will own authoritative identity,
 isolation, workflow, memory, verification, and delivery.
 
-Codex MCP launchers resolve relative to the installed plugin root and must work
-from an arbitrary caller directory. A global `[mcp_servers.*]` compatibility
-override is neither required nor part of supported setup.
+Codex and Claude Code each consume project-local direct binary entries. A global
+`[mcp_servers.*]` compatibility override is neither required nor part of
+supported setup.
 
-The Codex manifest explicitly forwards the owner's `SSH_AUTH_SOCK` to both
-trusted installed-root MCP launchers so their EventCore commits remain signed.
+The project-local MCP entries use the harness's ordinary process environment.
 If a signed append reports that the signing agent is unavailable, upgrade or
-reinstall the plugin before restarting Codex; no signing fallback is supported.
+reinstall the plugin before restarting the harness; no signing fallback is
+supported.
 
 The strong recommendation is to install only this plugin. Third-party plugin
 marketplaces add unnecessary supply-chain exposure. The plugin owns its bundled

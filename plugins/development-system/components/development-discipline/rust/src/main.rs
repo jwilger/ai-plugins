@@ -12201,8 +12201,8 @@ fn semantic_tools() -> Vec<Value> {
         }),
         json!({
             "name": "setup.apply",
-            "description": "Apply the exact setup.preview configuration after explicit confirmation. It writes only repository-local Development System configuration and never stages, commits, or changes harness settings.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 } }, "required": ["confirmed"], "additionalProperties": false }
+            "description": "Apply the exact setup.preview configuration after explicit confirmation. With a harness, it also writes only that harness's project-local MCP entries. It never stages, commits, or changes global harness settings.",
+            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 }, "harness": { "type": "string", "enum": ["codex", "claude"] } }, "required": ["confirmed"], "additionalProperties": false }
         }),
     ]
 }
@@ -12686,6 +12686,12 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         }
         semantic::ConfigState::Invalid(error) => return Err(error),
     };
+    let harness_configuration = match arguments.get("harness").and_then(Value::as_str) {
+        None => None,
+        Some("codex") => Some(write_project_mcp_configuration(project_root, "codex")?),
+        Some("claude") => Some(write_project_mcp_configuration(project_root, "claude")?),
+        Some(_) => return Err("development_system.setup_harness_invalid".to_string()),
+    };
     Ok(json!({
         "applied": true,
         "configuration_changed": configuration_changed,
@@ -12693,8 +12699,105 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         "configuration_digest": config.digest(),
         "authority": "advisory",
         "ordinary_harness_tools_restricted": false,
-        "restart_required": false
+        "restart_required": harness_configuration.is_some(),
+        "harness_configuration": harness_configuration
     }))
+}
+
+fn mcp_binary_directory() -> Result<PathBuf, String> {
+    if let Some(path) = env::var_os("DEVELOPMENT_SYSTEM_MCP_BINARY_DIRECTORY") {
+        let path = PathBuf::from(path);
+        if path.is_absolute() {
+            return Ok(path);
+        }
+    }
+    env::current_exe()
+        .map_err(|error| format!("development_system.mcp_binary_path_unavailable source={error}"))?
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "development_system.mcp_binary_path_unavailable".to_string())
+}
+
+fn toml_string(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
+}
+
+fn write_project_mcp_configuration(project_root: &Path, harness: &str) -> Result<Value, String> {
+    let binaries = mcp_binary_directory()?;
+    let discipline = binaries.join("development-discipline-mcp");
+    let tiber = binaries.join("tiber");
+    match harness {
+        "codex" => {
+            let directory = project_root.join(".codex");
+            fs::create_dir_all(&directory).map_err(|error| {
+                format!("development_system.setup_harness_write_failed source={error}")
+            })?;
+            let path = directory.join("config.toml");
+            let existing = fs::read_to_string(&path).unwrap_or_default();
+            let begin = "# >>> development-system MCP servers >>>";
+            let end = "# <<< development-system MCP servers <<<";
+            let retained = match (existing.find(begin), existing.find(end)) {
+                (Some(start), Some(stop)) if stop >= start => {
+                    let after = stop + end.len();
+                    format!("{}{}", &existing[..start], &existing[after..])
+                }
+                _ => existing,
+            };
+            let block = format!(
+                "{begin}\n[mcp_servers.development-discipline]\ncommand = {}\nargs = [\"--service\", \"plugin-advisory\"]\n\n[mcp_servers.tiber]\ncommand = {}\nargs = [\"mcp\", \"stdio\"]\n{end}\n",
+                toml_string(discipline.to_string_lossy().as_ref()),
+                toml_string(tiber.to_string_lossy().as_ref()),
+            );
+            let separator = if retained.is_empty() || retained.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            };
+            fs::write(&path, format!("{retained}{separator}\n{block}")).map_err(|error| {
+                format!("development_system.setup_harness_write_failed source={error}")
+            })?;
+            Ok(json!({ "harness": "codex", "path": ".codex/config.toml" }))
+        }
+        "claude" => {
+            let path = project_root.join(".mcp.json");
+            let mut document = match fs::read_to_string(&path) {
+                Ok(text) => serde_json::from_str::<Value>(&text)
+                    .map_err(|_| "development_system.setup_claude_mcp_invalid".to_string())?,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    json!({ "mcpServers": {} })
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "development_system.setup_harness_read_failed source={error}"
+                    ))
+                }
+            };
+            let servers = document
+                .get_mut("mcpServers")
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| "development_system.setup_claude_mcp_invalid".to_string())?;
+            servers.insert(
+                "development-discipline".to_string(),
+                json!({ "command": discipline, "args": ["--service", "plugin-advisory"] }),
+            );
+            servers.insert(
+                "tiber".to_string(),
+                json!({ "command": tiber, "args": ["mcp", "stdio"] }),
+            );
+            fs::write(
+                &path,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&document).expect("JSON serialization")
+                ),
+            )
+            .map_err(|error| {
+                format!("development_system.setup_harness_write_failed source={error}")
+            })?;
+            Ok(json!({ "harness": "claude", "path": ".mcp.json" }))
+        }
+        _ => Err("development_system.setup_harness_invalid".to_string()),
+    }
 }
 
 fn system_diagnostics_status() -> Result<Value, String> {

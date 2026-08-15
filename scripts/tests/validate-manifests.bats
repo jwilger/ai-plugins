@@ -167,14 +167,13 @@ manifest_for() {
   [[ "$output" == *"missing-codex-mcp-manifest"* ]]
 }
 
-@test "fails when codex MCP manifest exists but is undeclared" {
+@test "allows a project-owned root MCP manifest without a static Codex declaration" {
   make_plugin alpha
   rm -rf "$ROOT/plugins/alpha/.claude-plugin"
   echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/.mcp.json"
   write_manifests "" "alpha"
   run bash "$SCRIPT" "$ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"codex-mcp-manifest-not-declared"* ]]
+  [ "$status" -eq 0 ]
 }
 
 @test "fails when root codex MCP manifest exists but plugin declares another path" {
@@ -189,6 +188,16 @@ manifest_for() {
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"codex-mcp-manifest-not-declared"* ]]
+}
+
+@test "allows a plugin with no packaged MCP manifest" {
+  make_plugin alpha
+  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
+  write_manifests "" "alpha"
+
+  run bash "$SCRIPT" "$ROOT"
+
+  [ "$status" -eq 0 ]
 }
 
 @test "accepts a Codex-specific MCP manifest alongside Claude's root MCP manifest" {

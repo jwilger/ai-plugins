@@ -331,35 +331,29 @@ initialize_codex_plugin_server() {
   [[ "$output" != *"stale-global-launcher-used"* ]]
 }
 
-@test "Codex plugin MCP manifest starts every server from an arbitrary caller directory" {
-  local manifest="$ROOT/plugins/development-system/.codex-mcp.json"
+@test "installed direct binaries start both MCPs from absolute paths" {
+  local tiber_path
+  local discipline_path
 
-  [ "$(jq -r '.mcpServers["development-discipline"].command' "$manifest")" = \
-    "./bin/development-discipline-mcp" ]
-  [ "$(jq -r '.mcpServers["development-discipline"].cwd' "$manifest")" = "." ]
-  [ "$(jq -c '.mcpServers["development-discipline"].env_vars' "$manifest")" = \
-    '["SSH_AUTH_SOCK"]' ]
-  [ "$(jq -r '.mcpServers.tiber.command' "$manifest")" = "./bin/tiber" ]
-  [ "$(jq -r '.mcpServers.tiber.cwd' "$manifest")" = "." ]
-  [ "$(jq -c '.mcpServers.tiber.env_vars' "$manifest")" = \
-    '["SSH_AUTH_SOCK"]' ]
+  source "$ROOT/plugins/development-system/lib/installed-binary.sh"
+  tiber_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" tiber)"
+  discipline_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" development-discipline-mcp)"
 
-  run initialize_codex_plugin_server "$manifest" development-discipline
+  run initialize_server "$discipline_path" --service plugin-advisory
   [ "$status" -eq 0 ]
   [[ "$output" == *'"name":"development-discipline"'* ]]
 
-  run initialize_codex_plugin_server "$manifest" tiber
+  run initialize_server "$tiber_path" mcp stdio
   [ "$status" -eq 0 ]
   [[ "$output" == *'"name":"tiber"'* ]]
 }
 
-@test "Claude plugin MCP manifest starts the advisory coordination service" {
-  local manifest="$ROOT/plugins/development-system/.mcp.json"
-  local command="$ROOT/plugins/development-system/bin/development-discipline-mcp"
-  local args
-  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$manifest")
+@test "installed direct development-discipline binary exposes advisory coordination" {
+  source "$ROOT/plugins/development-system/lib/installed-binary.sh"
+  local command
+  command="$(development_system_installed_binary_path "$ROOT/plugins/development-system" development-discipline-mcp)"
 
-  run list_server_tools "$command" "${args[@]}"
+  run list_server_tools "$command" --service plugin-advisory
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"name":"final_review.plan"'* ]]
