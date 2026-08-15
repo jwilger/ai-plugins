@@ -6,6 +6,10 @@
 # Project-local npm dependencies are restored from package-lock.json.
 /node_modules/
 
+# Generated per-machine Codex MCP configuration. The configured binary paths
+# are resolved from the local XDG data directory during setup.
+/.codex/config.toml
+
 # Rust build artifacts (workspace target dir at repo root).
 /target/
 /**/target/

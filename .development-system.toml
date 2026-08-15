@@ -1,7 +1,7 @@
 schema_version = 3
 
-[commands.just-ci]
-argv = ["nix", "develop", "-c", "just", "ci"]
+[commands.just-pre-commit]
+argv = ["nix", "develop", "-c", "just", "pre-commit"]
 capability = "verification"
 network = "denied"
 

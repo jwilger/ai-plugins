@@ -3,6 +3,12 @@ no_auto_install: true
 
 pre-commit:
   jobs:
+    - name: reject-local-codex-config
+      run: |
+        if ! git diff --cached --quiet -- .codex/config.toml; then
+          echo '.codex/config.toml is generated machine-local configuration and must not be committed.' >&2
+          exit 1
+        fi
     - name: developer-gate
       run: just pre-commit
 
