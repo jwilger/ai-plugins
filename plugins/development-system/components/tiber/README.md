@@ -372,24 +372,14 @@ GitHub runner has no repository signing key. Provide repository-owned signed
 publication automation and rerun the preview; do not disable signing merely to
 admit the generated workflow.
 
-## Release Layout
+## Host-local installation
 
-The plugin ships:
-
-- Rust source under `rust/`
-- a `bin/tiber` launcher
-- a prebuilt x86_64 Linux binary under
-  `dist/x86_64-unknown-linux-gnu/tiber`
-- release metadata in `release-binaries.json`
-- checksum provenance in `release-binaries.sha256`
-
-The launcher prefers a matching bundled binary and falls back to
-`cargo run --manifest-path rust/Cargo.toml --bin tiber` for development.
-Generate the release metadata and checksums with
-`scripts/build-tiber-release-all.sh`.
-
-Tiber v1 supports and packages x86_64 Linux only. Other operating systems and
-architectures fail with an explicit unsupported-host diagnostic.
+Tiber ships Rust source and a `bin/tiber` launcher. After installing or
+upgrading Development System, run
+`just install-development-system-binaries` from the marketplace
+checkout. It builds Tiber for the current host and installs it alongside the
+matching Development Discipline MCP binary. The launcher only executes that
+installed versioned binary; it never invokes Cargo.
 
 ## Harness Support
 

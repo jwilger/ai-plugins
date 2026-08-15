@@ -5,18 +5,25 @@ description: Use when initializing or reconfiguring a repository with the develo
 
 # Development system setup
 
-1. From the primary checkout, call `setup.preview`. Select at least one detected
+1. Resolve the installed Development System plugin root relative to this skill,
+   then run `scripts/install-development-system-binaries.sh` from that root.
+   This is a required setup prerequisite: it builds and installs the current
+   host's `tiber` and `development-discipline-mcp` executables with Cargo. Do
+   not use Nix as a requirement and do not defer this to the user. If Cargo or
+   its required dependencies are unavailable, stop with the installer's
+   diagnostic; do not configure a repository whose MCPs cannot start.
+2. From the primary checkout, call `setup.preview`. Select at least one detected
    verification/test command, preferring `recommended_command_ids`; an empty
    catalog cannot configure the workflow. Show the exact preview and ask for explicit
    confirmation. Preview and confirmation are mandatory even if asked to skip
    them. Any changed option, conflict, scope, or command selection requires a
    fresh preview and approval.
-2. Call `setup.apply` with `confirmed: true`. It writes schema-v3
+3. Call `setup.apply` with `confirmed: true`. It writes schema-v3
    `.development-system.toml` in the primary checkout and never stages or
    commits. It generates no privileged profiles or agents, boundary proofs,
    activation files, or repository launch wrappers. It does not modify global
    Codex, Claude, marketplace, MCP, shell, or SSH configuration.
-3. From a non-plugin working directory, verify that both packaged MCP servers
+4. From a non-plugin working directory, verify that both installed host-local MCP servers
    start through launchers resolved from the installed plugin root. Do not add a
    global `mcp_servers` override to compensate for startup failure.
 

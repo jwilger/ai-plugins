@@ -2,6 +2,30 @@
 
 The single personal development plugin for Codex and Claude Code.
 
+## Host-local binaries
+
+After installing or upgrading this plugin, build its Rust executables once from
+the marketplace checkout:
+
+```shell
+just install-development-system-binaries
+```
+
+The command builds only the current host and atomically installs `tiber` and
+`development-discipline-mcp` in
+`$XDG_DATA_HOME/ai-plugins/development-system/<plugin-version>/<host>/`.
+When `XDG_DATA_HOME` is unset, it uses `~/.local/share`. Re-running the command
+is safe; a newer plugin version is installed alongside previous versions.
+Launchers execute only that installed binary. They never run Cargo and report
+this command when the matching host/version binary is missing.
+The bootstrap requires a working Cargo environment; the repository's Nix
+devshell is optional. If `just` is unavailable, run
+`scripts/install-development-system-binaries.sh` from the marketplace checkout.
+
+The `setup` skill runs this bootstrap automatically before it configures a
+repository, so manual use is only needed when you want the MCPs available
+before running setup.
+
 It is inert outside a Git repository or without a valid schema-3
 `.development-system.toml`. Read-only repository inspection remains available
 in every state. Start configuration through the structured `setup.preview`

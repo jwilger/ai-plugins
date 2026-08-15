@@ -118,11 +118,7 @@ const MAX_PRIOR_DEFENSE_PROMPT_CHARS: usize = 8 * 1024;
 const MAX_DEFERRED_FINDINGS_PER_LENS_PROMPT: usize = MAX_FINDINGS_PER_LENS;
 const PENDING_ASSIGNMENT_SUMMARY_VERSION: &str = "final-review-pending-assignments-v1";
 const LENS_RESULT_SCHEMA_VERSION: &str = "final-review-lens-result-v1";
-const BUILD_SOURCE_FINGERPRINT: &str =
-    match option_env!("DEVELOPMENT_DISCIPLINE_SOURCE_FINGERPRINT") {
-        Some(fingerprint) => fingerprint,
-        None => "development",
-    };
+const BUILD_SOURCE_FINGERPRINT: &str = "local-build";
 const _: () = assert!(
     MAX_STATE_BYTES + MAX_LENS_RESULTS_BYTES + MAX_VERIFIER_RESULT_BYTES + (64 * 1024)
         < MAX_REQUEST_BYTES

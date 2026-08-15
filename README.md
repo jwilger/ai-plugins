@@ -25,7 +25,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses          | Description                                                                                          | Version |
 | ---------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 5.0.2   |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 5.2.0   |
 
 ## Using the marketplace (Claude Code)
 
@@ -39,6 +39,21 @@ Add this repository as a marketplace, then install a plugin from it:
 
 /plugin install development-system@ai-plugins
 ```
+
+After every install or upgrade, build the two local Rust executables from the
+marketplace checkout for the current host:
+
+```shell
+just install-development-system-binaries
+```
+
+The bootstrap installs the binaries under
+`$XDG_DATA_HOME/ai-plugins/development-system/` (or
+`~/.local/share/ai-plugins/development-system/`) by plugin version and host.
+Normal plugin use never invokes Cargo.
+The bootstrap itself requires a working Cargo environment; the repository Nix
+devshell is optional convenience, not a plugin prerequisite. Without `just`,
+run `scripts/install-development-system-binaries.sh` from the checkout.
 
 The marketplace is referenced by its **name** (`ai-plugins`) in install
 commands, regardless of the URL you added it from. List and manage with
@@ -55,6 +70,9 @@ using the Codex plugin flow available in your Codex environment.
 
 Install `development-system` from the local marketplace, then start a new
 thread and run its setup skill from the target repository's primary checkout.
+The setup skill installs the required current-host binaries before configuring
+the repository. You can also run `just install-development-system-binaries`
+manually from the marketplace checkout.
 
 ## Developing in this repo
 
@@ -197,11 +215,10 @@ repo-owned artifact path above. Promptfoo's separate `mcp` provider is for
 testing MCP servers as systems under test and should be added only when a plugin
 or project exposes an MCP server to evaluate.
 
-If Codex or Claude Code reports `No such file or directory` for a bundled MCP
-client, upgrade or reinstall `development-system` so the active root manifest
-and launchers are refreshed. For an explicitly configured Promptfoo server,
-also verify that the pinned runtime above is available on `PATH`. The bundled
-launchers bootstrap through `/bin/sh` before resolving their commands.
+If Codex or Claude Code reports a missing Development System binary, run
+`just install-development-system-binaries` from the matching
+marketplace checkout. For an explicitly configured Promptfoo server, also
+verify that the pinned runtime above is available on `PATH`.
 
 ## Reporting eval cases
 

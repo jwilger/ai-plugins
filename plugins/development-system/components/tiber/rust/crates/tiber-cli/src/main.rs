@@ -13,11 +13,7 @@ use clap::{error::ErrorKind, ArgGroup, Args, CommandFactory, Parser, Subcommand}
 
 const ESCAPED_SUBTASK_TITLE_PREFIX: &str = "\0tiber-subtask-title\0";
 const EXPLICIT_INSTALL_TARGET_PREFIX: &str = "\0tiber-install-target\0";
-const BUILD_VERSION: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
-    "+source.",
-    env!("TIBER_SOURCE_FINGERPRINT")
-);
+const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone)]
 struct CommaSeparatedValues(Vec<String>);

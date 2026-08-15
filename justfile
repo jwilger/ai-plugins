@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace github-actions tiber-harness-rust tiber-rust development-discipline-rust development-discipline-release-from-source development-discipline-release-complete tiber-dashboard-smoke tiber-mutants tiber-release-complete bats
+ci: validate-marketplace github-actions tiber-harness-rust tiber-rust development-discipline-rust tiber-dashboard-smoke tiber-mutants bats
 
 # The developer gate runs before every commit. It deliberately excludes
 # acceptance, release, browser, mutation, and shell suites; CI owns those after
@@ -52,42 +52,17 @@ development-discipline-rust:
     cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
     cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml -- --test-threads=1
 
-development-discipline-release-complete:
-    cd plugins/development-system/components/development-discipline && sha256sum --check release-binaries.sha256
-    bash scripts/check-development-discipline-release-complete.sh
-    jq -e '.mcpServers["development-discipline"] | .command == "./bin/development-discipline-mcp" and .args == ["--service", "plugin-advisory"]' plugins/development-system/components/development-discipline/.mcp.json >/dev/null
-
-development-discipline-release-from-source:
-    bash scripts/check-development-discipline-release-from-source.sh
-
-# Build every bundled development-discipline MCP release target.
-development-discipline-release-all:
-    scripts/build-development-discipline-release-all.sh
+install-development-system-binaries:
+    scripts/install-development-system-binaries.sh
 
 # Browser smoke coverage for the read-only tiber dashboard.
 tiber-dashboard-smoke:
     scripts/evals/ensure-node-deps.sh
     node scripts/tiber/dashboard-smoke.mjs
 
-# Build the tiber release binary for the current host target.
-tiber-release-host:
-    scripts/build-tiber-host-release.sh
-
-# Build every bundled tiber v1 release target.
-tiber-release-all:
-    scripts/build-tiber-release-all.sh
-
 # Mutation gate for the pure tiber core.
 tiber-mutants:
     CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --package tiber-core
-
-# Ensure the tiber release plan names every bundled v1 binary target.
-tiber-release-manifest:
-    bash scripts/check-tiber-release-manifest.sh
-
-# Require every listed tiber release binary to be present and executable.
-tiber-release-complete:
-    bash scripts/check-tiber-release-complete.sh
 
 # Run provider-backed promptfoo evals locally, upload/share the latest result,
 # and print the share URL. This sends eval data to the configured promptfoo

@@ -67,12 +67,11 @@ current Haiku, Sonnet, and Opus aliases with route-appropriate tool allowlists.
 If a harness cannot honor the requested route, the agent reports that failure
 instead of treating inheritance or substitution as success.
 
-The final-review coordinator ships static stdio MCP binaries for x86_64 and
-aarch64 Linux plus both macOS architectures. Its launcher selects the local
-target without a runtime package installation; an explicitly enabled Cargo
-fallback remains available for source-tree development. Release checks validate
-each artifact's target format, checksum, and embedded source/toolchain
-fingerprint.
+The final-review coordinator runs from the Development System plugin's
+versioned host-local binary installation. Build it with
+`just install-development-system-binaries` from the marketplace
+checkout after every plugin install or upgrade. The launcher never compiles
+source at runtime.
 
 The caller carries compact final-review state references between requests while
 the MCP records typed transition facts on the Git-backed

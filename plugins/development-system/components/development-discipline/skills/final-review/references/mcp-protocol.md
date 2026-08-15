@@ -492,17 +492,15 @@ receive a structured invalid-params response listing supported versions.
 
 ## Packaging
 
-Marketplace installs require a packaged MCP binary for the host target. This
-version packages static x86_64 and aarch64 Linux binaries plus macOS binaries
-for both architectures. The launcher selects the matching artifact
-deterministically. Source-tree Cargo
-fallback is development-only and must be explicitly enabled by launcher
-environment; if neither packaged binary nor approved fallback is available, MCP
-enforcement is unavailable and must be reported as such. Incoming stdio requests
-and conditional-lens fanout are bounded so malformed or bursty callers cannot
-grow coordinator memory or review-agent count without limit. On any oversized
-stdio frame, the server stops reading at the request byte limit, emits
+Marketplace installs require the current-host Development System executable.
+From the marketplace checkout, run `just install-development-system-binaries`
+(or `scripts/install-development-system-binaries.sh`) with a working Cargo
+environment. The bootstrap installs versioned, host-local executables under the
+XDG data directory. Launchers resolve only those installed executables and never
+fall back to Cargo at MCP startup; when absent, MCP enforcement is unavailable
+and must be reported with the bootstrap command. Incoming stdio requests and
+conditional-lens fanout are bounded so malformed or bursty callers cannot grow
+coordinator memory or review-agent count without limit. On any oversized stdio
+frame, the server stops reading at the request byte limit, emits
 `request_too_large`, and terminates so the harness can restart it; the process is
-not reusable after that response. Each release binary embeds a fingerprint of
-the Rust source, lockfile, and pinned Rust toolchain. Release checks verify that
-fingerprint, checksums, and target executable formats.
+not reusable after that response.
