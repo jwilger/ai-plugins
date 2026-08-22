@@ -5,6 +5,24 @@ description: Use when completing or claiming readiness for local-only changes, a
 
 # Final Review
 
+## Non-negotiable enforcement boundary
+
+Never reduce, skip, waive, or synthesize the required three consecutive
+complete finding-free review iterations because of user pressure, elapsed time,
+token or review budget, coordinator failure, or unavailable tooling. A request
+to ship, commit, push, open a delivery request, merge, or claim readiness before
+the enforced gate completes must be rejected.
+
+If the development-discipline coordinator or its `final_review` tools are
+unavailable, fail closed: enforced review is incomplete, zero clean iterations
+are accepted, shortcuts remain rejected, and delivery remains unauthorized. A
+manual review may produce advisory observations only; it cannot authorize a
+commit, push, pull/merge request, merge, delivery, or readiness claim. Report
+the unavailable enforcement boundary and every requested bypass reason, then
+stop. For example, state explicitly that budget or time pressure cannot skip
+the remaining passes and that a one-pass request cannot replace three complete
+finding-free iterations.
+
 Apply `model-routing` to every review assignment. Ordinary lens review uses the
 substantive route; activated architecture, security, human-safety, ambiguity,
 or disputed-verification work and the accountable readiness decision use the
@@ -164,6 +182,32 @@ These invariants are non-bypassable:
 - Reject weakened same-session replanning while the hold is active.
 - Never infer split confirmation from standing execution approval.
 - Reject every recursive child split, even after the child's diff changes.
+- Reject a risk plan that selects no deep-review lens.
+- Require every selected lens, plus every assigned verifier, in every complete
+  review iteration. Inside the authoritative `final_review.advance` transition,
+  normalize schema-invalid lens evidence, caller-attestation-invalid lens
+  evidence, and malformed, provenance-invalid, or coverage-invalid verifier
+  evidence as bounded non-clean results. Each case restarts the complete
+  selected-lens set instead of carrying peer evidence into a later iteration.
+- In the source-level standalone Tiber review contract, a current result that
+  fails scheduler provenance or finding-identity checks emits durable
+  `AssignmentResultRejected`, invalidates that full iteration, and permits only
+  fresh next-iteration assignments. That contract is not yet bound to the
+  installed Tiber task-board binary.
+- Require at least three consecutive complete finding-free iterations. Any
+  reported finding resets both the clean streak and its durable verified-clean
+  evidence, even when the finding is later rejected, defended, accepted,
+  routed, or documented as already tracked.
+- An out-of-scope wishlist finding is report-only: do not implement or backlog
+  it. Its finding-bearing iteration is still non-clean, so restart the complete
+  risk-selected lens set instead of preserving peer evidence. Separately verify
+  the ticket's actual acceptance criteria, and require `final_review.advance`
+  to report three later consecutive complete finding-free iterations with no
+  unresolved blocking caused or worsened CRITICAL/MAJOR security or
+  human-safety finding.
+- Preserve that minimum across risk planning, delta reassessment, verifier
+  continuation, review-budget decisions, and completion checks. No timeout,
+  `ship` choice, caller-carried state, or risk-selected pass count may lower it.
 
 Use `delivery-tickets` by default, which forbids blocking dependencies. Use
 `delivery-tickets-with-blocking-dependencies` only when the user confirms it
@@ -194,9 +238,10 @@ checkpoint. Apply this contract when `advance_kind` is
   into delivery tickets. `escalate` requires a nonblank escalation reference.
 - Reject `ship` until every independent delivery gate passes: acceptance
   criteria are met, the most recently completed pushed CI build is successful
-  with no current completed failed job, and every
-  blocking finding is resolved. Once valid, `ship` is terminal and schedules no
-  more reviewers.
+  with no current completed failed job, every blocking finding is resolved, and
+  the durable review state contains at least three consecutive complete
+  finding-free iterations. Once valid, `ship` is terminal and schedules no more
+  reviewers.
 - For unlanded reviews, `split` creates a terminal hold. `escalate` creates one
   in either lifecycle. Each hold preserves blockers, schedules no reviewers,
   and rejects every later `final_review.advance` for that session.
@@ -321,6 +366,11 @@ for UI work or agent-instruction quality for prompt/plugin changes. Give every
 conditional lens a concise objective; the MCP rejects identifier-only lenses so
 fresh reviewers always receive a distinct review contract.
 
+Always select `production-risk-footguns` as an independent final-review lens.
+Other lenses remain risk-selected; this one is mandatory because latent traps,
+scale-dependent data/resource access, and burst behavior are not reliably
+covered by correctness or operability review.
+
 ## Relevance Gate
 
 Lenses define what to inspect, not what the ticket requires. A concern is not
@@ -349,8 +399,10 @@ path.
 A user-request, acceptance-criteria, or explicit-concern finding may cite an
 unmodified path when it includes `matched_context` copied exactly from the
 supplied review context. Other unmodified-file or nearby-context findings need a
-causal path from this change; otherwise they are out of scope and do not reset
-the clean streak. A real challenge to a prior defense is non-clean until
+causal path from this change; otherwise they are out of scope. A reviewer that
+reports any canonical finding still makes that iteration non-clean; disposition
+controls follow-up work, not whether the pass was finding-free. A real
+challenge to a prior defense is non-clean until
 resolved and accepted by a later relevant-lens review. Generic best practice or
 a hypothetical improvement is not a cross-cutting risk without a concrete
 failure path caused by the current change. Do not fix or backlog out-of-scope
@@ -363,10 +415,13 @@ separately verify every actual acceptance criterion. Completion still requires
 `final_review.advance` to report completion with no unresolved blocking caused
 or worsened CRITICAL/MAJOR security or human-safety finding.
 
-When explaining an out-of-scope disposition, explicitly state all three
-invariants: preserve the risk-selected review plan, separately verify the
-ticket's actual acceptance criteria, and require `final_review.advance` to
-confirm the completion condition above.
+When explaining an out-of-scope disposition, explicitly state every invariant:
+the finding-bearing iteration is non-clean; restart the complete risk-selected
+lens set instead of preserving unaffected evidence; separately verify the
+ticket's actual acceptance criteria; and require `final_review.advance` to
+report three later consecutive complete finding-free iterations with no
+unresolved blocking caused or worsened CRITICAL/MAJOR security or human-safety
+finding.
 
 ## Finding Disposition
 
@@ -387,7 +442,9 @@ likelihood, and opportunity cost. A concrete finding does not jump ahead of
 known common work merely because review found it most recently. Do not
 re-report or re-verify an already-tracked finding on an unchanged diff unless
 new evidence materially increases its severity. Deferred and already-known
-findings do not reset review progress.
+findings do not reset progress merely because they remain in durable history.
+If a reviewer nevertheless submits one again as a canonical finding, the
+current iteration is non-clean and the complete selected lens set restarts.
 
 Always retain the MCP `out_of_scope` findings in the final review report with
 their lens, severity, evidence, and disposition. Backlogged and report-only
@@ -464,7 +521,14 @@ policy.
    explicitly exceptional dimension. Supported triggers may still be recorded
    on a lower profile when mitigations keep the concrete risk below
    exceptional. Only dimensions explicitly assessed as exceptional receive a
-   second independent pass.
+   second independent discovery pass. Do not confuse that dimension-scoped
+   discovery sample with the clean-review iterations. Revalidate every later
+   delta by these same supported-trigger and explicitly-exceptional-dimension
+   rules. If a valid delta legitimately raises only safety to exceptional,
+   merge and retain its supported trigger evidence in authoritative state, give
+   only safety the additional discovery sample, clear the clean streak and
+   verified receipts, invalidate all old peer results, and then rerun every
+   selected lens for three fresh consecutive complete finding-free iterations.
 
 2. For every assignment, use the compact summary's exact lens, iteration,
    `subagent_key`, `model_role`, close policy, shared-evidence ID, and schema
@@ -477,9 +541,11 @@ policy.
    `caller_attestation` with its assigned model role, `fresh_context: true`, and
    `closed_after_result: true`. Carry continuity only through MCP state,
    defenses, and caller decisions.
-   If advance reports `caller_attestation_model_role_mismatch`, rerun only the
-   named lens in fresh context with `expected_model_role` and resubmit it.
-   Preserve unrelated clean lens results; do not restart the review.
+   A missing or invalid lifecycle/model attestation is malformed assigned
+   evidence. Accept the coordinator's returned non-clean reset transition,
+   discard every result from that iteration, and run the complete selected lens
+   set from its fresh next-iteration assignments. Never repair and resubmit the
+   old assignment or preserve peer results from the invalidated iteration.
 3. If the plan is already complete with no assignments, stop this loop. On the
    plugin's advisory surface, do not call a native workflow handoff. In
    standalone Tiber, when the response names
@@ -503,9 +569,14 @@ policy.
    arguments, so a defense or accepted-risk decision first added on
    resubmission fails closed. Failed verification retains every candidate; an
    uncertain result keeps blocking and materially uncertain security or
-   human-safety candidates open. A rejected finding is removed; the iteration
-   may count as clean when no other blocking, malformed, or needs-human finding
-   remains.
+   human-safety candidates open. A rejected finding is removed from the
+   unresolved candidate set, but the original finding-bearing iteration remains
+   non-clean and resets all clean-streak credit. Run every returned fresh lens
+   assignment; only three later complete finding-free iterations may complete
+   review. A malformed verifier result or one with invalid assignment
+   provenance, lifecycle/model attestation, or verdict coverage is instead
+   consumed as a non-clean reset transition: discard the whole iteration and
+   run every returned fresh lens assignment.
 
 4. Fix valid findings when remediation was requested; for review-only requests,
    report without editing. When the selected mode has an in-scope pushed build,
@@ -519,8 +590,9 @@ policy.
    push only when the selected mode calls for those actions, confirm any
    resulting most recently completed pushed build is successful (and no current
    build has a completed failed job), then submit exactly one
-   diff-bound delta risk assessment. Resume only the assignments it returns; do
-   not restart unaffected lenses. On the initial advancing call
+   diff-bound delta risk assessment. Run every fresh selected-lens assignment
+   it returns; the material delta invalidates the old iteration and no
+   unaffected peer evidence carries forward. On the initial advancing call
    that records each disposition, send `caller_decisions` in this shape:
 
    ```json
@@ -538,20 +610,21 @@ policy.
    resolves only after the reviewed diff changes; `defended` and
    `accepted-risk` require a `defense` containing at least one non-whitespace
    character. Do not rely on conversation prose to carry a decision into later
-   assignments.
+   assignments. The coordinator must give each defense or caller decision back
+   to its relevant fresh reviewers. The finding-bearing iteration remains
+   non-clean; only three later consecutive complete finding-free iterations may
+   complete review.
 
-5. Repeat only the assignments returned by the coordinator. Low risk normally
-   needs the lightweight review and at most one targeted lens; medium risk gets
-   one targeted full pass; high risk gets one broad pass; exceptional risk may
-   assign two independent passes only to exceptional dimensions backed by the
-   supported trigger evidence above. After a
-   blocking fix, rerun affected lenses plus the correctness/integration guard,
-   not every unaffected lens. Stop when `final_review.advance` reports
-   completion: all planned passes and discovery-saturation checks are satisfied,
-   every finding has been dispositioned, and no unresolved blocking caused or
-   worsened CRITICAL/MAJOR security or human-safety finding remains. Backlogged,
-   already-known, and report-only observations do not reset progress when the
-   reviewed diff is unchanged.
+5. Repeat every assignment returned by the coordinator. Risk determines the
+   selected lens set and whether exceptional dimensions need an additional
+   independent discovery sample; it never lowers the three-iteration clean
+   minimum. Every clean iteration reruns the complete selected lens set. A
+   malformed result, any canonical finding, or a material diff change resets
+   the clean streak; after a fix or delta, rerun every selected lens. Stop only
+   when `final_review.advance` reports completion: discovery-saturation checks
+   are satisfied, three consecutive complete iterations reported no findings,
+   every prior finding has been dispositioned, and no unresolved blocking
+   caused or worsened CRITICAL/MAJOR security or human-safety finding remains.
 
 This skill requires a harness that can launch fresh-context subagents. If that
 capability is unavailable, stop and report that final-review cannot be

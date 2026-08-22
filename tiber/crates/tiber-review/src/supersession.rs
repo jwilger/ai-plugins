@@ -3,6 +3,7 @@
 
 #![expect(
     clippy::missing_trait_methods,
+    clippy::ref_option,
     clippy::single_call_fn,
     clippy::trivially_copy_pass_by_ref,
     reason = "EventCore mapping signatures and static stream discovery are defined by the checked-model API"
@@ -14,7 +15,8 @@ use eventcore::{
 };
 
 use crate::{
-    __eventcore_model_reviewevent, AssignmentId, EvidenceId, ReviewEvent, ReviewFact, ReviewStream,
+    __eventcore_model_reviewevent, AssignmentId, EvidenceId, ReviewEvent, ReviewFact,
+    ReviewSnapshotId, ReviewStream,
 };
 
 #[derive(ModelInput)]
@@ -45,6 +47,8 @@ struct SupersedeAssignmentState {
     #[model(default)]
     issued: bool,
     #[model(default)]
+    assignment_snapshot: Option<ReviewSnapshotId>,
+    #[model(default)]
     completed: bool,
     #[model(default)]
     superseded: bool,
@@ -53,6 +57,7 @@ struct SupersedeAssignmentState {
 #[derive(Clone)]
 struct SupersedeContext {
     issued: bool,
+    assignment_snapshot: Option<ReviewSnapshotId>,
     completed: bool,
     superseded: bool,
 }
@@ -62,14 +67,20 @@ struct SupersedeDecision {
     context: SupersedeContext,
 }
 
-fn supersede_context(issued: &bool, completed: &bool, superseded: &bool) -> SupersedeContext {
+fn supersede_context(
+    issued: &bool,
+    assignment_snapshot: &Option<ReviewSnapshotId>,
+    completed: &bool,
+    superseded: &bool,
+) -> SupersedeContext {
     SupersedeContext {
         issued: *issued,
+        assignment_snapshot: assignment_snapshot.clone(),
         completed: *completed,
         superseded: *superseded,
     }
 }
-mapping! { SupersedeStateToDecision: (SupersedeAssignmentState.issued, SupersedeAssignmentState.completed, SupersedeAssignmentState.superseded) => SupersedeDecision.context using supersede_context; }
+mapping! { SupersedeStateToDecision: (SupersedeAssignmentState.issued, SupersedeAssignmentState.assignment_snapshot, SupersedeAssignmentState.completed, SupersedeAssignmentState.superseded) => SupersedeDecision.context using supersede_context; }
 
 fn supersede_stream(stream: &ReviewStream) -> StreamId {
     stream.as_stream_id().clone()
@@ -81,7 +92,11 @@ fn superseded_fact(
     reason: &EvidenceId,
     context: &SupersedeContext,
 ) -> Result<ReviewFact, CommandError> {
-    if !context.issued || context.completed || context.superseded {
+    if !context.issued
+        || context.assignment_snapshot.is_none()
+        || context.completed
+        || context.superseded
+    {
         return Err(CommandError::ValidationError(
             "review_supersession_not_authorized".to_owned(),
         ));
@@ -109,9 +124,43 @@ impl ModelCommandLogic for SupersedeAssignment {
                 if assignment.id() == &self.assignment_id =>
             {
                 folded.issued = true;
+                folded.assignment_snapshot = Some(assignment.snapshot().clone());
             }
             ReviewFact::AssignmentResultAccepted { result }
                 if result.assignment_id() == &self.assignment_id =>
+            {
+                folded.completed = true;
+            }
+            ReviewFact::AssignmentResultRejected { assignment_id, .. }
+                if assignment_id == &self.assignment_id =>
+            {
+                folded.completed = true;
+            }
+            ReviewFact::AssignmentResultRejected {
+                snapshot,
+                iteration,
+                ..
+            } if folded.assignment_snapshot.as_ref() == Some(snapshot)
+                && self.assignment_id.iteration() == *iteration =>
+            {
+                folded.completed = true;
+            }
+            ReviewFact::DeltaReassessed { from_snapshot, .. }
+                if folded.assignment_snapshot.as_ref() == Some(from_snapshot) =>
+            {
+                folded.completed = true;
+            }
+            ReviewFact::ReviewIterationCompleted {
+                snapshot,
+                iteration,
+                ..
+            } if folded.assignment_snapshot.as_ref() == Some(snapshot)
+                && self.assignment_id.iteration() == *iteration =>
+            {
+                folded.completed = true;
+            }
+            ReviewFact::CleanReviewAccepted { snapshot, .. }
+                if folded.assignment_snapshot.as_ref() == Some(snapshot) =>
             {
                 folded.completed = true;
             }
@@ -123,9 +172,11 @@ impl ModelCommandLogic for SupersedeAssignment {
             ReviewFact::RiskAssessed { .. }
             | ReviewFact::AssignmentIssued { .. }
             | ReviewFact::AssignmentResultAccepted { .. }
+            | ReviewFact::AssignmentResultRejected { .. }
             | ReviewFact::AssignmentSuperseded { .. }
             | ReviewFact::DeltaReassessed { .. }
             | ReviewFact::FindingResolutionVerified { .. }
+            | ReviewFact::ReviewIterationCompleted { .. }
             | ReviewFact::CleanReviewAccepted { .. } => {}
         }
         Modeled::from_built(folded)
@@ -140,10 +191,11 @@ impl ModelCommandLogic for SupersedeAssignment {
                 state.as_ref(),
                 state.as_ref(),
                 state.as_ref(),
+                state.as_ref(),
             )))
             .build();
         let context = &decision.as_ref().context;
-        if !context.issued {
+        if !context.issued || context.assignment_snapshot.is_none() {
             return Err(CommandError::ValidationError(
                 "review_assignment_not_issued".to_owned(),
             ));

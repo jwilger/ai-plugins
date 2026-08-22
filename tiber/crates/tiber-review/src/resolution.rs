@@ -53,6 +53,8 @@ struct VerifyFindingResolutionState {
     remediation_assignment: Option<ReviewAssignment>,
     #[model(default)]
     remediation_result: Option<AssignmentResult>,
+    #[model(default)]
+    iteration_closed: bool,
 }
 
 #[derive(Clone)]
@@ -61,6 +63,7 @@ struct ResolutionContext {
     already_resolved: bool,
     remediation_assignment: Option<ReviewAssignment>,
     remediation_result: Option<AssignmentResult>,
+    iteration_closed: bool,
 }
 
 #[derive(ModelOutput)]
@@ -73,15 +76,17 @@ fn resolution_context(
     resolved: &bool,
     assignment: &Option<ReviewAssignment>,
     result: &Option<AssignmentResult>,
+    iteration_closed: &bool,
 ) -> ResolutionContext {
     ResolutionContext {
         blocking_occurrence_accepted: *accepted,
         already_resolved: *resolved,
         remediation_assignment: assignment.clone(),
         remediation_result: result.clone(),
+        iteration_closed: *iteration_closed,
     }
 }
-mapping! { ResolutionStateToDecision: (VerifyFindingResolutionState.blocking_occurrence_accepted, VerifyFindingResolutionState.already_resolved, VerifyFindingResolutionState.remediation_assignment, VerifyFindingResolutionState.remediation_result) => ResolutionDecision.context using resolution_context; }
+mapping! { ResolutionStateToDecision: (VerifyFindingResolutionState.blocking_occurrence_accepted, VerifyFindingResolutionState.already_resolved, VerifyFindingResolutionState.remediation_assignment, VerifyFindingResolutionState.remediation_result, VerifyFindingResolutionState.iteration_closed) => ResolutionDecision.context using resolution_context; }
 
 fn resolution_stream(stream: &ReviewStream) -> StreamId {
     stream.as_stream_id().clone()
@@ -124,24 +129,64 @@ impl ModelCommandLogic for VerifyFindingResolution {
                     && assignment.finding_target() == Some(&self.finding_id) =>
             {
                 folded.remediation_assignment = Some(assignment.clone());
+                folded.iteration_closed = false;
             }
-            ReviewFact::DeltaReassessed {
-                affected_lenses, ..
-            } if affected_lenses.contains(self.finding_id.assignment_id().lens()) => {
-                folded.blocking_occurrence_accepted = false;
+            ReviewFact::DeltaReassessed { .. } => {
                 folded.remediation_assignment = None;
                 folded.remediation_result = None;
+                folded.iteration_closed = true;
+            }
+            ReviewFact::AssignmentResultRejected {
+                snapshot,
+                iteration,
+                ..
+            } if folded
+                .remediation_assignment
+                .as_ref()
+                .is_some_and(|assignment| {
+                    assignment.snapshot() == snapshot && assignment.id().iteration() == *iteration
+                }) =>
+            {
+                folded.iteration_closed = true;
+            }
+            ReviewFact::ReviewIterationCompleted {
+                snapshot,
+                iteration,
+                ..
+            } if folded
+                .remediation_assignment
+                .as_ref()
+                .is_some_and(|assignment| {
+                    assignment.snapshot() == snapshot && assignment.id().iteration() == *iteration
+                }) =>
+            {
+                folded.iteration_closed = true;
+            }
+            ReviewFact::CleanReviewAccepted { snapshot, .. }
+                if folded
+                    .remediation_assignment
+                    .as_ref()
+                    .is_some_and(|assignment| assignment.snapshot() == snapshot) =>
+            {
+                folded.iteration_closed = true;
             }
             ReviewFact::FindingResolutionVerified { finding_id, .. }
                 if finding_id == &self.finding_id =>
             {
                 folded.already_resolved = true;
             }
-            ReviewFact::RiskAssessed { .. }
-            | ReviewFact::AssignmentIssued { .. }
+            ReviewFact::RiskAssessed { .. } => {
+                folded.blocking_occurrence_accepted = false;
+                folded.already_resolved = false;
+                folded.remediation_assignment = None;
+                folded.remediation_result = None;
+                folded.iteration_closed = false;
+            }
+            ReviewFact::AssignmentIssued { .. }
+            | ReviewFact::AssignmentResultRejected { .. }
             | ReviewFact::AssignmentSuperseded { .. }
             | ReviewFact::FindingResolutionVerified { .. }
-            | ReviewFact::DeltaReassessed { .. }
+            | ReviewFact::ReviewIterationCompleted { .. }
             | ReviewFact::CleanReviewAccepted { .. } => {}
         }
         Modeled::from_built(folded)
@@ -157,9 +202,15 @@ impl ModelCommandLogic for VerifyFindingResolution {
                 state.as_ref(),
                 state.as_ref(),
                 state.as_ref(),
+                state.as_ref(),
             )))
             .build();
         let context = &decision.as_ref().context;
+        if context.iteration_closed {
+            return Err(CommandError::ValidationError(
+                "review_remediation_iteration_closed".to_owned(),
+            ));
+        }
         if !context.blocking_occurrence_accepted {
             return Err(CommandError::ValidationError(
                 "review_blocking_finding_not_accepted".to_owned(),

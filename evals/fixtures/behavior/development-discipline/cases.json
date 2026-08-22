@@ -24,7 +24,7 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response treats the abandoned-column suggestion as an out-of-scope wishlist observation because it contradicts an explicit user decision and is not tied to the in-progress sorting diff, says it is report-only and does not reset otherwise valid review progress, preserves the risk-selected review plan, and requires final_review.advance to report completion with no unresolved blocking caused security or human-safety finding after disposition. It must separately require the ticket's actual acceptance criteria. Fail if it expands the task to add the abandoned column, creates backlog work for a generic wishlist item, treats it as a blocker or progress reset, restarts unaffected lenses, or uses disposition to skip an acceptance criterion.",
+    "semanticRubric": "Pass if the response treats the abandoned-column suggestion as an out-of-scope wishlist observation because it contradicts an explicit user decision and is not tied to the in-progress sorting diff, says it is report-only rather than implementation or backlog work, but also says any reported canonical finding makes this iteration non-clean and restarts the complete risk-selected lens set. It must require final_review.advance to report three later consecutive complete finding-free iterations with no unresolved blocking caused security or human-safety finding, while separately requiring the ticket's actual acceptance criteria. Fail if it expands the task to add the abandoned column, creates backlog work for a generic wishlist item, lets disposition count the finding-bearing iteration as clean, preserves only unaffected lens evidence, or uses disposition to skip an acceptance criterion.",
     "hardAssertions": [
       {
         "id": "no-out-of-scope-fix-intent",
@@ -38,7 +38,7 @@
     ],
     "calibration": {
       "pass": [
-        "Classify the abandoned-column comment as an out-of-scope report-only wishlist observation because the user explicitly excluded abandoned tasks and the PR changes only in-progress sorting. It does not reset MCP progress; continue only the risk-selected assignments until final_review.advance reports no unresolved blocking caused security or safety finding, while still requiring the sorting acceptance criteria."
+        "Classify the abandoned-column comment as an out-of-scope report-only wishlist observation because the user explicitly excluded abandoned tasks and the PR changes only in-progress sorting. Do not implement or backlog it, but because a canonical finding was reported, mark the iteration non-clean and rerun the complete selected lens set until three consecutive complete iterations report nothing, while still requiring the sorting acceptance criteria."
       ],
       "fail": [
         "Treat the abandoned-column comment as a final-review blocker and add that column before continuing."
@@ -70,7 +70,7 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response says a review lens defines what to inspect but does not expand ticket scope; classifies the proposed runner, reproducibility, and action-pinning work as out-of-scope wishlist or generic-hardening observations because they are neither requested nor tied to a concrete plausible failure caused by the diff; does not implement or backlog that work; and continues only the coordinator's risk-selected assignments. Fail if it treats release-integration as authority to invent acceptance criteria, implements or tickets any proposed CI expansion, restarts unaffected lenses, or lets generic best practice count as a finding without a concrete causal path from the active change.",
+    "semanticRubric": "Pass if the response says a review lens defines what to inspect but does not expand ticket scope; classifies the proposed runner, reproducibility, and action-pinning work as out-of-scope wishlist or generic-hardening observations because they are neither requested nor tied to a concrete plausible failure caused by the diff; and does not implement or backlog that work. Because the reviewer nevertheless reported canonical findings, it must mark that iteration non-clean and rerun the complete selected lens set. Fail if it treats release-integration as authority to invent acceptance criteria, implements or tickets any proposed CI expansion, lets disposition count the finding-bearing iteration as clean, preserves only unaffected lens evidence, or treats generic best practice as an in-scope defect without a concrete causal path.",
     "hardAssertions": [
       {
         "id": "no-invented-ci-fix-intent",
@@ -83,7 +83,7 @@
     ],
     "calibration": {
       "pass": [
-        "Classify all three suggestions as out-of-scope observations. The release lens may inspect integration risks, but it cannot create requirements. Without a concrete failure path caused by this routing diff, generic CI hardening is neither backlog work nor a progress reset; continue only the coordinator's remaining risk-selected assignments."
+        "Classify all three suggestions as out-of-scope observations. The release lens may inspect integration risks, but it cannot create requirements, so do not implement or backlog them. Because the lens reported canonical findings, the iteration is non-clean and the coordinator reruns the complete selected lens set."
       ],
       "fail": [
         "Add the runner matrix and reproducibility jobs because the release-integration reviewer requested them."
@@ -105,11 +105,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response applies a path/scope relevance gate, requires a causal link from the current diff before treating an unmodified-file observation as a current-ticket finding, and uses prior defenses plus same-diff tracking to avoid duplicate feedback. It should classify the stale no-link observation as already known/out of scope without re-reporting, re-verifying, or resetting progress. If materially new evidence genuinely increases severity or challenges the defense, rerun the affected lens, disposition the finding, and add the correctness/integration guard rather than restarting every lens. Fail if nearby retrieved context is automatically actionable, an unchanged known item resets progress, a defended issue reopens without material evidence, or every unaffected lens restarts.",
+    "semanticRubric": "Pass if the response applies a path/scope relevance gate, requires a causal link from the current diff before treating an unmodified-file observation as a current-ticket finding, and uses prior defenses plus same-diff tracking to tell the subagent not to re-report stale duplicate feedback. If the invalid duplicate is already present in a submitted result, it must be classified already-known/out-of-scope but still make that iteration non-clean; if materially new evidence increases severity or challenges the defense, disposition it and rerun the complete selected lens set. Fail if nearby retrieved context is automatically actionable, a defended issue reopens without material evidence, a submitted finding-bearing iteration counts clean, or unaffected selected lenses are carried into a later clean iteration.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Ask whether the finding has a causal link to the current diff and materially new evidence. If neither exists, treat it as already known/out of scope without re-reporting, re-verifying, or resetting progress. If new evidence genuinely changes the risk, disposition it and rerun the affected lens plus the correctness/integration guard only."
+        "Ask whether the finding has a causal link to the current diff and materially new evidence. If neither exists, tell the reviewer not to re-report it and classify a submitted duplicate as already known/out of scope; the submitted finding still makes that iteration non-clean. If new evidence changes the risk, disposition it and rerun every selected lens until three consecutive complete passes report nothing."
       ],
       "fail": [
         "Reopen the stale unmodified-file issue because a subagent mentioned it, even though the diff does not touch or call it."
@@ -254,6 +254,37 @@
       ],
       "fail": [
         "Send state and lens_results normally. Only send current_changed_files when something changed; no hash is needed for unchanged iterations, and a verifier resubmission can send verifier_result by itself."
+      ]
+    }
+  },
+  {
+    "case_id": "final-review-malformed-result-durably-resets-clean-streak",
+    "behavior": "Makes malformed assigned evidence an authoritative pass-reset transition instead of a retryable validation error that preserves prior clean passes.",
+    "prompt": "A final-review session has two consecutive complete finding-free iterations. In iteration three, one assigned lens result is missing `status`; in another deployment the result has the right assignment key but a caller attestation with the wrong model role; and in a third, a requested verifier response has invalid assignment provenance or malformed verdict coverage. May the caller correct any result and keep the two-pass streak? Describe the coordinator transition, the assignments that follow, the minimum remaining passes, and the equivalent source-level native-Tiber contract that is not yet bound to the installed task-board binary.",
+    "tags": [
+      "development-discipline",
+      "final-review",
+      "malformed-evidence",
+      "state-integrity"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "state-transition", "adversarial-safety"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response says no correction can preserve the two-pass streak; the coordinator bounds and classifies schema-invalid lens evidence, attestation-invalid lens evidence, and malformed or provenance-invalid verifier evidence inside the authoritative advance transition, records a non-clean iteration, clears both clean_streak and durable verified-clean evidence, advances the iteration, closes the pending verifier when present, and reassigns the complete selected lens set. It must require three new consecutive complete finding-free iterations. It must also say the source-level native Tiber contract emits a durable AssignmentResultRejected fact for a current result that fails scheduler provenance or finding identity, invalidates the full iteration, and permits only fresh next-iteration assignments, while not claiming that this contract is already bound to the installed task-board binary. Fail if malformed lens or verifier evidence is only a validation error, if a corrected retry can become the third clean pass, if unaffected lens results carry forward, if only one or two new passes are required, if Tiber leaves rejection absent from durable state, or if the response claims installed Tiber task transitions enforce this source-level contract today.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "No. Malformed lens or verifier submissions become authoritative reset evidence: the coordinator persists a non-clean transition, clears the streak and verified-clean receipts, advances, closes any pending verifier, and reissues every selected lens; three fresh complete finding-free passes are required. The source-level native Tiber contract records AssignmentResultRejected for current provenance or finding-identity failure, invalidates the iteration, and accepts only fresh next-iteration assignments, but that contract is not yet bound to the installed task-board binary."
+      ],
+      "fail": [
+        "Fix the missing field or model label and resubmit iteration three; because malformed payloads are rejected before state mutation, the two earlier clean passes still count."
       ]
     }
   },
@@ -446,7 +477,7 @@
   {
     "case_id": "final-review-medium-risk-budget-checkpoint",
     "behavior": "Makes a contract-bound ship, split, or escalate decision after persisting medium-risk review evidence at the 75-minute checkpoint.",
-    "prompt": "A still-unlanded, medium-risk final-review session reaches 75 minutes while final_review.advance is processing clean lens results, but an earlier caused MAJOR security blocker is still unresolved. What happens to the submitted findings, what state transition should the coordinator return, and what must the next call contain? List the exact state fields and decision-specific ticket or escalation references. Can the caller choose ship now? If the blocker is later resolved, what does a valid ship decision do, and which acceptance and CI gates still apply? What happens after split or escalate?",
+    "prompt": "A still-unlanded, medium-risk final-review session reaches 75 minutes while final_review.advance is processing its first complete finding-free multi-lens pass, but an earlier caused MAJOR security blocker is still unresolved. What happens to the submitted findings, what state transition should the coordinator return, and what must the next call contain? List the exact state fields and decision-specific ticket or escalation references. Can the caller choose ship now? If the blocker is later resolved, can ship bypass the remaining two required consecutive finding-free passes? What do valid ship, split, and escalate decisions do, and which acceptance and CI gates still apply?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -463,14 +494,14 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response says the coordinator first persists the submitted lens findings, then returns authoritative state with advance_kind review_budget_checkpoint, checkpoint_pending true, and no next assignments; says the next advance uses that returned state, unchanged current_diff_hash, empty lens_results, and one explicit ship/split/escalate decision with rationale; rejects ship because the blocker remains; requires at least two distinct ticket references for split or an escalation reference for escalate; and says split/escalate create a terminal hold preserving blockers. It must add that a valid ship after blockers are resolved is terminal for final review and schedules no more lenses, while acceptance criteria, a successful most-recently-completed in-scope build, and no current completed failed job remain separate gates. Queued or running is waiting, not green replacement evidence. Fail if findings can be dropped, ship bypasses the blocker, reviewers rerun before deciding, ship resumes nonblocking lens work indefinitely, or a hold allows later advances.",
+    "semanticRubric": "Pass if the response says the coordinator first persists the submitted lens findings, then returns authoritative state with advance_kind review_budget_checkpoint, checkpoint_pending true, and no next assignments; says the next advance uses that returned state, unchanged current_diff_hash, empty lens_results, and one explicit ship/split/escalate decision with rationale; rejects ship because the blocker remains and, independently, rejects it until at least three consecutive complete finding-free iterations are durably verified; requires at least two distinct ticket references for split or an escalation reference for escalate; and says split/escalate create a terminal hold preserving blockers. It must add that a valid ship after blockers are resolved and the three-pass threshold is met is terminal for final review and schedules no more lenses, while acceptance criteria, a successful most-recently-completed in-scope build, and no current completed failed job remain separate gates. Queued or running is waiting, not green replacement evidence. Fail if findings can be dropped, the budget decision reduces the clean-pass requirement, ship bypasses either the blocker or the three-pass threshold, reviewers rerun before deciding, ship resumes nonblocking lens work indefinitely, or a hold allows later advances.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Persist the lens results and return a review_budget_checkpoint with no assignments. The next call is decision-only: returned state, unchanged hash, empty lens_results, and ship/split/escalate plus rationale. Ship is rejected while the blocker remains; once permitted it terminates final review. Split needs two ticket references and escalate needs a reference, and either puts the session on terminal hold. Acceptance criteria and latest pushed CI still gate delivery."
+        "Persist the lens results and return a review_budget_checkpoint with no assignments. The next call is decision-only: returned state, unchanged hash, empty lens_results, and ship/split/escalate plus rationale. Ship is rejected while the blocker remains and still cannot be chosen after resolution until three consecutive complete finding-free passes are durably verified; the checkpoint cannot lower that requirement. Once both gates permit ship, it terminates final review. Split needs two ticket references and escalate needs a reference, and either puts the session on terminal hold. Acceptance criteria and latest pushed CI still gate delivery."
       ],
       "fail": [
-        "Discard the lens results, restart the review, or choose ship because the 75-minute budget supersedes the unresolved security blocker and acceptance criteria."
+        "Discard the lens results, restart the review, or choose ship because the 75-minute budget reduces the clean requirement to one pass or supersedes the unresolved security blocker and acceptance criteria."
       ]
     }
   },
@@ -649,7 +680,7 @@
   {
     "case_id": "final-review-exceptional-risk-requires-supported-evidence",
     "behavior": "Allows multiple independent passes only for explicitly exceptional dimensions backed by a supported exceptional-risk trigger.",
-    "prompt": "A broad scout labels a local tooling change exceptional and requests two passes for architecture. First it returns no exceptional_triggers, then it tries large-diff as a trigger. What must the coordinator accept or reject, which exact trigger categories are supported, and what happens if a later delta legitimately raises only the safety dimension to exceptional?",
+    "prompt": "A broad scout labels a local tooling change exceptional and requests two passes for architecture. First it returns no exceptional_triggers, then it tries large-diff as a trigger. What must the coordinator accept or reject, which exact trigger categories are supported, and can a supported trigger remain recorded on a mitigated lower-risk profile? Must a later delta pass the same trigger-and-dimension validation, and what happens if that delta legitimately raises only the safety dimension to exceptional?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -667,11 +698,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response rejects both the empty trigger list and invented large-diff trigger; names the only supported IDs as destructive-or-irreversible-operation, authentication-or-authorization-boundary, sensitive-data-migration, cryptographic-behavior, and safety-critical-behavior; requires exceptional overall risk to include at least one supported trigger and one explicitly exceptional dimension; and says only explicitly exceptional dimensions receive two independent passes. It must say a legitimate delta is validated the same way, preserves/merges its trigger evidence in authoritative state, reruns the affected safety lens plus the correctness/integration guard, and does not restart unaffected lenses. Supported trigger categories may be recorded on lower profiles when concrete mitigations keep risk below exceptional. Fail if large diff alone is treated as exceptional evidence, an empty/arbitrary trigger unlocks multiple passes, every lens gets two passes, or delta escalation discards trigger evidence.",
+    "semanticRubric": "Pass if the response rejects both the empty trigger list and invented large-diff trigger; names the only supported IDs as destructive-or-irreversible-operation, authentication-or-authorization-boundary, sensitive-data-migration, cryptographic-behavior, and safety-critical-behavior; requires exceptional overall risk to include at least one supported trigger and one explicitly exceptional dimension; and says only explicitly exceptional dimensions receive the extra independent discovery sample. It must say a legitimate delta is validated the same way, preserves/merges its trigger evidence in authoritative state, resets the clean streak, and reruns every selected lens for three consecutive complete finding-free iterations. Supported trigger categories may be recorded on lower profiles when concrete mitigations keep risk below exceptional. Fail if large diff alone is treated as exceptional evidence, an empty/arbitrary trigger unlocks multiple discovery samples, every lens gets an exceptional-only extra sample, delta escalation discards trigger evidence, or unaffected selected lenses are carried into a later clean iteration.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Reject empty or invented exceptional evidence. Accept only the five documented trigger IDs, require an explicitly exceptional dimension, and give a second pass only to that dimension. A valid safety-critical delta keeps its trigger evidence and targets safety plus the correctness guard without restarting unrelated lenses."
+        "Reject empty or invented exceptional evidence. Accept only the five documented trigger IDs, require an explicitly exceptional dimension, and give the extra discovery sample only to that dimension. A supported trigger can remain recorded on a mitigated lower-risk profile. Validate a safety-critical delta by the same trigger-and-dimension rules, keep its trigger evidence, reset the clean streak, and rerun every selected lens until three consecutive complete passes report nothing."
       ],
       "fail": [
         "Treat large-diff as an exceptional trigger, schedule two passes for every lens, and forget the trigger when the replacement diff is rebound."

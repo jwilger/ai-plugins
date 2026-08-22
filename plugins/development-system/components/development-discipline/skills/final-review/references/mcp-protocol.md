@@ -110,10 +110,23 @@ assignment's full prompt and result schema. Repeated summary or prompt retrieval
 is idempotent: it appends no event, changes no revision, fingerprint, scope, or
 hash, and never reassigns a lens or model role.
 
-On `caller_attestation_model_role_mismatch`, use the reported `subagent_key`,
-`expected_model_role`, and `received_model_role`. Rerun only that lens in fresh
-context with the assigned role, close it, and resubmit. Preserve unrelated clean
-lenses instead of restarting them.
+Missing or invalid lifecycle/model attestation is malformed assigned evidence,
+not a retryable field error. `final_review.advance` records a non-clean reset
+transition, clears the streak and durable verified-clean receipts, advances the
+iteration, and returns fresh assignments for the complete selected lens set.
+Discard every old result; never repair the old assignment or preserve peer
+results from the invalidated iteration.
+
+The same authoritative reset applies to a malformed verifier response and to
+invalid verifier assignment provenance or verdict coverage. The transition
+closes the pending verifier, records the bounded rejection reason, and reissues
+the complete selected lens set; a corrected verifier response cannot resume the
+invalidated iteration.
+
+The equivalent standalone-Tiber transition emits durable
+`AssignmentResultRejected` when a current result fails scheduler provenance or
+finding-identity checks. That fact invalidates the full iteration, clears the
+consecutive-clean streak, and permits only fresh next-iteration assignments.
 
 Creation is insert-only and every
 transition uses a durable revision compare-and-swap, so concurrent processes
@@ -123,12 +136,13 @@ fingerprints and a restart, resume, or abandon recovery action; advancing a
 completed session also fails. Each process retains at most 32 active sessions,
 and durable storage is bounded independently.
 
-When `final_review.plan` selects no lenses and returns `assignments: []`, the
-state is already complete. Calling `final_review.advance` for this terminal
-state is a protocol error. The plugin's advisory surface returns no next tool;
-stop without calling a native workflow handoff. Standalone Tiber may name
-`next_tool: workflow.record_clean_review`; only when that native workflow
-service is actually available, pass the plan's `state_ref` as
+`final_review.plan` rejects a risk assessment that selects no deep-review lens.
+A review can reach completion only after at least three consecutive complete
+finding-free iterations of every selected lens and assigned verifier. The
+plugin's advisory surface returns no native workflow handoff; stop without
+calling one. Standalone Tiber may name `next_tool:
+workflow.record_clean_review`; only when that native workflow service is
+actually available, pass the terminal plan's `state_ref` as
 `review_state_ref`.
 When an advance returns `verifier_required`, the server retains the pending
 assignment ID and exact core pre-verifier arguments. Until the caller resubmits
@@ -302,9 +316,10 @@ send empty `lens_results`, and add one `review_budget_decision`:
 requires 2-16 distinct nonblank `ticket_references`; `escalate` requires a
 nonblank `escalation_reference`. The coordinator rejects premature, duplicate,
 malformed, or diff-changing decision calls. `ship` is rejected while any known
-blocking finding remains and never substitutes for acceptance criteria or CI.
-A valid `ship` decision is terminal for final review: it clears remaining
-nonblocking lens work, returns `complete: true`, and schedules no reviewers.
+blocking finding remains or fewer than three consecutive complete finding-free
+iterations exist, and it never substitutes for acceptance criteria or CI. A
+valid `ship` decision is terminal for final review, returns `complete: true`,
+and schedules no reviewers; it cannot discard remaining lens work.
 The calling workflow must still satisfy the ticket's acceptance criteria and
 confirm the most recently completed pushed CI build is successful before
 release or new work. A newer queued or running build does not replace that
@@ -482,7 +497,7 @@ runtime facts after closing each subagent:
 
 Append this object to every lens result before `final_review.advance`, and to a
 verifier result after closing the verifier. Missing or mismatched attestations
-block the transition.
+produce the authoritative non-clean reset transition described above.
 
 ## Protocol Versions
 

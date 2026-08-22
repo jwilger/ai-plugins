@@ -5,6 +5,7 @@
     clippy::missing_trait_methods,
     clippy::ref_option,
     clippy::single_call_fn,
+    clippy::trivially_copy_pass_by_ref,
     reason = "EventCore mapping signatures and static stream discovery are defined by the checked-model API"
 )]
 
@@ -57,6 +58,8 @@ struct ReassessDeltaState {
     accepted_delta_result: Option<AssignmentResult>,
     #[model(default)]
     delta_assignment: Option<ReviewAssignment>,
+    #[model(default)]
+    iteration_closed: bool,
 }
 
 #[derive(Clone)]
@@ -65,6 +68,7 @@ struct ReassessDeltaContext {
     assessed_lenses: BTreeSet<ReviewLens>,
     accepted_delta_result: Option<AssignmentResult>,
     delta_assignment: Option<ReviewAssignment>,
+    iteration_closed: bool,
 }
 
 #[derive(ModelOutput)]
@@ -77,18 +81,20 @@ fn delta_context(
     assessed_lenses: &BTreeSet<ReviewLens>,
     result: &Option<AssignmentResult>,
     assignment: &Option<ReviewAssignment>,
+    iteration_closed: &bool,
 ) -> ReassessDeltaContext {
     ReassessDeltaContext {
         current_snapshot: current_snapshot.clone(),
         assessed_lenses: assessed_lenses.clone(),
         accepted_delta_result: result.clone(),
         delta_assignment: assignment.clone(),
+        iteration_closed: *iteration_closed,
     }
 }
 
 mapping! {
     ReassessDeltaStateToDecision:
-        (ReassessDeltaState.current_snapshot, ReassessDeltaState.assessed_lenses, ReassessDeltaState.accepted_delta_result, ReassessDeltaState.delta_assignment) => ReassessDeltaDecision.context
+        (ReassessDeltaState.current_snapshot, ReassessDeltaState.assessed_lenses, ReassessDeltaState.accepted_delta_result, ReassessDeltaState.delta_assignment, ReassessDeltaState.iteration_closed) => ReassessDeltaDecision.context
         using delta_context;
 }
 
@@ -159,6 +165,37 @@ impl ModelCommandLogic for ReassessDelta {
             && assignment.id().kind() == AssignmentKind::DeltaRisk
         {
             folded.delta_assignment = Some(assignment.clone());
+            folded.iteration_closed = false;
+        }
+        if let ReviewFact::AssignmentResultRejected {
+            snapshot,
+            iteration,
+            ..
+        } = &event.fact
+            && folded.delta_assignment.as_ref().is_some_and(|assignment| {
+                assignment.snapshot() == snapshot && assignment.id().iteration() == *iteration
+            })
+        {
+            folded.iteration_closed = true;
+        }
+        if let ReviewFact::ReviewIterationCompleted {
+            snapshot,
+            iteration,
+            ..
+        } = &event.fact
+            && folded.delta_assignment.as_ref().is_some_and(|assignment| {
+                assignment.snapshot() == snapshot && assignment.id().iteration() == *iteration
+            })
+        {
+            folded.iteration_closed = true;
+        }
+        if let ReviewFact::CleanReviewAccepted { snapshot, .. } = &event.fact
+            && folded
+                .delta_assignment
+                .as_ref()
+                .is_some_and(|assignment| assignment.snapshot() == snapshot)
+        {
+            folded.iteration_closed = true;
         }
         Modeled::from_built(folded)
     }
@@ -173,9 +210,15 @@ impl ModelCommandLogic for ReassessDelta {
                 state.as_ref(),
                 state.as_ref(),
                 state.as_ref(),
+                state.as_ref(),
             )))
             .build();
         let context = &decision.as_ref().context;
+        if context.iteration_closed {
+            return Err(CommandError::ValidationError(
+                "review_delta_iteration_closed".to_owned(),
+            ));
+        }
         let current_snapshot = context.current_snapshot.as_ref().ok_or_else(|| {
             CommandError::ValidationError("review_risk_assessment_required".to_owned())
         })?;

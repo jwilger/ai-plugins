@@ -56,6 +56,17 @@ restrict ordinary harness tools. Editor, runner, local-repository,
 remote-repository, and diagnostics services remain withheld for standalone
 Tiber to authorize behind its own isolation boundary.
 
+The advisory final-review coordinator nevertheless rejects zero-lens plans and
+does not record completion until every selected lens and assigned verifier has
+produced at least three consecutive complete finding-free iterations. Any
+reported finding, malformed result, or material delta resets the streak, and a
+review-budget `ship` decision cannot lower or bypass the requirement.
+Schema-invalid lens or verifier evidence and verifier provenance/coverage
+failures are normalized to bounded malformed-result records inside the
+authoritative advance transition. The coordinator closes any pending verifier,
+invalidates the whole iteration, and reissues every selected lens, so correcting
+and retrying the submission cannot preserve an earlier clean streak.
+
 ## Harnesses
 
 Claude Code and Codex consume the same canonical routing policy from `skills/`.

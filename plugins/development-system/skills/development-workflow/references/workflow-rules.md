@@ -46,6 +46,11 @@ For a terminal pushed-CI failure, retain four records:
   predicted observation, and a discriminating experiment. Repair the earliest
   controllable cause supported by that evidence.
 - Final review is required before a readiness claim.
+- Final review is clean only after at least three consecutive complete
+  finding-free iterations. Every risk-selected lens and required verifier must
+  participate in each iteration; any finding or material delta resets the
+  streak, and neither a review-budget decision nor caller-carried state may
+  bypass it.
 - Verification evidence is fresh only when collected after the last in-scope
   mutation against the exact revision or worktree snapshot and current
   configuration. It is scope-complete only when it includes repository-required

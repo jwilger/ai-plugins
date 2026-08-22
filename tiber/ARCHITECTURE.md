@@ -237,10 +237,18 @@ state with another lens. EventCore facts own assignment,
 completion, cancellation, supersession, and clean-review decisions.
 
 Any material delta after assessment invalidates affected evidence and triggers
-bounded reassessment. Delivery cannot cross the clean-review gate until every
-required lens and verifier has a current terminal result and all blocking
-findings are resolved. The existing advisory plugin orchestration remains the
-bootstrap behavior until this contract is implemented natively; migration must
+bounded reassessment. Each review iteration requires fresh current results for
+every risk-selected lens and verifier. Completing an iteration records a
+durable `ReviewIterationCompleted` fact; any relevant finding makes that
+iteration non-clean and resets the streak. The default and minimum gate is
+three consecutive finding-free iterations, with a parsed upper bound of ten.
+Malformed evidence from a current assignment records a durable
+`AssignmentResultRejected` fact, invalidates the entire iteration, and clears
+the streak before fresh next-iteration assignments can be issued.
+Only the final clean iteration emits `CleanReviewAccepted`. Later assignment
+commands reject that terminal snapshot, and no earlier iteration can authorize
+delivery. The existing advisory plugin orchestration remains the bootstrap
+behavior until this contract is bound to the native scheduler; migration must
 preserve its risk assessment, independent lenses, verifier routing, durable
 state, delta reassessment, and clean-review gating.
 
@@ -248,12 +256,12 @@ The source-level `tiber-review` crate makes that native contract executable. It
 defines semantic session, source-snapshot, lens, agent, role, assignment, and
 evidence identities; a closed serializable review-fact vocabulary; deterministic
 command-specific event folds; exact assignment-provenance checks; bounded
-material-delta iterations; verified finding resolution; and the clean-review
-transition. It is a pure domain crate with no inference, filesystem, process,
-network, UI, MCP, or store dependency. Ticket 4 will bind these commands to the
-native scheduler; the contract intentionally lands first so that migration
-cannot collapse the shipped multi-agent behavior into one model call or ambient
-shared context.
+material-delta iterations; verified finding resolution; per-iteration
+multi-lens completeness; and the consecutive clean-review transition. It is a
+pure domain crate with no inference, filesystem, process, network, UI, MCP, or
+store dependency. Ticket 4 will bind these commands to the native scheduler;
+the contract intentionally lands first so that migration cannot collapse the
+shipped multi-agent behavior into one model call or ambient shared context.
 
 ## Observability and stochastic evaluation
 

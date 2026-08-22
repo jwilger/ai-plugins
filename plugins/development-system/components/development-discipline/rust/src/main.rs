@@ -58,6 +58,7 @@ use serde_json::{json, Value};
 const DEFAULT_BASE: &str = "origin/main";
 const DEFAULT_CLEAN_ITERATIONS: u64 = 3;
 const MAX_CLEAN_ITERATIONS: u64 = 10;
+const MAX_REVIEW_ITERATIONS: u64 = 32;
 const DEFAULT_CONFIG_PATH: &str = ".development-discipline/final-review.toml";
 const REVIEW_SEVERITIES: [&str; 4] = ["CRITICAL", "MAJOR", "MINOR", "TRIVIAL"];
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
@@ -130,6 +131,7 @@ const _: () = assert!(
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
     &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
+const PRODUCTION_RISK_FOOTGUNS_LENS: &str = "production-risk-footguns";
 const LENSES: &[&str] = &[
     "correctness-behavior",
     "tests-verification",
@@ -137,7 +139,7 @@ const LENSES: &[&str] = &[
     "architecture-maintainability",
     "operability-user-impact",
     "release-integration",
-    "production-risk-footguns",
+    PRODUCTION_RISK_FOOTGUNS_LENS,
 ];
 const SAFETY_LENS: &str = "safety-human-harm";
 const EXCEPTIONAL_RISK_TRIGGERS: &[&str] = &[
@@ -149,6 +151,29 @@ const EXCEPTIONAL_RISK_TRIGGERS: &[&str] = &[
 ];
 
 const FINAL_REVIEW_CATALOG_STREAM: &str = "development-discipline:final-review-catalog";
+
+fn review_iteration_limit_error() -> String {
+    format!(
+        "review_iteration_limit_reached=true max={MAX_REVIEW_ITERATIONS} recovery=restart_final_review"
+    )
+}
+
+fn next_review_iteration(current: u64) -> Result<u64, String> {
+    if current > MAX_REVIEW_ITERATIONS {
+        return Err(review_iteration_limit_error());
+    }
+    Ok(current.saturating_add(1))
+}
+
+fn ensure_review_iteration_can_stop(
+    next_iteration: u64,
+    terminal_or_held: bool,
+) -> Result<(), String> {
+    if next_iteration > MAX_REVIEW_ITERATIONS && !terminal_or_held {
+        return Err(review_iteration_limit_error());
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EventMetadata {
@@ -214,6 +239,8 @@ struct ReviewProgressFacts {
     required_clean_iterations: u64,
     clean_streak: u64,
     history_summary: String,
+    #[serde(default)]
+    iteration_limit_hold: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1611,6 +1638,9 @@ impl ReviewSessionState {
         });
         state["out_of_scope_report_omitted_count"] =
             json!(self.risk.out_of_scope_report_omitted_count);
+        if self.progress.iteration_limit_hold {
+            state["iteration_limit_hold"] = json!(true);
+        }
         state
     }
 
@@ -2019,6 +2049,8 @@ struct AdvanceLensResultInput {
     lens: String,
     subagent_key: String,
     status: String,
+    #[serde(skip)]
+    parse_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     shared_test_evidence_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2159,6 +2191,8 @@ struct AdvanceVerifierResultInput {
     assignment_id: String,
     model_role: String,
     status: String,
+    #[serde(skip)]
+    parse_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rationale: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2167,10 +2201,115 @@ struct AdvanceVerifierResultInput {
     verdicts: Vec<AdvanceVerifierVerdictInput>,
 }
 
-fn parse_advance_review_input(arguments: &Value) -> Result<AdvanceReviewInput, String> {
-    if let Some(lens_results) = arguments.get("lens_results") {
-        ensure_json_size(lens_results, "lens_results", MAX_LENS_RESULTS_BYTES)?;
+fn malformed_verifier_result(raw: &Value, reason: String) -> AdvanceVerifierResultInput {
+    AdvanceVerifierResultInput {
+        subagent_key: raw
+            .get("subagent_key")
+            .and_then(Value::as_str)
+            .unwrap_or("untrusted")
+            .to_string(),
+        assignment_id: raw
+            .get("assignment_id")
+            .and_then(Value::as_str)
+            .unwrap_or("untrusted")
+            .to_string(),
+        model_role: raw
+            .get("model_role")
+            .and_then(Value::as_str)
+            .unwrap_or("untrusted")
+            .to_string(),
+        status: "malformed".to_string(),
+        parse_error: Some(bounded_text(&reason, 1_024)),
+        rationale: None,
+        caller_attestation: None,
+        verdicts: Vec::new(),
     }
+}
+
+fn parse_verifier_result(raw: &Value) -> AdvanceVerifierResultInput {
+    if serde_json::to_vec(raw).is_ok_and(|encoded| encoded.len() > MAX_VERIFIER_RESULT_BYTES) {
+        return malformed_verifier_result(
+            raw,
+            format!("verifier_result_too_large max_bytes={MAX_VERIFIER_RESULT_BYTES}"),
+        );
+    }
+    if raw
+        .get("verdicts")
+        .and_then(Value::as_array)
+        .is_some_and(|verdicts| verdicts.len() > MAX_FINDINGS_PER_ITERATION)
+    {
+        return malformed_verifier_result(
+            raw,
+            format!("verifier_verdicts_too_many max={MAX_FINDINGS_PER_ITERATION}"),
+        );
+    }
+    serde_json::from_value(raw.clone()).unwrap_or_else(|error| {
+        malformed_verifier_result(
+            raw,
+            format!("verifier_result_schema_invalid source={error}"),
+        )
+    })
+}
+
+fn malformed_lens_result(reason: &str) -> AdvanceLensResultInput {
+    AdvanceLensResultInput {
+        lens: "untrusted".to_string(),
+        subagent_key: "untrusted".to_string(),
+        status: "malformed".to_string(),
+        parse_error: Some(bounded_text(reason, 1_024)),
+        shared_test_evidence_id: None,
+        additional_broad_test_run: None,
+        broad_test_rerun_reason: None,
+        findings: Vec::new(),
+        caller_attestation: None,
+    }
+}
+
+fn parse_advance_review_input(arguments: &Value) -> Result<AdvanceReviewInput, String> {
+    let parsed_lens_results = match arguments.get("lens_results") {
+        None => vec![malformed_lens_result("lens_results_missing=true")],
+        Some(Value::Array(raw_lens_results)) => {
+            let lens_result_count_oversized = raw_lens_results.len() > MAX_REVIEW_LENSES;
+            let lens_results_oversized = serde_json::to_vec(raw_lens_results)
+                .is_ok_and(|encoded| encoded.len() > MAX_LENS_RESULTS_BYTES);
+            if lens_result_count_oversized {
+                vec![malformed_lens_result(&format!(
+                    "lens_results_too_many max={MAX_REVIEW_LENSES}"
+                ))]
+            } else if lens_results_oversized {
+                vec![malformed_lens_result(&format!(
+                    "lens_results_too_large max_bytes={MAX_LENS_RESULTS_BYTES}"
+                ))]
+            } else {
+                raw_lens_results
+                    .iter()
+                    .map(|raw| {
+                        serde_json::from_value::<AdvanceLensResultInput>(raw.clone())
+                            .unwrap_or_else(|error| AdvanceLensResultInput {
+                                lens: raw
+                                    .get("lens")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("untrusted")
+                                    .to_string(),
+                                subagent_key: raw
+                                    .get("subagent_key")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("untrusted")
+                                    .to_string(),
+                                status: "malformed".to_string(),
+                                parse_error: Some(bounded_text(&error.to_string(), 1_024)),
+                                shared_test_evidence_id: None,
+                                additional_broad_test_run: None,
+                                broad_test_rerun_reason: None,
+                                findings: Vec::new(),
+                                caller_attestation: None,
+                            })
+                    })
+                    .collect()
+            }
+        }
+        Some(_) => vec![malformed_lens_result("lens_results_must_be_array=true")],
+    };
     if let Some(decisions) = arguments.get("caller_decisions").and_then(Value::as_array) {
         if decisions.iter().any(|decision| {
             decision
@@ -2197,31 +2336,25 @@ fn parse_advance_review_input(arguments: &Value) -> Result<AdvanceReviewInput, S
     // never become command state. The command retains only its observation of
     // that state and folds the authoritative state from persisted facts.
     let parsed_state = ReviewSessionState::parse_legacy_wire(supplied_state)?;
+    let parsed_verifier_result = arguments
+        .get("verifier_result")
+        .filter(|result| !result.is_null())
+        .map(parse_verifier_result);
     let mut wire = arguments.clone();
     let fields = wire
         .as_object_mut()
         .ok_or_else(|| "review_advance_arguments_object_required=true".to_string())?;
     fields.remove("state");
     fields.remove("state_ref");
+    fields.remove("verifier_result");
+    fields.insert("lens_results".to_string(), json!([]));
     fields.insert(
         "supplied_state_fingerprint".to_string(),
         json!(state_fingerprint(&parsed_state.to_wire())),
     );
-    if wire
-        .get("verifier_result")
-        .and_then(|result| result.get("verdicts"))
-        .and_then(Value::as_array)
-        .is_some_and(|verdicts| verdicts.len() > MAX_FINDINGS_PER_ITERATION)
-    {
-        return Err(format!(
-            "verifier_verdicts_too_many max={MAX_FINDINGS_PER_ITERATION}"
-        ));
-    }
-    serde_json::from_value(wire).map_err(|error| {
+    let mut input: AdvanceReviewInput = serde_json::from_value(wire).map_err(|error| {
         let source = error.to_string();
-        if source == "missing field `lens_results`" {
-            "lens_results is required".to_string()
-        } else if source == "missing field `current_diff_hash`" {
+        if source == "missing field `current_diff_hash`" {
             "current_diff_hash is required".to_string()
         } else if source.starts_with("unknown field `")
             && source.contains("expected one of `finding_id`, `lens`, `decision`")
@@ -2230,7 +2363,10 @@ fn parse_advance_review_input(arguments: &Value) -> Result<AdvanceReviewInput, S
         } else {
             format!("review_advance_input_parse_failed source={source}")
         }
-    })
+    })?;
+    input.lens_results = parsed_lens_results;
+    input.verifier_result = parsed_verifier_result;
+    Ok(input)
 }
 
 #[derive(Clone)]
@@ -2876,6 +3012,7 @@ struct RecordDeltaRiskAssessmentMaterial {
     iteration_index: u64,
     clean_streak: u64,
     history_summary: String,
+    iteration_limit_hold: bool,
     current_defenses_by_lens: BTreeMap<String, Vec<ReviewDefenseFacts>>,
     unresolved_findings: Option<Vec<ReviewFindingFacts>>,
     out_of_scope_report: Vec<OutOfScopeReportEntryFacts>,
@@ -2893,6 +3030,7 @@ impl From<ReviewSessionState> for RecordDeltaRiskAssessmentMaterial {
             iteration_index: session.progress.iteration_index,
             clean_streak: session.progress.clean_streak,
             history_summary: session.progress.history_summary,
+            iteration_limit_hold: session.progress.iteration_limit_hold,
             current_defenses_by_lens: session.defenses.current_by_lens,
             unresolved_findings: session.risk.unresolved_findings,
             out_of_scope_report: session.risk.out_of_scope_report,
@@ -2912,6 +3050,7 @@ impl RecordDeltaRiskAssessmentMaterial {
             required_clean_iterations: self.contract.required_clean_iterations,
             clean_streak: self.clean_streak,
             history_summary: self.history_summary.clone(),
+            iteration_limit_hold: self.iteration_limit_hold,
         }
     }
 
@@ -2976,6 +3115,7 @@ impl RecordDeltaRiskAssessmentMaterial {
                 iteration_index: progress.iteration_index,
                 clean_streak: progress.clean_streak,
                 history_summary: progress.history_summary.clone(),
+                iteration_limit_hold: progress.iteration_limit_hold,
                 current_defenses_by_lens: defenses.current_by_lens.clone(),
                 unresolved_findings: risk.unresolved_findings.clone(),
                 out_of_scope_report: risk.out_of_scope_report.clone(),
@@ -3328,15 +3468,29 @@ fn decide_record_delta_risk_assessment(
     next.contract.scope.changed_files = intent.current_changed_files.clone();
     next.contract.scope.snapshot_commit = Some(delta_evidence.current_snapshot_commit);
     next.contract.shared_test_evidence = Some(intent.current_shared_test_evidence.clone());
-    next.contract.lenses = compiled_risk.active_lenses.clone();
-    next.iteration_index = next.iteration_index.saturating_add(1);
+    next.contract.lenses = if split_required {
+        Vec::new()
+    } else {
+        compiled_risk.selected_lenses.clone()
+    };
+    let next_iteration =
+        next_review_iteration(next.iteration_index).map_err(CommandError::ValidationError)?;
+    ensure_review_iteration_can_stop(next_iteration, split_required)
+        .map_err(CommandError::ValidationError)?;
+    next.iteration_index = next_iteration;
     next.clean_streak = 0;
-    next.contract.required_clean_iterations = compiled_risk
-        .active_lens_passes
-        .values()
-        .copied()
-        .max()
-        .unwrap_or(1);
+    next.contract.required_clean_iterations = next
+        .contract
+        .required_clean_iterations
+        .max(DEFAULT_CLEAN_ITERATIONS)
+        .max(
+            compiled_risk
+                .active_lens_passes
+                .values()
+                .copied()
+                .max()
+                .unwrap_or(1),
+        );
     next.verified_clean_iterations.clear();
     for decision in &intent.caller_decisions {
         let reconfirmed = reconfirmed_finding_keys
@@ -3998,6 +4152,8 @@ struct SubmitReviewBudgetDecisionState {
     #[model(default)]
     clean_streak: Option<u64>,
     #[model(default)]
+    verified_clean_iterations: Vec<ReviewVerifiedCleanIterationFacts>,
+    #[model(default)]
     unresolved_findings: Option<Vec<ReviewFindingFacts>>,
     #[model(default)]
     revision: Option<u64>,
@@ -4010,6 +4166,7 @@ struct SubmitReviewBudgetDecisionContext {
     contract: Option<ReviewContractMaterial>,
     iteration_index: Option<u64>,
     clean_streak: Option<u64>,
+    verified_clean_iterations: Vec<ReviewVerifiedCleanIterationFacts>,
     unresolved_findings: Option<Vec<ReviewFindingFacts>>,
     revision: Option<u64>,
     catalog: ReviewCatalogRetention,
@@ -4024,6 +4181,7 @@ fn submit_review_budget_decision_context(
     contract: &Option<ReviewContractMaterial>,
     iteration_index: &Option<u64>,
     clean_streak: &Option<u64>,
+    verified_clean_iterations: &[ReviewVerifiedCleanIterationFacts],
     unresolved_findings: &Option<Vec<ReviewFindingFacts>>,
     revision: &Option<u64>,
     catalog: &ReviewCatalogRetention,
@@ -4032,6 +4190,7 @@ fn submit_review_budget_decision_context(
         contract: contract.clone(),
         iteration_index: *iteration_index,
         clean_streak: *clean_streak,
+        verified_clean_iterations: verified_clean_iterations.to_vec(),
         unresolved_findings: unresolved_findings.clone(),
         revision: *revision,
         catalog: catalog.clone(),
@@ -4044,6 +4203,7 @@ mapping! {
             SubmitReviewBudgetDecisionState.contract,
             SubmitReviewBudgetDecisionState.iteration_index,
             SubmitReviewBudgetDecisionState.clean_streak,
+            SubmitReviewBudgetDecisionState.verified_clean_iterations,
             SubmitReviewBudgetDecisionState.unresolved_findings,
             SubmitReviewBudgetDecisionState.revision,
             SubmitReviewBudgetDecisionState.catalog
@@ -4149,6 +4309,9 @@ fn build_submit_review_budget_decision_events(
             "review_advance_session_mismatch=true".to_string(),
         ));
     }
+    contract
+        .validate_current_protocol()
+        .map_err(CommandError::ValidationError)?;
     if intent.current_diff_hash.trim().is_empty() || intent.current_diff_hash == "unknown" {
         return Err(CommandError::ValidationError(
             "current_diff_hash_required=true".to_string(),
@@ -4219,6 +4382,22 @@ fn build_submit_review_budget_decision_events(
             "review_budget_ship_blocked_by_unresolved_findings=true".to_string(),
         ));
     }
+    let required_clean_iterations = contract
+        .required_clean_iterations
+        .max(DEFAULT_CLEAN_ITERATIONS);
+    let clean_receipts_complete = verified_clean_receipts_complete(
+        context.iteration_index.unwrap_or_default(),
+        required_clean_iterations,
+        &context.verified_clean_iterations,
+    );
+    if matches!(intent.decision, ReviewBudgetDecisionFacts::Ship { .. })
+        && (context.clean_streak.unwrap_or_default() < required_clean_iterations
+            || !clean_receipts_complete)
+    {
+        return Err(CommandError::ValidationError(
+            "review_budget_ship_blocked_by_clean_requirement=true".to_string(),
+        ));
+    }
 
     let ship = matches!(intent.decision, ReviewBudgetDecisionFacts::Ship { .. });
     let mut resulting_contract = contract.clone();
@@ -4232,7 +4411,6 @@ fn build_submit_review_budget_decision_events(
         resulting_risk_plan.active_lenses.clear();
         resulting_risk_plan.active_lens_passes.clear();
         resulting_contract.lenses.clear();
-        resulting_contract.required_clean_iterations = 1;
     }
     resulting_contract.review_contract_id = resulting_contract.computed_id();
     let metadata = EventMetadata {
@@ -4348,6 +4526,7 @@ fn replace_budget_material(
     state.contract = Some(ReviewContractMaterial::from_session(&session));
     state.iteration_index = Some(session.progress.iteration_index);
     state.clean_streak = Some(session.progress.clean_streak);
+    state.verified_clean_iterations = session.initial_state.verified_clean_iterations;
     state.unresolved_findings = session.risk.unresolved_findings;
 }
 
@@ -4422,6 +4601,9 @@ fn fold_budget_transition(
                 .as_mut()
                 .expect("budget transition requires contract material")
                 .initial_prior_defenses_by_lens = defenses.initial_by_lens.clone();
+        }
+        if let Some(iterations) = &changes.verified_clean_iterations {
+            state.verified_clean_iterations.clone_from(iterations);
         }
     }
 }
@@ -4518,6 +4700,7 @@ impl ModelCommandLogic for SubmitReviewBudgetDecision {
                 state.as_ref(),
                 state.as_ref(),
                 state.as_ref(),
+                state.as_ref(),
             )))
             .build();
         let output = SubmitReviewBudgetDecisionEventOutput::model_builder()
@@ -4563,14 +4746,15 @@ struct RecordVerifierResultIntent {
 enum RecordedVerifierStatus {
     Verified,
     Failed,
+    Malformed,
 }
 
 impl RecordedVerifierStatus {
-    fn parse(value: &str) -> Result<Self, String> {
+    fn parse(value: &str) -> Self {
         match value {
-            "verified" => Ok(Self::Verified),
-            "failed" => Ok(Self::Failed),
-            _ => Err("verifier_result_status_invalid=true".to_string()),
+            "verified" => Self::Verified,
+            "failed" => Self::Failed,
+            _ => Self::Malformed,
         }
     }
 
@@ -4578,6 +4762,7 @@ impl RecordedVerifierStatus {
         match self {
             Self::Verified => "verified",
             Self::Failed => "failed",
+            Self::Malformed => "malformed",
         }
     }
 }
@@ -4594,7 +4779,11 @@ fn record_verifier_result_intent(
         .verifier_result
         .clone()
         .ok_or_else(|| "verifier_result_required=true".to_string())?;
-    let status = RecordedVerifierStatus::parse(&result.status)?;
+    let status = if result.parse_error.is_some() {
+        RecordedVerifierStatus::Malformed
+    } else {
+        RecordedVerifierStatus::parse(&result.status)
+    };
     Ok(RecordVerifierResultIntent {
         iteration: review_iteration_submission(input),
         result,
@@ -4612,6 +4801,9 @@ fn validate_record_verifier_result(
     result: &AdvanceVerifierResultInput,
     status: RecordedVerifierStatus,
 ) -> Result<(), String> {
+    if let Some(parse_error) = result.parse_error.as_deref() {
+        return Err(parse_error.to_string());
+    }
     let encoded = serde_json::to_vec(result)
         .map_err(|error| format!("verifier_result_encode_failed source={error}"))?;
     if encoded.len() > MAX_VERIFIER_RESULT_BYTES {
@@ -4625,7 +4817,7 @@ fn validate_record_verifier_result(
     }
     if result.model_role != verifier_role {
         return Err(format!(
-            "verifier_result_model_role_mismatch subagent_key={expected_subagent_key} expected_model_role={verifier_role} received_model_role={} recovery=rerun_only_this_assignment_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
+            "verifier_result_model_role_mismatch subagent_key={expected_subagent_key} expected_model_role={verifier_role} received_model_role={} recovery=accept_reset_transition_and_rerun_complete_selected_lens_set",
             result.model_role
         ));
     }
@@ -4635,7 +4827,7 @@ fn validate_record_verifier_result(
         })?;
         if attestation.model_role != verifier_role {
             return Err(format!(
-                "caller_attestation_model_role_mismatch subagent_key={expected_subagent_key} expected_model_role={verifier_role} received_model_role={} recovery=rerun_only_this_lens_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
+                "caller_attestation_model_role_mismatch subagent_key={expected_subagent_key} expected_model_role={verifier_role} received_model_role={} recovery=accept_reset_transition_and_rerun_complete_selected_lens_set",
                 attestation.model_role
             ));
         }
@@ -4656,6 +4848,9 @@ fn validate_record_verifier_result(
         ));
     }
     match status {
+        RecordedVerifierStatus::Malformed => {
+            return Err("verifier_result_status_invalid=true".to_string());
+        }
         RecordedVerifierStatus::Failed => {
             if result
                 .rationale
@@ -4806,58 +5001,80 @@ fn build_record_verifier_result_events(
     let pending = context.pending_verifier.as_ref().ok_or_else(|| {
         CommandError::ValidationError("pending_verifier_result_required=true".to_string())
     })?;
-    if pending.assignment_id != intent.result.assignment_id {
-        return Err(CommandError::ValidationError(
-            "pending_verifier_assignment_mismatch=true".to_string(),
-        ));
-    }
-    if !pending.subagent_key.is_empty() && pending.subagent_key != intent.result.subagent_key {
-        return Err(CommandError::ValidationError(
-            "pending_verifier_subagent_key_mismatch=true".to_string(),
-        ));
-    }
-    if !pending.model_role.is_empty() && pending.model_role != intent.result.model_role {
-        return Err(CommandError::ValidationError(
-            "pending_verifier_model_role_mismatch=true".to_string(),
-        ));
-    }
-    validate_record_verifier_result(
-        &continuation.contract.session_id,
-        continuation.iteration_index,
-        if pending.model_role.is_empty() {
-            &continuation.contract.model_roles.verifier
-        } else {
-            &pending.model_role
-        },
-        if pending.legacy_request_fingerprint.is_some() {
-            continuation.contract.caller_attestation_policy.required
-        } else {
-            pending.caller_attestation_required
-        },
-        &intent.result,
-        intent.status,
-    )
-    .map_err(CommandError::ValidationError)?;
-    if pending.legacy_request_fingerprint.is_none() && intent.result.status == "verified" {
-        validate_typed_verdict_coverage(&pending.candidates, &intent.result.verdicts)
-            .map_err(CommandError::ValidationError)?;
-    }
-    if let Some(legacy_fingerprint) = pending.legacy_request_fingerprint.as_deref() {
-        let request_fingerprint = review_iteration_request_fingerprint(&intent.iteration)
-            .map_err(CommandError::ValidationError)?;
-        if request_fingerprint != legacy_fingerprint {
-            return Err(CommandError::ValidationError(
-                "pending_verifier_resubmission_mismatch=true".to_string(),
-            ));
+    let verifier_role = if pending.model_role.is_empty() {
+        &continuation.contract.model_roles.verifier
+    } else {
+        &pending.model_role
+    };
+    let verifier_validation = (|| -> Result<(), String> {
+        validate_record_verifier_result(
+            &continuation.contract.session_id,
+            continuation.iteration_index,
+            verifier_role,
+            if pending.legacy_request_fingerprint.is_some() {
+                continuation.contract.caller_attestation_policy.required
+            } else {
+                pending.caller_attestation_required
+            },
+            &intent.result,
+            intent.status,
+        )?;
+        if pending.assignment_id != intent.result.assignment_id {
+            return Err("pending_verifier_assignment_mismatch=true".to_string());
         }
-    }
-    let decision = finalize_verifier_continuation(
-        continuation,
-        &intent.result,
-        &intent.iteration,
-        intent.now_epoch_seconds,
-    )
-    .map_err(CommandError::ValidationError)?;
+        if !pending.subagent_key.is_empty() && pending.subagent_key != intent.result.subagent_key {
+            return Err("pending_verifier_subagent_key_mismatch=true".to_string());
+        }
+        if !pending.model_role.is_empty() && pending.model_role != intent.result.model_role {
+            return Err("pending_verifier_model_role_mismatch=true".to_string());
+        }
+        let candidates = typed_verification_candidates(
+            continuation
+                .unresolved_findings
+                .as_deref()
+                .unwrap_or_default(),
+            continuation.contract.risk_plan.as_deref(),
+            &continuation.filtered,
+        );
+        validate_typed_verifier_result(
+            &TypedVerifierMaterial {
+                contract: &continuation.contract,
+                context: &continuation.context,
+                finding_disposition_policy: &continuation.finding_disposition_policy,
+                iteration_index: continuation.iteration_index,
+                scope: &continuation.effective_scope,
+            },
+            &candidates,
+            &intent.result,
+        )?;
+        if pending.legacy_request_fingerprint.is_none() && intent.result.status == "verified" {
+            validate_typed_verdict_coverage(&pending.candidates, &intent.result.verdicts)?;
+        }
+        if let Some(legacy_fingerprint) = pending.legacy_request_fingerprint.as_deref() {
+            let request_fingerprint = review_iteration_request_fingerprint(&intent.iteration)?;
+            if request_fingerprint != legacy_fingerprint {
+                return Err("pending_verifier_resubmission_mismatch=true".to_string());
+            }
+        }
+        Ok(())
+    })();
+    let (decision, resolved_status) = match verifier_validation {
+        Ok(()) => (
+            finalize_verifier_continuation(
+                continuation,
+                &intent.result,
+                &intent.iteration,
+                intent.now_epoch_seconds,
+            )
+            .map_err(CommandError::ValidationError)?,
+            intent.status.as_str(),
+        ),
+        Err(reason) => (
+            reject_malformed_verifier_continuation(continuation, pending, &intent.result, &reason)
+                .map_err(CommandError::ValidationError)?,
+            "malformed",
+        ),
+    };
     let metadata = EventMetadata {
         revision: revision.saturating_add(1),
         updated_at: intent.now_epoch_seconds,
@@ -4872,7 +5089,7 @@ fn build_record_verifier_result_events(
         facts: VerifierResolvedFacts {
             transition: transition.clone(),
             assignment_id: intent.result.assignment_id.clone(),
-            status: intent.status.as_str().to_string(),
+            status: resolved_status.to_string(),
         },
     };
     let iteration_accepted = IterationAcceptedEvent {
@@ -4983,6 +5200,7 @@ fn finalize_verifier_continuation(
         resolution.unrelated_follow_ups.as_deref(),
     )?;
     let clean = filtered.clean;
+    let finding_free = continuation.finding_free_before_verifier;
     let typed_caller_decisions = retain_typed_decisions_for_known_findings(
         continuation
             .unresolved_findings
@@ -4992,7 +5210,8 @@ fn finalize_verifier_continuation(
         &verifier_rejected,
         &continuation.caller_decisions,
     );
-    let prior_contract_valid = continuation.contract.has_valid_id();
+    continuation.contract.validate_current_protocol()?;
+    let prior_contract_valid = continuation.contract.has_current_protocol();
     resulting.contract.scope = continuation.effective_scope.clone();
     let unresolved_outcome = update_typed_unresolved_findings(
         continuation
@@ -5024,7 +5243,7 @@ fn finalize_verifier_continuation(
     let mut saturation_progress = resulting.progress_facts();
     if let Some(plan) = resulting.contract.risk_plan.as_deref_mut() {
         update_typed_discovery_saturation(&mut saturation_progress, plan, &mut filtered);
-        resulting.contract.lenses = saturation_progress.lenses;
+        resulting.contract.lenses = plan.selected_lenses.clone();
         resulting.iteration_index = saturation_progress.iteration_index;
         resulting.contract.required_clean_iterations =
             saturation_progress.required_clean_iterations;
@@ -5038,12 +5257,14 @@ fn finalize_verifier_continuation(
         .unresolved_findings
         .as_ref()
         .is_none_or(Vec::is_empty);
-    let next_clean_streak = if clean && !decision_reset && no_completion_blockers {
+    let next_clean_streak = if clean && finding_free && !decision_reset && no_completion_blockers {
         continuation.clean_streak.saturating_add(1)
     } else {
         0
     };
-    let reset_reason = if clean {
+    let reset_reason = if !finding_free {
+        "findings_or_malformed_results"
+    } else if clean {
         if decision_reset {
             "caller_decision_requires_fresh_review"
         } else if no_completion_blockers {
@@ -5054,7 +5275,7 @@ fn finalize_verifier_continuation(
     } else {
         "findings_or_malformed_results"
     };
-    let next_iteration = continuation.iteration_index.saturating_add(1);
+    let next_iteration = next_review_iteration(continuation.iteration_index)?;
     resulting.clean_streak = next_clean_streak;
     resulting.iteration_index = next_iteration;
     resulting
@@ -5114,10 +5335,22 @@ fn finalize_verifier_continuation(
         &resulting.progress_facts(),
         resulting.contract.risk_plan.is_some(),
     );
-    let budget_requested = mark_typed_review_budget_checkpoint_if_due(
-        resulting.contract.risk_plan.as_deref_mut(),
-        now_epoch_seconds,
-    );
+    let iteration_limit_held =
+        next_iteration > MAX_REVIEW_ITERATIONS && !typed_verifier_continuation_complete(&resulting);
+    if iteration_limit_held {
+        resulting.iteration_index = continuation.iteration_index;
+        resulting.clean_streak = 0;
+        resulting.verified_clean_iterations.clear();
+        resulting.iteration_limit_hold = true;
+        for entry in &mut resulting.out_of_scope_report {
+            entry.iteration = continuation.iteration_index;
+        }
+    }
+    let budget_requested = !iteration_limit_held
+        && mark_typed_review_budget_checkpoint_if_due(
+            resulting.contract.risk_plan.as_deref_mut(),
+            now_epoch_seconds,
+        );
     if budget_requested {
         resulting.contract.review_contract_id = resulting.contract.computed_id();
     }
@@ -5126,8 +5359,14 @@ fn finalize_verifier_continuation(
     if encoded_state.len() > MAX_STATE_BYTES {
         return Err(format!("state_too_large max_bytes={MAX_STATE_BYTES}"));
     }
-    let complete = !budget_requested && typed_verifier_continuation_complete(&resulting);
-    let next_assignments = if complete || budget_requested {
+    let complete = !iteration_limit_held
+        && !budget_requested
+        && typed_verifier_continuation_complete(&resulting);
+    ensure_review_iteration_can_stop(
+        next_iteration,
+        complete || budget_requested || iteration_limit_held,
+    )?;
+    let next_assignments = if complete || budget_requested || iteration_limit_held {
         Vec::new()
     } else {
         build_typed_review_assignments(ReviewAssignmentMaterial {
@@ -5191,8 +5430,134 @@ fn finalize_verifier_continuation(
     })
 }
 
+fn reject_malformed_verifier_continuation(
+    continuation: &PendingVerifierContinuation,
+    pending: &PendingVerifierExpectation,
+    result: &AdvanceVerifierResultInput,
+    reason: &str,
+) -> Result<ReviewIterationDecision, String> {
+    let bounded_reason = bounded_text(reason, 1_024);
+    let mut resulting = continuation.clone();
+    resulting.contract.scope = continuation.effective_scope.clone();
+    let mut filtered = resulting.filtered.clone();
+    filtered.clean = false;
+    filtered.malformed.push(json!({
+        "phase": "verifier",
+        "subagent_key": result.subagent_key,
+        "assignment_id": result.assignment_id,
+        "filter_reason": format!("verifier result malformed: {bounded_reason}"),
+    }));
+    let unresolved_outcome = update_typed_unresolved_findings(
+        continuation
+            .unresolved_findings
+            .as_deref()
+            .unwrap_or_default(),
+        continuation.contract.risk_plan.as_deref(),
+        &filtered,
+        &[],
+        false,
+        &resulting.contract.scope.changed_files,
+        &resulting.contract.scope.diff_hash,
+    );
+    resulting.unresolved_findings = Some(unresolved_outcome.unresolved);
+    resulting.clean_streak = 0;
+    let next_iteration = next_review_iteration(continuation.iteration_index)?;
+    let iteration_limit_held = next_iteration > MAX_REVIEW_ITERATIONS;
+    resulting.iteration_index = if iteration_limit_held {
+        continuation.iteration_index
+    } else {
+        next_iteration
+    };
+    resulting.iteration_limit_hold = iteration_limit_held;
+    ensure_review_iteration_can_stop(next_iteration, iteration_limit_held)?;
+    append_typed_finding_history(
+        &mut resulting.finding_history,
+        continuation.iteration_index,
+        &filtered,
+        "findings_or_malformed_results",
+    );
+    resulting.verified_clean_iterations.clear();
+    resulting.contract.required_clean_iterations = effective_typed_clean_requirement(
+        &resulting.progress_facts(),
+        resulting.contract.risk_plan.is_some(),
+    );
+    let next_assignments = if iteration_limit_held {
+        Vec::new()
+    } else {
+        build_typed_review_assignments(ReviewAssignmentMaterial {
+            iteration: resulting.iteration_index,
+            session_id: &resulting.contract.session_id,
+            lenses: &resulting.contract.lenses,
+            lens_objectives: &resulting.contract.lens_objectives,
+            model_roles: &resulting.contract.model_roles,
+            scope: &resulting.contract.scope,
+            context: &resulting.context,
+            defenses: &resulting.current_defenses_by_lens,
+            deferred_findings: &resulting.deferred_findings,
+            shared_test_evidence: resulting.contract.shared_test_evidence.as_ref(),
+        })?
+    };
+    let changes = verifier_continuation_changes(
+        &resulting,
+        ReviewIterationMutationSet {
+            scope_changed: false,
+            contract_changed: false,
+            risk_changed: true,
+            defenses_changed: false,
+        },
+    );
+    let mut filtered_response = serde_json::to_value(&filtered)
+        .map_err(|error| format!("internal typed filtered result encode failed: {error}"))?;
+    filtered_response["verifier_rejected"] = json!([]);
+    let shutdown_key = if pending.subagent_key.is_empty() {
+        result.subagent_key.as_str()
+    } else {
+        pending.subagent_key.as_str()
+    };
+    Ok(ReviewIterationDecision {
+        changes,
+        iteration_index: resulting.iteration_index,
+        clean_streak: 0,
+        checkpoint_minutes: resulting
+            .contract
+            .risk_plan
+            .as_ref()
+            .map_or(MEDIUM_RISK_REVIEW_BUDGET_MINUTES, |plan| {
+                plan.review_budget.checkpoint_minutes
+            }),
+        review_lifecycle: resulting.contract.scope.review_lifecycle.clone(),
+        budget_requested: false,
+        complete: false,
+        filtered: filtered_response,
+        verification: json!({
+            "status": "malformed_rejected",
+            "reason": bounded_reason,
+        }),
+        reset_reason: "findings_or_malformed_results".to_string(),
+        next_assignments,
+        subagent_shutdown: vec![json!({
+            "subagent_key": shutdown_key,
+            "action": "close"
+        })],
+        verifier_request: None,
+        verifier_continuation: None,
+        verifier_assignment: None,
+        delta_risk_request: None,
+        delta_risk_assignment: None,
+    })
+}
+
 fn typed_verifier_continuation_complete(state: &PendingVerifierContinuation) -> bool {
+    if state.iteration_limit_hold {
+        return false;
+    }
     let unresolved_empty = state.unresolved_findings.as_ref().is_none_or(Vec::is_empty);
+    let required = state
+        .contract
+        .required_clean_iterations
+        .max(DEFAULT_CLEAN_ITERATIONS);
+    let clean_requirement_met = state.clean_streak >= required
+        && state.verified_clean_iterations.len() >= required as usize;
     if let Some(plan) = state.contract.risk_plan.as_deref() {
         if plan.scope_split.as_ref().is_some_and(|split| split.hold)
             || plan.review_budget.checkpoint_pending
@@ -5204,17 +5569,18 @@ fn typed_verifier_continuation_complete(state: &PendingVerifierContinuation) -> 
             plan.review_budget.decision,
             Some(ReviewBudgetDecisionFacts::Ship { .. })
         ) {
-            return unresolved_empty && state.contract.has_valid_id();
+            return clean_requirement_met
+                && unresolved_empty
+                && state.contract.has_current_protocol();
         }
-        return plan.active_lenses.is_empty() && unresolved_empty && state.contract.has_valid_id();
+        return plan.active_lenses.is_empty()
+            && clean_requirement_met
+            && unresolved_empty
+            && state.contract.has_current_protocol();
     }
-    let required = state
-        .contract
-        .required_clean_iterations
-        .max(DEFAULT_CLEAN_ITERATIONS);
     state.clean_streak >= required
         && unresolved_empty
-        && state.contract.has_valid_id()
+        && state.contract.has_current_protocol()
         && state.verified_clean_iterations.len() >= required as usize
 }
 
@@ -5477,6 +5843,7 @@ struct SubmitReviewIterationMaterial {
     iteration_index: u64,
     clean_streak: u64,
     history_summary: String,
+    iteration_limit_hold: bool,
     current_defenses_by_lens: BTreeMap<String, Vec<ReviewDefenseFacts>>,
     finding_disposition_policy: BTreeMap<ReviewSeverity, BTreeMap<String, FindingDisposition>>,
     unresolved_findings: Option<Vec<ReviewFindingFacts>>,
@@ -5497,6 +5864,7 @@ impl From<ReviewSessionState> for SubmitReviewIterationMaterial {
             iteration_index: session.progress.iteration_index,
             clean_streak: session.progress.clean_streak,
             history_summary: session.progress.history_summary,
+            iteration_limit_hold: session.progress.iteration_limit_hold,
             current_defenses_by_lens: session.defenses.current_by_lens,
             finding_disposition_policy: session.disposition_policy.findings,
             unresolved_findings: session.risk.unresolved_findings,
@@ -5518,6 +5886,7 @@ impl SubmitReviewIterationMaterial {
             required_clean_iterations: self.contract.required_clean_iterations,
             clean_streak: self.clean_streak,
             history_summary: self.history_summary.clone(),
+            iteration_limit_hold: self.iteration_limit_hold,
         }
     }
 
@@ -5583,6 +5952,7 @@ impl SubmitReviewIterationMaterial {
                 iteration_index: progress.iteration_index,
                 clean_streak: progress.clean_streak,
                 history_summary: progress.history_summary.clone(),
+                iteration_limit_hold: progress.iteration_limit_hold,
                 current_defenses_by_lens: defenses.current_by_lens.clone(),
                 finding_disposition_policy: policy.findings.clone(),
                 unresolved_findings: risk.unresolved_findings.clone(),
@@ -6189,12 +6559,10 @@ fn replace_typed_out_of_scope_report(
     }
 }
 
-fn effective_typed_clean_requirement(progress: &ReviewProgressFacts, has_risk_plan: bool) -> u64 {
-    progress.required_clean_iterations.max(if has_risk_plan {
-        1
-    } else {
-        DEFAULT_CLEAN_ITERATIONS
-    })
+fn effective_typed_clean_requirement(progress: &ReviewProgressFacts, _has_risk_plan: bool) -> u64 {
+    progress
+        .required_clean_iterations
+        .max(DEFAULT_CLEAN_ITERATIONS)
 }
 
 fn typed_transition_id(
@@ -6264,8 +6632,44 @@ fn mark_typed_review_budget_checkpoint_if_due(
     true
 }
 
-fn typed_review_complete(state: &SubmitReviewIterationMaterial, contract_valid: bool) -> bool {
+fn verified_clean_receipts_complete(
+    next_iteration: u64,
+    required: u64,
+    receipts: &[ReviewVerifiedCleanIterationFacts],
+) -> bool {
+    let Ok(required) = usize::try_from(required) else {
+        return false;
+    };
+    if required == 0 || receipts.len() < required {
+        return false;
+    }
+    let first_expected = next_iteration.saturating_sub(required as u64);
+    let mut transition_ids = HashSet::with_capacity(required);
+    receipts[receipts.len() - required..]
+        .iter()
+        .enumerate()
+        .all(|(offset, receipt)| {
+            receipt.iteration == first_expected.saturating_add(offset as u64)
+                && !receipt.transition_id.trim().is_empty()
+                && transition_ids.insert(receipt.transition_id.as_str())
+        })
+}
+
+fn typed_review_complete(state: &SubmitReviewIterationMaterial) -> bool {
+    if state.iteration_limit_hold {
+        return false;
+    }
     let unresolved_empty = state.unresolved_findings.as_ref().is_none_or(Vec::is_empty);
+    let required = state
+        .contract
+        .required_clean_iterations
+        .max(DEFAULT_CLEAN_ITERATIONS);
+    let clean_requirement_met = state.clean_streak >= required
+        && verified_clean_receipts_complete(
+            state.iteration_index,
+            required,
+            &state.verified_clean_iterations,
+        );
     if let Some(plan) = state.contract.risk_plan.as_deref() {
         if plan.scope_split.as_ref().is_some_and(|split| split.hold)
             || plan.review_budget.checkpoint_pending
@@ -6277,18 +6681,23 @@ fn typed_review_complete(state: &SubmitReviewIterationMaterial, contract_valid: 
             plan.review_budget.decision,
             Some(ReviewBudgetDecisionFacts::Ship { .. })
         ) {
-            return unresolved_empty && contract_valid;
+            return clean_requirement_met
+                && unresolved_empty
+                && state.contract.has_current_protocol();
         }
-        return plan.active_lenses.is_empty() && unresolved_empty && contract_valid;
+        return plan.active_lenses.is_empty()
+            && clean_requirement_met
+            && unresolved_empty
+            && state.contract.has_current_protocol();
     }
-    let required = state
-        .contract
-        .required_clean_iterations
-        .max(DEFAULT_CLEAN_ITERATIONS);
     state.clean_streak >= required
         && unresolved_empty
-        && contract_valid
-        && state.verified_clean_iterations.len() >= required as usize
+        && state.contract.has_current_protocol()
+        && verified_clean_receipts_complete(
+            state.iteration_index,
+            required,
+            &state.verified_clean_iterations,
+        )
 }
 
 fn update_typed_discovery_saturation(
@@ -6397,7 +6806,9 @@ fn update_typed_discovery_saturation(
     risk_plan.active_lenses = active.clone();
     risk_plan.active_lens_passes = active_passes.clone();
     progress.lenses = active.clone();
-    progress.required_clean_iterations = active_passes.values().copied().max().unwrap_or(1);
+    progress.required_clean_iterations = progress
+        .required_clean_iterations
+        .max(DEFAULT_CLEAN_ITERATIONS);
     filtered.discovery_saturation = Some(ReviewDiscoverySaturationResponse {
         reviewed_lenses,
         new_major_critical_ids: newly_discovered,
@@ -6708,55 +7119,22 @@ fn typed_filter_review_iteration(
     if expected_lenses.len() > MAX_REVIEW_LENSES {
         return Err(format!("review_lenses_too_many max={MAX_REVIEW_LENSES}"));
     }
-    if lens_results.len() > expected_lenses.len() {
-        return Err(format!(
-            "lens_results_too_many max={}",
-            expected_lenses.len()
-        ));
-    }
-    if material.contract.risk_plan.is_some() {
-        let evidence = material
-            .contract
-            .shared_test_evidence
-            .as_ref()
-            .ok_or_else(|| "shared_test_evidence_required=true".to_string())?;
-        for result in lens_results {
-            let lens = result.lens.as_str();
-            if result.shared_test_evidence_id.as_deref().is_none() {
-                return Err(format!(
-                    "shared_test_evidence_consumption_required lens={lens}"
-                ));
-            }
-            if result.shared_test_evidence_id.as_deref() != Some(evidence.id.as_str()) {
-                return Err(format!("shared_test_evidence_id_mismatch lens={lens}"));
-            }
-            let reran = result
-                .additional_broad_test_run
-                .ok_or_else(|| format!("additional_broad_test_run_required lens={lens}"))?;
-            if reran {
-                let reason = result
-                    .broad_test_rerun_reason
-                    .as_deref()
-                    .filter(|reason| {
-                        !reason.trim().is_empty()
-                            && reason.len() <= MAX_BROAD_TEST_RERUN_REASON_BYTES
-                    })
-                    .ok_or_else(|| format!("broad_test_rerun_reason_required lens={lens}"))?;
-                if reason.chars().any(char::is_control) {
-                    return Err(format!("broad_test_rerun_reason_invalid lens={lens}"));
-                }
-            }
-        }
-    }
+    let shared_test_evidence = if material.contract.risk_plan.is_some() {
+        Some(
+            material
+                .contract
+                .shared_test_evidence
+                .as_ref()
+                .ok_or_else(|| "shared_test_evidence_required=true".to_string())?,
+        )
+    } else {
+        None
+    };
     let finding_count = lens_results
         .iter()
         .map(|result| result.findings.len())
         .fold(0_usize, usize::saturating_add);
-    if finding_count > MAX_FINDINGS_PER_ITERATION {
-        return Err(format!(
-            "iteration_findings_too_many max={MAX_FINDINGS_PER_ITERATION}"
-        ));
-    }
+    let iteration_findings_too_many = finding_count > MAX_FINDINGS_PER_ITERATION;
 
     let project_root = Path::new(&effective_scope.project_root);
     let normalized_changed_files = effective_scope
@@ -6794,9 +7172,86 @@ fn typed_filter_review_iteration(
     };
     let mut seen_lenses = Vec::new();
     let mut seen_ids = HashSet::new();
+    if lens_results.len() > expected_lenses.len() {
+        filtered.malformed.push(json!({
+            "lens": "untrusted",
+            "filter_reason": format!("lens_results_too_many max={}", expected_lenses.len())
+        }));
+    }
+    if iteration_findings_too_many {
+        filtered.malformed.push(json!({
+            "lens": "untrusted",
+            "filter_reason": format!("iteration_findings_too_many max={MAX_FINDINGS_PER_ITERATION}")
+        }));
+    }
 
     for result in lens_results {
         let lens = result.lens.as_str();
+        if iteration_findings_too_many {
+            continue;
+        }
+        if let Some(parse_error) = result.parse_error.as_deref() {
+            filtered.malformed.push(json!({
+                "lens": if expected_lenses.iter().any(|expected| expected == lens) {
+                    lens
+                } else {
+                    "untrusted"
+                },
+                "filter_reason": format!("lens result schema invalid: {parse_error}")
+            }));
+            continue;
+        }
+        if let Some(evidence) = shared_test_evidence {
+            let shared_evidence_error = if result.shared_test_evidence_id.as_deref().is_none() {
+                Some(format!(
+                    "shared_test_evidence_consumption_required lens={lens}"
+                ))
+            } else if result.shared_test_evidence_id.as_deref() != Some(evidence.id.as_str()) {
+                Some(format!("shared_test_evidence_id_mismatch lens={lens}"))
+            } else if result.additional_broad_test_run.is_none() {
+                Some(format!("additional_broad_test_run_required lens={lens}"))
+            } else if result.additional_broad_test_run == Some(true)
+                && result
+                    .broad_test_rerun_reason
+                    .as_deref()
+                    .is_none_or(|reason| {
+                        reason.trim().is_empty()
+                            || reason.len() > MAX_BROAD_TEST_RERUN_REASON_BYTES
+                            || reason.chars().any(char::is_control)
+                    })
+            {
+                Some(format!("broad_test_rerun_reason_invalid lens={lens}"))
+            } else {
+                None
+            };
+            if let Some(shared_evidence_error) = shared_evidence_error {
+                filtered.malformed.push(json!({
+                    "lens": if expected_lenses.iter().any(|expected| expected == lens) {
+                        lens
+                    } else {
+                        "untrusted"
+                    },
+                    "filter_reason": shared_evidence_error
+                }));
+                continue;
+            }
+        }
+        if let Some(attestation_error) = iteration_lens_attestation_error(
+            material.contract.caller_attestation_policy.required,
+            &material.contract.model_roles.lens_review,
+            &material.contract.model_roles.verifier,
+            result,
+        ) {
+            filtered.malformed.push(json!({
+                "lens": if expected_lenses.iter().any(|expected| expected == lens) {
+                    lens
+                } else {
+                    "untrusted"
+                },
+                "filter_reason": attestation_error
+            }));
+            continue;
+        }
         let expected_key = format!(
             "{}:{}:{lens}",
             material.contract.session_id, material.iteration_index
@@ -6819,9 +7274,13 @@ fn typed_filter_review_iteration(
         seen_lenses.push(result.lens.clone());
         filtered.transition.seen_subagent_keys.push(expected_key);
         if result.findings.len() > MAX_FINDINGS_PER_LENS {
-            return Err(format!(
-                "lens_findings_too_many lens={lens} max={MAX_FINDINGS_PER_LENS}"
-            ));
+            filtered.malformed.push(json!({
+                "lens": lens,
+                "filter_reason": format!(
+                    "lens_findings_too_many lens={lens} max={MAX_FINDINGS_PER_LENS}"
+                )
+            }));
+            continue;
         }
         match result.status.as_str() {
             "clean" if !result.findings.is_empty() => {
@@ -7324,7 +7783,7 @@ fn validate_typed_verifier_result(
             .as_str()
             .ok_or_else(|| "verifier_assignment_model_role_missing=true".to_string())?;
         return Err(format!(
-            "verifier_result_model_role_mismatch subagent_key={} expected_model_role={expected_model_role} received_model_role={} recovery=rerun_only_this_assignment_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
+            "verifier_result_model_role_mismatch subagent_key={} expected_model_role={expected_model_role} received_model_role={} recovery=accept_reset_transition_and_rerun_complete_selected_lens_set",
             result.subagent_key, result.model_role
         ));
     }
@@ -7340,7 +7799,7 @@ fn validate_typed_verifier_result(
         })?;
         if attestation.model_role != result.model_role {
             return Err(format!(
-                "caller_attestation_model_role_mismatch subagent_key={} expected_model_role={} received_model_role={} recovery=rerun_only_this_lens_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
+                "caller_attestation_model_role_mismatch subagent_key={} expected_model_role={} received_model_role={} recovery=accept_reset_transition_and_rerun_complete_selected_lens_set",
                 result.subagent_key, result.model_role, attestation.model_role
             ));
         }
@@ -7661,6 +8120,7 @@ fn validate_typed_filter_transition(
     diff_hash: &str,
     lenses: &[String],
     transition: &ReviewFilterTransition,
+    has_malformed_results: bool,
 ) -> Result<(), String> {
     if transition.session_id.as_deref() != Some(session_id) {
         return Err("filtered transition session_id does not match state".to_string());
@@ -7678,14 +8138,22 @@ fn validate_typed_filter_transition(
         .iter()
         .map(|lens| format!("{session_id}:{iteration_index}:{lens}"))
         .collect::<Vec<_>>();
-    if expected_keys
-        .iter()
-        .any(|expected| !transition.seen_subagent_keys.contains(expected))
-        || transition.expected_subagent_keys != expected_keys
+    if transition.expected_subagent_keys != expected_keys
+        || transition
+            .seen_subagent_keys
+            .iter()
+            .any(|seen| !expected_keys.contains(seen))
     {
         return Err("filtered transition seen_subagent_keys do not match state".to_string());
     }
-    if !transition.complete_lens_set {
+    if transition.complete_lens_set
+        && expected_keys
+            .iter()
+            .any(|expected| !transition.seen_subagent_keys.contains(expected))
+    {
+        return Err("filtered transition seen_subagent_keys do not match state".to_string());
+    }
+    if !transition.complete_lens_set && !has_malformed_results {
         return Err("filtered transition must prove a complete lens set".to_string());
     }
     Ok(())
@@ -7743,47 +8211,62 @@ fn validate_iteration_clean_requirement(required_clean_iterations: u64) -> Resul
     Ok(())
 }
 
-fn validate_iteration_lens_attestations(
+fn shutdown_current_lens_assignments(state: &SubmitReviewIterationMaterial) -> Vec<Value> {
+    state
+        .contract
+        .lenses
+        .iter()
+        .map(|lens| {
+            json!({
+                "subagent_key": format!(
+                    "{}:{}:{}",
+                    state.contract.session_id, state.iteration_index, lens
+                ),
+                "action": "close"
+            })
+        })
+        .collect()
+}
+
+fn iteration_lens_attestation_error(
     required: bool,
     lens_review_role: &str,
     verifier_role: &str,
-    lens_results: &[AdvanceLensResultInput],
-) -> Result<(), String> {
+    result: &AdvanceLensResultInput,
+) -> Option<String> {
     if !required {
-        return Ok(());
+        return None;
     }
-    for result in lens_results {
-        let expected_role = if lens_uses_strong_route(&result.lens) {
-            verifier_role
-        } else {
-            lens_review_role
-        };
-        let attestation = result.caller_attestation.as_ref().ok_or_else(|| {
-            format!(
-                "caller_attestation_missing subagent_key={}",
-                result.subagent_key
-            )
-        })?;
-        if attestation.model_role != expected_role {
-            return Err(format!(
-                "caller_attestation_model_role_mismatch subagent_key={} expected_model_role={} received_model_role={} recovery=rerun_only_this_lens_in_fresh_context_using_assigned_role_then_resubmit_do_not_restart_unrelated_clean_lenses",
-                result.subagent_key, expected_role, attestation.model_role
-            ));
-        }
-        if !attestation.fresh_context {
-            return Err(format!(
-                "caller_attestation_fresh_context_required subagent_key={}",
-                result.subagent_key
-            ));
-        }
-        if !attestation.closed_after_result {
-            return Err(format!(
-                "caller_attestation_closed_after_result_required subagent_key={}",
-                result.subagent_key
-            ));
-        }
+    let expected_role = if lens_uses_strong_route(&result.lens) {
+        verifier_role
+    } else {
+        lens_review_role
+    };
+    let Some(attestation) = result.caller_attestation.as_ref() else {
+        return Some(format!(
+            "caller_attestation_missing subagent_key={}",
+            result.subagent_key
+        ));
+    };
+    if attestation.model_role != expected_role {
+        return Some(format!(
+            "caller_attestation_model_role_mismatch subagent_key={} expected_model_role={} received_model_role={} recovery=rerun_the_complete_selected_lens_set_in_fresh_context",
+            result.subagent_key, expected_role, attestation.model_role
+        ));
     }
-    Ok(())
+    if !attestation.fresh_context {
+        return Some(format!(
+            "caller_attestation_fresh_context_required subagent_key={}",
+            result.subagent_key
+        ));
+    }
+    if !attestation.closed_after_result {
+        return Some(format!(
+            "caller_attestation_closed_after_result_required subagent_key={}",
+            result.subagent_key
+        ));
+    }
+    None
 }
 
 enum IterationLifecycleGate<'a> {
@@ -7856,6 +8339,9 @@ fn decide_review_iteration(
     verifier_result: Option<&AdvanceVerifierResultInput>,
     now_epoch_seconds: u64,
 ) -> Result<ReviewIterationDecision, String> {
+    if authoritative_state.iteration_limit_hold {
+        return Err(review_iteration_limit_error());
+    }
     validate_iteration_scope(
         &authoritative_state.contract.scope.kind,
         &authoritative_state.contract.scope.base,
@@ -7875,9 +8361,7 @@ fn decide_review_iteration(
         authoritative_state.contract.risk_plan.is_some(),
     )?;
     validate_iteration_clean_requirement(authoritative_state.contract.required_clean_iterations)?;
-    if !authoritative_state.contract.has_valid_id() {
-        return Err("review_contract_invalid=true".to_string());
-    }
+    authoritative_state.contract.validate_current_protocol()?;
     let risk_plan = authoritative_state.contract.risk_plan.as_deref();
     match iteration_lifecycle_gate(
         risk_plan.and_then(|plan| plan.scope_split.as_ref().map(|split| split.hold)),
@@ -7901,6 +8385,13 @@ fn decide_review_iteration(
         IterationLifecycleGate::ScopeSplitHeld => {
             return Err("review_scope_split_hold_active=true".to_string());
         }
+    }
+    if authoritative_state.contract.risk_plan.is_some()
+        && authoritative_state.contract.lenses.is_empty()
+    {
+        return Err(
+            "review_selected_lenses_required=true recovery=restart_final_review".to_string(),
+        );
     }
     let current_diff_hash = input.current_diff_hash.as_str();
     if current_diff_hash.trim().is_empty() || current_diff_hash == "unknown" {
@@ -8022,7 +8513,7 @@ fn decide_review_iteration(
             verification: json!({ "status": "not_required" }),
             reset_reason: "none".to_string(),
             next_assignments: Vec::new(),
-            subagent_shutdown: Vec::new(),
+            subagent_shutdown: shutdown_current_lens_assignments(authoritative_state),
             verifier_request: None,
             verifier_continuation: None,
             delta_risk_request: Some((assignment_id, expectation)),
@@ -8030,15 +8521,6 @@ fn decide_review_iteration(
             delta_risk_assignment: Some(assignment),
         });
     }
-    validate_iteration_lens_attestations(
-        authoritative_state
-            .contract
-            .caller_attestation_policy
-            .required,
-        &authoritative_state.contract.model_roles.lens_review,
-        &authoritative_state.contract.model_roles.verifier,
-        &input.lens_results,
-    )?;
     let mut effective_scope = authoritative_state.contract.scope.clone();
     if let Some(files) = current_changed_files.as_ref() {
         effective_scope.changed_files.clone_from(files);
@@ -8052,7 +8534,10 @@ fn decide_review_iteration(
         current_diff_hash,
         &authoritative_state.contract.lenses,
         &typed_filtered.transition,
+        !typed_filtered.malformed.is_empty(),
     )?;
+    let terminal_malformed_iteration = authoritative_state.iteration_index == MAX_REVIEW_ITERATIONS
+        && !typed_filtered.malformed.is_empty();
     if authoritative_state
         .contract
         .unrelated_finding_policy_confirmation_required
@@ -8078,7 +8563,7 @@ fn decide_review_iteration(
     let mut verification = json!({ "status": "not_required" });
     let mut subagent_shutdown = Vec::new();
     let mut verifier_rejected = Vec::new();
-    if !typed_verifier_candidates.is_empty() {
+    if !terminal_malformed_iteration && !typed_verifier_candidates.is_empty() {
         let verifier_material = TypedVerifierMaterial {
             contract: &authoritative_state.contract,
             context: &authoritative_state.context,
@@ -8180,15 +8665,33 @@ fn decide_review_iteration(
         .map_err(|error| format!("internal typed filtered result encode failed: {error}"))?;
     filtered["verifier_rejected"] = serde_json::to_value(&verifier_rejected)
         .expect("typed verifier rejected findings serialize");
-    validate_typed_security_escalations(
-        &typed_filtered.security_escalations_required,
-        input.security_escalations.as_deref(),
-    )?;
-    validate_typed_follow_up_tickets(
-        &typed_filtered.follow_up_tickets_required,
-        input.unrelated_follow_ups.as_deref(),
-    )?;
+    if !terminal_malformed_iteration {
+        validate_typed_security_escalations(
+            &typed_filtered.security_escalations_required,
+            input.security_escalations.as_deref(),
+        )?;
+        validate_typed_follow_up_tickets(
+            &typed_filtered.follow_up_tickets_required,
+            input.unrelated_follow_ups.as_deref(),
+        )?;
+    }
     let clean = typed_filtered.clean;
+    let finding_free = input
+        .lens_results
+        .iter()
+        .all(|result| result.status == "clean" && result.findings.is_empty());
+    if !clean || !finding_free {
+        for subagent_key in &typed_filtered.transition.expected_subagent_keys {
+            if !subagent_shutdown.iter().any(|shutdown| {
+                shutdown.get("subagent_key").and_then(Value::as_str) == Some(subagent_key)
+            }) {
+                subagent_shutdown.push(json!({
+                    "subagent_key": subagent_key,
+                    "action": "close"
+                }));
+            }
+        }
+    }
     let mut final_typed_filtered = typed_filtered;
     let typed_caller_decisions = retain_typed_decisions_for_known_findings(
         authoritative_state
@@ -8199,7 +8702,7 @@ fn decide_review_iteration(
         &verifier_rejected,
         &input.caller_decisions,
     );
-    let prior_contract_valid = authoritative_state.contract.has_valid_id();
+    let prior_contract_valid = authoritative_state.contract.has_current_protocol();
     let mut resulting_state = authoritative_state.clone();
     if let Some(files) = current_changed_files {
         resulting_state.contract.scope.changed_files = files;
@@ -8239,9 +8742,10 @@ fn decide_review_iteration(
             required_clean_iterations: resulting_state.contract.required_clean_iterations,
             clean_streak: resulting_state.clean_streak,
             history_summary: resulting_state.history_summary.clone(),
+            iteration_limit_hold: resulting_state.iteration_limit_hold,
         };
         update_typed_discovery_saturation(&mut progress, plan, &mut final_typed_filtered);
-        resulting_state.contract.lenses = progress.lenses;
+        resulting_state.contract.lenses = plan.selected_lenses.clone();
         resulting_state.iteration_index = progress.iteration_index;
         resulting_state.contract.required_clean_iterations = progress.required_clean_iterations;
         resulting_state.clean_streak = progress.clean_streak;
@@ -8260,13 +8764,16 @@ fn decide_review_iteration(
         .unresolved_findings
         .as_ref()
         .is_none_or(Vec::is_empty);
-    let next_clean_streak = if clean && !diff_changed && !decision_reset && no_completion_blockers {
-        prior_clean_streak.saturating_add(1)
-    } else {
-        0
-    };
+    let next_clean_streak =
+        if clean && finding_free && !diff_changed && !decision_reset && no_completion_blockers {
+            prior_clean_streak.saturating_add(1)
+        } else {
+            0
+        };
     let reset_reason = if diff_changed {
         "diff_changed"
+    } else if !finding_free {
+        "findings_or_malformed_results"
     } else if clean {
         if decision_reset {
             "caller_decision_requires_fresh_review"
@@ -8278,7 +8785,7 @@ fn decide_review_iteration(
     } else {
         "findings_or_malformed_results"
     };
-    let next_iteration = authoritative_state.iteration_index.saturating_add(1);
+    let next_iteration = next_review_iteration(authoritative_state.iteration_index)?;
     resulting_state.clean_streak = next_clean_streak;
     resulting_state.iteration_index = next_iteration;
     resulting_state
@@ -8335,10 +8842,32 @@ fn decide_review_iteration(
         &resulting_state.progress_facts(),
         resulting_state.contract.risk_plan.is_some(),
     );
-    let budget_requested = mark_typed_review_budget_checkpoint_if_due(
-        resulting_state.contract.risk_plan.as_deref_mut(),
-        now_epoch_seconds,
-    );
+    let iteration_limit_held =
+        next_iteration > MAX_REVIEW_ITERATIONS && !typed_review_complete(&resulting_state);
+    if iteration_limit_held {
+        resulting_state.iteration_index = authoritative_state.iteration_index;
+        resulting_state.clean_streak = 0;
+        resulting_state.verified_clean_iterations.clear();
+        resulting_state.iteration_limit_hold = true;
+        for entry in &mut resulting_state.out_of_scope_report {
+            entry.iteration = authoritative_state.iteration_index;
+        }
+        for subagent_key in &final_typed_filtered.transition.expected_subagent_keys {
+            if !subagent_shutdown.iter().any(|shutdown| {
+                shutdown.get("subagent_key").and_then(Value::as_str) == Some(subagent_key)
+            }) {
+                subagent_shutdown.push(json!({
+                    "subagent_key": subagent_key,
+                    "action": "close"
+                }));
+            }
+        }
+    }
+    let budget_requested = !iteration_limit_held
+        && mark_typed_review_budget_checkpoint_if_due(
+            resulting_state.contract.risk_plan.as_deref_mut(),
+            now_epoch_seconds,
+        );
     if budget_requested {
         resulting_state.contract.review_contract_id =
             ReviewContractMaterial::from_iteration(&resulting_state).computed_id();
@@ -8348,12 +8877,13 @@ fn decide_review_iteration(
     if encoded_state.len() > MAX_STATE_BYTES {
         return Err(format!("state_too_large max_bytes={MAX_STATE_BYTES}"));
     }
-    let complete = !budget_requested
-        && typed_review_complete(
-            &resulting_state,
-            ReviewContractMaterial::from_iteration(&resulting_state).has_valid_id(),
-        );
-    let next_assignments = if complete || budget_requested {
+    let complete =
+        !iteration_limit_held && !budget_requested && typed_review_complete(&resulting_state);
+    ensure_review_iteration_can_stop(
+        next_iteration,
+        complete || budget_requested || iteration_limit_held,
+    )?;
+    let next_assignments = if complete || budget_requested || iteration_limit_held {
         Vec::new()
     } else {
         build_typed_review_assignments(ReviewAssignmentMaterial {
@@ -9016,6 +9546,46 @@ impl ReviewContractMaterial {
         self.review_contract_id == self.computed_id()
     }
 
+    fn has_current_protocol(&self) -> bool {
+        if !self.has_valid_id() {
+            return false;
+        }
+        let Some(plan) = self.risk_plan.as_deref() else {
+            return true;
+        };
+        if !plan
+            .selected_lenses
+            .iter()
+            .any(|lens| lens == PRODUCTION_RISK_FOOTGUNS_LENS)
+        {
+            return false;
+        }
+        let empty_contract_lenses_allowed =
+            plan.scope_split.as_ref().is_some_and(|split| split.hold)
+                || matches!(
+                    plan.review_budget.decision,
+                    Some(ReviewBudgetDecisionFacts::Ship { .. })
+                );
+        if empty_contract_lenses_allowed {
+            self.lenses.is_empty()
+        } else {
+            self.lenses == plan.selected_lenses
+        }
+    }
+
+    fn validate_current_protocol(&self) -> Result<(), String> {
+        if !self.has_valid_id() {
+            return Err("review_contract_invalid=true".to_string());
+        }
+        if !self.has_current_protocol() {
+            return Err(
+                "review_session_protocol_upgrade_required=true recovery=restart_final_review"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     /// One-way compatibility parser for caller-carried legacy state. Live
     /// command decisions retain this typed material and never retain the wire
     /// object used to construct it.
@@ -9174,11 +9744,9 @@ fn build_confirm_final_review_split_events(
             "review_split_session_mismatch=true".to_string(),
         ));
     }
-    if !contract.has_valid_id() {
-        return Err(CommandError::ValidationError(
-            "review_contract_invalid=true".to_string(),
-        ));
-    }
+    contract
+        .validate_current_protocol()
+        .map_err(CommandError::ValidationError)?;
     let mut contract_value = confirm_split_contract_value(decision)?;
     let scope_split = contract
         .risk_plan
@@ -9660,6 +10228,10 @@ fn typed_review_progress(state: &Value) -> Result<ReviewProgressFacts, String> {
         "required_clean_iterations": state.get("required_clean_iterations"),
         "clean_streak": state.get("clean_streak"),
         "history_summary": state.get("history_summary"),
+        "iteration_limit_hold": state
+            .get("iteration_limit_hold")
+            .cloned()
+            .unwrap_or(json!(false)),
     }))
     .map_err(|error| format!("review_progress_facts_invalid source={error}"))
 }
@@ -10112,6 +10684,8 @@ struct PendingVerifierContinuation {
     iteration_index: u64,
     clean_streak: u64,
     history_summary: String,
+    #[serde(default)]
+    iteration_limit_hold: bool,
     current_defenses_by_lens: BTreeMap<String, Vec<ReviewDefenseFacts>>,
     finding_disposition_policy: BTreeMap<ReviewSeverity, BTreeMap<String, FindingDisposition>>,
     unresolved_findings: Option<Vec<ReviewFindingFacts>>,
@@ -10123,6 +10697,8 @@ struct PendingVerifierContinuation {
     deferred_findings: Vec<ReviewDeferredFindingFacts>,
     effective_scope: ReviewScopeFacts,
     filtered: FilteredReviewFindings,
+    #[serde(default)]
+    finding_free_before_verifier: bool,
     caller_decisions: Vec<ReviewCallerDecisionFacts>,
 }
 
@@ -10139,6 +10715,7 @@ impl PendingVerifierContinuation {
             iteration_index: material.iteration_index,
             clean_streak: material.clean_streak,
             history_summary: material.history_summary.clone(),
+            iteration_limit_hold: material.iteration_limit_hold,
             current_defenses_by_lens: material.current_defenses_by_lens.clone(),
             finding_disposition_policy: material.finding_disposition_policy.clone(),
             unresolved_findings: material.unresolved_findings.clone(),
@@ -10150,6 +10727,10 @@ impl PendingVerifierContinuation {
             deferred_findings: material.deferred_findings.clone(),
             effective_scope,
             filtered,
+            finding_free_before_verifier: submission
+                .lens_results
+                .iter()
+                .all(|result| result.status == "clean" && result.findings.is_empty()),
             caller_decisions: submission.caller_decisions.clone(),
         }
     }
@@ -10161,6 +10742,7 @@ impl PendingVerifierContinuation {
             required_clean_iterations: self.contract.required_clean_iterations,
             clean_streak: self.clean_streak,
             history_summary: self.history_summary.clone(),
+            iteration_limit_hold: self.iteration_limit_hold,
         }
     }
 
@@ -10656,6 +11238,7 @@ impl ReviewCoordinator {
                 session_id,
                 self.service_surface.review_persistence(),
             )? {
+                validate_restored_review_protocol_state(&restored.state)?;
                 self.session_revisions
                     .insert(session_id.to_string(), restored.revision);
                 self.sessions.insert(session_id.to_string(), restored.state);
@@ -10714,6 +11297,7 @@ impl ReviewCoordinator {
                 "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
                     .to_string()
             })?;
+            validate_restored_review_protocol_state(&restored.state)?;
             state_ref = state_reference(&restored.state)?;
             self.session_revisions
                 .insert(session_id.clone(), restored.revision);
@@ -10727,7 +11311,9 @@ impl ReviewCoordinator {
         }
         let state = self.resolve_reference_read_only(&state_ref)?;
         let complete = review_state_complete(&state);
-        let next_tool = if complete {
+        let next_tool = if review_iteration_limit_hold_active(&state) {
+            Value::Null
+        } else if complete {
             if matches!(self.service_surface, ServiceSurface::PluginAdvisory) {
                 Value::Null
             } else {
@@ -10782,6 +11368,8 @@ impl ReviewCoordinator {
             "delta-risk"
         } else if self.pending_verifiers.contains_key(session_id) {
             "verifier"
+        } else if review_iteration_limit_hold_active(state) {
+            "iteration-limit-hold"
         } else if scope_split_hold_active(state) {
             "scope-split-confirmation"
         } else if review_budget_hold_active(state) {
@@ -10895,6 +11483,9 @@ impl ReviewCoordinator {
         }
         if tool_name == "final_review.advance" && scope_split_hold_active(state) {
             return Err("review_scope_split_hold_active=true".to_string());
+        }
+        if tool_name == "final_review.advance" && review_iteration_limit_hold_active(state) {
+            return Err(review_iteration_limit_error());
         }
         if tool_name == "final_review.advance" && review_state_complete(state) {
             let submitted_diff = arguments.get("current_diff_hash").and_then(Value::as_str);
@@ -11042,7 +11633,7 @@ impl ReviewCoordinator {
                 "complete": false,
                 "completion_blockers": unresolved_findings(&state),
                 "next_assignments": [],
-                "subagent_shutdown": []
+                "subagent_shutdown": response.subagent_shutdown.clone()
             })
         } else if projected_verifier_request {
             let assignment = response
@@ -11071,6 +11662,10 @@ impl ReviewCoordinator {
                 "subagent_shutdown": response.subagent_shutdown,
             })
         };
+        if review_iteration_limit_hold_active(&state) {
+            payload["transition_status"] = json!("iteration_limit_reached");
+            payload["recovery"] = json!("restart_final_review");
+        }
         if budget_requested {
             payload["advance_kind"] = json!("review_budget_checkpoint");
             payload["review_budget"] = review_budget_checkpoint_summary(&state, now_epoch_seconds);
@@ -11135,6 +11730,10 @@ impl ReviewCoordinator {
             "next_assignments": response.next_assignments,
             "subagent_shutdown": response.subagent_shutdown,
         });
+        if review_iteration_limit_hold_active(&state) {
+            payload["transition_status"] = json!("iteration_limit_reached");
+            payload["recovery"] = json!("restart_final_review");
+        }
         if response.budget_requested {
             payload["advance_kind"] = json!("review_budget_checkpoint");
             payload["review_budget"] = review_budget_checkpoint_summary(&state, now_epoch_seconds);
@@ -14958,21 +15557,22 @@ fn compile_risk_plan(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let selected_lenses = if overall_risk == ReviewRiskLevel::Low {
+    let mut selected_lenses = if overall_risk == ReviewRiskLevel::Low {
         elevated_lenses.into_iter().take(1).collect::<Vec<_>>()
     } else {
         elevated_lenses
     };
-    match overall_risk {
-        ReviewRiskLevel::Medium | ReviewRiskLevel::High | ReviewRiskLevel::Exceptional
-            if selected_lenses.is_empty() =>
-        {
-            return Err(format!(
-                "risk_assessment_{}_profile_requires_lens=true",
-                risk_level_name(overall_risk)
-            ));
-        }
-        _ => {}
+    if selected_lenses.is_empty() {
+        return Err(format!(
+            "risk_assessment_{}_profile_requires_lens=true",
+            risk_level_name(overall_risk)
+        ));
+    }
+    if !selected_lenses
+        .iter()
+        .any(|lens| lens == PRODUCTION_RISK_FOOTGUNS_LENS)
+    {
+        selected_lenses.push(PRODUCTION_RISK_FOOTGUNS_LENS.to_string());
     }
     let mut lens_passes = BTreeMap::new();
     for lens in &selected_lenses {
@@ -14990,11 +15590,12 @@ fn compile_risk_plan(
         .and_then(|split| split.get("hold"))
         .and_then(Value::as_bool)
         == Some(true);
-    let required_clean_iterations = if split_hold {
-        1
-    } else {
-        lens_passes.values().copied().max().unwrap_or(1)
-    };
+    let required_clean_iterations = lens_passes
+        .values()
+        .copied()
+        .max()
+        .unwrap_or(1)
+        .max(DEFAULT_CLEAN_ITERATIONS);
     let active_lenses = if split_hold {
         Vec::new()
     } else {
@@ -15903,7 +16504,10 @@ fn plan_decision_from_observation(
         .unwrap_or_else(|| configured_lenses.clone());
     let required_clean_iterations = compiled_risk_plan
         .as_ref()
-        .map(|plan| plan.required_clean_iterations)
+        .map(|plan| {
+            plan.required_clean_iterations
+                .max(legacy_required_clean_iterations)
+        })
         .unwrap_or(legacy_required_clean_iterations);
     let risk_plan_state = compiled_risk_plan
         .as_ref()
@@ -16227,6 +16831,7 @@ fn plan_decision_from_observation(
             required_clean_iterations,
             clean_streak: 0,
             history_summary: String::new(),
+            iteration_limit_hold: false,
         },
         model_routing: ReviewModelRoutingFacts {
             roles: ReviewModelRolesFacts {
@@ -16971,6 +17576,10 @@ fn review_budget_checkpoint_pending(state: &Value) -> bool {
         .pointer("/risk_plan/review_budget/checkpoint_pending")
         .and_then(Value::as_bool)
         == Some(true)
+}
+
+fn review_iteration_limit_hold_active(state: &Value) -> bool {
+    state.get("iteration_limit_hold").and_then(Value::as_bool) == Some(true)
 }
 
 fn review_budget_hold_active(state: &Value) -> bool {
@@ -19612,7 +20221,111 @@ fn out_of_scope_report(arguments: &Value) -> Result<String, String> {
     .to_string())
 }
 
+fn validate_restored_review_protocol_state(state: &Value) -> Result<(), String> {
+    let stored_required = state
+        .get("required_clean_iterations")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    if stored_required < DEFAULT_CLEAN_ITERATIONS {
+        return Err(
+            "review_session_protocol_upgrade_required=true recovery=restart_final_review"
+                .to_string(),
+        );
+    }
+    let next_iteration = state
+        .get("iteration_index")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let iteration_limit_hold = review_iteration_limit_hold_active(state);
+    let terminal_or_held = review_state_complete(state)
+        || iteration_limit_hold
+        || scope_split_hold_active(state)
+        || review_budget_checkpoint_pending(state)
+        || review_budget_hold_active(state);
+    if next_iteration > MAX_REVIEW_ITERATIONS.saturating_add(1)
+        || (next_iteration > MAX_REVIEW_ITERATIONS && !terminal_or_held)
+    {
+        return Err(format!(
+            "review_session_iteration_limit_invalid=true max={MAX_REVIEW_ITERATIONS} recovery=restart_final_review"
+        ));
+    }
+    let clean_streak = state
+        .get("clean_streak")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let receipts = state
+        .get("verified_clean_iterations")
+        .cloned()
+        .and_then(|value| {
+            serde_json::from_value::<Vec<ReviewVerifiedCleanIterationFacts>>(value).ok()
+        })
+        .unwrap_or_default();
+    let receipt_count_matches = usize::try_from(clean_streak)
+        .ok()
+        .is_some_and(|count| count == receipts.len());
+    let receipts_match_streak = clean_streak == 0
+        || (receipt_count_matches
+            && verified_clean_receipts_complete(next_iteration, clean_streak, &receipts));
+    if !receipts_match_streak {
+        return Err(
+            "review_session_clean_receipts_invalid=true recovery=restart_final_review".to_string(),
+        );
+    }
+    if iteration_limit_hold
+        && (next_iteration != MAX_REVIEW_ITERATIONS || clean_streak != 0 || !receipts.is_empty())
+    {
+        return Err(format!(
+            "review_session_iteration_limit_hold_invalid=true max={MAX_REVIEW_ITERATIONS} recovery=restart_final_review"
+        ));
+    }
+    let risk_planned = state.get("risk_plan").is_some_and(Value::is_object);
+    let lenses = string_array(state.get("lenses")).unwrap_or_default();
+    let selected_lenses =
+        string_array(state.pointer("/risk_plan/selected_lenses")).unwrap_or_default();
+    if risk_planned
+        && !selected_lenses
+            .iter()
+            .any(|lens| lens == PRODUCTION_RISK_FOOTGUNS_LENS)
+    {
+        return Err(
+            "review_session_protocol_upgrade_required=true recovery=restart_final_review"
+                .to_string(),
+        );
+    }
+    if risk_planned
+        && lenses.is_empty()
+        && !scope_split_hold_active(state)
+        && !review_state_complete(state)
+    {
+        return Err(
+            "review_session_selected_lenses_invalid=true recovery=restart_final_review".to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn review_state_complete(state: &Value) -> bool {
+    if review_iteration_limit_hold_active(state) {
+        return false;
+    }
+    let required = effective_required_clean_iterations(state);
+    let next_iteration = state
+        .get("iteration_index")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let verified_clean_iterations = state
+        .get("verified_clean_iterations")
+        .cloned()
+        .and_then(|value| {
+            serde_json::from_value::<Vec<ReviewVerifiedCleanIterationFacts>>(value).ok()
+        })
+        .unwrap_or_default();
+    let clean_requirement_met = state
+        .get("clean_streak")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        >= required
+        && verified_clean_receipts_complete(next_iteration, required, &verified_clean_iterations);
     if state.get("risk_plan").is_some_and(Value::is_object) {
         if scope_split_hold_active(state)
             || review_budget_checkpoint_pending(state)
@@ -19621,35 +20334,27 @@ fn review_state_complete(state: &Value) -> bool {
             return false;
         }
         if review_budget_ship_selected(state) {
-            return unresolved_findings(state).is_empty() && review_contract_is_valid(state);
+            return clean_requirement_met
+                && unresolved_findings(state).is_empty()
+                && review_contract_is_valid(state);
         }
         return string_array(state.pointer("/risk_plan/active_lenses"))
             .is_some_and(|lenses| lenses.is_empty())
+            && clean_requirement_met
             && unresolved_findings(state).is_empty()
             && review_contract_is_valid(state);
     }
-    let required = effective_required_clean_iterations(state);
-    state
-        .get("clean_streak")
-        .and_then(Value::as_u64)
-        .unwrap_or(0)
-        >= required
+    clean_requirement_met
         && unresolved_findings(state).is_empty()
         && review_contract_is_valid(state)
-        && verified_clean_count(state) >= required as usize
 }
 
 fn effective_required_clean_iterations(state: &Value) -> u64 {
-    let minimum = if state.get("risk_plan").is_some_and(Value::is_object) {
-        1
-    } else {
-        DEFAULT_CLEAN_ITERATIONS
-    };
     state
         .get("required_clean_iterations")
         .and_then(Value::as_u64)
-        .unwrap_or(minimum)
-        .max(minimum)
+        .unwrap_or(DEFAULT_CLEAN_ITERATIONS)
+        .max(DEFAULT_CLEAN_ITERATIONS)
 }
 
 struct ClassifiedFinding {
@@ -20601,10 +21306,15 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
     }
     let selected = string_array(risk_plan.get("selected_lenses")).unwrap_or_default();
     let active = string_array(risk_plan.get("active_lenses")).unwrap_or_default();
+    if !selected
+        .iter()
+        .any(|lens| lens == PRODUCTION_RISK_FOOTGUNS_LENS)
+    {
+        return false;
+    }
     let selected_unique = selected.iter().collect::<HashSet<_>>().len() == selected.len();
     let active_unique = active.iter().collect::<HashSet<_>>().len() == active.len();
-    if active != lenses
-        || !selected_unique
+    if !selected_unique
         || !active_unique
         || active
             .iter()
@@ -20757,15 +21467,27 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
     else {
         return false;
     };
-    let terminal_without_lenses = scope_split_hold || budget_ship;
-    if terminal_without_lenses {
+    if scope_split_hold {
+        let required = state
+            .get("required_clean_iterations")
+            .and_then(Value::as_u64);
         return active.is_empty()
             && lenses.is_empty()
             && active_lens_passes.is_empty()
-            && state
-                .get("required_clean_iterations")
-                .and_then(Value::as_u64)
-                == Some(1);
+            && required.is_some_and(|required| {
+                (DEFAULT_CLEAN_ITERATIONS..=MAX_CLEAN_ITERATIONS).contains(&required)
+            });
+    }
+    if budget_ship {
+        let required = state
+            .get("required_clean_iterations")
+            .and_then(Value::as_u64);
+        return active.is_empty()
+            && lenses.is_empty()
+            && active_lens_passes.is_empty()
+            && required.is_some_and(|required| {
+                (DEFAULT_CLEAN_ITERATIONS..=MAX_CLEAN_ITERATIONS).contains(&required)
+            });
     }
     let (expected_active, expected_active_passes) = derived_pending_review(
         &selected,
@@ -20773,7 +21495,8 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
         confirmation_samples,
         last_sample_added_new,
     );
-    if active != expected_active
+    if lenses != selected
+        || active != expected_active
         || risk_plan.get("active_lens_passes")
             != Some(&Value::Object(expected_active_passes.clone()))
     {
@@ -20790,15 +21513,19 @@ fn risk_plan_contract_is_valid(state: &Value, lenses: &[String]) -> bool {
     {
         return false;
     }
-    let required = active_lens_passes
+    let active_pass_requirement = active_lens_passes
         .values()
         .filter_map(Value::as_u64)
         .max()
         .unwrap_or(1);
-    state
+    let Some(required) = state
         .get("required_clean_iterations")
         .and_then(Value::as_u64)
-        == Some(required)
+    else {
+        return false;
+    };
+    (DEFAULT_CLEAN_ITERATIONS..=MAX_CLEAN_ITERATIONS).contains(&required)
+        && required >= active_pass_requirement
 }
 
 fn scope_split_contract_is_valid(
@@ -24451,7 +25178,7 @@ mod tests {
                 .as_array()
                 .expect("assignments")
                 .len(),
-            1
+            2
         );
     }
 
@@ -25555,10 +26282,16 @@ verifier = "default-verify"
         )
         .expect("plan json");
 
-        assert_eq!(planned["state"]["lenses"], json!(["correctness-behavior"]));
+        assert_eq!(
+            planned["state"]["lenses"],
+            json!(["correctness-behavior", "production-risk-footguns"])
+        );
         assert_eq!(
             planned["state"]["finding_disposition_policy"]["CRITICAL"],
-            json!({ "correctness-behavior": "block" })
+            json!({
+                "correctness-behavior": "block",
+                "production-risk-footguns": "block"
+            })
         );
         let _ = fs::remove_dir_all(project_root);
     }
@@ -25794,7 +26527,7 @@ pre_filter = "outside-pre"
     }
 
     #[test]
-    fn advance_rejects_missing_caller_lifecycle_and_model_attestation() {
+    fn missing_caller_lifecycle_and_model_attestation_invalidates_the_pass() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
             "diff_hash": "abc",
@@ -25808,14 +26541,29 @@ pre_filter = "outside-pre"
                 .expect("lens result object")
                 .remove("caller_attestation");
         }
-        let error = execute_advance_fixture(&json!({
-            "state": planned["state"],
-            "lens_results": lens_results,
-            "current_diff_hash": "abc"
-        }))
-        .expect_err("planned reviews require caller attestations");
+        let advanced: Value = serde_json::from_str(
+            &execute_advance_fixture(&json!({
+                "state": planned["state"],
+                "lens_results": lens_results,
+                "current_diff_hash": "abc"
+            }))
+            .expect("missing attestations are durably classified as malformed"),
+        )
+        .expect("advanced json");
 
-        assert!(error.starts_with("caller_attestation_missing subagent_key="));
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["complete"], false);
+        assert!(advanced["filtered"]["malformed"]
+            .as_array()
+            .expect("malformed results")
+            .iter()
+            .any(|malformed| malformed["filter_reason"]
+                .as_str()
+                .is_some_and(|reason| reason.starts_with("caller_attestation_missing"))));
+        assert_eq!(
+            advanced["next_assignments"].as_array().unwrap().len(),
+            planned["state"]["lenses"].as_array().unwrap().len()
+        );
     }
 
     #[test]
@@ -25914,7 +26662,7 @@ pre_filter = "outside-pre"
     }
 
     #[test]
-    fn advance_requires_verifier_caller_attestation_after_shutdown() {
+    fn advance_consumes_missing_verifier_attestation_as_a_full_iteration_reset() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
             "diff_hash": "abc",
@@ -25946,21 +26694,34 @@ pre_filter = "outside-pre"
         let verifier_required: Value =
             serde_json::from_str(&verifier_required).expect("verifier json");
         let assignment = &verifier_required["verifier_assignment"];
-        let error = execute_advance_fixture(&json!({
-            "state": state,
-            "lens_results": lens_results,
-            "current_diff_hash": "abc",
-            "verifier_result": {
-                "subagent_key": assignment["subagent_key"],
-                "model_role": assignment["model_role"],
-                "assignment_id": assignment["assignment_id"],
-                "status": "failed",
-                "rationale": "Verifier unavailable."
-            }
-        }))
-        .expect_err("verifier shutdown attestation is required");
+        let reset: Value = serde_json::from_str(
+            &execute_advance_fixture(&json!({
+                "state": state,
+                "lens_results": lens_results,
+                "current_diff_hash": "abc",
+                "verifier_result": {
+                    "subagent_key": assignment["subagent_key"],
+                    "model_role": assignment["model_role"],
+                    "assignment_id": assignment["assignment_id"],
+                    "status": "failed",
+                    "rationale": "Verifier unavailable."
+                }
+            }))
+            .expect("missing verifier attestation must be consumed as reset evidence"),
+        )
+        .expect("reset response");
 
-        assert!(error.starts_with("caller_attestation_missing subagent_key="));
+        assert_eq!(reset["state"]["clean_streak"], 0);
+        assert_eq!(reset["state"]["iteration_index"], 2);
+        assert_eq!(reset["state"]["verified_clean_iterations"], json!([]));
+        assert_eq!(reset["verification"]["status"], "malformed_rejected");
+        assert!(reset["verification"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("caller_attestation_missing")));
+        assert_eq!(
+            reset["next_assignments"].as_array().map(Vec::len),
+            planned["state"]["lenses"].as_array().map(Vec::len)
+        );
     }
 
     #[test]
@@ -28190,37 +28951,71 @@ pre_filter = "project-pre"
             "finding_history": []
         });
 
-        for _ in 0..=MAX_RETAINED_HISTORY_ENTRIES {
-            let output = advance_synthetic_state(&json!({
-                "state": state.clone(),
-                "lens_results": actionable_lens_results_for(&state),
-                "current_diff_hash": "same",
-                "verifier_result": failed_verifier_result_for(&state),
-                "caller_decisions": [{
-                    "finding_id": "finding-1",
-                    "lens": "correctness-behavior",
-                    "decision": "defended",
-                    "defense": "The user explicitly chose this behavior."
-                }]
+        state["finding_history"] = json!((0..MAX_RETAINED_HISTORY_ENTRIES)
+            .map(|completed_iteration| json!({
+                "completed_iteration": completed_iteration,
+                "clean": false,
+                "reset_reason": "findings_or_malformed_results",
+                "actionable_count": 1,
+                "routed_count": 0,
+                "already_tracked_count": 0,
+                "defended_or_accepted_count": 0,
+                "out_of_scope_count": 0,
+                "malformed_count": 0,
+                "needs_human_decision_count": 0
             }))
-            .expect("defended finding advances");
-            let advanced: Value = serde_json::from_str(&output).expect("advance json");
-            state = advanced["state"].clone();
-        }
+            .collect::<Vec<_>>());
+        state["prior_user_decisions"] = json!((0..MAX_RETAINED_CALLER_DECISIONS)
+            .map(|index| json!({
+                "finding_id": format!("prior-decision-{index}"),
+                "lens": "correctness-behavior",
+                "decision": "defended",
+                "defense": "Previously accepted defense."
+            }))
+            .collect::<Vec<_>>());
+        state["prior_defenses_by_lens"]["correctness-behavior"] = json!((0
+            ..MAX_RETAINED_DEFENSES_PER_LENS)
+            .map(|index| json!({
+                "id": format!("prior-defense-{index}"),
+                "status": "accepted",
+                "decision": "defended",
+                "defense": "Previously accepted defense."
+            }))
+            .collect::<Vec<_>>());
 
-        assert!(
-            state["finding_history"].as_array().expect("history").len()
-                <= MAX_RETAINED_HISTORY_ENTRIES
-                && state["prior_user_decisions"]
-                    .as_array()
-                    .expect("decisions")
-                    .len()
-                    <= MAX_RETAINED_CALLER_DECISIONS
-                && state["prior_defenses_by_lens"]["correctness-behavior"]
-                    .as_array()
-                    .expect("defenses")
-                    .len()
-                    <= MAX_RETAINED_DEFENSES_PER_LENS
+        let output = advance_synthetic_state(&json!({
+            "state": state.clone(),
+            "lens_results": actionable_lens_results_for(&state),
+            "current_diff_hash": "same",
+            "verifier_result": failed_verifier_result_for(&state),
+            "caller_decisions": [{
+                "finding_id": "finding-1",
+                "lens": "correctness-behavior",
+                "decision": "defended",
+                "defense": "The user explicitly chose this behavior."
+            }]
+        }))
+        .expect("defended finding advances within the bounded session lifetime");
+        let state: Value =
+            serde_json::from_str::<Value>(&output).expect("advance json")["state"].clone();
+
+        assert_eq!(
+            state["finding_history"].as_array().expect("history").len(),
+            MAX_RETAINED_HISTORY_ENTRIES
+        );
+        assert_eq!(
+            state["prior_user_decisions"]
+                .as_array()
+                .expect("decisions")
+                .len(),
+            MAX_RETAINED_CALLER_DECISIONS
+        );
+        assert_eq!(
+            state["prior_defenses_by_lens"]["correctness-behavior"]
+                .as_array()
+                .expect("defenses")
+                .len(),
+            MAX_RETAINED_DEFENSES_PER_LENS
         );
     }
 
@@ -28684,7 +29479,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn advance_rejects_lens_payloads_that_cannot_leave_verifier_headroom() {
+    fn oversized_lens_payload_invalidates_the_pass_without_verifier_amplification() {
         let state = json!({
             "scope": { "kind": "base", "base": "origin/main", "changed_files": ["src/new.rs"], "diff_hash": "same" },
             "session_id": "review-1",
@@ -28702,7 +29497,7 @@ pre_filter = "project-pre"
             "required_clean_iterations": 3,
             "clean_streak": 0
         });
-        let error = advance_synthetic_state(&json!({
+        let advanced: Value = serde_json::from_str(&advance_synthetic_state(&json!({
             "state": state,
             "lens_results": [{
                 "lens": "correctness-behavior",
@@ -28718,13 +29513,43 @@ pre_filter = "project-pre"
             }],
             "current_diff_hash": "same"
         }))
-        .expect_err("accepted lens payloads must leave verifier resubmission headroom");
+        .expect("oversized lens evidence is reduced to one bounded malformed record"))
+        .expect("advanced json");
 
-        assert_eq!(error, "lens_results_too_large max_bytes=262144");
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["complete"], false);
+        assert!(advanced["filtered"]["malformed"]
+            .as_array()
+            .expect("malformed results")
+            .iter()
+            .any(|malformed| malformed["filter_reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("lens_results_too_large"))));
     }
 
     #[test]
-    fn advance_rejects_invalid_verifier_attestations() {
+    fn excessive_lens_result_envelopes_collapse_to_one_malformed_record() {
+        let state = event_sourced_test_state(Path::new("."), "review-cardinality-bound");
+        let current_diff_hash = state["scope"]["diff_hash"].clone();
+        let raw_results = (0..=MAX_REVIEW_LENSES)
+            .map(|_| json!([]))
+            .collect::<Vec<_>>();
+        let input = parse_advance_review_input(&json!({
+            "state": state,
+            "lens_results": raw_results,
+            "current_diff_hash": current_diff_hash
+        }))
+        .expect("excess envelopes must collapse into bounded malformed evidence");
+
+        assert_eq!(input.lens_results.len(), 1);
+        assert!(input.lens_results[0]
+            .parse_error
+            .as_deref()
+            .is_some_and(|reason| reason.contains("lens_results_too_many")));
+    }
+
+    #[test]
+    fn advance_consumes_invalid_verifier_results_as_non_clean_iterations() {
         let state = json!({
             "scope": { "kind": "base", "base": "origin/main", "changed_files": ["src/new.rs"], "diff_hash": "same" },
             "session_id": "review-1",
@@ -28752,7 +29577,7 @@ pre_filter = "project-pre"
                     "status": "failed",
                     "rationale": "Verifier unavailable; retain every finding."
                 }),
-                "pending_verifier_subagent_key_mismatch=true",
+                "verifier_result_subagent_key_mismatch=true",
             ),
             (
                 json!({
@@ -28762,7 +29587,7 @@ pre_filter = "project-pre"
                     "status": "failed",
                     "rationale": "Verifier unavailable; retain every finding."
                 }),
-                "pending_verifier_model_role_mismatch=true",
+                "verifier_result_model_role_mismatch",
             ),
             (
                 json!({
@@ -28794,20 +29619,222 @@ pre_filter = "project-pre"
         ];
 
         for (verifier_result, expected_error) in cases {
-            let error = advance_synthetic_state(&json!({
-                "state": state.clone(),
-                "lens_results": actionable_lens_results_for(&json!({
-                    "session_id": "review-1",
-                    "iteration_index": 1,
-                    "lenses": ["correctness-behavior"]
-                })),
-                "current_diff_hash": "same",
-                "verifier_result": verifier_result
-            }))
-            .expect_err("invalid verifier attestation must fail");
+            let advanced: Value = serde_json::from_str(
+                &advance_synthetic_state(&json!({
+                    "state": state.clone(),
+                    "lens_results": actionable_lens_results_for(&json!({
+                        "session_id": "review-1",
+                        "iteration_index": 1,
+                        "lenses": ["correctness-behavior"]
+                    })),
+                    "current_diff_hash": "same",
+                    "verifier_result": verifier_result
+                }))
+                .expect("invalid verifier evidence must produce an authoritative reset"),
+            )
+            .expect("advance response");
 
-            assert_eq!(error, expected_error);
+            assert_eq!(advanced["state"]["clean_streak"], 0);
+            assert_eq!(advanced["state"]["iteration_index"], 2);
+            assert_eq!(advanced["complete"], false);
+            assert_eq!(advanced["reset_reason"], "findings_or_malformed_results");
+            assert_eq!(advanced["verification"]["status"], "malformed_rejected");
+            assert!(advanced["verification"]["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains(expected_error)));
+            assert_eq!(
+                advanced["next_assignments"].as_array().map(Vec::len),
+                Some(1)
+            );
         }
+    }
+
+    #[test]
+    fn malformed_ceiling_iteration_is_durably_closed_before_restart_is_required() {
+        fn call_tool(
+            coordinator: &mut ReviewCoordinator,
+            id: u64,
+            name: &str,
+            arguments: Value,
+        ) -> Value {
+            let response = coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "tools/call",
+                    "params": { "name": name, "arguments": arguments }
+                }))
+                .expect("JSON-RPC dispatch");
+            assert!(response.get("error").is_none(), "tool failed: {response}");
+            serde_json::from_str(
+                response["result"]["content"][0]["text"]
+                    .as_str()
+                    .expect("tool response text"),
+            )
+            .expect("tool response JSON")
+        }
+
+        let project_root = test_project_root("malformed-review-iteration-ceiling");
+        let session_id = "malformed-review-iteration-ceiling";
+        let diff_hash = "malformed-review-iteration-ceiling-diff";
+        let mut coordinator = ReviewCoordinator::default();
+        let planned = call_tool(
+            &mut coordinator,
+            1,
+            "final_review.plan",
+            assessed_plan_arguments_for_diff_at_root(
+                session_id,
+                diff_hash,
+                "high",
+                &[
+                    ("correctness-behavior", "high"),
+                    ("architecture-maintainability", "high"),
+                ],
+                json!([]),
+                Some(&project_root),
+            ),
+        );
+        let mut state = planned["state"].clone();
+
+        for request_id in 2..=30 {
+            let reset = call_tool(
+                &mut coordinator,
+                request_id,
+                "final_review.advance",
+                json!({
+                    "state": state,
+                    "lens_results": [{}],
+                    "current_diff_hash": diff_hash
+                }),
+            );
+            state = reset["state"].clone();
+        }
+        assert_eq!(state["iteration_index"], 30);
+
+        for request_id in 31..=32 {
+            let clean = call_tool(
+                &mut coordinator,
+                request_id,
+                "final_review.advance",
+                json!({
+                    "state": state,
+                    "lens_results": clean_lens_results_for(&state),
+                    "current_diff_hash": diff_hash
+                }),
+            );
+            state = clean["state"].clone();
+        }
+        assert_eq!(state["iteration_index"], MAX_REVIEW_ITERATIONS);
+        assert_eq!(state["clean_streak"], 2);
+        assert_eq!(
+            state["verified_clean_iterations"].as_array().map(Vec::len),
+            Some(2)
+        );
+
+        let ceiling_state = state.clone();
+        let corrected_results = clean_lens_results_for(&ceiling_state);
+        let expected_peer_keys = corrected_results
+            .as_array()
+            .expect("ceiling lens results")
+            .iter()
+            .map(|result| result["subagent_key"].clone())
+            .collect::<Vec<_>>();
+        let mut malformed_results = corrected_results.clone();
+        malformed_results[0]
+            .as_object_mut()
+            .expect("lens result object")
+            .remove("status");
+        malformed_results[1] = risk_finding_lens_result(
+            &ceiling_state,
+            "architecture-maintainability",
+            "ceiling-verifier-candidate",
+            "MAJOR",
+        );
+        malformed_results[1]["findings"][0]["security_impact"] = json!("major");
+        let held = call_tool(
+            &mut coordinator,
+            33,
+            "final_review.advance",
+            json!({
+                "state": ceiling_state,
+                "lens_results": malformed_results,
+                "current_diff_hash": diff_hash
+            }),
+        );
+
+        assert_eq!(held["transition_status"], "iteration_limit_reached");
+        assert_eq!(held["recovery"], "restart_final_review");
+        assert_eq!(held["state"]["iteration_index"], MAX_REVIEW_ITERATIONS);
+        assert_eq!(held["state"]["iteration_limit_hold"], true);
+        assert_eq!(held["state"]["clean_streak"], 0);
+        assert_eq!(held["state"]["verified_clean_iterations"], json!([]));
+        assert_eq!(held["complete"], false);
+        assert_eq!(held["next_assignments"], json!([]));
+        assert!(held.get("verifier_assignment").is_none());
+        assert!(held["filtered"]["malformed"]
+            .as_array()
+            .is_some_and(|malformed| !malformed.is_empty()));
+        let shutdowns = held["subagent_shutdown"]
+            .as_array()
+            .expect("closed ceiling assignments");
+        assert_eq!(shutdowns.len(), expected_peer_keys.len());
+        for expected_key in &expected_peer_keys {
+            assert!(shutdowns
+                .iter()
+                .any(|shutdown| shutdown["subagent_key"] == *expected_key));
+        }
+
+        let projected = load_authoritative_session(
+            &held["state"],
+            session_id,
+            ReviewPersistence::WorkflowAuthority,
+        )
+        .expect("held projection load")
+        .expect("held projection");
+        assert_eq!(projected.state, held["state"]);
+
+        let corrected = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 34,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state": held["state"],
+                        "lens_results": corrected_results,
+                        "current_diff_hash": diff_hash
+                    }
+                }
+            }))
+            .expect("corrected resubmission response");
+        assert!(corrected["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(&format!(
+                "review_iteration_limit_reached=true max={MAX_REVIEW_ITERATIONS} recovery=restart_final_review"
+            ))));
+
+        drop(coordinator);
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = call_tool(
+            &mut restarted,
+            35,
+            "final_review.resume_latest",
+            json!({
+                "session_id": session_id,
+                "project_root": project_root
+            }),
+        );
+        assert_eq!(
+            resumed["state_ref"]["state_fingerprint"],
+            state_fingerprint(&held["state"])
+        );
+        assert_eq!(resumed["complete"], false);
+        assert_eq!(resumed["next_tool"], Value::Null);
+        assert_eq!(resumed["pending_phase"], "iteration-limit-hold");
+        assert_eq!(resumed["pending_assignments"], json!([]));
+
+        let _ = fs::remove_dir_all(project_root);
     }
 
     #[test]
@@ -28842,21 +29869,28 @@ pre_filter = "project-pre"
             .collect::<Vec<_>>();
         let assignment = actionable_verifier_assignment_for(&state);
 
-        let error = advance_synthetic_state(&json!({
-            "state": state,
-            "lens_results": actionable_lens_results_for(&state),
-            "current_diff_hash": "same",
-            "verifier_result": {
-                "subagent_key": "review-1:1:verifier",
-                "model_role": "verify-model",
-                "assignment_id": assignment["assignment_id"],
-                "status": "verified",
-                "verdicts": verdicts
-            }
-        }))
-        .expect_err("verifier verdict count must be bounded before coverage matching");
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": state,
+                "lens_results": actionable_lens_results_for(&state),
+                "current_diff_hash": "same",
+                "verifier_result": {
+                    "subagent_key": "review-1:1:verifier",
+                    "model_role": "verify-model",
+                    "assignment_id": assignment["assignment_id"],
+                    "status": "verified",
+                    "verdicts": verdicts
+                }
+            }))
+            .expect("oversized verdict fanout must durably reset the iteration"),
+        )
+        .expect("advance response");
 
-        assert_eq!(error, "verifier_verdicts_too_many max=256");
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["verification"]["status"], "malformed_rejected");
+        assert!(advanced["verification"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("verifier_verdicts_too_many max=256")));
     }
 
     #[test]
@@ -28881,22 +29915,29 @@ pre_filter = "project-pre"
         let verdicts = vec![json!({}); MAX_FINDINGS_PER_ITERATION + 1];
         let assignment = actionable_verifier_assignment_for(&state);
 
-        let error = advance_synthetic_state(&json!({
-            "state": state,
-            "lens_results": actionable_lens_results_for(&state),
-            "current_diff_hash": "same",
-            "verifier_result": {
-                "subagent_key": "review-1:1:verifier",
-                "model_role": "verify-model",
-                "assignment_id": assignment["assignment_id"],
-                "status": "failed",
-                "rationale": "verifier unavailable",
-                "verdicts": verdicts
-            }
-        }))
-        .expect_err("optional verdicts remain bounded for failed results");
+        let advanced: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": state,
+                "lens_results": actionable_lens_results_for(&state),
+                "current_diff_hash": "same",
+                "verifier_result": {
+                    "subagent_key": "review-1:1:verifier",
+                    "model_role": "verify-model",
+                    "assignment_id": assignment["assignment_id"],
+                    "status": "failed",
+                    "rationale": "verifier unavailable",
+                    "verdicts": verdicts
+                }
+            }))
+            .expect("optional oversized verdict fanout must durably reset the iteration"),
+        )
+        .expect("advance response");
 
-        assert_eq!(error, "verifier_verdicts_too_many max=256");
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["verification"]["status"], "malformed_rejected");
+        assert!(advanced["verification"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("verifier_verdicts_too_many max=256")));
     }
 
     #[test]
@@ -29352,7 +30393,14 @@ pre_filter = "project-pre"
             "path": "src/lib.rs",
             "disposition": "block"
         }]);
-        let lens_results = json!([{
+        let mut lens_results = clean_lens_results_for(&state);
+        let security_result = lens_results
+            .as_array_mut()
+            .expect("lens results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security result");
+        *security_result = json!({
             "lens": "security-safety",
             "subagent_key": subagent_key(&state, "security-safety"),
             "shared_test_evidence_id": state["shared_test_evidence"]["id"],
@@ -29376,7 +30424,7 @@ pre_filter = "project-pre"
                 "fresh_context": true,
                 "closed_after_result": true
             }
-        }]);
+        });
 
         let pending: Value = serde_json::from_str(
             &advance_synthetic_state(&json!({
@@ -29430,7 +30478,10 @@ pre_filter = "project-pre"
         assert_eq!(advanced["state"]["unresolved_findings"], json!([]));
         assert_eq!(advanced["filtered"]["routed"][0]["disposition"], "ticket");
         assert_eq!(advanced["complete"], false);
-        assert_eq!(advanced["state"]["lenses"], json!(["security-safety"]));
+        assert_eq!(
+            advanced["state"]["lenses"],
+            json!(["security-safety", "production-risk-footguns"])
+        );
         let confirmed: Value = serde_json::from_str(
             &advance_synthetic_state(&json!({
                 "state": advanced["state"],
@@ -29440,7 +30491,8 @@ pre_filter = "project-pre"
             .expect("a second sample confirms no new material path"),
         )
         .expect("confirmed json");
-        assert_eq!(confirmed["complete"], true);
+        assert_eq!(confirmed["complete"], false);
+        assert_eq!(confirmed["state"]["clean_streak"], 1);
     }
 
     #[test]
@@ -29577,7 +30629,14 @@ pre_filter = "project-pre"
             "path": "src/legacy.rs",
             "disposition": "block"
         }]);
-        let lens_results = json!([{
+        let mut lens_results = clean_lens_results_for(&state);
+        let security_result = lens_results
+            .as_array_mut()
+            .expect("lens results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security result");
+        *security_result = json!({
             "lens": "security-safety",
             "subagent_key": subagent_key(&state, "security-safety"),
             "shared_test_evidence_id": state["shared_test_evidence"]["id"],
@@ -29601,7 +30660,7 @@ pre_filter = "project-pre"
                 "fresh_context": true,
                 "closed_after_result": true
             }
-        }]);
+        });
 
         let pending: Value = serde_json::from_str(
             &advance_synthetic_state(&json!({
@@ -29668,7 +30727,8 @@ pre_filter = "project-pre"
             .expect("a second sample confirms no new material path"),
         )
         .expect("confirmed json");
-        assert_eq!(confirmed["complete"], true);
+        assert_eq!(confirmed["complete"], false);
+        assert_eq!(confirmed["state"]["clean_streak"], 1);
     }
 
     #[test]
@@ -29902,7 +30962,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn advance_applies_rejected_verdict_and_counts_the_disposition_as_clean() {
+    fn advance_applies_rejected_verdict_but_does_not_count_a_finding_free_pass() {
         let state = json!({
             "scope": { "kind": "base", "base": "origin/main", "changed_files": ["src/new.rs"], "diff_hash": "same" },
             "session_id": "review-1",
@@ -29952,7 +31012,7 @@ pre_filter = "project-pre"
         assert!(parsed["state"]["unresolved_findings"]
             .as_array()
             .is_none_or(Vec::is_empty));
-        assert_eq!(parsed["state"]["clean_streak"], 1);
+        assert_eq!(parsed["state"]["clean_streak"], 0);
         assert_eq!(parsed["state"]["iteration_index"], 2);
         assert_eq!(
             parsed["subagent_shutdown"][0]["subagent_key"],
@@ -30142,23 +31202,38 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn advance_rejects_fabricated_filtered_without_lens_results() {
-        let planned: Value = serde_json::from_str(&plan(&json!({
-            "session_id": "fabricated-filtered-review",
-            "changed_files": ["src/new.rs"],
-            "diff_hash": "same"
-        })))
+    fn advance_consumes_missing_lens_results_as_a_non_clean_iteration() {
+        let planned: Value = serde_json::from_str(&plan(&assessed_plan_arguments(
+            "fabricated-filtered-review",
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        )))
         .expect("planned state");
-        let result = execute_advance_fixture(&json!({
-            "state": planned["state"],
-            "filtered": {
-                "clean": true,
-                "actionable": [],
-                "malformed": [],
-                "needs_human_decision": []
-            }
-        }));
-        assert_eq!(result.unwrap_err(), "lens_results is required");
+        let result: Value = serde_json::from_str(
+            &execute_advance_fixture(&json!({
+                "state": planned["state"],
+                "filtered": {
+                    "clean": true,
+                    "actionable": [],
+                    "malformed": [],
+                    "needs_human_decision": []
+                },
+                "current_diff_hash": "fabricated-filtered-review-diff"
+            }))
+            .expect("missing lens results must durably reset the pass"),
+        )
+        .expect("advanced json");
+
+        assert_eq!(result["state"]["clean_streak"], 0);
+        assert_eq!(result["state"]["verified_clean_iterations"], json!([]));
+        assert_eq!(result["complete"], false);
+        assert_eq!(result["next_assignments"].as_array().unwrap().len(), 2);
+        assert_eq!(result["subagent_shutdown"].as_array().unwrap().len(), 2);
+        assert!(!result["filtered"]["malformed"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
     #[test]
     fn advance_requires_current_diff_hash() {
@@ -31382,7 +32457,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn json_rpc_plan_compiles_a_medium_risk_assessment_into_one_targeted_pass() {
+    fn json_rpc_plan_requires_three_complete_medium_risk_passes() {
         let arguments = json!({
             "session_id": "medium-risk-review",
             "base": "origin/main",
@@ -31466,28 +32541,58 @@ pre_filter = "project-pre"
         assert_eq!(plan["state"]["risk_plan"]["overall_risk"], "medium");
         assert_eq!(
             plan["state"]["lenses"],
-            json!(["correctness-behavior", "tests-verification"])
+            json!([
+                "correctness-behavior",
+                "tests-verification",
+                "production-risk-footguns"
+            ])
         );
-        assert_eq!(plan["state"]["required_clean_iterations"], 1);
-        assert_eq!(plan["assignments"].as_array().unwrap().len(), 2);
+        assert_eq!(plan["state"]["required_clean_iterations"], 3);
+        assert_eq!(plan["assignments"].as_array().unwrap().len(), 3);
         assert!(review_contract_is_valid(&plan["state"]));
 
-        let advanced: Value = serde_json::from_str(
+        let first: Value = serde_json::from_str(
             &advance_synthetic_state(&json!({
                 "state": plan["state"],
                 "lens_results": clean_lens_results_for(&plan["state"]),
                 "current_diff_hash": "medium-risk-diff"
             }))
-            .expect("one-pass medium-risk advance"),
+            .expect("first medium-risk pass advances"),
         )
-        .expect("advanced json");
-        assert_eq!(advanced["complete"], true);
-        assert_eq!(advanced["state"]["clean_streak"], 1);
-        assert_eq!(advanced["next_assignments"], json!([]));
+        .expect("first advanced json");
+        assert_eq!(first["complete"], false);
+        assert_eq!(first["state"]["clean_streak"], 1);
+        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 3);
+
+        let second: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": first["state"],
+                "lens_results": clean_lens_results_for(&first["state"]),
+                "current_diff_hash": "medium-risk-diff"
+            }))
+            .expect("second medium-risk pass advances"),
+        )
+        .expect("second advanced json");
+        assert_eq!(second["complete"], false);
+        assert_eq!(second["state"]["clean_streak"], 2);
+        assert_eq!(second["next_assignments"].as_array().unwrap().len(), 3);
+
+        let third: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": second["state"],
+                "lens_results": clean_lens_results_for(&second["state"]),
+                "current_diff_hash": "medium-risk-diff"
+            }))
+            .expect("third medium-risk pass advances"),
+        )
+        .expect("third advanced json");
+        assert_eq!(third["complete"], true);
+        assert_eq!(third["state"]["clean_streak"], 3);
+        assert_eq!(third["next_assignments"], json!([]));
     }
 
     #[test]
-    fn json_rpc_plan_accepts_a_complete_low_risk_scout_and_targets_one_lens() {
+    fn json_rpc_plan_adds_mandatory_footguns_to_the_low_risk_selected_lens() {
         let arguments = assessed_plan_arguments(
             "complete-low-risk-review",
             "low",
@@ -31506,8 +32611,11 @@ pre_filter = "project-pre"
         .expect("plan json");
 
         assert_eq!(planned["state"]["risk_plan"]["overall_risk"], "low");
-        assert_eq!(planned["state"]["lenses"], json!(["correctness-behavior"]));
-        assert_eq!(planned["assignments"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            planned["state"]["lenses"],
+            json!(["correctness-behavior", "production-risk-footguns"])
+        );
+        assert_eq!(planned["assignments"].as_array().unwrap().len(), 2);
         assert!(review_contract_is_valid(&planned["state"]));
     }
 
@@ -31611,7 +32719,7 @@ pre_filter = "project-pre"
             planned["state"]["unrelated_finding_policy_confirmation_required"],
             false
         );
-        assert_eq!(planned["assignments"].as_array().unwrap().len(), 1);
+        assert_eq!(planned["assignments"].as_array().unwrap().len(), 2);
     }
 
     #[test]
@@ -31712,7 +32820,7 @@ pre_filter = "project-pre"
         tampered["risk_plan"]["review_budget"]["started_at_epoch_seconds"] = json!(999);
         assert!(!review_contract_is_valid(&tampered));
 
-        let before_checkpoint: Value = serde_json::from_str(
+        let first: Value = serde_json::from_str(
             &execute_advance_via_dispatcher_at(
                 &json!({
                     "state": state,
@@ -31720,18 +32828,31 @@ pre_filter = "project-pre"
                     "current_diff_hash": "medium-risk-budget-diff"
                 }),
                 false,
-                5_499,
+                1_001,
             )
-            .expect("one second before the checkpoint advances normally"),
+            .expect("first clean pass advances"),
         )
-        .expect("pre-checkpoint json");
-        assert_eq!(before_checkpoint["complete"], true);
+        .expect("first clean json");
+        let second: Value = serde_json::from_str(
+            &execute_advance_via_dispatcher_at(
+                &json!({
+                    "state": first["state"],
+                    "lens_results": clean_lens_results_for(&first["state"]),
+                    "current_diff_hash": "medium-risk-budget-diff"
+                }),
+                false,
+                1_002,
+            )
+            .expect("second clean pass advances"),
+        )
+        .expect("second clean json");
+        assert_eq!(second["state"]["clean_streak"], 2);
 
         let checkpoint: Value = serde_json::from_str(
             &execute_advance_via_dispatcher_at(
                 &json!({
-                    "state": state,
-                    "lens_results": clean_lens_results_for(&state),
+                    "state": second["state"],
+                    "lens_results": clean_lens_results_for(&second["state"]),
                     "current_diff_hash": "medium-risk-budget-diff"
                 }),
                 false,
@@ -31892,9 +33013,7 @@ pre_filter = "project-pre"
             .state,
             state
         );
-        clock.store(5_500, Ordering::SeqCst);
-
-        let checkpoint_response = coordinator
+        let first_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
                 "id": 2,
@@ -31904,6 +33023,51 @@ pre_filter = "project-pre"
                     "arguments": {
                         "state": state,
                         "lens_results": clean_lens_results_for(&state),
+                        "current_diff_hash": "json-rpc-budget-checkpoint-diff"
+                    }
+                }
+            }))
+            .expect("first clean response");
+        let first: Value = serde_json::from_str(
+            first_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("first clean text"),
+        )
+        .expect("first clean json");
+        let second_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state": first["state"],
+                        "lens_results": clean_lens_results_for(&first["state"]),
+                        "current_diff_hash": "json-rpc-budget-checkpoint-diff"
+                    }
+                }
+            }))
+            .expect("second clean response");
+        let second: Value = serde_json::from_str(
+            second_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("second clean text"),
+        )
+        .expect("second clean json");
+        assert_eq!(second["state"]["clean_streak"], 2);
+        clock.store(5_500, Ordering::SeqCst);
+
+        let checkpoint_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state": second["state"],
+                        "lens_results": clean_lens_results_for(&second["state"]),
                         "current_diff_hash": "json-rpc-budget-checkpoint-diff"
                     }
                 }
@@ -31943,7 +33107,7 @@ pre_filter = "project-pre"
         let ship_response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
-                "id": 3,
+                "id": 5,
                 "method": "tools/call",
                 "params": {
                     "name": "final_review.advance",
@@ -32031,6 +33195,8 @@ pre_filter = "project-pre"
             history,
             vec![
                 "planned",
+                "iteration-accepted",
+                "iteration-accepted",
                 "iteration-accepted",
                 "budget-requested",
                 "budget-resolved",
@@ -32144,7 +33310,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn review_budget_ship_terminates_remaining_nonblocking_review_work() {
+    fn review_budget_ship_cannot_bypass_three_finding_free_iterations() {
         let arguments = assessed_plan_arguments(
             "medium-risk-budget-terminal-ship",
             "medium",
@@ -32183,32 +33349,98 @@ pre_filter = "project-pre"
         assert_eq!(checkpoint["advance_kind"], "review_budget_checkpoint");
         assert_eq!(
             checkpoint["state"]["risk_plan"]["active_lenses"],
-            json!(["correctness-behavior"])
+            json!(["correctness-behavior", "production-risk-footguns"])
         );
 
-        let shipped: Value = serde_json::from_str(
-            &execute_advance_via_dispatcher_at(
-                &json!({
-                    "state": checkpoint["state"],
-                    "lens_results": [],
-                    "current_diff_hash": "medium-risk-budget-terminal-ship-diff",
-                    "review_budget_decision": {
-                        "decision": "ship",
-                        "rationale": "The remaining observation is tracked and does not block shipment."
-                    }
-                }),
-                false,
-                5_500,
-            )
-            .expect("ship ends final review"),
+        let error = execute_advance_via_dispatcher_at(
+            &json!({
+                "state": checkpoint["state"],
+                "lens_results": [],
+                "current_diff_hash": "medium-risk-budget-terminal-ship-diff",
+                "review_budget_decision": {
+                    "decision": "ship",
+                    "rationale": "The remaining observation is tracked and does not block shipment."
+                }
+            }),
+            false,
+            5_500,
         )
-        .expect("ship json");
+        .expect_err("ship must not bypass the clean-review streak");
 
-        assert_eq!(shipped["complete"], true);
-        assert_eq!(shipped["state"]["risk_plan"]["active_lenses"], json!([]));
-        assert_eq!(shipped["state"]["lenses"], json!([]));
-        assert_eq!(shipped["next_assignments"], json!([]));
-        assert!(review_contract_is_valid(&shipped["state"]));
+        assert_eq!(
+            error,
+            "review_budget_ship_blocked_by_clean_requirement=true"
+        );
+    }
+
+    #[test]
+    fn review_budget_ship_requires_three_consecutive_verified_receipts() {
+        let arguments = assessed_plan_arguments(
+            "medium-risk-budget-receipts",
+            "medium",
+            &[("correctness-behavior", "medium")],
+            json!([]),
+        );
+        let planned: Value =
+            serde_json::from_str(&plan_result_at(&arguments, 1_000).expect("medium-risk plan"))
+                .expect("plan json");
+        let mut state = planned["state"].clone();
+        state["iteration_index"] = json!(4);
+        state["clean_streak"] = json!(3);
+        state["verified_clean_iterations"] = json!([
+            {"iteration": 1, "transition_id": "verified-1"},
+            {"iteration": 2, "transition_id": "verified-2"}
+        ]);
+        state["risk_plan"]["review_budget"]["checkpoint_pending"] = json!(true);
+        state["review_contract_id"] =
+            json!(computed_review_contract_id(&state).expect("rehashed contract"));
+
+        let error = execute_advance_via_dispatcher_at(
+            &json!({
+                "state": state,
+                "lens_results": [],
+                "current_diff_hash": "medium-risk-budget-receipts-diff",
+                "review_budget_decision": {
+                    "decision": "ship",
+                    "rationale": "The counter alone claims three clean iterations."
+                }
+            }),
+            false,
+            5_500,
+        )
+        .expect_err("ship must require three distinct consecutive receipts");
+
+        assert_eq!(
+            error,
+            "review_budget_ship_blocked_by_clean_requirement=true"
+        );
+    }
+
+    #[test]
+    fn verified_clean_receipts_must_be_consecutive_and_distinct() {
+        let valid = vec![
+            ReviewVerifiedCleanIterationFacts {
+                iteration: 4,
+                transition_id: "verified-4".to_string(),
+            },
+            ReviewVerifiedCleanIterationFacts {
+                iteration: 5,
+                transition_id: "verified-5".to_string(),
+            },
+            ReviewVerifiedCleanIterationFacts {
+                iteration: 6,
+                transition_id: "verified-6".to_string(),
+            },
+        ];
+        assert!(verified_clean_receipts_complete(7, 3, &valid));
+
+        let mut duplicate = valid.clone();
+        duplicate[2].transition_id = duplicate[1].transition_id.clone();
+        assert!(!verified_clean_receipts_complete(7, 3, &duplicate));
+
+        let mut gap = valid;
+        gap[1].iteration = 3;
+        assert!(!verified_clean_receipts_complete(7, 3, &gap));
     }
 
     fn initial_scope_split_arguments(session_id: &str) -> Value {
@@ -32270,7 +33502,13 @@ pre_filter = "project-pre"
         assert!(split["state"]["finding_disposition_policy"]["MAJOR"]
             ["architecture-maintainability"]
             .is_string());
+        assert_eq!(
+            split["state"]["required_clean_iterations"],
+            DEFAULT_CLEAN_ITERATIONS
+        );
         assert!(review_contract_is_valid(&split["state"]));
+        validate_restored_review_protocol_state(&split["state"])
+            .expect("a persisted split hold must remain resumable");
 
         let confirmed: Value = serde_json::from_str(
             &confirm_scope_split(&json!({
@@ -33573,7 +34811,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn valid_delta_reassessment_targets_only_affected_lenses_plus_correctness_guard() {
+    fn valid_delta_reassessment_restarts_every_selected_lens() {
         let arguments = assessed_plan_arguments(
             "targeted-delta-reassessment",
             "high",
@@ -33607,6 +34845,16 @@ pre_filter = "project-pre"
         )
         .expect("delta-required json");
         let assignment = &required["delta_risk_assignments"][0];
+        let shutdowns = required["subagent_shutdown"]
+            .as_array()
+            .expect("material delta closes every old lens assignment");
+        assert_eq!(shutdowns.len(), state["lenses"].as_array().unwrap().len());
+        for lens in state["lenses"].as_array().unwrap() {
+            let lens = lens.as_str().unwrap();
+            assert!(shutdowns.iter().any(|shutdown| {
+                shutdown["subagent_key"] == format!("targeted-delta-reassessment:2:{lens}")
+            }));
+        }
         let assessment = delta_risk_assessment_for(
             assignment,
             "high",
@@ -33634,14 +34882,19 @@ pre_filter = "project-pre"
         );
         assert_eq!(
             advanced["state"]["lenses"],
-            json!(["correctness-behavior", "security-safety"])
+            json!([
+                "correctness-behavior",
+                "security-safety",
+                "architecture-maintainability",
+                "production-risk-footguns"
+            ])
         );
-        assert_eq!(advanced["next_assignments"].as_array().unwrap().len(), 2);
+        assert_eq!(advanced["next_assignments"].as_array().unwrap().len(), 4);
         assert!(advanced["next_assignments"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|assignment| assignment["lens"] != "architecture-maintainability"));
+            .any(|assignment| assignment["lens"] == "architecture-maintainability"));
         assert!(review_contract_is_valid(&advanced["state"]));
     }
 
@@ -33745,7 +34998,8 @@ pre_filter = "project-pre"
             json!([
                 "correctness-behavior",
                 "security-safety",
-                "architecture-maintainability"
+                "architecture-maintainability",
+                "production-risk-footguns"
             ])
         );
     }
@@ -34322,7 +35576,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn new_material_path_repeats_only_its_lens_until_the_next_sample_finds_nothing_new() {
+    fn new_material_path_requires_three_fresh_complete_multilens_passes() {
         let arguments = assessed_plan_arguments(
             "material-discovery-saturation",
             "high",
@@ -34353,8 +35607,16 @@ pre_filter = "project-pre"
         .expect("first advanced json");
 
         assert_eq!(first["complete"], false);
-        assert_eq!(first["state"]["lenses"], json!(["correctness-behavior"]));
-        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            first["state"]["lenses"],
+            json!([
+                "correctness-behavior",
+                "architecture-maintainability",
+                "production-risk-footguns"
+            ])
+        );
+        assert_eq!(first["state"]["clean_streak"], 0);
+        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 3);
         assert_eq!(
             first["filtered"]["discovery_saturation"]["new_major_critical_ids"],
             json!(["new-material-path"])
@@ -34371,12 +35633,36 @@ pre_filter = "project-pre"
         )
         .expect("second advanced json");
 
-        assert_eq!(second["complete"], true);
-        assert_eq!(second["state"]["lenses"], json!([]));
+        assert_eq!(second["complete"], false);
+        assert_eq!(second["state"]["clean_streak"], 1);
+
+        let third: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": second["state"],
+                "lens_results": clean_lens_results_for(&second["state"]),
+                "current_diff_hash": "material-discovery-saturation-diff"
+            }))
+            .expect("second clean confirmation sample advances"),
+        )
+        .expect("third advanced json");
+        assert_eq!(third["complete"], false);
+        assert_eq!(third["state"]["clean_streak"], 2);
+
+        let fourth: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": third["state"],
+                "lens_results": clean_lens_results_for(&third["state"]),
+                "current_diff_hash": "material-discovery-saturation-diff"
+            }))
+            .expect("third clean confirmation sample advances"),
+        )
+        .expect("fourth advanced json");
+        assert_eq!(fourth["complete"], true);
+        assert_eq!(fourth["state"]["clean_streak"], 3);
     }
 
     #[test]
-    fn exceptional_second_pass_targets_only_the_exceptional_lens() {
+    fn exceptional_review_keeps_every_selected_lens_in_all_three_clean_passes() {
         let mut arguments = assessed_plan_arguments(
             "exceptional-targeted-second-pass",
             "exceptional",
@@ -34401,9 +35687,13 @@ pre_filter = "project-pre"
 
         assert_eq!(
             first["state"]["lenses"],
-            json!(["architecture-maintainability"])
+            json!([
+                "correctness-behavior",
+                "architecture-maintainability",
+                "production-risk-footguns"
+            ])
         );
-        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 1);
+        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 3);
 
         let second: Value = serde_json::from_str(
             &advance_synthetic_state(&json!({
@@ -34414,7 +35704,19 @@ pre_filter = "project-pre"
             .expect("second exceptional sample advances"),
         )
         .expect("second advanced json");
-        assert_eq!(second["complete"], true);
+        assert_eq!(second["complete"], false);
+        assert_eq!(second["next_assignments"].as_array().unwrap().len(), 3);
+
+        let third: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": second["state"],
+                "lens_results": clean_lens_results_for(&second["state"]),
+                "current_diff_hash": "exceptional-targeted-second-pass-diff"
+            }))
+            .expect("third exceptional sample advances"),
+        )
+        .expect("third advanced json");
+        assert_eq!(third["complete"], true);
     }
 
     #[test]
@@ -34456,7 +35758,7 @@ pre_filter = "project-pre"
             &plan_result(&arguments).expect("a supported trigger permits exceptional review"),
         )
         .expect("plan json");
-        assert_eq!(planned["state"]["required_clean_iterations"], 2);
+        assert_eq!(planned["state"]["required_clean_iterations"], 3);
         assert_eq!(
             planned["state"]["risk_plan"]["exceptional_triggers"],
             json!(["safety-critical-behavior"])
@@ -34512,7 +35814,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn malformed_lens_retries_without_repeating_a_valid_peer() {
+    fn malformed_lens_restarts_a_complete_multilens_pass() {
         let arguments = assessed_plan_arguments(
             "malformed-targeted-retry",
             "high",
@@ -34542,6 +35844,7 @@ pre_filter = "project-pre"
                 "explanation": "The finding names the changed branch."
             }
         }]);
+        results.truncate(1);
         let first: Value = serde_json::from_str(
             &advance_synthetic_state(&json!({
                 "state": planned["state"],
@@ -34552,8 +35855,284 @@ pre_filter = "project-pre"
         )
         .expect("first advanced json");
 
-        assert_eq!(first["state"]["lenses"], json!(["correctness-behavior"]));
-        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            first["state"]["lenses"],
+            json!([
+                "correctness-behavior",
+                "architecture-maintainability",
+                "production-risk-footguns"
+            ])
+        );
+        assert_eq!(first["state"]["clean_streak"], 0);
+        assert_eq!(first["next_assignments"].as_array().unwrap().len(), 3);
+        assert_eq!(first["subagent_shutdown"].as_array().unwrap().len(), 3);
+        assert!(first["subagent_shutdown"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|shutdown| shutdown["subagent_key"]
+                == "malformed-targeted-retry:1:architecture-maintainability"));
+    }
+
+    #[test]
+    fn partial_clean_lens_omission_closes_and_restarts_complete_peer_set() {
+        let arguments = assessed_plan_arguments(
+            "partial-clean-omission",
+            "high",
+            &[
+                ("correctness-behavior", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let mut results = clean_lens_results_for(&planned["state"])
+            .as_array()
+            .expect("clean lens results")
+            .clone();
+        results.truncate(1);
+
+        let reset: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": results,
+                "current_diff_hash": "partial-clean-omission-diff"
+            }))
+            .expect("partial clean set advances to a complete retry"),
+        )
+        .expect("reset json");
+
+        assert_eq!(reset["state"]["clean_streak"], 0);
+        assert_eq!(reset["state"]["verified_clean_iterations"], json!([]));
+        assert_eq!(reset["complete"], false);
+        assert_eq!(reset["next_assignments"].as_array().unwrap().len(), 3);
+        let shutdowns = reset["subagent_shutdown"].as_array().unwrap();
+        assert_eq!(shutdowns.len(), 3);
+        for lens in [
+            "correctness-behavior",
+            "architecture-maintainability",
+            "production-risk-footguns",
+        ] {
+            assert!(shutdowns.iter().any(|shutdown| {
+                shutdown["subagent_key"] == format!("partial-clean-omission:1:{lens}")
+            }));
+        }
+    }
+
+    #[test]
+    fn schema_invalid_result_after_two_clean_passes_requires_three_fresh_passes() {
+        let arguments = assessed_plan_arguments(
+            "schema-invalid-after-two-clean",
+            "high",
+            &[
+                ("correctness-behavior", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let first: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": clean_lens_results_for(&planned["state"]),
+                "current_diff_hash": "schema-invalid-after-two-clean-diff"
+            }))
+            .expect("first clean pass advances"),
+        )
+        .expect("first clean json");
+        let second: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": first["state"],
+                "lens_results": clean_lens_results_for(&first["state"]),
+                "current_diff_hash": "schema-invalid-after-two-clean-diff"
+            }))
+            .expect("second clean pass advances"),
+        )
+        .expect("second clean json");
+        assert_eq!(second["state"]["clean_streak"], 2);
+
+        let mut malformed = clean_lens_results_for(&second["state"]);
+        malformed[0]
+            .as_object_mut()
+            .expect("lens result object")
+            .remove("status");
+        let reset: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": second["state"],
+                "lens_results": malformed,
+                "current_diff_hash": "schema-invalid-after-two-clean-diff"
+            }))
+            .expect("schema-invalid result is durably classified and resets the pass"),
+        )
+        .expect("reset json");
+        assert_eq!(reset["state"]["clean_streak"], 0);
+        assert_eq!(reset["state"]["verified_clean_iterations"], json!([]));
+        assert_eq!(reset["complete"], false);
+        assert_eq!(reset["next_assignments"].as_array().unwrap().len(), 3);
+
+        let mut state = reset["state"].clone();
+        for fresh_pass in 1..=3 {
+            let advanced: Value = serde_json::from_str(
+                &advance_synthetic_state(&json!({
+                    "state": state,
+                    "lens_results": clean_lens_results_for(&state),
+                    "current_diff_hash": "schema-invalid-after-two-clean-diff"
+                }))
+                .expect("fresh pass advances"),
+            )
+            .expect("fresh pass json");
+            assert_eq!(advanced["complete"], fresh_pass == 3);
+            state = advanced["state"].clone();
+        }
+    }
+
+    #[test]
+    fn per_lens_finding_overflow_after_two_clean_passes_requires_three_fresh_passes() {
+        let arguments = assessed_plan_arguments(
+            "per-lens-overflow-after-two-clean",
+            "high",
+            &[
+                ("correctness-behavior", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let first: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": clean_lens_results_for(&planned["state"]),
+                "current_diff_hash": "per-lens-overflow-after-two-clean-diff"
+            }))
+            .expect("first clean pass advances"),
+        )
+        .expect("first clean json");
+        let second: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": first["state"],
+                "lens_results": clean_lens_results_for(&first["state"]),
+                "current_diff_hash": "per-lens-overflow-after-two-clean-diff"
+            }))
+            .expect("second clean pass advances"),
+        )
+        .expect("second clean json");
+        assert_eq!(second["state"]["clean_streak"], 2);
+
+        let mut overfull = clean_lens_results_for(&second["state"]);
+        overfull[0]["status"] = json!("findings");
+        overfull[0]["findings"] = Value::Array(
+            (0..=MAX_FINDINGS_PER_LENS)
+                .map(|index| {
+                    json!({
+                        "finding_id": format!("overflow-finding-{index}"),
+                        "severity": "MAJOR",
+                        "causality": "caused",
+                        "causality_evidence": "The changed coordinator contains the candidate path.",
+                        "likelihood": "possible",
+                        "security_impact": "none",
+                        "safety_impact": "none",
+                        "path": "plugins/development-system/components/development-discipline/rust/src/main.rs",
+                        "message": "A compact overflow finding.",
+                        "relevance": {
+                            "category": "diff_changed_file",
+                            "explanation": "The finding names the changed coordinator."
+                        }
+                    })
+                })
+                .collect(),
+        );
+        let reset: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": second["state"],
+                "lens_results": overfull,
+                "current_diff_hash": "per-lens-overflow-after-two-clean-diff"
+            }))
+            .expect("per-lens overflow is durably classified and resets the pass"),
+        )
+        .expect("reset json");
+
+        assert_eq!(reset["state"]["clean_streak"], 0);
+        assert_eq!(reset["state"]["verified_clean_iterations"], json!([]));
+        assert_eq!(reset["complete"], false);
+        assert_eq!(reset["next_assignments"].as_array().unwrap().len(), 3);
+        assert_eq!(reset["subagent_shutdown"].as_array().unwrap().len(), 3);
+        assert!(reset["filtered"]["malformed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                entry["filter_reason"] == "lens_findings_too_many lens=correctness-behavior max=64"
+            }));
+
+        let mut state = reset["state"].clone();
+        for fresh_pass in 1..=3 {
+            let advanced: Value = serde_json::from_str(
+                &advance_synthetic_state(&json!({
+                    "state": state,
+                    "lens_results": clean_lens_results_for(&state),
+                    "current_diff_hash": "per-lens-overflow-after-two-clean-diff"
+                }))
+                .expect("fresh pass advances"),
+            )
+            .expect("fresh pass json");
+            assert_eq!(advanced["complete"], fresh_pass == 3);
+            state = advanced["state"].clone();
+        }
+    }
+
+    #[test]
+    fn malformed_lens_result_containers_after_two_clean_passes_reset_the_streak() {
+        let arguments = assessed_plan_arguments(
+            "malformed-container-after-two-clean",
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
+        let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
+        let first: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": clean_lens_results_for(&planned["state"]),
+                "current_diff_hash": "malformed-container-after-two-clean-diff"
+            }))
+            .expect("first clean pass advances"),
+        )
+        .expect("first clean json");
+        let second: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": first["state"],
+                "lens_results": clean_lens_results_for(&first["state"]),
+                "current_diff_hash": "malformed-container-after-two-clean-diff"
+            }))
+            .expect("second clean pass advances"),
+        )
+        .expect("second clean json");
+        assert_eq!(second["state"]["clean_streak"], 2);
+
+        for malformed_container in [None, Some(json!({ "not": "an array" }))] {
+            let mut request = json!({
+                "state": second["state"],
+                "current_diff_hash": "malformed-container-after-two-clean-diff"
+            });
+            if let Some(container) = malformed_container {
+                request["lens_results"] = container;
+            }
+            let reset: Value = serde_json::from_str(
+                &advance_synthetic_state(&request)
+                    .expect("malformed lens container is durably classified"),
+            )
+            .expect("reset json");
+
+            assert_eq!(reset["state"]["clean_streak"], 0);
+            assert_eq!(reset["state"]["verified_clean_iterations"], json!([]));
+            assert_eq!(reset["complete"], false);
+            assert_eq!(reset["next_assignments"].as_array().unwrap().len(), 2);
+            assert_eq!(reset["subagent_shutdown"].as_array().unwrap().len(), 2);
+            assert!(!reset["filtered"]["malformed"]
+                .as_array()
+                .unwrap()
+                .is_empty());
+        }
     }
 
     #[test]
@@ -34600,7 +36179,9 @@ pre_filter = "project-pre"
         )
         .expect("advanced json");
 
-        assert_eq!(advanced["complete"], true);
+        assert_eq!(advanced["complete"], false);
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["next_assignments"].as_array().unwrap().len(), 2);
         assert_eq!(
             advanced["filtered"]["discovery_saturation"]["new_major_critical_ids"],
             json!([])
@@ -34654,7 +36235,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn risk_review_defers_nonsecurity_findings_without_verifier_or_clean_reset() {
+    fn risk_review_defers_nonsecurity_findings_but_resets_clean_streak() {
         let arguments = assessed_plan_arguments(
             "deferred-nonsecurity-findings",
             "medium",
@@ -34662,8 +36243,25 @@ pre_filter = "project-pre"
             json!([]),
         );
         let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
-        let state = &planned["state"];
-        let lens_results = json!([{
+        let first_clean: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": planned["state"],
+                "lens_results": clean_lens_results_for(&planned["state"]),
+                "current_diff_hash": "deferred-nonsecurity-findings-diff"
+            }))
+            .expect("first clean pass advances"),
+        )
+        .expect("first clean json");
+        assert_eq!(first_clean["state"]["clean_streak"], 1);
+        let state = &first_clean["state"];
+        let mut lens_results = clean_lens_results_for(state);
+        let correctness_result = lens_results
+            .as_array_mut()
+            .expect("lens results")
+            .iter_mut()
+            .find(|result| result["lens"] == "correctness-behavior")
+            .expect("correctness result");
+        *correctness_result = json!({
             "lens": "correctness-behavior",
             "subagent_key": subagent_key(state, "correctness-behavior"),
             "shared_test_evidence_id": state["shared_test_evidence"]["id"],
@@ -34712,7 +36310,7 @@ pre_filter = "project-pre"
                 "fresh_context": true,
                 "closed_after_result": true
             }
-        }]);
+        });
         let filtered: Value = serde_json::from_str(
             &filter_findings(&json!({
                 "state": state,
@@ -34760,10 +36358,10 @@ pre_filter = "project-pre"
         .expect("advanced json");
         assert_eq!(advanced["complete"], false);
         assert_eq!(advanced["verification"]["status"], "not_required");
-        assert_eq!(advanced["state"]["clean_streak"], 1);
-        assert_eq!(advanced["state"]["finding_history"][0]["routed_count"], 3);
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["state"]["finding_history"][1]["routed_count"], 3);
         assert_eq!(
-            advanced["state"]["finding_history"][0]["already_tracked_count"],
+            advanced["state"]["finding_history"][1]["already_tracked_count"],
             0
         );
         let confirmed: Value = serde_json::from_str(
@@ -34775,7 +36373,32 @@ pre_filter = "project-pre"
             .expect("a second sample confirms no new material path"),
         )
         .expect("confirmed json");
-        assert_eq!(confirmed["complete"], true);
+        assert_eq!(confirmed["complete"], false);
+        assert_eq!(confirmed["state"]["clean_streak"], 1);
+
+        let second_clean: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": confirmed["state"],
+                "lens_results": clean_lens_results_for(&confirmed["state"]),
+                "current_diff_hash": "deferred-nonsecurity-findings-diff"
+            }))
+            .expect("second clean pass advances"),
+        )
+        .expect("second clean json");
+        assert_eq!(second_clean["complete"], false);
+        assert_eq!(second_clean["state"]["clean_streak"], 2);
+
+        let third_clean: Value = serde_json::from_str(
+            &advance_synthetic_state(&json!({
+                "state": second_clean["state"],
+                "lens_results": clean_lens_results_for(&second_clean["state"]),
+                "current_diff_hash": "deferred-nonsecurity-findings-diff"
+            }))
+            .expect("third clean pass advances"),
+        )
+        .expect("third clean json");
+        assert_eq!(third_clean["complete"], true);
+        assert_eq!(third_clean["state"]["clean_streak"], 3);
     }
 
     #[test]
@@ -34869,32 +36492,40 @@ pre_filter = "project-pre"
         );
         let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
         let state = &planned["state"];
+        let mut lens_results = clean_lens_results_for(state);
+        let security_result = lens_results
+            .as_array_mut()
+            .expect("lens results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security result");
+        *security_result = json!({
+            "lens": "security-safety",
+            "subagent_key": subagent_key(state, "security-safety"),
+            "shared_test_evidence_id": state["shared_test_evidence"]["id"],
+            "additional_broad_test_run": false,
+            "status": "findings",
+            "findings": [{
+                "id": "trivial-existing-pii-label",
+                "severity": "TRIVIAL",
+                "causality": "pre-existing",
+                "causality_evidence": "The label predates the reviewed diff.",
+                "likelihood": "observed",
+                "security_impact": "major",
+                "safety_impact": "none",
+                "suspected_pii": true,
+                "path": "src/unchanged.rs",
+                "message": "An unchanged diagnostic label mentions protected data.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The reviewer encountered it while following the changed flow."
+                }
+            }]
+        });
         let filtered: Value = serde_json::from_str(
             &filter_findings(&json!({
                 "state": state,
-                "lens_results": [{
-                    "lens": "security-safety",
-                    "subagent_key": subagent_key(state, "security-safety"),
-                    "shared_test_evidence_id": state["shared_test_evidence"]["id"],
-                    "additional_broad_test_run": false,
-                    "status": "findings",
-                    "findings": [{
-                        "id": "trivial-existing-pii-label",
-                        "severity": "TRIVIAL",
-                        "causality": "pre-existing",
-                        "causality_evidence": "The label predates the reviewed diff.",
-                        "likelihood": "observed",
-                        "security_impact": "major",
-                        "safety_impact": "none",
-                        "suspected_pii": true,
-                        "path": "src/unchanged.rs",
-                        "message": "An unchanged diagnostic label mentions protected data.",
-                        "relevance": {
-                            "category": "diff_changed_file",
-                            "explanation": "The reviewer encountered it while following the changed flow."
-                        }
-                    }]
-                }]
+                "lens_results": lens_results
             }))
             .expect("filter result"),
         )
@@ -35046,7 +36677,14 @@ pre_filter = "project-pre"
         );
         let planned: Value = serde_json::from_str(&plan(&arguments)).expect("plan json");
         let state = &planned["state"];
-        let lens_results = json!([{
+        let mut lens_results = clean_lens_results_for(state);
+        let security_result = lens_results
+            .as_array_mut()
+            .expect("lens results")
+            .iter_mut()
+            .find(|result| result["lens"] == "security-safety")
+            .expect("security result");
+        *security_result = json!({
             "lens": "security-safety",
             "subagent_key": subagent_key(state, "security-safety"),
             "shared_test_evidence_id": state["shared_test_evidence"]["id"],
@@ -35070,7 +36708,7 @@ pre_filter = "project-pre"
                 "fresh_context": true,
                 "closed_after_result": true
             }
-        }]);
+        });
         let filtered: Value = serde_json::from_str(
             &filter_findings(&json!({ "state": state, "lens_results": lens_results }))
                 .expect("filtered blocker"),
@@ -35148,12 +36786,13 @@ pre_filter = "project-pre"
         .expect("advanced json");
 
         assert_eq!(advanced["filtered"]["clean"], true);
-        assert_eq!(advanced["complete"], true);
-        assert_eq!(advanced["next_assignments"], json!([]));
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["complete"], false);
+        assert_eq!(advanced["next_assignments"].as_array().unwrap().len(), 2);
     }
 
     #[test]
-    fn unchanged_diff_already_tracked_finding_does_not_repeat_or_reset_clean_state() {
+    fn unchanged_diff_already_tracked_finding_still_resets_clean_streak() {
         let arguments = assessed_plan_arguments(
             "unchanged-deferred-finding",
             "exceptional",
@@ -35203,7 +36842,7 @@ pre_filter = "project-pre"
         .expect("first advance json");
 
         assert_eq!(first["complete"], false);
-        assert_eq!(first["state"]["clean_streak"], 1);
+        assert_eq!(first["state"]["clean_streak"], 0);
         assert_eq!(
             first["state"]["deferred_findings"][0]["ticket_reference"],
             "BACKLOG-REPEAT-1"
@@ -35231,8 +36870,8 @@ pre_filter = "project-pre"
         );
         assert_eq!(second["filtered"]["follow_up_tickets_required"], json!([]));
         assert_eq!(second["verification"]["status"], "not_required");
-        assert_eq!(second["state"]["clean_streak"], 2);
-        assert_eq!(second["complete"], true);
+        assert_eq!(second["state"]["clean_streak"], 0);
+        assert_eq!(second["complete"], false);
     }
 
     #[test]
@@ -35293,7 +36932,9 @@ pre_filter = "project-pre"
             advanced["state"]["deferred_findings"][0]["ticket_reference"],
             "BACKLOG-SCOUT-1"
         );
-        assert_eq!(advanced["complete"], true);
+        assert_eq!(advanced["state"]["clean_streak"], 1);
+        assert_eq!(advanced["complete"], false);
+        assert_eq!(advanced["next_assignments"].as_array().unwrap().len(), 2);
     }
 
     #[test]
@@ -36398,6 +38039,163 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn verifier_rejected_needs_human_finding_resets_two_prior_clean_passes() {
+        let mut coordinator = ReviewCoordinator::default();
+        let plan_arguments = add_test_risk_assessment(
+            json!({
+                "session_id": "needs-human-finding-free",
+                "changed_files": ["src/new.rs"],
+                "diff_hash": "same"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([]),
+        );
+        let plan_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.plan",
+                    "arguments": plan_arguments
+                }
+            }))
+            .expect("plan response");
+        let plan: Value = serde_json::from_str(
+            plan_response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("plan text"),
+        )
+        .expect("plan json");
+
+        let mut state = plan["state"].clone();
+        for request_id in 2..=3 {
+            let response = coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.advance",
+                        "arguments": {
+                            "state": state,
+                            "lens_results": clean_lens_results_for(&state),
+                            "current_diff_hash": "same"
+                        }
+                    }
+                }))
+                .expect("clean advance response");
+            let advanced: Value = serde_json::from_str(
+                response["result"]["content"][0]["text"]
+                    .as_str()
+                    .expect("clean advance text"),
+            )
+            .expect("clean advance json");
+            state = advanced["state"].clone();
+        }
+        assert_eq!(state["clean_streak"], 2);
+
+        let mut finding_results = clean_lens_results_for(&state);
+        finding_results[0]["status"] = json!("findings");
+        finding_results[0]["findings"] = json!([{
+            "id": "needs-human-finding",
+            "severity": "MAJOR",
+            "causality": "caused",
+            "causality_evidence": "The changed branch introduces the reported behavior.",
+            "likelihood": "possible",
+            "security_impact": "major",
+            "safety_impact": "none",
+            "path": "src/new.rs",
+            "message": "The finding needs a human decision because it omits a suggested fix.",
+            "relevance": {
+                "category": "explicit_user_concern",
+                "explanation": "The finding is tied to a changed path but needs human disposition."
+            }
+        }]);
+        let advance_arguments = json!({
+            "state": state,
+            "lens_results": finding_results,
+            "current_diff_hash": "same"
+        });
+        let pending_response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": advance_arguments.clone()
+                }
+            }))
+            .expect("pending verifier response");
+        let pending: Value = serde_json::from_str(
+            pending_response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("pending verifier text: {pending_response}")),
+        )
+        .expect("pending verifier json");
+        assert_eq!(
+            pending["transition_status"], "verifier_required",
+            "pending={pending}"
+        );
+        assert_eq!(
+            pending["filtered"]["needs_human_decision"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let assignment = &pending["verifier_assignment"];
+        let mut exact_resubmission = advance_arguments;
+        exact_resubmission["verifier_result"] = json!({
+            "subagent_key": assignment["subagent_key"],
+            "assignment_id": assignment["assignment_id"],
+            "model_role": assignment["model_role"],
+            "status": "verified",
+            "verdicts": [{
+                "finding_id": "needs-human-finding",
+                "lens": "correctness-behavior",
+                "verdict": "rejected",
+                "severity": "MINOR",
+                "causality": "incidental",
+                "causality_evidence": "The reported contradiction is not caused or worsened by the diff.",
+                "security_impact": "none",
+                "safety_impact": "none",
+                "rationale": "The new evidence does not contradict the accepted defense."
+            }],
+            "caller_attestation": {
+                "model_role": assignment["model_role"],
+                "fresh_context": true,
+                "closed_after_result": true
+            }
+        });
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": exact_resubmission
+                }
+            }))
+            .expect("verifier result response");
+        let advanced: Value = serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("advanced text"),
+        )
+        .expect("advanced json");
+
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["state"]["verified_clean_iterations"], json!([]));
+        assert_eq!(advanced["complete"], false);
+        assert_eq!(advanced["reset_reason"], "findings_or_malformed_results");
+    }
+
+    #[test]
     fn json_rpc_verifier_resubmission_accepts_newly_required_ticket_evidence() {
         let mut coordinator = ReviewCoordinator::default();
         let plan_arguments = assessed_plan_arguments(
@@ -37292,7 +39090,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn role_mismatch_diagnostic_exposes_exact_targeted_recovery() {
+    fn role_mismatch_invalidates_the_complete_pass_with_exact_recovery() {
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
             "diff_hash": "role-diagnostic",
@@ -37308,18 +39106,43 @@ pre_filter = "project-pre"
             .expect("lens result");
         let subagent_key = result["subagent_key"].as_str().expect("key").to_string();
         result["caller_attestation"]["model_role"] = json!("wrong-reviewer");
-        let error = execute_advance_fixture(&json!({
-            "state": planned["state"],
-            "lens_results": lens_results,
-            "current_diff_hash": "role-diagnostic"
-        }))
-        .expect_err("wrong role must be rejected");
+        let advanced: Value = serde_json::from_str(
+            &execute_advance_fixture(&json!({
+                "state": planned["state"],
+                "lens_results": lens_results,
+                "current_diff_hash": "role-diagnostic"
+            }))
+            .expect("wrong role must be durably classified as malformed"),
+        )
+        .expect("advanced json");
 
+        let malformed = advanced["filtered"]["malformed"]
+            .as_array()
+            .expect("malformed results")
+            .iter()
+            .find(|malformed| {
+                malformed["filter_reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("model_role_mismatch"))
+            })
+            .expect("role mismatch diagnostic");
+        let error = malformed["filter_reason"].as_str().expect("diagnostic");
         assert!(error.contains(&format!("subagent_key={subagent_key}")));
         assert!(error.contains("expected_model_role=assigned-reviewer"));
         assert!(error.contains("received_model_role=wrong-reviewer"));
-        assert!(error.contains("rerun_only_this_lens_in_fresh_context"));
-        assert!(error.contains("do_not_restart_unrelated_clean_lenses"));
+        assert!(error.contains("rerun_the_complete_selected_lens_set_in_fresh_context"));
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["complete"], false);
+        let shutdowns = advanced["subagent_shutdown"]
+            .as_array()
+            .expect("malformed attestation closes the complete prior peer set");
+        assert_eq!(
+            shutdowns.len(),
+            planned["state"]["lenses"].as_array().unwrap().len()
+        );
+        assert!(shutdowns
+            .iter()
+            .any(|shutdown| shutdown["subagent_key"] == subagent_key));
 
         let verifier_result: AdvanceVerifierResultInput = serde_json::from_value(json!({
             "subagent_key": "role-diagnostic:1:verifier",
@@ -37341,8 +39164,9 @@ pre_filter = "project-pre"
         assert!(verifier_error.contains("subagent_key=role-diagnostic:1:verifier"));
         assert!(verifier_error.contains("expected_model_role=assigned-verifier"));
         assert!(verifier_error.contains("received_model_role=wrong-verifier"));
-        assert!(verifier_error.contains("rerun_only_this_assignment_in_fresh_context"));
-        assert!(verifier_error.contains("do_not_restart_unrelated_clean_lenses"));
+        assert!(
+            verifier_error.contains("accept_reset_transition_and_rerun_complete_selected_lens_set")
+        );
     }
 
     #[test]
@@ -37452,7 +39276,7 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn zero_assignment_plan_is_complete_and_routes_directly_to_clean_review() {
+    fn zero_assignment_plan_is_rejected_before_clean_review_handoff() {
         let mut coordinator = ReviewCoordinator::default();
         let project_root = test_project_root("zero-assignment-review");
         let configuration = format!(
@@ -37515,75 +39339,97 @@ pre_filter = "project-pre"
                 }
             }))
             .expect("plan response");
-        let planned: Value = serde_json::from_str(
-            response["result"]["content"][0]["text"]
-                .as_str()
-                .expect("plan text"),
-        )
-        .expect("plan json");
+        assert_eq!(
+            response["error"]["message"],
+            "risk_assessment_low_profile_requires_lens=true"
+        );
+    }
 
-        assert_eq!(planned["assignments"], json!([]));
-        assert_eq!(planned["complete"], true);
-        assert_eq!(planned["next_tool"], "workflow.record_clean_review");
-        assert!(planned.get("advance_tool").is_none());
+    #[test]
+    fn all_none_risk_profile_fails_closed_at_wire_boundary() {
+        let arguments = assessed_plan_arguments("all-none-risk-review", "none", &[], json!([]));
 
-        let recorded = coordinator
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "workflow.record_clean_review",
-                    "arguments": {
-                        "project_root": project_root,
-                        "review_state_ref": planned["state_ref"]
-                    }
-                }
-            }))
-            .expect("clean review response");
-        assert!(recorded.get("result").is_some(), "{recorded}");
+        assert_eq!(
+            plan_result(&arguments).expect_err("a zero-lens none profile must fail closed"),
+            "risk_assessment_overall_risk_invalid=true"
+        );
+    }
 
-        let mut advisory = ReviewCoordinator::with_service_surface(ServiceSurface::PluginAdvisory);
-        let advisory_response = advisory
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {
-                    "name": "final_review.plan",
-                    "arguments": assessed_plan_arguments_for_diff_at_root(
-                        "zero-assignment-advisory-review",
-                        "zero-assignment-advisory-diff",
-                        "low",
-                        &[],
-                        json!([]),
-                        Some(&project_root),
-                    )
-                }
-            }))
-            .expect("advisory plan response");
-        let advisory_planned: Value = serde_json::from_str(
-            advisory_response["result"]["content"][0]["text"]
-                .as_str()
-                .expect("advisory plan text"),
-        )
-        .expect("advisory plan json");
-        assert_eq!(advisory_planned["complete"], true);
-        assert_eq!(advisory_planned["terminal"], true);
-        assert!(advisory_planned.get("next_tool").is_none());
+    #[test]
+    fn restored_pre_upgrade_or_empty_lens_sessions_require_a_restart() {
+        let mut legacy = event_sourced_test_state(Path::new("."), "legacy-one-pass-review");
+        legacy["required_clean_iterations"] = json!(1);
+        legacy["clean_streak"] = json!(1);
+        legacy["iteration_index"] = json!(2);
+        legacy["verified_clean_iterations"] =
+            json!([{"iteration": 1, "transition_id": "legacy-clean"}]);
+        assert_eq!(
+            validate_restored_review_protocol_state(&legacy),
+            Err(
+                "review_session_protocol_upgrade_required=true recovery=restart_final_review"
+                    .to_string()
+            )
+        );
 
-        let resumed = advisory
-            .resume_latest(&advisory_planned["state_ref"])
-            .expect("resume advisory completion");
-        let resumed: Value = serde_json::from_str(
-            resumed["content"][0]["text"]
-                .as_str()
-                .expect("advisory resume text"),
-        )
-        .expect("advisory resume json");
-        assert_eq!(resumed["complete"], true);
-        assert_eq!(resumed["terminal"], true);
-        assert_eq!(resumed["next_tool"], Value::Null);
+        let mut pre_mandatory_lens =
+            event_sourced_test_state(Path::new("."), "pre-mandatory-lens-review");
+        for pointer in [
+            "/lenses",
+            "/risk_plan/selected_lenses",
+            "/risk_plan/active_lenses",
+        ] {
+            pre_mandatory_lens
+                .pointer_mut(pointer)
+                .and_then(Value::as_array_mut)
+                .expect("lens array")
+                .retain(|lens| lens.as_str() != Some(PRODUCTION_RISK_FOOTGUNS_LENS));
+        }
+        for pointer in [
+            "/risk_plan/lens_passes",
+            "/risk_plan/active_lens_passes",
+            "/risk_plan/discovery_saturation/confirmation_samples_by_lens",
+            "/risk_plan/discovery_saturation/last_sample_added_new_by_lens",
+        ] {
+            pre_mandatory_lens
+                .pointer_mut(pointer)
+                .and_then(Value::as_object_mut)
+                .expect("lens map")
+                .remove(PRODUCTION_RISK_FOOTGUNS_LENS);
+        }
+        pre_mandatory_lens["review_contract_id"] =
+            json!(computed_review_contract_id(&pre_mandatory_lens)
+                .expect("rehashed pre-mandatory-lens contract"));
+        let obsolete_contract = ReviewContractMaterial::parse_legacy_wire(&pre_mandatory_lens)
+            .expect("pre-mandatory-lens contract");
+        assert!(obsolete_contract.has_valid_id());
+        assert!(!obsolete_contract.has_current_protocol());
+        assert_eq!(
+            obsolete_contract.validate_current_protocol(),
+            Err(
+                "review_session_protocol_upgrade_required=true recovery=restart_final_review"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            validate_restored_review_protocol_state(&pre_mandatory_lens),
+            Err(
+                "review_session_protocol_upgrade_required=true recovery=restart_final_review"
+                    .to_string()
+            )
+        );
+
+        let mut empty_lenses = event_sourced_test_state(Path::new("."), "legacy-empty-lens-review");
+        empty_lenses["lenses"] = json!([]);
+        empty_lenses["review_contract_id"] = json!(
+            computed_review_contract_id(&empty_lenses).expect("rehashed empty-lens contract")
+        );
+        assert_eq!(
+            validate_restored_review_protocol_state(&empty_lenses),
+            Err(
+                "review_session_selected_lenses_invalid=true recovery=restart_final_review"
+                    .to_string()
+            )
+        );
     }
 
     fn event_sourced_test_state(_root: &Path, session_id: &str) -> Value {

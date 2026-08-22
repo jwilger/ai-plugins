@@ -48,8 +48,8 @@ use serde::{Deserialize, Serialize};
 
 use types::{
     AssignmentAttempt, AssignmentId, AssignmentKind, AssignmentResult, ContextReceiptId,
-    EvidenceId, FindingOccurrenceId, ReviewAssignment, ReviewError, ReviewLens, ReviewSessionId,
-    ReviewSnapshotId, RiskAssessment, VerifierRoute,
+    EvidenceId, FindingOccurrenceId, ReviewAssignment, ReviewError, ReviewIteration, ReviewLens,
+    ReviewSessionId, ReviewSnapshotId, RiskAssessment, VerifierRoute,
 };
 
 /// Semantic stream identity for one native review session.
@@ -74,6 +74,19 @@ impl ReviewStream {
     }
 }
 
+/// Durable reason that a current assignment result invalidated the review pass.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum AssignmentResultRejection {
+    /// The result did not match the scheduler-issued agent, model, snapshot, or receipts.
+    ProvenanceMismatch,
+    /// One or more finding occurrences did not belong uniquely to the assignment.
+    FindingIdentityInvalid,
+    /// The result contained more findings than one assignment may persist.
+    FindingCountExceeded,
+    /// Delta classifications were oversized, duplicated, incomplete, or attached to the wrong assignment kind.
+    DeltaClassificationInvalid,
+}
+
 /// Immutable review-domain facts emitted by modeled commands.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ReviewFact {
@@ -88,6 +101,17 @@ pub enum ReviewFact {
     AssignmentIssued { assignment: ReviewAssignment },
     /// A result matching scheduler-owned assignment provenance was accepted.
     AssignmentResultAccepted { result: AssignmentResult },
+    /// A current assignment produced malformed evidence and invalidated the pass.
+    AssignmentResultRejected {
+        /// Exact scheduler-owned assignment whose submitted result was rejected.
+        assignment_id: AssignmentId,
+        /// Authoritative source snapshot bound to the assignment.
+        snapshot: ReviewSnapshotId,
+        /// Review iteration invalidated by the malformed result.
+        iteration: ReviewIteration,
+        /// Semantic rejection reason.
+        reason: AssignmentResultRejection,
+    },
     /// A failed, cancelled, or stale assignment was explicitly superseded.
     AssignmentSuperseded {
         assignment_id: AssignmentId,
@@ -110,6 +134,17 @@ pub enum ReviewFact {
         /// Exact assignment-bound finding occurrence.
         finding_id: FindingOccurrenceId,
         /// Evidence produced by the remediation verifier.
+        evidence_id: EvidenceId,
+    },
+    /// One complete risk-selected pass was recorded before advancing the loop.
+    ReviewIterationCompleted {
+        /// Exact reviewed source-content snapshot.
+        snapshot: ReviewSnapshotId,
+        /// One-based review iteration whose assigned work completed.
+        iteration: ReviewIteration,
+        /// Whether every accepted result in the iteration was finding-free.
+        clean: bool,
+        /// Evidence binding the iteration decision.
         evidence_id: EvidenceId,
     },
     /// All required current evidence passed the final-review gate.

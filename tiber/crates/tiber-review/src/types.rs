@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize, de::Error as _};
 
 /// Maximum number of independently assigned review lenses in one assessment.
 pub const MAX_REVIEW_LENSES: usize = 16;
+/// Maximum finding occurrences accepted from one assignment result.
+pub const MAX_ASSIGNMENT_RESULT_FINDINGS: usize = 256;
+/// Maximum bounded review-loop iterations before owner escalation is required.
+pub const MAX_REVIEW_ITERATIONS: u32 = 32;
 
 /// Stable expected review failures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -33,6 +37,7 @@ pub enum ReviewError {
     InvalidEvidenceId,
     InvalidStream,
     InvalidIteration,
+    InvalidRequiredCleanIterations,
     InvalidAssignmentAttempt,
     NoReviewLenses,
     TooManyReviewLenses,
@@ -62,6 +67,7 @@ impl ReviewError {
             Self::InvalidEvidenceId => "review_invalid_evidence_id",
             Self::InvalidStream => "review_invalid_stream",
             Self::InvalidIteration => "review_invalid_iteration",
+            Self::InvalidRequiredCleanIterations => "review_invalid_required_clean_iterations",
             Self::InvalidAssignmentAttempt => "review_invalid_assignment_attempt",
             Self::NoReviewLenses => "review_no_lenses",
             Self::TooManyReviewLenses => "review_too_many_lenses",
@@ -138,7 +144,7 @@ impl ReviewIteration {
     pub const FIRST: Self = Self(1);
 
     pub fn parse(value: u32) -> Result<Self, ReviewError> {
-        if value == 0 || value > 8 {
+        if value == 0 || value > MAX_REVIEW_ITERATIONS {
             return Err(ReviewError::InvalidIteration);
         }
         Ok(Self(value))
@@ -166,6 +172,45 @@ impl<'de> Deserialize<'de> for ReviewIteration {
 impl Default for ReviewIteration {
     fn default() -> Self {
         Self::FIRST
+    }
+}
+
+/// Bounded clean-streak requirement preserved from Development Discipline.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct RequiredCleanIterations(u32);
+
+impl RequiredCleanIterations {
+    /// Minimum number of consecutive finding-free review iterations.
+    pub const MINIMUM: Self = Self(3);
+    /// Maximum configured clean streak supported by the native review loop.
+    pub const MAXIMUM: Self = Self(10);
+
+    pub fn parse(value: u32) -> Result<Self, ReviewError> {
+        if !(Self::MINIMUM.0..=Self::MAXIMUM.0).contains(&value) {
+            return Err(ReviewError::InvalidRequiredCleanIterations);
+        }
+        Ok(Self(value))
+    }
+
+    /// Returns the validated clean-streak length.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for RequiredCleanIterations {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::parse(u32::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+}
+
+impl Default for RequiredCleanIterations {
+    fn default() -> Self {
+        Self::MINIMUM
     }
 }
 
@@ -369,6 +414,8 @@ pub struct RiskAssessment {
     model_role: ModelRole,
     context_receipt: ContextReceiptId,
     lifecycle_receipt: LifecycleReceiptId,
+    #[serde(default)]
+    required_clean_iterations: RequiredCleanIterations,
 }
 
 impl RiskAssessment {
@@ -389,6 +436,7 @@ impl RiskAssessment {
             model_role,
             context_receipt,
             lifecycle_receipt,
+            required_clean_iterations: RequiredCleanIterations::MINIMUM,
         };
         assessment.validate()?;
         Ok(assessment)
@@ -436,6 +484,22 @@ impl RiskAssessment {
     #[must_use]
     pub const fn model_role(&self) -> &ModelRole {
         &self.model_role
+    }
+
+    /// Overrides the minimum clean streak with an already parsed requirement.
+    #[must_use]
+    pub const fn with_required_clean_iterations(
+        mut self,
+        required_clean_iterations: RequiredCleanIterations,
+    ) -> Self {
+        self.required_clean_iterations = required_clean_iterations;
+        self
+    }
+
+    /// Returns the authoritative clean-streak requirement for this assessment.
+    #[must_use]
+    pub const fn required_clean_iterations(&self) -> RequiredCleanIterations {
+        self.required_clean_iterations
     }
 }
 

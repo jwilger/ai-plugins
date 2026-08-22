@@ -5,9 +5,10 @@
     clippy::missing_trait_methods,
     clippy::ref_option,
     clippy::single_call_fn,
+    clippy::struct_excessive_bools,
     clippy::too_many_arguments,
     clippy::trivially_copy_pass_by_ref,
-    reason = "EventCore mapping signatures and static stream discovery are defined by the checked-model API"
+    reason = "EventCore mapping signatures and static stream discovery are defined by the checked-model API; the command-local state names independent folded facts rather than encoding them in invalid combined states"
 )]
 
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -94,6 +95,8 @@ struct IssueAssignmentState {
     expected_attempt: AssignmentAttempt,
     #[model(default)]
     iteration_status: IterationStatus,
+    #[model(default)]
+    review_clean: bool,
 }
 
 #[derive(Clone)]
@@ -111,6 +114,7 @@ struct IssueAssignmentContext {
     blocking_findings: BTreeSet<FindingOccurrenceId>,
     expected_attempt: AssignmentAttempt,
     iteration_status: IterationStatus,
+    review_clean: bool,
 }
 
 #[derive(ModelOutput)]
@@ -132,6 +136,7 @@ fn assignment_context(
     blockers: &BTreeSet<FindingOccurrenceId>,
     expected_attempt: &AssignmentAttempt,
     iteration_status: &IterationStatus,
+    review_clean: &bool,
 ) -> IssueAssignmentContext {
     IssueAssignmentContext {
         risk_assessed: *risk_assessed,
@@ -147,12 +152,13 @@ fn assignment_context(
         blocking_findings: blockers.clone(),
         expected_attempt: *expected_attempt,
         iteration_status: *iteration_status,
+        review_clean: *review_clean,
     }
 }
 
 mapping! {
     IssueAssignmentStateToDecision:
-        (IssueAssignmentState.risk_assessed, IssueAssignmentState.expected_role, IssueAssignmentState.current_snapshot, IssueAssignmentState.assignment_active, IssueAssignmentState.used_context_receipts, IssueAssignmentState.used_lifecycle_receipts, IssueAssignmentState.lens_result_accepted, IssueAssignmentState.lens_reviewer_agents, IssueAssignmentState.completed_assignments, IssueAssignmentState.risk_agent, IssueAssignmentState.blocking_findings, IssueAssignmentState.expected_attempt, IssueAssignmentState.iteration_status) => IssueAssignmentDecision.context
+        (IssueAssignmentState.risk_assessed, IssueAssignmentState.expected_role, IssueAssignmentState.current_snapshot, IssueAssignmentState.assignment_active, IssueAssignmentState.used_context_receipts, IssueAssignmentState.used_lifecycle_receipts, IssueAssignmentState.lens_result_accepted, IssueAssignmentState.lens_reviewer_agents, IssueAssignmentState.completed_assignments, IssueAssignmentState.risk_agent, IssueAssignmentState.blocking_findings, IssueAssignmentState.expected_attempt, IssueAssignmentState.iteration_status, IssueAssignmentState.review_clean) => IssueAssignmentDecision.context
         using assignment_context;
 }
 
@@ -207,6 +213,8 @@ impl ModelCommandLogic for IssueAssignment {
                     .used_lifecycle_receipts
                     .insert(assessment.lifecycle_receipt().clone());
                 folded.current_snapshot = Some(snapshot.clone());
+                folded.blocking_findings.clear();
+                folded.review_clean = false;
                 folded.expected_role =
                     if matches!(self.assignment.id().kind(), AssignmentKind::DeltaRisk) {
                         Some(assessment.delta_model_role().clone())
@@ -250,7 +258,10 @@ impl ModelCommandLogic for IssueAssignment {
             }
             ReviewFact::AssignmentResultAccepted { result }
                 if result.assignment_id().lens() == self.assignment.id().lens()
-                    && result.assignment_id().kind() == AssignmentKind::Lens =>
+                    && result.assignment_id().kind() == AssignmentKind::Lens
+                    && folded.current_snapshot.as_ref() == Some(result.snapshot())
+                    && folded.iteration_status.expected()
+                        == Some(result.assignment_id().iteration()) =>
             {
                 folded
                     .completed_assignments
@@ -277,6 +288,21 @@ impl ModelCommandLogic for IssueAssignment {
                     .insert(result.assignment_id().clone());
                 folded.assignment_active = false;
             }
+            ReviewFact::AssignmentResultRejected {
+                assignment_id,
+                snapshot,
+                iteration,
+                ..
+            } if folded.current_snapshot.as_ref() == Some(snapshot)
+                && folded.iteration_status.expected() == Some(*iteration) =>
+            {
+                folded.completed_assignments.insert(assignment_id.clone());
+                folded.assignment_active = false;
+                folded.lens_result_accepted = false;
+                folded.lens_reviewer_agents.clear();
+                folded.expected_attempt = AssignmentAttempt::FIRST;
+                folded.iteration_status = folded.iteration_status.advance();
+            }
             ReviewFact::AssignmentSuperseded {
                 assignment_id,
                 replacement_attempt,
@@ -285,34 +311,39 @@ impl ModelCommandLogic for IssueAssignment {
                 folded.assignment_active = false;
                 folded.expected_attempt = *replacement_attempt;
             }
-            ReviewFact::DeltaReassessed {
-                to_snapshot,
-                affected_lenses,
-                ..
-            } if affected_lenses.contains(self.assignment.id().lens()) => {
+            ReviewFact::DeltaReassessed { to_snapshot, .. } => {
                 folded.current_snapshot = Some(to_snapshot.clone());
                 folded.assignment_active = false;
+                folded.expected_attempt = AssignmentAttempt::FIRST;
+                folded.iteration_status = folded.iteration_status.advance();
                 folded.lens_result_accepted = false;
-                folded
-                    .lens_reviewer_agents
-                    .retain(|lens, _| !affected_lenses.contains(lens));
-                folded
-                    .blocking_findings
-                    .retain(|finding| !affected_lenses.contains(finding.assignment_id().lens()));
+                folded.lens_reviewer_agents.clear();
+            }
+            ReviewFact::ReviewIterationCompleted {
+                snapshot,
+                iteration,
+                ..
+            } if folded.current_snapshot.as_ref() == Some(snapshot)
+                && folded.iteration_status.expected() == Some(*iteration) =>
+            {
+                folded.assignment_active = false;
+                folded.lens_result_accepted = false;
+                folded.lens_reviewer_agents.clear();
                 folded.expected_attempt = AssignmentAttempt::FIRST;
                 folded.iteration_status = folded.iteration_status.advance();
             }
-            ReviewFact::DeltaReassessed { to_snapshot, .. } => {
-                folded.current_snapshot = Some(to_snapshot.clone());
-                if self.assignment.id().kind() == AssignmentKind::DeltaRisk {
-                    folded.assignment_active = false;
-                    folded.expected_attempt = AssignmentAttempt::FIRST;
-                    folded.iteration_status = folded.iteration_status.advance();
-                }
+            ReviewFact::FindingResolutionVerified { finding_id, .. } => {
+                folded.blocking_findings.remove(finding_id);
+            }
+            ReviewFact::CleanReviewAccepted { snapshot, .. }
+                if folded.current_snapshot.as_ref() == Some(snapshot) =>
+            {
+                folded.review_clean = true;
             }
             ReviewFact::AssignmentResultAccepted { .. }
+            | ReviewFact::AssignmentResultRejected { .. }
             | ReviewFact::AssignmentSuperseded { .. }
-            | ReviewFact::FindingResolutionVerified { .. }
+            | ReviewFact::ReviewIterationCompleted { .. }
             | ReviewFact::CleanReviewAccepted { .. } => {}
         }
         Modeled::from_built(folded)
@@ -341,12 +372,18 @@ impl ModelCommandLogic for IssueAssignment {
                 state.as_ref(),
                 state.as_ref(),
                 state.as_ref(),
+                state.as_ref(),
             )))
             .build();
         let context = &decision.as_ref().context;
         if !context.risk_assessed {
             return Err(CommandError::ValidationError(
                 "review_risk_assessment_required".to_owned(),
+            ));
+        }
+        if context.review_clean {
+            return Err(CommandError::ValidationError(
+                "review_snapshot_already_clean".to_owned(),
             ));
         }
         let expected_iteration = context.iteration_status.expected().ok_or_else(|| {

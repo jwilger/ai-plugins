@@ -48,6 +48,15 @@ repository-local configuration. It does not generate privileged agents or
 profiles and never changes global Codex, Claude, marketplace, MCP, shell, or
 SSH settings.
 
+Within that advisory boundary, final-review state fails closed: risk planning
+must select a lens, every selected lens and assigned verifier reruns in each
+iteration, and completion requires at least three consecutive complete
+finding-free iterations. Findings, malformed results, and material deltas reset
+the streak; the review-budget `ship` choice cannot bypass it. The planned
+standalone Tiber scheduler is the authority layer that can eventually make
+those receipts prerequisites for repository mutation. That scheduler binding
+is not part of the currently installed Tiber task-board binary.
+
 The editor, runner, repository, and diagnostic services are retained as
 unexposed reusable components for the standalone Tiber harness. Ordinary Codex
 remains able to inspect, edit, verify, commit, and push while Tiber is being

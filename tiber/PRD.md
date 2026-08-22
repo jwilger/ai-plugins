@@ -37,6 +37,11 @@ crashes, stale or corrupt state, partial I/O, ambiguous remote results, and
 remote data loss. Malicious local root, intentional owner bypass, and a
 compromised trusted toolchain are outside the v1 threat model.
 
+Current assignment evidence that fails scheduler provenance or finding-identity
+checks must be recorded as a durable rejected-result fact. That fact invalidates
+the full review iteration and resets the consecutive-clean streak; a corrected
+retry begins with fresh assignments in the next iteration.
+
 ## Primary workflows
 
 1. Start `tiber`, resume or create a session, select a Tiber Task, and converse
@@ -112,6 +117,9 @@ memory, and integration health plus `/tasks`, `/memory`, and
   tools remain inert until the harness authorizes and executes them.
 - Native tasks, workflow, repository, process, verification, and delivery
   services operate without MCP or shell loopback into Tiber.
+- Final review cannot become terminal until every risk-selected lens and
+  verifier completes each iteration and at least three consecutive complete
+  iterations report no relevant findings; any finding resets that streak.
 - MCP denial, cancellation, ambiguous-write, hostile-input, and capability
   negotiation cases pass.
 - Hindsight fake-server tests and opt-in live tests prove scoped memory,
