@@ -89,20 +89,24 @@ delivery detail:
 
 When a `final_review.plan` handoff is truncated, recover it instead of
 replanning. Call `final_review.pending_assignments` with the retained
-`state_ref`; its compact summary is authoritative for each pending lens's
-iteration, exact `subagent_key`, exact `model_role`, `close_after_result`,
-shared-test-evidence ID, and result-schema version. Pass one exact
-`subagent_key` back to that tool to retrieve only that assignment's full prompt
-and schema. An incomplete `final_review.resume_latest` returns the same compact
-summary. These retrievals are read-only and idempotent: they append no event,
-change no revision, fingerprint, scope, or hash, and never reassign a lens or
-role. A missing or invalid lifecycle/model attestation is malformed assigned
-evidence: accept the coordinator's non-clean reset transition, discard the full
-iteration, and execute every fresh next-iteration assignment. Never repair the
-old assignment or preserve peer results from that invalidated iteration. Apply
-the same rule to malformed verifier evidence and invalid verifier assignment
-provenance or verdict coverage: close the pending verifier and rerun the full
-selected lens set returned by the reset transition.
+`state_ref`; its compact summary is authoritative for every pending lens,
+verifier, or delta-risk assignment, including the exact `subagent_key`, exact
+`model_role`, phase metadata, close policy, result-schema version, and the
+phase-specific assignment identity and evidence references. Pass one exact
+`subagent_key` back to that tool to retrieve only that assignment's original
+durable prompt and schema. An incomplete `final_review.resume_latest` returns
+the same compact summary. These retrievals are read-only and idempotent: they
+append no event, change no revision, fingerprint, scope, or hash, and never
+reassign a lens or role. If a pre-upgrade pending verifier or delta-risk record
+lacks recoverable assignment facts, follow its explicit
+`recovery=restart_final_review` guidance; never reconstruct it from partial
+projection state. A missing or invalid lifecycle/model attestation is malformed
+assigned evidence: accept the coordinator's non-clean reset transition, discard
+the full iteration, and execute every fresh next-iteration assignment. Never
+repair the old assignment or preserve peer results from that invalidated
+iteration. Apply the same rule to malformed verifier evidence and invalid
+verifier assignment provenance or verdict coverage: close the pending verifier
+and rerun the full selected lens set returned by the reset transition.
 
 The pinned Git baseline plus in-repository paths, contents, modes, and untracked
 inventory define reviewed source scope. Coordinator events, snapshots, state

@@ -102,13 +102,17 @@ reference plus the compact pending-assignment summary from `session_id`,
 
 Call `final_review.pending_assignments` with `state_ref` when a plan or advance
 response was truncated or too large to retain. Its versioned compact summary
-returns each required lens's iteration, exact `subagent_key`, exact
-`model_role`, `close_after_result`, shared-test-evidence ID, result-schema
-version, and prompt reference. It never returns full prompts in the summary.
-Pass one exact `subagent_key` with the same `state_ref` to retrieve only that
-assignment's full prompt and result schema. Repeated summary or prompt retrieval
-is idempotent: it appends no event, changes no revision, fingerprint, scope, or
-hash, and never reassigns a lens or model role.
+returns every pending assignment's exact `subagent_key`, exact `model_role`,
+phase metadata, close policy, result-schema version, and prompt reference. Lens
+summaries also carry the lens, iteration, and shared-test-evidence ID; verifier
+and delta-risk summaries carry their durable assignment identity. It never
+returns full prompts in the summary. Pass one exact `subagent_key` with the same
+`state_ref` to retrieve only that assignment's original durable prompt and
+result schema. Repeated summary or prompt retrieval is idempotent: it appends no
+event, changes no revision, fingerprint, scope, or hash, and never reassigns a
+lens or model role. A pre-upgrade pending verifier or delta-risk record that
+lacks the durable assignment fails explicitly with `recovery=restart_final_review`
+instead of returning an empty or reconstructed assignment.
 
 Missing or invalid lifecycle/model attestation is malformed assigned evidence,
 not a retryable field error. `final_review.advance` records a non-clean reset

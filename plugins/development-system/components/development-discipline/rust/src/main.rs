@@ -123,6 +123,8 @@ const MAX_PRIOR_DEFENSE_PROMPT_CHARS: usize = 8 * 1024;
 const MAX_DEFERRED_FINDINGS_PER_LENS_PROMPT: usize = MAX_FINDINGS_PER_LENS;
 const PENDING_ASSIGNMENT_SUMMARY_VERSION: &str = "final-review-pending-assignments-v1";
 const LENS_RESULT_SCHEMA_VERSION: &str = "final-review-lens-result-v1";
+const VERIFIER_RESULT_SCHEMA_VERSION: &str = "final-review-verifier-result-v1";
+const DELTA_RISK_RESULT_SCHEMA_VERSION: &str = "final-review-delta-risk-assessment-v1";
 const BUILD_SOURCE_FINGERPRINT: &str = "local-build";
 const _: () = assert!(
     MAX_STATE_BYTES + MAX_LENS_RESULTS_BYTES + MAX_VERIFIER_RESULT_BYTES + (64 * 1024)
@@ -11334,7 +11336,7 @@ impl ReviewCoordinator {
                 "pending_assignment_summary": pending,
                 "pending_assignment_summary_version": PENDING_ASSIGNMENT_SUMMARY_VERSION,
                 "pending_phase": pending["pending_phase"],
-                "result_schema_version": LENS_RESULT_SCHEMA_VERSION,
+                "result_schema_version": pending["result_schema_version"],
                 "prompt_retrieval_tool": "final_review.pending_assignments"
             })
             .to_string(),
@@ -11349,6 +11351,70 @@ impl ReviewCoordinator {
         let requested_key = arguments.get("subagent_key").and_then(Value::as_str);
         let payload = self.pending_assignment_summary(&state, state_ref, requested_key)?;
         Ok(text_content(payload.to_string()))
+    }
+
+    fn recover_pending_special_phase_assignment(
+        &self,
+        state: &Value,
+        session_id: &str,
+        pending_phase: &str,
+    ) -> Result<Value, String> {
+        let recovery_unavailable = || {
+            format!(
+                "review_pending_assignment_protocol_upgrade_required=true pending_phase={pending_phase} recovery=restart_final_review"
+            )
+        };
+        let revision = self
+            .session_revisions
+            .get(session_id)
+            .copied()
+            .ok_or_else(&recovery_unavailable)?;
+        let response = load_committed_iteration_response(
+            state,
+            session_id,
+            revision,
+            self.service_surface.review_persistence(),
+        )
+        .map_err(|error| {
+            if error == "review_iteration_response_fact_missing=true" {
+                recovery_unavailable()
+            } else {
+                error
+            }
+        })?;
+        let assignment = match pending_phase {
+            "verifier" => response.verifier_assignment,
+            "delta-risk" => response.delta_risk_assignment,
+            _ => None,
+        }
+        .ok_or_else(&recovery_unavailable)?;
+        let assignment_id = assignment
+            .get("assignment_id")
+            .and_then(Value::as_str)
+            .ok_or_else(&recovery_unavailable)?;
+        let identity_matches = match pending_phase {
+            "verifier" => self
+                .pending_verifiers
+                .get(session_id)
+                .is_some_and(|pending| pending.assignment_id == assignment_id),
+            "delta-risk" => self
+                .pending_delta_risks
+                .get(session_id)
+                .is_some_and(|pending| {
+                    pending.assignment_id == assignment_id
+                        && assignment.get("subagent_key").and_then(Value::as_str)
+                            == Some(pending.subagent_key.as_str())
+                        && assignment.get("model_role").and_then(Value::as_str)
+                            == Some(pending.model_role.as_str())
+                }),
+            _ => false,
+        };
+        if !identity_matches {
+            return Err(format!(
+                "review_pending_assignment_identity_mismatch=true pending_phase={pending_phase} recovery=restart_final_review"
+            ));
+        }
+        Ok(assignment)
     }
 
     fn pending_assignment_summary(
@@ -11377,22 +11443,33 @@ impl ReviewCoordinator {
         } else {
             "lens-review"
         };
-        let full_assignments = if pending_phase == "lens-review" {
-            let typed = ReviewSessionState::parse_legacy_wire(state)?;
-            build_typed_review_assignments(ReviewAssignmentMaterial {
-                iteration: typed.progress.iteration_index,
-                session_id: &typed.identity.session_id,
-                lenses: &typed.progress.lenses,
-                lens_objectives: &typed.model_routing.lens_objectives,
-                model_roles: &typed.model_routing.roles,
-                scope: &typed.scope,
-                context: &typed.context,
-                defenses: &typed.defenses.current_by_lens,
-                deferred_findings: &typed.initial_state.deferred_findings,
-                shared_test_evidence: typed.evidence.shared_test_evidence.as_ref(),
-            })?
-        } else {
-            Vec::new()
+        let result_schema_version = match pending_phase {
+            "verifier" => VERIFIER_RESULT_SCHEMA_VERSION,
+            "delta-risk" => DELTA_RISK_RESULT_SCHEMA_VERSION,
+            _ => LENS_RESULT_SCHEMA_VERSION,
+        };
+        let full_assignments = match pending_phase {
+            "lens-review" => {
+                let typed = ReviewSessionState::parse_legacy_wire(state)?;
+                build_typed_review_assignments(ReviewAssignmentMaterial {
+                    iteration: typed.progress.iteration_index,
+                    session_id: &typed.identity.session_id,
+                    lenses: &typed.progress.lenses,
+                    lens_objectives: &typed.model_routing.lens_objectives,
+                    model_roles: &typed.model_routing.roles,
+                    scope: &typed.scope,
+                    context: &typed.context,
+                    defenses: &typed.defenses.current_by_lens,
+                    deferred_findings: &typed.initial_state.deferred_findings,
+                    shared_test_evidence: typed.evidence.shared_test_evidence.as_ref(),
+                })?
+            }
+            "verifier" | "delta-risk" => vec![self.recover_pending_special_phase_assignment(
+                state,
+                session_id,
+                pending_phase,
+            )?],
+            _ => Vec::new(),
         };
         if let Some(subagent_key) = requested_key {
             let assignment = full_assignments
@@ -11405,7 +11482,7 @@ impl ReviewCoordinator {
                 })?;
             return Ok(json!({
                 "assignment_summary_version": PENDING_ASSIGNMENT_SUMMARY_VERSION,
-                "result_schema_version": LENS_RESULT_SCHEMA_VERSION,
+                "result_schema_version": result_schema_version,
                 "state_ref": state_ref,
                 "complete": complete,
                 "pending_phase": pending_phase,
@@ -11415,24 +11492,29 @@ impl ReviewCoordinator {
         let assignments = full_assignments
             .iter()
             .map(|assignment| {
-                json!({
-                    "lens": assignment["lens"],
+                let mut compact = json!({
                     "iteration": assignment["iteration"],
                     "subagent_key": assignment["subagent_key"],
                     "model_role": assignment["model_role"],
                     "close_after_result": assignment["close_after_result"],
                     "shared_test_evidence_id": assignment.pointer("/shared_test_evidence/id").cloned().unwrap_or(Value::Null),
-                    "result_schema_version": LENS_RESULT_SCHEMA_VERSION,
+                    "result_schema_version": result_schema_version,
                     "prompt_ref": {
                         "tool": "final_review.pending_assignments",
                         "subagent_key": assignment["subagent_key"]
                     }
-                })
+                });
+                for field in ["lens", "phase", "role", "assignment_id"] {
+                    if let Some(value) = assignment.get(field) {
+                        compact[field] = value.clone();
+                    }
+                }
+                compact
             })
             .collect::<Vec<_>>();
         Ok(json!({
             "assignment_summary_version": PENDING_ASSIGNMENT_SUMMARY_VERSION,
-            "result_schema_version": LENS_RESULT_SCHEMA_VERSION,
+            "result_schema_version": result_schema_version,
             "state_ref": state_ref,
             "complete": complete,
             "pending_phase": pending_phase,
@@ -23880,6 +23962,57 @@ mod tests {
             "commands": ["cargo test --lib"],
             "artifact_reference": "ci://fast-unit-tests"
         })
+    }
+
+    fn parsed_tool_text(response: &Value) -> Value {
+        serde_json::from_str(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("tool response missing text: {response}")),
+        )
+        .unwrap_or_else(|error| panic!("tool response text is not JSON: {error}: {response}"))
+    }
+
+    fn strip_iteration_response_from_latest_pending_event(database: &Path, event_name: &str) {
+        fn strip_iteration_response(value: &mut Value) -> bool {
+            match value {
+                Value::Object(fields) => {
+                    let mut removed = fields.remove("iteration_response").is_some();
+                    for value in fields.values_mut() {
+                        removed = strip_iteration_response(value) || removed;
+                    }
+                    removed
+                }
+                Value::Array(values) => {
+                    let mut removed = false;
+                    for value in values {
+                        removed = strip_iteration_response(value) || removed;
+                    }
+                    removed
+                }
+                _ => false,
+            }
+        }
+
+        let connection = open_review_connection(database).expect("review event store");
+        let (row_id, encoded): (i64, String) = connection
+            .query_row(
+                "SELECT rowid, event_data FROM eventcore_events WHERE event_data LIKE ?1 ORDER BY rowid DESC LIMIT 1",
+                params![format!("%{event_name}%")],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or_else(|error| panic!("pending {event_name} event: {error}"));
+        let mut event: Value = serde_json::from_str(&encoded).expect("pending event JSON");
+        assert!(
+            strip_iteration_response(&mut event),
+            "pending {event_name} event must contain current response facts"
+        );
+        connection
+            .execute(
+                "UPDATE eventcore_events SET event_data = ?1 WHERE rowid = ?2",
+                params![event.to_string(), row_id],
+            )
+            .expect("replace pending event with pre-upgrade fixture");
     }
 
     fn test_delivery_boundaries(component: &str) -> Value {
@@ -39087,6 +39220,549 @@ pre_filter = "project-pre"
             }))
             .expect("advance response");
         assert!(advanced.get("result").is_some(), "{advanced}");
+    }
+
+    #[test]
+    fn pending_verifier_assignment_survives_response_loss_and_restart() {
+        let project_root = test_project_root("pending-verifier-assignment-recovery");
+        let mut coordinator = ReviewCoordinator::default();
+        let planned = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.plan",
+                        "arguments": assessed_plan_arguments_for_diff_at_root(
+                            "pending-verifier-assignment-recovery",
+                            "pending-verifier-assignment-recovery-diff",
+                            "high",
+                            &[("correctness-behavior", "high")],
+                            json!([]),
+                            Some(&project_root),
+                        )
+                    }
+                }))
+                .expect("plan response"),
+        );
+        let state = planned["state"].clone();
+        let mut finding_results = clean_lens_results_for(&state);
+        let result = finding_results
+            .as_array_mut()
+            .expect("lens results")
+            .iter_mut()
+            .find(|result| result["lens"] == "correctness-behavior")
+            .expect("correctness result");
+        result["status"] = json!("findings");
+        result["findings"] = json!([{
+            "id": "finding-1",
+            "severity": "CRITICAL",
+            "causality": "caused",
+            "causality_evidence": "The changed branch introduces this failure path.",
+            "likelihood": "possible",
+            "security_impact": "critical",
+            "safety_impact": "none",
+            "path": "src/lib.rs",
+            "message": "A verifier must inspect this material finding.",
+            "relevance": {
+                "category": "diff_changed_file",
+                "explanation": "The finding is in the changed branch."
+            }
+        }]);
+        let pending = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.advance",
+                        "arguments": {
+                            "state": state.clone(),
+                            "lens_results": finding_results,
+                            "current_diff_hash": "pending-verifier-assignment-recovery-diff"
+                        }
+                    }
+                }))
+                .expect("verifier request"),
+        );
+        assert_eq!(pending["transition_status"], "verifier_required");
+        let original_assignment = pending["verifier_assignment"].clone();
+        let state_ref = pending["state_ref"].clone();
+        let pending_revision =
+            coordinator.session_revisions["pending-verifier-assignment-recovery"];
+
+        let compact = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.pending_assignments",
+                        "arguments": { "state_ref": state_ref.clone() }
+                    }
+                }))
+                .expect("pending verifier summary"),
+        );
+        assert_eq!(compact["pending_phase"], "verifier");
+        assert_eq!(
+            compact["result_schema_version"],
+            VERIFIER_RESULT_SCHEMA_VERSION
+        );
+        assert_eq!(compact["assignments"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            compact["assignments"][0]["result_schema_version"],
+            VERIFIER_RESULT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            compact["assignments"][0]["subagent_key"],
+            original_assignment["subagent_key"]
+        );
+        let exact = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.pending_assignments",
+                        "arguments": {
+                            "state_ref": state_ref.clone(),
+                            "subagent_key": original_assignment["subagent_key"]
+                        }
+                    }
+                }))
+                .expect("exact pending verifier assignment"),
+        );
+        assert_eq!(
+            exact["result_schema_version"],
+            VERIFIER_RESULT_SCHEMA_VERSION
+        );
+        assert_eq!(exact["assignment"], original_assignment);
+
+        drop(coordinator);
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = parsed_tool_text(
+            &restarted
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.resume_latest",
+                        "arguments": {
+                            "session_id": "pending-verifier-assignment-recovery",
+                            "project_root": project_root
+                        }
+                    }
+                }))
+                .expect("resume pending verifier"),
+        );
+        assert_eq!(resumed["state_ref"], state_ref);
+        assert_eq!(resumed["pending_phase"], "verifier");
+        assert_eq!(
+            resumed["result_schema_version"],
+            VERIFIER_RESULT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            restarted.session_revisions["pending-verifier-assignment-recovery"],
+            pending_revision
+        );
+        let recovered_payload = parsed_tool_text(
+            &restarted
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 6,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.pending_assignments",
+                        "arguments": {
+                            "state_ref": resumed["state_ref"],
+                            "subagent_key": original_assignment["subagent_key"]
+                        }
+                    }
+                }))
+                .expect("recover exact verifier assignment after restart"),
+        );
+        assert_eq!(
+            recovered_payload["result_schema_version"],
+            VERIFIER_RESULT_SCHEMA_VERSION
+        );
+        let recovered = recovered_payload["assignment"].clone();
+        assert_eq!(recovered, original_assignment);
+
+        let resolved = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state_ref": state_ref,
+                        "lens_results": clean_lens_results_for(&state),
+                        "current_diff_hash": "pending-verifier-assignment-recovery-diff",
+                        "verifier_result": {
+                            "subagent_key": recovered["subagent_key"],
+                            "assignment_id": recovered["assignment_id"],
+                            "model_role": recovered["model_role"],
+                            "status": "failed",
+                            "rationale": "The verifier could not clear the material finding.",
+                            "caller_attestation": {
+                                "model_role": recovered["model_role"],
+                                "fresh_context": true,
+                                "closed_after_result": true
+                            }
+                        }
+                    }
+                }
+            }))
+            .expect("submit recovered verifier result");
+        assert!(resolved.get("result").is_some(), "{resolved}");
+    }
+
+    #[test]
+    fn pending_delta_risk_assignment_survives_response_loss_and_restart() {
+        let project_root = test_project_root("pending-delta-assignment-recovery");
+        let mut coordinator = ReviewCoordinator::default();
+        let planned = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.plan",
+                        "arguments": assessed_plan_arguments_for_diff_at_root(
+                            "pending-delta-assignment-recovery",
+                            "pending-delta-assignment-recovery-v1",
+                            "high",
+                            &[
+                                ("security-safety", "high"),
+                                ("architecture-maintainability", "high"),
+                            ],
+                            json!([]),
+                            Some(&project_root),
+                        )
+                    }
+                }))
+                .expect("plan response"),
+        );
+        let replacement_diff_hash = "pending-delta-assignment-recovery-v2";
+        let pending = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.advance",
+                        "arguments": {
+                            "state": planned["state"],
+                            "lens_results": [],
+                            "current_diff_hash": replacement_diff_hash,
+                            "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+                            "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash)
+                        }
+                    }
+                }))
+                .expect("delta-risk request"),
+        );
+        assert_eq!(
+            pending["transition_status"],
+            "delta_risk_assessment_required"
+        );
+        let original_assignment = pending["delta_risk_assignments"][0].clone();
+        let state_ref = pending["state_ref"].clone();
+        let pending_revision = coordinator.session_revisions["pending-delta-assignment-recovery"];
+
+        let compact = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.pending_assignments",
+                        "arguments": { "state_ref": state_ref.clone() }
+                    }
+                }))
+                .expect("pending delta-risk summary"),
+        );
+        assert_eq!(compact["pending_phase"], "delta-risk");
+        assert_eq!(
+            compact["result_schema_version"],
+            DELTA_RISK_RESULT_SCHEMA_VERSION
+        );
+        assert_eq!(compact["assignments"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            compact["assignments"][0]["result_schema_version"],
+            DELTA_RISK_RESULT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            compact["assignments"][0]["subagent_key"],
+            original_assignment["subagent_key"]
+        );
+
+        drop(coordinator);
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = parsed_tool_text(
+            &restarted
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.resume_latest",
+                        "arguments": {
+                            "session_id": "pending-delta-assignment-recovery",
+                            "project_root": project_root
+                        }
+                    }
+                }))
+                .expect("resume pending delta-risk assignment"),
+        );
+        assert_eq!(resumed["state_ref"], state_ref);
+        assert_eq!(resumed["pending_phase"], "delta-risk");
+        assert_eq!(
+            resumed["result_schema_version"],
+            DELTA_RISK_RESULT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            restarted.session_revisions["pending-delta-assignment-recovery"],
+            pending_revision
+        );
+        let recovered_payload = parsed_tool_text(
+            &restarted
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.pending_assignments",
+                        "arguments": {
+                            "state_ref": resumed["state_ref"],
+                            "subagent_key": original_assignment["subagent_key"]
+                        }
+                    }
+                }))
+                .expect("recover exact delta-risk assignment after restart"),
+        );
+        assert_eq!(
+            recovered_payload["result_schema_version"],
+            DELTA_RISK_RESULT_SCHEMA_VERSION
+        );
+        let recovered = recovered_payload["assignment"].clone();
+        assert_eq!(recovered, original_assignment);
+
+        let assessment = delta_risk_assessment_for(
+            &recovered,
+            "high",
+            &[
+                ("security-safety", "high"),
+                ("architecture-maintainability", "high"),
+            ],
+            &["security-safety"],
+            json!([]),
+        );
+        let resolved = restarted
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "tools/call",
+                "params": {
+                    "name": "final_review.advance",
+                    "arguments": {
+                        "state_ref": state_ref,
+                        "lens_results": [],
+                        "current_diff_hash": replacement_diff_hash,
+                        "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+                        "current_shared_test_evidence": shared_test_evidence_for(replacement_diff_hash),
+                        "delta_risk_assessment": assessment
+                    }
+                }
+            }))
+            .expect("submit recovered delta-risk assessment");
+        assert!(resolved.get("result").is_some(), "{resolved}");
+    }
+
+    #[test]
+    fn legacy_pending_assignment_without_durable_handoff_requires_review_restart() {
+        {
+            let project_root = test_project_root("legacy-pending-verifier-recovery");
+            let session_id = "legacy-pending-verifier-recovery";
+            let diff_hash = "legacy-pending-verifier-recovery-diff";
+            let mut coordinator = ReviewCoordinator::default();
+            let planned = parsed_tool_text(
+                &coordinator
+                    .handle_json_rpc(&json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "final_review.plan",
+                            "arguments": assessed_plan_arguments_for_diff_at_root(
+                                session_id,
+                                diff_hash,
+                                "high",
+                                &[("correctness-behavior", "high")],
+                                json!([]),
+                                Some(&project_root),
+                            )
+                        }
+                    }))
+                    .expect("plan legacy verifier fixture"),
+            );
+            let state = planned["state"].clone();
+            let mut lens_results = clean_lens_results_for(&state);
+            let result = lens_results
+                .as_array_mut()
+                .expect("legacy verifier lens results")
+                .iter_mut()
+                .find(|result| result["lens"] == "correctness-behavior")
+                .expect("legacy verifier correctness result");
+            result["status"] = json!("findings");
+            result["findings"] = json!([{
+                "id": "legacy-finding",
+                "severity": "CRITICAL",
+                "causality": "caused",
+                "causality_evidence": "The changed branch introduces this failure path.",
+                "likelihood": "possible",
+                "security_impact": "critical",
+                "safety_impact": "none",
+                "path": "src/lib.rs",
+                "message": "A verifier must inspect this material finding.",
+                "relevance": {
+                    "category": "diff_changed_file",
+                    "explanation": "The finding is in the changed branch."
+                }
+            }]);
+            let pending = parsed_tool_text(
+                &coordinator
+                    .handle_json_rpc(&json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "final_review.advance",
+                            "arguments": {
+                                "state": state,
+                                "lens_results": lens_results,
+                                "current_diff_hash": diff_hash
+                            }
+                        }
+                    }))
+                    .expect("persist verifier request fixture"),
+            );
+            assert_eq!(pending["transition_status"], "verifier_required");
+            let database = PathBuf::from(
+                pending["state"]["out_of_scope_report_artifact"]
+                    .as_str()
+                    .expect("legacy verifier database"),
+            );
+            strip_iteration_response_from_latest_pending_event(&database, "VerifierRequested");
+
+            drop(coordinator);
+            let mut restarted = ReviewCoordinator::default();
+            let response = restarted
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.resume_latest",
+                        "arguments": {
+                            "session_id": session_id,
+                            "project_root": project_root
+                        }
+                    }
+                }))
+                .expect("resume legacy verifier fixture");
+            assert_eq!(
+                response["error"]["message"],
+                "review_pending_assignment_protocol_upgrade_required=true pending_phase=verifier recovery=restart_final_review"
+            );
+        }
+
+        {
+            let project_root = test_project_root("legacy-pending-delta-recovery");
+            let session_id = "legacy-pending-delta-recovery";
+            let prior_diff_hash = "legacy-pending-delta-recovery-v1";
+            let current_diff_hash = "legacy-pending-delta-recovery-v2";
+            let mut coordinator = ReviewCoordinator::default();
+            let planned = parsed_tool_text(
+                &coordinator
+                    .handle_json_rpc(&json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "final_review.plan",
+                            "arguments": assessed_plan_arguments_for_diff_at_root(
+                                session_id,
+                                prior_diff_hash,
+                                "high",
+                                &[("security-safety", "high")],
+                                json!([]),
+                                Some(&project_root),
+                            )
+                        }
+                    }))
+                    .expect("plan legacy delta fixture"),
+            );
+            let pending = parsed_tool_text(
+                &coordinator
+                    .handle_json_rpc(&json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "final_review.advance",
+                            "arguments": {
+                                "state": planned["state"],
+                                "lens_results": [],
+                                "current_diff_hash": current_diff_hash,
+                                "current_changed_files": ["src/lib.rs", "tests/lib_test.rs"],
+                                "current_shared_test_evidence": shared_test_evidence_for(current_diff_hash)
+                            }
+                        }
+                    }))
+                    .expect("persist delta-risk request fixture"),
+            );
+            assert_eq!(
+                pending["transition_status"],
+                "delta_risk_assessment_required"
+            );
+            let database = PathBuf::from(
+                pending["state"]["out_of_scope_report_artifact"]
+                    .as_str()
+                    .expect("legacy delta database"),
+            );
+            strip_iteration_response_from_latest_pending_event(&database, "DeltaRiskRequested");
+
+            drop(coordinator);
+            let mut restarted = ReviewCoordinator::default();
+            let response = restarted
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.resume_latest",
+                        "arguments": {
+                            "session_id": session_id,
+                            "project_root": project_root
+                        }
+                    }
+                }))
+                .expect("resume legacy delta fixture");
+            assert_eq!(
+                response["error"]["message"],
+                "review_pending_assignment_protocol_upgrade_required=true pending_phase=delta-risk recovery=restart_final_review"
+            );
+        }
     }
 
     #[test]
