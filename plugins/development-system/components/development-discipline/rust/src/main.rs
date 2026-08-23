@@ -36,6 +36,8 @@ use std::process::{Command as ProcessCommand, Stdio};
 #[cfg(test)]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(test)]
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -81,6 +83,12 @@ const MAX_ACTIVE_REVIEW_SESSIONS: usize = 32;
 const MAX_DURABLE_REVIEW_SESSIONS: usize = 1024;
 #[cfg(test)]
 static FAIL_NEXT_REVIEW_PROJECTION_REBUILD: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static FAIL_NEXT_FULL_REVIEW_STREAM_READ: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static REVIEW_PROJECTION_FAULT_TEST_LOCK: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+static OBSERVED_REVIEW_WRITE_AHEAD_MARKER: AtomicBool = AtomicBool::new(false);
 const MAX_RETAINED_HISTORY_ENTRIES: usize = 64;
 const MAX_RETAINED_OUT_OF_SCOPE_REPORT_ENTRIES: usize = 128;
 const MAX_RETAINED_DEFERRED_FINDINGS: usize = MAX_FINDINGS_PER_ITERATION;
@@ -125,6 +133,7 @@ const PENDING_ASSIGNMENT_SUMMARY_VERSION: &str = "final-review-pending-assignmen
 const LENS_RESULT_SCHEMA_VERSION: &str = "final-review-lens-result-v1";
 const VERIFIER_RESULT_SCHEMA_VERSION: &str = "final-review-verifier-result-v1";
 const DELTA_RISK_RESULT_SCHEMA_VERSION: &str = "final-review-delta-risk-assessment-v1";
+const FINAL_REVIEW_CONTRACT_VERSION: u64 = 2;
 const BUILD_SOURCE_FINGERPRINT: &str = "local-build";
 const _: () = assert!(
     MAX_STATE_BYTES + MAX_LENS_RESULTS_BYTES + MAX_VERIFIER_RESULT_BYTES + (64 * 1024)
@@ -153,6 +162,14 @@ const EXCEPTIONAL_RISK_TRIGGERS: &[&str] = &[
 ];
 
 const FINAL_REVIEW_CATALOG_STREAM: &str = "development-discipline:final-review-catalog";
+
+fn final_review_protocol_attestation() -> Value {
+    json!({
+        "contract_version": FINAL_REVIEW_CONTRACT_VERSION,
+        "minimum_clean_iterations": DEFAULT_CLEAN_ITERATIONS,
+        "durable_pending_assignment_recovery": true
+    })
+}
 
 fn review_iteration_limit_error() -> String {
     format!(
@@ -6911,6 +6928,7 @@ fn build_typed_delta_risk_assignment(
         .cloned()
         .ok_or_else(|| "delta_risk_assignment_missing=true".to_string())?;
     assignment["role"] = json!("delta-risk-scout");
+    assignment["result_schema_version"] = json!(DELTA_RISK_RESULT_SCHEMA_VERSION);
     assignment["prior_diff_hash"] = json!(scope.diff_hash);
     assignment["current_diff_hash"] = json!(material.current_diff_hash);
     assignment["delta_evidence"] = delta_evidence;
@@ -7756,6 +7774,7 @@ fn typed_verifier_assignment(
         "assignment_id": assignment_id,
         "iteration": iteration,
         "phase": "verifier",
+        "result_schema_version": VERIFIER_RESULT_SCHEMA_VERSION,
         "model_role": model_role,
         "lifecycle_action": "start_fresh",
         "close_after_result": true,
@@ -11230,34 +11249,42 @@ impl ReviewCoordinator {
             .get("project_root")
             .and_then(Value::as_str)
             .ok_or_else(|| "review_session_project_root_required=true".to_string())?;
-        if !self.sessions.contains_key(session_id) {
-            let mut lookup = json!({ "scope": { "project_root": project_root } });
-            if let Some(work_item_id) = state_ref.get("work_item_id") {
-                lookup["work_item_id"] = work_item_id.clone();
+        let mut lookup = json!({ "scope": { "project_root": project_root } });
+        if let Some(work_item_id) = state_ref.get("work_item_id") {
+            lookup["work_item_id"] = work_item_id.clone();
+        }
+        if let Some(restored) = loader(
+            &lookup,
+            session_id,
+            self.service_surface.review_persistence(),
+        )? {
+            validate_restored_review_protocol_state(&restored.state)?;
+            self.session_revisions
+                .insert(session_id.to_string(), restored.revision);
+            self.sessions.insert(session_id.to_string(), restored.state);
+            self.pending_verifiers.remove(session_id);
+            self.pending_delta_risks.remove(session_id);
+            if let Some(pending) = restored.pending_verifier {
+                self.pending_verifiers
+                    .insert(session_id.to_string(), pending);
             }
-            if let Some(restored) = loader(
-                &lookup,
-                session_id,
-                self.service_surface.review_persistence(),
-            )? {
-                validate_restored_review_protocol_state(&restored.state)?;
-                self.session_revisions
-                    .insert(session_id.to_string(), restored.revision);
-                self.sessions.insert(session_id.to_string(), restored.state);
-                if let Some(pending) = restored.pending_verifier {
-                    self.pending_verifiers
-                        .insert(session_id.to_string(), pending);
-                }
-                if let Some(pending) = restored.pending_delta_risk {
-                    self.pending_delta_risks
-                        .insert(session_id.to_string(), pending);
-                }
+            if let Some(pending) = restored.pending_delta_risk {
+                self.pending_delta_risks
+                    .insert(session_id.to_string(), pending);
             }
         }
         let state = self.sessions.get(session_id).cloned().ok_or_else(|| {
             "review_session_not_found=true recovery=restart_final_review_or_abandon_stale_state"
                 .to_string()
         })?;
+        let canonical_ref = state_reference(&state)?;
+        for field in ["project_root", "work_item_id"] {
+            if canonical_ref.get(field) != state_ref.get(field) {
+                return Err(format!(
+                    "review_state_binding_mismatch=true field={field} recovery=resume_latest_state_or_abandon_stale_review"
+                ));
+            }
+        }
         let received = state_ref
             .get("state_fingerprint")
             .and_then(Value::as_str)
@@ -11349,7 +11376,8 @@ impl ReviewCoordinator {
             .ok_or_else(|| "review_state_ref_required=true".to_string())?;
         let state = self.resolve_reference_read_only(state_ref)?;
         let requested_key = arguments.get("subagent_key").and_then(Value::as_str);
-        let payload = self.pending_assignment_summary(&state, state_ref, requested_key)?;
+        let canonical_ref = state_reference(&state)?;
+        let payload = self.pending_assignment_summary(&state, &canonical_ref, requested_key)?;
         Ok(text_content(payload.to_string()))
     }
 
@@ -11443,7 +11471,7 @@ impl ReviewCoordinator {
         } else {
             "lens-review"
         };
-        let result_schema_version = match pending_phase {
+        let default_result_schema_version = match pending_phase {
             "verifier" => VERIFIER_RESULT_SCHEMA_VERSION,
             "delta-risk" => DELTA_RISK_RESULT_SCHEMA_VERSION,
             _ => LENS_RESULT_SCHEMA_VERSION,
@@ -11471,6 +11499,12 @@ impl ReviewCoordinator {
             )?],
             _ => Vec::new(),
         };
+        let result_schema_version = full_assignments
+            .first()
+            .and_then(|assignment| assignment.get("result_schema_version"))
+            .and_then(Value::as_str)
+            .unwrap_or(default_result_schema_version)
+            .to_string();
         if let Some(subagent_key) = requested_key {
             let assignment = full_assignments
                 .into_iter()
@@ -13389,7 +13423,7 @@ fn call_semantic_tool(name: &str, arguments: &Value) -> Result<Value, String> {
             arguments,
         )?)),
         "workspace-reader.status" => {
-            let config = match semantic::config_at(&project_root) {
+            let mut config = match semantic::config_at(&project_root) {
                 semantic::ConfigState::Absent => {
                     json!({ "configuration": "absent", "authority": "advisory" })
                 }
@@ -13407,6 +13441,7 @@ fn call_semantic_tool(name: &str, arguments: &Value) -> Result<Value, String> {
                     })
                 }
             };
+            config["final_review_protocol"] = final_review_protocol_attestation();
             Ok(semantic_result(config))
         }
         "setup.preview" => Ok(semantic_result(semantic_setup_preview(&project_root)?)),
@@ -19127,6 +19162,10 @@ fn initialize_durable_report_schema(connection: &Connection) -> Result<(), Strin
             updated_at INTEGER NOT NULL,
             revision INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS final_review_projection_metadata (
+            key TEXT PRIMARY KEY,
+            value INTEGER NOT NULL
+        );
     ";
     connection
         .execute_batch(&format!(
@@ -19245,6 +19284,11 @@ macro_rules! define_final_review_executor {
             }
             let next_revision = expected_revision.unwrap_or(0).saturating_add(1);
             let _lock = lock_review_database(&path)?;
+            // Write the repair marker before the authoritative append. If the
+            // process exits after the append but before projection, the next
+            // read must replay both the catalog and addressed session streams;
+            // a session-only revision check cannot observe catalog retirement.
+            persist_projection_pending_marker(&path)?;
             #[cfg(not(test))]
             {
                 let session_stream = FinalReviewStream(review_stream_id(session_id)?);
@@ -19280,6 +19324,9 @@ macro_rules! define_final_review_executor {
             }
             #[cfg(test)]
             {
+                if projection_pending_path(&path).exists() {
+                    OBSERVED_REVIEW_WRITE_AHEAD_MARKER.store(true, Ordering::SeqCst);
+                }
                 $test_executor(&path, session_id, intent)?;
                 project_committed_review(
                     &path,
@@ -19482,9 +19529,35 @@ fn load_authoritative_session_from_path(
 ) -> Result<Option<RestoredReviewSession>, String> {
     let _lock = lock_review_database(path)?;
     initialize_event_store(path)?;
-    rebuild_review_projections(path, project_root, Some(session_id), persistence)?;
-    if let Some(restored) = read_projected_session(path, session_id)? {
-        return Ok(Some(restored));
+    let projection_marker = projection_pending_path(path);
+    let projected_catalog_membership = if projection_marker.exists() {
+        None
+    } else {
+        projected_catalog_membership_if_current(path, session_id)?
+    };
+    if projected_catalog_membership == Some(true) {
+        if let Some(restored) = read_projected_session(path, session_id)? {
+            let stream = review_stream_id(session_id)?;
+            let authoritative_revision = read_latest_review_stream_revision(path, stream)?;
+            if authoritative_revision == Some(restored.revision) {
+                return Ok(Some(restored));
+            }
+        }
+    }
+    if projected_catalog_membership != Some(false) {
+        rebuild_review_projections(path, project_root, Some(session_id), persistence)?;
+        match fs::remove_file(&projection_marker) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "review_projection_repair_marker_remove_failed source={error}"
+                ));
+            }
+        }
+        if let Some(restored) = read_projected_session(path, session_id)? {
+            return Ok(Some(restored));
+        }
     }
 
     let connection = open_review_connection(path)?;
@@ -19541,6 +19614,41 @@ fn load_authoritative_session_from_path(
         ReviewPersistence::WorkflowAuthority,
     )?;
     read_projected_session(path, session_id)
+}
+
+fn projected_catalog_membership_if_current(
+    path: &Path,
+    session_id: &str,
+) -> Result<Option<bool>, String> {
+    let connection = open_review_connection(path)?;
+    let catalog_stream = catalog_stream_id()?;
+    let authoritative_head: i64 = connection
+        .query_row(
+            "SELECT COALESCE(MAX(stream_version), -1) FROM eventcore_events WHERE stream_id = ?1",
+            params![catalog_stream.as_ref()],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("review_catalog_head_read_failed source={error}"))?;
+    let projected_head: Option<i64> = connection
+        .query_row(
+            "SELECT value FROM final_review_projection_metadata WHERE key = 'catalog_stream_head'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("review_catalog_projection_head_read_failed source={error}"))?;
+    if Some(authoritative_head) != projected_head {
+        return Ok(None);
+    }
+    connection
+        .query_row(
+            "SELECT 1 FROM final_review_catalog_projection WHERE session_id = ?1",
+            params![session_id],
+            |_| Ok(true),
+        )
+        .optional()
+        .map(|present| Some(present.unwrap_or(false)))
+        .map_err(|error| format!("review_catalog_projection_membership_read_failed source={error}"))
 }
 
 struct ReviewDatabaseLock(fs::File);
@@ -19938,6 +20046,32 @@ fn projection_pending_path(path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.projection-pending", path.to_string_lossy()))
 }
 
+fn persist_projection_pending_marker(path: &Path) -> Result<(), String> {
+    let marker = projection_pending_path(path);
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&marker)
+        .map_err(|error| format!("review_projection_repair_marker_write_failed source={error}"))?;
+    file.write_all(b"final-review-projection-rebuild-required\n")
+        .map_err(|error| format!("review_projection_repair_marker_write_failed source={error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("review_projection_repair_marker_sync_failed source={error}"))?;
+    #[cfg(unix)]
+    {
+        let parent = marker
+            .parent()
+            .ok_or_else(|| "review_projection_repair_marker_parent_missing=true".to_string())?;
+        fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| {
+                format!("review_projection_repair_marker_parent_sync_failed source={error}")
+            })?;
+    }
+    Ok(())
+}
+
 fn repair_projection_before_read(
     arguments: &Value,
     persistence: ReviewPersistence,
@@ -19990,7 +20124,7 @@ fn project_committed_review(
             // The append is already committed. Projection repair is deliberately
             // separate so a transient read-model failure cannot be reported as
             // a failed command and prompt an unsafe duplicate retry.
-            let _ = fs::write(marker, b"final-review-projection-rebuild-required\n");
+            let _ = persist_projection_pending_marker(path);
         }
     }
 }
@@ -20005,6 +20139,9 @@ fn read_review_stream(
     let _ = persistence;
     #[cfg(test)]
     {
+        if FAIL_NEXT_FULL_REVIEW_STREAM_READ.swap(false, Ordering::SeqCst) {
+            return Err("review_full_stream_read_test_fault=true".to_string());
+        }
         let connection = open_review_connection(_path)?;
         let mut statement = connection
             .prepare("SELECT event_data FROM eventcore_events WHERE stream_id = ?1 ORDER BY stream_version")
@@ -20043,6 +20180,32 @@ fn read_review_stream(
     }
 }
 
+fn read_latest_review_stream_revision(
+    path: &Path,
+    stream: StreamId,
+) -> Result<Option<u64>, String> {
+    let connection = open_review_connection(path)?;
+    connection
+        .query_row(
+            "SELECT event_data FROM eventcore_events WHERE stream_id = ?1 ORDER BY stream_version DESC LIMIT 1",
+            params![stream.as_ref()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("review_latest_event_read_failed source={error}"))?
+        .map(|event| {
+            serde_json::from_str::<FinalReviewEvent>(&event)
+                .map_err(|error| format!("review_latest_event_parse_failed source={error}"))
+                .and_then(|event| {
+                    event
+                        .metadata()
+                        .map(|metadata| metadata.revision)
+                        .ok_or_else(|| "review_latest_event_metadata_missing=true".to_string())
+                })
+        })
+        .transpose()
+}
+
 fn rebuild_review_projections(
     path: &Path,
     project_root: Option<&Path>,
@@ -20054,6 +20217,16 @@ fn rebuild_review_projections(
         return Err("review_projection_test_fault=true".to_string());
     }
     let catalog_stream = catalog_stream_id()?;
+    let catalog_head = {
+        let connection = open_review_connection(path)?;
+        connection
+            .query_row(
+                "SELECT COALESCE(MAX(stream_version), -1) FROM eventcore_events WHERE stream_id = ?1",
+                params![catalog_stream.as_ref()],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| format!("review_catalog_head_read_failed source={error}"))?
+    };
     let mut catalog = HashMap::<String, (u64, u64)>::new();
     for event in read_review_stream(path, project_root, catalog_stream, persistence)? {
         match event {
@@ -20106,6 +20279,12 @@ fn rebuild_review_projections(
             )
             .map_err(|error| format!("review_catalog_projection_write_failed source={error}"))?;
     }
+    transaction
+        .execute(
+            "INSERT INTO final_review_projection_metadata (key, value) VALUES ('catalog_stream_head', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![catalog_head],
+        )
+        .map_err(|error| format!("review_catalog_projection_head_write_failed source={error}"))?;
     transaction
         .execute(
             "DELETE FROM final_review_session_projection WHERE session_id NOT IN (SELECT session_id FROM final_review_catalog_projection)",
@@ -23973,6 +24152,32 @@ mod tests {
         .unwrap_or_else(|error| panic!("tool response text is not JSON: {error}: {response}"))
     }
 
+    fn rewrite_latest_pending_event(
+        database: &Path,
+        event_name: &str,
+        rewrite: impl FnOnce(&mut Value) -> bool,
+    ) {
+        let connection = open_review_connection(database).expect("review event store");
+        let (row_id, encoded): (i64, String) = connection
+            .query_row(
+                "SELECT rowid, event_data FROM eventcore_events WHERE event_data LIKE ?1 ORDER BY rowid DESC LIMIT 1",
+                params![format!("%{event_name}%")],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or_else(|error| panic!("pending {event_name} event: {error}"));
+        let mut event: Value = serde_json::from_str(&encoded).expect("pending event JSON");
+        assert!(
+            rewrite(&mut event),
+            "pending {event_name} event did not contain the expected fixture material"
+        );
+        connection
+            .execute(
+                "UPDATE eventcore_events SET event_data = ?1 WHERE rowid = ?2",
+                params![event.to_string(), row_id],
+            )
+            .expect("replace pending event fixture");
+    }
+
     fn strip_iteration_response_from_latest_pending_event(database: &Path, event_name: &str) {
         fn strip_iteration_response(value: &mut Value) -> bool {
             match value {
@@ -23994,25 +24199,46 @@ mod tests {
             }
         }
 
-        let connection = open_review_connection(database).expect("review event store");
-        let (row_id, encoded): (i64, String) = connection
-            .query_row(
-                "SELECT rowid, event_data FROM eventcore_events WHERE event_data LIKE ?1 ORDER BY rowid DESC LIMIT 1",
-                params![format!("%{event_name}%")],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap_or_else(|error| panic!("pending {event_name} event: {error}"));
-        let mut event: Value = serde_json::from_str(&encoded).expect("pending event JSON");
-        assert!(
-            strip_iteration_response(&mut event),
-            "pending {event_name} event must contain current response facts"
-        );
-        connection
-            .execute(
-                "UPDATE eventcore_events SET event_data = ?1 WHERE rowid = ?2",
-                params![event.to_string(), row_id],
-            )
-            .expect("replace pending event with pre-upgrade fixture");
+        rewrite_latest_pending_event(database, event_name, strip_iteration_response);
+    }
+
+    fn set_pending_assignment_schema_version(
+        database: &Path,
+        event_name: &str,
+        assignment_field: &str,
+        result_schema_version: &str,
+    ) {
+        fn set_schema_version(
+            value: &mut Value,
+            assignment_field: &str,
+            result_schema_version: &str,
+        ) -> bool {
+            match value {
+                Value::Object(fields) => {
+                    if let Some(assignment) = fields
+                        .get_mut(assignment_field)
+                        .and_then(Value::as_object_mut)
+                    {
+                        assignment.insert(
+                            "result_schema_version".to_string(),
+                            json!(result_schema_version),
+                        );
+                        return true;
+                    }
+                    fields.values_mut().any(|value| {
+                        set_schema_version(value, assignment_field, result_schema_version)
+                    })
+                }
+                Value::Array(values) => values.iter_mut().any(|value| {
+                    set_schema_version(value, assignment_field, result_schema_version)
+                }),
+                _ => false,
+            }
+        }
+
+        rewrite_latest_pending_event(database, event_name, |event| {
+            set_schema_version(event, assignment_field, result_schema_version)
+        });
     }
 
     fn test_delivery_boundaries(component: &str) -> Value {
@@ -39308,17 +39534,29 @@ pre_filter = "project-pre"
         );
         assert_eq!(compact["pending_phase"], "verifier");
         assert_eq!(
+            compact["assignment_summary_version"],
+            "final-review-pending-assignments-v1"
+        );
+        assert_eq!(
             compact["result_schema_version"],
-            VERIFIER_RESULT_SCHEMA_VERSION
-        );
-        assert_eq!(compact["assignments"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            compact["assignments"][0]["result_schema_version"],
-            VERIFIER_RESULT_SCHEMA_VERSION
+            "final-review-verifier-result-v1"
         );
         assert_eq!(
-            compact["assignments"][0]["subagent_key"],
-            original_assignment["subagent_key"]
+            compact["assignments"],
+            json!([{
+                "iteration": original_assignment["iteration"],
+                "subagent_key": original_assignment["subagent_key"],
+                "model_role": original_assignment["model_role"],
+                "close_after_result": original_assignment["close_after_result"],
+                "shared_test_evidence_id": null,
+                "result_schema_version": "final-review-verifier-result-v1",
+                "prompt_ref": {
+                    "tool": "final_review.pending_assignments",
+                    "subagent_key": original_assignment["subagent_key"]
+                },
+                "phase": original_assignment["phase"],
+                "assignment_id": original_assignment["assignment_id"]
+            }])
         );
         let exact = parsed_tool_text(
             &coordinator
@@ -39338,7 +39576,7 @@ pre_filter = "project-pre"
         );
         assert_eq!(
             exact["result_schema_version"],
-            VERIFIER_RESULT_SCHEMA_VERSION
+            "final-review-verifier-result-v1"
         );
         assert_eq!(exact["assignment"], original_assignment);
 
@@ -39364,8 +39602,10 @@ pre_filter = "project-pre"
         assert_eq!(resumed["pending_phase"], "verifier");
         assert_eq!(
             resumed["result_schema_version"],
-            VERIFIER_RESULT_SCHEMA_VERSION
+            "final-review-verifier-result-v1"
         );
+        assert_eq!(resumed["pending_assignments"], compact["assignments"]);
+        assert_eq!(resumed["pending_assignment_summary"], compact);
         assert_eq!(
             restarted.session_revisions["pending-verifier-assignment-recovery"],
             pending_revision
@@ -39388,13 +39628,14 @@ pre_filter = "project-pre"
         );
         assert_eq!(
             recovered_payload["result_schema_version"],
-            VERIFIER_RESULT_SCHEMA_VERSION
+            "final-review-verifier-result-v1"
         );
         let recovered = recovered_payload["assignment"].clone();
         assert_eq!(recovered, original_assignment);
 
-        let resolved = restarted
-            .handle_json_rpc(&json!({
+        let resolved = parsed_tool_text(
+            &restarted
+                .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
                 "id": 7,
                 "method": "tools/call",
@@ -39418,9 +39659,42 @@ pre_filter = "project-pre"
                         }
                     }
                 }
-            }))
-            .expect("submit recovered verifier result");
-        assert!(resolved.get("result").is_some(), "{resolved}");
+                }))
+                .expect("submit recovered verifier result"),
+        );
+        assert_eq!(resolved["transition_status"], "advanced");
+        assert_eq!(resolved["verification"]["status"], "failed_retained");
+        assert_eq!(
+            restarted.session_revisions["pending-verifier-assignment-recovery"],
+            pending_revision + 1
+        );
+        assert!(!restarted
+            .pending_verifiers
+            .contains_key("pending-verifier-assignment-recovery"));
+        drop(restarted);
+        let mut restarted_again = ReviewCoordinator::default();
+        let resumed_after_submission = parsed_tool_text(
+            &restarted_again
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 8,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.resume_latest",
+                        "arguments": {
+                            "session_id": "pending-verifier-assignment-recovery",
+                            "project_root": project_root
+                        }
+                    }
+                }))
+                .expect("resume after verifier submission"),
+        );
+        assert_eq!(resumed_after_submission["pending_phase"], "lens-review");
+        assert!(resumed_after_submission["pending_assignments"]
+            .as_array()
+            .is_some_and(|assignments| assignments.iter().all(|assignment| {
+                assignment["subagent_key"] != original_assignment["subagent_key"]
+            })));
     }
 
     #[test]
@@ -39493,17 +39767,29 @@ pre_filter = "project-pre"
         );
         assert_eq!(compact["pending_phase"], "delta-risk");
         assert_eq!(
+            compact["assignment_summary_version"],
+            "final-review-pending-assignments-v1"
+        );
+        assert_eq!(
             compact["result_schema_version"],
-            DELTA_RISK_RESULT_SCHEMA_VERSION
-        );
-        assert_eq!(compact["assignments"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            compact["assignments"][0]["result_schema_version"],
-            DELTA_RISK_RESULT_SCHEMA_VERSION
+            "final-review-delta-risk-assessment-v1"
         );
         assert_eq!(
-            compact["assignments"][0]["subagent_key"],
-            original_assignment["subagent_key"]
+            compact["assignments"],
+            json!([{
+                "iteration": null,
+                "subagent_key": original_assignment["subagent_key"],
+                "model_role": original_assignment["model_role"],
+                "close_after_result": original_assignment["close_after_result"],
+                "shared_test_evidence_id": original_assignment["shared_test_evidence"]["id"],
+                "result_schema_version": "final-review-delta-risk-assessment-v1",
+                "prompt_ref": {
+                    "tool": "final_review.pending_assignments",
+                    "subagent_key": original_assignment["subagent_key"]
+                },
+                "role": original_assignment["role"],
+                "assignment_id": original_assignment["assignment_id"]
+            }])
         );
 
         drop(coordinator);
@@ -39528,8 +39814,10 @@ pre_filter = "project-pre"
         assert_eq!(resumed["pending_phase"], "delta-risk");
         assert_eq!(
             resumed["result_schema_version"],
-            DELTA_RISK_RESULT_SCHEMA_VERSION
+            "final-review-delta-risk-assessment-v1"
         );
+        assert_eq!(resumed["pending_assignments"], compact["assignments"]);
+        assert_eq!(resumed["pending_assignment_summary"], compact);
         assert_eq!(
             restarted.session_revisions["pending-delta-assignment-recovery"],
             pending_revision
@@ -39552,7 +39840,7 @@ pre_filter = "project-pre"
         );
         assert_eq!(
             recovered_payload["result_schema_version"],
-            DELTA_RISK_RESULT_SCHEMA_VERSION
+            "final-review-delta-risk-assessment-v1"
         );
         let recovered = recovered_payload["assignment"].clone();
         assert_eq!(recovered, original_assignment);
@@ -39567,8 +39855,9 @@ pre_filter = "project-pre"
             &["security-safety"],
             json!([]),
         );
-        let resolved = restarted
-            .handle_json_rpc(&json!({
+        let resolved = parsed_tool_text(
+            &restarted
+                .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
                 "id": 6,
                 "method": "tools/call",
@@ -39583,9 +39872,252 @@ pre_filter = "project-pre"
                         "delta_risk_assessment": assessment
                     }
                 }
+                }))
+                .expect("submit recovered delta-risk assessment"),
+        );
+        assert_eq!(resolved["transition_status"], "advanced");
+        assert_eq!(resolved["advance_kind"], "delta_reassessment");
+        assert_eq!(
+            restarted.session_revisions["pending-delta-assignment-recovery"],
+            pending_revision + 1
+        );
+        assert!(!restarted
+            .pending_delta_risks
+            .contains_key("pending-delta-assignment-recovery"));
+        drop(restarted);
+        let mut restarted_again = ReviewCoordinator::default();
+        let resumed_after_submission = parsed_tool_text(
+            &restarted_again
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "final_review.resume_latest",
+                        "arguments": {
+                            "session_id": "pending-delta-assignment-recovery",
+                            "project_root": project_root
+                        }
+                    }
+                }))
+                .expect("resume after delta-risk submission"),
+        );
+        assert_ne!(resumed_after_submission["pending_phase"], "delta-risk");
+        assert!(resumed_after_submission["pending_assignments"]
+            .as_array()
+            .is_some_and(|assignments| assignments.iter().all(|assignment| {
+                assignment["subagent_key"] != original_assignment["subagent_key"]
+            })));
+    }
+
+    #[test]
+    fn pending_assignment_recovery_preserves_its_durable_result_schema_version() {
+        let project_root = test_project_root("pending-assignment-schema-version");
+        let mut coordinator = ReviewCoordinator::default();
+        let planned = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {
+                        "name": "final_review.plan",
+                        "arguments": assessed_plan_arguments_for_diff_at_root(
+                            "pending-assignment-schema-version",
+                            "pending-assignment-schema-version-v1",
+                            "high",
+                            &[("security-safety", "high")],
+                            json!([]),
+                            Some(&project_root),
+                        )
+                    }
+                }))
+                .expect("plan response"),
+        );
+        let pending = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {
+                        "name": "final_review.advance",
+                        "arguments": {
+                            "state": planned["state"],
+                            "lens_results": [],
+                            "current_diff_hash": "pending-assignment-schema-version-v2",
+                            "current_changed_files": ["src/lib.rs"],
+                            "current_shared_test_evidence": shared_test_evidence_for(
+                                "pending-assignment-schema-version-v2"
+                            )
+                        }
+                    }
+                }))
+                .expect("delta-risk request"),
+        );
+        let database = PathBuf::from(
+            pending["state"]["out_of_scope_report_artifact"]
+                .as_str()
+                .expect("review database"),
+        );
+        set_pending_assignment_schema_version(
+            &database,
+            "DeltaRiskRequested",
+            "delta_risk_assignment",
+            "final-review-delta-risk-assessment-v0",
+        );
+
+        drop(coordinator);
+        let mut restarted = ReviewCoordinator::default();
+        let resumed = parsed_tool_text(
+            &restarted
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                    "params": {
+                        "name": "final_review.resume_latest",
+                        "arguments": {
+                            "session_id": "pending-assignment-schema-version",
+                            "project_root": project_root
+                        }
+                    }
+                }))
+                .expect("resume pending delta-risk assignment"),
+        );
+        assert_eq!(
+            resumed["result_schema_version"],
+            "final-review-delta-risk-assessment-v0"
+        );
+        assert_eq!(
+            resumed["pending_assignments"][0]["result_schema_version"],
+            "final-review-delta-risk-assessment-v0"
+        );
+    }
+
+    #[test]
+    fn pending_assignments_rejects_a_mixed_cached_state_reference() {
+        let project_root = test_project_root("pending-assignment-reference-binding");
+        let other_project_root = test_project_root("pending-assignment-reference-binding-other");
+        let mut coordinator = ReviewCoordinator::default();
+        let planned = parsed_tool_text(
+            &coordinator
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {
+                        "name": "final_review.plan",
+                        "arguments": assessed_plan_arguments_for_diff_at_root(
+                            "pending-assignment-reference-binding",
+                            "pending-assignment-reference-binding-diff",
+                            "high",
+                            &[("correctness-behavior", "high")],
+                            json!([]),
+                            Some(&project_root),
+                        )
+                    }
+                }))
+                .expect("plan response"),
+        );
+        let mut mixed_state_ref = planned["state_ref"].clone();
+        mixed_state_ref["project_root"] = json!(other_project_root);
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {
+                    "name": "final_review.pending_assignments",
+                    "arguments": { "state_ref": mixed_state_ref }
+                }
             }))
-            .expect("submit recovered delta-risk assessment");
-        assert!(resolved.get("result").is_some(), "{resolved}");
+            .expect("binding mismatch response");
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message
+                    .contains("review_state_binding_mismatch=true field=project_root")),
+            "{response}"
+        );
+    }
+
+    #[test]
+    fn pending_assignments_refreshes_stale_process_state_before_recovery() {
+        let project_root = test_project_root("pending-assignment-stale-process");
+        let mut first_process = ReviewCoordinator::default();
+        let planned = parsed_tool_text(
+            &first_process
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {
+                        "name": "final_review.plan",
+                        "arguments": assessed_plan_arguments_for_diff_at_root(
+                            "pending-assignment-stale-process",
+                            "pending-assignment-stale-process-v1",
+                            "high",
+                            &[("security-safety", "high")],
+                            json!([]),
+                            Some(&project_root),
+                        )
+                    }
+                }))
+                .expect("plan response"),
+        );
+        let current_diff_hash = "pending-assignment-stale-process-v2";
+        let pending = parsed_tool_text(
+            &first_process
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {
+                        "name": "final_review.advance",
+                        "arguments": {
+                            "state": planned["state"],
+                            "lens_results": [],
+                            "current_diff_hash": current_diff_hash,
+                            "current_changed_files": ["src/lib.rs"],
+                            "current_shared_test_evidence": shared_test_evidence_for(current_diff_hash)
+                        }
+                    }
+                }))
+                .expect("delta-risk request"),
+        );
+        let state_ref = pending["state_ref"].clone();
+        let assignment = &pending["delta_risk_assignments"][0];
+        let assessment = delta_risk_assessment_for(
+            assignment,
+            "high",
+            &[("security-safety", "high")],
+            &["security-safety"],
+            json!([]),
+        );
+
+        let mut second_process = ReviewCoordinator::default();
+        let resolved = parsed_tool_text(
+            &second_process
+                .handle_json_rpc(&json!({
+                    "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                    "params": {
+                        "name": "final_review.advance",
+                        "arguments": {
+                            "state_ref": state_ref.clone(),
+                            "lens_results": [],
+                            "current_diff_hash": current_diff_hash,
+                            "current_changed_files": ["src/lib.rs"],
+                            "current_shared_test_evidence": shared_test_evidence_for(current_diff_hash),
+                            "delta_risk_assessment": assessment
+                        }
+                    }
+                }))
+                .expect("resolve pending delta-risk assignment"),
+        );
+        assert_eq!(resolved["transition_status"], "advanced");
+
+        let stale = first_process
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                "params": {
+                    "name": "final_review.pending_assignments",
+                    "arguments": { "state_ref": state_ref }
+                }
+            }))
+            .expect("stale recovery response");
+        assert!(
+            stale["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("review_state_out_of_sync=true")),
+            "{stale}"
+        );
     }
 
     #[test]
@@ -40896,6 +41428,9 @@ pre_filter = "project-pre"
 
     #[test]
     fn projection_failure_after_commit_is_deferred_and_repairable() {
+        let _fault_lock = REVIEW_PROJECTION_FAULT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let root = test_project_root("projection-repair");
         let planned: Value = serde_json::from_str(&plan(&json!({
             "changed_files": ["src/lib.rs"],
@@ -40967,20 +41502,6 @@ pre_filter = "project-pre"
             .session_revisions
             .insert(session_id.to_string(), 1);
         let repaired_state = valid_state.clone();
-        project_committed_review(
-            &path,
-            None,
-            &session_id,
-            ReviewPersistence::WorkflowAuthority,
-        );
-        assert!(!projection_pending_path(&path).exists());
-        assert_eq!(
-            read_projected_session(&path, &session_id)
-                .expect("repaired projection read")
-                .expect("repaired projection")
-                .state,
-            repaired_state
-        );
         coordinator
             .sessions
             .insert(session_id.to_string(), repaired_state.clone());
@@ -40999,10 +41520,63 @@ pre_filter = "project-pre"
             }))
             .expect("repaired MCP response");
         assert!(repaired_read.get("error").is_none(), "{repaired_read}");
+        assert!(!projection_pending_path(&path).exists());
+        assert_eq!(
+            read_projected_session(&path, &session_id)
+                .expect("repaired projection read")
+                .expect("repaired projection")
+                .state,
+            repaired_state
+        );
+    }
+
+    #[test]
+    fn write_ahead_marker_precedes_authoritative_append_for_catalog_retirement_safety() {
+        let _fault_lock = REVIEW_PROJECTION_FAULT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        OBSERVED_REVIEW_WRITE_AHEAD_MARKER.store(false, Ordering::SeqCst);
+        let root = test_project_root("write-ahead-catalog-retirement");
+        let session_id = "write-ahead-catalog-retirement";
+        let arguments = add_test_risk_assessment(
+            json!({
+            "session_id": session_id,
+            "changed_files": ["src/lib.rs"],
+            "diff_hash": "write-ahead-catalog-retirement",
+            "project_root": root
+            }),
+            "low",
+            &[("correctness-behavior", "low")],
+            json!([]),
+        );
+        let mut coordinator = ReviewCoordinator::default();
+        let response = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "final_review.plan", "arguments": arguments }
+            }))
+            .expect("plan response");
+        assert!(response.get("error").is_none(), "{response}");
+
+        assert!(
+            OBSERVED_REVIEW_WRITE_AHEAD_MARKER.swap(false, Ordering::SeqCst),
+            "the repair marker must exist before the authoritative command can append catalog retirement"
+        );
+        let path = durable_report_database_path(root.to_str().expect("project root"), None)
+            .expect("review database path");
+        assert!(
+            !projection_pending_path(&path).exists(),
+            "successful projection must clear the write-ahead marker"
+        );
     }
 
     #[test]
     fn addressed_legacy_session_import_is_idempotent_and_leaves_legacy_row_inert() {
+        let _fault_lock = REVIEW_PROJECTION_FAULT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let directory = tempfile::tempdir().expect("temporary legacy store");
         let path = directory.path().join("review.sqlite");
         let state = event_sourced_test_state(directory.path(), "legacy-review");
@@ -41028,6 +41602,8 @@ pre_filter = "project-pre"
             .revision,
             3
         );
+        FAIL_NEXT_REVIEW_PROJECTION_REBUILD.store(true, Ordering::SeqCst);
+        FAIL_NEXT_FULL_REVIEW_STREAM_READ.store(true, Ordering::SeqCst);
         assert_eq!(
             load_authoritative_session_from_path(
                 &path,
@@ -41040,6 +41616,100 @@ pre_filter = "project-pre"
             .expect("projected session")
             .revision,
             3
+        );
+        assert!(
+            FAIL_NEXT_REVIEW_PROJECTION_REBUILD.swap(false, Ordering::SeqCst),
+            "a current projection must avoid a full catalog rebuild"
+        );
+        assert!(
+            FAIL_NEXT_FULL_REVIEW_STREAM_READ.swap(false, Ordering::SeqCst),
+            "a current projected session must read only the latest authoritative event"
+        );
+        FAIL_NEXT_REVIEW_PROJECTION_REBUILD.store(true, Ordering::SeqCst);
+        assert!(load_authoritative_session_from_path(
+            &path,
+            None,
+            "missing-review",
+            ReviewPersistence::WorkflowAuthority,
+            true,
+        )
+        .expect("missing session lookup")
+        .is_none());
+        assert!(
+            FAIL_NEXT_REVIEW_PROJECTION_REBUILD.swap(false, Ordering::SeqCst),
+            "a missing session in a current catalog must avoid a full catalog rebuild"
+        );
+        let connection = open_review_connection(&path).expect("stale catalog metadata database");
+        connection
+            .execute(
+                "UPDATE final_review_projection_metadata SET value = value - 1 WHERE key = 'catalog_stream_head'",
+                [],
+            )
+            .expect("stale catalog projection head");
+        drop(connection);
+        FAIL_NEXT_REVIEW_PROJECTION_REBUILD.store(true, Ordering::SeqCst);
+        let catalog_error = match load_authoritative_session_from_path(
+            &path,
+            None,
+            "legacy-review",
+            ReviewPersistence::WorkflowAuthority,
+            true,
+        ) {
+            Ok(_) => panic!("a stale catalog generation must require projection replay"),
+            Err(error) => error,
+        };
+        assert!(catalog_error.contains("review_projection_test_fault=true"));
+        assert!(load_authoritative_session_from_path(
+            &path,
+            None,
+            "legacy-review",
+            ReviewPersistence::WorkflowAuthority,
+            true,
+        )
+        .expect("catalog projection repair")
+        .is_some());
+        let connection = open_review_connection(&path).expect("stale projection database");
+        connection
+            .execute(
+                "UPDATE final_review_session_projection SET revision = 2 WHERE session_id = ?1",
+                params!["legacy-review"],
+            )
+            .expect("stale projection revision");
+        drop(connection);
+        FAIL_NEXT_REVIEW_PROJECTION_REBUILD.store(true, Ordering::SeqCst);
+        let error = match load_authoritative_session_from_path(
+            &path,
+            None,
+            "legacy-review",
+            ReviewPersistence::WorkflowAuthority,
+            true,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("a stale unmarked projection must rebuild"),
+        };
+        assert!(error.contains("review_projection_test_fault=true"));
+        assert!(!FAIL_NEXT_REVIEW_PROJECTION_REBUILD.swap(false, Ordering::SeqCst));
+        fs::write(
+            projection_pending_path(&path),
+            b"final-review-projection-rebuild-required\n",
+        )
+        .expect("projection marker");
+        assert_eq!(
+            load_authoritative_session_from_path(
+                &path,
+                None,
+                "legacy-review",
+                ReviewPersistence::WorkflowAuthority,
+                true,
+            )
+            .expect("marker repair")
+            .expect("repaired session")
+            .revision,
+            3
+        );
+        assert!(
+            !projection_pending_path(&path).exists(),
+            "a successful load-time repair must clear its marker"
         );
 
         let connection = open_review_connection(&path).expect("imported database");

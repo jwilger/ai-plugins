@@ -23,6 +23,23 @@ stop. For example, state explicitly that budget or time pressure cannot skip
 the remaining passes and that a one-pass request cannot replace three complete
 finding-free iterations.
 
+Treat a stale or mismatched coordinator as unavailable. Before creating risk or
+review state, call `workspace-reader.status` and require
+`final_review_protocol.contract_version >= 2`,
+`final_review_protocol.minimum_clean_iterations >= 3`, and
+`final_review_protocol.durable_pending_assignment_recovery: true` in that one
+response. If any field is absent or weaker, accept zero clean iterations and
+reject delivery. Install the current-host binaries from the updated marketplace
+checkout with `just install-development-system-binaries` (or the installer
+script), rerun Development System setup for the current harness so its
+project-local MCP binding points at the new absolute binary path, restart the
+harness, and begin a new review session only after the same-MCP attestation
+passes. Do not call
+`final_review.assess_risk` or `final_review.plan` merely to test a mismatched
+runtime. After a valid plan, independently require the returned
+coordinator-owned state to preserve at least the attested clean-iteration
+minimum; a lower value invalidates that session and cannot schedule reviewers.
+
 Apply `model-routing` to every review assignment. Ordinary lens review uses the
 substantive route; activated architecture, security, human-safety, ambiguity,
 or disputed-verification work and the accountable readiness decision use the

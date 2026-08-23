@@ -1,6 +1,6 @@
 ---
 name: development-workflow
-description: Use when making repository changes, debugging, handling review feedback, verifying work, conducting final review, recovering CI, or deciding the next development lifecycle step.
+description: Use when making repository changes, debugging, handling review feedback, verifying work, conducting final review, recovering CI, deciding the next development lifecycle step, or handling a missing or weaker final_review_protocol attestation or coordinator clean-iteration minimum.
 ---
 
 # Development workflow
@@ -9,6 +9,46 @@ Use `workspace-reader.status` before choosing a workflow. Outside Git, without
 configuration, or with invalid configuration, inspection remains available but
 the plugin cannot provide configured workflow guidance. This advisory state
 does not deny ordinary host mutation capabilities.
+
+## Final-review protocol preflight
+
+For every final-review path, complete this checklist before creating any risk
+or review state:
+
+1. Call `workspace-reader.status` through the same connected MCP that would run
+   final review.
+2. Require one `final_review_protocol` object with all three predicates:
+   `contract_version >= 2`, `minimum_clean_iterations >= 3`, and
+   `durable_pending_assignment_recovery: true`.
+3. If any predicate is missing or weaker, classify the skill and connected MCP
+   as stale or mismatched. Do not call `final_review.assess_risk` or
+   `final_review.plan`; if a plan was already created, discard that entire
+   session. State that zero clean iterations are accepted, launch no reviewers,
+   and reject commit, push, pull/merge-request creation, merge, delivery, and
+   readiness claims.
+4. Recover by installing the current-host binaries from the updated marketplace
+   checkout with `just install-development-system-binaries` (or
+   `scripts/install-development-system-binaries.sh`), then rerun Development
+   System setup for the current harness so the project-local MCP configuration
+   is rewritten to the newly installed absolute binary path. Restart the
+   harness. Start a new review session only after the same-MCP status call
+   passes all three predicates; another plan call is never the runtime probe.
+5. After planning, require the returned coordinator-owned
+   `required_clean_iterations` to be at least the attested minimum. A lower
+   value invalidates and discards that session; it cannot schedule reviewers or
+   authorize delivery.
+
+When reporting a protocol mismatch, do not abbreviate this checklist. Name the
+same-MCP status requirement and all three predicate names and thresholds; say
+that `final_review.assess_risk` and `final_review.plan` are prohibited; say the
+old session is discarded with zero accepted clean iterations and no reviewers;
+name commit, push, pull/merge-request creation, merge, delivery, and readiness
+as rejected actions; require current-host binary installation, rerunning
+Development System setup for the current harness to rewrite the project-local
+absolute MCP binding, and harness restart; and require a fresh plan whose
+coordinator-owned minimum is at least the attested minimum. A generic
+instruction to refresh, reconnect, or require
+"three passes" is not a complete fail-closed recovery record.
 
 For every workflow question, load [workflow
 rules](references/workflow-rules.md). Before editing, classify artifact impact
@@ -95,7 +135,9 @@ verifier, or delta-risk assignment, including the exact `subagent_key`, exact
 phase-specific assignment identity and evidence references. Pass one exact
 `subagent_key` back to that tool to retrieve only that assignment's original
 durable prompt and schema. An incomplete `final_review.resume_latest` returns
-the same compact summary. These retrievals are read-only and idempotent: they
+the same compact summary. Supply `work_item_id` when the original review was
+ticket-bound, and never mix a session, project root, work item, or fingerprint
+from different handoffs. These retrievals are read-only and idempotent: they
 append no event, change no revision, fingerprint, scope, or hash, and never
 reassign a lens or role. If a pre-upgrade pending verifier or delta-risk record
 lacks recoverable assignment facts, follow its explicit

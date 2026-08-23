@@ -84,6 +84,18 @@ fn test_executable(program: &str) -> String {
         .to_string()
 }
 
+fn assert_current_final_review_protocol(status: &Value) {
+    assert_eq!(
+        status.pointer("/result/structuredContent/final_review_protocol"),
+        Some(&json!({
+            "contract_version": 2,
+            "minimum_clean_iterations": 3,
+            "durable_pending_assignment_recovery": true
+        })),
+        "unexpected final-review protocol attestation: {status}"
+    );
+}
+
 #[test]
 fn semantic_reader_is_inert_without_configuration_and_invalid_config_fails_closed() {
     let root = TempDir::new().expect("repository");
@@ -101,6 +113,7 @@ fn semantic_reader_is_inert_without_configuration_and_invalid_config_fails_close
         absent.pointer("/result/structuredContent/authority"),
         Some(&json!("advisory"))
     );
+    assert_current_final_review_protocol(&absent);
     let status = mcp_call(
         root.path(),
         "workspace-reader.repository",
@@ -140,6 +153,7 @@ fn semantic_reader_is_inert_without_configuration_and_invalid_config_fails_close
         invalid.pointer("/result/structuredContent/authority"),
         Some(&json!("advisory"))
     );
+    assert_current_final_review_protocol(&invalid);
 }
 
 #[test]
@@ -378,6 +392,7 @@ fn setup_apply_migrates_legacy_configuration_without_dropping_project_policy() {
         status.pointer("/result/structuredContent/configuration"),
         Some(&json!("configured"))
     );
+    assert_current_final_review_protocol(&status);
 }
 
 #[test]

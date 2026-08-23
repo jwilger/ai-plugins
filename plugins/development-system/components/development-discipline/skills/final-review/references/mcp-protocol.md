@@ -5,6 +5,22 @@ final-review path.
 
 ## Required Scope
 
+Before `final_review.assess_risk`, call `workspace-reader.status` through the
+same connected MCP and validate its `final_review_protocol` attestation. The
+current contract requires `contract_version >= 2`,
+`minimum_clean_iterations >= 3`, and
+`durable_pending_assignment_recovery: true`. Missing or weaker fields identify
+a stale skill/runtime pairing: create no review state, accept zero clean
+iterations, and reject delivery. Install the current-host binaries from the
+updated marketplace checkout with `just install-development-system-binaries`
+(or `scripts/install-development-system-binaries.sh`), rerun Development System
+setup for the current harness so its project-local MCP configuration is
+rewritten to the newly installed absolute binary path, restart the harness, and
+start a new session only after the same-MCP attestation passes. A valid
+plan must also return coordinator-owned state whose
+`required_clean_iterations` is at least the attested minimum; otherwise discard
+that session as a protocol mismatch.
+
 Run `final_review.assess_risk` before `final_review.plan`; the plan boundary
 requires that scout's bound `risk_assessment`, the complete reviewed
 `changed_files` inventory, a non-placeholder `diff_hash`, the full
@@ -98,7 +114,9 @@ not the decision authority. A new stdio MCP process resolves a
 valid reference, including pending verifier and delta-risk assignments. If a
 caller loses the latest handoff, `final_review.resume_latest` returns the latest
 reference plus the compact pending-assignment summary from `session_id`,
-`project_root`, and optional `work_item_id` without advancing the review.
+`project_root`, and `work_item_id` when the original review was ticket-bound,
+without advancing the review. Keep those binding fields together; a reference
+whose session, project, or work item came from different handoffs is rejected.
 
 Call `final_review.pending_assignments` with `state_ref` when a plan or advance
 response was truncated or too large to retain. Its versioned compact summary

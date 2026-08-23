@@ -52,7 +52,11 @@ Within that advisory boundary, final-review state fails closed: risk planning
 must select a lens, every selected lens and assigned verifier reruns in each
 iteration, and completion requires at least three consecutive complete
 finding-free iterations. Findings, malformed results, and material deltas reset
-the streak; the review-budget `ship` choice cannot bypass it. The planned
+the streak; the review-budget `ship` choice cannot bypass it. The reader status
+attests the connected final-review protocol, and current workflow guidance
+refuses to create review state when that attestation is missing or too old, so
+a newly installed skill cannot silently coordinate through a stale one-pass MCP
+runtime. The planned
 standalone Tiber scheduler is the authority layer that can eventually make
 those receipts prerequisites for repository mutation. That scheduler binding
 is not part of the currently installed Tiber task-board binary.

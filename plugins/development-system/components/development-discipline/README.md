@@ -61,6 +61,9 @@ does not record completion until every selected lens and assigned verifier has
 produced at least three consecutive complete finding-free iterations. Any
 reported finding, malformed result, or material delta resets the streak, and a
 review-budget `ship` decision cannot lower or bypass the requirement.
+`workspace-reader.status` exposes a versioned final-review protocol attestation;
+the installed workflow requires the current attestation before creating risk or
+review state and rejects any plan that returns a lower clean-iteration minimum.
 Schema-invalid lens or verifier evidence and verifier provenance/coverage
 failures are normalized to bounded malformed-result records inside the
 authoritative advance transition. The coordinator closes any pending verifier,

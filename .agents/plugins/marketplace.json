@@ -10,7 +10,7 @@
         "source": "local",
         "path": "./plugins/development-system"
       },
-      "version": "5.3.1",
+      "version": "5.3.2",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"

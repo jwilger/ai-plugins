@@ -2188,6 +2188,62 @@
     }
   },
   {
+    "case_id": "final-review-stale-coordinator-protocol-fails-closed",
+    "behavior": "Refuses to create or continue final-review state when a newer skill is connected to a stale coordinator runtime.",
+    "prompt": "Apply $development-system:development-workflow and read its instructions before answering. A configured Development System repository has newly installed final-review guidance requiring three consecutive clean iterations. Through the same connected MCP, workspace-reader.status says configuration=\"configured\" but omits final_review_protocol. A caller nevertheless asks final_review.plan for required_clean_iterations=3, and the returned coordinator-owned state contains required_clean_iterations=1. May the caller launch reviewers or deliver? Give the exact fail-closed recovery sequence and the checks required before a fresh review session.",
+    "tags": [
+      "development-discipline",
+      "final-review",
+      "protocol-versioning",
+      "stale-runtime"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "state-transition", "close-boundary"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response treats the missing final_review_protocol attestation as a stale skill/MCP mismatch, says assess_risk and plan must not be called under that mismatch, discards the already-created one-pass session, accepts zero clean iterations, launches no reviewers, and rejects commit/push/merge/readiness. It must require installing the current-host binaries from the updated marketplace checkout, rerunning Development System setup for the current harness so the project-local MCP configuration is rewritten to the new absolute binary path, and restarting the harness. It must then call workspace-reader.status through the same connected MCP and require contract_version >= 2, minimum_clean_iterations >= 3, and durable_pending_assignment_recovery=true before creating a new session. It must also validate that a fresh plan's coordinator-owned required_clean_iterations is at least the attested minimum. Fail if configured status alone is accepted, the one-pass session continues, manual review substitutes for the coordinator, delivery proceeds, setup is omitted after installing a versioned binary, or another plan is used as the runtime probe.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Do not launch reviewers or deliver. The missing protocol object proves this connected MCP is stale, and the returned one-pass state confirms it. Discard that session and count zero clean iterations. Install the current-host binaries from the updated marketplace checkout, rerun Development System setup so this harness's project-local MCP binding names the new absolute binary path, restart the harness, and use workspace-reader.status on the new connection to require contract_version at least 2, minimum_clean_iterations at least 3, and durable pending-assignment recovery. Only then create a fresh review, and reject its plan too if required_clean_iterations is below the attested minimum."
+      ],
+      "fail": [
+        "The repository is configured, so continue the one-pass session and compensate with a manual second review before pushing."
+      ]
+    }
+  },
+  {
+    "case_id": "final-review-current-coordinator-protocol-allows-review-only",
+    "behavior": "Allows a fresh coordinated review when protocol attestation and plan state meet the minimum without prematurely authorizing delivery.",
+    "prompt": "Apply $development-system:development-workflow and read its instructions before answering. In a configured Development System repository, workspace-reader.status through the connected MCP reports final_review_protocol with contract_version=2, minimum_clean_iterations=3, and durable_pending_assignment_recovery=true. A fresh final_review plan then returns coordinator-owned required_clean_iterations=3 and its assigned first-iteration reviewers. Must the caller reinstall or restart again? May it launch those reviewers or deliver immediately?",
+    "tags": [
+      "development-discipline",
+      "final-review",
+      "protocol-versioning",
+      "current-runtime"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "state-transition", "close-boundary"]
+    },
+    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response says the same-MCP attestation satisfies contract_version >= 2, minimum_clean_iterations >= 3, and durable_pending_assignment_recovery=true, and the coordinator-owned plan preserves the attested minimum, so no additional reinstall or restart is required and the caller may launch exactly the assigned fresh-context reviewers. It must still reject immediate delivery and require the coordinator to report three consecutive complete finding-free iterations plus the remaining configured verification and delivery gates. Fail if it demands another reinstall/restart despite the passing predicates, refuses to launch assigned reviewers, treats configured status alone as sufficient, or authorizes delivery merely because the plan was created.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "The protocol preflight passes on this connection and the plan preserves its minimum, so do not reinstall or restart again. Launch the fresh-context reviewers exactly as assigned, but do not deliver yet: the coordinator must first record three consecutive complete finding-free iterations and the configured verification and delivery gates must also pass."
+      ],
+      "fail": [
+        "Any final-review session requires another reinstall, or alternatively the valid plan itself authorizes immediate delivery."
+      ]
+    }
+  },
+  {
     "case_id": "writing-skills-replaces-gating-adjectives-with-predicates",
     "behavior": "Rewrites vague gate-changing adjectives as operational predicates without academicizing the prose.",
     "prompt": "Improve this proposed agent instruction: `Use a stronger model for significant risky changes, run appropriate tests, and stop when evidence is inadequate.` Preserve its intent, make every gate executable, and say which behavior fixtures are required.",
