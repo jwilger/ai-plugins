@@ -6,6 +6,8 @@ use eventcore::{
 use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStoreError, StreamId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+#[cfg(test)]
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsStr;
@@ -43,7 +45,20 @@ const FINAL_REVIEW_SCOPE_MAX_PATHS: usize = 100_000;
 const FINAL_REVIEW_SCOPE_MAX_CONTENT_BYTES: u64 = 1024 * 1024 * 1024;
 const FINAL_REVIEW_FINGERPRINT_CACHE_MAX_ENTRIES: usize = 256;
 #[cfg(test)]
-static FINAL_REVIEW_TREE_GIT_PROCESS_COUNT: AtomicU64 = AtomicU64::new(0);
+thread_local! {
+    static FINAL_REVIEW_TREE_GIT_PROCESS_COUNT: Cell<u64> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+fn count_final_review_tree_git_process() {
+    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT
+        .set(FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.get().saturating_add(1));
+}
+
+#[cfg(test)]
+fn final_review_tree_git_process_count() -> u64 {
+    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.get()
+}
 const REPOSITORY_STREAM: &str = "tiber:repository";
 const BOARD_STREAM: &str = "tiber:board";
 const CI_RECOVERY_STREAM: &str = "tiber:ci-recovery";
@@ -5282,7 +5297,7 @@ fn bounded_final_review_git_output(
     scope_kind: &str,
     limits: FinalReviewScopeLimits,
 ) -> Result<Vec<u8>, Error> {
-    bounded_final_review_git_output_with_index(root, args, scope, scope_kind, limits, None)
+    bounded_final_review_git_output_with_index(root, args, scope, scope_kind, limits, None, None)
 }
 
 fn bounded_final_review_git_output_with_index(
@@ -5292,11 +5307,15 @@ fn bounded_final_review_git_output_with_index(
     scope_kind: &str,
     limits: FinalReviewScopeLimits,
     index_file: Option<&Path>,
+    attribute_source: Option<&str>,
 ) -> Result<Vec<u8>, Error> {
     let mut command = Command::new("git");
     command.args(args).args(scope).current_dir(root);
     if let Some(index_file) = index_file {
         command.env("GIT_INDEX_FILE", index_file);
+    }
+    if let Some(attribute_source) = attribute_source {
+        command.env("GIT_ATTR_SOURCE", attribute_source);
     }
     let mut child = command
         .stdout(Stdio::piped())
@@ -5767,16 +5786,29 @@ struct TreeManifestEntry {
     oid: String,
 }
 
+#[derive(Default)]
+struct FinalReviewBlobBatch {
+    bytes: Vec<u8>,
+    ranges: BTreeMap<String, (usize, usize)>,
+}
+
+impl FinalReviewBlobBatch {
+    fn get(&self, oid: &str) -> Option<&[u8]> {
+        let (start, end) = self.ranges.get(oid)?;
+        self.bytes.get(*start..*end)
+    }
+}
+
 fn bounded_final_review_blob_batch(
     root: &Path,
     object_ids: &BTreeSet<String>,
     scope_kind: &str,
-) -> Result<BTreeMap<String, Vec<u8>>, Error> {
+) -> Result<FinalReviewBlobBatch, Error> {
     if object_ids.is_empty() {
-        return Ok(BTreeMap::new());
+        return Ok(FinalReviewBlobBatch::default());
     }
     #[cfg(test)]
-    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
+    count_final_review_tree_git_process();
     let mut child = Command::new("git")
         .args(["cat-file", "--batch"])
         .current_dir(root)
@@ -5839,7 +5871,7 @@ fn bounded_final_review_blob_batch(
         });
     }
     let mut cursor = 0_usize;
-    let mut blobs = BTreeMap::new();
+    let mut ranges = BTreeMap::new();
     for requested_oid in object_ids {
         let header_end = stdout_bytes[cursor..]
             .iter()
@@ -5869,13 +5901,18 @@ fn bounded_final_review_blob_batch(
                 "tiber.final_review_blob_batch_invalid=true".into(),
             ));
         }
-        blobs.insert(
-            oid.to_string(),
-            stdout_bytes[content_start..content_end].to_vec(),
-        );
+        ranges.insert(oid.to_string(), (content_start, content_end));
         cursor = content_end + 1;
     }
-    Ok(blobs)
+    if cursor != stdout_bytes.len() {
+        return Err(Error::Parse(
+            "tiber.final_review_blob_batch_invalid=true".into(),
+        ));
+    }
+    Ok(FinalReviewBlobBatch {
+        bytes: stdout_bytes,
+        ranges,
+    })
 }
 
 fn tree_scope_fingerprint(
@@ -5902,7 +5939,7 @@ fn tree_scope_fingerprint(
         .map_err(Error::Io)?;
     let index_file = index_directory.path().join("index");
     #[cfg(test)]
-    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
+    count_final_review_tree_git_process();
     let read_tree = Command::new("git")
         .args(["read-tree", tree_oid])
         .env("GIT_INDEX_FILE", &index_file)
@@ -5915,7 +5952,7 @@ fn tree_scope_fingerprint(
         ));
     }
     #[cfg(test)]
-    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
+    count_final_review_tree_git_process();
     let materialized = bounded_final_review_git_output_with_index(
         root,
         &["ls-files", "--cached", "-z", "--"],
@@ -5923,6 +5960,7 @@ fn tree_scope_fingerprint(
         scope_kind,
         FINAL_REVIEW_SCOPE_LIMITS,
         Some(&index_file),
+        Some(tree_oid),
     )?;
     let mut paths =
         bounded_final_review_paths(&materialized, scope_kind, FINAL_REVIEW_SCOPE_LIMITS)?
@@ -5938,7 +5976,7 @@ fn tree_scope_fingerprint(
         .map(|path| format!(":(literal){path}"))
         .collect::<Vec<_>>();
     #[cfg(test)]
-    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
+    count_final_review_tree_git_process();
     let output = bounded_final_review_git_output(
         root,
         &["ls-tree", "-rzt", "--full-tree", tree_oid, "--"],
@@ -10091,7 +10129,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 1ac8c07b5bd567a11a926adb99b7028aa82bfc42\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout e919300f01b6a57811f4268a96b95e1558a949db\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -12271,17 +12309,17 @@ mod lock_tests {
             ":(literal)two.txt".to_string(),
         ];
         let mut cache = TreeFinalReviewFingerprintCache::default();
-        let before = FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.load(Ordering::SeqCst);
+        let before = final_review_tree_git_process_count();
         let first = cached_tree_scope_fingerprint(
             &root, &tree_oid, &requested, &retained, "source", &mut cache,
         )
         .expect("fingerprint tree");
-        let after_first = FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.load(Ordering::SeqCst);
+        let after_first = final_review_tree_git_process_count();
         let second = cached_tree_scope_fingerprint(
             &root, &tree_oid, &requested, &retained, "source", &mut cache,
         )
         .expect("reuse tree fingerprint");
-        let after_second = FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.load(Ordering::SeqCst);
+        let after_second = final_review_tree_git_process_count();
 
         assert_eq!(first, second);
         assert_eq!(
@@ -12290,6 +12328,54 @@ mod lock_tests {
             "one read-tree, one pathspec materialization, one ls-tree, and one blob batch"
         );
         assert_eq!(after_second, after_first, "cache must spawn no Git process");
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn immutable_tree_fingerprint_uses_attributes_from_selected_tree() {
+        let root = temporary_repository("tree-attribute-source");
+        fs::write(root.join("one.txt"), "one\n").expect("write first blob");
+        fs::write(root.join("two.txt"), "two\n").expect("write second blob");
+        fs::write(root.join(".gitattributes"), "*.txt reviewed\n")
+            .expect("write committed attributes");
+        for args in [
+            vec!["config", "user.name", "Tiber Test"],
+            vec!["config", "user.email", "tiber@example.invalid"],
+            vec!["add", "one.txt", "two.txt", ".gitattributes"],
+            vec!["commit", "-q", "-m", "Add attributed blobs"],
+        ] {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .expect("run Git fixture command");
+            assert!(output.status.success());
+        }
+        let requested = vec![":(attr:reviewed)".to_string()];
+        let retained = final_review_scope_snapshot(
+            &root,
+            &requested,
+            None,
+            "source",
+            FINAL_REVIEW_SCOPE_LIMITS,
+        )
+        .expect("materialize reviewed scope")
+        .paths
+        .into_iter()
+        .map(|path| format!(":(literal){path}"))
+        .collect::<Vec<_>>();
+        let expected = source_scope_fingerprint(&root, &requested, None, "source")
+            .expect("fingerprint reviewed worktree");
+        let (_, tree_oid) = canonical_commit_snapshot(&root, "HEAD").expect("resolve tree");
+        fs::write(root.join(".gitattributes"), "one.txt reviewed\n")
+            .expect("diverge worktree attributes");
+
+        let (missing, actual) =
+            tree_scope_fingerprint(&root, &tree_oid, &requested, &retained, "source")
+                .expect("fingerprint immutable tree");
+
+        assert!(missing.is_empty());
+        assert_eq!(actual, expected);
         fs::remove_dir_all(root).expect("remove temporary repository");
     }
 

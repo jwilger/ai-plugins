@@ -186,10 +186,11 @@ completion or trailer-driven delivery is attempted. Refusals name the exact
 missing count, independence condition, or stale evidence condition.
 
 Immutable-tree evaluation uses a disposable index loaded only from the selected
-tree, one bounded tree listing, and one batched blob read. Identical source or
-verification scopes are cached across tasks in one trailer-delivery command;
-Git subprocess count is therefore constant per distinct uncached scope rather
-than proportional to its file count.
+tree, pins attribute pathspec evaluation to that same tree, uses one bounded
+tree listing, and performs one batched blob read into a single retained buffer.
+Identical source or verification scopes are cached across tasks in one
+trailer-delivery command; Git subprocess count is therefore constant per
+distinct uncached scope rather than proportional to its file count.
 
 Fingerprinting fails closed with a `scope_too_large` diagnostic when one Git
 enumeration exceeds 16 MiB, the combined scope exceeds 100,000 paths, or the
