@@ -13,10 +13,14 @@
 //! authoritative. Adding a mutator therefore requires adding or deliberately
 //! reusing a semantic event and extending the corresponding fold.
 
-use crate::task::{ChecklistItem, Claim, FinalReviewRecord, Note, Subtask, Task, ValidationRepair};
+use crate::task::{
+    ChecklistItem, Claim, FinalReviewCompletionSnapshot, FinalReviewRecord, Note, Subtask, Task,
+    ValidationRepair,
+};
 use eventcore::ModelEvent;
 use eventcore_types::{Event, StreamId};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Concrete CI-recovery state carried by historical snapshot events. New
 /// writes are being migrated to per-transition facts, but this type keeps the
@@ -275,6 +279,8 @@ pub struct TaskTransitionedEvent {
     pub stem: String,
     pub status: String,
     pub claim: Option<Claim>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_snapshot: Option<FinalReviewCompletionSnapshot>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TaskOrderEvent {
@@ -368,6 +374,8 @@ pub struct TasksClosedFromCommitTrailersEvent {
     pub stream_id: StreamId,
     pub stems: Vec<String>,
     pub order: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub completion_snapshots: BTreeMap<String, FinalReviewCompletionSnapshot>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TaskStemEvent {

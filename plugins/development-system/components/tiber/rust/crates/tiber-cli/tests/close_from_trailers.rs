@@ -63,6 +63,8 @@ fn close_from_trailers_revalidates_an_already_done_reviewed_task() {
     for iteration in 1..=3 {
         record_delivery_review(&repo, iteration);
     }
+    repo.git(["add", "delivery.txt"]);
+    repo.git(["commit", "-m", "Commit reviewed delivery"]);
     assert_success(repo.tiber(["transition", "protected-delivery", "done"]));
 
     fs::write(
@@ -143,7 +145,17 @@ fn close_from_trailers_preserves_reviews_across_content_identical_staging_and_co
     let close = repo.tiber(["close-from-trailers"]);
 
     assert_success_ref(&close);
-    task_stem(&repo, "done", "protected-delivery");
+    let done = task_stem(&repo, "done", "protected-delivery");
+    let rendered = repo.task_file("done", &done);
+    let commit = String::from_utf8(repo.git_output(["rev-parse", "HEAD"]).stdout)
+        .expect("commit oid utf8")
+        .trim()
+        .to_string();
+    let tree = String::from_utf8(repo.git_output(["rev-parse", "HEAD^{tree}"]).stdout)
+        .expect("tree oid utf8")
+        .trim()
+        .to_string();
+    assert!(rendered.contains(&format!("completion_snapshot commit={commit} tree={tree}")));
 }
 
 #[test]
@@ -173,7 +185,10 @@ fn close_from_trailers_rejects_staged_deletion_with_same_path_untracked_replacem
     assert!(!close.status.success());
     let stderr = String::from_utf8(close.stderr).expect("stderr should be utf8");
     assert!(stderr.contains("delivery_blocked=true"), "{stderr}");
-    assert!(stderr.contains("condition=source_changed"), "{stderr}");
+    assert!(
+        stderr.contains("condition=source_not_committed"),
+        "{stderr}"
+    );
     task_stem(&repo, "in-progress", "protected-delivery");
 }
 
@@ -206,7 +221,10 @@ fn close_from_trailers_rejects_staged_deletion_with_same_path_ignored_replacemen
     assert!(!close.status.success());
     let stderr = String::from_utf8(close.stderr).expect("stderr should be utf8");
     assert!(stderr.contains("delivery_blocked=true"), "{stderr}");
-    assert!(stderr.contains("condition=source_changed"), "{stderr}");
+    assert!(
+        stderr.contains("condition=source_not_committed"),
+        "{stderr}"
+    );
     task_stem(&repo, "in-progress", "protected-delivery");
 }
 
@@ -384,7 +402,7 @@ fn close_from_trailers_rejects_an_uncommitted_policy_opt_out() {
 }
 
 #[test]
-fn close_from_trailers_rejects_changed_verification_evidence() {
+fn close_from_trailers_ignores_uncommitted_verification_bytes_outside_immutable_head() {
     let repo = TempRepo::initialized();
     enable_final_review_policy(&repo);
     assert_success(repo.tiber(["init"]));
@@ -405,14 +423,14 @@ fn close_from_trailers_rejects_changed_verification_evidence() {
 
     let close = repo.tiber(["close-from-trailers"]);
 
-    assert!(!close.status.success());
-    let stderr = String::from_utf8(close.stderr).expect("stderr should be utf8");
-    assert!(stderr.contains("delivery_blocked=true"), "{stderr}");
-    assert!(
-        stderr.contains("condition=verification_changed"),
-        "{stderr}"
-    );
-    task_stem(&repo, "in-progress", "protected-delivery");
+    assert_success_ref(&close);
+    task_stem(&repo, "done", "protected-delivery");
+    assert!(String::from_utf8(
+        repo.git_output(["status", "--short", "verification.txt"])
+            .stdout
+    )
+    .expect("status utf8")
+    .contains("verification.txt"));
 }
 
 #[test]

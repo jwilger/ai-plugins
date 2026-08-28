@@ -37,6 +37,16 @@ pub struct Note {
 pub struct FinalReviewState {
     pub reviews: Vec<FinalReviewRecord>,
     pub clean_reviews: Vec<FinalReviewRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_snapshot: Option<FinalReviewCompletionSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FinalReviewCompletionSnapshot {
+    pub commit_oid: String,
+    pub tree_oid: String,
+    pub source_fingerprint: String,
+    pub verification_fingerprint: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -214,6 +224,15 @@ impl Task {
                 review.verification_scope.join(","),
                 review.verification_fingerprint,
                 review.evidence
+            ));
+        }
+        if let Some(snapshot) = &self.final_review.completion_snapshot {
+            output.push_str(&format!(
+                "\n- completion_snapshot commit={} tree={} source={} verification={}",
+                snapshot.commit_oid,
+                snapshot.tree_oid,
+                snapshot.source_fingerprint,
+                snapshot.verification_fingerprint
             ));
         }
         output.push('\n');

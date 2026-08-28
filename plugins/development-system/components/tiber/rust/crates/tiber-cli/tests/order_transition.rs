@@ -1,6 +1,9 @@
 pub mod support;
 
 use std::fs;
+use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 use support::{assert_success, assert_success_ref, task_stem, TempRepo};
 
 fn record_review(repo: &TempRepo, iteration: usize, outcome: &str) {
@@ -24,7 +27,7 @@ fn enable_final_review_policy_with_minimum(repo: &TempRepo, minimum: usize) {
 }
 
 #[test]
-fn stale_review_diagnostic_uses_the_configured_minimum() {
+fn dirty_worktree_after_review_does_not_reinterpret_the_reviewed_commit() {
     let repo = TempRepo::initialized();
     enable_final_review_policy_with_minimum(&repo, 4);
     assert_success(repo.tiber(["init"]));
@@ -36,16 +39,8 @@ fn stale_review_diagnostic_uses_the_configured_minimum() {
     fs::write(repo.path().join("README.md"), "changed after review\n")
         .expect("change reviewed source");
 
-    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
-
-    assert!(!completion.status.success());
-    let stderr = String::from_utf8(completion.stderr).expect("stderr should be utf8");
-    assert!(stderr.contains("condition=source_changed"), "{stderr}");
-    assert!(stderr.contains("required=4 clean=0 missing=4"), "{stderr}");
-    assert!(
-        stderr.contains("complete 4 fresh clean independent final reviews"),
-        "{stderr}"
-    );
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    task_stem(&repo, "done", "reviewed-work");
 }
 
 #[test]
@@ -173,7 +168,7 @@ fn gitlink_scope_can_be_reviewed_and_completed() {
 }
 
 #[test]
-fn gitlink_checkout_change_after_clean_reviews_resets_completion_evidence() {
+fn changed_gitlink_checkout_does_not_reinterpret_the_parent_commit() {
     let dependency = TempRepo::initialized();
     let repo = TempRepo::initialized();
     repo.git([
@@ -203,15 +198,8 @@ fn gitlink_checkout_change_after_clean_reviews_resets_completion_evidence() {
     repo.git(["-C", "dependency", "add", "README.md"]);
     repo.git(["-C", "dependency", "commit", "-m", "Change dependency"]);
 
-    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
-
-    assert!(!completion.status.success());
-    let stderr = String::from_utf8(completion.stderr).expect("stderr should be utf8");
-    assert!(
-        stderr.contains("final_review_evidence_stale")
-            && stderr.contains("condition=source_changed"),
-        "{stderr}"
-    );
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    task_stem(&repo, "done", "reviewed-work");
 }
 
 #[test]
@@ -331,7 +319,7 @@ fn absent_uninitialized_gitlink_scope_is_rejected() {
 }
 
 #[test]
-fn tracked_file_replaced_by_directory_can_be_reviewed_and_completed() {
+fn tracked_file_replaced_by_uncommitted_directory_is_rejected_at_completion() {
     let repo = TempRepo::initialized();
     fs::write(repo.path().join("config"), "legacy config\n").expect("write tracked config");
     repo.git(["add", "config"]);
@@ -348,8 +336,14 @@ fn tracked_file_replaced_by_directory_can_be_reviewed_and_completed() {
         record_review_with_scope(&repo, iteration, "clean", &["config"]);
     }
 
-    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
-    task_stem(&repo, "done", "reviewed-work");
+    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
+    assert!(!completion.status.success());
+    let stderr = String::from_utf8(completion.stderr).expect("stderr utf8");
+    assert!(
+        stderr.contains("condition=source_not_committed"),
+        "{stderr}"
+    );
+    task_stem(&repo, "in-progress", "reviewed-work");
 }
 
 fn record_review_with_scope(repo: &TempRepo, iteration: usize, outcome: &str, scope: &[&str]) {
@@ -509,10 +503,230 @@ fn transition_to_done_accepts_three_clean_independent_final_reviews() {
     let done = task_stem(&repo, "done", "reviewed-work");
     let rendered = repo.task_file("done", &done);
     assert!(rendered.contains("review-1") && rendered.contains("review-3"));
+    let commit = String::from_utf8(repo.git_output(["rev-parse", "HEAD"]).stdout)
+        .expect("commit oid utf8")
+        .trim()
+        .to_string();
+    let tree = String::from_utf8(repo.git_output(["rev-parse", "HEAD^{tree}"]).stdout)
+        .expect("tree oid utf8")
+        .trim()
+        .to_string();
+    assert!(rendered.contains(&format!("completion_snapshot commit={commit} tree={tree}")));
 }
 
 #[test]
-fn implementation_change_after_clean_reviews_resets_completion_evidence() {
+fn transition_to_done_rejects_reviewed_uncommitted_source() {
+    let repo = TempRepo::initialized();
+    enable_final_review_policy(&repo);
+    fs::write(repo.path().join("uncommitted.rs"), "reviewed bytes\n").expect("write source");
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Reviewed work"]));
+    assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+    for iteration in 1..=3 {
+        record_review_with_scope(&repo, iteration, "clean", &["uncommitted.rs"]);
+    }
+
+    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
+
+    assert!(!completion.status.success());
+    let stderr = String::from_utf8(completion.stderr).expect("stderr utf8");
+    assert!(
+        stderr.contains("condition=source_not_committed"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("path=\"uncommitted.rs\""), "{stderr}");
+    task_stem(&repo, "in-progress", "reviewed-work");
+}
+
+#[test]
+fn transition_to_done_rejects_reviewed_uncommitted_verification_receipt() {
+    let repo = TempRepo::initialized();
+    enable_final_review_policy(&repo);
+    fs::write(
+        repo.path().join("uncommitted-verification.txt"),
+        "focused tests pass\n",
+    )
+    .expect("write verification receipt");
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Reviewed work"]));
+    assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+    for iteration in 1..=3 {
+        let review_id = format!("review-{iteration}");
+        let reviewer = format!("reviewer-{iteration}");
+        assert_success(repo.tiber([
+            "review",
+            "reviewed-work",
+            "--review-id",
+            &review_id,
+            "--reviewer",
+            &reviewer,
+            "--reviewer-type",
+            "independent-final-review",
+            "--scope",
+            "README.md",
+            "--commit-range",
+            "HEAD..HEAD",
+            "--outcome",
+            "clean",
+            "--evidence",
+            "review receipt",
+            "--timestamp",
+            "2026-08-27T12:00:00Z",
+            "--source-fingerprint",
+            "auto",
+            "--verification-scope",
+            "uncommitted-verification.txt",
+            "--verification-fingerprint",
+            "auto",
+        ]));
+    }
+
+    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
+
+    assert!(!completion.status.success());
+    let stderr = String::from_utf8(completion.stderr).expect("stderr utf8");
+    assert!(
+        stderr.contains("condition=verification_not_committed"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("path=\"uncommitted-verification.txt\""),
+        "{stderr}"
+    );
+    task_stem(&repo, "in-progress", "reviewed-work");
+}
+
+#[test]
+fn transition_to_done_rejects_a_different_committed_tree() {
+    let repo = TempRepo::initialized();
+    enable_final_review_policy(&repo);
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Reviewed work"]));
+    assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+    for iteration in 1..=3 {
+        record_review(&repo, iteration, "clean");
+    }
+    fs::write(repo.path().join("README.md"), "different committed tree\n").expect("change source");
+    repo.git(["add", "README.md"]);
+    repo.git(["commit", "-m", "Change reviewed source"]);
+
+    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
+
+    assert!(!completion.status.success());
+    let stderr = String::from_utf8(completion.stderr).expect("stderr utf8");
+    assert!(stderr.contains("condition=source_changed"), "{stderr}");
+    assert!(stderr.contains("clean=0 missing=3"), "{stderr}");
+    task_stem(&repo, "in-progress", "reviewed-work");
+}
+
+#[cfg(unix)]
+#[test]
+fn immutable_tree_fingerprint_rejects_mode_symlink_and_deletion_changes() {
+    for variant in ["mode", "symlink", "deletion"] {
+        let repo = TempRepo::initialized();
+        enable_final_review_policy(&repo);
+        let reviewed_path = match variant {
+            "mode" => {
+                fs::write(repo.path().join("script.sh"), "#!/bin/sh\nexit 0\n")
+                    .expect("write script");
+                "script.sh"
+            }
+            "symlink" => {
+                fs::write(repo.path().join("target-a"), "a\n").expect("write target a");
+                fs::write(repo.path().join("target-b"), "b\n").expect("write target b");
+                std::os::unix::fs::symlink("target-a", repo.path().join("selected"))
+                    .expect("create symlink");
+                "selected"
+            }
+            "deletion" => {
+                fs::write(repo.path().join("removed.txt"), "reviewed\n").expect("write file");
+                "removed.txt"
+            }
+            _ => unreachable!(),
+        };
+        repo.git(["add", "--all"]);
+        repo.git(["commit", "-m", "Add reviewed tree entry"]);
+        assert_success(repo.tiber(["init"]));
+        assert_success(repo.tiber(["create", "Reviewed work"]));
+        assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+        for iteration in 1..=3 {
+            record_review_with_scope(&repo, iteration, "clean", &[reviewed_path]);
+        }
+        match variant {
+            "mode" => repo.git(["update-index", "--chmod=+x", "script.sh"]),
+            "symlink" => {
+                fs::remove_file(repo.path().join("selected")).expect("remove symlink");
+                std::os::unix::fs::symlink("target-b", repo.path().join("selected"))
+                    .expect("replace symlink");
+                repo.git(["add", "selected"]);
+            }
+            "deletion" => repo.git(["rm", "removed.txt"]),
+            _ => unreachable!(),
+        }
+        repo.git(["commit", "-m", "Change reviewed tree entry"]);
+
+        let completion = repo.tiber(["transition", "reviewed-work", "done"]);
+        assert!(!completion.status.success(), "{variant} change must fail");
+        let stderr = String::from_utf8(completion.stderr).expect("stderr utf8");
+        assert!(
+            stderr.contains("condition=source_changed")
+                || stderr.contains("condition=source_not_committed"),
+            "{variant}: {stderr}"
+        );
+        task_stem(&repo, "in-progress", "reviewed-work");
+    }
+}
+
+#[test]
+fn completion_race_persists_the_resolved_commit_not_later_worktree_bytes() {
+    let repo = TempRepo::initialized();
+    enable_final_review_policy(&repo);
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Reviewed work"]));
+    assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+    for iteration in 1..=3 {
+        record_review(&repo, iteration, "clean");
+    }
+    let reviewed_commit = String::from_utf8(repo.git_output(["rev-parse", "HEAD"]).stdout)
+        .expect("commit oid utf8")
+        .trim()
+        .to_string();
+    let barrier = repo.path().join("completion-barrier");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["transition", "reviewed-work", "done"])
+        .env("TIBER_TEST_COMPLETION_SNAPSHOT_BARRIER", &barrier)
+        .current_dir(repo.path())
+        .spawn()
+        .expect("spawn completion");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !barrier.join("ready").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "completion did not reach snapshot barrier"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    fs::write(
+        repo.path().join("README.md"),
+        "changed after immutable snapshot\n",
+    )
+    .expect("mutate worktree");
+    fs::write(barrier.join("release"), "continue\n").expect("release barrier");
+    let status = child.wait().expect("wait completion");
+    assert!(status.success(), "immutable completion should succeed");
+
+    let done = task_stem(&repo, "done", "reviewed-work");
+    let rendered = repo.task_file("done", &done);
+    assert!(rendered.contains(&format!("completion_snapshot commit={reviewed_commit}")));
+    assert!(
+        String::from_utf8(repo.git_output(["status", "--short", "README.md"]).stdout)
+            .expect("status utf8")
+            .contains("README.md")
+    );
+}
+
+#[test]
+fn uncommitted_implementation_change_does_not_reinterpret_head_completion() {
     let repo = TempRepo::initialized();
     enable_final_review_policy(&repo);
     assert_success(repo.tiber(["init"]));
@@ -524,21 +738,12 @@ fn implementation_change_after_clean_reviews_resets_completion_evidence() {
     fs::write(repo.path().join("README.md"), "# changed after review\n")
         .expect("change reviewed source");
 
-    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
-
-    assert!(!completion.status.success());
-    let stderr = String::from_utf8(completion.stderr).expect("stderr should be utf8");
-    assert!(
-        stderr.contains("final_review_evidence_stale")
-            && stderr.contains("condition=source_changed")
-            && stderr.contains("clean=0")
-            && stderr.contains("missing=3"),
-        "stderr should explain the source-change reset: {stderr}"
-    );
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    task_stem(&repo, "done", "reviewed-work");
 }
 
 #[test]
-fn newly_tracked_file_matching_declared_pathspec_resets_completion_evidence() {
+fn newly_staged_file_is_not_included_in_immutable_head_completion() {
     let repo = TempRepo::initialized();
     fs::create_dir(repo.path().join("src")).expect("create source directory");
     fs::write(repo.path().join("src/existing.rs"), "reviewed\n").expect("write reviewed source");
@@ -555,15 +760,12 @@ fn newly_tracked_file_matching_declared_pathspec_resets_completion_evidence() {
         .expect("write newly matching source");
     repo.git(["add", "src/new.rs"]);
 
-    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
-
-    assert!(!completion.status.success());
-    let stderr = String::from_utf8(completion.stderr).expect("stderr should be utf8");
-    assert!(stderr.contains("condition=source_changed"), "{stderr}");
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    task_stem(&repo, "done", "reviewed-work");
 }
 
 #[test]
-fn new_untracked_file_matching_declared_pathspec_resets_completion_evidence() {
+fn new_untracked_file_is_not_included_in_immutable_head_completion() {
     let repo = TempRepo::initialized();
     fs::create_dir(repo.path().join("src")).expect("create source directory");
     fs::write(repo.path().join("src/existing.rs"), "reviewed\n").expect("write reviewed source");
@@ -579,15 +781,12 @@ fn new_untracked_file_matching_declared_pathspec_resets_completion_evidence() {
     fs::write(repo.path().join("src/new.rs"), "new implementation\n")
         .expect("write newly matching source");
 
-    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
-
-    assert!(!completion.status.success());
-    let stderr = String::from_utf8(completion.stderr).expect("stderr should be utf8");
-    assert!(stderr.contains("condition=source_changed"), "{stderr}");
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    task_stem(&repo, "done", "reviewed-work");
 }
 
 #[test]
-fn staged_implementation_change_after_clean_reviews_resets_completion_evidence() {
+fn staged_unreviewed_bytes_are_not_included_in_immutable_head_completion() {
     let repo = TempRepo::initialized();
     enable_final_review_policy(&repo);
     assert_success(repo.tiber(["init"]));
@@ -604,16 +803,19 @@ fn staged_implementation_change_after_clean_reviews_resets_completion_evidence()
     fs::write(repo.path().join("README.md"), reviewed)
         .expect("restore reviewed working-tree content");
 
-    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
-
-    assert!(!completion.status.success());
-    let stderr = String::from_utf8(completion.stderr).expect("stderr should be utf8");
+    let reviewed_head = String::from_utf8(repo.git_output(["rev-parse", "HEAD"]).stdout)
+        .expect("head utf8")
+        .trim()
+        .to_string();
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    let done = task_stem(&repo, "done", "reviewed-work");
+    assert!(repo
+        .task_file("done", &done)
+        .contains(&format!("completion_snapshot commit={reviewed_head}")));
     assert!(
-        stderr.contains("final_review_evidence_stale")
-            && stderr.contains("condition=source_changed")
-            && stderr.contains("clean=0")
-            && stderr.contains("missing=3"),
-        "stderr should explain the staged source-change reset: {stderr}"
+        String::from_utf8(repo.git_output(["diff", "--cached", "--name-only"]).stdout)
+            .expect("diff utf8")
+            .contains("README.md")
     );
 }
 
@@ -787,7 +989,7 @@ fn review_supports_a_pathspec_containing_spaces() {
 }
 
 #[test]
-fn unstaged_deletion_makes_review_evidence_stale_without_an_io_failure() {
+fn unstaged_deletion_is_not_included_in_immutable_head_completion() {
     let repo = TempRepo::initialized();
     enable_final_review_policy(&repo);
     fs::write(repo.path().join("deleted.txt"), "reviewed\n").expect("write source");
@@ -801,12 +1003,8 @@ fn unstaged_deletion_makes_review_evidence_stale_without_an_io_failure() {
     }
     fs::remove_file(repo.path().join("deleted.txt")).expect("delete reviewed source");
 
-    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
-
-    assert!(!completion.status.success());
-    let stderr = String::from_utf8(completion.stderr).expect("stderr should be utf8");
-    assert!(stderr.contains("condition=source_changed"), "{stderr}");
-    assert!(!stderr.contains("io_error"), "{stderr}");
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    task_stem(&repo, "done", "reviewed-work");
 }
 
 #[test]
@@ -873,7 +1071,7 @@ fn invalid_commit_range_is_rejected_before_review_is_recorded() {
 }
 
 #[test]
-fn changed_verification_receipt_makes_existing_reviews_stale() {
+fn changed_uncommitted_verification_does_not_reinterpret_head_completion() {
     let repo = TempRepo::initialized();
     enable_final_review_policy(&repo);
     assert_success(repo.tiber(["init"]));
@@ -885,18 +1083,12 @@ fn changed_verification_receipt_makes_existing_reviews_stale() {
     fs::write(repo.path().join("verification.txt"), "just ci: failed\n")
         .expect("change verification receipt");
 
-    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
-
-    assert!(!completion.status.success());
-    let stderr = String::from_utf8(completion.stderr).expect("stderr should be utf8");
-    assert!(
-        stderr.contains("condition=verification_changed"),
-        "{stderr}"
-    );
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    task_stem(&repo, "done", "reviewed-work");
 }
 
 #[test]
-fn deleted_untracked_verification_receipt_reports_verification_changed() {
+fn deleted_untracked_verification_receipt_reports_not_committed() {
     let repo = TempRepo::initialized();
     enable_final_review_policy(&repo);
     fs::write(
@@ -945,10 +1137,7 @@ fn deleted_untracked_verification_receipt_reports_verification_changed() {
     assert!(!completion.status.success());
     let stderr = String::from_utf8(completion.stderr).expect("stderr should be utf8");
     assert!(
-        stderr.contains("final_review_evidence_stale")
-            && stderr.contains("condition=verification_changed")
-            && stderr.contains("clean=0")
-            && stderr.contains("missing=3"),
+        stderr.contains("condition=verification_not_committed"),
         "{stderr}"
     );
 }

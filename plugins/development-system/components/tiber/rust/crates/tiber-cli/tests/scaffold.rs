@@ -1,8 +1,30 @@
 pub mod support;
 
 use std::fs;
+use std::process::Command;
 
 use support::{assert_success, assert_success_ref, TempRepo};
+
+const SCAFFOLDED_TIBER_REVISION: &str = "baa4f74d90edab025eb605351dca1a642723d9b6";
+const SCAFFOLDED_TIBER_CHECKOUT_PREFIX: &str = "git -C .tiber-src checkout ";
+
+fn normalize_embedded_tiber_revision(source: &str) -> String {
+    let revision_start = source
+        .find(SCAFFOLDED_TIBER_CHECKOUT_PREFIX)
+        .expect("Tiber source should contain its scaffolded checkout revision")
+        + SCAFFOLDED_TIBER_CHECKOUT_PREFIX.len();
+    let revision_end = revision_start + 40;
+    let revision = source
+        .get(revision_start..revision_end)
+        .expect("scaffolded checkout revision should contain forty ASCII bytes");
+    assert!(
+        revision.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "scaffolded checkout revision should be a full hexadecimal commit ID"
+    );
+    let mut normalized = source.to_string();
+    normalized.replace_range(revision_start..revision_end, "<scaffolded-tiber-commit>");
+    normalized
+}
 
 #[test]
 fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
@@ -48,10 +70,37 @@ fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
     assert!(!workflow.contains("write-all"));
     assert!(workflow.contains("actions/checkout@"));
     assert!(!workflow.contains("actions/checkout@v4"));
-    assert!(
-        workflow.contains("git -C .tiber-src checkout 68823dd13951586e62108dac1602ce4a45560aaf")
-    );
+    assert!(workflow.contains(&format!(
+        "git -C .tiber-src checkout {SCAFFOLDED_TIBER_REVISION}"
+    )));
     assert!(workflow.contains("cargo install --locked --path"));
+
+    let pinned_source = Command::new("git")
+        .args([
+            "-C",
+            env!("CARGO_MANIFEST_DIR"),
+            "show",
+            &format!(
+                "{SCAFFOLDED_TIBER_REVISION}:plugins/development-system/components/tiber/rust/crates/tiber-git/src/lib.rs"
+            ),
+        ])
+        .output()
+        .expect("inspect scaffolded immutable Tiber revision");
+    assert!(
+        pinned_source.status.success(),
+        "scaffolded Tiber revision must exist in the repository"
+    );
+    let pinned_source =
+        String::from_utf8(pinned_source.stdout).expect("pinned Tiber source should be utf8");
+    let current_source = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tiber-git/src/lib.rs"),
+    )
+    .expect("read the Tiber implementation exercised by the current black-box suite");
+    assert_eq!(
+        normalize_embedded_tiber_revision(&pinned_source),
+        normalize_embedded_tiber_revision(&current_source),
+        "the scaffolded immutable revision must contain the exact Tiber implementation exercised by the current completion and trailer-delivery tests"
+    );
 }
 
 #[test]

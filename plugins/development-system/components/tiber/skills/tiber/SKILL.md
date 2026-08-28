@@ -84,8 +84,10 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   fingerprint, verification-evidence scope, and its current fingerprint. Pass
   each pathspec as a separate array item or repeated CLI option; use `auto` for
   both fingerprints so Tiber computes them. Tiber resets the effective sequence
-  on findings or changed scope/range/fingerprints, recomputes both scopes at
-  completion, and blocks both `transition ... done` and trailer-driven delivery
+  on findings or changed scope/range/fingerprints. In policy mode, source and
+  verification receipts must be committed: completion and trailer delivery
+  recompute the v5 path manifests from one resolved full commit/tree identity,
+  persist that immutable identity, and reject mutable or legacy-v4 evidence
   with condition-specific diagnostics. There is no runtime bypass; opting out
   requires an auditable repository configuration change.
 - When `.tiber.toml` sets `[backlog].max_queued`, only `backlog` tasks count.

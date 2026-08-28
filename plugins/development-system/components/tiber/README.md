@@ -136,8 +136,11 @@ clean reviews. Every review in the final configured sequence must use the
 identity, and agree on the declared Git pathspec scope, commit range, source
 fingerprint, and verification-evidence scope and fingerprint. Tiber resolves
 the supplied commit-range endpoints to full commit OIDs and computes both
-fingerprints itself. It recomputes the declared source and verification scopes
-at completion and delivery time, so later changes make the sequence stale.
+fingerprints itself. Reviews use the canonical `tiber-final-review-scope-v5`
+path manifest, which binds each materialized path, Git mode, entry kind, and
+exact bytes (or gitlink OID) without binding the staging partition. Completion
+and delivery resolve a full commit OID and tree OID once, recompute both scopes
+from that immutable tree, and persist those OIDs with the completion event.
 
 Record every clean review and every review with a substantive finding through
 the CLI or the provider-neutral `tiber.review.record` MCP tool:
@@ -166,10 +169,12 @@ pathspec arguments, so paths containing spaces remain exact. Tiber resolves
 those pathspecs when the review is recorded and retains literal entries for
 deleted paths, allowing a content-identical staging and commit step to preserve
 the reviewed receipt. Empty scopes and unresolved commit ranges are rejected.
-Source fingerprints bind working-tree contents and modes plus any staged state
-that diverges from both HEAD and the worktree, so moving identical content
-between unstaged, staged, and committed partitions is metadata-only while a
-partial-stage change after review makes the evidence stale. A finding clears
+Source fingerprints bind working-tree contents and Git modes. Moving identical
+content between unstaged, staged, and committed partitions is metadata-only,
+but policy-enabled completion requires every reviewed source and verification
+receipt to be represented by the selected commit tree. An uncommitted reviewed
+path is rejected with `source_not_committed` or `verification_not_committed`;
+commit it and record fresh reviews if the committed snapshot differs. A finding clears
 the effective clean sequence. A later record with a changed scope, commit range, source fingerprint,
 verification scope, or verification fingerprint also starts a new sequence;
 this covers scope expansion and changed relevant verification evidence. Source
@@ -196,7 +201,12 @@ minimum, but cannot weaken the required three-review floor.
 
 Existing projects remain opted out after upgrade because a missing table
 defaults to zero. Existing Tiber event histories need no migration: review
-fields on older task-creation events default to an empty state during replay.
+fields and completion-snapshot fields on older events default to empty during
+replay. Historical v4 review fingerprints remain readable but cannot authorize
+a new policy-enabled completion; Tiber reports `fingerprint_version_legacy`
+and requires fresh v5 reviews. Source and verification receipts must be
+committed before completion (a future explicitly supported immutable external
+receipt may provide another durable representation).
 Enabling the policy does not grandfather open or completed work: each task must
 acquire fresh qualifying records before completion or later trailer-driven
 delivery. Disabling and later re-enabling the policy does not erase review

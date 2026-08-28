@@ -22,8 +22,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiber_core::task::{
-    ChecklistItem, Claim, FinalReviewOutcome, FinalReviewRecord, Note, Subtask, Task,
-    ValidationRepair,
+    ChecklistItem, Claim, FinalReviewCompletionSnapshot, FinalReviewOutcome, FinalReviewRecord,
+    Note, Subtask, Task, ValidationRepair,
 };
 use tiber_core::{events::*, BoardSnapshot, OrderReconciliation, TaskSnapshot, TaskTitle};
 
@@ -2412,11 +2412,17 @@ fn apply_tiber_event(projection: &mut TiberProjection, event: &TiberEvent) -> Re
             stem,
             status,
             claim,
+            completion_snapshot,
             ..
         }) => {
             let task = task_mut(projection, stem)?;
             task.status.clone_from(status);
             task.claim.clone_from(claim);
+            if completion_snapshot.is_some() {
+                task.final_review
+                    .completion_snapshot
+                    .clone_from(completion_snapshot);
+            }
         }
         TiberEvent::TaskPriorityChanged(TaskOrderEvent { order, .. })
         | TiberEvent::BoardReordered(TaskOrderEvent { order, .. }) => {
@@ -2528,12 +2534,17 @@ fn apply_tiber_event(projection: &mut TiberProjection, event: &TiberEvent) -> Re
         TiberEvent::TasksClosedFromCommitTrailers(TasksClosedFromCommitTrailersEvent {
             stems,
             order,
+            completion_snapshots,
             ..
         }) => {
             for stem in stems {
                 let task = task_mut(projection, stem)?;
                 task.status = "done".into();
                 task.claim = None;
+            }
+            for (stem, snapshot) in completion_snapshots {
+                task_mut(projection, stem)?.final_review.completion_snapshot =
+                    Some(snapshot.clone());
             }
             projection.order = order.clone();
         }
@@ -3091,6 +3102,7 @@ struct TransitionTaskIntent {
     max_queued: Option<usize>,
     minimum_clean_reviews: usize,
     expected_clean_reviews: Vec<FinalReviewRecord>,
+    completion_snapshot: Option<FinalReviewCompletionSnapshot>,
 }
 
 #[derive(ModelInput)]
@@ -3149,6 +3161,7 @@ fn transitioned_task_fact(
         stem: intent.stem.clone(),
         status: intent.status.clone(),
         claim: intent.claim.clone(),
+        completion_snapshot: intent.completion_snapshot.clone(),
     }
 }
 
@@ -3293,6 +3306,28 @@ impl ModelCommandLogic for TransitionTask {
                 self.intent.minimum_clean_reviews,
                 false,
             )?;
+            let snapshot = self.intent.completion_snapshot.as_ref().ok_or_else(|| {
+                eventcore::CommandError::from(format!(
+                    "tiber.final_review_completion_snapshot_missing task={} action=\"retry completion against an immutable commit snapshot\"",
+                    self.intent.stem
+                ))
+            })?;
+            let latest = state
+                .final_review_clean_reviews
+                .get(&self.intent.stem)
+                .and_then(|reviews| reviews.last())
+                .ok_or("tiber.final_review_completion_snapshot_missing")?;
+            if snapshot.source_fingerprint != latest.source_fingerprint
+                || snapshot.verification_fingerprint != latest.verification_fingerprint
+            {
+                return Err(format!(
+                    "tiber.final_review_completion_snapshot_changed task={} required={} clean=0 missing={} action=\"record fresh reviews for the immutable completion snapshot\"",
+                    self.intent.stem,
+                    self.intent.minimum_clean_reviews,
+                    self.intent.minimum_clean_reviews
+                )
+                .into());
+            }
         }
         let admits_to_backlog = self.intent.status == "backlog" && old_status != "backlog";
         if admits_to_backlog {
@@ -3394,17 +3429,35 @@ fn execute_transition_task(root: &Path, task_ref: &str, status: &str) -> Result<
     } else {
         repository.project_config()?
     };
-    if status == "done" && project_config.final_review.minimum_clean_reviews > 0 {
-        let task = projection
-            .tasks
-            .get(&stem)
-            .ok_or_else(|| Error::Parse(format!("task_ref_missing ref={task_ref}")))?;
-        enforce_final_review_gate(
-            root,
-            task,
-            project_config.final_review.minimum_clean_reviews,
-            false,
-        )?;
+    let completion_snapshot =
+        if status == "done" && project_config.final_review.minimum_clean_reviews > 0 {
+            let task = projection
+                .tasks
+                .get(&stem)
+                .ok_or_else(|| Error::Parse(format!("task_ref_missing ref={task_ref}")))?;
+            enforce_final_review_gate(
+                root,
+                task,
+                project_config.final_review.minimum_clean_reviews,
+                false,
+            )?;
+            let latest = task
+                .final_review
+                .clean_reviews
+                .last()
+                .expect("gate requires reviews");
+            Some(completion_snapshot_for_review(
+                root,
+                "HEAD",
+                latest,
+                project_config.final_review.minimum_clean_reviews,
+                false,
+            )?)
+        } else {
+            None
+        };
+    if completion_snapshot.is_some() {
+        wait_at_completion_snapshot_test_barrier()?;
     }
     let intent = TransitionTaskIntent {
         stem: stem.clone(),
@@ -3420,6 +3473,7 @@ fn execute_transition_task(root: &Path, task_ref: &str, status: &str) -> Result<
             .get(&stem)
             .map(|task| task.final_review.clean_reviews.clone())
             .unwrap_or_default(),
+        completion_snapshot,
     };
     let request = TransitionTaskRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
@@ -5407,57 +5461,8 @@ fn source_scope_fingerprint_with_limits(
         })
         .collect::<Result<BTreeSet<_>, _>>()
         .map_err(|_| Error::Usage("tiber.final_review_scope_path_invalid_utf8=true".into()))?;
-    let indexed_paths = index
-        .split(|byte| *byte == 0)
-        .filter(|record| !record.is_empty())
-        .filter_map(|record| {
-            let separator = record.iter().position(|byte| *byte == b'\t')?;
-            Some(String::from_utf8(record[separator + 1..].to_vec()))
-        })
-        .collect::<Result<BTreeSet<_>, _>>()
-        .map_err(|_| Error::Usage("tiber.final_review_scope_path_invalid_utf8=true".into()))?;
-    let mut divergent_index_paths = snapshot
-        .staged_paths
-        .intersection(&snapshot.unstaged_paths)
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    for path in &snapshot.staged_paths {
-        if indexed_paths.contains(path) {
-            continue;
-        }
-        match fs::symlink_metadata(root.join(path)) {
-            Ok(_) => {
-                divergent_index_paths.insert(path.clone());
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-    }
     let mut hasher = Sha256::new();
-    hasher.update(b"tiber-final-review-scope-v4\0index-divergence\0");
-    for path in &divergent_index_paths {
-        hasher.update(path.as_bytes());
-        hasher.update([0]);
-        let mut found = false;
-        for record in index
-            .split(|byte| *byte == 0)
-            .filter(|record| !record.is_empty())
-        {
-            let Some(separator) = record.iter().position(|byte| *byte == b'\t') else {
-                continue;
-            };
-            if record[separator + 1..] == *path.as_bytes() {
-                found = true;
-                hasher.update((record.len() as u64).to_le_bytes());
-                hasher.update(record);
-            }
-        }
-        if !found {
-            hasher.update(b"index-deleted\0");
-        }
-        hasher.update([0]);
-    }
-    hasher.update(b"worktree\0");
+    hasher.update(b"tiber-final-review-scope-v5\0");
     let mut content_bytes = 0_u64;
     for path in paths {
         let absolute = root.join(&path);
@@ -5471,15 +5476,13 @@ fn source_scope_fingerprint_with_limits(
                         "tiber.final_review_gitlink_unavailable path={path:?} action=\"initialize the scoped submodule checkout before recording or completing final review\""
                     )));
                 }
-                hasher.update(b"deleted\0");
+                hasher.update(b"deleted\0deleted\0");
                 continue;
             }
             Err(error) => return Err(error.into()),
         };
-        #[cfg(unix)]
-        hasher.update(metadata.permissions().mode().to_le_bytes());
         if metadata.file_type().is_symlink() {
-            hasher.update(b"symlink\0");
+            hasher.update(b"120000\0symlink\0");
             hasher.update(fs::read_link(&absolute)?.as_os_str().as_encoded_bytes());
         } else if metadata.is_dir() && gitlinks.contains(&path) {
             let top_level = Command::new("git")
@@ -5519,12 +5522,21 @@ fn source_scope_fingerprint_with_limits(
                     "tiber.final_review_gitlink_dirty path={path:?} action=\"commit or discard nested submodule changes before recording or completing final review\""
                 )));
             }
-            hasher.update(b"gitlink-worktree-head\0");
-            hasher.update(&head.stdout);
+            hasher.update(b"160000\0gitlink\0");
+            hasher.update(String::from_utf8_lossy(&head.stdout).trim().as_bytes());
         } else if metadata.is_dir() {
-            hasher.update(b"directory\0");
+            hasher.update(b"040000\0directory\0");
         } else {
-            hasher.update(b"regular\0");
+            #[cfg(unix)]
+            let mode = if metadata.permissions().mode() & 0o111 == 0 {
+                b"100644".as_slice()
+            } else {
+                b"100755".as_slice()
+            };
+            #[cfg(not(unix))]
+            let mode = b"100644".as_slice();
+            hasher.update(mode);
+            hasher.update(b"\0blob\0");
             let mut file = fs::File::open(&absolute)?;
             let mut buffer = [0_u8; 64 * 1024];
             loop {
@@ -5544,13 +5556,11 @@ fn source_scope_fingerprint_with_limits(
         }
         hasher.update([0]);
     }
-    Ok(format!("sha256:{:x}", hasher.finalize()))
+    Ok(format!("sha256:v5:{:x}", hasher.finalize()))
 }
 
 struct FinalReviewScopeSnapshot {
     paths: Vec<String>,
-    staged_paths: BTreeSet<String>,
-    unstaged_paths: BTreeSet<String>,
 }
 
 fn final_review_scope_snapshot(
@@ -5668,11 +5678,7 @@ fn final_review_scope_snapshot(
             "tiber.final_review_{scope_kind}_scope_empty action=\"correct the declared pathspecs so they select at least one tracked, untracked, or range-changed repository file\""
         )));
     }
-    Ok(FinalReviewScopeSnapshot {
-        paths,
-        staged_paths,
-        unstaged_paths,
-    })
+    Ok(FinalReviewScopeSnapshot { paths })
 }
 
 fn canonical_commit_range(root: &Path, commit_range: &str) -> Result<String, Error> {
@@ -5706,8 +5712,232 @@ fn canonical_commit_range(root: &Path, commit_range: &str) -> Result<String, Err
     Ok(format!("{}..{}", resolve(start)?, resolve(end)?))
 }
 
+fn canonical_commit_snapshot(root: &Path, revision: &str) -> Result<(String, String), Error> {
+    let resolve = |suffix: &str| {
+        git_output(
+            [
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                &format!("{revision}^{{{suffix}}}"),
+            ],
+            Some(root),
+        )
+        .map(|value| value.trim().to_string())
+        .map_err(|_| {
+            Error::Usage(format!(
+                "tiber.final_review_completion_commit_invalid revision={revision:?} action=\"provide a revision that resolves to an immutable commit\""
+            ))
+        })
+    };
+    let commit_oid = resolve("commit")?;
+    let tree_oid = git_output(
+        [
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            &format!("{commit_oid}^{{tree}}"),
+        ],
+        Some(root),
+    )
+    .map(|value| value.trim().to_string())
+    .map_err(|_| Error::Parse("tiber.final_review_completion_tree_invalid=true".into()))?;
+    Ok((commit_oid, tree_oid))
+}
+
+fn tree_scope_fingerprint(
+    root: &Path,
+    tree_oid: &str,
+    requested_scope: &[String],
+    scope_kind: &str,
+) -> Result<(Vec<String>, String), Error> {
+    let mut paths = requested_scope.to_vec();
+    paths.sort();
+    paths.dedup();
+    let mut missing = Vec::new();
+    let mut content_bytes = 0_u64;
+    let mut hasher = Sha256::new();
+    hasher.update(b"tiber-final-review-scope-v5\0");
+    for path in paths {
+        if path.is_empty() || path.starts_with('/') || path.contains('\0') {
+            return Err(Error::Usage(format!(
+                "tiber.final_review_{scope_kind}_scope_invalid action=\"record fresh v5 reviews with repository-contained materialized paths\""
+            )));
+        }
+        let materialized_path = path.strip_prefix(":(literal)").unwrap_or(&path).to_string();
+        let literal = format!(":(literal){materialized_path}");
+        let output = bounded_final_review_git_output(
+            root,
+            &["ls-tree", "-rz", "--full-tree", tree_oid, "--"],
+            &[literal],
+            scope_kind,
+            FINAL_REVIEW_SCOPE_LIMITS,
+        )?;
+        hasher.update(materialized_path.as_bytes());
+        hasher.update([0]);
+        let record = output
+            .split(|byte| *byte == 0)
+            .find(|record| !record.is_empty());
+        let Some(record) = record else {
+            missing.push(materialized_path);
+            hasher.update(b"deleted\0deleted\0");
+            continue;
+        };
+        let separator = record
+            .iter()
+            .position(|byte| *byte == b'\t')
+            .ok_or_else(|| Error::Parse("tiber.final_review_tree_entry_invalid=true".into()))?;
+        let metadata = std::str::from_utf8(&record[..separator])
+            .map_err(|_| Error::Parse("tiber.final_review_tree_entry_invalid=true".into()))?;
+        let mut fields = metadata.split_whitespace();
+        let mode = fields.next().unwrap_or_default();
+        let object_type = fields.next().unwrap_or_default();
+        let oid = fields.next().unwrap_or_default();
+        hasher.update(mode.as_bytes());
+        hasher.update([0]);
+        match mode {
+            "160000" => {
+                hasher.update(b"gitlink\0");
+                hasher.update(oid.as_bytes());
+            }
+            "120000" | "100644" | "100755" if object_type == "blob" => {
+                if mode == "120000" {
+                    hasher.update(b"symlink\0");
+                } else {
+                    hasher.update(b"blob\0");
+                }
+                let blob = bounded_final_review_git_output(
+                    root,
+                    &["cat-file", "blob", oid],
+                    &[],
+                    scope_kind,
+                    FINAL_REVIEW_SCOPE_LIMITS,
+                )?;
+                content_bytes = content_bytes.saturating_add(blob.len() as u64);
+                if content_bytes > FINAL_REVIEW_SCOPE_LIMITS.content_bytes {
+                    return Err(Error::Usage(format!(
+                        "tiber.final_review_{scope_kind}_scope_too_large condition=content_bytes max_bytes={} action=\"narrow the declared review scope and record fresh independent reviews\"",
+                        FINAL_REVIEW_SCOPE_LIMITS.content_bytes
+                    )));
+                }
+                hasher.update(blob);
+            }
+            _ => {
+                return Err(Error::Usage(format!(
+                    "tiber.final_review_completion_tree_entry_unsupported path={materialized_path:?} mode={mode:?} type={object_type:?}"
+                )));
+            }
+        }
+        hasher.update([0]);
+    }
+    Ok((missing, format!("sha256:v5:{:x}", hasher.finalize())))
+}
+
+fn completion_snapshot_for_review(
+    root: &Path,
+    revision: &str,
+    latest: &FinalReviewRecord,
+    required: usize,
+    delivery: bool,
+) -> Result<FinalReviewCompletionSnapshot, Error> {
+    let (commit_oid, tree_oid) = canonical_commit_snapshot(root, revision)?;
+    completion_snapshot_for_review_at(root, &commit_oid, &tree_oid, latest, required, delivery)
+}
+
+fn completion_snapshot_for_review_at(
+    root: &Path,
+    commit_oid: &str,
+    tree_oid: &str,
+    latest: &FinalReviewRecord,
+    required: usize,
+    delivery: bool,
+) -> Result<FinalReviewCompletionSnapshot, Error> {
+    let delivery_field = if delivery {
+        " delivery_blocked=true"
+    } else {
+        ""
+    };
+    if !latest.source_fingerprint.starts_with("sha256:v5:")
+        || !latest.verification_fingerprint.starts_with("sha256:v5:")
+    {
+        return Err(Error::Usage(format!(
+            "tiber.final_review_completion_snapshot_mutable{delivery_field} condition=fingerprint_version_legacy required={required} clean=0 missing={required} action=\"record {required} fresh clean independent final reviews using v5 immutable-compatible fingerprints\""
+        )));
+    }
+    let canonical_range = canonical_commit_range(root, &latest.commit_range)?;
+    if canonical_range != latest.commit_range {
+        return Err(Error::Usage(format!(
+            "tiber.final_review_evidence_stale{delivery_field} condition=commit_range_changed required={required} clean=0 missing={required} reviewed={} current={} action=\"record {required} fresh clean independent final reviews for the pinned commit range\"",
+            latest.commit_range, canonical_range
+        )));
+    }
+    let (missing_source, source_fingerprint) =
+        tree_scope_fingerprint(root, tree_oid, &latest.scope, "source")?;
+    if source_fingerprint != latest.source_fingerprint {
+        let condition = if missing_source.is_empty() {
+            "source_changed"
+        } else {
+            "source_not_committed"
+        };
+        let path = missing_source
+            .first()
+            .map_or(String::new(), |path| format!(" path={path:?}"));
+        return Err(Error::Usage(format!(
+            "tiber.final_review_completion_snapshot_mutable{delivery_field} condition={condition}{path} required={required} clean=0 missing={required} action=\"commit the reviewed source snapshot and complete {required} fresh clean independent final reviews\""
+        )));
+    }
+    let (missing_verification, verification_fingerprint) =
+        tree_scope_fingerprint(root, tree_oid, &latest.verification_scope, "verification")?;
+    if verification_fingerprint != latest.verification_fingerprint {
+        let condition = if missing_verification.is_empty() {
+            "verification_changed"
+        } else {
+            "verification_not_committed"
+        };
+        let path = missing_verification
+            .first()
+            .map_or(String::new(), |path| format!(" path={path:?}"));
+        return Err(Error::Usage(format!(
+            "tiber.final_review_completion_snapshot_mutable{delivery_field} condition={condition}{path} required={required} clean=0 missing={required} action=\"commit the reviewed verification receipt or configure an immutable committed receipt before completion\""
+        )));
+    }
+    Ok(FinalReviewCompletionSnapshot {
+        commit_oid: commit_oid.to_string(),
+        tree_oid: tree_oid.to_string(),
+        source_fingerprint,
+        verification_fingerprint,
+    })
+}
+
+#[cfg(debug_assertions)]
+fn wait_at_completion_snapshot_test_barrier() -> Result<(), Error> {
+    let Some(directory) = std::env::var_os("TIBER_TEST_COMPLETION_SNAPSHOT_BARRIER") else {
+        return Ok(());
+    };
+    let directory = PathBuf::from(directory);
+    fs::create_dir_all(&directory)?;
+    fs::write(directory.join("ready"), b"snapshot-resolved\n")?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !directory.join("release").exists() {
+        if Instant::now() >= deadline {
+            return Err(Error::Parse(
+                "tiber.final_review_test_barrier_timeout=true".into(),
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
+}
+
+#[cfg(not(debug_assertions))]
+fn wait_at_completion_snapshot_test_barrier() -> Result<(), Error> {
+    Ok(())
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 type FinalReviewFingerprintCacheKey = [u8; 32];
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn final_review_fingerprint_cache_key(
     scope_kind: &str,
     scope: &[String],
@@ -5735,14 +5965,7 @@ fn final_review_fingerprint_cache_key(
     hasher.finalize().into()
 }
 
-fn effective_final_review_scope(requested: &[String], materialized: &[String]) -> Vec<String> {
-    let mut effective = requested.to_vec();
-    effective.extend(materialized.iter().cloned());
-    effective.sort();
-    effective.dedup();
-    effective
-}
-
+#[cfg_attr(not(test), allow(dead_code))]
 struct FinalReviewFingerprintCache {
     entries: BTreeMap<FinalReviewFingerprintCacheKey, String>,
     recency: VecDeque<FinalReviewFingerprintCacheKey>,
@@ -5768,6 +5991,7 @@ impl FinalReviewFingerprintCache {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn cached_final_review_scope_fingerprint(
     root: &Path,
     scope: &[String],
@@ -5894,7 +6118,7 @@ fn enforce_final_review_gate_with_cache(
     task: &Task,
     required: usize,
     delivery: bool,
-    fingerprint_cache: &mut FinalReviewFingerprintCache,
+    _fingerprint_cache: &mut FinalReviewFingerprintCache,
 ) -> Result<(), Error> {
     let stem = &task.stem;
     let delivery_field = if delivery {
@@ -5936,48 +6160,6 @@ fn enforce_final_review_gate_with_cache(
     let latest = sequence
         .last()
         .expect("required final review sequence is nonempty");
-    let current_source_scope = effective_final_review_scope(&latest.requested_scope, &latest.scope);
-    let current_source = cached_final_review_scope_fingerprint(
-        root,
-        &current_source_scope,
-        Some(&latest.commit_range),
-        "source",
-        fingerprint_cache,
-    )?;
-    if latest.source_fingerprint != current_source {
-        return Err(Error::Usage(format!(
-            "tiber.final_review_evidence_stale{delivery_field} task={stem} condition=source_changed required={required} clean=0 missing={required} reviewed={} current={} action=\"verify the changed implementation and complete {required} fresh clean independent final reviews\"",
-            latest.source_fingerprint, current_source
-        )));
-    }
-    let current_verification_scope = effective_final_review_scope(
-        &latest.requested_verification_scope,
-        &latest.verification_scope,
-    );
-    let current_verification = match cached_final_review_scope_fingerprint(
-        root,
-        &current_verification_scope,
-        None,
-        "verification",
-        fingerprint_cache,
-    ) {
-        Ok(fingerprint) => fingerprint,
-        Err(Error::Usage(message))
-            if message.starts_with("tiber.final_review_verification_scope_empty") =>
-        {
-            return Err(Error::Usage(format!(
-                "tiber.final_review_evidence_stale{delivery_field} task={stem} condition=verification_changed required={required} clean=0 missing={required} reviewed={} current=missing action=\"restore or rerun verification and complete {required} fresh clean independent final reviews\"",
-                latest.verification_fingerprint
-            )));
-        }
-        Err(error) => return Err(error),
-    };
-    if latest.verification_fingerprint != current_verification {
-        return Err(Error::Usage(format!(
-            "tiber.final_review_evidence_stale{delivery_field} task={stem} condition=verification_changed required={required} clean=0 missing={required} reviewed={} current={} action=\"rerun verification and complete {required} fresh clean independent final reviews\"",
-            latest.verification_fingerprint, current_verification
-        )));
-    }
     let canonical_range = canonical_commit_range(root, &latest.commit_range)?;
     if canonical_range != latest.commit_range {
         return Err(Error::Usage(format!(
@@ -6156,18 +6338,15 @@ fn execute_record_final_review(
     .into_iter()
     .map(|path| format!(":(literal){path}"))
     .collect();
-    let effective_source_scope = effective_final_review_scope(&requested_scope, &scope);
     let computed_source_fingerprint =
-        source_scope_fingerprint(root, &effective_source_scope, Some(&commit_range), "source")?;
+        source_scope_fingerprint(root, &scope, Some(&commit_range), "source")?;
     if source_fingerprint != "auto" && source_fingerprint != computed_source_fingerprint {
         return Err(Error::Usage(format!(
             "tiber.final_review_source_fingerprint_mismatch supplied={source_fingerprint} current={computed_source_fingerprint} action=\"rerun with --source-fingerprint auto or the reported current fingerprint\""
         )));
     }
-    let effective_verification_scope =
-        effective_final_review_scope(&requested_verification_scope, &verification_scope);
     let computed_verification_fingerprint =
-        source_scope_fingerprint(root, &effective_verification_scope, None, "verification")?;
+        source_scope_fingerprint(root, &verification_scope, None, "verification")?;
     if verification_fingerprint != "auto"
         && verification_fingerprint != computed_verification_fingerprint
     {
@@ -6513,6 +6692,7 @@ struct CloseTasksFromCommitTrailersIntent {
     stems: Vec<String>,
     minimum_clean_reviews: usize,
     expected_clean_reviews: BTreeMap<String, Vec<FinalReviewRecord>>,
+    completion_snapshots: BTreeMap<String, FinalReviewCompletionSnapshot>,
 }
 
 #[derive(ModelInput)]
@@ -6633,6 +6813,7 @@ fn closed_tasks_from_trailers_fact(
             .filter(|stem| !closed_set.contains(*stem))
             .cloned()
             .collect(),
+        completion_snapshots: intent.completion_snapshots.clone(),
     }
 }
 mapping! { CloseTasksFromCommitTrailersToFact:
@@ -6686,6 +6867,27 @@ impl ModelCommandLogic for CloseTasksFromCommitTrailers {
                     self.intent.minimum_clean_reviews,
                     true,
                 )?;
+                let snapshot = self.intent.completion_snapshots.get(stem).ok_or_else(|| {
+                    eventcore::CommandError::from(format!(
+                        "tiber.final_review_completion_snapshot_missing delivery_blocked=true task={stem} action=\"retry delivery against the immutable HEAD commit snapshot\""
+                    ))
+                })?;
+                let latest = state
+                    .as_ref()
+                    .final_review_clean_reviews
+                    .get(stem)
+                    .and_then(|reviews| reviews.last())
+                    .ok_or("tiber.final_review_completion_snapshot_missing")?;
+                if snapshot.source_fingerprint != latest.source_fingerprint
+                    || snapshot.verification_fingerprint != latest.verification_fingerprint
+                {
+                    return Err(format!(
+                        "tiber.final_review_completion_snapshot_changed delivery_blocked=true task={stem} required={} clean=0 missing={} action=\"record fresh reviews for the immutable delivery snapshot\"",
+                        self.intent.minimum_clean_reviews,
+                        self.intent.minimum_clean_reviews
+                    )
+                    .into());
+                }
             }
         }
         let has_open_task = self.intent.stems.iter().any(|stem| {
@@ -6695,7 +6897,7 @@ impl ModelCommandLogic for CloseTasksFromCommitTrailers {
                 .get(stem)
                 .is_some_and(|status| status != "done")
         });
-        if !has_open_task {
+        if !has_open_task && self.intent.completion_snapshots.is_empty() {
             return Ok(ModeledEvents::none(
                 "trailer-referenced tasks are already closed",
             ));
@@ -6732,8 +6934,10 @@ fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, 
     stems.sort();
     stems.dedup();
     let config = repository.project_config_for_lifecycle_gate()?;
+    let mut completion_snapshots = BTreeMap::new();
     if config.final_review.minimum_clean_reviews > 0 {
         let required = config.final_review.minimum_clean_reviews;
+        let (completion_commit_oid, completion_tree_oid) = canonical_commit_snapshot(root, "HEAD")?;
         let mut fingerprint_cache = FinalReviewFingerprintCache::new();
         for stem in &stems {
             let task = projection
@@ -6747,7 +6951,24 @@ fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, 
                 true,
                 &mut fingerprint_cache,
             )?;
+            let latest = task
+                .final_review
+                .clean_reviews
+                .last()
+                .expect("gate requires reviews");
+            completion_snapshots.insert(
+                stem.clone(),
+                completion_snapshot_for_review_at(
+                    root,
+                    &completion_commit_oid,
+                    &completion_tree_oid,
+                    latest,
+                    required,
+                    true,
+                )?,
+            );
         }
+        wait_at_completion_snapshot_test_barrier()?;
     }
     let request = CloseTasksFromCommitTrailersRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
@@ -6763,6 +6984,7 @@ fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, 
                         .map(|task| (stem.clone(), task.final_review.clean_reviews.clone()))
                 })
                 .collect(),
+            completion_snapshots,
         })
         .build();
     let command = CloseTasksFromCommitTrailers::model_builder()
@@ -9588,7 +9810,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 68823dd13951586e62108dac1602ce4a45560aaf\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout baa4f74d90edab025eb605351dca1a642723d9b6\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -11009,6 +11231,7 @@ mod lock_tests {
                 max_queued: None,
                 minimum_clean_reviews: 3,
                 expected_clean_reviews: clean_reviews.clone(),
+                completion_snapshot: None,
             })
             .build();
         let transition = TransitionTask::model_builder()
@@ -11056,6 +11279,7 @@ mod lock_tests {
                 stems: vec!["task-a".into()],
                 minimum_clean_reviews: 3,
                 expected_clean_reviews: BTreeMap::from([("task-a".into(), clean_reviews)]),
+                completion_snapshots: BTreeMap::new(),
             })
             .build();
         let close = CloseTasksFromCommitTrailers::model_builder()
@@ -11097,6 +11321,7 @@ mod lock_tests {
                 stems: vec!["task-a".into()],
                 minimum_clean_reviews: 0,
                 expected_clean_reviews: BTreeMap::new(),
+                completion_snapshots: BTreeMap::new(),
             })
             .build();
         let command = CloseTasksFromCommitTrailers::model_builder()
