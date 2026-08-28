@@ -1115,7 +1115,7 @@ dependencies = [
 
 [[package]]
 name = "tiber-cli"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "clap",
  "serde",
@@ -1129,7 +1129,7 @@ dependencies = [
 
 [[package]]
 name = "tiber-core"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "eventcore",
  "eventcore-types",
@@ -1139,7 +1139,7 @@ dependencies = [
 
 [[package]]
 name = "tiber-git"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "chrono",
  "eventcore",
@@ -1148,6 +1148,7 @@ dependencies = [
  "eventcore-types",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
  "tiber-core",
@@ -1159,7 +1160,7 @@ dependencies = [
 
 [[package]]
 name = "tiber-mcp"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "percent-encoding",
  "serde",
@@ -1169,7 +1170,7 @@ dependencies = [
 
 [[package]]
 name = "tiber-server"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "axum",
  "futures-util",

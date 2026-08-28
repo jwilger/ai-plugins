@@ -5,6 +5,7 @@
 //! document boundaries; it is never parsed back into authoritative state.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Claim {
@@ -30,6 +31,57 @@ pub struct Subtask {
 pub struct Note {
     pub date: String,
     pub text: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FinalReviewState {
+    pub reviews: Vec<FinalReviewRecord>,
+    pub clean_reviews: Vec<FinalReviewRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FinalReviewRecord {
+    pub review_id: String,
+    pub reviewer_identity: String,
+    pub reviewer_type: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requested_scope: Vec<String>,
+    pub scope: Vec<String>,
+    pub commit_range: String,
+    pub outcome: FinalReviewOutcome,
+    pub evidence: String,
+    pub timestamp: String,
+    pub source_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requested_verification_scope: Vec<String>,
+    pub verification_scope: Vec<String>,
+    pub verification_fingerprint: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FinalReviewOutcome {
+    Clean,
+    Finding,
+}
+
+impl FinalReviewOutcome {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "clean" => Some(Self::Clean),
+            "finding" => Some(Self::Finding),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for FinalReviewOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Clean => "clean",
+            Self::Finding => "finding",
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -66,6 +118,8 @@ pub struct Task {
     pub acceptance: Vec<ChecklistItem>,
     pub subtasks: Vec<Subtask>,
     pub notes: Vec<Note>,
+    #[serde(default)]
+    pub final_review: FinalReviewState,
     pub committed_at: String,
 }
 
@@ -86,6 +140,7 @@ impl Task {
             acceptance: Vec::new(),
             subtasks: Vec::new(),
             notes: Vec::new(),
+            final_review: FinalReviewState::default(),
             committed_at,
         }
     }
@@ -142,6 +197,25 @@ impl Task {
         for note in &self.notes {
             output.push_str(&format!("\n- {}: {}", note.date, note.text));
         }
+        output.push_str("\n## Final reviews\n");
+        for review in &self.final_review.reviews {
+            output.push_str(&format!(
+                "\n- {} [{}] {} reviewer={} type={} requested_scope={} scope={} range={} source={} requested_verification_scope={} verification_scope={} verification={} evidence={}",
+                review.timestamp,
+                review.outcome,
+                review.review_id,
+                review.reviewer_identity,
+                review.reviewer_type,
+                review.requested_scope.join(","),
+                review.scope.join(","),
+                review.commit_range,
+                review.source_fingerprint,
+                review.requested_verification_scope.join(","),
+                review.verification_scope.join(","),
+                review.verification_fingerprint,
+                review.evidence
+            ));
+        }
         output.push('\n');
         output
     }
@@ -160,5 +234,34 @@ fn render_body(output: &mut String, value: &str) {
         output.push('\n');
         output.push_str(value.trim());
         output.push('\n');
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FinalReviewOutcome;
+
+    #[test]
+    fn final_review_outcome_rejects_unknown_persisted_values() {
+        assert_eq!(
+            FinalReviewOutcome::parse("clean"),
+            Some(FinalReviewOutcome::Clean)
+        );
+        assert_eq!(
+            FinalReviewOutcome::parse("finding"),
+            Some(FinalReviewOutcome::Finding)
+        );
+        assert_eq!(FinalReviewOutcome::parse("approved"), None);
+        assert_eq!(FinalReviewOutcome::Clean.to_string(), "clean");
+        assert_eq!(FinalReviewOutcome::Finding.to_string(), "finding");
+        assert_eq!(
+            serde_json::from_str::<FinalReviewOutcome>("\"clean\"").unwrap(),
+            FinalReviewOutcome::Clean
+        );
+        assert_eq!(
+            serde_json::from_str::<FinalReviewOutcome>("\"finding\"").unwrap(),
+            FinalReviewOutcome::Finding
+        );
+        assert!(serde_json::from_str::<FinalReviewOutcome>("\"approved\"").is_err());
     }
 }

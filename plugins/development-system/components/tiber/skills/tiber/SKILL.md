@@ -77,6 +77,17 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - Before actively working on an existing Tiber task, move it to `in-progress`
   with `tiber transition <ref> in-progress`; do not leave active work in the
   backlog as an informal reservation.
+- When `.tiber.toml` configures `[final_review].minimum_clean_reviews`, record
+  every clean result and substantive finding through `tiber.review.record`.
+  Include the review identity, reviewer identity and type, exact Git pathspec
+  scope, resolvable commit range, outcome, evidence, timestamp, current source
+  fingerprint, verification-evidence scope, and its current fingerprint. Pass
+  each pathspec as a separate array item or repeated CLI option; use `auto` for
+  both fingerprints so Tiber computes them. Tiber resets the effective sequence
+  on findings or changed scope/range/fingerprints, recomputes both scopes at
+  completion, and blocks both `transition ... done` and trailer-driven delivery
+  with condition-specific diagnostics. There is no runtime bypass; opting out
+  requires an auditable repository configuration change.
 - When `.tiber.toml` sets `[backlog].max_queued`, only `backlog` tasks count.
   The active `in-progress` task does not count. Creating, reopening, or moving
   work into `backlog` refuses once the limit is full across CLI and MCP.
@@ -140,6 +151,7 @@ tiber show <task-ref>
 tiber metadata <task-ref>
 tiber next
 tiber transition <task-ref> <status>
+tiber review <task-ref> --review-id <id> --reviewer <identity> --reviewer-type <type> --scope '<git-pathspec>' [--scope '<git-pathspec>' ...] --commit-range <start>..<end> --outcome <clean|finding> --evidence <receipt> --timestamp <timestamp> --source-fingerprint auto --verification-scope '<evidence-pathspec>' [--verification-scope '<evidence-pathspec>' ...] --verification-fingerprint auto
 tiber prioritize <task-ref> --before <task-ref>
 tiber link <task-ref> blocks <task-ref>
 tiber unlink <task-ref> blocks <task-ref>

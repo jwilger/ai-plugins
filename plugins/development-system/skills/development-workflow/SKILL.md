@@ -103,6 +103,11 @@ delivery detail:
   reviewers. Never accept a defense only in the caller context. A defense
   cannot make its finding-bearing iteration clean; completion still requires
   three later consecutive complete finding-free iterations.
+- When Tiber's opt-in final-review policy applies, explicitly require every
+  fresh independent clean review and every substantive finding to be recorded
+  through the durable `tiber.review.record` surface. Prose instructions,
+  coordinator state, or an unrecorded reviewer result are not completion or
+  delivery evidence.
 - For pushed work, the most recently completed in-scope build must be green.
   A queued or running build is only waiting, never replacement evidence, and a
   completed failed required job creates the CI-recovery hold.
@@ -182,8 +187,11 @@ transitions: `workflow.record_red`,
 `workflow.begin_verification`, `workflow.record_verification`,
 `workflow.record_clean_review`, `workflow.authorize_delivery`, and
 `workflow.complete_delivery`. Until then, do not call or emulate those native
-transitions through the advisory bootstrap surface or claim that installed
-Tiber task transitions enforce them.
+transitions through the advisory bootstrap surface. Installed Tiber task
+transitions enforce only the separate opt-in
+`[final_review].minimum_clean_reviews` completion and trailer-delivery policy;
+they do not enforce RED, GREEN, verification, editor, runner, or
+complete-delivery transitions.
 
 Before a new task, inspect forge CI. Require a successful completed run for the
 candidate revision; queued/running is not terminal evidence, and any completed

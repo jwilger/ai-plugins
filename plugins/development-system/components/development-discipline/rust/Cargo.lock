@@ -883,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "tiber-core"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "eventcore",
  "eventcore-types",
@@ -893,7 +893,7 @@ dependencies = [
 
 [[package]]
 name = "tiber-git"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "chrono",
  "eventcore",
@@ -901,6 +901,7 @@ dependencies = [
  "eventcore-types",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
  "tiber-core",

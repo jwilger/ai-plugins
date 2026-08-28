@@ -134,6 +134,8 @@ enum Command {
     Next,
     /// Move a task to a status.
     Transition(TransitionArgs),
+    /// Record durable final-review evidence for a task.
+    Review(ReviewArgs),
     /// Reorder a task before another task.
     Prioritize(PrioritizeArgs),
     /// Add a task dependency relation.
@@ -398,6 +400,34 @@ struct TransitionArgs {
     task_ref: String,
     /// Target status.
     status: String,
+}
+
+#[derive(Args)]
+struct ReviewArgs {
+    /// Task id, nickname, or full stem.
+    task_ref: String,
+    #[arg(long)]
+    review_id: String,
+    #[arg(long)]
+    reviewer: String,
+    #[arg(long)]
+    reviewer_type: String,
+    #[arg(long, required = true)]
+    scope: Vec<String>,
+    #[arg(long)]
+    commit_range: String,
+    #[arg(long)]
+    outcome: String,
+    #[arg(long)]
+    evidence: String,
+    #[arg(long)]
+    timestamp: String,
+    #[arg(long)]
+    source_fingerprint: String,
+    #[arg(long, required = true)]
+    verification_scope: Vec<String>,
+    #[arg(long)]
+    verification_fingerprint: String,
 }
 
 #[derive(Args)]
@@ -1085,6 +1115,33 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
             tiber_git::transition_task(&task_ref, &status)?;
             Ok(())
         }
+        Command::Review(ReviewArgs {
+            task_ref,
+            review_id,
+            reviewer,
+            reviewer_type,
+            scope,
+            commit_range,
+            outcome,
+            evidence,
+            timestamp,
+            source_fingerprint,
+            verification_scope,
+            verification_fingerprint,
+        }) => tiber_git::record_final_review(
+            &task_ref,
+            &review_id,
+            &reviewer,
+            &reviewer_type,
+            &scope,
+            &commit_range,
+            &outcome,
+            &evidence,
+            &timestamp,
+            &source_fingerprint,
+            &verification_scope,
+            &verification_fingerprint,
+        ),
         Command::Prioritize(PrioritizeArgs { task_ref, before }) => {
             tiber_git::prioritize_before(&task_ref, &before)?;
             Ok(())

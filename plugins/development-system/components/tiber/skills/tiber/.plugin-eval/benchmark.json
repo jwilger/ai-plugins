@@ -12,7 +12,7 @@
     "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
   },
   "workspace": {
-    "sourcePath": ".",
+    "sourcePath": "plugins/development-system/components/tiber/skills/tiber/.plugin-eval/workspace",
     "setupMode": "copy",
     "preserve": "on-failure"
   },
@@ -26,15 +26,18 @@
       "rg -q 'install-bin --target-dir ~/.local/bin --dry-run' .plugin-eval-benchmark/tiber.md",
       "rg -q 'backlog' .plugin-eval-benchmark/tiber.md && rg -q 'in-progress' .plugin-eval-benchmark/tiber.md && rg -q 'done' .plugin-eval-benchmark/tiber.md && rg -q 'abandoned' .plugin-eval-benchmark/tiber.md",
       "rg -q '(tiber create|tiber\\.create)' .plugin-eval-benchmark/tiber.md",
-      "rg -q '(validate --fix|tiber\\.validate_fix)' .plugin-eval-benchmark/tiber.md",
-      "rg -q '(sync conflict|conflict).*fail|fail.*(sync conflict|conflict)|hard failure|hard stop' .plugin-eval-benchmark/tiber.md",
-      "! rg -q '(taskbranch|\\.tasks/todo|todo task|force-push|force push|directly edit \\.tasks|hand-edit \\.tasks)' .plugin-eval-benchmark/tiber.md"
+      "rg -U -q '(tiber[[:space:]]+validate[[:space:]]+--fix|tiber\\.validate_fix)' .plugin-eval-benchmark/tiber.md",
+      "rg -q 'minimum_clean_reviews' .plugin-eval-benchmark/tiber.md && rg -q '(tiber review|tiber\\.review\\.record)' .plugin-eval-benchmark/tiber.md",
+      "rg -qi '(finding|source|scope|verification)' .plugin-eval-benchmark/tiber.md && rg -qi '(reset|stale)' .plugin-eval-benchmark/tiber.md",
+      "rg -qi '(no runtime bypass|auditable.*configuration|configuration.*auditable)' .plugin-eval-benchmark/tiber.md",
+      "rg -qi '(sync conflict|conflict)' .plugin-eval-benchmark/tiber.md && rg -qi '(fail|hard stop)' .plugin-eval-benchmark/tiber.md",
+      "! rg -q '(taskbranch|\\.tasks/todo|todo task|git push[^\\n]*(--force|-f)|(^|[;`]) *(printf|echo|tee|cp|mv|touch|rm)[^\\n]*\\.tasks)' .plugin-eval-benchmark/tiber.md"
     ]
   },
   "notes": [
     "Run this benchmark from the repository root.",
     "Scenarios avoid mutating the source checkout or running provider-backed eval sharing; each writes a local benchmark artifact in the copied workspace.",
-    "The verifier checks that every scenario preserves the core Tiber safety contract: bundled launcher first, explicit install-bin dry-run, course-shaped statuses, command/MCP-owned writes, validation, and hard sync-conflict failure."
+    "The verifier checks that every scenario preserves the core Tiber safety contract: bundled launcher first, explicit install-bin dry-run, course-shaped statuses, command/MCP-owned writes, validation, hard sync-conflict failure, and the opt-in durable final-review completion/delivery gate."
   ],
   "setupQuestions": [],
   "scenarios": [
@@ -42,7 +45,7 @@
       "id": "setup-and-first-task",
       "title": "Setup and first task workflow",
       "purpose": "Check that the skill guides agents through explicit setup, launcher discovery, first-task creation, and validation without install-time mutation.",
-      "userInput": "Use the local Codex skill \"tiber\" if it helps. In this copied workspace, inspect plugins/tiber/skills/tiber/SKILL.md and plugins/tiber/README.md, then write .plugin-eval-benchmark/tiber.md with the exact safe workflow for a user who asks to initialize Tiber and create the first task. The artifact must mention resolving <plugin-root>/bin/tiber relative to the skill file before PATH, offering `tiber install-bin --target-dir ~/.local/bin --dry-run` without auto-applying it, using tiber commands or MCP tools such as tiber create/tiber.create rather than direct .tasks edits, the backlog/in-progress/done/abandoned status model, `tiber validate --fix`, and the rule that unresolvable sync conflicts make the command fail.",
+      "userInput": "Use the local Codex skill \"tiber\" and write .plugin-eval-benchmark/tiber.md with the exact safe workflow for a user who asks to initialize Tiber and create the first task. The artifact must mention resolving <plugin-root>/bin/tiber relative to the skill file before PATH, offering `tiber install-bin --target-dir ~/.local/bin --dry-run` without auto-applying it, using tiber commands or MCP tools such as tiber create/tiber.create rather than direct .tasks edits, the backlog/in-progress/done/abandoned status model, `tiber validate --fix`, and the rule that unresolvable sync conflicts make the command fail. Also summarize the opt-in `[final_review].minimum_clean_reviews` gate: use tiber review or tiber.review.record, findings or changed source/scope/verification reset or stale the sequence, and opting out is an auditable configuration change with no runtime bypass.",
       "successChecklist": [
         "The artifact exists at .plugin-eval-benchmark/tiber.md.",
         "The workflow uses the bundled launcher before PATH and keeps install-bin opt-in.",
@@ -54,7 +57,7 @@
       "id": "unsafe-direct-edit-request",
       "title": "Unsafe direct edit request",
       "purpose": "Check that the skill rejects user pressure to write task files or order.md directly while still giving an actionable Tiber command workflow.",
-      "userInput": "Use the local Codex skill \"tiber\" if it helps. In this copied workspace, inspect plugins/tiber/skills/tiber/SKILL.md and plugins/tiber/README.md, then write .plugin-eval-benchmark/tiber.md answering a user who asks you to create `.tasks/backlog/release-checklist.md` by hand and update order.md yourself. The artifact must refuse direct .tasks/order.md editing as the normal workflow, route creation through tiber create or tiber.create, include the backlog/in-progress/done/abandoned status model, mention <plugin-root>/bin/tiber before PATH and `tiber install-bin --target-dir ~/.local/bin --dry-run`, include `tiber validate --fix`, and say sync conflicts that Tiber cannot auto-resolve must fail instead of being overwritten.",
+      "userInput": "Use the local Codex skill \"tiber\" and write .plugin-eval-benchmark/tiber.md answering a user who asks you to create `.tasks/backlog/release-checklist.md` by hand and update order.md yourself. The artifact must refuse direct .tasks/order.md editing as the normal workflow, route creation through tiber create or tiber.create, include the backlog/in-progress/done/abandoned status model, mention <plugin-root>/bin/tiber before PATH and `tiber install-bin --target-dir ~/.local/bin --dry-run`, include `tiber validate --fix`, and say sync conflicts that Tiber cannot auto-resolve must fail instead of being overwritten. Also summarize the opt-in `[final_review].minimum_clean_reviews` gate: use tiber review or tiber.review.record, findings or changed source/scope/verification reset or stale the sequence, and opting out is an auditable configuration change with no runtime bypass.",
       "successChecklist": [
         "The artifact refuses direct .tasks/order.md edits for normal task creation.",
         "The alternative uses Tiber CLI/MCP operations.",
@@ -65,7 +68,7 @@
       "id": "sync-conflict-boundary",
       "title": "Sync conflict boundary",
       "purpose": "Check that the skill treats unresolved task sync conflicts as real blockers instead of force-pushing or choosing a side silently.",
-      "userInput": "Use the local Codex skill \"tiber\" if it helps. In this copied workspace, inspect plugins/tiber/skills/tiber/SKILL.md and plugins/tiber/README.md, then write .plugin-eval-benchmark/tiber.md with guidance for a Tiber command that fails because remote and local task state changed the same task differently. The artifact must say the command fails when Tiber cannot auto-resolve the sync, reject force-pushing or blindly choosing local/remote, preserve both sides for deliberate resolution, and still mention the normal launcher/install-bin/status/command-owned-write/validate workflow: <plugin-root>/bin/tiber before PATH, `tiber install-bin --target-dir ~/.local/bin --dry-run`, backlog/in-progress/done/abandoned, tiber create or tiber.create for writes, and tiber validate --fix.",
+      "userInput": "Use the local Codex skill \"tiber\" and write .plugin-eval-benchmark/tiber.md with guidance for a Tiber command that fails because remote and local task state changed the same task differently. The artifact must say the command fails when Tiber cannot auto-resolve the sync, reject force-pushing or blindly choosing local/remote, preserve both sides for deliberate resolution, and still mention the normal launcher/install-bin/status/command-owned-write/validate workflow: <plugin-root>/bin/tiber before PATH, `tiber install-bin --target-dir ~/.local/bin --dry-run`, backlog/in-progress/done/abandoned, tiber create or tiber.create for writes, and tiber validate --fix. Also summarize the opt-in `[final_review].minimum_clean_reviews` gate: use tiber review or tiber.review.record, findings or changed source/scope/verification reset or stale the sequence, and opting out is an auditable configuration change with no runtime bypass.",
       "successChecklist": [
         "The artifact treats the sync conflict as a hard failure.",
         "The artifact rejects force-push or silent overwrite behavior.",

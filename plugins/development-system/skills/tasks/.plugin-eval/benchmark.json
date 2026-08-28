@@ -1,0 +1,50 @@
+{
+  "kind": "plugin-eval-benchmark",
+  "schemaVersion": 2,
+  "version": 2,
+  "targetKind": "skill",
+  "targetName": "tasks",
+  "runner": {
+    "type": "codex-cli",
+    "model": "gpt-5.6-terra",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
+  },
+  "workspace": {
+    "sourcePath": "plugins/development-system/skills/tasks/.plugin-eval/workspace",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
+  "verifiers": {
+    "commands": [
+      "test -f task-policy.md",
+      "rg -q '(tiber review|tiber\\.review\\.record)' task-policy.md",
+      "rg -qi 'three' task-policy.md && rg -qi '(consecutive|fresh)' task-policy.md && rg -qi '(clean|finding-free)' task-policy.md && rg -qi 'independent' task-policy.md",
+      "rg -qi '(finding|source|scope|verification)' task-policy.md && rg -qi '(reset|stale)' task-policy.md",
+      "rg -qi '(no runtime bypass|reviewed.*config|config.*audit)' task-policy.md",
+      "rg -qi '(not|refuse|block)' task-policy.md && rg -qi '(done|completion)' task-policy.md && rg -qi '(delivery|trailer|closed)' task-policy.md"
+    ]
+  },
+  "notes": [
+    "This focused benchmark verifies that the top-level tasks skill surfaces Tiber's durable final-review enforcement contract instead of relying on prose-only review guidance.",
+    "The disposable minimal workspace prevents task-board or repository mutation while the verifier checks the written policy artifact."
+  ],
+  "setupQuestions": [],
+  "scenarios": [
+    {
+      "id": "final-review-delivery-gate",
+      "title": "Preserve Tiber final-review enforcement",
+      "purpose": "Verify that the tasks skill refuses prose-only review evidence and describes the durable completion and delivery gate.",
+      "userInput": "Use the local Codex skill \"tasks\". A project enables Tiber's final-review policy. Two clean reviews preceded a third review that found a bug; the bug is now fixed. Write task-policy.md explaining whether the task may be marked done or closed from a commit trailer, what durable Tiber records are required, what happens after findings or changes to source/scope/verification evidence, and whether a one-run bypass is allowed. Do not mutate a task board or perform Git operations.",
+      "successChecklist": [
+        "The artifact refuses completion and trailer-driven delivery after the finding and fix.",
+        "It requires three fresh consecutive clean independent reviews recorded through Tiber's durable review surface.",
+        "It explains source, scope, and verification staleness/reset behavior and the auditable configuration-only opt-out."
+      ]
+    }
+  ]
+}

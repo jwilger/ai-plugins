@@ -263,6 +263,26 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
             let transitioned = tiber_git::transition_task(task_ref, status)?;
             Ok(text_content(format!("transitioned {}", transitioned.path)))
         }
+        "tiber.review.record" => {
+            let task_ref = required_string(arguments, "ref")?;
+            tiber_git::record_final_review(
+                task_ref,
+                required_string(arguments, "review_id")?,
+                required_string(arguments, "reviewer_identity")?,
+                required_string(arguments, "reviewer_type")?,
+                &required_string_array(arguments, "scope")?,
+                required_string(arguments, "commit_range")?,
+                required_string(arguments, "outcome")?,
+                required_string(arguments, "evidence")?,
+                required_string(arguments, "timestamp")?,
+                required_string(arguments, "source_fingerprint")?,
+                &required_string_array(arguments, "verification_scope")?,
+                required_string(arguments, "verification_fingerprint")?,
+            )?;
+            Ok(text_content(format!(
+                "recorded final review for {task_ref}"
+            )))
+        }
         "tiber.prioritize" => {
             let task_ref = required_string(arguments, "ref")?;
             let before_ref = required_string(arguments, "before")?;
@@ -642,6 +662,11 @@ fn optional_string_array(
     ))
 }
 
+fn required_string_array(arguments: &Value, name: &str) -> Result<Vec<String>, tiber_git::Error> {
+    optional_string_array(arguments, name)?
+        .ok_or_else(|| tiber_git::Error::Parse(format!("mcp_argument_missing name={name}")))
+}
+
 fn task_ref_schema(role: &str) -> Value {
     json!({
         "type": "string",
@@ -733,6 +758,26 @@ fn tools() -> Vec<Value> {
                 }
             }),
             vec!["ref", "status"],
+        ),
+        tool(
+            "tiber.review.record",
+            "Record final review",
+            "Append durable machine-checkable final-review evidence. Clean sequences reset on findings or changed scope, commit range, source, or verification fingerprints.",
+            json!({
+                "ref": task_ref_schema("Task receiving final-review evidence."),
+                "review_id": { "type": "string" },
+                "reviewer_identity": { "type": "string" },
+                "reviewer_type": { "type": "string", "enum": ["independent-final-review"] },
+                "scope": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Repository-relative Git pathspecs declaring the exact reviewed scope." },
+                "commit_range": { "type": "string", "description": "A Git <start>..<end> range; endpoints are resolved and stored as commit OIDs." },
+                "outcome": { "type": "string", "enum": ["clean", "finding"] },
+                "evidence": { "type": "string" },
+                "timestamp": { "type": "string" },
+                "source_fingerprint": { "type": "string", "description": "Use auto to bind the record to the current declared-scope content, or supply the expected reported fingerprint." },
+                "verification_scope": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Repository-relative Git pathspecs selecting the durable verification evidence reviewed." },
+                "verification_fingerprint": { "type": "string", "description": "Use auto to bind the record to the current verification evidence, or supply the expected reported fingerprint." }
+            }),
+            vec!["ref", "review_id", "reviewer_identity", "reviewer_type", "scope", "commit_range", "outcome", "evidence", "timestamp", "source_fingerprint", "verification_scope", "verification_fingerprint"],
         ),
         tool(
             "tiber.prioritize",

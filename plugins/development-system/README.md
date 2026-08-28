@@ -57,9 +57,11 @@ attests the connected final-review protocol, and current workflow guidance
 refuses to create review state when that attestation is missing or too old, so
 a newly installed skill cannot silently coordinate through a stale one-pass MCP
 runtime. The planned
-standalone Tiber scheduler is the authority layer that can eventually make
-those receipts prerequisites for repository mutation. That scheduler binding
-is not part of the currently installed Tiber task-board binary.
+Tiber can additionally enforce those receipts at the task boundary when a
+project opts into `[final_review].minimum_clean_reviews`: its Git-backed task
+history then blocks both task completion and trailer-driven delivery until the
+required clean sequence is current. This gate is available through the same
+provider-neutral CLI and MCP surface in Codex and Claude Code.
 
 The editor, runner, repository, and diagnostic services are retained as
 unexposed reusable components for the standalone Tiber harness. Ordinary Codex

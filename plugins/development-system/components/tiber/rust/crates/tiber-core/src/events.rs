@@ -13,7 +13,7 @@
 //! authoritative. Adding a mutator therefore requires adding or deliberately
 //! reusing a semantic event and extending the corresponding fold.
 
-use crate::task::{ChecklistItem, Claim, Note, Subtask, Task, ValidationRepair};
+use crate::task::{ChecklistItem, Claim, FinalReviewRecord, Note, Subtask, Task, ValidationRepair};
 use eventcore::ModelEvent;
 use eventcore_types::{Event, StreamId};
 use serde::{Deserialize, Serialize};
@@ -349,6 +349,12 @@ pub struct TaskNoteAddedEvent {
     pub note: Note,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TaskFinalReviewRecordedEvent {
+    pub stream_id: StreamId,
+    pub stem: String,
+    pub review: FinalReviewRecord,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TaskValidationRepairedEvent {
     pub stream_id: StreamId,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -393,6 +399,7 @@ pub enum TiberEvent {
     TaskAcceptanceChecked(TaskAcceptanceCheckedEvent),
     TaskAcceptanceRemoved(TaskAcceptanceRemovedEvent),
     TaskNoteAdded(TaskNoteAddedEvent),
+    TaskFinalReviewRecorded(TaskFinalReviewRecordedEvent),
     TaskValidationRepaired(TaskValidationRepairedEvent),
     TasksClosedFromCommitTrailers(TasksClosedFromCommitTrailersEvent),
     /// Historical singular trailer-closure fact retained solely for replay.
@@ -529,6 +536,13 @@ impl TiberEvent {
     #[doc(hidden)]
     pub fn __eventcore_model_get_TaskNoteAdded(&self) -> &TaskNoteAddedEvent {
         let Self::TaskNoteAdded(value) = self else {
+            unreachable!("modeled event variant mismatch")
+        };
+        value
+    }
+    #[doc(hidden)]
+    pub fn __eventcore_model_get_TaskFinalReviewRecorded(&self) -> &TaskFinalReviewRecordedEvent {
+        let Self::TaskFinalReviewRecorded(value) = self else {
             unreachable!("modeled event variant mismatch")
         };
         value
@@ -682,6 +696,7 @@ impl TiberEvent {
             | Self::TaskAcceptanceChecked(TaskAcceptanceCheckedEvent { stream_id, .. })
             | Self::TaskAcceptanceRemoved(TaskAcceptanceRemovedEvent { stream_id, .. })
             | Self::TaskNoteAdded(TaskNoteAddedEvent { stream_id, .. })
+            | Self::TaskFinalReviewRecorded(TaskFinalReviewRecordedEvent { stream_id, .. })
             | Self::TaskValidationRepaired(TaskValidationRepairedEvent { stream_id, .. })
             | Self::TasksClosedFromCommitTrailers(TasksClosedFromCommitTrailersEvent {
                 stream_id,

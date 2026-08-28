@@ -387,6 +387,7 @@ mod tests {
                 "\n- [ ] (model) Model commands — after: store",
                 "\n## Notes / Log\n",
                 "\n- 2026-08-05: Implementation verified\n",
+                "## Final reviews\n\n",
             )
         );
     }

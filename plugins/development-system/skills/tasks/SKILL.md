@@ -51,6 +51,18 @@ For operational requests, preserve these exact boundaries:
 - Treat `close-from-trailers` as successful only when it synchronizes the board,
   resolves every `Closes:` trailer from current `HEAD`, prints each closed task,
   and leaves each named task no longer open.
+- When `[final_review].minimum_clean_reviews` is enabled, record every clean
+  result and substantive finding through `tiber.review.record` (or `tiber
+review`) with reviewer identity/type, a requested pathspec scope that Tiber
+  materializes into a durable exact path inventory, a resolvable commit
+  range, outcome, evidence, timestamp, and Tiber-computed source and
+  verification-evidence fingerprints. A
+  finding or changed source, declared scope, commit range, or verification
+  evidence resets or stales the sequence; completion and trailer delivery need
+  the configured number of fresh consecutive clean independent records, with a
+  minimum floor of three. There is no runtime bypass. Opting out requires an
+  explicit, reviewed repository configuration change, which is the audit
+  record.
 
 When a task-board request coincides with a pushed-CI failure, use Tiber's
 semantic CI-recovery operations. Tiber is the single durable authority for the

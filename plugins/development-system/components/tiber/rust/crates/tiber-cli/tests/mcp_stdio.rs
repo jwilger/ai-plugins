@@ -136,6 +136,150 @@ fn mcp_admissions_return_the_shared_backlog_capacity_refusal() {
 }
 
 #[test]
+fn mcp_review_record_round_trips_into_the_completion_gate() {
+    let repo = TempRepo::initialized();
+    fs::write(
+        repo.path().join(".tiber.toml"),
+        "[final_review]\nminimum_clean_reviews = 3\n",
+    )
+    .expect("write final review policy");
+    fs::write(repo.path().join("verification.txt"), "just ci: pass\n")
+        .expect("write verification receipt");
+    repo.git(["add", ".tiber.toml", "verification.txt"]);
+    repo.git(["commit", "-m", "Enable final review policy"]);
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Reviewed through MCP"]));
+    assert_success(repo.tiber(["transition", "reviewed-through-mcp", "in-progress"]));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tiber mcp stdio");
+    let mut stdin = child.stdin.take().expect("mcp stdin should be available");
+    let stdout = child.stdout.take().expect("mcp stdout should be available");
+    let mut stdout = BufReader::new(stdout);
+
+    let arguments = serde_json::json!({
+        "ref": "reviewed-through-mcp",
+        "review_id": "mcp-review-1",
+        "reviewer_identity": "independent-reviewer-1",
+        "reviewer_type": "independent-final-review",
+        "scope": ["README.md"],
+        "commit_range": "HEAD..HEAD",
+        "outcome": "clean",
+        "evidence": "MCP review receipt",
+        "timestamp": "2026-08-27T12:00:00Z",
+        "source_fingerprint": "auto",
+        "verification_scope": ["verification.txt"],
+        "verification_fingerprint": "auto"
+    });
+    write_message(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "tiber.review.record", "arguments": arguments}
+        })
+        .to_string(),
+    );
+    let recorded = read_json_message(&mut stdout);
+    assert_eq!(recorded["id"], 1);
+    assert!(recorded["result"]["content"][0]["text"]
+        .as_str()
+        .expect("record response text")
+        .contains("recorded final review"));
+
+    let incomplete = repo.tiber(["transition", "reviewed-through-mcp", "done"]);
+    assert!(!incomplete.status.success());
+    let stderr = String::from_utf8(incomplete.stderr).expect("stderr should be utf8");
+    assert!(
+        stderr.contains("final_review_evidence_incomplete")
+            && stderr.contains("clean=1")
+            && stderr.contains("missing=2"),
+        "{stderr}"
+    );
+
+    write_message(
+        &mut stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "tiber.review.record",
+                "arguments": {
+                    "ref": "reviewed-through-mcp",
+                    "review_id": "mcp-review-invalid",
+                    "reviewer_identity": "independent-reviewer-2",
+                    "reviewer_type": "independent-final-review",
+                    "scope": ["README.md"],
+                    "commit_range": "HEAD..HEAD",
+                    "outcome": "approved",
+                    "evidence": "invalid MCP review receipt",
+                    "timestamp": "2026-08-27T12:00:00Z",
+                    "source_fingerprint": "auto",
+                    "verification_scope": ["verification.txt"],
+                    "verification_fingerprint": "auto"
+                }
+            }
+        })
+        .to_string(),
+    );
+    let rejected = read_json_message(&mut stdout);
+    assert_eq!(rejected["id"], 2);
+    assert!(rejected["error"]["message"]
+        .as_str()
+        .expect("invalid outcome error")
+        .contains("final_review_outcome_invalid"));
+
+    for iteration in 2..=3 {
+        write_message(
+            &mut stdin,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": iteration + 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "tiber.review.record",
+                    "arguments": {
+                        "ref": "reviewed-through-mcp",
+                        "review_id": format!("mcp-review-{iteration}"),
+                        "reviewer_identity": format!("independent-reviewer-{iteration}"),
+                        "reviewer_type": "independent-final-review",
+                        "scope": ["README.md"],
+                        "commit_range": "HEAD..HEAD",
+                        "outcome": "clean",
+                        "evidence": format!("MCP review receipt {iteration}"),
+                        "timestamp": format!("2026-08-27T12:00:0{iteration}Z"),
+                        "source_fingerprint": "auto",
+                        "verification_scope": ["verification.txt"],
+                        "verification_fingerprint": "auto"
+                    }
+                }
+            })
+            .to_string(),
+        );
+        let recorded = read_json_message(&mut stdout);
+        assert_eq!(recorded["id"], iteration + 1);
+        assert!(recorded["result"]["content"][0]["text"]
+            .as_str()
+            .expect("record response text")
+            .contains("recorded final review"));
+    }
+
+    drop(stdin);
+    assert!(child.wait().expect("wait for mcp server").success());
+
+    let completion = repo.tiber(["transition", "reviewed-through-mcp", "done"]);
+    assert_success(completion);
+    task_stem(&repo, "done", "reviewed-through-mcp");
+}
+
+#[test]
 fn mcp_stdio_exposes_tools_and_task_resources() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
@@ -220,6 +364,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         "tiber.metadata",
         "tiber.next",
         "tiber.transition",
+        "tiber.review.record",
         "tiber.prioritize",
         "tiber.link",
         "tiber.unlink",
@@ -248,6 +393,30 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         serde_json::json!(["backlog", "in-progress", "done", "abandoned"])
     );
     assert_eq!(list_tool["inputSchema"]["required"], serde_json::json!([]));
+    let review_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.review.record")
+        .expect("tiber.review.record should be advertised");
+    for property in ["scope", "verification_scope"] {
+        assert_eq!(
+            review_tool["inputSchema"]["properties"][property]["type"],
+            "array"
+        );
+        assert_eq!(
+            review_tool["inputSchema"]["properties"][property]["items"]["type"],
+            "string"
+        );
+        assert_eq!(
+            review_tool["inputSchema"]["properties"][property]["minItems"],
+            1
+        );
+    }
+    assert!(
+        review_tool["inputSchema"]["properties"]["commit_range"]["description"]
+            .as_str()
+            .expect("commit range description")
+            .contains("resolved")
+    );
     let transition_tool = listed_tools
         .iter()
         .find(|tool| tool["name"] == "tiber.transition")

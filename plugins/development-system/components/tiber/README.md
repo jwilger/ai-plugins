@@ -118,6 +118,90 @@ not Tiber configuration. It triggers judgment about whether to look for
 candidates and does not define a storage invariant, so Tiber mechanically
 enforces only the maximum queued count.
 
+## Final-Review Completion Policy
+
+Projects can opt into a mechanical completion and delivery gate in the
+repository-owned `.tiber.toml`:
+
+```toml
+[final_review]
+minimum_clean_reviews = 3
+```
+
+When enabled, `tiber transition <task-ref> done` and
+`tiber close-from-trailers` refuse to close an implementation task until its
+authoritative Tiber event history contains the configured number of consecutive
+clean reviews. Every review in the final configured sequence must use the
+`independent-final-review` reviewer type, have a distinct review and reviewer
+identity, and agree on the declared Git pathspec scope, commit range, source
+fingerprint, and verification-evidence scope and fingerprint. Tiber resolves
+the supplied commit-range endpoints to full commit OIDs and computes both
+fingerprints itself. It recomputes the declared source and verification scopes
+at completion and delivery time, so later changes make the sequence stale.
+
+Record every clean review and every review with a substantive finding through
+the CLI or the provider-neutral `tiber.review.record` MCP tool:
+
+```shell
+tiber review <task-ref> \
+  --review-id review-3 \
+  --reviewer reviewer-session-3 \
+  --reviewer-type independent-final-review \
+  --scope 'src/**' \
+  --scope 'tests/**' \
+  --commit-range base-oid..head-oid \
+  --outcome clean \
+  --evidence receipt-or-report-reference \
+  --timestamp 2026-08-27T12:00:00Z \
+  --source-fingerprint auto \
+  --verification-scope .tiber-verification/final-review.txt \
+  --verification-fingerprint auto
+```
+
+Each record durably includes its identity, reviewer identity and type, the
+materialized exact path inventory selected by the requested scope,
+commit range, outcome, evidence, timestamp, source fingerprint, verification
+scope, and verification fingerprint. Requested scope values are repeated
+pathspec arguments, so paths containing spaces remain exact. Tiber resolves
+those pathspecs when the review is recorded and retains literal entries for
+deleted paths, allowing a content-identical staging and commit step to preserve
+the reviewed receipt. Empty scopes and unresolved commit ranges are rejected.
+Source fingerprints bind working-tree contents and modes plus any staged state
+that diverges from both HEAD and the worktree, so moving identical content
+between unstaged, staged, and committed partitions is metadata-only while a
+partial-stage change after review makes the evidence stale. A finding clears
+the effective clean sequence. A later record with a changed scope, commit range, source fingerprint,
+verification scope, or verification fingerprint also starts a new sequence;
+this covers scope expansion and changed relevant verification evidence. Source
+or verification mutation after the latest clean review is detected when
+completion or trailer-driven delivery is attempted. Refusals name the exact
+missing count, independence condition, or stale evidence condition.
+
+Fingerprinting fails closed with a `scope_too_large` diagnostic when one Git
+enumeration exceeds 16 MiB, the combined scope exceeds 100,000 paths, or the
+selected regular-file content exceeds 1 GiB. Narrow the declared scope and
+record fresh independent reviews rather than bypassing those limits. A single
+trailer-delivery command reuses identical source and verification fingerprints
+across its referenced tasks while retaining at most 256 distinct fingerprint
+entries and evicting the least recently reused entry when the cache is full.
+
+There is no runtime bypass flag. To opt out deliberately, remove the
+`[final_review]` table (or set `minimum_clean_reviews = 0`) in a reviewed,
+committed project configuration change. Completion and delivery evaluate the
+committed policy and reject an uncommitted policy change. That Git-visible change is the audit
+record; ordinary CLI, MCP, local completion, and trailer-driven CI delivery
+cannot silently bypass an enabled policy. Nonzero values below three are
+rejected as invalid configuration; an enabled policy can strengthen the
+minimum, but cannot weaken the required three-review floor.
+
+Existing projects remain opted out after upgrade because a missing table
+defaults to zero. Existing Tiber event histories need no migration: review
+fields on older task-creation events default to an empty state during replay.
+Enabling the policy does not grandfather open or completed work: each task must
+acquire fresh qualifying records before completion or later trailer-driven
+delivery. Disabling and later re-enabling the policy does not erase review
+history, but only the current consecutive sequence can satisfy the gate.
+
 ## New Task Skill
 
 The plugin includes the manually invokable `tiber:new-task` skill for quick
