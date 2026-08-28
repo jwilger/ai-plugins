@@ -20,6 +20,13 @@ fn mcp_uses_codex_sandbox_metadata_when_started_from_an_installed_plugin_root() 
             .expect("initialize plugin-root repository"),
     );
     assert_success(
+        Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(plugin_root.path())
+            .output()
+            .expect("disable signing for plugin-root test repository"),
+    );
+    assert_success(
         Command::new(env!("CARGO_BIN_EXE_tiber"))
             .arg("init")
             .current_dir(plugin_root.path())

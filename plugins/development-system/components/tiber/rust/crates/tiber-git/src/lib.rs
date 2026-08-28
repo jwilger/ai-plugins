@@ -5915,6 +5915,46 @@ fn bounded_final_review_blob_batch(
     })
 }
 
+fn final_review_pathspec_uses_attributes(pathspec: &str) -> bool {
+    pathspec
+        .strip_prefix(":(")
+        .and_then(|suffix| suffix.split_once(')'))
+        .is_some_and(|(magic, _)| {
+            magic
+                .split(',')
+                .any(|component| component.starts_with("attr:"))
+        })
+}
+
+fn final_review_attribute_source_support_from_command(
+    command: &mut Command,
+    scope_kind: &str,
+) -> Result<(), Error> {
+    let status = command.status().map_err(Error::Io)?;
+    if status.success() {
+        return Ok(());
+    }
+    Err(Error::Usage(format!(
+        "tiber.final_review_{scope_kind}_attribute_source_unsupported action=\"upgrade Git to 2.41 or newer and record fresh independent reviews\""
+    )))
+}
+
+fn ensure_final_review_attribute_source_support(
+    root: &Path,
+    tree_oid: &str,
+    scope_kind: &str,
+) -> Result<(), Error> {
+    let mut command = Command::new("git");
+    command
+        .arg("check-attr")
+        .arg(format!("--source={tree_oid}"))
+        .args(["--all", "--", "."])
+        .current_dir(root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    final_review_attribute_source_support_from_command(&mut command, scope_kind)
+}
+
 fn tree_scope_fingerprint(
     root: &Path,
     tree_oid: &str,
@@ -5950,6 +5990,12 @@ fn tree_scope_fingerprint(
         return Err(Error::Parse(
             "tiber.final_review_completion_tree_invalid=true".into(),
         ));
+    }
+    if requested_scope
+        .iter()
+        .any(|pathspec| final_review_pathspec_uses_attributes(pathspec))
+    {
+        ensure_final_review_attribute_source_support(root, tree_oid, scope_kind)?;
     }
     #[cfg(test)]
     count_final_review_tree_git_process();
@@ -10129,7 +10175,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout e919300f01b6a57811f4268a96b95e1558a949db\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout d7e5b141960163fbc751583f1a3ce3c45f14fe91\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -12292,6 +12338,7 @@ mod lock_tests {
         for args in [
             vec!["config", "user.name", "Tiber Test"],
             vec!["config", "user.email", "tiber@example.invalid"],
+            vec!["config", "commit.gpgsign", "false"],
             vec!["add", "one.txt", "two.txt"],
             vec!["commit", "-q", "-m", "Add blobs"],
         ] {
@@ -12341,6 +12388,7 @@ mod lock_tests {
         for args in [
             vec!["config", "user.name", "Tiber Test"],
             vec!["config", "user.email", "tiber@example.invalid"],
+            vec!["config", "commit.gpgsign", "false"],
             vec!["add", "one.txt", "two.txt", ".gitattributes"],
             vec!["commit", "-q", "-m", "Add attributed blobs"],
         ] {
@@ -12352,18 +12400,7 @@ mod lock_tests {
             assert!(output.status.success());
         }
         let requested = vec![":(attr:reviewed)".to_string()];
-        let retained = final_review_scope_snapshot(
-            &root,
-            &requested,
-            None,
-            "source",
-            FINAL_REVIEW_SCOPE_LIMITS,
-        )
-        .expect("materialize reviewed scope")
-        .paths
-        .into_iter()
-        .map(|path| format!(":(literal){path}"))
-        .collect::<Vec<_>>();
+        let retained = vec![":(literal)one.txt".to_string()];
         let expected = source_scope_fingerprint(&root, &requested, None, "source")
             .expect("fingerprint reviewed worktree");
         let (_, tree_oid) = canonical_commit_snapshot(&root, "HEAD").expect("resolve tree");
@@ -12377,6 +12414,27 @@ mod lock_tests {
         assert!(missing.is_empty());
         assert_eq!(actual, expected);
         fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn immutable_tree_attribute_scope_fails_closed_without_git_support() {
+        assert!(final_review_pathspec_uses_attributes(":(attr:reviewed)"));
+        assert!(final_review_pathspec_uses_attributes(
+            ":(top,attr:reviewed)src"
+        ));
+        assert!(!final_review_pathspec_uses_attributes(
+            ":(literal)attr:reviewed"
+        ));
+
+        let mut unsupported = Command::new("sh");
+        unsupported.args(["-c", "exit 129"]);
+        let error = final_review_attribute_source_support_from_command(&mut unsupported, "source")
+            .expect_err("unsupported Git must fail closed");
+
+        assert!(error
+            .to_string()
+            .contains("tiber.final_review_source_attribute_source_unsupported"));
+        assert!(error.to_string().contains("upgrade Git to 2.41 or newer"));
     }
 
     #[test]

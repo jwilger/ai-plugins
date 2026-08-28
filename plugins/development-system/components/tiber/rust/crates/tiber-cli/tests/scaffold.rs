@@ -5,7 +5,7 @@ use std::process::Command;
 
 use support::{assert_success, assert_success_ref, TempRepo};
 
-const SCAFFOLDED_TIBER_REVISION: &str = "e919300f01b6a57811f4268a96b95e1558a949db";
+const SCAFFOLDED_TIBER_REVISION: &str = "d7e5b141960163fbc751583f1a3ce3c45f14fe91";
 const SCAFFOLDED_TIBER_CHECKOUT_PREFIX: &str = "git -C .tiber-src checkout ";
 
 fn normalize_embedded_tiber_revision(source: &str) -> String {

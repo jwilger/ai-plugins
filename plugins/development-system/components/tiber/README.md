@@ -188,6 +188,10 @@ missing count, independence condition, or stale evidence condition.
 Immutable-tree evaluation uses a disposable index loaded only from the selected
 tree, pins attribute pathspec evaluation to that same tree, uses one bounded
 tree listing, and performs one batched blob read into a single retained buffer.
+Attribute-magic pathspecs require Git 2.41 or newer. Tiber probes that capability
+before immutable evaluation and fails closed with
+`attribute_source_unsupported` plus the upgrade-and-rereview action when the
+host Git cannot bind attributes to the selected tree.
 Identical source or verification scopes are cached across tasks in one
 trailer-delivery command; Git subprocess count is therefore constant per
 distinct uncached scope rather than proportional to its file count.
