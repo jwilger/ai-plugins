@@ -141,6 +141,9 @@ path manifest, which binds each materialized path, Git mode, entry kind, and
 exact bytes (or gitlink OID) without binding the staging partition. Completion
 and delivery resolve a full commit OID and tree OID once, recompute both scopes
 from that immutable tree, and persist those OIDs with the completion event.
+The retained requested pathspecs are rematerialized against that selected tree,
+so newly committed matching paths invalidate the clean sequence while retained
+literal deleted paths remain part of the manifest.
 
 Record every clean review and every review with a substantive finding through
 the CLI or the provider-neutral `tiber.review.record` MCP tool:
@@ -181,6 +184,12 @@ this covers scope expansion and changed relevant verification evidence. Source
 or verification mutation after the latest clean review is detected when
 completion or trailer-driven delivery is attempted. Refusals name the exact
 missing count, independence condition, or stale evidence condition.
+
+Immutable-tree evaluation uses a disposable index loaded only from the selected
+tree, one bounded tree listing, and one batched blob read. Identical source or
+verification scopes are cached across tasks in one trailer-delivery command;
+Git subprocess count is therefore constant per distinct uncached scope rather
+than proportional to its file count.
 
 Fingerprinting fails closed with a `scope_too_large` diagnostic when one Git
 enumeration exceeds 16 MiB, the combined scope exceeds 100,000 paths, or the

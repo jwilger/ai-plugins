@@ -159,6 +159,68 @@ fn close_from_trailers_preserves_reviews_across_content_identical_staging_and_co
 }
 
 #[test]
+fn close_from_trailers_rejects_newly_matching_committed_source() {
+    let repo = TempRepo::initialized();
+    fs::create_dir(repo.path().join("src")).expect("create source directory");
+    fs::write(repo.path().join("src/existing.rs"), "reviewed\n").expect("write source");
+    repo.git(["add", "src/existing.rs"]);
+    repo.git(["commit", "-m", "Add reviewed source"]);
+    enable_final_review_policy(&repo);
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Protected delivery"]));
+    assert_success(repo.tiber(["transition", "protected-delivery", "in-progress"]));
+    for iteration in 1..=3 {
+        let review_id = format!("review-{iteration}");
+        let reviewer = format!("reviewer-{iteration}");
+        assert_success(repo.tiber([
+            "review",
+            "protected-delivery",
+            "--review-id",
+            &review_id,
+            "--reviewer",
+            &reviewer,
+            "--reviewer-type",
+            "independent-final-review",
+            "--scope",
+            "src/**",
+            "--commit-range",
+            "HEAD..HEAD",
+            "--outcome",
+            "clean",
+            "--evidence",
+            "review receipt",
+            "--timestamp",
+            "2026-08-27T12:00:00Z",
+            "--source-fingerprint",
+            "auto",
+            "--verification-scope",
+            "verification.txt",
+            "--verification-fingerprint",
+            "auto",
+        ]));
+    }
+    fs::write(
+        repo.path().join("src/new.rs"),
+        "unreviewed committed source\n",
+    )
+    .expect("write matching source");
+    repo.git(["add", "src/new.rs"]);
+    repo.git([
+        "commit",
+        "-m",
+        "Expand reviewed scope\n\nCloses: protected-delivery",
+    ]);
+
+    let close = repo.tiber(["close-from-trailers"]);
+
+    assert!(!close.status.success());
+    let stderr = String::from_utf8(close.stderr).expect("stderr utf8");
+    assert!(stderr.contains("delivery_blocked=true"), "{stderr}");
+    assert!(stderr.contains("condition=source_changed"), "{stderr}");
+    task_stem(&repo, "in-progress", "protected-delivery");
+}
+
+#[test]
 fn close_from_trailers_rejects_staged_deletion_with_same_path_untracked_replacement() {
     let repo = TempRepo::initialized();
     enable_final_review_policy(&repo);

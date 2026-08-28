@@ -346,6 +346,30 @@ fn tracked_file_replaced_by_uncommitted_directory_is_rejected_at_completion() {
     task_stem(&repo, "in-progress", "reviewed-work");
 }
 
+#[test]
+fn content_identical_file_to_directory_commit_preserves_review() {
+    let repo = TempRepo::initialized();
+    fs::write(repo.path().join("config"), "legacy config\n").expect("write config");
+    repo.git(["add", "config"]);
+    repo.git(["commit", "-m", "Add tracked config file"]);
+    fs::remove_file(repo.path().join("config")).expect("remove file");
+    fs::create_dir(repo.path().join("config")).expect("create directory");
+    fs::write(repo.path().join("config/value.txt"), "replacement config\n")
+        .expect("write replacement");
+    enable_final_review_policy(&repo);
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Reviewed work"]));
+    assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+    for iteration in 1..=3 {
+        record_review_with_scope(&repo, iteration, "clean", &["config"]);
+    }
+    repo.git(["add", "--all"]);
+    repo.git(["commit", "-m", "Commit reviewed directory replacement"]);
+
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    task_stem(&repo, "done", "reviewed-work");
+}
+
 fn record_review_with_scope(repo: &TempRepo, iteration: usize, outcome: &str, scope: &[&str]) {
     let review_id = format!("review-{iteration}");
     let reviewer = format!("reviewer-{iteration}");
@@ -762,6 +786,37 @@ fn newly_staged_file_is_not_included_in_immutable_head_completion() {
 
     assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
     task_stem(&repo, "done", "reviewed-work");
+}
+
+#[test]
+fn newly_matching_committed_file_invalidates_reviewed_scope() {
+    let repo = TempRepo::initialized();
+    fs::create_dir(repo.path().join("src")).expect("create source directory");
+    fs::write(repo.path().join("src/existing.rs"), "reviewed\n").expect("write source");
+    repo.git(["add", "src/existing.rs"]);
+    repo.git(["commit", "-m", "Add reviewed source"]);
+    enable_final_review_policy(&repo);
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Reviewed work"]));
+    assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+    for iteration in 1..=3 {
+        record_review_with_scope(&repo, iteration, "clean", &["src/**"]);
+    }
+    fs::write(
+        repo.path().join("src/new.rs"),
+        "unreviewed committed source\n",
+    )
+    .expect("write matching source");
+    repo.git(["add", "src/new.rs"]);
+    repo.git(["commit", "-m", "Expand reviewed scope"]);
+
+    let completion = repo.tiber(["transition", "reviewed-work", "done"]);
+
+    assert!(!completion.status.success());
+    let stderr = String::from_utf8(completion.stderr).expect("stderr utf8");
+    assert!(stderr.contains("condition=source_changed"), "{stderr}");
+    assert!(stderr.contains("clean=0 missing=3"), "{stderr}");
+    task_stem(&repo, "in-progress", "reviewed-work");
 }
 
 #[test]

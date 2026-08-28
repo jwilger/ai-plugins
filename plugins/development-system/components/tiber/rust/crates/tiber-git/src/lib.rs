@@ -42,6 +42,8 @@ const FINAL_REVIEW_GIT_OUTPUT_MAX_BYTES: usize = 16 * 1024 * 1024;
 const FINAL_REVIEW_SCOPE_MAX_PATHS: usize = 100_000;
 const FINAL_REVIEW_SCOPE_MAX_CONTENT_BYTES: u64 = 1024 * 1024 * 1024;
 const FINAL_REVIEW_FINGERPRINT_CACHE_MAX_ENTRIES: usize = 256;
+#[cfg(test)]
+static FINAL_REVIEW_TREE_GIT_PROCESS_COUNT: AtomicU64 = AtomicU64::new(0);
 const REPOSITORY_STREAM: &str = "tiber:repository";
 const BOARD_STREAM: &str = "tiber:board";
 const CI_RECOVERY_STREAM: &str = "tiber:ci-recovery";
@@ -5280,10 +5282,23 @@ fn bounded_final_review_git_output(
     scope_kind: &str,
     limits: FinalReviewScopeLimits,
 ) -> Result<Vec<u8>, Error> {
-    let mut child = Command::new("git")
-        .args(args)
-        .args(scope)
-        .current_dir(root)
+    bounded_final_review_git_output_with_index(root, args, scope, scope_kind, limits, None)
+}
+
+fn bounded_final_review_git_output_with_index(
+    root: &Path,
+    args: &[&str],
+    scope: &[String],
+    scope_kind: &str,
+    limits: FinalReviewScopeLimits,
+    index_file: Option<&Path>,
+) -> Result<Vec<u8>, Error> {
+    let mut command = Command::new("git");
+    command.args(args).args(scope).current_dir(root);
+    if let Some(index_file) = index_file {
+        command.env("GIT_INDEX_FILE", index_file);
+    }
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -5745,74 +5760,262 @@ fn canonical_commit_snapshot(root: &Path, revision: &str) -> Result<(String, Str
     Ok((commit_oid, tree_oid))
 }
 
+#[derive(Clone)]
+struct TreeManifestEntry {
+    mode: String,
+    object_type: String,
+    oid: String,
+}
+
+fn bounded_final_review_blob_batch(
+    root: &Path,
+    object_ids: &BTreeSet<String>,
+    scope_kind: &str,
+) -> Result<BTreeMap<String, Vec<u8>>, Error> {
+    if object_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    #[cfg(test)]
+    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
+    let mut child = Command::new("git")
+        .args(["cat-file", "--batch"])
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(Error::Io)?;
+    let requested_oids = object_ids.iter().cloned().collect::<Vec<_>>();
+    let mut stdin = child.stdin.take().expect("piped Git stdin");
+    let writer = thread::spawn(move || -> std::io::Result<()> {
+        for oid in requested_oids {
+            writeln!(stdin, "{oid}")?;
+        }
+        Ok(())
+    });
+    let stdout = child.stdout.take().expect("piped Git stdout");
+    let stderr = child.stderr.take().expect("piped Git stderr");
+    let stderr_reader = thread::spawn(move || -> std::io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        stderr
+            .take((FINAL_REVIEW_GIT_OUTPUT_MAX_BYTES as u64).saturating_add(1))
+            .read_to_end(&mut bytes)?;
+        Ok(bytes)
+    });
+    let maximum = FINAL_REVIEW_SCOPE_LIMITS
+        .content_bytes
+        .saturating_add(FINAL_REVIEW_SCOPE_LIMITS.git_output_bytes as u64);
+    let mut stdout_bytes = Vec::new();
+    stdout
+        .take(maximum.saturating_add(1))
+        .read_to_end(&mut stdout_bytes)
+        .map_err(Error::Io)?;
+    if stdout_bytes.len() as u64 > maximum {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = writer.join();
+        let _ = stderr_reader.join();
+        return Err(Error::Usage(format!(
+            "tiber.final_review_{scope_kind}_scope_too_large condition=content_bytes max_bytes={} action=\"narrow the declared review scope and record fresh independent reviews\"",
+            FINAL_REVIEW_SCOPE_LIMITS.content_bytes
+        )));
+    }
+    writer
+        .join()
+        .map_err(|_| Error::Parse("tiber.final_review_blob_batch_writer_failed=true".into()))?
+        .map_err(Error::Io)?;
+    let status = child.wait().map_err(Error::Io)?;
+    let mut stderr_bytes = stderr_reader
+        .join()
+        .map_err(|_| Error::Parse("tiber.final_review_git_stderr_reader_failed=true".into()))?
+        .map_err(Error::Io)?;
+    stderr_bytes.truncate(FINAL_REVIEW_GIT_OUTPUT_MAX_BYTES);
+    if !status.success() {
+        return Err(Error::CommandFailed {
+            program: "git".into(),
+            args: vec!["cat-file".into(), "--batch".into()],
+            status: status.code().unwrap_or(1).to_string(),
+            stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
+        });
+    }
+    let mut cursor = 0_usize;
+    let mut blobs = BTreeMap::new();
+    for requested_oid in object_ids {
+        let header_end = stdout_bytes[cursor..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| cursor + offset)
+            .ok_or_else(|| Error::Parse("tiber.final_review_blob_batch_invalid=true".into()))?;
+        let header = std::str::from_utf8(&stdout_bytes[cursor..header_end])
+            .map_err(|_| Error::Parse("tiber.final_review_blob_batch_invalid=true".into()))?;
+        let mut fields = header.split_whitespace();
+        let oid = fields.next().unwrap_or_default();
+        let object_type = fields.next().unwrap_or_default();
+        let size = fields
+            .next()
+            .and_then(|value| value.parse::<usize>().ok())
+            .ok_or_else(|| Error::Parse("tiber.final_review_blob_batch_invalid=true".into()))?;
+        if oid != requested_oid || object_type != "blob" {
+            return Err(Error::Parse(
+                "tiber.final_review_blob_batch_invalid=true".into(),
+            ));
+        }
+        let content_start = header_end + 1;
+        let content_end = content_start
+            .checked_add(size)
+            .ok_or_else(|| Error::Parse("tiber.final_review_blob_batch_invalid=true".into()))?;
+        if content_end >= stdout_bytes.len() || stdout_bytes[content_end] != b'\n' {
+            return Err(Error::Parse(
+                "tiber.final_review_blob_batch_invalid=true".into(),
+            ));
+        }
+        blobs.insert(
+            oid.to_string(),
+            stdout_bytes[content_start..content_end].to_vec(),
+        );
+        cursor = content_end + 1;
+    }
+    Ok(blobs)
+}
+
 fn tree_scope_fingerprint(
     root: &Path,
     tree_oid: &str,
     requested_scope: &[String],
+    retained_scope: &[String],
     scope_kind: &str,
 ) -> Result<(Vec<String>, String), Error> {
-    let mut paths = requested_scope.to_vec();
-    paths.sort();
-    paths.dedup();
-    let mut missing = Vec::new();
-    let mut content_bytes = 0_u64;
-    let mut hasher = Sha256::new();
-    hasher.update(b"tiber-final-review-scope-v5\0");
-    for path in paths {
-        if path.is_empty() || path.starts_with('/') || path.contains('\0') {
-            return Err(Error::Usage(format!(
-                "tiber.final_review_{scope_kind}_scope_invalid action=\"record fresh v5 reviews with repository-contained materialized paths\""
-            )));
-        }
-        let materialized_path = path.strip_prefix(":(literal)").unwrap_or(&path).to_string();
-        let literal = format!(":(literal){materialized_path}");
-        let output = bounded_final_review_git_output(
-            root,
-            &["ls-tree", "-rz", "--full-tree", tree_oid, "--"],
-            &[literal],
-            scope_kind,
-            FINAL_REVIEW_SCOPE_LIMITS,
-        )?;
-        hasher.update(materialized_path.as_bytes());
-        hasher.update([0]);
-        let record = output
-            .split(|byte| *byte == 0)
-            .find(|record| !record.is_empty());
-        let Some(record) = record else {
-            missing.push(materialized_path);
-            hasher.update(b"deleted\0deleted\0");
-            continue;
-        };
+    if requested_scope.is_empty()
+        || retained_scope.is_empty()
+        || requested_scope
+            .iter()
+            .chain(retained_scope)
+            .any(|path| path.is_empty() || path.starts_with('/') || path.contains('\0'))
+    {
+        return Err(Error::Usage(format!(
+            "tiber.final_review_{scope_kind}_scope_invalid action=\"record fresh v5 reviews with repository-contained materialized paths\""
+        )));
+    }
+    let index_directory = tempfile::Builder::new()
+        .prefix("tiber-final-review-tree-index-")
+        .tempdir()
+        .map_err(Error::Io)?;
+    let index_file = index_directory.path().join("index");
+    #[cfg(test)]
+    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
+    let read_tree = Command::new("git")
+        .args(["read-tree", tree_oid])
+        .env("GIT_INDEX_FILE", &index_file)
+        .current_dir(root)
+        .output()
+        .map_err(Error::Io)?;
+    if !read_tree.status.success() {
+        return Err(Error::Parse(
+            "tiber.final_review_completion_tree_invalid=true".into(),
+        ));
+    }
+    #[cfg(test)]
+    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
+    let materialized = bounded_final_review_git_output_with_index(
+        root,
+        &["ls-files", "--cached", "-z", "--"],
+        requested_scope,
+        scope_kind,
+        FINAL_REVIEW_SCOPE_LIMITS,
+        Some(&index_file),
+    )?;
+    let mut paths =
+        bounded_final_review_paths(&materialized, scope_kind, FINAL_REVIEW_SCOPE_LIMITS)?
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+    let retained_paths = retained_scope
+        .iter()
+        .map(|path| path.strip_prefix(":(literal)").unwrap_or(path).to_string())
+        .collect::<BTreeSet<_>>();
+    paths.extend(retained_paths.iter().cloned());
+    let literal_paths = paths
+        .iter()
+        .map(|path| format!(":(literal){path}"))
+        .collect::<Vec<_>>();
+    #[cfg(test)]
+    FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
+    let output = bounded_final_review_git_output(
+        root,
+        &["ls-tree", "-rzt", "--full-tree", tree_oid, "--"],
+        &literal_paths,
+        scope_kind,
+        FINAL_REVIEW_SCOPE_LIMITS,
+    )?;
+    let mut entries = BTreeMap::new();
+    for record in output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
         let separator = record
             .iter()
             .position(|byte| *byte == b'\t')
             .ok_or_else(|| Error::Parse("tiber.final_review_tree_entry_invalid=true".into()))?;
         let metadata = std::str::from_utf8(&record[..separator])
             .map_err(|_| Error::Parse("tiber.final_review_tree_entry_invalid=true".into()))?;
+        let path = String::from_utf8(record[separator + 1..].to_vec())
+            .map_err(|_| Error::Usage("tiber.final_review_scope_path_invalid_utf8=true".into()))?;
         let mut fields = metadata.split_whitespace();
-        let mode = fields.next().unwrap_or_default();
-        let object_type = fields.next().unwrap_or_default();
-        let oid = fields.next().unwrap_or_default();
-        hasher.update(mode.as_bytes());
+        entries.insert(
+            path,
+            TreeManifestEntry {
+                mode: fields.next().unwrap_or_default().to_string(),
+                object_type: fields.next().unwrap_or_default().to_string(),
+                oid: fields.next().unwrap_or_default().to_string(),
+            },
+        );
+    }
+    if paths.len() > FINAL_REVIEW_SCOPE_LIMITS.paths {
+        return Err(Error::Usage(format!(
+            "tiber.final_review_{scope_kind}_scope_too_large condition=path_count paths={} max_paths={} action=\"narrow the declared review scope and record fresh independent reviews\"",
+            paths.len(), FINAL_REVIEW_SCOPE_LIMITS.paths
+        )));
+    }
+    let blob_oids = paths
+        .iter()
+        .filter_map(|path| entries.get(path))
+        .filter(|entry| matches!(entry.mode.as_str(), "120000" | "100644" | "100755"))
+        .map(|entry| entry.oid.clone())
+        .collect::<BTreeSet<_>>();
+    let blobs = bounded_final_review_blob_batch(root, &blob_oids, scope_kind)?;
+    let mut missing = Vec::new();
+    let mut content_bytes = 0_u64;
+    let mut hasher = Sha256::new();
+    hasher.update(b"tiber-final-review-scope-v5\0");
+    for materialized_path in paths {
+        if materialized_path.is_empty() || materialized_path.starts_with('/') {
+            return Err(Error::Usage(format!(
+                "tiber.final_review_{scope_kind}_scope_invalid action=\"record fresh v5 reviews with repository-contained materialized paths\""
+            )));
+        }
+        hasher.update(materialized_path.as_bytes());
         hasher.update([0]);
-        match mode {
+        let Some(entry) = entries.get(&materialized_path) else {
+            missing.push(materialized_path);
+            hasher.update(b"deleted\0deleted\0");
+            continue;
+        };
+        hasher.update(entry.mode.as_bytes());
+        hasher.update([0]);
+        match entry.mode.as_str() {
             "160000" => {
                 hasher.update(b"gitlink\0");
-                hasher.update(oid.as_bytes());
+                hasher.update(entry.oid.as_bytes());
             }
-            "120000" | "100644" | "100755" if object_type == "blob" => {
-                if mode == "120000" {
+            "040000" if entry.object_type == "tree" => hasher.update(b"directory\0"),
+            "120000" | "100644" | "100755" if entry.object_type == "blob" => {
+                if entry.mode == "120000" {
                     hasher.update(b"symlink\0");
                 } else {
                     hasher.update(b"blob\0");
                 }
-                let blob = bounded_final_review_git_output(
-                    root,
-                    &["cat-file", "blob", oid],
-                    &[],
-                    scope_kind,
-                    FINAL_REVIEW_SCOPE_LIMITS,
-                )?;
+                let blob = blobs.get(&entry.oid).ok_or_else(|| {
+                    Error::Parse("tiber.final_review_blob_batch_invalid=true".into())
+                })?;
                 content_bytes = content_bytes.saturating_add(blob.len() as u64);
                 if content_bytes > FINAL_REVIEW_SCOPE_LIMITS.content_bytes {
                     return Err(Error::Usage(format!(
@@ -5824,13 +6027,68 @@ fn tree_scope_fingerprint(
             }
             _ => {
                 return Err(Error::Usage(format!(
-                    "tiber.final_review_completion_tree_entry_unsupported path={materialized_path:?} mode={mode:?} type={object_type:?}"
+                    "tiber.final_review_completion_tree_entry_unsupported path={materialized_path:?} mode={:?} type={:?}", entry.mode, entry.object_type
                 )));
             }
         }
         hasher.update([0]);
     }
     Ok((missing, format!("sha256:v5:{:x}", hasher.finalize())))
+}
+
+#[derive(Default)]
+struct TreeFinalReviewFingerprintCache {
+    entries: BTreeMap<FinalReviewFingerprintCacheKey, (Vec<String>, String)>,
+}
+
+fn tree_final_review_fingerprint_cache_key(
+    tree_oid: &str,
+    scope_kind: &str,
+    requested_scope: &[String],
+    retained_scope: &[String],
+) -> FinalReviewFingerprintCacheKey {
+    let mut hasher = Sha256::new();
+    hasher.update(b"tiber-final-review-tree-cache-v1\0");
+    for value in [tree_oid, scope_kind] {
+        hasher.update((value.len() as u64).to_le_bytes());
+        hasher.update(value.as_bytes());
+    }
+    for scope in [requested_scope, retained_scope] {
+        hasher.update((scope.len() as u64).to_le_bytes());
+        for path in scope {
+            hasher.update((path.len() as u64).to_le_bytes());
+            hasher.update(path.as_bytes());
+        }
+    }
+    hasher.finalize().into()
+}
+
+fn cached_tree_scope_fingerprint(
+    root: &Path,
+    tree_oid: &str,
+    requested_scope: &[String],
+    retained_scope: &[String],
+    scope_kind: &str,
+    cache: &mut TreeFinalReviewFingerprintCache,
+) -> Result<(Vec<String>, String), Error> {
+    let key = tree_final_review_fingerprint_cache_key(
+        tree_oid,
+        scope_kind,
+        requested_scope,
+        retained_scope,
+    );
+    if let Some(value) = cache.entries.get(&key) {
+        return Ok(value.clone());
+    }
+    let value =
+        tree_scope_fingerprint(root, tree_oid, requested_scope, retained_scope, scope_kind)?;
+    if cache.entries.len() == FINAL_REVIEW_FINGERPRINT_CACHE_MAX_ENTRIES {
+        if let Some(oldest) = cache.entries.keys().next().copied() {
+            cache.entries.remove(&oldest);
+        }
+    }
+    cache.entries.insert(key, value.clone());
+    Ok(value)
 }
 
 fn completion_snapshot_for_review(
@@ -5841,7 +6099,15 @@ fn completion_snapshot_for_review(
     delivery: bool,
 ) -> Result<FinalReviewCompletionSnapshot, Error> {
     let (commit_oid, tree_oid) = canonical_commit_snapshot(root, revision)?;
-    completion_snapshot_for_review_at(root, &commit_oid, &tree_oid, latest, required, delivery)
+    completion_snapshot_for_review_at(
+        root,
+        &commit_oid,
+        &tree_oid,
+        latest,
+        required,
+        delivery,
+        &mut TreeFinalReviewFingerprintCache::default(),
+    )
 }
 
 fn completion_snapshot_for_review_at(
@@ -5851,6 +6117,7 @@ fn completion_snapshot_for_review_at(
     latest: &FinalReviewRecord,
     required: usize,
     delivery: bool,
+    cache: &mut TreeFinalReviewFingerprintCache,
 ) -> Result<FinalReviewCompletionSnapshot, Error> {
     let delivery_field = if delivery {
         " delivery_blocked=true"
@@ -5871,8 +6138,14 @@ fn completion_snapshot_for_review_at(
             latest.commit_range, canonical_range
         )));
     }
-    let (missing_source, source_fingerprint) =
-        tree_scope_fingerprint(root, tree_oid, &latest.scope, "source")?;
+    let (missing_source, source_fingerprint) = cached_tree_scope_fingerprint(
+        root,
+        tree_oid,
+        &latest.requested_scope,
+        &latest.scope,
+        "source",
+        cache,
+    )?;
     if source_fingerprint != latest.source_fingerprint {
         let condition = if missing_source.is_empty() {
             "source_changed"
@@ -5886,8 +6159,14 @@ fn completion_snapshot_for_review_at(
             "tiber.final_review_completion_snapshot_mutable{delivery_field} condition={condition}{path} required={required} clean=0 missing={required} action=\"commit the reviewed source snapshot and complete {required} fresh clean independent final reviews\""
         )));
     }
-    let (missing_verification, verification_fingerprint) =
-        tree_scope_fingerprint(root, tree_oid, &latest.verification_scope, "verification")?;
+    let (missing_verification, verification_fingerprint) = cached_tree_scope_fingerprint(
+        root,
+        tree_oid,
+        &latest.requested_verification_scope,
+        &latest.verification_scope,
+        "verification",
+        cache,
+    )?;
     if verification_fingerprint != latest.verification_fingerprint {
         let condition = if missing_verification.is_empty() {
             "verification_changed"
@@ -6939,6 +7218,7 @@ fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, 
         let required = config.final_review.minimum_clean_reviews;
         let (completion_commit_oid, completion_tree_oid) = canonical_commit_snapshot(root, "HEAD")?;
         let mut fingerprint_cache = FinalReviewFingerprintCache::new();
+        let mut tree_fingerprint_cache = TreeFinalReviewFingerprintCache::default();
         for stem in &stems {
             let task = projection
                 .tasks
@@ -6965,6 +7245,7 @@ fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, 
                     latest,
                     required,
                     true,
+                    &mut tree_fingerprint_cache,
                 )?,
             );
         }
@@ -9810,7 +10091,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout baa4f74d90edab025eb605351dca1a642723d9b6\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 1ac8c07b5bd567a11a926adb99b7028aa82bfc42\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -11962,6 +12243,53 @@ mod lock_tests {
             error.to_string().contains(condition),
             "unexpected diagnostic: {error}"
         );
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn immutable_tree_fingerprint_batches_processes_and_reuses_cached_scope() {
+        let root = temporary_repository("tree-batch-cache");
+        fs::write(root.join("one.txt"), "one\n").expect("write first blob");
+        fs::write(root.join("two.txt"), "two\n").expect("write second blob");
+        for args in [
+            vec!["config", "user.name", "Tiber Test"],
+            vec!["config", "user.email", "tiber@example.invalid"],
+            vec!["add", "one.txt", "two.txt"],
+            vec!["commit", "-q", "-m", "Add blobs"],
+        ] {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .expect("run Git fixture command");
+            assert!(output.status.success());
+        }
+        let (_, tree_oid) = canonical_commit_snapshot(&root, "HEAD").expect("resolve tree");
+        let requested = vec!["*.txt".to_string()];
+        let retained = vec![
+            ":(literal)one.txt".to_string(),
+            ":(literal)two.txt".to_string(),
+        ];
+        let mut cache = TreeFinalReviewFingerprintCache::default();
+        let before = FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.load(Ordering::SeqCst);
+        let first = cached_tree_scope_fingerprint(
+            &root, &tree_oid, &requested, &retained, "source", &mut cache,
+        )
+        .expect("fingerprint tree");
+        let after_first = FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.load(Ordering::SeqCst);
+        let second = cached_tree_scope_fingerprint(
+            &root, &tree_oid, &requested, &retained, "source", &mut cache,
+        )
+        .expect("reuse tree fingerprint");
+        let after_second = FINAL_REVIEW_TREE_GIT_PROCESS_COUNT.load(Ordering::SeqCst);
+
+        assert_eq!(first, second);
+        assert_eq!(
+            after_first - before,
+            4,
+            "one read-tree, one pathspec materialization, one ls-tree, and one blob batch"
+        );
+        assert_eq!(after_second, after_first, "cache must spawn no Git process");
         fs::remove_dir_all(root).expect("remove temporary repository");
     }
 
