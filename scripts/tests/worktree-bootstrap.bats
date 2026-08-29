@@ -7,11 +7,11 @@ setup() {
   git -C "$REPO" config user.email test@example.com
   git -C "$REPO" config user.name test
   git -C "$REPO" config commit.gpgsign false
-  mkdir -p "$REPO/scripts" "$REPO/.dependencies/npm/bin"
+  mkdir -p "$REPO/scripts" "$REPO/.direnv/cache"
   cp "$BATS_TEST_DIRNAME/../worktree-ports.sh" "$REPO/scripts/worktree-ports.sh"
   cp "$BOOTSTRAP" "$REPO/scripts/worktree-bootstrap.sh"
   chmod +x "$REPO/scripts/worktree-ports.sh" "$REPO/scripts/worktree-bootstrap.sh"
-  touch "$REPO/.dependencies/npm/bin/example-tool"
+  touch "$REPO/.direnv/cache/devshell"
   git -C "$REPO" add scripts
   git -C "$REPO" commit -q -m seed
 }
@@ -39,24 +39,24 @@ teardown() {
   grep -qx "use flake" "$REPO/.worktrees/feat/.envrc"
 }
 
-@test "warms project-local dependency cache" {
+@test "warms the Nix development-shell cache" {
   git -C "$REPO" worktree add -q "$REPO/.worktrees/cache" -b cache
 
   run bash -c "cd '$REPO/.worktrees/cache' && scripts/worktree-bootstrap.sh"
 
   [ "$status" -eq 0 ]
-  [ -f "$REPO/.worktrees/cache/.dependencies/npm/bin/example-tool" ]
+  [ -f "$REPO/.worktrees/cache/.direnv/cache/devshell" ]
 }
 
-@test "does not copy disposable eval state into linked worktrees" {
-  mkdir -p "$REPO/.dependencies/evals/codex-home-full-marketplace"
-  touch "$REPO/.dependencies/evals/codex-home-full-marketplace/auth.json"
-  git -C "$REPO" worktree add -q "$REPO/.worktrees/evals" -b evals
+@test "does not copy legacy dependency state into linked worktrees" {
+  mkdir -p "$REPO/.dependencies/npm/bin"
+  touch "$REPO/.dependencies/npm/bin/example-tool"
+  git -C "$REPO" worktree add -q "$REPO/.worktrees/legacy" -b legacy
 
-  run bash -c "cd '$REPO/.worktrees/evals' && scripts/worktree-bootstrap.sh"
+  run bash -c "cd '$REPO/.worktrees/legacy' && scripts/worktree-bootstrap.sh"
 
   [ "$status" -eq 0 ]
-  [ ! -e "$REPO/.worktrees/evals/.dependencies/evals" ]
+  [ ! -e "$REPO/.worktrees/legacy/.dependencies" ]
 }
 
 @test "does not mark bootstrap complete when cache warmup fails" {

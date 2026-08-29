@@ -9,6 +9,19 @@ surface, record `applicable` or `not-applicable`, the impact relation
 (`directly-modified`, `consumes`, `generates-from`, `validates`, `ships`, or
 `none`), and repository evidence. File proximity is not an impact relation.
 
+Provider-backed evaluation applies only when the change can alter
+model-mediated behavior, such as instructions, triggers, model-visible schemas
+or results, injected context, prompt construction, routing, fixtures, or
+graders. A plugin-directory path is not sufficient evidence. For deterministic
+installer, packaging, lifecycle, locking, path, state, permission, manifest, or
+non-instructional documentation changes, run the relevant deterministic tests
+and eval-wiring dry run, then explicitly record live behavior evals as not
+applicable. When live evaluation is applicable, name the changed claim and
+metric, then start with the smallest causal case set and an explicit sample
+count justified by that metric; expand to a full-marketplace suite only when a
+shared model-facing surface or marketplace loading is the claim. Use only the
+live harnesses selected by current repository policy.
+
 ## CI recovery record
 
 For a terminal pushed-CI failure, retain four records:

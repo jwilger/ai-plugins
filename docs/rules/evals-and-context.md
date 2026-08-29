@@ -7,8 +7,27 @@ tooling). Re-run the eval whenever the description changes. "Looks good" is not 
 passing condition.
 
 **Minimum-necessary context.** Skills, MCP schemas/descriptions, hooks, and any
-injected context must use the **least context that stays effective** across Claude
-Code, Codex, and future harnesses: progressive disclosure, triggers-only
-descriptions, reference material loaded on demand. Measure each surface's token
-footprint in both harnesses; reject regressions that don't buy proportional
-effectiveness.
+injected context must use the **least context that stays effective** across
+supported harnesses: progressive disclosure, triggers-only descriptions, and
+reference material loaded on demand. Measure model-facing effectiveness and
+token footprint through the canonical Codex harness. Claude compatibility is
+limited to deterministic marketplace validation while its support remains;
+reject context regressions that do not buy proportional effectiveness.
+
+## Match evaluation to the causal surface
+
+Provider-backed evaluation is evidence for stochastic, model-mediated claims,
+not a generic tax on every file below a plugin directory. Require live LLM
+evals when instructions, triggers, model-visible schemas or results, injected
+context, prompt construction, routing, or graders can change what a model does.
+Scope cases and samples to the claim being measured. This repository's live
+behavior evals use the Codex harness only; retaining Claude marketplace support
+does not authorize or require Claude harness evals.
+
+Use deterministic tests for deterministic behavior such as installation,
+packaging, process lifecycle, locking, paths, state directories, permissions,
+manifest synchronization, and non-instructional documentation. A wiring dry
+run may prove that an eval harness still composes, but it is not behavior
+evidence and does not justify spending provider quota when no model-mediated
+behavior changed. Record the applicable deterministic evidence and mark live
+behavior evals not applicable rather than running them reflexively.

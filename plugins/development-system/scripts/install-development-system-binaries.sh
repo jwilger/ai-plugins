@@ -25,10 +25,14 @@ host="$(development_system_host)" || {
 
 version_dir="$data_home/ai-plugins/development-system/$version"
 mkdir -p "$version_dir"
+if ! command -v flock >/dev/null 2>&1; then
+  printf '%s\n' "development_system.flock_unavailable remediation=install_or_activate_a_working_flock" >&2
+  exit 1
+fi
+exec 9>"$version_dir/.install.lock"
+flock -x 9
 if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
   build_dir="$CARGO_TARGET_DIR"
-elif [[ -f "$marketplace_root/justfile" ]]; then
-  build_dir="$marketplace_root/.dependencies/cargo-target/development-system-binaries"
 else
   build_dir="$data_home/ai-plugins/development-system/build-cache/$version/$host"
 fi
@@ -39,12 +43,17 @@ mkdir -p "$build_dir"
 staged_dir=""
 staged_link=""
 previous_target=""
+host_link="$version_dir/$host"
 cleanup() {
   if [[ -n "$staged_link" ]]; then
     rm -f -- "$staged_link"
   fi
   if [[ -n "$staged_dir" ]]; then
-    rm -rf -- "$staged_dir"
+    if [[ -L "$host_link" ]] && [[ "$(readlink "$host_link")" == "$(basename "$staged_dir")" ]]; then
+      : # The atomic rename published this directory before an interruption.
+    else
+      rm -rf -- "$staged_dir"
+    fi
   fi
 }
 trap cleanup EXIT
@@ -71,7 +80,6 @@ staged_link="$(mktemp "$version_dir/.${host}.link.XXXXXX")"
 rm -f -- "$staged_link"
 ln -s "$(basename "$staged_dir")" "$staged_link"
 
-host_link="$version_dir/$host"
 if [[ -L "$host_link" ]]; then
   previous_target="$(readlink "$host_link")"
 fi

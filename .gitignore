@@ -1,5 +1,6 @@
-# Project-local "global" dependency sandbox (npm -g, cargo install, etc.).
-# Provisioned by the Nix devshell; never committed.
+# Legacy project-local package-manager state. No current workflow creates this
+# directory, but existing clones may retain npm credentials or Cargo caches
+# here until the owner removes it.
 /.dependencies/
 /**/.dependencies/
 

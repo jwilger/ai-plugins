@@ -17,7 +17,7 @@ else
   exit 127
 fi
 
-state_root="${PROMPTFOO_MCP_STATE_DIR:-$workspace_root/.dependencies/promptfoo-mcp}"
+state_root="${PROMPTFOO_MCP_STATE_DIR:-$workspace_root/.evals/promptfoo-mcp}"
 mkdir -p "$state_root/home" "$state_root/config" "$state_root/cache"
 
 export HOME="${PROMPTFOO_MCP_HOME:-$state_root/home}"

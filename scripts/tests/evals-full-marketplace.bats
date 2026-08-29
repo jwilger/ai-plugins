@@ -297,13 +297,11 @@ JSON
   [[ "$output" == *"coverage complete"* ]]
 }
 
-@test "generated behavior config expands provider variants across plugin modes" {
+@test "generated behavior config expands the Codex provider across plugin modes" {
   run node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: claude-code-sonnet-full-marketplace"* ]]
-  [[ "$output" == *"label: claude-code-sonnet-targeted-plugins"* ]]
-  [[ "$output" == *"label: claude-code-sonnet-no-plugins"* ]]
+  [[ "$output" != *"label: claude-code-sonnet"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]
@@ -311,52 +309,6 @@ JSON
   [[ "$output" == *"pluginMode: targeted-plugins"* ]]
   [[ "$output" == *"pluginMode: full-marketplace"* ]]
   [[ "$output" == *"load-harness-cases.cjs?pluginMode={{ provider.pluginMode }}"* ]]
-}
-
-@test "filtered behavior config gives Claude targeted provider exactly the selected case plugins" {
-  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture node - "$ROOT" <<'NODE'
-const fs = require('node:fs');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-
-const root = process.argv[2];
-const result = spawnSync(
-  process.execPath,
-  [path.join(root, 'scripts/evals/generate-config.mjs'), '--suite', 'behavior', '--stdout'],
-  { cwd: root, encoding: 'utf8', env: process.env },
-);
-if (result.status !== 0) {
-  process.stderr.write(result.stderr || result.stdout);
-  process.exit(result.status);
-}
-
-function providerPluginPaths(label) {
-  const marker = `    label: ${label}\n`;
-  const start = result.stdout.indexOf(marker);
-  if (start < 0) throw new Error(`missing provider ${label}`);
-  const next = result.stdout.indexOf('\n  - id:', start + marker.length);
-  const section = result.stdout.slice(start, next < 0 ? undefined : next);
-  return [...section.matchAll(/^\s+path: "([^"]+)"$/gm)]
-    .map((match) => match[1])
-    .sort();
-}
-
-const targeted = providerPluginPaths('claude-code-sonnet-targeted-plugins');
-const full = providerPluginPaths('claude-code-sonnet-full-marketplace');
-const expectedTargeted = [path.join(root, 'plugins/development-system')];
-const expectedFull = JSON.parse(
-  fs.readFileSync(path.join(root, '.claude-plugin/marketplace.json'), 'utf8'),
-).plugins.map(({ name }) => path.join(root, 'plugins', name)).sort();
-
-if (JSON.stringify(targeted) !== JSON.stringify(expectedTargeted)) {
-  throw new Error(`targeted provider paths ${JSON.stringify(targeted)} != ${JSON.stringify(expectedTargeted)}`);
-}
-if (JSON.stringify(full) !== JSON.stringify(expectedFull)) {
-  throw new Error(`full provider paths ${JSON.stringify(full)} != ${JSON.stringify(expectedFull)}`);
-}
-NODE
-
-  [ "$status" -eq 0 ]
 }
 
 @test "generated metadata records exact filtered provider plugin compositions" {
@@ -375,11 +327,8 @@ NODE
     def plugins($label):
       [.providerCompositions[] | select(.label == $label) | .plugins] | first;
     (.providerLabels | sort) == ([.providerCompositions[].label] | sort)
-      and plugins("claude-code-sonnet-targeted-plugins") == ["development-system"]
       and plugins("codex-gpt-5.6-terra-targeted-plugins") == ["development-system"]
-      and plugins("claude-code-sonnet-no-plugins") == []
       and plugins("codex-gpt-5.6-terra-no-plugins") == []
-      and plugins("claude-code-sonnet-full-marketplace") == ["development-system"]
       and plugins("codex-gpt-5.6-terra-full-marketplace") == ["development-system"]
   ' "$generated_metadata"
   run node - "$generated_config" "$generated_metadata" <<'NODE'

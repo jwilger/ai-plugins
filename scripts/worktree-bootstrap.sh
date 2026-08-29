@@ -16,18 +16,6 @@ marker="$git_dir/.ai-plugins-worktree-bootstrapped"
 worktree="$(git rev-parse --show-toplevel)"
 main="$(cd "$common_dir/.." && pwd -P)"
 
-if [ -d "$main/.dependencies" ] && [ ! -e "$worktree/.dependencies" ]; then
-  mkdir -p "$worktree/.dependencies"
-  for cache_entry in \
-    "$main/.dependencies"/* \
-    "$main/.dependencies"/.[!.]* \
-    "$main/.dependencies"/..?*; do
-    [ -e "$cache_entry" ] || [ -L "$cache_entry" ] || continue
-    [ "${cache_entry##*/}" != evals ] || continue
-    cp -a "$cache_entry" "$worktree/.dependencies/"
-  done
-fi
-
 if [ -d "$main/.direnv" ] && [ ! -e "$worktree/.direnv" ]; then
   mkdir -p "$worktree/.direnv"
   cp -a "$main/.direnv/." "$worktree/.direnv/"

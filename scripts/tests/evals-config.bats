@@ -102,7 +102,7 @@ MD
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"openai:codex-sdk"* ]]
-  [[ "$output" == *"anthropic:claude-agent-sdk"* ]]
+  [[ "$output" != *"anthropic:claude-agent-sdk"* ]]
   [[ "$output" == *"Answer the scenario directly as a stateless advisory question"* ]]
   [[ "$output" == *"If you recommend a command, give its exact name and flags"* ]]
   [[ "$output" == *"Apply any available instructions relevant to the scenario."* ]]
@@ -120,10 +120,6 @@ MD
   [[ "$output" == *"skip_git_repo_check: true"* ]]
   [[ "$output" == *"working_dir: \"$expected_eval_workspace\""* ]]
   [[ "$output" != *"working_dir: \"$ROOT/"* ]]
-  [[ "$output" == *"skills: all"* ]]
-  [[ "$output" == *"setting_sources: []"* ]]
-  [[ "$output" == *"persist_session: false"* ]]
-  [[ "$output" == *"disallowed_tools:"*$'\n'"        - Bash"* ]]
   [[ "$output" == *"load-harness-cases.cjs"* ]]
 }
 
@@ -134,11 +130,11 @@ MD
   [[ "$output" == *"$ROOT/.evals/codex-home-full-marketplace"* && "$output" != *"$ROOT/.dependencies/evals/"* ]]
 }
 
-@test "generated config uses local Claude Code and Codex auth for providers and graders" {
+@test "generated config uses local Codex auth for providers and graders" {
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"apiKeyRequired: false"* ]]
+  [[ "$output" != *"apiKeyRequired: false"* ]]
   [[ "$output" == *"provider:"*$'\n'"      text:"*$'\n'"        id: openai:codex-sdk"* ]]
   [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME)"* ]]
   [[ "$output" != *"openai:gpt-5-mini"* ]]
@@ -215,10 +211,12 @@ JSON
 }
 
 @test "generated claude plugin paths are absolute so generated configs can move" {
-  run node "$GENERATOR" --suite behavior --stdout
+  make_codex_only_eval_fixture
+
+  run node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"path: \"$ROOT/plugins/development-system\""* ]]
+  [[ "$output" == *"path: \"$FIXTURE_TMP/plugins/shared\""* ]]
   [[ "$output" != *"path: \"./plugins/"* ]]
 }
 

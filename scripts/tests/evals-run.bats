@@ -43,15 +43,13 @@ teardown() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: scripts/evals/run.sh"* ]]
-  [[ "$output" == *"Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all"* ]]
-  [[ "$output" == *"Codex:       provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium"* ]]
+  [[ "$output" == *"Codex: provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium"* ]]
   [[ "$output" == *"CODEX_GRADER_MODEL            (default: gpt-5.6-sol)"* ]]
   [[ "$output" == *"CODEX_GRADER_REASONING_EFFORT (default: high)"* ]]
-  [[ "$output" == *"Each provider loads the relevant marketplace surface for its harness"* ]]
+  [[ "$output" == *"The provider loads the relevant Codex marketplace surface"* ]]
   [[ "$output" == *"Pinned eval packages are managed by package.json and package-lock.json"* ]]
-  [[ "$output" == *"@openai/codex-sdk"* ]]
-  [[ "$output" == *"@anthropic-ai/claude-agent-sdk"* ]]
-  [[ "$output" == *"Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions"* ]]
+  [[ "$output" != *"@anthropic-ai/claude-agent-sdk"* ]]
+  [[ "$output" == *"Local runs reuse the existing Codex/ChatGPT subscription session"* ]]
   [[ "$output" == *"They do not require provider API keys or fresh approval for repository-owned evals"* ]]
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
   [[ "$output" == *"EVAL_PROVIDER_FILTER"* ]]
@@ -485,16 +483,11 @@ SH
   rm -rf "$fixture_root"
 }
 
-@test "eval runner dry-run prepares only Codex grader home for Claude-only provider filter" {
+@test "eval runner rejects the retired Claude provider filter" {
   run env EVAL_PROVIDER_FILTER=claude "$RUNNER" --dry-run
 
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"generate-config.mjs"* ]]
-  [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
-  [[ "$output" == *"--plugin-mode full-marketplace"* ]]
-  [[ "$output" != *"--plugin-mode no-plugins"* ]]
-  [[ "$output" != *"--plugin-mode targeted-plugins"* ]]
-  [[ "$output" == *"promptfoo eval"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no providers match EVAL_PROVIDER_FILTER=claude"* ]]
 }
 
 @test "eval runner dry-run prepares only selected Codex plugin mode" {
@@ -535,12 +528,11 @@ SH
   [[ "$output" != *"timeout --kill-after"* ]]
 }
 
-@test "generated eval config can filter providers" {
+@test "generated eval config rejects the retired Claude provider filter" {
   run env EVAL_PROVIDER_FILTER=claude node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"label: claude-code-sonnet-full-marketplace"* ]]
-  [[ "$output" != *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no providers match EVAL_PROVIDER_FILTER=claude"* ]]
 }
 
 @test "generated eval config exact provider variant filter selects one full-marketplace provider" {
@@ -594,7 +586,7 @@ SH
 
   rm -rf "$fixture_root"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"PROMPTFOO_CONFIG_DIR=$fixture_root/.dependencies/promptfoo"* ]]
+  [[ "$output" == *"PROMPTFOO_CONFIG_DIR=$fixture_root/.evals/promptfoo"* ]]
 }
 
 @test "eval threshold checker honors case min pass rates" {

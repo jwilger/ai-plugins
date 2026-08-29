@@ -35,16 +35,16 @@ Use the Nix devshell — do not install global toolchains by hand.
 nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats, lefthook
 ```
 
-**Critical convention:** anything npm would normally install "globally" must
-land in the git-ignored `./.dependencies/` directory, not in `$HOME`. The
-devshell enforces this by setting `NPM_CONFIG_PREFIX` and `NPM_CONFIG_CACHE` to
-point inside `./.dependencies/` and prepending the local npm `bin/` dir to
-`PATH`. So:
+The devshell supplies the repository toolchain directly. It does not redirect
+global package installations or caches into the checkout. Under the supported
+workflow it runs inside the MicroVM, so ordinary npm and Cargo user state stays
+in the VM's persistent home rather than appearing in the repository or the
+developer's normal host home.
 
-- `npm install -g <pkg>` → installs to `./.dependencies/npm/`
-
-Never commit `./.dependencies/`. If the environment looks broken, `rm -rf
-.dependencies` and re-enter the devshell.
+Older checkouts may retain a now-unused `.dependencies/` tree containing npm
+configuration or Cargo caches. It remains ignored as migration containment;
+after checking that it contains nothing you need, remove it once with `rm -rf
+.dependencies` from each checkout.
 
 The Promptfoo eval runner is the exception to the "no root npm project" shape:
 `package.json` and `package-lock.json` are committed so Promptfoo can resolve
@@ -123,10 +123,9 @@ launchers have been refreshed with `just worktree-hooks`.
 
 For each linked worktree, the bootstrap:
 
-- copies warm local dependency and devshell caches from the main checkout when
-  present: `.dependencies/` and `.direnv/`; legacy `.dependencies/evals/`
-  state is excluded, while current disposable eval state lives per worktree
-  under the git-ignored `.evals/` directory;
+- copies the warm `.direnv/` devshell cache from the main checkout when present;
+  disposable eval state remains per-worktree under the git-ignored `.evals/`
+  directory;
 - creates a local `.envrc` with `use flake` if the worktree does not already
   have one;
 - writes `.env.worktree` with stable, slot-based `PORT`, `PG_PORT`,
@@ -223,11 +222,29 @@ find plugins -name plugin.json -exec jq empty {} \;  # every plugin manifest val
 prettier --check "**/*.{json,md}"                 # formatting (use --write to fix)
 ```
 
-For every plugin in this marketplace, when modifying anything under `plugins/`
-that could affect plugin or skill behavior, run the full relevant eval set
-before claiming completion. Behavior evals for the marketplace run through
-promptfoo's native Claude Code and Codex coding-agent providers, loading the
-relevant marketplace surface for each harness:
+Run provider-backed behavior evals only when a change can plausibly alter
+model-mediated behavior: skill/command/agent instructions, triggers or
+descriptions, injected context, MCP tool schemas/descriptions/results consumed
+by a model, prompt assembly, model/provider routing, hooks that change model
+context, or the behavior fixtures and graders themselves. Do not run live LLM
+evals merely because a changed file lives under `plugins/` or because a plugin
+version changed.
+
+Deterministic plugin infrastructure does not require provider-backed evals when
+the changed behavior is fully exercised without a model. Examples include
+installer paths and locking, launcher process/state handling, cache locations,
+manifest/version synchronization, packaging, filesystem permissions, and
+documentation that does not change agent instructions. For those changes, run
+the relevant unit/integration/acceptance tests, manifest validation, and eval
+configuration dry run. In delivery notes, state that live behavior evals were
+not applicable and name the deterministic evidence instead.
+
+When live evals are applicable, choose the smallest suite, cases, and sample
+count that measure the changed claim. Use the full-marketplace set only when
+the change affects a shared model-facing surface or when end-to-end marketplace
+loading is itself the claim. Canonical live behavior evals run through
+promptfoo's native Codex coding-agent provider. Do not run Claude harness evals;
+Claude marketplace support remains in scope until a separate removal change.
 
 ```shell
 just evals
@@ -244,13 +261,13 @@ with Ctrl-C, `just evals` exits immediately and does not share.
 
 `scripts/evals/run.sh --dry-run` only validates promptfoo wiring and is useful
 for pull-request CI without secrets; it is not behavior evidence. Provider-backed
-runs require working Claude Code and Codex authentication. The runner restores
-the pinned npm dev dependencies from `package-lock.json`, generates promptfoo
-config from the current marketplace manifests, prepares a `CODEX_EVAL_HOME`
-with every Codex marketplace plugin, configures Claude with `apiKeyRequired: false`, uses
-Codex as the default model-graded assertion provider, and disables prompt
-response caching and hosted sharing so generated artifacts are fresh and
-repo-owned. Run `scripts/evals/run.sh --suite canary` to prove full-marketplace
+runs require working Codex authentication. The runner restores the pinned npm
+dev dependencies from `package-lock.json`, generates promptfoo config from the
+current Codex marketplace manifest, prepares a `CODEX_EVAL_HOME` with every
+Codex marketplace plugin, uses Codex as the default model-graded assertion
+provider, and disables prompt response caching and hosted sharing so generated
+artifacts are fresh and repo-owned. Run `scripts/evals/run.sh --suite canary`
+to prove full-marketplace
 plugin loading before relying on behavior results. The optional Promptfoo MCP
 definition retained under
 `plugins/development-system/components/agentic-systems-engineering/` is internal
@@ -273,22 +290,21 @@ plugin-eval benchmark plugins/<plugin-name>/skills/<skill-name> --config <benchm
 ```
 
 If `plugin-eval` is not on `PATH`, run the installed plugin-eval script directly
-from the local Codex plugin cache. If Claude Code has an equivalent evaluator for
-the changed plugin or skill, run that too. Include eval results in the PR notes
-alongside `just ci`. Do not wire provider-backed evals into untrusted PR gates
-unless that automation is explicitly requested and secrets are protected.
+from the local Codex plugin cache. Do not run a Claude equivalent evaluator.
+Include applicable eval results in the PR notes alongside `just ci`. Do not wire
+provider-backed evals into untrusted PR gates unless that automation is
+explicitly requested and secrets are protected.
 
 ### Standing authorization for repository-owned live evals
 
 The repository owner grants standing approval to run repository-owned
-provider-backed evals and benchmarks through both supported coding harnesses:
+provider-backed evals and benchmarks through Codex CLI using the owner's
+existing ChatGPT/OpenAI subscription authentication. This authorization does
+not extend to Claude harness evals.
 
-- Claude Code using the owner's existing Claude/Anthropic subscription authentication.
-- Codex CLI using the owner's existing ChatGPT/OpenAI subscription authentication.
-
-Local execution reuses those authenticated harness sessions and does not
+Local execution reuses that authenticated harness session and does not
 require provider API keys or fresh approval merely because an authorized
-repository-owned eval uses either provider. This authorization includes sending
+repository-owned eval uses Codex. This authorization includes sending
 this repository's purpose-built fixtures and prompts to the corresponding
 provider. It does not authorize sending secrets, private client data,
 proprietary unrelated content, or unrelated workspace files. Keep generated
@@ -322,9 +338,9 @@ per-input reliability, pass@k capability, pass^k reliability, stochastic judge
 variance, or close A/B comparisons. Do not treat `k` as a ritual substitute for
 better fixtures.
 
-For a Claude-supported plugin, an end-to-end check in Claude Code is
-`/plugin marketplace add .` then `/plugin install <plugin-name>@ai-plugins`.
-Skip this for Codex-only plugins.
+Do not run Claude Code end-to-end plugin checks. While Claude marketplace
+support remains, validate that surface deterministically through its manifests,
+version synchronization, and marketplace consistency checks.
 
 ## Conventions
 

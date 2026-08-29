@@ -81,7 +81,7 @@ The Codex manifest includes an optional Promptfoo MCP server. The bundled
 `bin/promptfoo-mcp` launcher runs `promptfoo mcp --transport stdio`, prefers
 `PROMPTFOO_BIN`, then a project-local `node_modules/.bin/promptfoo`, then
 `promptfoo` on `PATH`, and keeps Promptfoo state under a writable
-`.dependencies/promptfoo-mcp/` directory by default. Use it from Codex to
+`.evals/promptfoo-mcp/` directory by default. Use it from Codex to
 validate promptfoo configs, run focused eval slices, inspect prior results, and
 develop new eval cases. Keep release evidence on the canonical runner and
 generated repo-owned artifacts.

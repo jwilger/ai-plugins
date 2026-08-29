@@ -752,9 +752,10 @@
           default = pkgs.mkShell {
           name = "ai-plugins";
 
-          # Toolchain provided by Nix. Anything installed globally outside Nix
-          # (npm -g, etc.) is redirected into ./.dependencies/ by the shellHook
-          # below so it never leaks into your home directory.
+          # The complete project toolchain is provided by Nix. Package-manager
+          # state uses the guest's persistent home when this shell runs in the
+          # MicroVM; the shell deliberately carries no checkout-local global
+          # install or cache overrides.
           packages =
             (with pkgs; [
               bash
@@ -805,30 +806,8 @@
             export AI_PLUGINS_LEFTHOOK_STORE_PATH="${pkgs.lefthook}"
             export AI_PLUGINS_LEFTHOOK_VERSION="${pkgs.lefthook.version}"
 
-            # --- Project-local "global" dependency sandbox ---------------------
-            # Everything a package manager would normally drop into $HOME instead
-            # lands in ./.dependencies/ (git-ignored). Blow it away any time with
-            # `rm -rf .dependencies` to get a clean slate.
-            export DEPENDENCIES_DIR="$PWD/.dependencies"
-            mkdir -p \
-              "$DEPENDENCIES_DIR/npm/bin" \
-              "$DEPENDENCIES_DIR/npm-cache" \
-              "$DEPENDENCIES_DIR/cargo"
-
-            # npm / node — `npm install -g <pkg>` installs here, bins on PATH.
-            export NPM_CONFIG_PREFIX="$DEPENDENCIES_DIR/npm"
-            export NPM_CONFIG_CACHE="$DEPENDENCIES_DIR/npm-cache"
-            export NPM_CONFIG_USERCONFIG="$DEPENDENCIES_DIR/npmrc"
-
-            # Cargo — project-local installs and registry state stay out of $HOME.
-            export CARGO_HOME="$DEPENDENCIES_DIR/cargo"
-            export CARGO_INSTALL_ROOT="$CARGO_HOME"
-
-            export PATH="$CARGO_INSTALL_ROOT/bin:$DEPENDENCIES_DIR/npm/bin:$PATH"
-
             echo "ai-plugins devshell ready."
             echo "  just:  $(just --version) · node $(node --version) · npm $(npm --version)"
-            echo "  Global npm installs -> ./.dependencies/ (git-ignored)"
           '';
           };
         }

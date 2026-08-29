@@ -110,7 +110,7 @@ initialize_codex_plugin_server() {
     "$ROOT/plugins/development-system/components/development-discipline/bin/development-discipline-mcp" ]
 }
 
-@test "promptfoo component manifest starts with repo-local dependencies and isolated state" {
+@test "promptfoo component manifest starts with the repo-local binary and isolated state" {
   local manifest="$ROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json"
   local command
   command="$(manifest_command "$manifest" promptfoo)"
@@ -125,6 +125,21 @@ initialize_codex_plugin_server() {
   [ -d "$TMPROOT/promptfoo-state/home" ]
   [ -d "$TMPROOT/promptfoo-state/config" ]
   [ -d "$TMPROOT/promptfoo-state/cache" ]
+}
+
+@test "promptfoo component defaults disposable state to the eval runtime directory" {
+  local command="$ROOT/plugins/development-system/components/agentic-systems-engineering/bin/promptfoo-mcp"
+  local workspace="$TMPROOT/promptfoo-workspace"
+  mkdir -p "$workspace"
+
+  run bash -c 'cd "$1" && PROMPTFOO_BIN="$2" "$3" </dev/null' _ \
+    "$workspace" "$ROOT/node_modules/.bin/promptfoo" "$command"
+
+  [ "$status" -eq 0 ]
+  [ -d "$workspace/.evals/promptfoo-mcp/home" ]
+  [ -d "$workspace/.evals/promptfoo-mcp/config" ]
+  [ -d "$workspace/.evals/promptfoo-mcp/cache" ]
+  [ ! -e "$workspace/.dependencies" ]
 }
 
 @test "tiber component manifest initializes without an installed marketplace cache" {
@@ -216,10 +231,141 @@ initialize_codex_plugin_server() {
   [ "${directories[1]}" = "$discipline_rust" ]
 }
 
+@test "the host-local bootstrap keeps its default build cache outside the checkout" {
+  local fake_bin="$TMPROOT/default-cargo-bin"
+  local fake_cargo="$fake_bin/cargo"
+  local target_log="$TMPROOT/default-cargo-targets"
+  local data_home="$TMPROOT/default-cargo-xdg-data"
+
+  mkdir -p "$fake_bin"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'if [[ "$1" == "--version" ]]; then echo "cargo fake"; exit 0; fi' \
+    'binary=""' \
+    'while [[ $# -gt 0 ]]; do' \
+    '  if [[ "$1" == "--bin" ]]; then binary="$2"; shift 2; continue; fi' \
+    '  shift' \
+    'done' \
+    'printf "%s\\n" "$CARGO_TARGET_DIR" >> "$CARGO_TARGET_LOG"' \
+    'mkdir -p "$CARGO_TARGET_DIR/release"' \
+    'printf "%s\\n" "#!/bin/sh" "exit 0" > "$CARGO_TARGET_DIR/release/$binary"' \
+    'chmod +x "$CARGO_TARGET_DIR/release/$binary"' >"$fake_cargo"
+  chmod +x "$fake_cargo"
+
+  run env -u CARGO_TARGET_DIR \
+    PATH="$fake_bin:$PATH" \
+    CARGO_TARGET_LOG="$target_log" \
+    XDG_DATA_HOME="$data_home" \
+    "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$target_log")" -eq 2 ]
+  while IFS= read -r target; do
+    [[ "$target" == "$data_home/ai-plugins/development-system/build-cache/"* ]]
+    [[ "$target" != "$ROOT/"* ]]
+  done <"$target_log"
+}
+
+@test "concurrent host-local bootstrap runs serialize the shared build cache" {
+  local fake_bin="$TMPROOT/concurrent-cargo-bin"
+  local fake_cargo="$fake_bin/cargo"
+  local data_home="$TMPROOT/concurrent-cargo-xdg-data"
+  local sentinel="$TMPROOT/cargo-concurrency-sentinel"
+  local status_dir="$TMPROOT/concurrent-status"
+
+  mkdir -p "$fake_bin" "$status_dir"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'if [[ "$1" == "--version" ]]; then echo "cargo fake"; exit 0; fi' \
+    'binary=""' \
+    'while [[ $# -gt 0 ]]; do' \
+    '  if [[ "$1" == "--bin" ]]; then binary="$2"; shift 2; continue; fi' \
+    '  shift' \
+    'done' \
+    'mkdir "$CARGO_CONCURRENCY_SENTINEL" || exit 99' \
+    'trap '\''rmdir "$CARGO_CONCURRENCY_SENTINEL"'\'' EXIT' \
+    'sleep 0.2' \
+    'mkdir -p "$CARGO_TARGET_DIR/release"' \
+    'printf "%s\\n" "#!/bin/sh" "exit 0" > "$CARGO_TARGET_DIR/release/$binary"' \
+    'chmod +x "$CARGO_TARGET_DIR/release/$binary"' >"$fake_cargo"
+  chmod +x "$fake_cargo"
+
+  run env -u CARGO_TARGET_DIR \
+    ROOT="$ROOT" \
+    PATH="$fake_bin:$PATH" \
+    CARGO_CONCURRENCY_SENTINEL="$sentinel" \
+    XDG_DATA_HOME="$data_home" \
+    STATUS_DIR="$status_dir" \
+    bash -c '
+      "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" >"$STATUS_DIR/one.log" 2>&1 & one=$!
+      "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" >"$STATUS_DIR/two.log" 2>&1 & two=$!
+      wait "$one"; one_status=$?
+      wait "$two"; two_status=$?
+      printf "%s %s\n" "$one_status" "$two_status"
+    '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "0 0" ]
+}
+
+@test "an interruption after publication preserves the installed binaries" {
+  local fake_bin="$TMPROOT/interrupted-install-bin"
+  local fake_cargo="$fake_bin/cargo"
+  local fake_mv="$fake_bin/mv"
+  local data_home="$TMPROOT/interrupted-install-xdg-data"
+  local real_mv
+  local host
+  local version="5.5.0"
+
+  real_mv="$(command -v mv)"
+  host="$(source "$ROOT/plugins/development-system/lib/installed-binary.sh"; development_system_host)"
+  mkdir -p "$fake_bin"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'if [[ "$1" == "--version" ]]; then echo "cargo fake"; exit 0; fi' \
+    'binary=""' \
+    'while [[ $# -gt 0 ]]; do' \
+    '  if [[ "$1" == "--bin" ]]; then binary="$2"; shift 2; continue; fi' \
+    '  shift' \
+    'done' \
+    'mkdir -p "$CARGO_TARGET_DIR/release"' \
+    'printf "%s\\n" "#!/bin/sh" "exit 0" > "$CARGO_TARGET_DIR/release/$binary"' \
+    'chmod +x "$CARGO_TARGET_DIR/release/$binary"' >"$fake_cargo"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'published=false' \
+    'for argument in "$@"; do [[ "$argument" == *".link."* ]] && published=true; done' \
+    '"$REAL_MV" "$@"' \
+    'if [[ "$published" == true ]]; then kill -TERM "$PPID"; sleep 1; fi' >"$fake_mv"
+  chmod +x "$fake_cargo" "$fake_mv"
+
+  run env -u CARGO_TARGET_DIR \
+    PATH="$fake_bin:$PATH" \
+    REAL_MV="$real_mv" \
+    XDG_DATA_HOME="$data_home" \
+    "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh"
+
+  [ "$status" -ne 0 ]
+  [ -x "$data_home/ai-plugins/development-system/$version/$host/tiber" ]
+  [ -x "$data_home/ai-plugins/development-system/$version/$host/development-discipline-mcp" ]
+}
+
+@test "legacy dependency state remains ignored during migration" {
+  local legacy="$ROOT/.dependencies/npmrc"
+
+  run git -C "$ROOT" check-ignore -q "$legacy"
+
+  [ "$status" -eq 0 ]
+}
+
 @test "the host-local bootstrap normalizes a relative Cargo target directory" {
   local fake_bin="$TMPROOT/relative-cargo-bin"
   local fake_cargo="$fake_bin/cargo"
-  local relative_target=".dependencies/test-cargo-target-$BATS_TEST_NUMBER"
+  local relative_target="target/test-cargo-target-$BATS_TEST_NUMBER"
   local expected_target="$ROOT/$relative_target"
 
   mkdir -p "$fake_bin"

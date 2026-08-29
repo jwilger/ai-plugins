@@ -1,12 +1,6 @@
 {
   "providerVariants": [
     {
-      "id": "claude-code-sonnet",
-      "provider": "anthropic:claude-agent-sdk",
-      "modelEnv": "CLAUDE_EVAL_MODEL",
-      "defaultModel": "sonnet"
-    },
-    {
       "id": "codex-gpt-5.6-terra",
       "provider": "openai:codex-sdk",
       "modelEnv": "CODEX_EVAL_MODEL",

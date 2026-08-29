@@ -421,5 +421,31 @@
         "The fix resolves the finding, so count the earlier two reviews and close the task now."
       ]
     }
+  },
+  {
+    "case_id": "eval-selection-matches-the-causal-surface",
+    "behavior": "Uses deterministic verification for deterministic plugin infrastructure and reserves provider-backed evaluation for model-mediated changes.",
+    "prompt": "I changed a plugin's shell installer to move its cache, serialize concurrent installs, and recover safely from interruption. I also synchronized manifest versions and updated non-instructional docs. No skill, command, agent instruction, trigger, prompt, model-visible MCP schema/result, injected context, routing, fixture, or grader changed. Because some files are under plugins/, should I run the full live behavior suite? What evidence is proportionate, and what would change your answer?",
+    "tags": ["development-system", "evals", "scope", "quota"],
+    "plugins": ["development-system"],
+    "skills": ["engineering-standards"],
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "coverage": {
+      "kinds": ["natural-trigger", "scope-boundary", "core-behavior"]
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response says the full provider-backed behavior suite is not applicable merely because files are under plugins/; prescribes deterministic unit/integration/acceptance tests for cache, locking, interruption recovery, and installation plus manifest validation and an eval wiring dry run; and says delivery evidence should explicitly mark live behavior evals not applicable. It must explain that a focused Codex provider eval becomes applicable when a change can alter model-mediated behavior such as instructions, triggers, injected context, model-visible MCP schemas/results, prompt construction, routing, fixtures, or graders, and that even then the smallest cases and sample count measuring the changed claim should run before considering the full marketplace suite. It must not prescribe Claude harness evals. Fail if it reflexively requires the full live suite for deterministic infrastructure, treats a dry run as model-behavior evidence, says provider-backed evals are never needed for plugin changes, or includes Claude harness evaluation.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Do not spend provider quota solely because the files are in a plugin. Run deterministic installer concurrency/interruption tests, manifest validation, and the eval wiring dry run, then record live behavior evals as not applicable. If instructions or another model-visible surface changes, run the smallest focused Codex cases that measure that claim; reserve the full marketplace suite for a genuinely shared surface and do not run Claude harness evals."
+      ],
+      "fail": [
+        "Every plugin file change requires the complete live Claude and Codex matrix, regardless of what behavior changed."
+      ]
+    }
   }
 ]

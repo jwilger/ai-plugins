@@ -53,15 +53,13 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/evals/run.sh [--suite behavior|canary] [config]
 
-Runs provider-backed promptfoo evals through Claude Code and Codex.
-Each provider loads the relevant marketplace surface for its harness.
+Runs provider-backed promptfoo evals through Codex.
+The provider loads the relevant Codex marketplace surface.
 
 Default harness posture:
-  Claude Code: provider=anthropic:claude-agent-sdk, model=sonnet, skills=all
-  Codex:       provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium
+  Codex: provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium
 
 Environment overrides:
-  CLAUDE_EVAL_MODEL
   CODEX_EVAL_MODEL
   CODEX_EVAL_REASONING_EFFORT
   CODEX_GRADER_MODEL            (default: gpt-5.6-sol)
@@ -83,10 +81,9 @@ Environment overrides:
                                 must be outside this repository and ancestor instructions)
 
 Prompt response caching and hosted sharing are disabled for behavior evidence.
-Pinned eval packages are managed by package.json and package-lock.json:
-promptfoo, @openai/codex-sdk, and @anthropic-ai/claude-agent-sdk.
+Pinned eval packages are managed by package.json and package-lock.json.
 
-Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions.
+Local runs reuse the existing Codex/ChatGPT subscription session.
 They do not require provider API keys or fresh approval for repository-owned evals.
 
 Writes repo-owned artifacts:
@@ -509,8 +506,8 @@ if [ "$generated_config" -eq 1 ]; then
 fi
 
 export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
-export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$root/.dependencies/promptfoo}"
-export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.dependencies/promptfoo-cache}"
+export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$root/.evals/promptfoo}"
+export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.evals/promptfoo-cache}"
 export PROMPTFOO_CACHE_TTL="${PROMPTFOO_CACHE_TTL:-86400}"
 export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.evals/codex-home-full-marketplace}"
 export CODEX_EVAL_HOME_FULL_MARKETPLACE="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-$CODEX_EVAL_HOME}"

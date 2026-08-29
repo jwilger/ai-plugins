@@ -25,7 +25,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harnesses          | Description                                                                                          | Version |
 | ---------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 5.4.0   |
+| [development-system](plugins/development-system/README.md) | Codex, Claude Code | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 5.5.0   |
 
 ## Using the marketplace (Claude Code)
 
@@ -85,9 +85,13 @@ nix develop        # enter the devshell
 echo "use flake" > .envrc && direnv allow
 ```
 
-Any **globally installed** npm tooling (`npm install -g …`) is redirected into a
-git-ignored `./.dependencies/` directory by the devshell, so it never pollutes
-your home directory. Delete that directory any time for a clean slate.
+The devshell does not install or redirect package-manager state into the
+checkout. In the supported MicroVM workflow, ordinary npm and Cargo user state
+is confined to the VM's persistent home.
+
+If an older checkout still has `.dependencies/`, inspect and remove that legacy
+cache once. It remains ignored only to prevent old npm configuration or build
+state from being staged accidentally during migration.
 
 This repo also has a committed `package.json`/`package-lock.json` for the local
 Promptfoo eval runner. `node_modules/` is ignored and restored with `npm ci`;
@@ -103,8 +107,8 @@ The repo-owned eval dashboard is generated under `site/evals/` by
 and workflow uploads; the durable record is repo-owned and does not depend on
 promptfoo-hosted sharing.
 
-Local runs reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription
-sessions. They do not require provider API keys or fresh approval for the
+Local runs reuse the existing Codex/ChatGPT subscription session. They do not
+require provider API keys or fresh approval for the
 repository-owned evals authorized in [`AGENTS.md`](AGENTS.md). Unattended trusted
 automation may instead use protected provider credentials when interactive
 harness sessions are unavailable; untrusted pull-request checks remain
@@ -115,33 +119,28 @@ threshold status, exact installed provider compositions, and separate
 case-target plugin/skill summaries so regressions can be traced back to both the
 loaded marketplace surface and the behavior each scenario exercises.
 
-The canonical promptfoo behavior evals run through Promptfoo's native coding
-agent providers: `anthropic:claude-agent-sdk` for Claude Code and
-`openai:codex-sdk` for Codex. The runner generates the promptfoo config from
-the current marketplace manifests and labels no-plugin, targeted-plugin, and
-full-marketplace behavior modes. Codex uses a separate generated home for each
-mode. For both harnesses, targeted mode installs the deterministic, deduplicated
-union of plugins declared by the selected behavior cases; `EVAL_CASE_FILTER`
-therefore narrows both the cases and their installed plugin set. Full-marketplace
-mode still installs the complete harness-specific catalog, while no-plugin mode
-installs none. The generated config records each provider's exact installed
-composition separately from the plugins targeted by an individual case. An
-unfiltered targeted run equals the full catalog in both harnesses today because
-the marketplace has one public plugin and the selected cases target it. The two
-modes remain distinct controls for filtered runs and future catalog changes.
-Promptfoo is pinned at `0.121.18`;
-the Promptfoo, Codex SDK, and Claude Agent SDK packages are pinned in
-`package.json` and `package-lock.json`. The runner disables prompt response
-caching and hosted sharing so a behavior run is a fresh local record.
+The canonical promptfoo behavior evals run through Promptfoo's native
+`openai:codex-sdk` coding-agent provider. Claude marketplace support remains,
+but this repository no longer runs Claude harness evals. The runner generates
+the promptfoo config from the current Codex marketplace manifest and labels
+no-plugin, targeted-plugin, and full-marketplace behavior modes. Codex uses a
+separate generated home for each mode. Targeted mode installs the deterministic,
+deduplicated union of plugins declared by the selected behavior cases;
+`EVAL_CASE_FILTER` therefore narrows both the cases and their installed plugin
+set. Full-marketplace mode installs the complete Codex catalog, while no-plugin
+mode installs none. The generated config records the exact installed composition
+separately from the plugins targeted by an individual case. An unfiltered
+targeted run equals the full catalog today because the marketplace has one
+public plugin and the selected cases target it. The two modes remain distinct
+controls for filtered runs and future catalog changes.
+Promptfoo is pinned at `0.121.18`; Promptfoo and the provider SDK packages are
+pinned in `package.json` and `package-lock.json`. The Claude Agent SDK remains
+pinned while Claude marketplace support is retained, but the canonical runner
+does not invoke it. The runner disables prompt response caching and hosted
+sharing so a behavior run is a fresh local record.
 
 Default eval harness posture:
 
-- Claude Code: `anthropic:claude-agent-sdk`, Sonnet 5 via the `sonnet` alias,
-  local Claude Code authentication via `apiKeyRequired: false`, and all local
-  plugins with `skills: all`. The intended human-facing Claude Code posture
-  remains Sonnet high effort with Opus 4.8 advisor where that harness exposes
-  those controls; Promptfoo's current Claude Agent SDK provider does not expose
-  those knobs in this repo's generated config.
 - Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with
   `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
   deep tracing disabled, and isolated generated homes containing no plugins,
@@ -173,8 +172,7 @@ live samples.
 
 Pull-request CI validates the eval configuration with `--dry-run` but does not
 claim behavior evidence. Provider-backed behavior evidence comes from local,
-scheduled, manual, or `main` runs where Claude Code and Codex authentication are
-available.
+scheduled, manual, or `main` runs where Codex authentication is available.
 
 To produce the same artifacts locally:
 
