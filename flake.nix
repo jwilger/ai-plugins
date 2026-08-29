@@ -219,6 +219,74 @@
                 source.unlink(missing_ok=True)
                 PY
               '';
+              mountShares = pkgs.writeShellScript "codex-vm-mount-shares" ''
+                set -euo pipefail
+                runtime=/run/codex-vm-shares
+                manifest=/run/codex-vm-bootstrap/shares.json
+                ${pkgs.coreutils}/bin/install -d -m 0700 "$runtime"
+                live_targets="$runtime/live-targets"
+                ${pkgs.python3}/bin/python3 - >"$live_targets" <<'PY'
+                import re
+
+                pattern = re.compile(r"/mnt/[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+                targets = set()
+                with open("/proc/self/mountinfo", encoding="utf-8") as mountinfo:
+                    for line in mountinfo:
+                        target = line.split(" - ", 1)[0].split()[4]
+                        if pattern.fullmatch(target):
+                            targets.add(target)
+                print("\n".join(sorted(targets)))
+                PY
+                while IFS= read -r target; do
+                  while ${pkgs.util-linux}/bin/mountpoint -q "$target"; do
+                    ${pkgs.util-linux}/bin/umount "$target"
+                  done
+                done <"$live_targets"
+                ${pkgs.coreutils}/bin/rm -f "$live_targets"
+                declarations="$runtime/declarations"
+                ${pkgs.python3}/bin/python3 - "$manifest" >"$declarations" <<'PY'
+                import base64
+                import json
+                import pathlib
+                import re
+                import sys
+
+                pattern = re.compile(r"/mnt/[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+                payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+                if not isinstance(payload, dict) or set(payload) != {"schemaVersion", "shares"} or payload["schemaVersion"] != 1:
+                    raise SystemExit("invalid share manifest schema")
+                shares = payload["shares"]
+                if not isinstance(shares, list):
+                    raise SystemExit("share manifest entries must be an array")
+                seen = set()
+                counts = {"ro": 0, "rw": 0}
+                for share in shares:
+                    if not isinstance(share, dict) or set(share) != {"mode", "mountPoint", "slot"}:
+                        raise SystemExit("invalid share manifest entry")
+                    mode = share["mode"]
+                    target = share["mountPoint"]
+                    slot = share["slot"]
+                    if mode not in counts or type(slot) is not int or slot != counts[mode] or slot > 3:
+                        raise SystemExit("invalid share slot assignment")
+                    if not isinstance(target, str) or not pattern.fullmatch(target) or target in seen:
+                        raise SystemExit("invalid share mount point")
+                    counts[mode] += 1
+                    seen.add(target)
+                    encoded = base64.b64encode(target.encode()).decode()
+                    print(f"{mode} {slot} {encoded}")
+                PY
+                while read -r mode slot encoded; do
+                  [ -n "$mode" ] || continue
+                  target="$(${pkgs.coreutils}/bin/printf '%s' "$encoded" | ${pkgs.coreutils}/bin/base64 --decode)"
+                  source="/run/codex-vm-extra/$mode/$slot"
+                  ${pkgs.coreutils}/bin/install -d -m 0755 "$target"
+                  ${pkgs.util-linux}/bin/mount --bind "$source" "$target"
+                  if [ "$mode" = ro ]; then
+                    ${pkgs.util-linux}/bin/mount -o remount,bind,ro "$target"
+                  fi
+                done <"$declarations"
+                ${pkgs.coreutils}/bin/rm -f "$declarations"
+              '';
             in
             {
               networking.hostName = "codex-vm";
@@ -301,6 +369,8 @@
 
               systemd.services.codex-vm-environment = {
                 description = "Evaluate project environment inside the Codex VM";
+                requires = [ "codex-vm-shares.service" ];
+                after = [ "codex-vm-shares.service" ];
                 unitConfig.RequiresMountsFor = [
                   "/work"
                   "/home/codex"
@@ -309,6 +379,26 @@
                 serviceConfig = {
                   Type = "oneshot";
                   ExecStart = refreshEnvironment;
+                  UMask = "0077";
+                };
+              };
+
+              systemd.services.codex-vm-shares = {
+                description = "Mount explicitly authorized Codex VM shares";
+                unitConfig.RequiresMountsFor = [
+                  "/run/codex-vm-bootstrap"
+                  "/run/codex-vm-extra/ro/0"
+                  "/run/codex-vm-extra/ro/1"
+                  "/run/codex-vm-extra/ro/2"
+                  "/run/codex-vm-extra/ro/3"
+                  "/run/codex-vm-extra/rw/0"
+                  "/run/codex-vm-extra/rw/1"
+                  "/run/codex-vm-extra/rw/2"
+                  "/run/codex-vm-extra/rw/3"
+                ];
+                serviceConfig = {
+                  Type = "oneshot";
+                  ExecStart = mountShares;
                   UMask = "0077";
                 };
               };
@@ -360,7 +450,22 @@
                     mountPoint = "/run/codex-vm-bootstrap";
                     readOnly = true;
                   }
-                ];
+                ] ++ builtins.concatLists (builtins.genList (index: [
+                  {
+                    proto = "virtiofs";
+                    tag = "extra-ro-${toString index}";
+                    source = "extra-shares/ro-${toString index}";
+                    mountPoint = "/run/codex-vm-extra/ro/${toString index}";
+                    readOnly = true;
+                  }
+                  {
+                    proto = "virtiofs";
+                    tag = "extra-rw-${toString index}";
+                    source = "extra-shares/rw-${toString index}";
+                    mountPoint = "/run/codex-vm-extra/rw/${toString index}";
+                    readOnly = false;
+                  }
+                ]) 4);
                 volumes = [
                   {
                     image = "nix-store-overlay.img";
@@ -485,6 +590,104 @@
           exported = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
           assert exported["PROJECT_VALUE"] == "project", exported
           assert "SSH_AUTH_SOCK" not in exported, exported
+        '';
+      };
+
+      checks.x86_64-linux.codex-vm-shares = codexVmPkgs.testers.runNixOSTest {
+        name = "codex-vm-shares";
+        nodes.machine = {
+          system.stateVersion = "25.11";
+          systemd.services.codex-vm-shares = {
+            serviceConfig = {
+              Type = "oneshot";
+              ExecStart = codexVm.config.systemd.services.codex-vm-shares.serviceConfig.ExecStart;
+              UMask = "0077";
+            };
+          };
+        };
+        testScript = ''
+          import base64
+          import json
+          import shlex
+
+          machine.start()
+          machine.wait_for_unit("multi-user.target")
+
+          def put(path, content, mode="0600"):
+              encoded = base64.b64encode(content.encode()).decode()
+              parent = path.rsplit("/", 1)[0]
+              machine.succeed(
+                  "install -d -m 0700 " + shlex.quote(parent) +
+                  "; printf %s " + shlex.quote(encoded) +
+                  " | base64 -d >" + shlex.quote(path) +
+                  "; chmod " + mode + " " + shlex.quote(path)
+              )
+
+          machine.succeed(
+              "install -d /run/codex-vm-extra/ro/0 /run/codex-vm-extra/rw/0"
+          )
+          put("/run/codex-vm-extra/ro/0/reference.txt", "reference\n", "0644")
+          manifest = {
+              "schemaVersion": 1,
+              "shares": [
+                  {"mountPoint": "/mnt/reference", "mode": "ro", "slot": 0},
+                  {"mountPoint": "/mnt/output", "mode": "rw", "slot": 0},
+              ],
+          }
+          put("/run/codex-vm-bootstrap/shares.json", json.dumps(manifest))
+
+          machine.succeed("systemctl start codex-vm-shares.service")
+          machine.succeed("grep -Fx reference /mnt/reference/reference.txt")
+          machine.fail("touch /mnt/reference/root-must-not-write")
+          machine.succeed("touch /mnt/output/guest-can-write")
+
+          machine.succeed(
+              "systemd-run --unit=hold-initial-share --service-type=exec "
+              "sh -c 'cd /mnt/reference && exec /run/current-system/sw/bin/sleep infinity'"
+          )
+          machine.wait_for_unit("hold-initial-share.service")
+          manifest["shares"] = []
+          put("/run/codex-vm-bootstrap/shares.json", json.dumps(manifest))
+          machine.fail("systemctl start codex-vm-shares.service")
+          machine.succeed("mountpoint -q /mnt/reference")
+          machine.fail("mountpoint -q /mnt/output")
+          machine.succeed("systemctl stop hold-initial-share.service")
+          machine.succeed("systemctl start codex-vm-shares.service")
+          machine.fail("mountpoint -q /mnt/reference")
+          machine.fail("mountpoint -q /mnt/output")
+
+          machine.succeed(
+              "rm -f /run/codex-vm-extra/rw/0/guest-can-write; "
+              "rmdir /run/codex-vm-extra/rw/0"
+          )
+          manifest["shares"] = [
+              {"mountPoint": "/mnt/reference", "mode": "ro", "slot": 0},
+              {"mountPoint": "/mnt/output", "mode": "rw", "slot": 0},
+          ]
+          put("/run/codex-vm-bootstrap/shares.json", json.dumps(manifest))
+          machine.fail("systemctl start codex-vm-shares.service")
+          machine.succeed("mountpoint -q /mnt/reference")
+          machine.fail("mountpoint -q /mnt/output")
+          machine.succeed("rm -f /run/codex-vm-shares/mounted.json")
+
+          machine.succeed(
+              "systemd-run --unit=hold-share --service-type=exec "
+              "sh -c 'cd /mnt/reference && exec /run/current-system/sw/bin/sleep infinity'"
+          )
+          machine.wait_for_unit("hold-share.service")
+          machine.succeed("install -d /run/codex-vm-extra/rw/0")
+          machine.fail("systemctl start codex-vm-shares.service")
+          machine.succeed("mountpoint -q /mnt/reference")
+          machine.succeed("systemctl stop hold-share.service")
+          machine.succeed("systemctl start codex-vm-shares.service")
+          machine.succeed("mountpoint -q /mnt/reference")
+          machine.succeed("mountpoint -q /mnt/output")
+
+          manifest["shares"] = []
+          put("/run/codex-vm-bootstrap/shares.json", json.dumps(manifest))
+          machine.succeed("systemctl start codex-vm-shares.service")
+          machine.fail("mountpoint -q /mnt/reference")
+          machine.fail("mountpoint -q /mnt/output")
         '';
       };
 

@@ -15,7 +15,7 @@ make_fake_vm_runtime() {
   mkdir -p "$FAKE_VM_BIN"
   printf '#!/usr/bin/env bash\nexec sleep 60\n' >"$FAKE_VM_BIN/runner"
   printf '#!/usr/bin/env bash\nexec sleep 60\n' >"$FAKE_VM_BIN/virtiofsd-run"
-  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"$FAKE_BWRAP_ARGS"\nexec "${@: -1}"\n' >"$FAKE_VM_BIN/bwrap"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"$FAKE_BWRAP_ARGS"\nprintf "%%s\\0" "$@" >"$FAKE_BWRAP_ARGS_NUL"\nexec "${@: -1}"\n' >"$FAKE_VM_BIN/bwrap"
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"$FAKE_SSH_ARGS"\nexit 0\n' >"$FAKE_VM_BIN/ssh"
   printf '#!/usr/bin/env bash\nexit 97\n' >"$FAKE_VM_BIN/nix"
   chmod +x "$FAKE_VM_BIN"/*
@@ -28,6 +28,7 @@ make_fake_vm_runtime() {
   export CODEX_VM_SSH="$FAKE_VM_BIN/ssh"
   export CODEX_VM_SSH_KEYGEN="$(command -v ssh-keygen)"
   export FAKE_BWRAP_ARGS="$BATS_TEST_TMPDIR/bwrap.args"
+  export FAKE_BWRAP_ARGS_NUL="$BATS_TEST_TMPDIR/bwrap.args.nul"
   export FAKE_SSH_ARGS="$BATS_TEST_TMPDIR/ssh.args"
 }
 
@@ -558,4 +559,256 @@ PY
   [[ "$output" == *"shares must be an array"* ]]
   [ ! -e "$REPO/.codex-vm" ]
   [ ! -e "$XDG_RUNTIME_DIR/ai-plugins-codex-vm" ]
+}
+
+@test "start dry-run accepts only owner-authorized canonical extra shares" {
+  host_home="$BATS_TEST_TMPDIR/host-home"
+  read_source="$BATS_TEST_TMPDIR/reference"
+  write_source="$BATS_TEST_TMPDIR/output"
+  mkdir -p "$host_home/.config/ai-plugins" "$read_source" "$write_source"
+  project_id="$(cd "$REPO" && "$ROOT/scripts/codex-vm/vm-codex" status --json | jq -r .project_id)"
+
+  jq -n \
+    --arg project_id "$project_id" \
+    --arg read_source "$read_source" \
+    --arg write_source "$write_source" \
+    '{schemaVersion: 1, projects: {($project_id): [
+      {source: $read_source, mountPoint: "/mnt/reference", mode: "ro"},
+      {source: $write_source, mountPoint: "/mnt/output", mode: "rw"}
+    ]}}' >"$host_home/.config/ai-plugins/codex-vm-shares.json"
+  jq -n \
+    --arg read_source "$read_source" \
+    --arg write_source "$write_source" \
+    '{schemaVersion: 1, shares: [
+      {source: $read_source, mountPoint: "/mnt/reference", mode: "ro"},
+      {source: $write_source, mountPoint: "/mnt/output", mode: "rw"}
+    ]}' >"$REPO/codex-vm.json"
+
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --dry-run --json"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.shares[] | select(.mount_point == "/mnt/reference") | .mode' <<<"$output")" = ro ]
+  [ "$(jq -r '.shares[] | select(.mount_point == "/mnt/output") | .mode' <<<"$output")" = rw ]
+  [ ! -e "$REPO/.codex-vm" ]
+
+  for mismatch in \
+    '{"source":"READ_SOURCE","mountPoint":"/mnt/reference","mode":"rw"}' \
+    '{"source":"WRITE_SOURCE","mountPoint":"/mnt/reference","mode":"ro"}' \
+    '{"source":"READ_SOURCE","mountPoint":"/mnt/renamed","mode":"ro"}'; do
+    mismatch="${mismatch//READ_SOURCE/$read_source}"
+    mismatch="${mismatch//WRITE_SOURCE/$write_source}"
+    jq -n \
+      --arg project_id "$project_id" \
+      --arg write_source "$write_source" \
+      --argjson mismatch "$mismatch" \
+      '{schemaVersion: 1, projects: {($project_id): [
+        $mismatch,
+        {source: $write_source, mountPoint: "/mnt/output", mode: "rw"}
+      ]}}' \
+      >"$host_home/.config/ai-plugins/codex-vm-shares.json"
+
+    run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --dry-run --json"
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"extra share is not authorized for this project"* ]]
+  done
+
+  ln -s "$read_source" "$BATS_TEST_TMPDIR/reference-link"
+  jq -n \
+    --arg source "$BATS_TEST_TMPDIR/reference-link" \
+    '{schemaVersion: 1, shares: [{source: $source, mountPoint: "/mnt/reference", mode: "ro"}]}' \
+    >"$REPO/codex-vm.json"
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --dry-run --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"source must be a canonical non-root directory"* ]]
+  [ ! -e "$REPO/.codex-vm" ]
+}
+
+@test "start reports malformed share modes without a traceback" {
+  share_source="$BATS_TEST_TMPDIR/reference"
+  mkdir -p "$share_source"
+  jq -n \
+    --arg source "$share_source" \
+    '{schemaVersion: 1, shares: [
+      {source: $source, mountPoint: "/mnt/reference", mode: {unexpected: true}}
+    ]}' >"$REPO/codex-vm.json"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --dry-run --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"mode must be ro or rw"* ]]
+  [[ "$output" != *"Traceback"* ]]
+  [ ! -e "$REPO/.codex-vm" ]
+}
+
+@test "start gives authorized read-only and read-write shares distinct host export slots" {
+  make_fake_vm_runtime
+  host_home="$BATS_TEST_TMPDIR/host-home"
+  read_source="$BATS_TEST_TMPDIR/"$'reference\n'
+  write_source="$BATS_TEST_TMPDIR/output"
+  mkdir -p "$host_home/.config/ai-plugins" "$read_source" "$write_source"
+  project_id="$(cd "$REPO" && "$ROOT/scripts/codex-vm/vm-codex" status --json | jq -r .project_id)"
+  jq -n \
+    --arg project_id "$project_id" \
+    --arg read_source "$read_source" \
+    --arg write_source "$write_source" \
+    '{schemaVersion: 1, projects: {($project_id): [
+      {source: $read_source, mountPoint: "/mnt/reference", mode: "ro"},
+      {source: $write_source, mountPoint: "/mnt/output", mode: "rw"}
+    ]}}' >"$host_home/.config/ai-plugins/codex-vm-shares.json"
+  jq -n \
+    --arg read_source "$read_source" \
+    --arg write_source "$write_source" \
+    '{schemaVersion: 1, shares: [
+      {source: $read_source, mountPoint: "/mnt/reference", mode: "ro"},
+      {source: $write_source, mountPoint: "/mnt/output", mode: "rw"}
+    ]}' >"$REPO/codex-vm.json"
+
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+
+  [ "$status" -eq 0 ]
+  manifest="$REPO/.codex-vm/bootstrap/shares.json"
+  [ "$(jq -r '.shares[] | select(.mountPoint == "/mnt/reference") | [.mode, .slot] | @tsv' "$manifest")" = $'ro\t0' ]
+  [ "$(jq -r '.shares[] | select(.mountPoint == "/mnt/output") | [.mode, .slot] | @tsv' "$manifest")" = $'rw\t0' ]
+  run "$CODEX_VM_PYTHON" - "$FAKE_BWRAP_ARGS_NUL" "$read_source" "$write_source" <<'PY'
+import pathlib
+import sys
+
+arguments = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
+arguments = [argument.decode() for argument in arguments if argument]
+expected = [
+    ["--ro-bind", sys.argv[2], "/state/extra-shares/ro-0"],
+    ["--bind", sys.argv[3], "/state/extra-shares/rw-0"],
+]
+for triple in expected:
+    if not any(arguments[index:index + 3] == triple for index in range(len(arguments) - 2)):
+        raise SystemExit(f"missing host export binding: {triple}")
+PY
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&3
+  fi
+  [ "$status" -eq 0 ]
+
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop"
+  [ "$status" -eq 0 ]
+}
+
+@test "start rejects extra-share changes while the VM is running" {
+  make_fake_vm_runtime
+  host_home="$BATS_TEST_TMPDIR/host-home"
+  share_source="$BATS_TEST_TMPDIR/reference"
+  mkdir -p "$host_home/.config/ai-plugins" "$share_source"
+
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+  [ "$status" -eq 0 ]
+  project_id="$(jq -r .project_id <<<"$output")"
+
+  jq -n \
+    --arg project_id "$project_id" \
+    --arg source "$share_source" \
+    '{schemaVersion: 1, projects: {($project_id): [
+      {source: $source, mountPoint: "/mnt/reference", mode: "ro"}
+    ]}}' >"$host_home/.config/ai-plugins/codex-vm-shares.json"
+  jq -n \
+    --arg source "$share_source" \
+    '{schemaVersion: 1, shares: [
+      {source: $source, mountPoint: "/mnt/reference", mode: "ro"}
+    ]}' >"$REPO/codex-vm.json"
+
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+  restart_status="$status"
+  restart_output="$output"
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop"
+  [ "$status" -eq 0 ]
+
+  [ "$restart_status" -eq 2 ]
+  [[ "$restart_output" == *"extra shares changed; run vm-codex stop before restarting"* ]]
+}
+
+@test "start rejects replacement of a shared directory while the VM is running" {
+  make_fake_vm_runtime
+  host_home="$BATS_TEST_TMPDIR/host-home"
+  share_source="$BATS_TEST_TMPDIR/reference"
+  original_source="$BATS_TEST_TMPDIR/original-reference"
+  mkdir -p "$host_home/.config/ai-plugins" "$share_source"
+  project_id="$(cd "$REPO" && "$ROOT/scripts/codex-vm/vm-codex" status --json | jq -r .project_id)"
+  jq -n \
+    --arg project_id "$project_id" \
+    --arg source "$share_source" \
+    '{schemaVersion: 1, projects: {($project_id): [
+      {source: $source, mountPoint: "/mnt/reference", mode: "ro"}
+    ]}}' >"$host_home/.config/ai-plugins/codex-vm-shares.json"
+  jq -n \
+    --arg source "$share_source" \
+    '{schemaVersion: 1, shares: [
+      {source: $source, mountPoint: "/mnt/reference", mode: "ro"}
+    ]}' >"$REPO/codex-vm.json"
+
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+  [ "$status" -eq 0 ]
+  mv "$share_source" "$original_source"
+  mkdir "$share_source"
+
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+  restart_status="$status"
+  restart_output="$output"
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop"
+  [ "$status" -eq 0 ]
+
+  [ "$restart_status" -eq 2 ]
+  [[ "$restart_output" == *"extra shares changed; run vm-codex stop before restarting"* ]]
+}
+
+@test "start terminates a surviving exporter before recovering from a QEMU crash" {
+  make_fake_vm_runtime
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+  [ "$status" -eq 0 ]
+  project_id="$(jq -r .project_id <<<"$output")"
+  qemu_pid="$(jq -r .pid <<<"$output")"
+  runtime_dir="$XDG_RUNTIME_DIR/ai-plugins-codex-vm/$project_id"
+  read -r old_exporter_pid _ <"$runtime_dir/virtiofsd.pid"
+  kill "$qemu_pid"
+  for _ in $(seq 1 50); do
+    kill -0 "$qemu_pid" 2>/dev/null || break
+    sleep 0.02
+  done
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+  restart_status="$status"
+  old_exporter_alive=false
+  if kill -0 "$old_exporter_pid" 2>/dev/null; then
+    old_exporter_alive=true
+    kill "$old_exporter_pid" 2>/dev/null || true
+  fi
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop"
+  [ "$status" -eq 0 ]
+
+  [ "$restart_status" -eq 0 ]
+  [ "$old_exporter_alive" = false ]
+}
+
+@test "start rejects a writable share containing the owner authorization" {
+  host_home="$BATS_TEST_TMPDIR/host-home"
+  authorization_dir="$host_home/.config/ai-plugins"
+  mkdir -p "$authorization_dir"
+  project_id="$(cd "$REPO" && "$ROOT/scripts/codex-vm/vm-codex" status --json | jq -r .project_id)"
+  jq -n \
+    --arg project_id "$project_id" \
+    --arg source "$authorization_dir" \
+    '{schemaVersion: 1, projects: {($project_id): [
+      {source: $source, mountPoint: "/mnt/owner-config", mode: "rw"}
+    ]}}' >"$authorization_dir/codex-vm-shares.json"
+  jq -n \
+    --arg source "$authorization_dir" \
+    '{schemaVersion: 1, shares: [
+      {source: $source, mountPoint: "/mnt/owner-config", mode: "rw"}
+    ]}' >"$REPO/codex-vm.json"
+
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --dry-run --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"writable share must not contain the owner authorization"* ]]
+  [ ! -e "$REPO/.codex-vm" ]
 }

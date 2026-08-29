@@ -52,16 +52,34 @@ runtime_command() {
 
 initialize_state() {
   local ssh_dir="$STATE_DIR/ssh" key_share="$STATE_DIR/ssh-keys" bootstrap_dir="$STATE_DIR/bootstrap"
+  local extra_share_dir="$STATE_DIR/extra-shares"
   local path temp temp_dir
 
-  for path in "$STATE_DIR" "$ssh_dir" "$key_share" "$bootstrap_dir"; do
+  for path in \
+    "$STATE_DIR" \
+    "$ssh_dir" \
+    "$key_share" \
+    "$bootstrap_dir" \
+    "$extra_share_dir" \
+    "$extra_share_dir/ro-0" \
+    "$extra_share_dir/ro-1" \
+    "$extra_share_dir/ro-2" \
+    "$extra_share_dir/ro-3" \
+    "$extra_share_dir/rw-0" \
+    "$extra_share_dir/rw-1" \
+    "$extra_share_dir/rw-2" \
+    "$extra_share_dir/rw-3"; do
     [ ! -L "$path" ] || die "VM state directories must not be symlinks: $path"
     [ ! -e "$path" ] || [ -d "$path" ] || die "VM state path must be a directory: $path"
   done
 
   umask 077
-  mkdir -p "$ssh_dir" "$key_share" "$bootstrap_dir"
-  chmod 700 "$STATE_DIR" "$ssh_dir" "$bootstrap_dir"
+  mkdir -p \
+    "$ssh_dir" \
+    "$key_share" \
+    "$bootstrap_dir" \
+    "$extra_share_dir"/{ro-0,ro-1,ro-2,ro-3,rw-0,rw-1,rw-2,rw-3}
+  chmod 700 "$STATE_DIR" "$ssh_dir" "$bootstrap_dir" "$extra_share_dir" "$extra_share_dir"/*
   chmod 755 "$key_share"
   temp_dir="$(mktemp -d "$STATE_DIR/.init.XXXXXX")"
   trap 'rm -rf -- "$temp_dir"' EXIT
@@ -73,7 +91,8 @@ initialize_state() {
     "$key_share/codex.pub" \
     "$key_share/ssh_host_ed25519_key" \
     "$key_share/ssh_host_ed25519_key.pub" \
-    "$bootstrap_dir/preferences.toml"; do
+    "$bootstrap_dir/preferences.toml" \
+    "$bootstrap_dir/shares.json"; do
     [ ! -L "$path" ] || die "VM state files must not be symlinks: $path"
     if [ -e "$path" ]; then
       [ -f "$path" ] || die "VM state path must be a regular file: $path"
@@ -451,27 +470,233 @@ validate_operational_paths() {
     "$STATE_DIR/virtiofsd.log" \
     "$RUNTIME_DIR/qemu.pid" \
     "$RUNTIME_DIR/virtiofsd.pid" \
-    "$RUNTIME_DIR/ssh.port"; do
+    "$RUNTIME_DIR/ssh.port" \
+    "$RUNTIME_DIR/shares.sha256"; do
     assert_safe_file_path "$path"
   done
 }
 
 load_project_config() {
-  local config_file="$PROJECT_ROOT/codex-vm.json" unknown_field
+  local config_file="$PROJECT_ROOT/codex-vm.json"
+  local authorization_file="${HOME:-}/.config/ai-plugins/codex-vm-shares.json"
+  local python="${CODEX_VM_PYTHON:-python3}"
 
-  PROJECT_CONFIG='{"schemaVersion":1,"shares":[]}'
+  PROJECT_SHARES='[]'
   [ ! -L "$config_file" ] || die "project configuration must not be a symlink"
-  [ -e "$config_file" ] || return 0
-  [ -f "$config_file" ] || die "project configuration must be a regular file"
+  if [ -e "$config_file" ]; then
+    [ -f "$config_file" ] || die "project configuration must be a regular file"
+    [ "$(stat -c %h "$config_file")" -eq 1 ] || die "project configuration must not be hard-linked"
+  fi
 
-  PROJECT_CONFIG="$(jq -ce 'select(type == "object")' "$config_file" 2>/dev/null)" ||
-    die "project configuration must be a JSON object"
-  unknown_field="$(jq -r '[keys_unsorted[] | select(. != "schemaVersion" and . != "shares")][0] // empty' <<<"$PROJECT_CONFIG")"
-  [ -z "$unknown_field" ] || die "unknown configuration field: $unknown_field"
-  jq -e '.schemaVersion == 1 and (.schemaVersion | type) == "number"' <<<"$PROJECT_CONFIG" >/dev/null ||
-    die "schemaVersion must be the number 1"
-  jq -e '((has("shares") | not) or (.shares | type == "array"))' <<<"$PROJECT_CONFIG" >/dev/null ||
-    die "shares must be an array"
+  if ! PROJECT_SHARES="$($python - "$config_file" "$authorization_file" "$PROJECT_ID" 2>&1 <<'PY'
+import json
+import os
+import pathlib
+import re
+import stat
+import sys
+
+config_path = pathlib.Path(sys.argv[1])
+authorization_path = pathlib.Path(sys.argv[2]) if sys.argv[2] else None
+project_id = sys.argv[3]
+project_root = config_path.parent.resolve(strict=True)
+mount_pattern = re.compile(r"/mnt/[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+share_keys = {"source", "mountPoint", "mode"}
+
+
+def concise_excepthook(_kind, value, _traceback):
+    print(value, file=sys.stderr)
+
+
+sys.excepthook = concise_excepthook
+
+
+def load_json(path, label):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"{label} must be valid JSON: {error}") from error
+
+
+def exact_object(value, keys, label):
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    unknown = sorted(set(value) - keys)
+    if unknown:
+        raise ValueError(f"unknown {label} field: {unknown[0]}")
+
+
+if config_path.exists():
+    config = load_json(config_path, "project configuration")
+else:
+    config = {"schemaVersion": 1, "shares": []}
+exact_object(config, {"schemaVersion", "shares"}, "configuration")
+if type(config.get("schemaVersion")) is not int or config["schemaVersion"] != 1:
+    raise ValueError("schemaVersion must be the number 1")
+shares = config.get("shares", [])
+if not isinstance(shares, list):
+    raise ValueError("shares must be an array")
+
+normalized = []
+mount_points = set()
+mode_counts = {"ro": 0, "rw": 0}
+for index, share in enumerate(shares):
+    label = f"share {index}"
+    exact_object(share, share_keys, label)
+    if set(share) != share_keys:
+        missing = sorted(share_keys - set(share))
+        raise ValueError(f"{label} is missing field: {missing[0]}")
+    source_value = share["source"]
+    mount_point = share["mountPoint"]
+    mode = share["mode"]
+    if not isinstance(source_value, str) or not source_value.startswith("/"):
+        raise ValueError(f"{label} source must be an absolute path")
+    source = pathlib.Path(source_value)
+    try:
+        canonical = source.resolve(strict=True)
+    except OSError as error:
+        raise ValueError(f"{label} source must be an existing directory: {source_value}") from error
+    if str(canonical) != source_value or not canonical.is_dir() or canonical == pathlib.Path("/"):
+        raise ValueError(f"{label} source must be a canonical non-root directory")
+    if not isinstance(mount_point, str) or not mount_pattern.fullmatch(mount_point):
+        raise ValueError(f"{label} mountPoint must match /mnt/<name>")
+    if mount_point in mount_points:
+        raise ValueError(f"duplicate share mountPoint: {mount_point}")
+    if not isinstance(mode, str) or mode not in mode_counts:
+        raise ValueError(f"{label} mode must be ro or rw")
+    mode_counts[mode] += 1
+    if mode_counts[mode] > 4:
+        raise ValueError(f"at most 4 {mode} shares are supported")
+    mount_points.add(mount_point)
+    normalized.append({"source": source_value, "mount_point": mount_point, "mode": mode})
+
+if normalized:
+    if authorization_path is None:
+        raise ValueError("extra share is not authorized for this project")
+    try:
+        authorization_stat = authorization_path.lstat()
+    except FileNotFoundError:
+        raise ValueError("extra share is not authorized for this project") from None
+    if not stat.S_ISREG(authorization_stat.st_mode) or authorization_stat.st_nlink != 1:
+        raise ValueError("share authorization must be an unlinked regular file")
+    resolved_authorization = authorization_path.resolve(strict=True)
+    if resolved_authorization.is_relative_to(project_root):
+        raise ValueError("share authorization must be outside the project checkout")
+    authorization = load_json(authorization_path, "share authorization")
+    exact_object(authorization, {"schemaVersion", "projects"}, "share authorization")
+    if type(authorization.get("schemaVersion")) is not int or authorization["schemaVersion"] != 1:
+        raise ValueError("share authorization schemaVersion must be the number 1")
+    projects = authorization.get("projects")
+    if not isinstance(projects, dict):
+        raise ValueError("share authorization projects must be an object")
+    allowed = projects.get(project_id, [])
+    if not isinstance(allowed, list):
+        raise ValueError("project share authorization must be an array")
+    allowed_tuples = set()
+    for index, share in enumerate(allowed):
+        label = f"authorized share {index}"
+        exact_object(share, share_keys, label)
+        if set(share) != share_keys or not all(isinstance(share[key], str) for key in share_keys):
+            raise ValueError(f"{label} must contain source, mountPoint, and mode strings")
+        allowed_tuples.add((share["source"], share["mountPoint"], share["mode"]))
+    for share in normalized:
+        requested = (share["source"], share["mount_point"], share["mode"])
+        if requested not in allowed_tuples:
+            raise ValueError("extra share is not authorized for this project")
+        if share["mode"] == "rw" and resolved_authorization.is_relative_to(pathlib.Path(share["source"])):
+            raise ValueError("writable share must not contain the owner authorization")
+
+print(json.dumps(normalized, separators=(",", ":"), sort_keys=True))
+PY
+  )"; then
+    die "$PROJECT_SHARES"
+  fi
+}
+
+build_share_bind_args() {
+  local encoded source mode index
+  local ro_index=0 rw_index=0
+  SHARE_BIND_ARGS=()
+
+  while IFS= read -r encoded; do
+    [ -n "$encoded" ] || continue
+    source="$({ printf '%s' "$encoded" | base64 --decode | jq -j .source; printf /; })"
+    source="${source%/}"
+    mode="$(printf '%s' "$encoded" | base64 --decode | jq -r .mode)"
+    if [ "$mode" = ro ]; then
+      index="$ro_index"
+      ro_index=$((ro_index + 1))
+      SHARE_BIND_ARGS+=(--ro-bind "$source" "/state/extra-shares/ro-$index")
+    else
+      index="$rw_index"
+      rw_index=$((rw_index + 1))
+      SHARE_BIND_ARGS+=(--bind "$source" "/state/extra-shares/rw-$index")
+    fi
+  done < <(jq -r '.[] | @base64' <<<"$PROJECT_SHARES")
+}
+
+stage_share_manifest() {
+  local destination="$STATE_DIR/bootstrap/shares.json"
+
+  "$CODEX_VM_PYTHON" - "$PROJECT_SHARES" "$destination" <<'PY'
+import json
+import os
+import pathlib
+import sys
+import tempfile
+
+shares = json.loads(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+if destination.is_symlink():
+    raise SystemExit(f"VM share manifest must not be a symlink: {destination}")
+if destination.exists() and (not destination.is_file() or destination.stat().st_nlink != 1):
+    raise SystemExit(f"VM share manifest must be an unlinked regular file: {destination}")
+counts = {"ro": 0, "rw": 0}
+manifest = []
+for share in shares:
+    mode = share["mode"]
+    slot = counts[mode]
+    counts[mode] += 1
+    manifest.append({"mode": mode, "mountPoint": share["mount_point"], "slot": slot})
+payload = {"schemaVersion": 1, "shares": manifest}
+fd, temporary_name = tempfile.mkstemp(prefix=".shares.", dir=destination.parent)
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", closefd=True) as handle:
+        json.dump(payload, handle, separators=(",", ":"), sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary_name, destination)
+except BaseException:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    pathlib.Path(temporary_name).unlink(missing_ok=True)
+    raise
+PY
+}
+
+compute_share_fingerprint() {
+  "$CODEX_VM_PYTHON" - "$PROJECT_SHARES" <<'PY'
+import hashlib
+import json
+import os
+import sys
+
+shares = json.loads(sys.argv[1])
+identified = []
+for share in shares:
+    source_stat = os.stat(share["source"], follow_symlinks=False)
+    identified.append({
+        **share,
+        "sourceDevice": source_stat.st_dev,
+        "sourceInode": source_stat.st_ino,
+    })
+payload = json.dumps(identified, separators=(",", ":"), sort_keys=True).encode()
+print(hashlib.sha256(payload).hexdigest())
+PY
 }
 
 status_command() {
@@ -533,32 +758,45 @@ start_command() {
       --arg project_root "$PROJECT_ROOT" \
       --arg state_dir "$STATE_DIR" \
       --arg work_source "$PROJECT_ROOT" \
+      --argjson extra_shares "$PROJECT_SHARES" \
       '{
         schema_version: $schema_version,
         project_id: $project_id,
         project_root: $project_root,
         state_dir: $state_dir,
         resources: {vcpus: 4, memory_mib: 8192, store_mib: 65536, home_mib: 32768},
-        shares: [{name: "work", source: $work_source, mount_point: "/work", mode: "rw"}],
+        shares: ([{name: "work", source: $work_source, mount_point: "/work", mode: "rw"}] + $extra_shares),
         host_nix_evaluation: false
       }'
   elif [ "$dry_run" = true ]; then
     printf 'Would start %s with %s mounted read/write at /work.\n' "$PROJECT_ID" "$PROJECT_ROOT"
   else
-    local ssh_port qemu_pid virtiofsd_pid
+    local ssh_port qemu_pid virtiofsd_pid share_fingerprint running_share_fingerprint
     runtime_command >/dev/null
     initialize_state
     stage_envrc_inputs
     validate_operational_paths
     mkdir -p "$RUNTIME_DIR" "$STATE_DIR/work-export"
     chmod 700 "$RUNTIME_DIR"
+    build_share_bind_args
+    share_fingerprint="$(compute_share_fingerprint)"
     exec 9>"$STATE_DIR/launch.lock"
     "$CODEX_VM_FLOCK" -x 9
 
     if qemu_pid="$(read_pid_record "$RUNTIME_DIR/qemu.pid")"; then
       ssh_port="$(read_ssh_port)" || die "running VM has invalid SSH port state; run vm-codex stop before restarting"
+      running_share_fingerprint="$(cat "$RUNTIME_DIR/shares.sha256" 2>/dev/null)" ||
+        die "running VM has invalid extra-share state; run vm-codex stop before restarting"
+      [ "$running_share_fingerprint" = "$share_fingerprint" ] ||
+        die "extra shares changed; run vm-codex stop before restarting"
+      stage_share_manifest
     else
-      rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
+      if read_pid_record "$RUNTIME_DIR/virtiofsd.pid" >/dev/null; then
+        terminate_recorded_process "$RUNTIME_DIR/virtiofsd.pid" ||
+          die "surviving virtiofsd did not stop during VM recovery"
+      fi
+      rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port" "$RUNTIME_DIR/shares.sha256"
+      stage_share_manifest
       (
         exec 9>&-
         exec "$CODEX_VM_BWRAP" \
@@ -572,6 +810,7 @@ start_command() {
           --bind "$STATE_DIR" /state \
           --bind "$PROJECT_ROOT" /state/work-export \
           --tmpfs /state/work-export/.codex-vm \
+          "${SHARE_BIND_ARGS[@]}" \
           --chdir /state \
           "$CODEX_VM_VIRTIOFSD_RUN"
       ) >"$STATE_DIR/virtiofsd.log" 2>&1 &
@@ -597,6 +836,7 @@ start_command() {
           sleep 0.2
           if read_pid_record "$RUNTIME_DIR/qemu.pid" >/dev/null; then
             printf '%s\n' "$ssh_port" >"$RUNTIME_DIR/ssh.port"
+            printf '%s\n' "$share_fingerprint" >"$RUNTIME_DIR/shares.sha256"
             started=true
             break
           fi
@@ -606,7 +846,7 @@ start_command() {
       done
       if [ "$started" != true ]; then
         terminate_recorded_process "$RUNTIME_DIR/virtiofsd.pid" || true
-        rm -f "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
+        rm -f "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port" "$RUNTIME_DIR/shares.sha256"
         die "QEMU failed to claim a loopback SSH port after 5 attempts; see $STATE_DIR/qemu.log"
       fi
     fi
@@ -614,7 +854,7 @@ start_command() {
     if ! wait_for_ssh "$ssh_port"; then
       terminate_recorded_process "$RUNTIME_DIR/qemu.pid" || true
       terminate_recorded_process "$RUNTIME_DIR/virtiofsd.pid" || true
-      rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
+      rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port" "$RUNTIME_DIR/shares.sha256"
       die "VM did not become reachable over project SSH; see $STATE_DIR/qemu.log"
     fi
     refresh_guest_environment "$ssh_port"
@@ -658,7 +898,7 @@ stop_command() {
       stopped=true
     fi
   done
-  rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
+  rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port" "$RUNTIME_DIR/shares.sha256"
 
   if [ "$output_json" = true ]; then
     jq -n --argjson schema_version 1 --arg project_id "$PROJECT_ID" --argjson stopped "$stopped" \
