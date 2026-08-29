@@ -57,10 +57,15 @@
                 group = "codex";
                 home = "/home/codex";
                 createHome = true;
+                extraGroups = [ "wheel" ];
               };
+
+              security.sudo.wheelNeedsPassword = false;
+              networking.useDHCP = true;
 
               services.openssh = {
                 enable = true;
+                openFirewall = true;
                 hostKeys = [
                   {
                     path = "/run/host-keys/ssh_host_ed25519_key";
@@ -78,9 +83,20 @@
 
               environment.systemPackages = with pkgs; [
                 bash
+                cacert
+                codex
+                curl
                 git
+                gh
                 jq
+                nix
                 openssh
+                ripgrep
+              ];
+
+              nix.settings.experimental-features = [
+                "nix-command"
+                "flakes"
               ];
 
               microvm = {

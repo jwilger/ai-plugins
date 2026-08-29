@@ -16,7 +16,7 @@ make_fake_vm_runtime() {
   printf '#!/usr/bin/env bash\nexec sleep 60\n' >"$FAKE_VM_BIN/runner"
   printf '#!/usr/bin/env bash\nexec sleep 60\n' >"$FAKE_VM_BIN/virtiofsd-run"
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"$FAKE_BWRAP_ARGS"\nexec "${@: -1}"\n' >"$FAKE_VM_BIN/bwrap"
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$FAKE_VM_BIN/ssh"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"$FAKE_SSH_ARGS"\nexit 0\n' >"$FAKE_VM_BIN/ssh"
   printf '#!/usr/bin/env bash\nexit 97\n' >"$FAKE_VM_BIN/nix"
   chmod +x "$FAKE_VM_BIN"/*
   export PATH="$FAKE_VM_BIN:$PATH"
@@ -28,6 +28,7 @@ make_fake_vm_runtime() {
   export CODEX_VM_SSH="$FAKE_VM_BIN/ssh"
   export CODEX_VM_SSH_KEYGEN="$(command -v ssh-keygen)"
   export FAKE_BWRAP_ARGS="$BATS_TEST_TMPDIR/bwrap.args"
+  export FAKE_SSH_ARGS="$BATS_TEST_TMPDIR/ssh.args"
 }
 
 @test "the root flake publishes the Codex VM command" {
@@ -146,6 +147,9 @@ make_fake_vm_runtime() {
     shares="$(nix eval --json "$ref.shares" 2>/dev/null)" || exit
     runtime_args="$(nix eval --raw "$ref.extraArgsScript" 2>/dev/null)" || exit
     ssh="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.enable" 2>/dev/null)" || exit
+    ssh_firewall="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.openFirewall" 2>/dev/null)" || exit
+    sudo_password="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.security.sudo.wheelNeedsPassword" 2>/dev/null)" || exit
+    system_packages="$(nix eval --json --apply "ps: map (p: p.name) ps" "$1#nixosConfigurations.codex-vm.config.environment.systemPackages" 2>/dev/null)" || exit
     host_keys="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.hostKeys" 2>/dev/null)" || exit
     runner="$(nix eval --raw "$1#packages.x86_64-linux.codex-vm-runner.drvPath" 2>/dev/null)" || exit
     jq -cn \
@@ -156,9 +160,12 @@ make_fake_vm_runtime() {
       --argjson shares "$shares" \
       --arg runtime_args "$runtime_args" \
       --argjson ssh "$ssh" \
+      --argjson ssh_firewall "$ssh_firewall" \
+      --argjson sudo_password "$sudo_password" \
+      --argjson system_packages "$system_packages" \
       --argjson host_keys "$host_keys" \
       --arg runner "$runner" \
-      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$host_keys, \$runner}"
+      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$ssh_firewall, \$sudo_password, \$system_packages, \$host_keys, \$runner}"
   ' _ "$ROOT"
 
   [ "$status" -eq 0 ]
@@ -172,6 +179,9 @@ make_fake_vm_runtime() {
   [ "$(jq -r '.shares[] | select(.mountPoint == "/run/host-keys") | .readOnly' <<<"$output")" = true ]
   [[ "$(jq -r .runtime_args <<<"$output")" = /nix/store/*-codex-qemu-runtime-args ]]
   [ "$(jq -r .ssh <<<"$output")" = true ]
+  [ "$(jq -r .ssh_firewall <<<"$output")" = true ]
+  [ "$(jq -r .sudo_password <<<"$output")" = false ]
+  [ "$(jq -r '[.system_packages[] | select(startswith("codex-"))] | length' <<<"$output")" -eq 1 ]
   [ "$(jq -r .host_keys[0].path <<<"$output")" = /run/host-keys/ssh_host_ed25519_key ]
   [[ "$(jq -r .runner <<<"$output")" = /nix/store/*-microvm-qemu-codex-vm.drv ]]
 }
@@ -333,6 +343,60 @@ make_fake_vm_runtime() {
 
   run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop"
   [ "$status" -eq 0 ]
+}
+
+@test "Codex and shell connections use only project SSH identity" {
+  make_fake_vm_runtime
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' shell"
+  [ "$status" -eq 0 ]
+  grep -Fx -- '-F' "$FAKE_SSH_ARGS"
+  grep -Fx -- '/dev/null' "$FAKE_SSH_ARGS"
+  grep -Fx -- 'IdentityAgent=none' "$FAKE_SSH_ARGS"
+  grep -Fx -- 'IdentitiesOnly=yes' "$FAKE_SSH_ARGS"
+  project_id="$(cd "$REPO" && "$ROOT/scripts/codex-vm/vm-codex" status --json | jq -r .project_id)"
+  grep -Fx -- "HostKeyAlias=$project_id" "$FAKE_SSH_ARGS"
+  grep -F -- "$REPO/.codex-vm/ssh/client_ed25519" "$FAKE_SSH_ARGS"
+  grep -Fx -- 'cd /work && exec /bin/bash -l' "$FAKE_SSH_ARGS"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' codex"
+  [ "$status" -eq 0 ]
+  grep -Fx -- 'cd /work && exec codex --yolo' "$FAKE_SSH_ARGS"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' remote-control start"
+  [ "$status" -eq 0 ]
+  grep -Fx -- 'cd /work && exec codex --yolo remote-control start --json' "$FAKE_SSH_ARGS"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' login"
+  [ "$status" -eq 0 ]
+  grep -Fx -- 'cd /work && exec codex --yolo login --device-auth' "$FAKE_SSH_ARGS"
+
+  for action in pair stop; do
+    run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' remote-control '$action'"
+    [ "$status" -eq 0 ]
+    grep -Fx -- "cd /work && exec codex --yolo remote-control $action --json" "$FAKE_SSH_ARGS"
+  done
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop"
+  [ "$status" -eq 0 ]
+}
+
+@test "start rolls back both processes when strict SSH never becomes ready" {
+  make_fake_vm_runtime
+  printf '#!/usr/bin/env bash\nsleep 0.3\nexit 1\n' >"$FAKE_VM_BIN/runner"
+  printf '#!/usr/bin/env bash\nexit 1\n' >"$FAKE_VM_BIN/ssh"
+  chmod +x "$FAKE_VM_BIN/runner" "$FAKE_VM_BIN/ssh"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"VM did not become reachable over project SSH"* || "$output" == *"QEMU failed to claim"* ]]
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' status --json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .running <<<"$output")" = false ]
+  project_id="$(jq -r .project_id <<<"$output")"
+  [ ! -e "$XDG_RUNTIME_DIR/ai-plugins-codex-vm/$project_id/qemu.pid" ]
+  [ ! -e "$XDG_RUNTIME_DIR/ai-plugins-codex-vm/$project_id/virtiofsd.pid" ]
 }
 
 @test "start rejects unknown project configuration fields" {

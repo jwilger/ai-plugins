@@ -8,6 +8,8 @@ Usage: vm-codex status [--json]
        vm-codex init [--json]
        vm-codex start [--dry-run] [--json]
        vm-codex stop [--json]
+       vm-codex login
+       vm-codex remote-control {start|pair|stop}
        vm-shell [--dry-run] [--json]
 EOF
 }
@@ -201,6 +203,37 @@ read_ssh_port() {
   [[ "$port" =~ ^[0-9]+$ ]] || return 1
   [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || return 1
   printf '%s\n' "$port"
+}
+
+ssh_command() {
+  local port="$1"
+  shift
+  "$CODEX_VM_SSH" \
+    -F /dev/null \
+    -o IdentityAgent=none \
+    -o IdentitiesOnly=yes \
+    -o PasswordAuthentication=no \
+    -o KbdInteractiveAuthentication=no \
+    -o StrictHostKeyChecking=yes \
+    -o "UserKnownHostsFile=$STATE_DIR/ssh/known_hosts" \
+    -o "HostKeyAlias=$PROJECT_ID" \
+    -o ConnectTimeout=2 \
+    -i "$STATE_DIR/ssh/client_ed25519" \
+    -p "$port" \
+    codex@127.0.0.1 \
+    "$@"
+}
+
+wait_for_ssh() {
+  local port="$1" attempt
+  for ((attempt = 1; attempt <= 120; attempt++)); do
+    if ssh_command "$port" -o BatchMode=yes true </dev/null >/dev/null 2>&1; then
+      return 0
+    fi
+    read_pid_record "$RUNTIME_DIR/qemu.pid" >/dev/null || return 1
+    sleep 0.5
+  done
+  return 1
 }
 
 terminate_recorded_process() {
@@ -414,6 +447,13 @@ start_command() {
       fi
     fi
 
+    if ! wait_for_ssh "$ssh_port"; then
+      terminate_recorded_process "$RUNTIME_DIR/qemu.pid" || true
+      terminate_recorded_process "$RUNTIME_DIR/virtiofsd.pid" || true
+      rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
+      die "VM did not become reachable over project SSH; see $STATE_DIR/qemu.log"
+    fi
+
     if [ "$output_json" = true ]; then
       jq -n \
         --argjson schema_version 1 \
@@ -476,10 +516,9 @@ shell_command() {
     shift
   done
 
-  [ "$dry_run" = true ] || die "shell currently requires --dry-run"
   resolve_project
 
-  if [ "$output_json" = true ]; then
+  if [ "$dry_run" = true ] && [ "$output_json" = true ]; then
     jq -n \
       --argjson schema_version 1 \
       --arg project_id "$PROJECT_ID" \
@@ -493,16 +532,62 @@ shell_command() {
         guest_command: ["/bin/bash", "-l"],
         host_nix_evaluation: false
       }'
-  else
+  elif [ "$dry_run" = true ]; then
     printf 'Would open a login shell in %s at /work.\n' "$PROJECT_ID"
+  else
+    start_command --json >/dev/null
+    resolve_project
+    local ssh_port
+    ssh_port="$(read_ssh_port)" || die "VM has no valid SSH port state"
+    ssh_command "$ssh_port" -tt 'cd /work && exec /bin/bash -l'
   fi
 }
 
-command="${1:-status}"
-[ "$#" -eq 0 ] || shift
+codex_command() {
+  [ "$#" -eq 0 ] || die "codex takes no arguments"
+  start_command --json >/dev/null
+  resolve_project
+  local ssh_port
+  ssh_port="$(read_ssh_port)" || die "VM has no valid SSH port state"
+  ssh_command "$ssh_port" -tt 'cd /work && exec codex --yolo'
+}
+
+login_command() {
+  [ "$#" -eq 0 ] || die "login takes no arguments"
+  start_command --json >/dev/null
+  resolve_project
+  local ssh_port
+  ssh_port="$(read_ssh_port)" || die "VM has no valid SSH port state"
+  ssh_command "$ssh_port" -tt 'cd /work && exec codex --yolo login --device-auth'
+}
+
+remote_control_command() {
+  local action="${1:-start}"
+  [ "$#" -le 1 ] || die "remote-control accepts one of: start, pair, stop"
+  case "$action" in
+    start|pair|stop) ;;
+    *) die "remote-control accepts one of: start, pair, stop" ;;
+  esac
+  start_command --json >/dev/null
+  resolve_project
+  local ssh_port
+  ssh_port="$(read_ssh_port)" || die "VM has no valid SSH port state"
+  ssh_command "$ssh_port" -tt "cd /work && exec codex --yolo remote-control $action --json"
+}
+
+invocation="$(basename "$0")"
+if [ "$invocation" = vm-shell ]; then
+  command=shell
+else
+  command="${1:-codex}"
+  [ "$#" -eq 0 ] || shift
+fi
 
 case "$command" in
   init) init_command "$@" ;;
+  codex) codex_command "$@" ;;
+  login) login_command "$@" ;;
+  remote-control) remote_control_command "$@" ;;
   runtime) runtime_command "$@" ;;
   shell) shell_command "$@" ;;
   status) status_command "$@" ;;
