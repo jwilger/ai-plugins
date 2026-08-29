@@ -3,10 +3,14 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    microvm = {
+      url = "github:microvm-nix/microvm.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { nixpkgs, ... }:
+    { nixpkgs, microvm, ... }:
     let
       supportedSystems = [
         "aarch64-darwin"
@@ -14,8 +18,107 @@
         "x86_64-darwin"
         "x86_64-linux"
       ];
+      codexVmPkgs = import nixpkgs { system = "x86_64-linux"; };
+      codexVmQemuRuntimeArgs = codexVmPkgs.writeShellScript "codex-qemu-runtime-args" ''
+        port="''${CODEX_VM_SSH_PORT:-}"
+        case "$port" in
+          ""|*[!0-9]*)
+            echo "CODEX_VM_SSH_PORT must be a decimal port" >&2
+            exit 2
+            ;;
+        esac
+        if [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
+          echo "CODEX_VM_SSH_PORT must be between 1024 and 65535" >&2
+          exit 2
+        fi
+        printf '%s\n' "-nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$port-:22"
+      '';
+      codexVm = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          microvm.nixosModules.microvm
+          (
+            { config, pkgs, ... }:
+            let
+              authorizedKeysCommand = pkgs.writeShellScript "codex-authorized-keys" ''
+                if [ "$1" = codex ] && [ -r /run/host-keys/codex.pub ]; then
+                  exec ${pkgs.coreutils}/bin/cat /run/host-keys/codex.pub
+                fi
+              '';
+            in
+            {
+              networking.hostName = "codex-vm";
+              system.stateVersion = "25.11";
+
+              users.groups.codex.gid = 1000;
+              users.users.codex = {
+                isNormalUser = true;
+                uid = 1000;
+                group = "codex";
+                home = "/home/codex";
+                createHome = true;
+              };
+
+              services.openssh = {
+                enable = true;
+                settings = {
+                  PasswordAuthentication = false;
+                  KbdInteractiveAuthentication = false;
+                  PermitRootLogin = "no";
+                  AuthorizedKeysCommand = "${authorizedKeysCommand} %u";
+                  AuthorizedKeysCommandUser = "nobody";
+                };
+              };
+
+              environment.systemPackages = with pkgs; [
+                bash
+                git
+                jq
+                openssh
+              ];
+
+              microvm = {
+                hypervisor = "qemu";
+                vcpu = 4;
+                mem = 8192;
+                writableStoreOverlay = "/nix/.rw-store";
+                extraArgsScript = "${codexVmQemuRuntimeArgs}";
+                shares = [
+                  {
+                    proto = "virtiofs";
+                    tag = "work";
+                    source = "work-export";
+                    mountPoint = "/work";
+                  }
+                  {
+                    proto = "virtiofs";
+                    tag = "host-keys";
+                    source = "ssh-keys";
+                    mountPoint = "/run/host-keys";
+                    readOnly = true;
+                  }
+                ];
+                volumes = [
+                  {
+                    image = "nix-store-overlay.img";
+                    mountPoint = config.microvm.writableStoreOverlay;
+                    size = 65536;
+                  }
+                  {
+                    image = "codex-home.img";
+                    mountPoint = "/home/codex";
+                    size = 32768;
+                  }
+                ];
+              };
+            }
+          )
+        ];
+      };
     in
     {
+      nixosConfigurations.codex-vm = codexVm;
+
       packages = nixpkgs.lib.genAttrs supportedSystems (
         system:
         let
@@ -38,6 +141,10 @@
             ];
             text = builtins.readFile ./scripts/codex-vm/vm-codex;
           };
+        }
+        // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          codex-vm-runner = codexVm.config.microvm.declaredRunner;
+          codex-vm-qemu-runtime-args = codexVmQemuRuntimeArgs;
         }
       );
 

@@ -23,6 +23,57 @@ setup() {
   [ "$(jq -r .running <<<"$output")" = false ]
 }
 
+@test "the root flake owns the Codex MicroVM definition" {
+  run bash -c '
+    ref="$1#nixosConfigurations.codex-vm.config.microvm"
+    hypervisor="$(nix eval --raw "$ref.hypervisor" 2>/dev/null)" || exit
+    vcpu="$(nix eval --json "$ref.vcpu" 2>/dev/null)" || exit
+    mem="$(nix eval --json "$ref.mem" 2>/dev/null)" || exit
+    volumes="$(nix eval --json "$ref.volumes" 2>/dev/null)" || exit
+    shares="$(nix eval --json "$ref.shares" 2>/dev/null)" || exit
+    runtime_args="$(nix eval --raw "$ref.extraArgsScript" 2>/dev/null)" || exit
+    ssh="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.enable" 2>/dev/null)" || exit
+    runner="$(nix eval --raw "$1#packages.x86_64-linux.codex-vm-runner.drvPath" 2>/dev/null)" || exit
+    jq -cn \
+      --arg hypervisor "$hypervisor" \
+      --argjson vcpu "$vcpu" \
+      --argjson mem "$mem" \
+      --argjson volumes "$volumes" \
+      --argjson shares "$shares" \
+      --arg runtime_args "$runtime_args" \
+      --argjson ssh "$ssh" \
+      --arg runner "$runner" \
+      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$runner}"
+  ' _ "$ROOT"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .hypervisor <<<"$output")" = qemu ]
+  [ "$(jq -r .vcpu <<<"$output")" -eq 4 ]
+  [ "$(jq -r .mem <<<"$output")" -eq 8192 ]
+  [ "$(jq -r '.volumes | length' <<<"$output")" -eq 2 ]
+  [ "$(jq -r '.volumes[] | select(.mountPoint == "/nix/.rw-store") | .size' <<<"$output")" -eq 65536 ]
+  [ "$(jq -r '.volumes[] | select(.mountPoint == "/home/codex") | .size' <<<"$output")" -eq 32768 ]
+  [ "$(jq -r '.shares[] | select(.mountPoint == "/work") | .source' <<<"$output")" = work-export ]
+  [ "$(jq -r '.shares[] | select(.mountPoint == "/run/host-keys") | .readOnly' <<<"$output")" = true ]
+  [[ "$(jq -r .runtime_args <<<"$output")" = /nix/store/*-codex-qemu-runtime-args ]]
+  [ "$(jq -r .ssh <<<"$output")" = true ]
+  [[ "$(jq -r .runner <<<"$output")" = /nix/store/*-microvm-qemu-codex-vm.drv ]]
+}
+
+@test "the root flake runtime script safely forwards SSH" {
+  runtime_args="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-qemu-runtime-args" 2>/dev/null)"
+
+  run env -i CODEX_VM_SSH_PORT=43210 "$runtime_args"
+  [ "$status" -eq 0 ]
+  [ "$output" = "-nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:43210-:22" ]
+
+  run env -i CODEX_VM_SSH_PORT='43210,hostfwd=tcp:0.0.0.0:1-:1' "$runtime_args"
+  [ "$status" -eq 2 ]
+
+  run env -i CODEX_VM_SSH_PORT=22 "$runtime_args"
+  [ "$status" -eq 2 ]
+}
+
 @test "status reports a stable project identity without creating VM state" {
   run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' status --json"
 
