@@ -42,7 +42,7 @@ const CI_RECOVERY_LEASE_SECONDS: u64 = 60 * 60;
 const CI_RECOVERY_TEXT_MAX_BYTES: usize = 16 * 1024;
 const FINAL_REVIEW_GIT_OUTPUT_MAX_BYTES: usize = 16 * 1024 * 1024;
 const FINAL_REVIEW_SCOPE_MAX_PATHS: usize = 100_000;
-const FINAL_REVIEW_SCOPE_MAX_CONTENT_BYTES: u64 = 1024 * 1024 * 1024;
+const FINAL_REVIEW_SCOPE_MAX_CONTENT_BYTES: u64 = 64 * 1024 * 1024;
 const FINAL_REVIEW_FINGERPRINT_CACHE_MAX_ENTRIES: usize = 256;
 #[cfg(test)]
 thread_local! {
@@ -6130,9 +6130,31 @@ fn tree_scope_fingerprint(
     Ok((missing, format!("sha256:v5:{:x}", hasher.finalize())))
 }
 
-#[derive(Default)]
 struct TreeFinalReviewFingerprintCache {
     entries: BTreeMap<FinalReviewFingerprintCacheKey, (Vec<String>, String)>,
+    recency: VecDeque<FinalReviewFingerprintCacheKey>,
+    max_entries: usize,
+}
+
+impl Default for TreeFinalReviewFingerprintCache {
+    fn default() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            recency: VecDeque::new(),
+            max_entries: FINAL_REVIEW_FINGERPRINT_CACHE_MAX_ENTRIES,
+        }
+    }
+}
+
+#[cfg(test)]
+impl TreeFinalReviewFingerprintCache {
+    fn with_max_entries(max_entries: usize) -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            recency: VecDeque::new(),
+            max_entries,
+        }
+    }
 }
 
 fn tree_final_review_fingerprint_cache_key(
@@ -6172,16 +6194,22 @@ fn cached_tree_scope_fingerprint(
         retained_scope,
     );
     if let Some(value) = cache.entries.get(&key) {
-        return Ok(value.clone());
+        let value = value.clone();
+        cache.recency.retain(|candidate| candidate != &key);
+        cache.recency.push_back(key);
+        return Ok(value);
     }
     let value =
         tree_scope_fingerprint(root, tree_oid, requested_scope, retained_scope, scope_kind)?;
-    if cache.entries.len() == FINAL_REVIEW_FINGERPRINT_CACHE_MAX_ENTRIES {
-        if let Some(oldest) = cache.entries.keys().next().copied() {
-            cache.entries.remove(&oldest);
+    if cache.max_entries > 0 {
+        if cache.entries.len() == cache.max_entries {
+            if let Some(oldest) = cache.recency.pop_front() {
+                cache.entries.remove(&oldest);
+            }
         }
+        cache.entries.insert(key, value.clone());
+        cache.recency.push_back(key);
     }
-    cache.entries.insert(key, value.clone());
     Ok(value)
 }
 
@@ -6307,90 +6335,7 @@ fn wait_at_completion_snapshot_test_barrier() -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 type FinalReviewFingerprintCacheKey = [u8; 32];
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn final_review_fingerprint_cache_key(
-    scope_kind: &str,
-    scope: &[String],
-    commit_range: Option<&str>,
-) -> FinalReviewFingerprintCacheKey {
-    fn update_field(hasher: &mut Sha256, value: &[u8]) {
-        hasher.update((value.len() as u64).to_le_bytes());
-        hasher.update(value);
-    }
-
-    let mut hasher = Sha256::new();
-    hasher.update(b"tiber-final-review-fingerprint-cache-key-v1\0");
-    update_field(&mut hasher, scope_kind.as_bytes());
-    hasher.update((scope.len() as u64).to_le_bytes());
-    for pathspec in scope {
-        update_field(&mut hasher, pathspec.as_bytes());
-    }
-    match commit_range {
-        Some(commit_range) => {
-            hasher.update([1]);
-            update_field(&mut hasher, commit_range.as_bytes());
-        }
-        None => hasher.update([0]),
-    }
-    hasher.finalize().into()
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-struct FinalReviewFingerprintCache {
-    entries: BTreeMap<FinalReviewFingerprintCacheKey, String>,
-    recency: VecDeque<FinalReviewFingerprintCacheKey>,
-    max_entries: usize,
-}
-
-impl FinalReviewFingerprintCache {
-    fn new() -> Self {
-        Self {
-            entries: BTreeMap::new(),
-            recency: VecDeque::new(),
-            max_entries: FINAL_REVIEW_FINGERPRINT_CACHE_MAX_ENTRIES,
-        }
-    }
-
-    #[cfg(test)]
-    fn with_max_entries(max_entries: usize) -> Self {
-        Self {
-            entries: BTreeMap::new(),
-            recency: VecDeque::new(),
-            max_entries,
-        }
-    }
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn cached_final_review_scope_fingerprint(
-    root: &Path,
-    scope: &[String],
-    commit_range: Option<&str>,
-    scope_kind: &str,
-    cache: &mut FinalReviewFingerprintCache,
-) -> Result<String, Error> {
-    let key = final_review_fingerprint_cache_key(scope_kind, scope, commit_range);
-    if let Some(fingerprint) = cache.entries.get(&key) {
-        let fingerprint = fingerprint.clone();
-        cache.recency.retain(|candidate| candidate != &key);
-        cache.recency.push_back(key);
-        return Ok(fingerprint);
-    }
-    let fingerprint = source_scope_fingerprint(root, scope, commit_range, scope_kind)?;
-    if cache.max_entries > 0 {
-        if cache.entries.len() == cache.max_entries {
-            if let Some(evicted) = cache.recency.pop_front() {
-                cache.entries.remove(&evicted);
-            }
-        }
-        cache.entries.insert(key, fingerprint.clone());
-        cache.recency.push_back(key);
-    }
-    Ok(fingerprint)
-}
 
 fn apply_final_review_record_to_clean_sequence(
     clean_reviews: &mut Vec<FinalReviewRecord>,
@@ -6477,13 +6422,7 @@ fn enforce_final_review_gate(
     required: usize,
     delivery: bool,
 ) -> Result<(), Error> {
-    enforce_final_review_gate_with_cache(
-        root,
-        task,
-        required,
-        delivery,
-        &mut FinalReviewFingerprintCache::new(),
-    )
+    enforce_final_review_gate_with_cache(root, task, required, delivery)
 }
 
 fn enforce_final_review_gate_with_cache(
@@ -6491,7 +6430,6 @@ fn enforce_final_review_gate_with_cache(
     task: &Task,
     required: usize,
     delivery: bool,
-    _fingerprint_cache: &mut FinalReviewFingerprintCache,
 ) -> Result<(), Error> {
     let stem = &task.stem;
     let delivery_field = if delivery {
@@ -7311,20 +7249,13 @@ fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, 
     if config.final_review.minimum_clean_reviews > 0 {
         let required = config.final_review.minimum_clean_reviews;
         let (completion_commit_oid, completion_tree_oid) = canonical_commit_snapshot(root, "HEAD")?;
-        let mut fingerprint_cache = FinalReviewFingerprintCache::new();
         let mut tree_fingerprint_cache = TreeFinalReviewFingerprintCache::default();
         for stem in &stems {
             let task = projection
                 .tasks
                 .get(stem)
                 .ok_or_else(|| Error::Parse(format!("task_ref_missing ref={stem}")))?;
-            enforce_final_review_gate_with_cache(
-                root,
-                task,
-                required,
-                true,
-                &mut fingerprint_cache,
-            )?;
+            enforce_final_review_gate_with_cache(root, task, required, true)?;
             let latest = task
                 .final_review
                 .clean_reviews
@@ -10185,7 +10116,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout a0be04dd99b86a3fa09a8ca8d1a207ef40633eba\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout dd73484d305275ffa62beadc9cfe9996b899a6a0\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -12389,6 +12320,71 @@ mod lock_tests {
     }
 
     #[test]
+    fn immutable_tree_fingerprint_cache_evicts_the_least_recently_used_scope() {
+        let root = temporary_repository("tree-cache-bound");
+        for (path, content) in [
+            ("one.txt", "one\n"),
+            ("two.txt", "two\n"),
+            ("three.txt", "three\n"),
+        ] {
+            fs::write(root.join(path), content).expect("write cached blob");
+        }
+        for args in [
+            vec!["config", "user.name", "Tiber Test"],
+            vec!["config", "user.email", "tiber@example.invalid"],
+            vec!["config", "commit.gpgsign", "false"],
+            vec!["add", "one.txt", "two.txt", "three.txt"],
+            vec!["commit", "-q", "-m", "Add cached blobs"],
+        ] {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .expect("run Git fixture command");
+            assert!(output.status.success());
+        }
+        let (_, tree_oid) = canonical_commit_snapshot(&root, "HEAD").expect("resolve tree");
+        let mut cache = TreeFinalReviewFingerprintCache::with_max_entries(2);
+        let retained = |path: &str| vec![format!(":(literal){path}")];
+
+        for path in ["one.txt", "two.txt", "one.txt", "three.txt"] {
+            cached_tree_scope_fingerprint(
+                &root,
+                &tree_oid,
+                &[path.to_string()],
+                &retained(path),
+                "source",
+                &mut cache,
+            )
+            .expect("cache immutable tree scope");
+        }
+
+        let one_key = tree_final_review_fingerprint_cache_key(
+            &tree_oid,
+            "source",
+            &["one.txt".to_string()],
+            &retained("one.txt"),
+        );
+        let two_key = tree_final_review_fingerprint_cache_key(
+            &tree_oid,
+            "source",
+            &["two.txt".to_string()],
+            &retained("two.txt"),
+        );
+        let three_key = tree_final_review_fingerprint_cache_key(
+            &tree_oid,
+            "source",
+            &["three.txt".to_string()],
+            &retained("three.txt"),
+        );
+        assert_eq!(cache.entries.len(), 2);
+        assert!(cache.entries.contains_key(&one_key));
+        assert!(!cache.entries.contains_key(&two_key));
+        assert!(cache.entries.contains_key(&three_key));
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
     fn immutable_tree_fingerprint_uses_attributes_from_selected_tree() {
         let root = temporary_repository("tree-attribute-source");
         fs::write(root.join("one.txt"), "one\n").expect("write first blob");
@@ -12473,87 +12469,6 @@ mod lock_tests {
             },
             "condition=content_bytes",
         );
-    }
-
-    #[test]
-    fn final_review_scope_fingerprint_cache_reuses_an_identical_scope() {
-        let root = temporary_repository("fingerprint-cache");
-        fs::write(root.join("one.txt"), "one").expect("write scoped file");
-        let scope = vec![".".to_string()];
-        let mut cache = FinalReviewFingerprintCache::new();
-
-        let first =
-            cached_final_review_scope_fingerprint(&root, &scope, None, "source", &mut cache)
-                .expect("compute first fingerprint");
-        let second =
-            cached_final_review_scope_fingerprint(&root, &scope, None, "source", &mut cache)
-                .expect("reuse fingerprint");
-
-        assert_eq!(first, second);
-        assert_eq!(
-            cache.entries.len(),
-            1,
-            "identical scope must have one cache entry"
-        );
-        fs::remove_dir_all(root).expect("remove temporary repository");
-    }
-
-    #[test]
-    fn final_review_scope_fingerprint_cache_keys_have_fixed_size_for_broad_scopes() {
-        let broad_scope: Vec<String> = (0..FINAL_REVIEW_SCOPE_MAX_PATHS)
-            .map(|index| format!("src/component-{index:06}/**"))
-            .collect();
-        let first = final_review_fingerprint_cache_key("source", &broad_scope, Some("a..b"));
-        let mut changed_scope = broad_scope;
-        changed_scope.push("src/new/**".to_string());
-        let second = final_review_fingerprint_cache_key("source", &changed_scope, Some("a..b"));
-
-        assert_eq!(std::mem::size_of_val(&first), 32);
-        assert_ne!(
-            first, second,
-            "distinct broad scopes need distinct cache keys"
-        );
-    }
-
-    #[test]
-    fn final_review_scope_fingerprint_cache_bounds_and_reuses_post_capacity_scope() {
-        let root = temporary_repository("fingerprint-cache-bound");
-        fs::write(root.join("one.txt"), "one").expect("write scoped file");
-        let mut cache = FinalReviewFingerprintCache::with_max_entries(1);
-
-        cached_final_review_scope_fingerprint(
-            &root,
-            &["one.txt".to_string()],
-            None,
-            "source",
-            &mut cache,
-        )
-        .expect("cache first scope");
-        cached_final_review_scope_fingerprint(
-            &root,
-            &[":(literal)one.txt".to_string()],
-            None,
-            "source",
-            &mut cache,
-        )
-        .expect("compute and retain distinct scope after eviction");
-
-        fs::write(root.join("one.txt"), "changed").expect("change scoped file");
-        let reused = cached_final_review_scope_fingerprint(
-            &root,
-            &[":(literal)one.txt".to_string()],
-            None,
-            "source",
-            &mut cache,
-        )
-        .expect("reuse post-capacity scope");
-        let fresh =
-            source_scope_fingerprint(&root, &[":(literal)one.txt".to_string()], None, "source")
-                .expect("compute changed scope without cache");
-
-        assert_eq!(cache.entries.len(), 1, "cache must retain its entry bound");
-        assert_ne!(reused, fresh, "post-capacity scope must have been cached");
-        fs::remove_dir_all(root).expect("remove temporary repository");
     }
 
     #[test]
