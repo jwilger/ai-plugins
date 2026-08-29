@@ -5309,6 +5309,29 @@ fn bounded_final_review_git_output_with_index(
     index_file: Option<&Path>,
     attribute_source: Option<&str>,
 ) -> Result<Vec<u8>, Error> {
+    let isolated_attributes = if attribute_source.is_some() {
+        let git_dir = tempfile::Builder::new()
+            .prefix("tiber-final-review-attributes-")
+            .tempdir()
+            .map_err(Error::Io)?;
+        let init = Command::new("git")
+            .args(["init", "--bare", "--quiet"])
+            .arg(git_dir.path())
+            .current_dir(root)
+            .output()
+            .map_err(Error::Io)?;
+        if !init.status.success() {
+            return Err(Error::Parse(
+                "tiber.final_review_attribute_isolation_failed=true".into(),
+            ));
+        }
+        let attributes_file = git_dir.path().join("empty-attributes");
+        fs::write(&attributes_file, []).map_err(Error::Io)?;
+        let object_directory = GitRepository::at(root).git_common_dir()?.join("objects");
+        Some((git_dir, attributes_file, object_directory))
+    } else {
+        None
+    };
     let mut command = Command::new("git");
     command.args(args).args(scope).current_dir(root);
     if let Some(index_file) = index_file {
@@ -5316,6 +5339,16 @@ fn bounded_final_review_git_output_with_index(
     }
     if let Some(attribute_source) = attribute_source {
         command.env("GIT_ATTR_SOURCE", attribute_source);
+    }
+    if let Some((git_dir, attributes_file, object_directory)) = isolated_attributes.as_ref() {
+        command
+            .env("GIT_DIR", git_dir.path())
+            .env("GIT_WORK_TREE", root)
+            .env("GIT_OBJECT_DIRECTORY", object_directory)
+            .env("GIT_ATTR_NOSYSTEM", "1")
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "core.attributesFile")
+            .env("GIT_CONFIG_VALUE_0", attributes_file);
     }
     let mut child = command
         .stdout(Stdio::piped())
@@ -10116,7 +10149,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout dd73484d305275ffa62beadc9cfe9996b899a6a0\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 414918f2bde09eef73fb4769dcd33bd5ff737613\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -12412,6 +12445,8 @@ mod lock_tests {
         let (_, tree_oid) = canonical_commit_snapshot(&root, "HEAD").expect("resolve tree");
         fs::write(root.join(".gitattributes"), "one.txt reviewed\n")
             .expect("diverge worktree attributes");
+        fs::write(root.join(".git/info/attributes"), "two.txt -reviewed\n")
+            .expect("diverge repository-local attributes");
 
         let (missing, actual) =
             tree_scope_fingerprint(&root, &tree_oid, &requested, &retained, "source")
