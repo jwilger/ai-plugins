@@ -6,7 +6,8 @@ usage() {
 Usage: vm-codex status [--json]
        vm-codex runtime [--json]
        vm-codex init [--json]
-       vm-codex start --dry-run [--json]
+       vm-codex start [--dry-run] [--json]
+       vm-codex stop [--json]
        vm-shell [--dry-run] [--json]
 EOF
 }
@@ -18,8 +19,8 @@ die() {
 
 runtime_command() {
   local output_json=false name path variable
-  local -a names=(runner virtiofsd_run bwrap flock ssh ssh_keygen)
-  local -a variables=(CODEX_VM_RUNNER CODEX_VM_VIRTIOFSD_RUN CODEX_VM_BWRAP CODEX_VM_FLOCK CODEX_VM_SSH CODEX_VM_SSH_KEYGEN)
+  local -a names=(runner virtiofsd_run bwrap flock python ssh ssh_keygen)
+  local -a variables=(CODEX_VM_RUNNER CODEX_VM_VIRTIOFSD_RUN CODEX_VM_BWRAP CODEX_VM_FLOCK CODEX_VM_PYTHON CODEX_VM_SSH CODEX_VM_SSH_KEYGEN)
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -174,6 +175,91 @@ process_start_time() {
   printf '%s\n' "${fields[19]}"
 }
 
+read_pid_record() {
+  local record_file="$1" record pid recorded_start current_start
+  [ -r "$record_file" ] || return 1
+  record="$(cat "$record_file" 2>/dev/null)" || return 1
+  read -r pid recorded_start _ <<<"$record"
+  [[ "${pid:-}" =~ ^[0-9]+$ ]] || return 1
+  [[ "${recorded_start:-}" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  current_start="$(process_start_time "$pid")" || return 1
+  [ "$current_start" = "$recorded_start" ] || return 1
+  printf '%s\n' "$pid"
+}
+
+record_process() {
+  local pid="$1" record_file="$2" start
+  start="$(process_start_time "$pid")" || return 1
+  printf '%s %s\n' "$pid" "$start" >"$record_file"
+}
+
+read_ssh_port() {
+  local port
+  [ -r "$RUNTIME_DIR/ssh.port" ] || return 1
+  port="$(cat "$RUNTIME_DIR/ssh.port" 2>/dev/null)" || return 1
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || return 1
+  printf '%s\n' "$port"
+}
+
+terminate_recorded_process() {
+  local record_file="$1" pid attempt
+  pid="$(read_pid_record "$record_file")" || return 0
+  kill "$pid" 2>/dev/null || true
+  for ((attempt = 1; attempt <= 50; attempt++)); do
+    read_pid_record "$record_file" >/dev/null || return 0
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  for ((attempt = 1; attempt <= 20; attempt++)); do
+    read_pid_record "$record_file" >/dev/null || return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+allocate_ssh_port() {
+  "$CODEX_VM_PYTHON" - <<'PY'
+import socket
+
+with socket.socket() as listener:
+    listener.bind(("127.0.0.1", 0))
+    print(listener.getsockname()[1])
+PY
+}
+
+assert_safe_directory_path() {
+  local path="$1"
+  [ ! -L "$path" ] || die "VM runtime directories must not be symlinks: $path"
+  [ ! -e "$path" ] || [ -d "$path" ] || die "VM runtime path must be a directory: $path"
+}
+
+assert_safe_file_path() {
+  local path="$1"
+  [ ! -L "$path" ] || die "VM runtime files must not be symlinks: $path"
+  if [ -e "$path" ]; then
+    [ -f "$path" ] || die "VM runtime path must be a regular file: $path"
+    [ "$(stat -c %h "$path")" -eq 1 ] || die "VM runtime files must not be hard-linked: $path"
+  fi
+}
+
+validate_operational_paths() {
+  local path
+  for path in "$STATE_DIR/work-export" "$RUNTIME_DIR"; do
+    assert_safe_directory_path "$path"
+  done
+  for path in \
+    "$STATE_DIR/launch.lock" \
+    "$STATE_DIR/qemu.log" \
+    "$STATE_DIR/virtiofsd.log" \
+    "$RUNTIME_DIR/qemu.pid" \
+    "$RUNTIME_DIR/virtiofsd.pid" \
+    "$RUNTIME_DIR/ssh.port"; do
+    assert_safe_file_path "$path"
+  done
+}
+
 load_project_config() {
   local config_file="$PROJECT_ROOT/codex-vm.json" unknown_field
 
@@ -193,7 +279,7 @@ load_project_config() {
 }
 
 status_command() {
-  local output_json=false running=false
+  local output_json=false running=false ssh_port_json=null
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -205,16 +291,12 @@ status_command() {
   done
 
   resolve_project
-  if [ -r "$RUNTIME_DIR/qemu.pid" ]; then
-    local pid_record pid recorded_start current_start
-    pid_record="$(cat "$RUNTIME_DIR/qemu.pid" 2>/dev/null)" || pid_record=""
-    read -r pid recorded_start _ <<<"$pid_record"
-    if [[ "${pid:-}" =~ ^[0-9]+$ ]] &&
-      [[ "${recorded_start:-}" =~ ^[0-9]+$ ]] &&
-      kill -0 "$pid" 2>/dev/null &&
-      current_start="$(process_start_time "$pid")" &&
-      [ "$current_start" = "$recorded_start" ]; then
-      running=true
+  if read_pid_record "$RUNTIME_DIR/qemu.pid" >/dev/null; then
+    running=true
+    if [ -r "$RUNTIME_DIR/ssh.port" ]; then
+      local ssh_port
+      ssh_port="$(cat "$RUNTIME_DIR/ssh.port" 2>/dev/null)" || ssh_port=""
+      [[ "$ssh_port" =~ ^[0-9]+$ ]] && ssh_port_json="$ssh_port"
     fi
   fi
 
@@ -225,7 +307,8 @@ status_command() {
       --arg project_root "$PROJECT_ROOT" \
       --arg state_dir "$STATE_DIR" \
       --argjson running "$running" \
-      '{schema_version: $schema_version, project_id: $project_id, project_root: $project_root, state_dir: $state_dir, running: $running}'
+      --argjson ssh_port "$ssh_port_json" \
+      '{schema_version: $schema_version, project_id: $project_id, project_root: $project_root, state_dir: $state_dir, running: $running, ssh_port: $ssh_port}'
   else
     printf '%s: %s\n' "$PROJECT_ID" "$([ "$running" = true ] && printf running || printf stopped)"
   fi
@@ -244,11 +327,10 @@ start_command() {
     shift
   done
 
-  [ "$dry_run" = true ] || die "start currently requires --dry-run"
   resolve_project
   load_project_config
 
-  if [ "$output_json" = true ]; then
+  if [ "$dry_run" = true ] && [ "$output_json" = true ]; then
     jq -n \
       --argjson schema_version 1 \
       --arg project_id "$PROJECT_ID" \
@@ -264,8 +346,120 @@ start_command() {
         shares: [{name: "work", source: $work_source, mount_point: "/work", mode: "rw"}],
         host_nix_evaluation: false
       }'
-  else
+  elif [ "$dry_run" = true ]; then
     printf 'Would start %s with %s mounted read/write at /work.\n' "$PROJECT_ID" "$PROJECT_ROOT"
+  else
+    local ssh_port qemu_pid virtiofsd_pid
+    runtime_command >/dev/null
+    initialize_state
+    validate_operational_paths
+    mkdir -p "$RUNTIME_DIR" "$STATE_DIR/work-export"
+    chmod 700 "$RUNTIME_DIR"
+    exec 9>"$STATE_DIR/launch.lock"
+    "$CODEX_VM_FLOCK" -x 9
+
+    if qemu_pid="$(read_pid_record "$RUNTIME_DIR/qemu.pid")"; then
+      ssh_port="$(read_ssh_port)" || die "running VM has invalid SSH port state; run vm-codex stop before restarting"
+    else
+      rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
+      (
+        exec 9>&-
+        exec "$CODEX_VM_BWRAP" \
+          --die-with-parent \
+          --unshare-all \
+          --dir /nix \
+          --ro-bind /nix/store /nix/store \
+          --proc /proc \
+          --dev /dev \
+          --dir /state \
+          --bind "$STATE_DIR" /state \
+          --bind "$PROJECT_ROOT" /state/work-export \
+          --tmpfs /state/work-export/.codex-vm \
+          --chdir /state \
+          "$CODEX_VM_VIRTIOFSD_RUN"
+      ) >"$STATE_DIR/virtiofsd.log" 2>&1 &
+      virtiofsd_pid=$!
+      record_process "$virtiofsd_pid" "$RUNTIME_DIR/virtiofsd.pid" || die "virtiofsd failed to start"
+      sleep 0.2
+      if ! read_pid_record "$RUNTIME_DIR/virtiofsd.pid" >/dev/null; then
+        rm -f "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
+        die "virtiofsd failed to start; see $STATE_DIR/virtiofsd.log"
+      fi
+
+      local attempt started=false
+      for ((attempt = 1; attempt <= 5; attempt++)); do
+        ssh_port="$(allocate_ssh_port)"
+        (
+          exec 9>&-
+          cd "$STATE_DIR"
+          export CODEX_VM_SSH_PORT="$ssh_port"
+          exec "$CODEX_VM_RUNNER"
+        ) >"$STATE_DIR/qemu.log" 2>&1 &
+        qemu_pid=$!
+        if record_process "$qemu_pid" "$RUNTIME_DIR/qemu.pid"; then
+          sleep 0.2
+          if read_pid_record "$RUNTIME_DIR/qemu.pid" >/dev/null; then
+            printf '%s\n' "$ssh_port" >"$RUNTIME_DIR/ssh.port"
+            started=true
+            break
+          fi
+        fi
+        wait "$qemu_pid" 2>/dev/null || true
+        rm -f "$RUNTIME_DIR/qemu.pid"
+      done
+      if [ "$started" != true ]; then
+        terminate_recorded_process "$RUNTIME_DIR/virtiofsd.pid" || true
+        rm -f "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
+        die "QEMU failed to claim a loopback SSH port after 5 attempts; see $STATE_DIR/qemu.log"
+      fi
+    fi
+
+    if [ "$output_json" = true ]; then
+      jq -n \
+        --argjson schema_version 1 \
+        --arg project_id "$PROJECT_ID" \
+        --arg state_dir "$STATE_DIR" \
+        --argjson pid "$qemu_pid" \
+        --argjson ssh_port "$ssh_port" \
+        '{schema_version: $schema_version, project_id: $project_id, state_dir: $state_dir, running: true, pid: $pid, ssh_port: $ssh_port, host_nix_evaluation: false}'
+    else
+      printf 'Started %s (SSH 127.0.0.1:%s).\n' "$PROJECT_ID" "$ssh_port"
+    fi
+  fi
+}
+
+stop_command() {
+  local output_json=false stopped=false pid
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --json) output_json=true ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown stop argument: $1" ;;
+    esac
+    shift
+  done
+
+  resolve_project
+  [ ! -L "$STATE_DIR" ] || die "VM state directories must not be symlinks: $STATE_DIR"
+  validate_operational_paths
+  if [ -d "$STATE_DIR" ]; then
+    exec 9>"$STATE_DIR/launch.lock"
+    "$CODEX_VM_FLOCK" -x 9
+  fi
+  for name in qemu virtiofsd; do
+    if pid="$(read_pid_record "$RUNTIME_DIR/$name.pid")"; then
+      terminate_recorded_process "$RUNTIME_DIR/$name.pid" || die "$name did not stop after SIGKILL"
+      stopped=true
+    fi
+  done
+  rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
+
+  if [ "$output_json" = true ]; then
+    jq -n --argjson schema_version 1 --arg project_id "$PROJECT_ID" --argjson stopped "$stopped" \
+      '{schema_version: $schema_version, project_id: $project_id, running: false, stopped: $stopped}'
+  else
+    printf '%s: stopped\n' "$PROJECT_ID"
   fi
 }
 
@@ -313,6 +507,7 @@ case "$command" in
   shell) shell_command "$@" ;;
   status) status_command "$@" ;;
   start) start_command "$@" ;;
+  stop) stop_command "$@" ;;
   -h|--help|help) usage ;;
   *) die "unknown command: $command" ;;
 esac

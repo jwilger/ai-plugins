@@ -10,6 +10,26 @@ setup() {
   git -C "$REPO" init -q
 }
 
+make_fake_vm_runtime() {
+  FAKE_VM_BIN="$BATS_TEST_TMPDIR/lifecycle-bin"
+  mkdir -p "$FAKE_VM_BIN"
+  printf '#!/usr/bin/env bash\nexec sleep 60\n' >"$FAKE_VM_BIN/runner"
+  printf '#!/usr/bin/env bash\nexec sleep 60\n' >"$FAKE_VM_BIN/virtiofsd-run"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"$FAKE_BWRAP_ARGS"\nexec "${@: -1}"\n' >"$FAKE_VM_BIN/bwrap"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$FAKE_VM_BIN/ssh"
+  printf '#!/usr/bin/env bash\nexit 97\n' >"$FAKE_VM_BIN/nix"
+  chmod +x "$FAKE_VM_BIN"/*
+  export PATH="$FAKE_VM_BIN:$PATH"
+  export CODEX_VM_RUNNER="$FAKE_VM_BIN/runner"
+  export CODEX_VM_VIRTIOFSD_RUN="$FAKE_VM_BIN/virtiofsd-run"
+  export CODEX_VM_BWRAP="$FAKE_VM_BIN/bwrap"
+  export CODEX_VM_FLOCK="$(command -v flock)"
+  export CODEX_VM_PYTHON="$(command -v python3)"
+  export CODEX_VM_SSH="$FAKE_VM_BIN/ssh"
+  export CODEX_VM_SSH_KEYGEN="$(command -v ssh-keygen)"
+  export FAKE_BWRAP_ARGS="$BATS_TEST_TMPDIR/bwrap.args"
+}
+
 @test "the root flake publishes the Codex VM command" {
   package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
 
@@ -234,6 +254,85 @@ setup() {
   [ "$(jq -r .host_nix_evaluation <<<"$output")" = false ]
   [ ! -e "$REPO/.codex-vm" ]
   [ ! -e "$XDG_RUNTIME_DIR/ai-plugins-codex-vm" ]
+}
+
+@test "start and stop manage the same VM process without invoking Nix" {
+  make_fake_vm_runtime
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+
+  [ "$status" -eq 0 ]
+  qemu_pid="$(jq -r .pid <<<"$output")"
+  ssh_port="$(jq -r .ssh_port <<<"$output")"
+  kill -0 "$qemu_pid"
+  [[ "$ssh_port" =~ ^[0-9]+$ ]]
+  grep -Fx -- '--ro-bind' "$FAKE_BWRAP_ARGS"
+  grep -Fx -- '/nix/store' "$FAKE_BWRAP_ARGS"
+  grep -Fx -- '--tmpfs' "$FAKE_BWRAP_ARGS"
+  grep -Fx -- '/state/work-export/.codex-vm' "$FAKE_BWRAP_ARGS"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' status --json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .running <<<"$output")" = true ]
+  [ "$(jq -r .ssh_port <<<"$output")" = "$ssh_port" ]
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop --json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .running <<<"$output")" = false ]
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' status --json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .running <<<"$output")" = false ]
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+  [ "$status" -eq 0 ]
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop --json"
+  [ "$status" -eq 0 ]
+}
+
+@test "start rejects agent-controlled runtime log symlinks" {
+  make_fake_vm_runtime
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' init"
+  [ "$status" -eq 0 ]
+  outside="$BATS_TEST_TMPDIR/outside.log"
+  printf '%s\n' preserved >"$outside"
+  ln -s "$outside" "$REPO/.codex-vm/qemu.log"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"VM runtime files must not be symlinks"* ]]
+  [ "$(cat "$outside")" = preserved ]
+}
+
+@test "start retries a runner that loses its first port race" {
+  make_fake_vm_runtime
+  attempts="$BATS_TEST_TMPDIR/runner-attempts"
+  printf '#!/usr/bin/env bash\nprintf x >>"%s"\n[ "$(wc -c <"%s")" -gt 1 ] || exit 1\nexec sleep 60\n' \
+    "$attempts" "$attempts" >"$FAKE_VM_BIN/runner"
+  chmod +x "$FAKE_VM_BIN/runner"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+
+  [ "$status" -eq 0 ]
+  [ "$(wc -c <"$attempts")" -eq 2 ]
+  [ "$(jq -r .running <<<"$output")" = true ]
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop"
+  [ "$status" -eq 0 ]
+}
+
+@test "start rejects a running VM with missing SSH port state" {
+  make_fake_vm_runtime
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+  [ "$status" -eq 0 ]
+  rm "$XDG_RUNTIME_DIR/ai-plugins-codex-vm/$(jq -r .project_id <<<"$output")/ssh.port"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --json"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"running VM has invalid SSH port state"* ]]
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop"
+  [ "$status" -eq 0 ]
 }
 
 @test "start rejects unknown project configuration fields" {

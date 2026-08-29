@@ -151,6 +151,7 @@
             runtimeEnv = {
               CODEX_VM_BWRAP = "${pkgs.bubblewrap}/bin/bwrap";
               CODEX_VM_FLOCK = "${pkgs.util-linux}/bin/flock";
+              CODEX_VM_PYTHON = "${pkgs.python3}/bin/python3";
               CODEX_VM_RUNNER = "${codexVm.config.microvm.declaredRunner}/bin/microvm-run";
               CODEX_VM_SSH = "${pkgs.openssh}/bin/ssh";
               CODEX_VM_SSH_KEYGEN = "${pkgs.openssh}/bin/ssh-keygen";
