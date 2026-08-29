@@ -132,6 +132,30 @@ PY
   ! grep -q 'gpt-5.6-terra' "$seed"
 }
 
+@test "init snapshots the applicable envrc chain as private data without executing it" {
+  package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
+  parent_envrc="$BATS_TEST_TMPDIR/.envrc"
+  execution_marker="$BATS_TEST_TMPDIR/envrc-was-executed"
+  printf 'export PARENT_VALUE=parent\ntouch %q\n' "$execution_marker" >"$parent_envrc"
+  printf 'source_up_if_exists\nexport PROJECT_VALUE=project\n' >"$REPO/.envrc"
+
+  run env AMBIENT_ONLY=must-not-be-captured bash -c "cd '$REPO' && '$package/bin/vm-codex' init"
+  [ "$status" -eq 0 ]
+  [ ! -e "$execution_marker" ]
+  manifest="$REPO/.codex-vm/bootstrap/envrc/manifest.json"
+  [ -f "$manifest" ]
+  [ "$(stat -c %a "$manifest")" = 600 ]
+  [ "$(jq -r .projectRoot "$manifest")" = "$REPO" ]
+  [ "$(jq -r '.files | length' "$manifest")" -eq 2 ]
+  jq -e --arg path "$parent_envrc" '.files[] | select(.path == $path and .kind == "ancestor")' "$manifest" >/dev/null
+  jq -e --arg path "$REPO/.envrc" '.files[] | select(.path == $path and .kind == "project")' "$manifest" >/dev/null
+  while IFS= read -r staged; do
+    [ -f "$REPO/.codex-vm/bootstrap/envrc/files/$staged" ]
+    [ "$(stat -c %a "$REPO/.codex-vm/bootstrap/envrc/files/$staged")" = 600 ]
+  done < <(jq -r '.files[].staged' "$manifest")
+  ! grep -R -q 'AMBIENT_ONLY' "$REPO/.codex-vm/bootstrap/envrc"
+}
+
 @test "init rejects agent-controlled VM state symlinks" {
   package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
   outside="$BATS_TEST_TMPDIR/outside"
@@ -207,6 +231,7 @@ PY
     host_keys="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.hostKeys" 2>/dev/null)" || exit
     bootstrap_script="$(nix eval --raw "$1#nixosConfigurations.codex-vm.config.systemd.services.codex-vm-bootstrap.script" 2>/dev/null)" || exit
     bootstrap_before="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.systemd.services.codex-vm-bootstrap.before" 2>/dev/null)" || exit
+    environment_service="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.systemd.services.codex-vm-environment.serviceConfig" 2>/dev/null)" || exit
     runner="$(nix eval --raw "$1#packages.x86_64-linux.codex-vm-runner.drvPath" 2>/dev/null)" || exit
     jq -cn \
       --arg hypervisor "$hypervisor" \
@@ -223,8 +248,9 @@ PY
       --argjson host_keys "$host_keys" \
       --arg bootstrap_script "$bootstrap_script" \
       --argjson bootstrap_before "$bootstrap_before" \
+      --argjson environment_service "$environment_service" \
       --arg runner "$runner" \
-      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$ssh_firewall, \$sudo_password, \$system_packages, \$egress_rules, \$host_keys, \$bootstrap_script, \$bootstrap_before, \$runner}"
+      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$ssh_firewall, \$sudo_password, \$system_packages, \$egress_rules, \$host_keys, \$bootstrap_script, \$bootstrap_before, \$environment_service, \$runner}"
   ' _ "$ROOT"
 
   [ "$status" -eq 0 ]
@@ -241,7 +267,9 @@ PY
   [ "$(jq -r .ssh <<<"$output")" = true ]
   [ "$(jq -r .ssh_firewall <<<"$output")" = true ]
   [ "$(jq -r .sudo_password <<<"$output")" = false ]
-  [ "$(jq -r '[.system_packages[] | select(startswith("codex-"))] | length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r '[.system_packages[] | select(test("^codex-[0-9]"))] | length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r '[.system_packages[] | select(. == "codex-vm-enter")] | length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r '[.system_packages[] | select(startswith("direnv-"))] | length' <<<"$output")" -eq 1 ]
   egress_rules="$(jq -r .egress_rules <<<"$output")"
   [[ "$egress_rules" == *"ct state established,related accept"* ]]
   [[ "$egress_rules" == *"10.0.2.2 udp sport 68 udp dport 67 accept"* ]]
@@ -271,6 +299,7 @@ PY
   [[ "$(jq -r .bootstrap_script <<<"$output")" == *"codex_home=/home/codex/.codex"* ]]
   [[ "$(jq -r .bootstrap_script <<<"$output")" == *'"$codex_home/config.toml"'* ]]
   [ "$(jq -r '.bootstrap_before | index("sshd.service") != null' <<<"$output")" = true ]
+  [[ "$(jq -r .environment_service.ExecStart <<<"$output")" = /nix/store/*-codex-vm-refresh-environment ]]
   [[ "$(jq -r .runner <<<"$output")" = /nix/store/*-microvm-qemu-codex-vm.drv ]]
 }
 
@@ -445,24 +474,24 @@ PY
   project_id="$(cd "$REPO" && "$ROOT/scripts/codex-vm/vm-codex" status --json | jq -r .project_id)"
   grep -Fx -- "HostKeyAlias=$project_id" "$FAKE_SSH_ARGS"
   grep -F -- "$REPO/.codex-vm/ssh/client_ed25519" "$FAKE_SSH_ARGS"
-  grep -Fx -- 'cd /work && exec /bin/bash -l' "$FAKE_SSH_ARGS"
+  grep -Fx -- 'exec codex-vm-enter shell' "$FAKE_SSH_ARGS"
 
   run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' codex"
   [ "$status" -eq 0 ]
-  grep -Fx -- 'cd /work && exec codex --yolo' "$FAKE_SSH_ARGS"
+  grep -Fx -- 'exec codex-vm-enter codex --yolo' "$FAKE_SSH_ARGS"
 
   run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' remote-control start"
   [ "$status" -eq 0 ]
-  grep -Fx -- 'cd /work && exec codex --yolo remote-control start --json' "$FAKE_SSH_ARGS"
+  grep -Fx -- 'exec codex-vm-enter codex --yolo remote-control start --json' "$FAKE_SSH_ARGS"
 
   run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' login"
   [ "$status" -eq 0 ]
-  grep -Fx -- 'cd /work && exec codex --yolo login --device-auth' "$FAKE_SSH_ARGS"
+  grep -Fx -- 'exec codex-vm-enter codex --yolo login --device-auth' "$FAKE_SSH_ARGS"
 
   for action in pair stop; do
     run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' remote-control '$action'"
     [ "$status" -eq 0 ]
-    grep -Fx -- "cd /work && exec codex --yolo remote-control $action --json" "$FAKE_SSH_ARGS"
+    grep -Fx -- "exec codex-vm-enter codex --yolo remote-control $action --json" "$FAKE_SSH_ARGS"
   done
 
   run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' stop"

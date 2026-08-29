@@ -151,6 +151,123 @@ PY
   trap - EXIT
 }
 
+stage_envrc_inputs() {
+  local envrc_dir="$STATE_DIR/bootstrap/envrc"
+
+  "$CODEX_VM_PYTHON" - "$PROJECT_ROOT" "$envrc_dir" <<'PY'
+import hashlib
+import json
+import os
+import pathlib
+import stat
+import sys
+import tempfile
+
+project_root = pathlib.Path(sys.argv[1]).resolve(strict=True)
+destination = pathlib.Path(sys.argv[2])
+for path in (destination, destination / "files"):
+    if path.is_symlink():
+        raise SystemExit(f"VM envrc state must not be a symlink: {path}")
+    if path.exists() and not path.is_dir():
+        raise SystemExit(f"VM envrc state must be a directory: {path}")
+destination.mkdir(mode=0o700, parents=True, exist_ok=True)
+files_dir = destination / "files"
+files_dir.mkdir(mode=0o700, exist_ok=True)
+os.chmod(destination, 0o700)
+os.chmod(files_dir, 0o700)
+
+directories = list(reversed(project_root.parents)) + [project_root]
+entries = []
+referenced = set()
+for directory in directories:
+    source = directory / ".envrc"
+    try:
+        source_stat = source.lstat()
+    except FileNotFoundError:
+        continue
+    if not stat.S_ISREG(source_stat.st_mode) or source_stat.st_nlink != 1:
+        raise SystemExit(f"applicable .envrc must be a non-linked regular file: {source}")
+    data = source.read_bytes()
+    if len(data) > 1024 * 1024:
+        raise SystemExit(f"applicable .envrc exceeds the 1 MiB limit: {source}")
+    digest = hashlib.sha256(data).hexdigest()
+    staged_name = f"{digest}.envrc"
+    staged = files_dir / staged_name
+    if staged.is_symlink():
+        raise SystemExit(f"VM envrc snapshot must not be a symlink: {staged}")
+    if staged.exists():
+        staged_stat = staged.stat()
+        if not stat.S_ISREG(staged_stat.st_mode) or staged_stat.st_nlink != 1:
+            raise SystemExit(f"VM envrc snapshot must be an unlinked regular file: {staged}")
+        if hashlib.sha256(staged.read_bytes()).hexdigest() != digest:
+            raise SystemExit(f"VM envrc snapshot content mismatch: {staged}")
+    else:
+        fd, temporary_name = tempfile.mkstemp(prefix=".envrc.", dir=files_dir)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb", closefd=True) as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_name, staged)
+        except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            pathlib.Path(temporary_name).unlink(missing_ok=True)
+            raise
+    os.chmod(staged, 0o600)
+    referenced.add(staged_name)
+    entries.append({
+        "kind": "project" if directory == project_root else "ancestor",
+        "path": str(source),
+        "relativePath": str(source.relative_to("/")),
+        "sha256": digest,
+        "staged": staged_name,
+    })
+
+manifest = destination / "manifest.json"
+if manifest.is_symlink():
+    raise SystemExit(f"VM envrc manifest must not be a symlink: {manifest}")
+if manifest.exists():
+    manifest_stat = manifest.stat()
+    if not stat.S_ISREG(manifest_stat.st_mode) or manifest_stat.st_nlink != 1:
+        raise SystemExit(f"VM envrc manifest must be an unlinked regular file: {manifest}")
+payload = {
+    "schemaVersion": 1,
+    "projectRoot": str(project_root),
+    "projectRelativePath": str(project_root.relative_to("/")),
+    "files": entries,
+}
+fd, temporary_name = tempfile.mkstemp(prefix=".manifest.", dir=destination)
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", closefd=True) as handle:
+        json.dump(payload, handle, separators=(",", ":"), sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary_name, manifest)
+except BaseException:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    pathlib.Path(temporary_name).unlink(missing_ok=True)
+    raise
+os.chmod(manifest, 0o600)
+
+for child in files_dir.iterdir():
+    if child.name in referenced:
+        continue
+    child_stat = child.lstat()
+    if not stat.S_ISREG(child_stat.st_mode) or child_stat.st_nlink != 1:
+        raise SystemExit(f"unexpected linked VM envrc snapshot: {child}")
+    child.unlink()
+PY
+}
+
 init_command() {
   local output_json=false
 
@@ -166,6 +283,7 @@ init_command() {
   resolve_project
   runtime_command >/dev/null
   initialize_state
+  stage_envrc_inputs
 
   if [ "$output_json" = true ]; then
     jq -n \
@@ -272,6 +390,13 @@ wait_for_ssh() {
     sleep 0.5
   done
   return 1
+}
+
+refresh_guest_environment() {
+  local port="$1"
+  if ! ssh_command "$port" -o BatchMode=yes 'sudo systemctl start codex-vm-environment.service'; then
+    die "guest project environment refresh failed; inspect codex-vm-environment.service inside the VM"
+  fi
 }
 
 terminate_recorded_process() {
@@ -423,6 +548,7 @@ start_command() {
     local ssh_port qemu_pid virtiofsd_pid
     runtime_command >/dev/null
     initialize_state
+    stage_envrc_inputs
     validate_operational_paths
     mkdir -p "$RUNTIME_DIR" "$STATE_DIR/work-export"
     chmod 700 "$RUNTIME_DIR"
@@ -491,6 +617,7 @@ start_command() {
       rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
       die "VM did not become reachable over project SSH; see $STATE_DIR/qemu.log"
     fi
+    refresh_guest_environment "$ssh_port"
 
     if [ "$output_json" = true ]; then
       jq -n \
@@ -577,7 +704,7 @@ shell_command() {
     resolve_project
     local ssh_port
     ssh_port="$(read_ssh_port)" || die "VM has no valid SSH port state"
-    ssh_command "$ssh_port" -tt 'cd /work && exec /bin/bash -l'
+    ssh_command "$ssh_port" -tt 'exec codex-vm-enter shell'
   fi
 }
 
@@ -587,7 +714,7 @@ codex_command() {
   resolve_project
   local ssh_port
   ssh_port="$(read_ssh_port)" || die "VM has no valid SSH port state"
-  ssh_command "$ssh_port" -tt 'cd /work && exec codex --yolo'
+  ssh_command "$ssh_port" -tt 'exec codex-vm-enter codex --yolo'
 }
 
 login_command() {
@@ -596,7 +723,7 @@ login_command() {
   resolve_project
   local ssh_port
   ssh_port="$(read_ssh_port)" || die "VM has no valid SSH port state"
-  ssh_command "$ssh_port" -tt 'cd /work && exec codex --yolo login --device-auth'
+  ssh_command "$ssh_port" -tt 'exec codex-vm-enter codex --yolo login --device-auth'
 }
 
 remote_control_command() {
@@ -610,7 +737,7 @@ remote_control_command() {
   resolve_project
   local ssh_port
   ssh_port="$(read_ssh_port)" || die "VM has no valid SSH port state"
-  ssh_command "$ssh_port" -tt "cd /work && exec codex --yolo remote-control $action --json"
+  ssh_command "$ssh_port" -tt "exec codex-vm-enter codex --yolo remote-control $action --json"
 }
 
 invocation="$(basename "$0")"

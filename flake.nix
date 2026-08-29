@@ -45,6 +45,180 @@
                   exec ${pkgs.coreutils}/bin/cat /run/host-keys/codex.pub
                 fi
               '';
+              codexVmEnter = pkgs.writeScriptBin "codex-vm-enter" ''
+                #!${pkgs.python3}/bin/python3
+                import json
+                import os
+                import pathlib
+                import sys
+
+                environment_path = pathlib.Path("/run/codex-vm-environment/environment.json")
+                try:
+                    delta = json.loads(environment_path.read_text())
+                except (OSError, json.JSONDecodeError) as error:
+                    raise SystemExit(f"codex-vm-enter: environment is unavailable: {error}")
+                if not isinstance(delta, dict):
+                    raise SystemExit("codex-vm-enter: environment delta is not an object")
+                environment = {
+                    "HOME": "/home/codex",
+                    "USER": "codex",
+                    "LOGNAME": "codex",
+                    "SHELL": "/bin/bash",
+                    "PATH": "/run/current-system/sw/bin:/usr/bin:/bin",
+                    "LANG": "C.UTF-8",
+                    "TERM": "xterm-256color",
+                }
+                for key, value in delta.items():
+                    if not isinstance(key, str) or not key or "=" in key or "\0" in key:
+                        raise SystemExit("codex-vm-enter: invalid environment variable name")
+                    if value is None:
+                        environment.pop(key, None)
+                    elif isinstance(value, str) and "\0" not in value:
+                        environment[key] = value
+                    else:
+                        raise SystemExit(f"codex-vm-enter: invalid value for {key}")
+                if len(sys.argv) < 2:
+                    raise SystemExit("usage: codex-vm-enter shell | COMMAND [ARG ...]")
+                os.chdir("/work")
+                command = ["/bin/bash", "--noprofile", "--norc", "-i"] if sys.argv[1] == "shell" else sys.argv[1:]
+                os.execvpe(command[0], command, environment)
+              '';
+              refreshEnvironment = pkgs.writeShellScript "codex-vm-refresh-environment" ''
+                set -euo pipefail
+                runtime=/run/codex-vm-environment
+                tree="$runtime/tree"
+                manifest=/run/codex-vm-bootstrap/envrc/manifest.json
+                old_mount="$runtime/mounted-project"
+                old_envrc="$runtime/mounted-envrc"
+                ${pkgs.coreutils}/bin/install -d -m 0711 "$runtime"
+                if [ -r "$old_envrc" ]; then
+                  mounted_envrc="$(${pkgs.coreutils}/bin/cat "$old_envrc")"
+                  case "$mounted_envrc" in "$tree"/*) ;; *) exit 2 ;; esac
+                  ${pkgs.util-linux}/bin/mountpoint -q "$mounted_envrc" && ${pkgs.util-linux}/bin/umount "$mounted_envrc" || true
+                fi
+                if [ -r "$old_mount" ]; then
+                  mounted_project="$(${pkgs.coreutils}/bin/cat "$old_mount")"
+                  case "$mounted_project" in "$tree"/*) ;; *) exit 2 ;; esac
+                  ${pkgs.util-linux}/bin/mountpoint -q "$mounted_project" && ${pkgs.util-linux}/bin/umount "$mounted_project" || true
+                fi
+                ${pkgs.coreutils}/bin/rm -rf "$tree"
+                project_mirror="$(${pkgs.python3}/bin/python3 - "$manifest" "$tree" <<'PY'
+                import hashlib
+                import json
+                import os
+                import pathlib
+                import sys
+
+                manifest_path = pathlib.Path(sys.argv[1])
+                tree = pathlib.Path(sys.argv[2])
+                payload = json.loads(manifest_path.read_text())
+                if set(payload) != {"files", "projectRelativePath", "projectRoot", "schemaVersion"} or payload["schemaVersion"] != 1:
+                    raise SystemExit("invalid envrc manifest schema")
+                project_relative = pathlib.PurePosixPath(payload["projectRelativePath"])
+                if project_relative.is_absolute() or ".." in project_relative.parts or not project_relative.parts:
+                    raise SystemExit("invalid envrc project path")
+                project_mirror = tree.joinpath(*project_relative.parts)
+                project_mirror.mkdir(mode=0o755, parents=True)
+                for entry in payload["files"]:
+                    if set(entry) != {"kind", "path", "relativePath", "sha256", "staged"}:
+                        raise SystemExit("invalid envrc file entry")
+                    relative = pathlib.PurePosixPath(entry["relativePath"])
+                    if relative.is_absolute() or ".." in relative.parts or relative.name != ".envrc":
+                        raise SystemExit("invalid envrc file path")
+                    source = pathlib.Path("/run/codex-vm-bootstrap/envrc/files") / entry["staged"]
+                    data = source.read_bytes()
+                    if hashlib.sha256(data).hexdigest() != entry["sha256"]:
+                        raise SystemExit("envrc snapshot digest mismatch")
+                    if entry["kind"] == "ancestor":
+                        target = tree.joinpath(*relative.parts)
+                        target.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                        target.write_bytes(data)
+                        os.chmod(target, 0o600)
+                        os.chown(target, 1000, 1000)
+                    elif entry["kind"] != "project":
+                        raise SystemExit("invalid envrc file kind")
+                print(project_mirror)
+                PY
+                )"
+                ${pkgs.coreutils}/bin/chown -R codex:codex "$tree"
+                ${pkgs.util-linux}/bin/mount --bind /work "$project_mirror"
+                printf '%s\n' "$project_mirror" >"$old_mount"
+                project_snapshot="$(${pkgs.jq}/bin/jq -er '.files[] | select(.kind == "project") | .staged' "$manifest" 2>/dev/null || true)"
+                if [ -n "$project_snapshot" ]; then
+                  staged_envrc="/run/codex-vm-bootstrap/envrc/files/$project_snapshot"
+                  ${pkgs.coreutils}/bin/install -m 0600 -o codex -g codex "$staged_envrc" "$runtime/project.envrc"
+                  ${pkgs.util-linux}/bin/mount --bind "$runtime/project.envrc" "$project_mirror/.envrc"
+                  ${pkgs.util-linux}/bin/mount -o remount,bind,ro "$project_mirror/.envrc"
+                  printf '%s\n' "$project_mirror/.envrc" >"$old_envrc"
+                else
+                  ${pkgs.coreutils}/bin/rm -f "$old_envrc"
+                fi
+                ${pkgs.coreutils}/bin/install -d -m 0700 -o codex -g codex "$runtime/config" "$runtime/data"
+                printf '%s\n' 'source_up_if_present() { source_up_if_exists "$@"; }' >"$runtime/config/direnvrc"
+                ${pkgs.coreutils}/bin/chown codex:codex "$runtime/config/direnvrc"
+                ${pkgs.coreutils}/bin/chmod 0600 "$runtime/config/direnvrc"
+                delta="$runtime/.environment.json"
+                envrc_count="$(${pkgs.jq}/bin/jq -er '.files | length' "$manifest")"
+                if [ "$envrc_count" -gt 0 ]; then
+                  if ! ${pkgs.util-linux}/bin/runuser -u codex -- \
+                    ${pkgs.coreutils}/bin/env -i \
+                      HOME=/home/codex USER=codex LOGNAME=codex SHELL=/bin/bash \
+                      PATH=/run/current-system/sw/bin:/usr/bin:/bin LANG=C.UTF-8 TERM=xterm-256color \
+                      DIRENV_CONFIG="$runtime/config" XDG_DATA_HOME="$runtime/data" DIRENV_LOG_FORMAT= \
+                      ${pkgs.bash}/bin/bash --noprofile --norc -c \
+                        'cd "$1" && direnv allow . >/dev/null && exec direnv export json' _ "$project_mirror" \
+                    >"$delta" 2>/dev/null; then
+                    ${pkgs.coreutils}/bin/rm -f "$delta"
+                    echo "project .envrc evaluation failed inside the guest" >&2
+                    exit 1
+                  fi
+                else
+                  printf '{}\n' >"$delta"
+                fi
+                ${pkgs.python3}/bin/python3 - "$delta" "$runtime/environment.json" "$project_mirror" <<'PY'
+                import json
+                import os
+                import pathlib
+                import sys
+
+                source = pathlib.Path(sys.argv[1])
+                destination = pathlib.Path(sys.argv[2])
+                mirror = sys.argv[3]
+                delta = json.loads(source.read_text())
+                if not isinstance(delta, dict):
+                    raise SystemExit("direnv did not return an environment object")
+                baseline = {
+                    "HOME": "/home/codex", "USER": "codex", "LOGNAME": "codex",
+                    "SHELL": "/bin/bash", "PATH": "/run/current-system/sw/bin:/usr/bin:/bin",
+                    "LANG": "C.UTF-8", "TERM": "xterm-256color",
+                }
+                prohibited_names = {"SSH_AUTH_SOCK", "DOCKER_HOST", "CONTAINER_HOST", "NIX_REMOTE"}
+                prohibited_fragments = (
+                    "/run/host-keys", "/run/codex-vm-bootstrap", "/.codex-vm",
+                    "/dev/kvm", "/dev/vhost", "/run/docker.sock", "/var/run/docker.sock",
+                )
+                cleaned = {}
+                for key, value in delta.items():
+                    if key.startswith("DIRENV_") or key in {"PWD", "OLDPWD", "SHLVL", "_"}:
+                        continue
+                    if key in prohibited_names:
+                        raise SystemExit(f"prohibited host-boundary variable: {key}")
+                    if value is not None and not isinstance(value, str):
+                        raise SystemExit(f"invalid environment value for {key}")
+                    if isinstance(value, str):
+                        value = value.replace(mirror, "/work")
+                        if any(fragment in value for fragment in prohibited_fragments):
+                            raise SystemExit(f"prohibited host-boundary value for {key}")
+                    if value != baseline.get(key):
+                        cleaned[key] = value
+                temporary = destination.with_name(".environment.json.tmp")
+                temporary.write_text(json.dumps(cleaned, separators=(",", ":"), sort_keys=True) + "\n")
+                os.chmod(temporary, 0o600)
+                os.chown(temporary, 1000, 1000)
+                os.replace(temporary, destination)
+                source.unlink(missing_ok=True)
+                PY
+              '';
             in
             {
               networking.hostName = "codex-vm";
@@ -125,17 +299,33 @@
                 '';
               };
 
+              systemd.services.codex-vm-environment = {
+                description = "Evaluate project environment inside the Codex VM";
+                unitConfig.RequiresMountsFor = [
+                  "/work"
+                  "/home/codex"
+                  "/run/codex-vm-bootstrap"
+                ];
+                serviceConfig = {
+                  Type = "oneshot";
+                  ExecStart = refreshEnvironment;
+                  UMask = "0077";
+                };
+              };
+
               environment.systemPackages = with pkgs; [
                 bash
                 cacert
                 codex
                 curl
+                direnv
                 git
                 gh
                 jq
                 nix
                 openssh
                 ripgrep
+                codexVmEnter
               ];
 
               nix.settings.experimental-features = [
@@ -188,9 +378,115 @@
           )
         ];
       };
+      codexVmEnterPackage = builtins.head (
+        builtins.filter (package: package.name == "codex-vm-enter") codexVm.config.environment.systemPackages
+      );
+      codexVmRefreshEnvironment = codexVm.config.systemd.services.codex-vm-environment.serviceConfig.ExecStart;
     in
     {
       nixosConfigurations.codex-vm = codexVm;
+
+      checks.x86_64-linux.codex-vm-environment = codexVmPkgs.testers.runNixOSTest {
+        name = "codex-vm-environment";
+        nodes.machine =
+          { pkgs, ... }:
+          {
+            system.stateVersion = "25.11";
+            users.groups.codex.gid = 1000;
+            users.users.codex = {
+              isNormalUser = true;
+              uid = 1000;
+              group = "codex";
+              home = "/home/codex";
+              createHome = true;
+            };
+            environment.systemPackages = [
+              codexVmEnterPackage
+              pkgs.direnv
+            ];
+            systemd.services.codex-vm-environment = {
+              serviceConfig = {
+                Type = "oneshot";
+                ExecStart = codexVmRefreshEnvironment;
+                UMask = "0077";
+              };
+            };
+          };
+        testScript = ''
+          import base64
+          import hashlib
+          import json
+          import shlex
+
+          machine.start()
+          machine.wait_for_unit("multi-user.target")
+
+          def put(path, content, mode="0600"):
+              encoded = base64.b64encode(content.encode()).decode()
+              parent = path.rsplit("/", 1)[0]
+              machine.succeed(
+                  "install -d -m 0700 " + shlex.quote(parent) +
+                  "; printf %s " + shlex.quote(encoded) +
+                  " | base64 -d >" + shlex.quote(path) +
+                  "; chmod " + mode + " " + shlex.quote(path)
+              )
+
+          ancestor = "export PARENT_VALUE=parent\n"
+          project = (
+              "source_up_if_exists\n"
+              "export PROJECT_VALUE=project\n"
+              "export PROJECT_PATH=\"$PWD/bin\"\n"
+              "unset HOME\n"
+          )
+          entries = []
+          for kind, path, relative, content in [
+              ("ancestor", "/workspace/.envrc", "workspace/.envrc", ancestor),
+              ("project", "/workspace/project/.envrc", "workspace/project/.envrc", project),
+          ]:
+              digest = hashlib.sha256(content.encode()).hexdigest()
+              staged = digest + ".envrc"
+              put("/run/codex-vm-bootstrap/envrc/files/" + staged, content)
+              entries.append({
+                  "kind": kind,
+                  "path": path,
+                  "relativePath": relative,
+                  "sha256": digest,
+                  "staged": staged,
+              })
+          manifest = {
+              "schemaVersion": 1,
+              "projectRoot": "/workspace/project",
+              "projectRelativePath": "workspace/project",
+              "files": entries,
+          }
+          put("/run/codex-vm-bootstrap/envrc/manifest.json", json.dumps(manifest))
+          put("/work/.envrc", project)
+          machine.succeed("chown -R codex:codex /work; chmod 0755 /work")
+
+          machine.succeed("systemctl start codex-vm-environment.service")
+          output = machine.succeed(
+              "runuser -u codex -- env AMBIENT_GUEST=must-not-leak codex-vm-enter env"
+          )
+          exported = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+          assert exported["PARENT_VALUE"] == "parent", exported
+          assert exported["PROJECT_VALUE"] == "project", exported
+          assert exported["PROJECT_PATH"] == "/work/bin", exported
+          assert "HOME" not in exported, exported
+          assert "AMBIENT_GUEST" not in exported, exported
+
+          prohibited = "export SSH_AUTH_SOCK=/run/user/1000/agent\n"
+          digest = hashlib.sha256(prohibited.encode()).hexdigest()
+          staged = digest + ".envrc"
+          put("/run/codex-vm-bootstrap/envrc/files/" + staged, prohibited)
+          manifest["files"][-1].update({"sha256": digest, "staged": staged})
+          put("/run/codex-vm-bootstrap/envrc/manifest.json", json.dumps(manifest))
+          machine.fail("systemctl start codex-vm-environment.service")
+          output = machine.succeed("runuser -u codex -- codex-vm-enter env")
+          exported = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+          assert exported["PROJECT_VALUE"] == "project", exported
+          assert "SSH_AUTH_SOCK" not in exported, exported
+        '';
+      };
 
       packages = nixpkgs.lib.genAttrs supportedSystems (
         system:
