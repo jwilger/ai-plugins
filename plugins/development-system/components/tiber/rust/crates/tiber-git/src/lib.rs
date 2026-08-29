@@ -3160,6 +3160,7 @@ struct TransitionTaskState {
     completion_snapshots: BTreeMap<String, FinalReviewCompletionSnapshot>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn transitioned_task_fact(
     board: &TiberBoardStream,
     intent: &TransitionTaskIntent,
@@ -3185,6 +3186,7 @@ fn transitioned_task_fact(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn transitioned_task_order_fact(
     board: &TiberBoardStream,
     intent: &TransitionTaskIntent,
@@ -3391,9 +3393,13 @@ impl ModelCommandLogic for TransitionTask {
         }
         let status_changed = old_status != &self.intent.status || old_claim != self.intent.claim;
         let order_changed = order != state.board_order;
-        let completion_snapshot_changed = self.intent.completion_snapshot.as_ref().is_some_and(
-            |snapshot| state.completion_snapshots.get(&self.intent.stem) != Some(snapshot),
-        );
+        let completion_snapshot_changed =
+            self.intent
+                .completion_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| {
+                    state.completion_snapshots.get(&self.intent.stem) != Some(snapshot)
+                });
         if !status_changed && !order_changed && !completion_snapshot_changed {
             return Ok(ModeledEvents::none(
                 "task already has requested lifecycle state",
@@ -10185,7 +10191,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout e5fda1233c1c38b2850e108e2e0d0cc6425c0d71\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 8d2207b3d7d8b0e1ace8df92e2b64f1a8b9756e7\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
