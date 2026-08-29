@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: vm-codex status [--json]
+EOF
+}
+
+die() {
+  printf 'vm-codex: %s\n' "$1" >&2
+  exit 2
+}
+
+resolve_project() {
+  local root common_dir common_abs digest name
+
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" ||
+    die "run this command from a Git checkout"
+  root="$(cd "$root" && pwd -P)"
+
+  common_dir="$(git -C "$root" rev-parse --git-common-dir)"
+  case "$common_dir" in
+    /*) common_abs="$(cd "$common_dir" && pwd -P)" ;;
+    *) common_abs="$(cd "$root/$common_dir" && pwd -P)" ;;
+  esac
+
+  digest="$(printf '%s\0%s' "$root" "$common_abs" | sha256sum | cut -c1-16)"
+  name="$(basename "$root" | tr -c '[:alnum:]' '-')"
+  name="${name#-}"
+  name="${name%-}"
+
+  PROJECT_ROOT="$root"
+  PROJECT_ID="${name:-project}-$digest"
+  STATE_DIR="$root/.codex-vm"
+  RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}/ai-plugins-codex-vm/$PROJECT_ID"
+}
+
+process_start_time() {
+  local pid="$1" stat rest
+  [ -r "/proc/$pid/stat" ] || return 1
+  stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || return 1
+  rest="${stat##*) }"
+  set -- $rest
+  [ "$#" -ge 20 ] || return 1
+  printf '%s\n' "${20}"
+}
+
+status_command() {
+  local output_json=false running=false
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --json) output_json=true ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown status argument: $1" ;;
+    esac
+    shift
+  done
+
+  resolve_project
+  if [ -r "$RUNTIME_DIR/qemu.pid" ]; then
+    local pid_record pid recorded_start current_start
+    pid_record="$(cat "$RUNTIME_DIR/qemu.pid" 2>/dev/null)" || pid_record=""
+    read -r pid recorded_start _ <<<"$pid_record"
+    if [[ "${pid:-}" =~ ^[0-9]+$ ]] &&
+      [[ "${recorded_start:-}" =~ ^[0-9]+$ ]] &&
+      kill -0 "$pid" 2>/dev/null &&
+      current_start="$(process_start_time "$pid")" &&
+      [ "$current_start" = "$recorded_start" ]; then
+      running=true
+    fi
+  fi
+
+  if [ "$output_json" = true ]; then
+    jq -n \
+      --argjson schema_version 1 \
+      --arg project_id "$PROJECT_ID" \
+      --arg project_root "$PROJECT_ROOT" \
+      --arg state_dir "$STATE_DIR" \
+      --argjson running "$running" \
+      '{schema_version: $schema_version, project_id: $project_id, project_root: $project_root, state_dir: $state_dir, running: $running}'
+  else
+    printf '%s: %s\n' "$PROJECT_ID" "$([ "$running" = true ] && printf running || printf stopped)"
+  fi
+}
+
+command="${1:-status}"
+[ "$#" -eq 0 ] || shift
+
+case "$command" in
+  status) status_command "$@" ;;
+  -h|--help|help) usage ;;
+  *) die "unknown command: $command" ;;
+esac
