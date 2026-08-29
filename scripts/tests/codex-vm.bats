@@ -150,6 +150,7 @@ make_fake_vm_runtime() {
     ssh_firewall="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.openFirewall" 2>/dev/null)" || exit
     sudo_password="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.security.sudo.wheelNeedsPassword" 2>/dev/null)" || exit
     system_packages="$(nix eval --json --apply "ps: map (p: p.name) ps" "$1#nixosConfigurations.codex-vm.config.environment.systemPackages" 2>/dev/null)" || exit
+    egress_rules="$(nix eval --raw "$1#nixosConfigurations.codex-vm.config.networking.nftables.tables.codex-vm-egress.content" 2>/dev/null)" || exit
     host_keys="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.hostKeys" 2>/dev/null)" || exit
     runner="$(nix eval --raw "$1#packages.x86_64-linux.codex-vm-runner.drvPath" 2>/dev/null)" || exit
     jq -cn \
@@ -163,9 +164,10 @@ make_fake_vm_runtime() {
       --argjson ssh_firewall "$ssh_firewall" \
       --argjson sudo_password "$sudo_password" \
       --argjson system_packages "$system_packages" \
+      --arg egress_rules "$egress_rules" \
       --argjson host_keys "$host_keys" \
       --arg runner "$runner" \
-      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$ssh_firewall, \$sudo_password, \$system_packages, \$host_keys, \$runner}"
+      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$ssh_firewall, \$sudo_password, \$system_packages, \$egress_rules, \$host_keys, \$runner}"
   ' _ "$ROOT"
 
   [ "$status" -eq 0 ]
@@ -182,6 +184,30 @@ make_fake_vm_runtime() {
   [ "$(jq -r .ssh_firewall <<<"$output")" = true ]
   [ "$(jq -r .sudo_password <<<"$output")" = false ]
   [ "$(jq -r '[.system_packages[] | select(startswith("codex-"))] | length' <<<"$output")" -eq 1 ]
+  egress_rules="$(jq -r .egress_rules <<<"$output")"
+  [[ "$egress_rules" == *"ct state established,related accept"* ]]
+  [[ "$egress_rules" == *"10.0.2.2 udp sport 68 udp dport 67 accept"* ]]
+  [[ "$egress_rules" == *"10.0.2.3 udp dport 53 accept"* ]]
+  [[ "$egress_rules" == *"10.0.2.3 tcp dport 53 accept"* ]]
+  [[ "$egress_rules" == *"fec0::3 udp dport 53 accept"* ]]
+  [[ "$egress_rules" == *"fec0::3 tcp dport 53 accept"* ]]
+  [[ "$(jq -r .egress_rules <<<"$output")" == *"10.0.0.0/8"* ]]
+  [[ "$(jq -r .egress_rules <<<"$output")" == *"169.254.0.0/16"* ]]
+  [[ "$egress_rules" == *"fc00::/7"* ]]
+  private_v4_line="$(grep -nF 'ip daddr { 10.0.0.0/8' <<<"$egress_rules" | cut -d: -f1)"
+  private_v6_line="$(grep -nF 'ip6 daddr { fc00::/7' <<<"$egress_rules" | cut -d: -f1)"
+  for rule in \
+    'ct state established,related accept' \
+    'ip daddr 10.0.2.2 udp sport 68 udp dport 67 accept' \
+    'ip daddr 10.0.2.3 udp dport 53 accept' \
+    'ip daddr 10.0.2.3 tcp dport 53 accept'; do
+    [ "$(grep -nF "$rule" <<<"$egress_rules" | cut -d: -f1)" -lt "$private_v4_line" ]
+  done
+  for rule in \
+    'ip6 daddr fec0::3 udp dport 53 accept' \
+    'ip6 daddr fec0::3 tcp dport 53 accept'; do
+    [ "$(grep -nF "$rule" <<<"$egress_rules" | cut -d: -f1)" -lt "$private_v6_line" ]
+  done
   [ "$(jq -r .host_keys[0].path <<<"$output")" = /run/host-keys/ssh_host_ed25519_key ]
   [[ "$(jq -r .runner <<<"$output")" = /nix/store/*-microvm-qemu-codex-vm.drv ]]
 }

@@ -62,6 +62,26 @@
 
               security.sudo.wheelNeedsPassword = false;
               networking.useDHCP = true;
+              networking.nftables = {
+                enable = true;
+                tables.codex-vm-egress = {
+                  family = "inet";
+                  content = ''
+                    chain output {
+                      type filter hook output priority -5; policy accept;
+                      oifname "lo" accept
+                      ct state established,related accept
+                      ip daddr 10.0.2.2 udp sport 68 udp dport 67 accept
+                      ip daddr 10.0.2.3 udp dport 53 accept
+                      ip daddr 10.0.2.3 tcp dport 53 accept
+                      ip6 daddr fec0::3 udp dport 53 accept
+                      ip6 daddr fec0::3 tcp dport 53 accept
+                      ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } reject
+                      ip6 daddr { fc00::/7, fe80::/10 } reject
+                    }
+                  '';
+                };
+              };
 
               services.openssh = {
                 enable = true;
