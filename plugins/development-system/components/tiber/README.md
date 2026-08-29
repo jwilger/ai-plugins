@@ -198,7 +198,7 @@ distinct uncached scope rather than proportional to its file count.
 
 Fingerprinting fails closed with a `scope_too_large` diagnostic when one Git
 enumeration exceeds 16 MiB, the combined scope exceeds 100,000 paths, or the
-selected regular-file content exceeds 1 GiB. Narrow the declared scope and
+selected regular-file content exceeds 64 MiB. Narrow the declared scope and
 record fresh independent reviews rather than bypassing those limits. A single
 trailer-delivery command reuses identical source and verification fingerprints
 across its referenced tasks while retaining at most 256 distinct fingerprint

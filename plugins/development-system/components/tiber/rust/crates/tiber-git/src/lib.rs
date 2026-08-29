@@ -5739,7 +5739,14 @@ fn final_review_scope_snapshot(
                     "tiber.final_review_{scope_kind}_scope_invalid action=\"provide repository-contained literal paths\""
                 )));
             }
-            paths.push(path.to_string_lossy().into_owned());
+            let literal_path = path.to_string_lossy().trim_end_matches('/').to_string();
+            let directory_prefix = format!("{literal_path}/");
+            if !paths
+                .iter()
+                .any(|materialized| materialized.starts_with(&directory_prefix))
+            {
+                paths.push(literal_path);
+            }
         }
     }
     paths.sort();
@@ -10155,7 +10162,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout f9687ac8b430ea35960ed60e25071b0dbe072027\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout c078b28e12396096e0fcf08a31987115d16dd776\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));

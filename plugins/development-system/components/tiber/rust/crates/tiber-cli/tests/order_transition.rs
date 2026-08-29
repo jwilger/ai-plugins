@@ -371,6 +371,25 @@ fn content_identical_file_to_directory_commit_preserves_review() {
     task_stem(&repo, "done", "reviewed-work");
 }
 
+#[test]
+fn literal_directory_scope_matches_the_immutable_completion_tree() {
+    let repo = TempRepo::initialized();
+    fs::create_dir(repo.path().join("src")).expect("create source directory");
+    fs::write(repo.path().join("src/lib.rs"), "reviewed\n").expect("write reviewed source");
+    repo.git(["add", "src/lib.rs"]);
+    repo.git(["commit", "-m", "Add reviewed source"]);
+    enable_final_review_policy(&repo);
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Reviewed work"]));
+    assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+    for iteration in 1..=3 {
+        record_review_with_scope(&repo, iteration, "clean", &[":(literal)src"]);
+    }
+
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    task_stem(&repo, "done", "reviewed-work");
+}
+
 fn record_review_with_scope(repo: &TempRepo, iteration: usize, outcome: &str, scope: &[&str]) {
     let review_id = format!("review-{iteration}");
     let reviewer = format!("reviewer-{iteration}");
