@@ -38,6 +38,84 @@ setup() {
   [ ! -e "$REPO/.codex-vm" ]
 }
 
+@test "init creates isolated project SSH state without invoking Nix" {
+  package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
+  fake_bin="$BATS_TEST_TMPDIR/no-nix"
+  mkdir -p "$fake_bin"
+  printf '#!/usr/bin/env bash\nexit 97\n' >"$fake_bin/nix"
+  chmod +x "$fake_bin/nix"
+
+  run env PATH="$fake_bin:$PATH" bash -c "cd '$REPO' && '$package/bin/vm-codex' init --json"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .state_dir <<<"$output")" = "$REPO/.codex-vm" ]
+  [ -f "$REPO/.codex-vm/ssh/client_ed25519" ]
+  [ -f "$REPO/.codex-vm/ssh-keys/codex.pub" ]
+  [ -f "$REPO/.codex-vm/ssh-keys/ssh_host_ed25519_key" ]
+  [ "$(stat -c %a "$REPO/.codex-vm/ssh/client_ed25519")" = 600 ]
+  [ "$(stat -c %a "$REPO/.codex-vm/ssh/known_hosts")" = 600 ]
+  [[ "$(cat "$REPO/.codex-vm/ssh/known_hosts")" = project-*" "ssh-ed25519* ]]
+  git -C "$ROOT" check-ignore -q .codex-vm/example
+}
+
+@test "init rejects agent-controlled VM state symlinks" {
+  package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
+  outside="$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$outside"
+  ln -s "$outside" "$REPO/.codex-vm"
+
+  run bash -c "cd '$REPO' && '$package/bin/vm-codex' init --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"VM state directories must not be symlinks"* ]]
+  [ -z "$(find "$outside" -mindepth 1 -print -quit)" ]
+}
+
+@test "init rejects nested symlinks and hardlinks in VM state" {
+  package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
+  mkdir -p "$REPO/.codex-vm"
+  ln -s "$BATS_TEST_TMPDIR" "$REPO/.codex-vm/ssh"
+
+  run bash -c "cd '$REPO' && '$package/bin/vm-codex' init"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"VM state directories must not be symlinks"* ]]
+
+  rm "$REPO/.codex-vm/ssh"
+  run bash -c "cd '$REPO' && '$package/bin/vm-codex' init"
+  [ "$status" -eq 0 ]
+  cp "$REPO/.codex-vm/ssh/client_ed25519.pub" "$BATS_TEST_TMPDIR/hardlinked.pub"
+  rm "$REPO/.codex-vm/ssh/client_ed25519.pub"
+  ln "$BATS_TEST_TMPDIR/hardlinked.pub" "$REPO/.codex-vm/ssh/client_ed25519.pub"
+
+  run bash -c "cd '$REPO' && '$package/bin/vm-codex' init"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"VM state files must not be hard-linked"* ]]
+}
+
+@test "init repairs missing or mismatched public keys from private keys" {
+  package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
+  run bash -c "cd '$REPO' && '$package/bin/vm-codex' init"
+  [ "$status" -eq 0 ]
+  rm "$REPO/.codex-vm/ssh/client_ed25519.pub"
+  printf '%s\n' 'ssh-ed25519 stale' >"$REPO/.codex-vm/ssh-keys/ssh_host_ed25519_key.pub"
+
+  run bash -c "cd '$REPO' && '$package/bin/vm-codex' init"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$REPO/.codex-vm/ssh/client_ed25519.pub")" = "$(ssh-keygen -y -f "$REPO/.codex-vm/ssh/client_ed25519")" ]
+  [ "$(cat "$REPO/.codex-vm/ssh-keys/ssh_host_ed25519_key.pub")" = "$(ssh-keygen -y -f "$REPO/.codex-vm/ssh-keys/ssh_host_ed25519_key")" ]
+}
+
+@test "init ignores stale interrupted temporary state" {
+  package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
+  mkdir -p "$REPO/.codex-vm/.init.stale"
+  printf '%s\n' stale >"$REPO/.codex-vm/.init.stale/client_ed25519"
+
+  run bash -c "cd '$REPO' && '$package/bin/vm-codex' init"
+
+  [ "$status" -eq 0 ]
+  [ -f "$REPO/.codex-vm/ssh/client_ed25519" ]
+}
+
 @test "the root flake owns the Codex MicroVM definition" {
   run bash -c '
     ref="$1#nixosConfigurations.codex-vm.config.microvm"
@@ -48,6 +126,7 @@ setup() {
     shares="$(nix eval --json "$ref.shares" 2>/dev/null)" || exit
     runtime_args="$(nix eval --raw "$ref.extraArgsScript" 2>/dev/null)" || exit
     ssh="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.enable" 2>/dev/null)" || exit
+    host_keys="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.hostKeys" 2>/dev/null)" || exit
     runner="$(nix eval --raw "$1#packages.x86_64-linux.codex-vm-runner.drvPath" 2>/dev/null)" || exit
     jq -cn \
       --arg hypervisor "$hypervisor" \
@@ -57,8 +136,9 @@ setup() {
       --argjson shares "$shares" \
       --arg runtime_args "$runtime_args" \
       --argjson ssh "$ssh" \
+      --argjson host_keys "$host_keys" \
       --arg runner "$runner" \
-      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$runner}"
+      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$host_keys, \$runner}"
   ' _ "$ROOT"
 
   [ "$status" -eq 0 ]
@@ -72,6 +152,7 @@ setup() {
   [ "$(jq -r '.shares[] | select(.mountPoint == "/run/host-keys") | .readOnly' <<<"$output")" = true ]
   [[ "$(jq -r .runtime_args <<<"$output")" = /nix/store/*-codex-qemu-runtime-args ]]
   [ "$(jq -r .ssh <<<"$output")" = true ]
+  [ "$(jq -r .host_keys[0].path <<<"$output")" = /run/host-keys/ssh_host_ed25519_key ]
   [[ "$(jq -r .runner <<<"$output")" = /nix/store/*-microvm-qemu-codex-vm.drv ]]
 }
 

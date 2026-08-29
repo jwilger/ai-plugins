@@ -3,6 +3,11 @@
 /.dependencies/
 /**/.dependencies/
 
+# Durable per-project MicroVM state. Contains VM disks, Codex state, and
+# project-unique SSH keys; it is data only and must never be committed.
+/.codex-vm/
+/**/.codex-vm/
+
 # Project-local npm dependencies are restored from package-lock.json.
 /node_modules/
 

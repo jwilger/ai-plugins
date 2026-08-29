@@ -5,6 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: vm-codex status [--json]
        vm-codex runtime [--json]
+       vm-codex init [--json]
        vm-codex start --dry-run [--json]
        vm-shell [--dry-run] [--json]
 EOF
@@ -43,6 +44,98 @@ runtime_command() {
     jq -cn --argjson schema_version 1 --argjson tools "$result" '{schema_version: $schema_version, tools: $tools, host_nix_evaluation: false}'
   else
     printf 'Trusted Codex VM runtime is installed.\n'
+  fi
+}
+
+initialize_state() {
+  local ssh_dir="$STATE_DIR/ssh" key_share="$STATE_DIR/ssh-keys"
+  local path temp temp_dir
+
+  for path in "$STATE_DIR" "$ssh_dir" "$key_share"; do
+    [ ! -L "$path" ] || die "VM state directories must not be symlinks: $path"
+    [ ! -e "$path" ] || [ -d "$path" ] || die "VM state path must be a directory: $path"
+  done
+
+  umask 077
+  mkdir -p "$ssh_dir" "$key_share"
+  chmod 700 "$STATE_DIR" "$ssh_dir"
+  chmod 755 "$key_share"
+  temp_dir="$(mktemp -d "$STATE_DIR/.init.XXXXXX")"
+  trap 'rm -rf -- "$temp_dir"' EXIT
+
+  for path in \
+    "$ssh_dir/client_ed25519" \
+    "$ssh_dir/client_ed25519.pub" \
+    "$ssh_dir/known_hosts" \
+    "$key_share/codex.pub" \
+    "$key_share/ssh_host_ed25519_key" \
+    "$key_share/ssh_host_ed25519_key.pub"; do
+    [ ! -L "$path" ] || die "VM state files must not be symlinks: $path"
+    if [ -e "$path" ]; then
+      [ -f "$path" ] || die "VM state path must be a regular file: $path"
+      [ "$(stat -c %h "$path")" -eq 1 ] || die "VM state files must not be hard-linked: $path"
+    fi
+  done
+
+  if [ ! -e "$ssh_dir/client_ed25519" ]; then
+    temp="$temp_dir/client_ed25519"
+    "$CODEX_VM_SSH_KEYGEN" -q -t ed25519 -N '' -C "$PROJECT_ID client" -f "$temp"
+    mv "$temp" "$ssh_dir/client_ed25519"
+    rm -f "$temp.pub"
+  fi
+  temp="$temp_dir/client_ed25519.pub"
+  "$CODEX_VM_SSH_KEYGEN" -y -f "$ssh_dir/client_ed25519" >"$temp"
+  mv -f "$temp" "$ssh_dir/client_ed25519.pub"
+
+  if [ ! -e "$key_share/ssh_host_ed25519_key" ]; then
+    temp="$temp_dir/ssh_host_ed25519_key"
+    "$CODEX_VM_SSH_KEYGEN" -q -t ed25519 -N '' -C "$PROJECT_ID host" -f "$temp"
+    mv "$temp" "$key_share/ssh_host_ed25519_key"
+    rm -f "$temp.pub"
+  fi
+  temp="$temp_dir/ssh_host_ed25519_key.pub"
+  "$CODEX_VM_SSH_KEYGEN" -y -f "$key_share/ssh_host_ed25519_key" >"$temp"
+  mv -f "$temp" "$key_share/ssh_host_ed25519_key.pub"
+
+  temp="$temp_dir/codex.pub"
+  cp "$ssh_dir/client_ed25519.pub" "$temp"
+  mv -f "$temp" "$key_share/codex.pub"
+  chmod 600 "$ssh_dir/client_ed25519" "$key_share/ssh_host_ed25519_key"
+  chmod 644 "$ssh_dir/client_ed25519.pub" "$key_share/codex.pub" "$key_share/ssh_host_ed25519_key.pub"
+  temp="$temp_dir/known_hosts"
+  printf '%s %s\n' "$PROJECT_ID" "$(cat "$key_share/ssh_host_ed25519_key.pub")" >"$temp"
+  mv -f "$temp" "$ssh_dir/known_hosts"
+  chmod 600 "$ssh_dir/known_hosts"
+  rm -rf -- "$temp_dir"
+  trap - EXIT
+}
+
+init_command() {
+  local output_json=false
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --json) output_json=true ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown init argument: $1" ;;
+    esac
+    shift
+  done
+
+  resolve_project
+  runtime_command >/dev/null
+  initialize_state
+
+  if [ "$output_json" = true ]; then
+    jq -n \
+      --argjson schema_version 1 \
+      --arg project_id "$PROJECT_ID" \
+      --arg state_dir "$STATE_DIR" \
+      --arg identity_file "$STATE_DIR/ssh/client_ed25519" \
+      --arg known_hosts_file "$STATE_DIR/ssh/known_hosts" \
+      '{schema_version: $schema_version, project_id: $project_id, state_dir: $state_dir, identity_file: $identity_file, known_hosts_file: $known_hosts_file}'
+  else
+    printf 'Initialized Codex VM state at %s.\n' "$STATE_DIR"
   fi
 }
 
@@ -215,6 +308,7 @@ command="${1:-status}"
 [ "$#" -eq 0 ] || shift
 
 case "$command" in
+  init) init_command "$@" ;;
   runtime) runtime_command "$@" ;;
   shell) shell_command "$@" ;;
   status) status_command "$@" ;;
