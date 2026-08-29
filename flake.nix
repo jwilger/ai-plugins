@@ -27,6 +27,18 @@
           # to build Nixpkgs' Darwin-only apple-sdk wrapper derivation.
           apple-sdk-source = pkgs.apple-sdk_15.src;
         }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          vm-codex = pkgs.writeShellApplication {
+            name = "vm-codex";
+            runtimeInputs = with pkgs; [
+              coreutils
+              git
+              jq
+              procps
+            ];
+            text = builtins.readFile ./scripts/codex-vm/vm-codex;
+          };
+        }
       );
 
       devShells = nixpkgs.lib.genAttrs supportedSystems (

@@ -10,6 +10,19 @@ setup() {
   git -C "$REPO" init -q
 }
 
+@test "the root flake publishes the Codex VM command" {
+  run bash -c '
+    package="$(nix build --no-link --print-out-paths "$1#vm-codex" 2>/dev/null)" || exit
+    cd "$2"
+    env -i PATH=/nonexistent XDG_RUNTIME_DIR="$3" \
+      "$package/bin/vm-codex" status --json
+  ' _ "$ROOT" "$REPO" "$XDG_RUNTIME_DIR"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .project_root <<<"$output")" = "$REPO" ]
+  [ "$(jq -r .running <<<"$output")" = false ]
+}
+
 @test "status reports a stable project identity without creating VM state" {
   run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' status --json"
 
