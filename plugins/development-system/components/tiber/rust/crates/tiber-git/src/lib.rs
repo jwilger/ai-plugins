@@ -5321,6 +5321,20 @@ const FINAL_REVIEW_SCOPE_LIMITS: FinalReviewScopeLimits = FinalReviewScopeLimits
 
 const FINAL_REVIEW_GIT_ARGV_MAX_BYTES: usize = 64 * 1024;
 
+fn final_review_pathspec_is_exclude(pathspec: &str) -> bool {
+    if pathspec.starts_with(":!") || pathspec.starts_with(":^") {
+        return true;
+    }
+    pathspec
+        .strip_prefix(":(")
+        .and_then(|magic| magic.split_once(')'))
+        .is_some_and(|(magic, _)| {
+            magic
+                .split(',')
+                .any(|term| matches!(term, "exclude" | "!" | "^"))
+        })
+}
+
 fn bounded_final_review_git_output(
     root: &Path,
     args: &[&str],
@@ -5365,12 +5379,25 @@ fn bounded_final_review_git_output_with_index(
     };
     let mut bytes = Vec::new();
     let base_argv_bytes: usize = args.iter().map(|arg| arg.len().saturating_add(1)).sum();
+    let (exclusions, positives): (Vec<_>, Vec<_>) = scope
+        .iter()
+        .partition(|pathspec| final_review_pathspec_is_exclude(pathspec));
+    let exclusion_argv_bytes: usize = exclusions
+        .iter()
+        .map(|pathspec| pathspec.len().saturating_add(1))
+        .sum();
+    if base_argv_bytes.saturating_add(exclusion_argv_bytes) > FINAL_REVIEW_GIT_ARGV_MAX_BYTES {
+        return Err(Error::Usage(format!(
+            "tiber.final_review_{scope_kind}_scope_too_large condition=pathspec_exclusion_bytes max_bytes={} action=\"narrow the declared review scope and record fresh independent reviews\"",
+            FINAL_REVIEW_GIT_ARGV_MAX_BYTES
+        )));
+    }
     let mut chunk_start = 0;
     loop {
         let mut chunk_end = chunk_start;
-        let mut argv_bytes = base_argv_bytes;
-        while chunk_end < scope.len() {
-            let next_bytes = scope[chunk_end].len().saturating_add(1);
+        let mut argv_bytes = base_argv_bytes.saturating_add(exclusion_argv_bytes);
+        while chunk_end < positives.len() {
+            let next_bytes = positives[chunk_end].len().saturating_add(1);
             if chunk_end > chunk_start
                 && argv_bytes.saturating_add(next_bytes) > FINAL_REVIEW_GIT_ARGV_MAX_BYTES
             {
@@ -5382,7 +5409,8 @@ fn bounded_final_review_git_output_with_index(
         let mut command = Command::new("git");
         command
             .args(args)
-            .args(&scope[chunk_start..chunk_end])
+            .args(&positives[chunk_start..chunk_end])
+            .args(&exclusions)
             .current_dir(root);
         if let Some(index_file) = index_file {
             command.env("GIT_INDEX_FILE", index_file);
@@ -5451,7 +5479,7 @@ fn bounded_final_review_git_output_with_index(
                 stderr: String::from_utf8_lossy(&stderr).into_owned(),
             });
         }
-        if chunk_end == scope.len() {
+        if chunk_end == positives.len() {
             break;
         }
         chunk_start = chunk_end;
@@ -10216,7 +10244,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 80bf866c270e4f55f6ffcbe0c7cb779b73110aa2\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 5d9e3449f2ee0ef77212a4c7cc66acb29b2fc88e\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -12374,9 +12402,22 @@ mod lock_tests {
     #[test]
     fn bounded_git_output_chunks_the_documented_path_inventory_below_argv_limits() {
         let root = temporary_repository("large-path-inventory");
-        let scope = (0..FINAL_REVIEW_SCOPE_MAX_PATHS)
+        fs::write(root.join("keep.txt"), "keep\n").expect("write included file");
+        fs::write(root.join("drop.txt"), "drop\n").expect("write excluded file");
+        let add = Command::new("git")
+            .args(["add", "keep.txt", "drop.txt"])
+            .current_dir(&root)
+            .output()
+            .expect("stage fixture files");
+        assert!(add.status.success());
+        let mut scope = (0..FINAL_REVIEW_SCOPE_MAX_PATHS - 3)
             .map(|index| format!(":(literal)missing-{index:05}.txt"))
             .collect::<Vec<_>>();
+        scope.extend([
+            ":(literal)keep.txt".to_string(),
+            ":(literal)drop.txt".to_string(),
+            ":(exclude,literal)drop.txt".to_string(),
+        ]);
 
         let output = bounded_final_review_git_output(
             &root,
@@ -12387,7 +12428,7 @@ mod lock_tests {
         )
         .expect("documented path inventory should not exceed the process argv limit");
 
-        assert!(output.is_empty());
+        assert_eq!(output, b"keep.txt\0");
         fs::remove_dir_all(root).expect("remove temporary repository");
     }
 
