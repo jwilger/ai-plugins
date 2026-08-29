@@ -4,6 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage: vm-codex status [--json]
+       vm-codex start --dry-run [--json]
 EOF
 }
 
@@ -85,11 +86,49 @@ status_command() {
   fi
 }
 
+start_command() {
+  local dry_run=false output_json=false
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry_run=true ;;
+      --json) output_json=true ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown start argument: $1" ;;
+    esac
+    shift
+  done
+
+  [ "$dry_run" = true ] || die "start currently requires --dry-run"
+  resolve_project
+
+  if [ "$output_json" = true ]; then
+    jq -n \
+      --argjson schema_version 1 \
+      --arg project_id "$PROJECT_ID" \
+      --arg project_root "$PROJECT_ROOT" \
+      --arg state_dir "$STATE_DIR" \
+      --arg work_source "$PROJECT_ROOT" \
+      '{
+        schema_version: $schema_version,
+        project_id: $project_id,
+        project_root: $project_root,
+        state_dir: $state_dir,
+        resources: {vcpus: 4, memory_mib: 8192, store_mib: 65536, home_mib: 32768},
+        shares: [{name: "work", source: $work_source, mount_point: "/work", mode: "rw"}],
+        host_nix_evaluation: false
+      }'
+  else
+    printf 'Would start %s with %s mounted read/write at /work.\n' "$PROJECT_ID" "$PROJECT_ROOT"
+  fi
+}
+
 command="${1:-status}"
 [ "$#" -eq 0 ] || shift
 
 case "$command" in
   status) status_command "$@" ;;
+  start) start_command "$@" ;;
   -h|--help|help) usage ;;
   *) die "unknown command: $command" ;;
 esac
