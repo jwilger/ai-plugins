@@ -101,6 +101,30 @@
                 };
               };
 
+              systemd.services.codex-vm-bootstrap = {
+                description = "Initialize project-local Codex preferences";
+                wantedBy = [ "multi-user.target" ];
+                before = [ "sshd.service" ];
+                unitConfig.RequiresMountsFor = [
+                  "/home/codex"
+                  "/run/codex-vm-bootstrap"
+                ];
+                serviceConfig.Type = "oneshot";
+                script = ''
+                  codex_home=/home/codex/.codex
+                  marker="$codex_home/.vm-preferences-initialized"
+                  ${pkgs.coreutils}/bin/install -d -m 0700 -o codex -g codex "$codex_home"
+                  if [ ! -e "$marker" ]; then
+                    ${pkgs.coreutils}/bin/install -m 0600 -o codex -g codex \
+                      /run/codex-vm-bootstrap/preferences.toml \
+                      "$codex_home/config.toml"
+                    ${pkgs.coreutils}/bin/touch "$marker"
+                    ${pkgs.coreutils}/bin/chown codex:codex "$marker"
+                    ${pkgs.coreutils}/bin/chmod 0600 "$marker"
+                  fi
+                '';
+              };
+
               environment.systemPackages = with pkgs; [
                 bash
                 cacert
@@ -137,6 +161,13 @@
                     tag = "host-keys";
                     source = "ssh-keys";
                     mountPoint = "/run/host-keys";
+                    readOnly = true;
+                  }
+                  {
+                    proto = "virtiofs";
+                    tag = "bootstrap";
+                    source = "bootstrap";
+                    mountPoint = "/run/codex-vm-bootstrap";
                     readOnly = true;
                   }
                 ];

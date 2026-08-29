@@ -51,17 +51,17 @@ runtime_command() {
 }
 
 initialize_state() {
-  local ssh_dir="$STATE_DIR/ssh" key_share="$STATE_DIR/ssh-keys"
+  local ssh_dir="$STATE_DIR/ssh" key_share="$STATE_DIR/ssh-keys" bootstrap_dir="$STATE_DIR/bootstrap"
   local path temp temp_dir
 
-  for path in "$STATE_DIR" "$ssh_dir" "$key_share"; do
+  for path in "$STATE_DIR" "$ssh_dir" "$key_share" "$bootstrap_dir"; do
     [ ! -L "$path" ] || die "VM state directories must not be symlinks: $path"
     [ ! -e "$path" ] || [ -d "$path" ] || die "VM state path must be a directory: $path"
   done
 
   umask 077
-  mkdir -p "$ssh_dir" "$key_share"
-  chmod 700 "$STATE_DIR" "$ssh_dir"
+  mkdir -p "$ssh_dir" "$key_share" "$bootstrap_dir"
+  chmod 700 "$STATE_DIR" "$ssh_dir" "$bootstrap_dir"
   chmod 755 "$key_share"
   temp_dir="$(mktemp -d "$STATE_DIR/.init.XXXXXX")"
   trap 'rm -rf -- "$temp_dir"' EXIT
@@ -72,7 +72,8 @@ initialize_state() {
     "$ssh_dir/known_hosts" \
     "$key_share/codex.pub" \
     "$key_share/ssh_host_ed25519_key" \
-    "$key_share/ssh_host_ed25519_key.pub"; do
+    "$key_share/ssh_host_ed25519_key.pub" \
+    "$bootstrap_dir/preferences.toml"; do
     [ ! -L "$path" ] || die "VM state files must not be symlinks: $path"
     if [ -e "$path" ]; then
       [ -f "$path" ] || die "VM state path must be a regular file: $path"
@@ -109,6 +110,43 @@ initialize_state() {
   printf '%s %s\n' "$PROJECT_ID" "$(cat "$key_share/ssh_host_ed25519_key.pub")" >"$temp"
   mv -f "$temp" "$ssh_dir/known_hosts"
   chmod 600 "$ssh_dir/known_hosts"
+
+  if [ ! -e "$bootstrap_dir/preferences.toml" ]; then
+    temp="$temp_dir/preferences.toml"
+    if ! "$CODEX_VM_PYTHON" - "${HOME:-}/.codex/config.toml" "$temp" <<'PY'
+import json
+import pathlib
+import sys
+import tomllib
+
+source = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+config = tomllib.loads(source.read_text()) if source.is_file() else {}
+allowed = {
+    "model": str,
+    "model_reasoning_effort": str,
+    "model_verbosity": str,
+    "personality": str,
+    "plan_mode_reasoning_effort": str,
+    "web_search": str,
+    "file_opener": str,
+    "hide_agent_reasoning": bool,
+}
+lines = ["# Seeded once from an explicit allowlist by vm-codex init."]
+for key, expected_type in allowed.items():
+    value = config.get(key)
+    if type(value) is not expected_type:
+        continue
+    rendered = "true" if value is True else "false" if value is False else json.dumps(value)
+    lines.append(f"{key} = {rendered}")
+destination.write_text("\n".join(lines) + "\n")
+PY
+    then
+      die "could not parse the host Codex configuration for preference seeding"
+    fi
+    chmod 600 "$temp"
+    mv "$temp" "$bootstrap_dir/preferences.toml"
+  fi
   rm -rf -- "$temp_dir"
   trap - EXIT
 }

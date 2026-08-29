@@ -79,6 +79,59 @@ make_fake_vm_runtime() {
   git -C "$ROOT" check-ignore -q .codex-vm/example
 }
 
+@test "init seeds only allowlisted host Codex preferences once" {
+  package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
+  host_home="$BATS_TEST_TMPDIR/host-home"
+  mkdir -p "$host_home/.codex"
+  cat >"$host_home/.codex/config.toml" <<'EOF'
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+model_verbosity = "low"
+personality = "pragmatic"
+plan_mode_reasoning_effort = "xhigh"
+web_search = "live"
+file_opener = "none"
+hide_agent_reasoning = true
+forced_login_method = "api"
+model_provider = "private-provider"
+
+[history]
+persistence = "save-all"
+
+[mcp_servers.private]
+env = { SECRET_TOKEN = "must-not-copy" }
+EOF
+
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$package/bin/vm-codex' init"
+  [ "$status" -eq 0 ]
+  seed="$REPO/.codex-vm/bootstrap/preferences.toml"
+  [ -f "$seed" ]
+  [ "$(stat -c %a "$seed")" = 600 ]
+  run python3 - "$seed" <<'PY'
+import pathlib, sys, tomllib
+path = pathlib.Path(sys.argv[1])
+parsed = tomllib.loads(path.read_text())
+assert parsed == {
+    "model": "gpt-5.6-sol",
+    "model_reasoning_effort": "high",
+    "model_verbosity": "low",
+    "personality": "pragmatic",
+    "plan_mode_reasoning_effort": "xhigh",
+    "web_search": "live",
+    "file_opener": "none",
+    "hide_agent_reasoning": True,
+}
+assert "must-not-copy" not in path.read_text()
+PY
+  [ "$status" -eq 0 ]
+
+  sed -i 's/gpt-5.6-sol/gpt-5.6-terra/' "$host_home/.codex/config.toml"
+  run env HOME="$host_home" bash -c "cd '$REPO' && '$package/bin/vm-codex' init"
+  [ "$status" -eq 0 ]
+  grep -q 'gpt-5.6-sol' "$seed"
+  ! grep -q 'gpt-5.6-terra' "$seed"
+}
+
 @test "init rejects agent-controlled VM state symlinks" {
   package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
   outside="$BATS_TEST_TMPDIR/outside"
@@ -152,6 +205,8 @@ make_fake_vm_runtime() {
     system_packages="$(nix eval --json --apply "ps: map (p: p.name) ps" "$1#nixosConfigurations.codex-vm.config.environment.systemPackages" 2>/dev/null)" || exit
     egress_rules="$(nix eval --raw "$1#nixosConfigurations.codex-vm.config.networking.nftables.tables.codex-vm-egress.content" 2>/dev/null)" || exit
     host_keys="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.hostKeys" 2>/dev/null)" || exit
+    bootstrap_script="$(nix eval --raw "$1#nixosConfigurations.codex-vm.config.systemd.services.codex-vm-bootstrap.script" 2>/dev/null)" || exit
+    bootstrap_before="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.systemd.services.codex-vm-bootstrap.before" 2>/dev/null)" || exit
     runner="$(nix eval --raw "$1#packages.x86_64-linux.codex-vm-runner.drvPath" 2>/dev/null)" || exit
     jq -cn \
       --arg hypervisor "$hypervisor" \
@@ -166,8 +221,10 @@ make_fake_vm_runtime() {
       --argjson system_packages "$system_packages" \
       --arg egress_rules "$egress_rules" \
       --argjson host_keys "$host_keys" \
+      --arg bootstrap_script "$bootstrap_script" \
+      --argjson bootstrap_before "$bootstrap_before" \
       --arg runner "$runner" \
-      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$ssh_firewall, \$sudo_password, \$system_packages, \$egress_rules, \$host_keys, \$runner}"
+      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$ssh_firewall, \$sudo_password, \$system_packages, \$egress_rules, \$host_keys, \$bootstrap_script, \$bootstrap_before, \$runner}"
   ' _ "$ROOT"
 
   [ "$status" -eq 0 ]
@@ -179,6 +236,7 @@ make_fake_vm_runtime() {
   [ "$(jq -r '.volumes[] | select(.mountPoint == "/home/codex") | .size' <<<"$output")" -eq 32768 ]
   [ "$(jq -r '.shares[] | select(.mountPoint == "/work") | .source' <<<"$output")" = work-export ]
   [ "$(jq -r '.shares[] | select(.mountPoint == "/run/host-keys") | .readOnly' <<<"$output")" = true ]
+  [ "$(jq -r '.shares[] | select(.mountPoint == "/run/codex-vm-bootstrap") | .readOnly' <<<"$output")" = true ]
   [[ "$(jq -r .runtime_args <<<"$output")" = /nix/store/*-codex-qemu-runtime-args ]]
   [ "$(jq -r .ssh <<<"$output")" = true ]
   [ "$(jq -r .ssh_firewall <<<"$output")" = true ]
@@ -209,6 +267,10 @@ make_fake_vm_runtime() {
     [ "$(grep -nF "$rule" <<<"$egress_rules" | cut -d: -f1)" -lt "$private_v6_line" ]
   done
   [ "$(jq -r .host_keys[0].path <<<"$output")" = /run/host-keys/ssh_host_ed25519_key ]
+  [[ "$(jq -r .bootstrap_script <<<"$output")" == *"preferences.toml"* ]]
+  [[ "$(jq -r .bootstrap_script <<<"$output")" == *"codex_home=/home/codex/.codex"* ]]
+  [[ "$(jq -r .bootstrap_script <<<"$output")" == *'"$codex_home/config.toml"'* ]]
+  [ "$(jq -r '.bootstrap_before | index("sshd.service") != null' <<<"$output")" = true ]
   [[ "$(jq -r .runner <<<"$output")" = /nix/store/*-microvm-qemu-codex-vm.drv ]]
 }
 
