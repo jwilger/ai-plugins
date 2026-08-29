@@ -10,7 +10,7 @@
   };
 
   outputs =
-    { nixpkgs, microvm, ... }:
+    { self, nixpkgs, microvm, ... }:
     let
       supportedSystems = [
         "aarch64-darwin"
@@ -130,7 +130,10 @@
           # to build Nixpkgs' Darwin-only apple-sdk wrapper derivation.
           apple-sdk-source = pkgs.apple-sdk_15.src;
         }
-        // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+        // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          codex-vm-runner = codexVm.config.microvm.declaredRunner;
+          codex-vm-qemu-runtime-args = codexVmQemuRuntimeArgs;
+
           vm-codex = pkgs.writeShellApplication {
             name = "vm-codex";
             runtimeInputs = with pkgs; [
@@ -139,12 +142,31 @@
               jq
               procps
             ];
+            runtimeEnv = {
+              CODEX_VM_BWRAP = "${pkgs.bubblewrap}/bin/bwrap";
+              CODEX_VM_FLOCK = "${pkgs.util-linux}/bin/flock";
+              CODEX_VM_RUNNER = "${codexVm.config.microvm.declaredRunner}/bin/microvm-run";
+              CODEX_VM_SSH = "${pkgs.openssh}/bin/ssh";
+              CODEX_VM_SSH_KEYGEN = "${pkgs.openssh}/bin/ssh-keygen";
+              CODEX_VM_VIRTIOFSD_RUN = "${codexVm.config.microvm.declaredRunner}/bin/virtiofsd-run";
+            };
             text = builtins.readFile ./scripts/codex-vm/vm-codex;
           };
-        }
-        // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-          codex-vm-runner = codexVm.config.microvm.declaredRunner;
-          codex-vm-qemu-runtime-args = codexVmQemuRuntimeArgs;
+
+          vm-shell = pkgs.writeShellApplication {
+            name = "vm-shell";
+            text = ''
+              exec ${self.packages.${system}.vm-codex}/bin/vm-codex shell "$@"
+            '';
+          };
+
+          codex-vm-tools = pkgs.symlinkJoin {
+            name = "codex-vm-tools";
+            paths = [
+              self.packages.${system}.vm-codex
+              self.packages.${system}.vm-shell
+            ];
+          };
         }
       );
 

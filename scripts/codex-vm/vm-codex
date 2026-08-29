@@ -4,13 +4,46 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage: vm-codex status [--json]
+       vm-codex runtime [--json]
        vm-codex start --dry-run [--json]
+       vm-shell [--dry-run] [--json]
 EOF
 }
 
 die() {
   printf 'vm-codex: %s\n' "$1" >&2
   exit 2
+}
+
+runtime_command() {
+  local output_json=false name path variable
+  local -a names=(runner virtiofsd_run bwrap flock ssh ssh_keygen)
+  local -a variables=(CODEX_VM_RUNNER CODEX_VM_VIRTIOFSD_RUN CODEX_VM_BWRAP CODEX_VM_FLOCK CODEX_VM_SSH CODEX_VM_SSH_KEYGEN)
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --json) output_json=true ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown runtime argument: $1" ;;
+    esac
+    shift
+  done
+
+  local result='{}' index
+  for index in "${!names[@]}"; do
+    name="${names[$index]}"
+    variable="${variables[$index]}"
+    path="${!variable:-}"
+    [ -n "$path" ] || die "trusted runtime is missing $name"
+    [ -x "$path" ] || die "trusted runtime path is not executable: $path"
+    result="$(jq -cn --argjson current "$result" --arg name "$name" --arg path "$path" '$current + {($name): $path}')"
+  done
+
+  if [ "$output_json" = true ]; then
+    jq -cn --argjson schema_version 1 --argjson tools "$result" '{schema_version: $schema_version, tools: $tools, host_nix_evaluation: false}'
+  else
+    printf 'Trusted Codex VM runtime is installed.\n'
+  fi
 }
 
 resolve_project() {
@@ -143,10 +176,47 @@ start_command() {
   fi
 }
 
+shell_command() {
+  local dry_run=false output_json=false
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry_run=true ;;
+      --json) output_json=true ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown shell argument: $1" ;;
+    esac
+    shift
+  done
+
+  [ "$dry_run" = true ] || die "shell currently requires --dry-run"
+  resolve_project
+
+  if [ "$output_json" = true ]; then
+    jq -n \
+      --argjson schema_version 1 \
+      --arg project_id "$PROJECT_ID" \
+      --arg project_root "$PROJECT_ROOT" \
+      --arg state_dir "$STATE_DIR" \
+      '{
+        schema_version: $schema_version,
+        project_id: $project_id,
+        project_root: $project_root,
+        state_dir: $state_dir,
+        guest_command: ["/bin/bash", "-l"],
+        host_nix_evaluation: false
+      }'
+  else
+    printf 'Would open a login shell in %s at /work.\n' "$PROJECT_ID"
+  fi
+}
+
 command="${1:-status}"
 [ "$#" -eq 0 ] || shift
 
 case "$command" in
+  runtime) runtime_command "$@" ;;
+  shell) shell_command "$@" ;;
   status) status_command "$@" ;;
   start) start_command "$@" ;;
   -h|--help|help) usage ;;

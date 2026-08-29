@@ -11,16 +11,31 @@ setup() {
 }
 
 @test "the root flake publishes the Codex VM command" {
+  package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
+
   run bash -c '
-    package="$(nix build --no-link --print-out-paths "$1#vm-codex" 2>/dev/null)" || exit
+    package="$1"
     cd "$2"
     env -i PATH=/nonexistent XDG_RUNTIME_DIR="$3" \
       "$package/bin/vm-codex" status --json
-  ' _ "$ROOT" "$REPO" "$XDG_RUNTIME_DIR"
+  ' _ "$package" "$REPO" "$XDG_RUNTIME_DIR"
 
   [ "$status" -eq 0 ]
   [ "$(jq -r .project_root <<<"$output")" = "$REPO" ]
   [ "$(jq -r .running <<<"$output")" = false ]
+  [ -x "$package/bin/vm-shell" ]
+
+  run env -i PATH=/nonexistent "$package/bin/vm-codex" runtime --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .host_nix_evaluation <<<"$output")" = false ]
+  [[ "$(jq -r .tools.runner <<<"$output")" = /nix/store/*/bin/microvm-run ]]
+  [[ "$(jq -r .tools.virtiofsd_run <<<"$output")" = /nix/store/*/bin/virtiofsd-run ]]
+
+  run bash -c "cd '$REPO' && env -i PATH=/nonexistent XDG_RUNTIME_DIR='$XDG_RUNTIME_DIR' '$package/bin/vm-shell' --dry-run --json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .guest_command <<<"$output")" = '["/bin/bash","-l"]' ]
+  [ "$(jq -r .project_root <<<"$output")" = "$REPO" ]
+  [ ! -e "$REPO/.codex-vm" ]
 }
 
 @test "the root flake owns the Codex MicroVM definition" {
