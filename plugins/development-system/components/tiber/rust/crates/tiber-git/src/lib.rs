@@ -5319,6 +5319,8 @@ const FINAL_REVIEW_SCOPE_LIMITS: FinalReviewScopeLimits = FinalReviewScopeLimits
     content_bytes: FINAL_REVIEW_SCOPE_MAX_CONTENT_BYTES,
 };
 
+const FINAL_REVIEW_GIT_ARGV_MAX_BYTES: usize = 64 * 1024;
+
 fn bounded_final_review_git_output(
     root: &Path,
     args: &[&str],
@@ -5361,75 +5363,98 @@ fn bounded_final_review_git_output_with_index(
     } else {
         None
     };
-    let mut command = Command::new("git");
-    command.args(args).args(scope).current_dir(root);
-    if let Some(index_file) = index_file {
-        command.env("GIT_INDEX_FILE", index_file);
-    }
-    if let Some(attribute_source) = attribute_source {
-        command.env("GIT_ATTR_SOURCE", attribute_source);
-    }
-    if let Some((git_dir, attributes_file, object_directory)) = isolated_attributes.as_ref() {
-        command
-            .env("GIT_DIR", git_dir.path())
-            .env("GIT_WORK_TREE", root)
-            .env("GIT_OBJECT_DIRECTORY", object_directory)
-            .env("GIT_ATTR_NOSYSTEM", "1")
-            .env("GIT_CONFIG_COUNT", "1")
-            .env("GIT_CONFIG_KEY_0", "core.attributesFile")
-            .env("GIT_CONFIG_VALUE_0", attributes_file);
-    }
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(Error::Io)?;
-    let mut stdout = child
-        .stdout
-        .take()
-        .expect("piped Git stdout should be available");
-    let stderr = child
-        .stderr
-        .take()
-        .expect("piped Git stderr should be available");
-    let stderr_limit = limits.git_output_bytes;
-    let stderr_reader = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stderr
-            .take(stderr_limit.saturating_add(1) as u64)
-            .read_to_end(&mut bytes)
-            .map(|_| bytes)
-    });
     let mut bytes = Vec::new();
-    let mut buffer = [0_u8; 64 * 1024];
+    let base_argv_bytes: usize = args.iter().map(|arg| arg.len().saturating_add(1)).sum();
+    let mut chunk_start = 0;
     loop {
-        let read = stdout.read(&mut buffer)?;
-        if read == 0 {
+        let mut chunk_end = chunk_start;
+        let mut argv_bytes = base_argv_bytes;
+        while chunk_end < scope.len() {
+            let next_bytes = scope[chunk_end].len().saturating_add(1);
+            if chunk_end > chunk_start
+                && argv_bytes.saturating_add(next_bytes) > FINAL_REVIEW_GIT_ARGV_MAX_BYTES
+            {
+                break;
+            }
+            argv_bytes = argv_bytes.saturating_add(next_bytes);
+            chunk_end += 1;
+        }
+        let mut command = Command::new("git");
+        command
+            .args(args)
+            .args(&scope[chunk_start..chunk_end])
+            .current_dir(root);
+        if let Some(index_file) = index_file {
+            command.env("GIT_INDEX_FILE", index_file);
+        }
+        if let Some(attribute_source) = attribute_source {
+            command.env("GIT_ATTR_SOURCE", attribute_source);
+        }
+        if let Some((git_dir, attributes_file, object_directory)) = isolated_attributes.as_ref() {
+            command
+                .env("GIT_DIR", git_dir.path())
+                .env("GIT_WORK_TREE", root)
+                .env("GIT_OBJECT_DIRECTORY", object_directory)
+                .env("GIT_ATTR_NOSYSTEM", "1")
+                .env("GIT_CONFIG_COUNT", "1")
+                .env("GIT_CONFIG_KEY_0", "core.attributesFile")
+                .env("GIT_CONFIG_VALUE_0", attributes_file);
+        }
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(Error::Io)?;
+        let mut stdout = child
+            .stdout
+            .take()
+            .expect("piped Git stdout should be available");
+        let stderr = child
+            .stderr
+            .take()
+            .expect("piped Git stderr should be available");
+        let stderr_limit = limits.git_output_bytes;
+        let stderr_reader = thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stderr
+                .take(stderr_limit.saturating_add(1) as u64)
+                .read_to_end(&mut bytes)
+                .map(|_| bytes)
+        });
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = stdout.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            if bytes.len().saturating_add(read) > limits.git_output_bytes {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stderr_reader.join();
+                return Err(Error::Usage(format!(
+                    "tiber.final_review_{scope_kind}_scope_too_large condition=git_output_bytes max_bytes={} action=\"narrow the declared review scope and record fresh independent reviews\"",
+                    limits.git_output_bytes
+                )));
+            }
+            bytes.extend_from_slice(&buffer[..read]);
+        }
+        let status = child.wait()?;
+        let mut stderr = stderr_reader.join().map_err(|_| {
+            Error::Parse("tiber.final_review_git_stderr_reader_failed=true".into())
+        })??;
+        stderr.truncate(limits.git_output_bytes);
+        if !status.success() {
+            return Err(Error::CommandFailed {
+                program: "git".into(),
+                args: args.iter().map(|arg| (*arg).to_string()).collect(),
+                status: status.code().unwrap_or(1).to_string(),
+                stderr: String::from_utf8_lossy(&stderr).into_owned(),
+            });
+        }
+        if chunk_end == scope.len() {
             break;
         }
-        if bytes.len().saturating_add(read) > limits.git_output_bytes {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = stderr_reader.join();
-            return Err(Error::Usage(format!(
-                "tiber.final_review_{scope_kind}_scope_too_large condition=git_output_bytes max_bytes={} action=\"narrow the declared review scope and record fresh independent reviews\"",
-                limits.git_output_bytes
-            )));
-        }
-        bytes.extend_from_slice(&buffer[..read]);
-    }
-    let status = child.wait()?;
-    let mut stderr = stderr_reader
-        .join()
-        .map_err(|_| Error::Parse("tiber.final_review_git_stderr_reader_failed=true".into()))??;
-    stderr.truncate(limits.git_output_bytes);
-    if !status.success() {
-        return Err(Error::CommandFailed {
-            program: "git".into(),
-            args: args.iter().map(|arg| (*arg).to_string()).collect(),
-            status: status.code().unwrap_or(1).to_string(),
-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        });
+        chunk_start = chunk_end;
     }
     Ok(bytes)
 }
@@ -10191,7 +10216,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 8d2207b3d7d8b0e1ace8df92e2b64f1a8b9756e7\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 80bf866c270e4f55f6ffcbe0c7cb779b73110aa2\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -12343,6 +12368,26 @@ mod lock_tests {
             error.to_string().contains(condition),
             "unexpected diagnostic: {error}"
         );
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn bounded_git_output_chunks_the_documented_path_inventory_below_argv_limits() {
+        let root = temporary_repository("large-path-inventory");
+        let scope = (0..FINAL_REVIEW_SCOPE_MAX_PATHS)
+            .map(|index| format!(":(literal)missing-{index:05}.txt"))
+            .collect::<Vec<_>>();
+
+        let output = bounded_final_review_git_output(
+            &root,
+            &["ls-files", "--cached", "-z", "--"],
+            &scope,
+            "source",
+            FINAL_REVIEW_SCOPE_LIMITS,
+        )
+        .expect("documented path inventory should not exceed the process argv limit");
+
+        assert!(output.is_empty());
         fs::remove_dir_all(root).expect("remove temporary repository");
     }
 
