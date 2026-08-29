@@ -5398,6 +5398,14 @@ fn bounded_final_review_git_output_with_index(
         let mut argv_bytes = base_argv_bytes.saturating_add(exclusion_argv_bytes);
         while chunk_end < positives.len() {
             let next_bytes = positives[chunk_end].len().saturating_add(1);
+            if chunk_end == chunk_start
+                && argv_bytes.saturating_add(next_bytes) > FINAL_REVIEW_GIT_ARGV_MAX_BYTES
+            {
+                return Err(Error::Usage(format!(
+                    "tiber.final_review_{scope_kind}_scope_too_large condition=pathspec_bytes max_bytes={} action=\"narrow the declared review scope and record fresh independent reviews\"",
+                    FINAL_REVIEW_GIT_ARGV_MAX_BYTES
+                )));
+            }
             if chunk_end > chunk_start
                 && argv_bytes.saturating_add(next_bytes) > FINAL_REVIEW_GIT_ARGV_MAX_BYTES
             {
@@ -10244,7 +10252,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 5d9e3449f2ee0ef77212a4c7cc66acb29b2fc88e\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 0fd4a4433bede02775d544f1424989ae01e1da3f\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -12429,6 +12437,30 @@ mod lock_tests {
         .expect("documented path inventory should not exceed the process argv limit");
 
         assert_eq!(output, b"keep.txt\0");
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn bounded_git_output_rejects_one_pathspec_larger_than_the_argv_budget() {
+        let root = temporary_repository("oversized-pathspec");
+        let scope = vec![format!(
+            ":(literal){}",
+            "x".repeat(FINAL_REVIEW_GIT_ARGV_MAX_BYTES)
+        )];
+
+        let error = bounded_final_review_git_output(
+            &root,
+            &["ls-files", "--cached", "-z", "--"],
+            &scope,
+            "source",
+            FINAL_REVIEW_SCOPE_LIMITS,
+        )
+        .expect_err("one oversized pathspec must fail before spawning Git");
+
+        assert!(
+            error.to_string().contains("condition=pathspec_bytes"),
+            "unexpected diagnostic: {error}"
+        );
         fs::remove_dir_all(root).expect("remove temporary repository");
     }
 

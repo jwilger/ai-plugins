@@ -4,7 +4,7 @@ use std::fs;
 
 use support::{assert_success, assert_success_ref, TempRepo};
 
-const SCAFFOLDED_TIBER_REVISION: &str = "e5fda1233c1c38b2850e108e2e0d0cc6425c0d71";
+const SCAFFOLDED_TIBER_REVISION: &str = "0fd4a4433bede02775d544f1424989ae01e1da3f";
 
 #[test]
 fn scaffold_repo_dry_run_previews_and_apply_writes_files() {
