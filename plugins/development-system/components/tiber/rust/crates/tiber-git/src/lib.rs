@@ -5377,7 +5377,7 @@ fn bounded_final_review_git_output_with_index(
     } else {
         None
     };
-    let mut bytes = Vec::new();
+    let mut records = BTreeSet::new();
     let base_argv_bytes: usize = args.iter().map(|arg| arg.len().saturating_add(1)).sum();
     let (exclusions, positives): (Vec<_>, Vec<_>) = scope
         .iter()
@@ -5457,13 +5457,14 @@ fn bounded_final_review_git_output_with_index(
                 .read_to_end(&mut bytes)
                 .map(|_| bytes)
         });
+        let mut chunk_bytes = Vec::new();
         let mut buffer = [0_u8; 64 * 1024];
         loop {
             let read = stdout.read(&mut buffer)?;
             if read == 0 {
                 break;
             }
-            if bytes.len().saturating_add(read) > limits.git_output_bytes {
+            if chunk_bytes.len().saturating_add(read) > limits.git_output_bytes {
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = stderr_reader.join();
@@ -5472,7 +5473,7 @@ fn bounded_final_review_git_output_with_index(
                     limits.git_output_bytes
                 )));
             }
-            bytes.extend_from_slice(&buffer[..read]);
+            chunk_bytes.extend_from_slice(&buffer[..read]);
         }
         let status = child.wait()?;
         let mut stderr = stderr_reader.join().map_err(|_| {
@@ -5487,12 +5488,35 @@ fn bounded_final_review_git_output_with_index(
                 stderr: String::from_utf8_lossy(&stderr).into_owned(),
             });
         }
+        if chunk_bytes.last().is_some_and(|byte| *byte != 0) {
+            return Err(Error::Parse(
+                "tiber.final_review_git_output_unterminated=true".into(),
+            ));
+        }
+        for record in chunk_bytes
+            .split(|byte| *byte == 0)
+            .filter(|record| !record.is_empty())
+        {
+            records.insert(record.to_vec());
+        }
+        let unique_output_bytes = records.iter().fold(0_usize, |total, record| {
+            total.saturating_add(record.len().saturating_add(1))
+        });
+        if unique_output_bytes > limits.git_output_bytes {
+            return Err(Error::Usage(format!(
+                "tiber.final_review_{scope_kind}_scope_too_large condition=git_output_bytes max_bytes={} action=\"narrow the declared review scope and record fresh independent reviews\"",
+                limits.git_output_bytes
+            )));
+        }
         if chunk_end == positives.len() {
             break;
         }
         chunk_start = chunk_end;
     }
-    Ok(bytes)
+    Ok(records
+        .into_iter()
+        .flat_map(|record| record.into_iter().chain(std::iter::once(0)))
+        .collect())
 }
 
 fn bounded_final_review_paths(
@@ -10252,7 +10276,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 0fd4a4433bede02775d544f1424989ae01e1da3f\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout 6bb320c4bc47f6f0d504a1692d552a585dfd81c4\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
@@ -12461,6 +12485,36 @@ mod lock_tests {
             error.to_string().contains("condition=pathspec_bytes"),
             "unexpected diagnostic: {error}"
         );
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn bounded_git_output_deduplicates_overlapping_pathspecs_across_chunks() {
+        let root = temporary_repository("overlapping-pathspec-chunks");
+        fs::write(root.join("keep.txt"), "keep\n").expect("write included file");
+        let add = Command::new("git")
+            .args(["add", "keep.txt"])
+            .current_dir(&root)
+            .output()
+            .expect("stage fixture file");
+        assert!(add.status.success());
+        let padding = "x".repeat(FINAL_REVIEW_GIT_ARGV_MAX_BYTES / 2);
+        let scope = vec![
+            "*.txt".to_string(),
+            format!(":(literal)missing-{padding}"),
+            "keep.txt".to_string(),
+        ];
+
+        let output = bounded_final_review_git_output(
+            &root,
+            &["ls-files", "--cached", "-z", "--"],
+            &scope,
+            "source",
+            FINAL_REVIEW_SCOPE_LIMITS,
+        )
+        .expect("overlapping pathspec chunks should retain single-call semantics");
+
+        assert_eq!(output, b"keep.txt\0");
         fs::remove_dir_all(root).expect("remove temporary repository");
     }
 
