@@ -8081,6 +8081,8 @@ capability = "implementation"
                 "user.name=Development System Test",
                 "-c",
                 "user.email=development-system@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
                 "commit",
                 "--quiet",
                 "-m",
@@ -8661,6 +8663,12 @@ capability = "implementation"
     }
 
     fn activate_test_workflow(root: &Path, epoch: u64) {
+        assert!(Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(root)
+            .status()
+            .expect("disable inherited signing in workflow fixture")
+            .success());
         if !root.join(CONFIG_FILE).exists() {
             fs::write(
                 root.join(CONFIG_FILE),
@@ -9695,6 +9703,8 @@ network="allowed"
                 "user.name=Development System Test",
                 "-c",
                 "user.email=development-system@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
                 "commit",
                 "--quiet",
                 "-m",

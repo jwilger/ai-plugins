@@ -1271,6 +1271,23 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        if arguments.first() == Some(&"init") {
+            let initialized = arguments
+                .last()
+                .filter(|argument| !argument.starts_with('-') && **argument != "init")
+                .expect("test repository path");
+            let configured = Command::new("git")
+                .arg("-C")
+                .arg(initialized)
+                .args(["config", "commit.gpgsign", "false"])
+                .output()
+                .expect("disable inherited signing in test repository");
+            assert!(
+                configured.status.success(),
+                "{}",
+                String::from_utf8_lossy(&configured.stderr)
+            );
+        }
         String::from_utf8_lossy(&output.stdout).trim().to_owned()
     }
 

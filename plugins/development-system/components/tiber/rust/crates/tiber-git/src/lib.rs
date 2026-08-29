@@ -5484,17 +5484,23 @@ fn source_scope_fingerprint_with_limits(
         scope_kind,
         limits,
     )?;
-    let gitlinks = index
+    let index_modes = index
         .split(|byte| *byte == 0)
         .filter(|record| !record.is_empty())
         .filter_map(|record| {
             let separator = record.iter().position(|byte| *byte == b'\t')?;
-            record[..separator]
-                .starts_with(b"160000 ")
-                .then(|| String::from_utf8(record[separator + 1..].to_vec()))
+            let mode = record[..separator].split(|byte| *byte == b' ').next()?;
+            Some(
+                String::from_utf8(record[separator + 1..].to_vec())
+                    .map(|path| (path, mode.to_vec())),
+            )
         })
-        .collect::<Result<BTreeSet<_>, _>>()
+        .collect::<Result<BTreeMap<_, _>, _>>()
         .map_err(|_| Error::Usage("tiber.final_review_scope_path_invalid_utf8=true".into()))?;
+    let gitlinks = index_modes
+        .iter()
+        .filter_map(|(path, mode)| (mode == b"160000").then_some(path.as_str()))
+        .collect::<BTreeSet<_>>();
     let mut hasher = Sha256::new();
     hasher.update(b"tiber-final-review-scope-v5\0");
     let mut content_bytes = 0_u64;
@@ -5505,7 +5511,7 @@ fn source_scope_fingerprint_with_limits(
         let metadata = match fs::symlink_metadata(&absolute) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if gitlinks.contains(&path) {
+                if gitlinks.contains(path.as_str()) {
                     return Err(Error::Usage(format!(
                         "tiber.final_review_gitlink_unavailable path={path:?} action=\"initialize the scoped submodule checkout before recording or completing final review\""
                     )));
@@ -5518,7 +5524,7 @@ fn source_scope_fingerprint_with_limits(
         if metadata.file_type().is_symlink() {
             hasher.update(b"120000\0symlink\0");
             hasher.update(fs::read_link(&absolute)?.as_os_str().as_encoded_bytes());
-        } else if metadata.is_dir() && gitlinks.contains(&path) {
+        } else if metadata.is_dir() && gitlinks.contains(path.as_str()) {
             let top_level = Command::new("git")
                 .args(["rev-parse", "--show-toplevel"])
                 .current_dir(&absolute)
@@ -5568,7 +5574,11 @@ fn source_scope_fingerprint_with_limits(
                 b"100755".as_slice()
             };
             #[cfg(not(unix))]
-            let mode = b"100644".as_slice();
+            let mode = if index_modes.get(&path).is_some_and(|mode| mode == b"100755") {
+                b"100755".as_slice()
+            } else {
+                b"100644".as_slice()
+            };
             hasher.update(mode);
             hasher.update(b"\0blob\0");
             let mut file = fs::File::open(&absolute)?;
@@ -10175,7 +10185,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout d7e5b141960163fbc751583f1a3ce3c45f14fe91\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout a0be04dd99b86a3fa09a8ca8d1a207ef40633eba\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));

@@ -70,6 +70,14 @@ fn git(root: &std::path::Path, arguments: &[&str]) {
         .status()
         .expect("git");
     assert!(status.success(), "git {arguments:?}");
+    if arguments.first() == Some(&"init") {
+        let status = Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(root)
+            .status()
+            .expect("disable signing in test repository");
+        assert!(status.success(), "disable signing in test repository");
+    }
 }
 
 fn test_executable(program: &str) -> String {

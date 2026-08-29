@@ -2548,6 +2548,12 @@ mod tests {
             .status()
             .expect("git init");
         assert!(status.success());
+        assert!(Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(repository.path())
+            .status()
+            .expect("disable inherited signing in test repository")
+            .success());
 
         let import = LegacyLifecycleImport {
             source_id: "fixture-lifecycle:9e3779b9".to_string(),

@@ -29220,7 +29220,7 @@ pre_filter = "project-pre"
                 "acceptance_criteria": ["preserve context"],
                 "explicit_concerns": []
             },
-            "model_roles": { "lens_review": "review-model" },
+            "model_roles": { "lens_review": "review-model", "verifier": "verify-model" },
             "lenses": ["correctness-behavior"],
             "iteration_index": 1,
             "required_clean_iterations": 3,
@@ -29246,7 +29246,8 @@ pre_filter = "project-pre"
 
         assert_eq!(
             advanced["state"]["prior_defenses_by_lens"]["correctness-behavior"][0]["id"],
-            "finding-1"
+            "finding-1",
+            "advanced state did not retain the caller defense: {advanced}"
         );
         assert!(advanced["next_assignments"][0]["prompt"]
             .as_str()
