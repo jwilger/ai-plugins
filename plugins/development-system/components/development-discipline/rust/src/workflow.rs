@@ -2166,15 +2166,6 @@ fn open_event_store(project_root: &Path) -> Result<GitEventStore, String> {
         .map_err(|error| format!("development_workflow.event_store_open_failed source={error}"))
 }
 
-/// Opens the fixed Git authority used by the non-test final-review command
-/// executor. Test builds use an in-memory compatibility path instead.
-#[cfg(not(test))]
-pub(crate) fn open_development_workflow_event_store(
-    project_root: &Path,
-) -> Result<GitEventStore, String> {
-    open_event_store(project_root)
-}
-
 /// Opens the fixed Git authority selected by the final-review adapter. The
 /// plugin advisory authority is deliberately local-only and separate from the
 /// remotely published native workflow authority.

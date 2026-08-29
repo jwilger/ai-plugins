@@ -104,6 +104,184 @@ fn assert_current_final_review_protocol(status: &Value) {
     );
 }
 
+fn sqlite_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut found = Vec::new();
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(directory).expect("read state directory") {
+            let path = entry.expect("state entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "sqlite")
+            {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
+fn mcp_text_payload(response: &Value) -> Value {
+    serde_json::from_str(
+        response
+            .pointer("/result/content/0/text")
+            .and_then(Value::as_str)
+            .expect("MCP text payload"),
+    )
+    .expect("MCP payload JSON")
+}
+
+#[test]
+fn advisory_final_review_resume_rebuilds_deleted_sqlite_projection_from_git_authority() {
+    let root = TempDir::new().expect("repository");
+    let state = TempDir::new().expect("state root");
+    git(root.path(), &["init", "--quiet"]);
+    fs::create_dir(root.path().join("src")).expect("source directory");
+    fs::write(root.path().join("src/review.rs"), "const VALUE: u8 = 1;\n").expect("initial source");
+    fs::write(
+        root.path().join(".development-system.toml"),
+        "schema_version = 3\n\n[delivery]\nmode = \"direct-to-trunk\"\ntrunk_branch = \"main\"\n\n[features]\ntiber = true\n\n[final_review.models.codex]\npre_filter = \"gpt-5.6-sol\"\nlens_review = \"gpt-5.6-terra\"\npost_filter = \"gpt-5.6-luna\"\nverifier = \"gpt-5.6-sol\"\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n",
+    )
+    .expect("configuration");
+    git(root.path(), &["add", "."]);
+    git(
+        root.path(),
+        &[
+            "-c",
+            "user.name=Development System Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "test fixture",
+        ],
+    );
+    let baseline = String::from_utf8(
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root.path())
+            .output()
+            .expect("baseline")
+            .stdout,
+    )
+    .expect("baseline UTF-8")
+    .trim()
+    .to_string();
+    fs::write(root.path().join("src/review.rs"), "const VALUE: u8 = 2;\n").expect("changed source");
+
+    let session_id = "production-resume-rebuild";
+    let risk_arguments = json!({
+        "session_id": session_id,
+        "base": "HEAD",
+        "baseline_commit": baseline,
+        "scope": "uncommitted",
+        "project_root": root.path(),
+        "changed_files": ["src/review.rs"],
+        "diff_hash": "production-resume-diff",
+        "shared_test_evidence": {
+            "id": "production-resume-tests",
+            "diff_hash": "production-resume-diff",
+            "status": "passed",
+            "summary": "Fixture verification passed.",
+            "commands": ["fixture:verification"],
+            "artifact_reference": "fixture://production-resume"
+        },
+        "pre_filter_model_role": "gpt-5.6-sol"
+    });
+    let risk_response = mcp_call_with_environment(
+        root.path(),
+        "final_review.assess_risk",
+        risk_arguments.clone(),
+        &[("XDG_STATE_HOME", state.path())],
+    );
+    let risk = mcp_text_payload(&risk_response);
+    let assignment = &risk["assignments"][0];
+    let dimensions = assignment["review_dimensions"]
+        .as_array()
+        .expect("review dimensions")
+        .iter()
+        .map(|lens| {
+            let lens = lens.as_str().expect("lens");
+            let selected = lens == "correctness-behavior";
+            json!({
+                "lens": lens,
+                "risk": if selected { "medium" } else { "none" },
+                "evidence": if selected { "The changed recovery path controls durable final-review resumption." } else { "No concrete failure path in this fixture." },
+                "plausible_failure": if selected { "A restarted coordinator cannot recover its pending assignments." } else { "none" },
+                "material_impact": if selected { "Required final review becomes unavailable and blocks delivery." } else { "none" },
+                "uncertain": false
+            })
+        })
+        .collect::<Vec<_>>();
+    let assessment = json!({
+        "assignment_id": assignment["assignment_id"],
+        "subagent_key": assignment["subagent_key"],
+        "shared_test_evidence_id": assignment["shared_test_evidence"]["id"],
+        "overall_risk": "medium",
+        "dimensions": dimensions,
+        "exceptional_triggers": [],
+        "split_required": false,
+        "plan_assumptions": [],
+        "findings": [],
+        "caller_attestation": {
+            "model_role": assignment["model_role"],
+            "fresh_context": true,
+            "closed_after_result": true
+        }
+    });
+    let mut plan_arguments = risk_arguments;
+    plan_arguments["risk_assessment"] = assessment;
+    plan_arguments["unrelated_finding_policy"] = json!({ "default": "report" });
+    let plan_response = mcp_call_with_environment(
+        root.path(),
+        "final_review.plan",
+        plan_arguments,
+        &[("XDG_STATE_HOME", state.path())],
+    );
+    let plan = mcp_text_payload(&plan_response);
+    assert!(
+        plan.get("state_ref").is_some(),
+        "plan failed: {plan_response}"
+    );
+
+    let resumed = mcp_call_with_environment(
+        root.path(),
+        "final_review.resume_latest",
+        json!({ "project_root": root.path(), "session_id": session_id }),
+        &[("XDG_STATE_HOME", state.path())],
+    );
+    let resumed_payload = mcp_text_payload(&resumed);
+    assert!(
+        resumed_payload.get("state_ref").is_some(),
+        "restart recovery failed: {resumed}"
+    );
+
+    let projections = sqlite_files(state.path());
+    assert_eq!(projections.len(), 1, "expected one review projection");
+    fs::remove_file(&projections[0]).expect("delete rebuildable projection");
+    for suffix in ["-wal", "-shm"] {
+        let sidecar =
+            std::path::PathBuf::from(format!("{}{}", projections[0].to_string_lossy(), suffix));
+        if sidecar.exists() {
+            fs::remove_file(sidecar).expect("delete projection sidecar");
+        }
+    }
+    let rebuilt = mcp_call_with_environment(
+        root.path(),
+        "final_review.resume_latest",
+        json!({ "project_root": root.path(), "session_id": session_id }),
+        &[("XDG_STATE_HOME", state.path())],
+    );
+    let rebuilt_payload = mcp_text_payload(&rebuilt);
+    assert!(
+        rebuilt_payload.get("state_ref").is_some(),
+        "projection rebuild failed: {rebuilt}"
+    );
+}
+
 #[test]
 fn semantic_reader_is_inert_without_configuration_and_invalid_config_fails_closed() {
     let root = TempDir::new().expect("repository");

@@ -18285,6 +18285,7 @@ fn execute_advance_via_dispatcher_at(
         &path,
         Some(&fixture_root),
         &session_id,
+        ReviewPersistence::WorkflowAuthority,
         LegacyReviewImportedEvent {
             stream: review_stream_id(&session_id)?,
             facts: LegacyImportFacts {
@@ -19438,9 +19439,6 @@ fn load_authoritative_session_with_legacy_policy(
         caller_state.get("work_item_id").and_then(Value::as_str),
         persistence,
     )?;
-    if !path.exists() {
-        return Ok(None);
-    }
     load_authoritative_session_from_path(
         &path,
         Some(Path::new(project_root)),
@@ -19533,12 +19531,13 @@ fn load_authoritative_session_from_path(
     let projected_catalog_membership = if projection_marker.exists() {
         None
     } else {
-        projected_catalog_membership_if_current(path, session_id)?
+        projected_catalog_membership_if_current(path, project_root, session_id, persistence)?
     };
     if projected_catalog_membership == Some(true) {
         if let Some(restored) = read_projected_session(path, session_id)? {
             let stream = review_stream_id(session_id)?;
-            let authoritative_revision = read_latest_review_stream_revision(path, stream)?;
+            let authoritative_revision =
+                read_latest_review_stream_revision(path, project_root, stream, persistence)?;
             if authoritative_revision == Some(restored.revision) {
                 return Ok(Some(restored));
             }
@@ -19560,20 +19559,13 @@ fn load_authoritative_session_from_path(
         }
     }
 
-    let connection = open_review_connection(path)?;
     let session_stream = review_stream_id(session_id)?;
-    let already_event_sourced = connection
-        .query_row(
-            "SELECT 1 FROM eventcore_events WHERE stream_id = ?1 LIMIT 1",
-            params![session_stream.as_ref()],
-            |_| Ok(()),
-        )
-        .optional()
-        .map_err(|error| format!("review_session_event_check_failed source={error}"))?
-        .is_some();
+    let already_event_sourced =
+        !read_review_stream(path, project_root, session_stream, persistence)?.is_empty();
     if already_event_sourced {
         return Ok(None);
     }
+    let connection = open_review_connection(path)?;
     let legacy = read_session_row(&connection, "final_review_session", session_id)?;
     drop(connection);
     let Some(legacy) = legacy else {
@@ -19587,6 +19579,7 @@ fn load_authoritative_session_from_path(
         path,
         project_root,
         session_id,
+        persistence,
         LegacyReviewImportedEvent {
             stream,
             facts: LegacyImportFacts {
@@ -19607,28 +19600,37 @@ fn load_authoritative_session_from_path(
             },
         },
     )?;
-    rebuild_review_projections(
-        path,
-        None,
-        Some(session_id),
-        ReviewPersistence::WorkflowAuthority,
-    )?;
+    rebuild_review_projections(path, project_root, Some(session_id), persistence)?;
     read_projected_session(path, session_id)
 }
 
 fn projected_catalog_membership_if_current(
     path: &Path,
+    project_root: Option<&Path>,
     session_id: &str,
+    persistence: ReviewPersistence,
 ) -> Result<Option<bool>, String> {
-    let connection = open_review_connection(path)?;
+    #[cfg(test)]
+    let authoritative_head = {
+        let connection = open_review_connection(path)?;
+        let catalog_stream = catalog_stream_id()?;
+        connection
+            .query_row(
+                "SELECT COALESCE(MAX(stream_version), -1) FROM eventcore_events WHERE stream_id = ?1",
+                params![catalog_stream.as_ref()],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| format!("review_catalog_head_read_failed source={error}"))?
+    };
+    #[cfg(not(test))]
     let catalog_stream = catalog_stream_id()?;
-    let authoritative_head: i64 = connection
-        .query_row(
-            "SELECT COALESCE(MAX(stream_version), -1) FROM eventcore_events WHERE stream_id = ?1",
-            params![catalog_stream.as_ref()],
-            |row| row.get(0),
-        )
-        .map_err(|error| format!("review_catalog_head_read_failed source={error}"))?;
+    #[cfg(not(test))]
+    let authoritative_head = review_stream_head_from_event_count(
+        read_review_stream(path, project_root, catalog_stream, persistence)?.len(),
+    )?;
+    #[cfg(test)]
+    let _ = (project_root, persistence);
+    let connection = open_review_connection(path)?;
     let projected_head: Option<i64> = connection
         .query_row(
             "SELECT value FROM final_review_projection_metadata WHERE key = 'catalog_stream_head'",
@@ -19649,6 +19651,14 @@ fn projected_catalog_membership_if_current(
         .optional()
         .map(|present| Some(present.unwrap_or(false)))
         .map_err(|error| format!("review_catalog_projection_membership_read_failed source={error}"))
+}
+
+fn review_stream_head_from_event_count(event_count: usize) -> Result<i64, String> {
+    if event_count == 0 {
+        Ok(-1)
+    } else {
+        i64::try_from(event_count).map_err(|_| "review_catalog_head_too_large=true".to_string())
+    }
 }
 
 struct ReviewDatabaseLock(fs::File);
@@ -19729,8 +19739,11 @@ fn execute_legacy_review_import(
     path: &Path,
     _project_root: Option<&Path>,
     session_id: &str,
+    persistence: ReviewPersistence,
     imported: LegacyReviewImportedEvent,
 ) -> Result<(), String> {
+    #[cfg(test)]
+    let _ = persistence;
     initialize_event_store(path)?;
     let session_stream = review_stream_id(session_id)?;
     if imported.stream != session_stream {
@@ -19744,8 +19757,9 @@ fn execute_legacy_review_import(
     })
     .map_err(|error| format!("review_event_store_open_failed source={error}"))?;
     #[cfg(not(test))]
-    let store = crate::workflow::open_development_workflow_event_store(
+    let store = crate::workflow::open_final_review_event_store(
         _project_root.ok_or_else(|| "review_event_project_root_required=true".to_string())?,
+        persistence.authority(),
     )
     .map_err(|error| format!("review_event_store_open_failed source={error}"))?;
     let runtime = review_runtime()?;
@@ -20182,26 +20196,41 @@ fn read_review_stream(
 
 fn read_latest_review_stream_revision(
     path: &Path,
+    project_root: Option<&Path>,
     stream: StreamId,
+    persistence: ReviewPersistence,
 ) -> Result<Option<u64>, String> {
-    let connection = open_review_connection(path)?;
-    connection
-        .query_row(
-            "SELECT event_data FROM eventcore_events WHERE stream_id = ?1 ORDER BY stream_version DESC LIMIT 1",
-            params![stream.as_ref()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|error| format!("review_latest_event_read_failed source={error}"))?
+    #[cfg(test)]
+    {
+        let _ = (project_root, persistence);
+        let connection = open_review_connection(path)?;
+        connection
+            .query_row(
+                "SELECT event_data FROM eventcore_events WHERE stream_id = ?1 ORDER BY stream_version DESC LIMIT 1",
+                params![stream.as_ref()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("review_latest_event_read_failed source={error}"))?
+            .map(|event| {
+                serde_json::from_str::<FinalReviewEvent>(&event)
+                    .map_err(|error| format!("review_latest_event_parse_failed source={error}"))
+                    .and_then(|event| {
+                        event.metadata().map(|metadata| metadata.revision).ok_or_else(|| {
+                            "review_latest_event_metadata_missing=true".to_string()
+                        })
+                    })
+            })
+            .transpose()
+    }
+    #[cfg(not(test))]
+    read_review_stream(path, project_root, stream, persistence)?
+        .last()
         .map(|event| {
-            serde_json::from_str::<FinalReviewEvent>(&event)
-                .map_err(|error| format!("review_latest_event_parse_failed source={error}"))
-                .and_then(|event| {
-                    event
-                        .metadata()
-                        .map(|metadata| metadata.revision)
-                        .ok_or_else(|| "review_latest_event_metadata_missing=true".to_string())
-                })
+            event
+                .metadata()
+                .map(|metadata| metadata.revision)
+                .ok_or_else(|| "review_latest_event_metadata_missing=true".to_string())
         })
         .transpose()
 }
@@ -20217,18 +20246,10 @@ fn rebuild_review_projections(
         return Err("review_projection_test_fault=true".to_string());
     }
     let catalog_stream = catalog_stream_id()?;
-    let catalog_head = {
-        let connection = open_review_connection(path)?;
-        connection
-            .query_row(
-                "SELECT COALESCE(MAX(stream_version), -1) FROM eventcore_events WHERE stream_id = ?1",
-                params![catalog_stream.as_ref()],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|error| format!("review_catalog_head_read_failed source={error}"))?
-    };
+    let catalog_events = read_review_stream(path, project_root, catalog_stream, persistence)?;
+    let catalog_head = review_stream_head_from_event_count(catalog_events.len())?;
     let mut catalog = HashMap::<String, (u64, u64)>::new();
-    for event in read_review_stream(path, project_root, catalog_stream, persistence)? {
+    for event in catalog_events {
         match event {
             FinalReviewEvent::CatalogSessionTouched(CatalogSessionTouchedEvent {
                 session_id,
@@ -41457,6 +41478,7 @@ pre_filter = "project-pre"
             &path,
             None,
             &session_id,
+            ReviewPersistence::WorkflowAuthority,
             LegacyReviewImportedEvent {
                 stream: stream.clone(),
                 facts: LegacyImportFacts {
@@ -41794,6 +41816,7 @@ pre_filter = "project-pre"
             &path,
             None,
             session_id,
+            ReviewPersistence::WorkflowAuthority,
             LegacyReviewImportedEvent {
                 stream: review_stream_id(session_id).expect("session stream"),
                 facts: LegacyImportFacts {
@@ -41836,10 +41859,22 @@ pre_filter = "project-pre"
                 },
             },
         };
-        execute_legacy_review_import(&path, None, session_id, imported.clone())
-            .expect("first legacy import");
-        let error = execute_legacy_review_import(&path, None, session_id, imported)
-            .expect_err("replayed legacy intent must be rejected");
+        execute_legacy_review_import(
+            &path,
+            None,
+            session_id,
+            ReviewPersistence::WorkflowAuthority,
+            imported.clone(),
+        )
+        .expect("first legacy import");
+        let error = execute_legacy_review_import(
+            &path,
+            None,
+            session_id,
+            ReviewPersistence::WorkflowAuthority,
+            imported,
+        )
+        .expect_err("replayed legacy intent must be rejected");
         assert!(error.contains("review_legacy_import_already_applied=true"));
 
         let connection = open_review_connection(&path).expect("event store database");
