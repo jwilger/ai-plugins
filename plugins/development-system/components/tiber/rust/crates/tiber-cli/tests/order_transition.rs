@@ -559,6 +559,32 @@ fn transition_to_done_accepts_three_clean_independent_final_reviews() {
 }
 
 #[test]
+fn transition_to_done_revalidates_and_persists_a_new_immutable_snapshot() {
+    let repo = TempRepo::initialized();
+    enable_final_review_policy(&repo);
+    assert_success(repo.tiber(["init"]));
+    assert_success(repo.tiber(["create", "Reviewed work"]));
+    assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+    for iteration in 1..=3 {
+        record_review(&repo, iteration, "clean");
+    }
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+    fs::write(repo.path().join("unrelated.txt"), "unrelated\n").expect("write unrelated file");
+    repo.git(["add", "unrelated.txt"]);
+    repo.git(["commit", "-m", "Add unrelated file"]);
+    let new_commit = String::from_utf8(repo.git_output(["rev-parse", "HEAD"]).stdout)
+        .expect("commit oid utf8")
+        .trim()
+        .to_string();
+
+    assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+
+    let done = task_stem(&repo, "done", "reviewed-work");
+    let rendered = repo.task_file("done", &done);
+    assert!(rendered.contains(&format!("completion_snapshot commit={new_commit}")));
+}
+
+#[test]
 fn transition_to_done_rejects_reviewed_uncommitted_source() {
     let repo = TempRepo::initialized();
     enable_final_review_policy(&repo);
