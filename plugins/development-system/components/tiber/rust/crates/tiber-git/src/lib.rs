@@ -7264,7 +7264,14 @@ impl ModelCommandLogic for CloseTasksFromCommitTrailers {
 fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, Error> {
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    let log = repository.git(["log", "-1", "--format=%B"])?;
+    let (completion_commit_oid, completion_tree_oid) = canonical_commit_snapshot(root, "HEAD")?;
+    let log = repository.git([
+        "log",
+        "-1",
+        "--format=%B",
+        "--end-of-options",
+        &completion_commit_oid,
+    ])?;
     let requested = closes_trailers(&log);
     if requested.is_empty() {
         return Ok(Vec::new());
@@ -7281,7 +7288,6 @@ fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, 
     let mut completion_snapshots = BTreeMap::new();
     if config.final_review.minimum_clean_reviews > 0 {
         let required = config.final_review.minimum_clean_reviews;
-        let (completion_commit_oid, completion_tree_oid) = canonical_commit_snapshot(root, "HEAD")?;
         let mut tree_fingerprint_cache = TreeFinalReviewFingerprintCache::default();
         for stem in &stems {
             let task = projection
@@ -10149,7 +10155,7 @@ impl GitRepository {
                 files.push((
                     ".github/workflows/tiber-close-from-trailers.yml",
                     format!(
-                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout e975c7eb5bf66a3bb93095e65343955e30f4eedc\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
+                        "name: tiber close from trailers\n\non:\n  push:\n    branches: [{publication_branch}]\n\npermissions:\n  contents: write\n\njobs:\n  close:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683\n      - name: Install Tiber\n        run: |\n          git clone --no-checkout https://github.com/jwilger/ai-plugins.git .tiber-src\n          git -C .tiber-src checkout f9687ac8b430ea35960ed60e25071b0dbe072027\n          cargo install --locked --path .tiber-src/plugins/development-system/components/tiber/rust/crates/tiber-cli --bin tiber --root .tiber-install\n          echo \"$PWD/.tiber-install/bin\" >> \"$GITHUB_PATH\"\n      - run: tiber close-from-trailers\n"
                     ),
                     true,
                 ));
