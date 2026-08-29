@@ -47,6 +47,24 @@ process_start_time() {
   printf '%s\n' "${20}"
 }
 
+load_project_config() {
+  local config_file="$PROJECT_ROOT/codex-vm.json" unknown_field
+
+  PROJECT_CONFIG='{"schemaVersion":1,"shares":[]}'
+  [ ! -L "$config_file" ] || die "project configuration must not be a symlink"
+  [ -e "$config_file" ] || return 0
+  [ -f "$config_file" ] || die "project configuration must be a regular file"
+
+  PROJECT_CONFIG="$(jq -ce 'select(type == "object")' "$config_file" 2>/dev/null)" ||
+    die "project configuration must be a JSON object"
+  unknown_field="$(jq -r '[keys_unsorted[] | select(. != "schemaVersion" and . != "shares")][0] // empty' <<<"$PROJECT_CONFIG")"
+  [ -z "$unknown_field" ] || die "unknown configuration field: $unknown_field"
+  jq -e '.schemaVersion == 1 and (.schemaVersion | type) == "number"' <<<"$PROJECT_CONFIG" >/dev/null ||
+    die "schemaVersion must be the number 1"
+  jq -e '((has("shares") | not) or (.shares | type == "array"))' <<<"$PROJECT_CONFIG" >/dev/null ||
+    die "shares must be an array"
+}
+
 status_command() {
   local output_json=false running=false
 
@@ -101,6 +119,7 @@ start_command() {
 
   [ "$dry_run" = true ] || die "start currently requires --dry-run"
   resolve_project
+  load_project_config
 
   if [ "$output_json" = true ]; then
     jq -n \

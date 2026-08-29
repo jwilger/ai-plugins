@@ -75,3 +75,47 @@ setup() {
   [ ! -e "$REPO/.codex-vm" ]
   [ ! -e "$XDG_RUNTIME_DIR/ai-plugins-codex-vm" ]
 }
+
+@test "start rejects unknown project configuration fields" {
+  printf '%s\n' '{"schemaVersion":1,"unexpected":true}' >"$REPO/codex-vm.json"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --dry-run --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unknown configuration field: unexpected"* ]]
+  [ ! -e "$REPO/.codex-vm" ]
+  [ ! -e "$XDG_RUNTIME_DIR/ai-plugins-codex-vm" ]
+}
+
+@test "start rejects a dangling project configuration symlink" {
+  ln -s "$REPO/missing-config.json" "$REPO/codex-vm.json"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --dry-run --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"project configuration must not be a symlink"* ]]
+  [ ! -e "$REPO/.codex-vm" ]
+  [ ! -e "$XDG_RUNTIME_DIR/ai-plugins-codex-vm" ]
+}
+
+@test "start requires a numeric schema version" {
+  printf '%s\n' '{"schemaVersion":"1","shares":[]}' >"$REPO/codex-vm.json"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --dry-run --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"schemaVersion must be the number 1"* ]]
+  [ ! -e "$REPO/.codex-vm" ]
+  [ ! -e "$XDG_RUNTIME_DIR/ai-plugins-codex-vm" ]
+}
+
+@test "start requires shares to be an array" {
+  printf '%s\n' '{"schemaVersion":1,"shares":false}' >"$REPO/codex-vm.json"
+
+  run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' start --dry-run --json"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"shares must be an array"* ]]
+  [ ! -e "$REPO/.codex-vm" ]
+  [ ! -e "$XDG_RUNTIME_DIR/ai-plugins-codex-vm" ]
+}
