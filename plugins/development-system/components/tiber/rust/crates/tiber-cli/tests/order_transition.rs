@@ -190,6 +190,14 @@ fn changed_gitlink_checkout_does_not_reinterpret_the_parent_commit() {
     for iteration in 1..=3 {
         record_review_with_scope(&repo, iteration, "clean", &["dependency"]);
     }
+    repo.git(["-C", "dependency", "config", "user.name", "Tiber Test"]);
+    repo.git([
+        "-C",
+        "dependency",
+        "config",
+        "user.email",
+        "tiber@example.invalid",
+    ]);
     repo.git(["-C", "dependency", "config", "commit.gpgsign", "false"]);
     fs::write(
         repo.path().join("dependency/README.md"),
