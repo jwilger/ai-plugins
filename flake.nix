@@ -491,6 +491,34 @@
     {
       nixosConfigurations.codex-vm = codexVm;
 
+      nixosModules.codex-vm-host =
+        { config, lib, pkgs, ... }:
+        let
+          cfg = config.programs.aiPlugins.codexVm;
+          system = pkgs.stdenv.hostPlatform.system;
+        in
+        {
+          options.programs.aiPlugins.codexVm = {
+            enable = lib.mkEnableOption "the trusted ai-plugins Codex MicroVM launchers";
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = self.packages.${system}.codex-vm-tools;
+              defaultText = lib.literalExpression "inputs.ai-plugins.packages.${pkgs.system}.codex-vm-tools";
+              description = "Immutable Codex VM launcher closure to install on the host.";
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            assertions = [
+              {
+                assertion = system == "x86_64-linux";
+                message = "the Codex MicroVM host integration currently requires x86_64-linux";
+              }
+            ];
+            environment.systemPackages = [ cfg.package ];
+          };
+        };
+
       checks.x86_64-linux.codex-vm-environment = codexVmPkgs.testers.runNixOSTest {
         name = "codex-vm-environment";
         nodes.machine =
@@ -739,6 +767,16 @@
               self.packages.${system}.vm-codex
               self.packages.${system}.vm-shell
             ];
+          };
+
+          codex-vm-installer = pkgs.writeShellApplication {
+            name = "codex-vm-installer";
+            runtimeInputs = with pkgs; [ coreutils gnugrep ];
+            runtimeEnv = {
+              CODEX_VM_INSTALL_TOOLS = "${self.packages.${system}.codex-vm-tools}";
+              CODEX_VM_SOURCE_REVISION = self.rev or "";
+            };
+            text = builtins.readFile ./scripts/codex-vm/install-codex-vm;
           };
         }
       );

@@ -93,6 +93,11 @@ If an older checkout still has `.dependencies/`, inspect and remove that legacy
 cache once. It remains ignored only to prevent old npm configuration or build
 state from being staged accidentally during migration.
 
+The supported isolated Codex workflow, including exact-revision installation,
+first authentication, daily commands, state cleanup, explicit shares, trust
+inventory, and network limitations, is documented in
+[`docs/codex-vm.md`](docs/codex-vm.md).
+
 This repo also has a committed `package.json`/`package-lock.json` for the local
 Promptfoo eval runner. `node_modules/` is ignored and restored with `npm ci`;
 the eval scripts run that automatically when the Promptfoo, Codex SDK, or

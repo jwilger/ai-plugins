@@ -60,6 +60,90 @@ make_fake_vm_runtime() {
   [ ! -e "$REPO/.codex-vm" ]
 }
 
+@test "the root flake publishes a NixOS host integration module" {
+  run nix eval --json --impure --expr '
+    let
+      flake = builtins.getFlake (toString ./.) ;
+      host = flake.inputs.nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          flake.nixosModules.codex-vm-host
+          {
+            system.stateVersion = "25.11";
+            programs.aiPlugins.codexVm.enable = true;
+          }
+        ];
+      };
+    in map (package: package.name) host.config.environment.systemPackages
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.[] | select(startswith("codex-vm-tools"))] | length' <<<"$output")" -eq 1 ]
+}
+
+@test "the exact-revision installer atomically publishes stable host launchers" {
+  installer="$ROOT/scripts/codex-vm/install-codex-vm"
+  data_home="$BATS_TEST_TMPDIR/data"
+  bin_dir="$BATS_TEST_TMPDIR/bin"
+  first_tools="$BATS_TEST_TMPDIR/tools-a"
+  second_tools="$BATS_TEST_TMPDIR/tools-b"
+  first_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  second_revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  mkdir -p "$first_tools/bin" "$second_tools/bin"
+  printf '#!/usr/bin/env bash\nprintf "first:%%s\\n" "$1"\n' >"$first_tools/bin/vm-codex"
+  printf '#!/usr/bin/env bash\nprintf "first-shell\\n"\n' >"$first_tools/bin/vm-shell"
+  printf '#!/usr/bin/env bash\nprintf "second:%%s\\n" "$1"\n' >"$second_tools/bin/vm-codex"
+  printf '#!/usr/bin/env bash\nprintf "second-shell\\n"\n' >"$second_tools/bin/vm-shell"
+  chmod +x "$first_tools/bin/"* "$second_tools/bin/"*
+
+  run env \
+    CODEX_VM_SOURCE_REVISION="$first_revision" \
+    CODEX_VM_INSTALL_TOOLS="$first_tools" \
+    XDG_DATA_HOME="$data_home" \
+    XDG_BIN_HOME="$bin_dir" \
+    bash "$installer" install --revision "$first_revision"
+
+  [ "$status" -eq 0 ]
+  run "$bin_dir/vm-codex" status
+  [ "$status" -eq 0 ]
+  [ "$output" = first:status ]
+  [ "$(readlink "$data_home/ai-plugins/codex-vm/current")" = "revisions/$first_revision" ]
+
+  run env \
+    CODEX_VM_SOURCE_REVISION="$second_revision" \
+    CODEX_VM_INSTALL_TOOLS="$second_tools" \
+    XDG_DATA_HOME="$data_home" \
+    XDG_BIN_HOME="$bin_dir" \
+    bash "$installer" install --revision "$second_revision"
+
+  [ "$status" -eq 0 ]
+  run "$bin_dir/vm-codex" status
+  [ "$status" -eq 0 ]
+  [ "$output" = second:status ]
+  [ "$(readlink "$data_home/ai-plugins/codex-vm/current")" = "revisions/$second_revision" ]
+  [ -L "$data_home/ai-plugins/codex-vm/revisions/$first_revision" ]
+}
+
+@test "the installer rejects mutable or mismatched source revisions" {
+  installer="$ROOT/scripts/codex-vm/install-codex-vm"
+  tools="$BATS_TEST_TMPDIR/tools"
+  revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  mkdir -p "$tools/bin"
+  printf '#!/usr/bin/env bash\n' >"$tools/bin/vm-codex"
+  printf '#!/usr/bin/env bash\n' >"$tools/bin/vm-shell"
+  chmod +x "$tools/bin/"*
+
+  run env CODEX_VM_SOURCE_REVISION=dirty CODEX_VM_INSTALL_TOOLS="$tools" \
+    bash "$installer" install --revision "$revision"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not built from an immutable exact Git revision"* ]]
+
+  run env CODEX_VM_SOURCE_REVISION="$revision" CODEX_VM_INSTALL_TOOLS="$tools" \
+    bash "$installer" install --revision bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"requested revision does not match"* ]]
+}
+
 @test "init creates isolated project SSH state without invoking Nix" {
   package="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-tools" 2>/dev/null)"
   fake_bin="$BATS_TEST_TMPDIR/no-nix"

@@ -1,0 +1,91 @@
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: codex-vm-installer install --revision <40-character-git-revision>
+
+Installs the vm-codex and vm-shell launchers from this immutable flake
+revision. Run this installer only through an exact-revision Nix flake reference.
+EOF
+}
+
+die() {
+  printf 'codex-vm-installer: %s\n' "$1" >&2
+  exit 2
+}
+
+[ "${1:-}" = install ] || {
+  usage >&2
+  exit 2
+}
+shift
+
+requested_revision=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --revision)
+      [ "$#" -ge 2 ] || die "--revision requires a value"
+      requested_revision="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
+source_revision="${CODEX_VM_SOURCE_REVISION:-}"
+tools="${CODEX_VM_INSTALL_TOOLS:-}"
+case "$source_revision" in
+  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+  *) die "installer was not built from an immutable exact Git revision" ;;
+esac
+[ "$requested_revision" = "$source_revision" ] ||
+  die "requested revision does not match the installer revision"
+[ -d "$tools" ] || die "trusted tool closure is unavailable"
+[ -x "$tools/bin/vm-codex" ] || die "trusted tool closure is missing vm-codex"
+[ -x "$tools/bin/vm-shell" ] || die "trusted tool closure is missing vm-shell"
+
+data_home="${XDG_DATA_HOME:-${HOME:?HOME is required}/.local/share}"
+bin_dir="${XDG_BIN_HOME:-${HOME:?HOME is required}/.local/bin}"
+install_root="$data_home/ai-plugins/codex-vm"
+revisions="$install_root/revisions"
+
+umask 077
+mkdir -p "$revisions" "$bin_dir"
+[ ! -L "$install_root" ] || die "install root must not be a symlink"
+[ ! -L "$revisions" ] || die "revision directory must not be a symlink"
+[ ! -L "$bin_dir" ] || die "binary directory must not be a symlink"
+
+revision_link="$revisions/$source_revision"
+revision_stage="$revisions/.${source_revision}.$$"
+current_stage="$install_root/.current.$$"
+trap 'rm -f -- "$revision_stage" "$current_stage"' EXIT
+ln -s "$tools" "$revision_stage"
+mv -Tf "$revision_stage" "$revision_link"
+
+for command in vm-codex vm-shell; do
+  wrapper="$bin_dir/$command"
+  [ ! -L "$wrapper" ] || die "refusing to replace symlinked launcher: $wrapper"
+  if [ -e "$wrapper" ]; then
+    [ -f "$wrapper" ] || die "refusing to replace non-file launcher: $wrapper"
+    grep -q '^# ai-plugins-codex-vm-launcher:v1$' "$wrapper" ||
+      die "refusing to replace unmanaged launcher: $wrapper"
+  fi
+  wrapper_stage="$(mktemp "$bin_dir/.${command}.XXXXXX")"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' '# ai-plugins-codex-vm-launcher:v1'
+    printf 'exec %q "$@"\n' "$install_root/current/bin/$command"
+  } >"$wrapper_stage"
+  chmod 0755 "$wrapper_stage"
+  mv -f "$wrapper_stage" "$wrapper"
+done
+
+ln -s "revisions/$source_revision" "$current_stage"
+mv -Tf "$current_stage" "$install_root/current"
+
+printf 'Installed Codex VM tools from %s.\n' "$source_revision"
+printf 'Ensure %s is on PATH.\n' "$bin_dir"
