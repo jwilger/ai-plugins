@@ -76,7 +76,7 @@ make_fake_vm_runtime() {
 }
 
 @test "the root flake publishes a NixOS host integration module" {
-  run nix eval --json --impure --expr '
+  run --separate-stderr nix eval --json --impure --expr '
     let
       flake = builtins.getFlake (toString ./.);
       pkgs = flake.inputs.nixpkgs.legacyPackages.x86_64-linux;
@@ -97,7 +97,10 @@ make_fake_vm_runtime() {
     }
   '
 
-  [ "$status" -eq 0 ]
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$stderr" >&3
+    false
+  fi
   [ "$(jq -r '[.packages[] | select(startswith("hello-"))] | length' <<<"$output")" -eq 1 ]
   [ "$(jq -r .enabled <<<"$output")" = true ]
   [ "$(jq -r '.assertions | all' <<<"$output")" = true ]
@@ -323,7 +326,7 @@ PY
 }
 
 @test "the root flake owns the Codex MicroVM definition" {
-  run nix eval --json --impure --expr '
+  run --separate-stderr nix eval --json --impure --expr '
     let
       flake = builtins.getFlake (toString ./.);
       cfg = flake.nixosConfigurations.codex-vm.config;
@@ -348,7 +351,7 @@ PY
   '
 
   if [ "$status" -ne 0 ]; then
-    printf '%s\n' "$output" >&3
+    printf '%s\n' "$stderr" >&3
     false
   fi
   [ "$(jq -r .hypervisor <<<"$output")" = qemu ]
