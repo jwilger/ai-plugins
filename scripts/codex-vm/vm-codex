@@ -21,8 +21,8 @@ die() {
 
 runtime_command() {
   local output_json=false name path variable
-  local -a names=(runner virtiofsd_run bwrap flock python ssh ssh_keygen)
-  local -a variables=(CODEX_VM_RUNNER CODEX_VM_VIRTIOFSD_RUN CODEX_VM_BWRAP CODEX_VM_FLOCK CODEX_VM_PYTHON CODEX_VM_SSH CODEX_VM_SSH_KEYGEN)
+  local -a names=(runner virtiofsd_run bwrap flock python qmp_forward ssh ssh_keygen)
+  local -a variables=(CODEX_VM_RUNNER CODEX_VM_VIRTIOFSD_RUN CODEX_VM_BWRAP CODEX_VM_FLOCK CODEX_VM_PYTHON CODEX_VM_QMP_FORWARD CODEX_VM_SSH CODEX_VM_SSH_KEYGEN)
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -626,11 +626,11 @@ build_share_bind_args() {
     if [ "$mode" = ro ]; then
       index="$ro_index"
       ro_index=$((ro_index + 1))
-      SHARE_BIND_ARGS+=(--ro-bind "$source" "/state/extra-shares/ro-$index")
+      SHARE_BIND_ARGS+=(--ro-bind "$source" "/runtime/extra-shares/ro-$index")
     else
       index="$rw_index"
       rw_index=$((rw_index + 1))
-      SHARE_BIND_ARGS+=(--bind "$source" "/state/extra-shares/rw-$index")
+      SHARE_BIND_ARGS+=(--bind "$source" "/runtime/extra-shares/rw-$index")
     fi
   done < <(jq -r '.[] | @base64' <<<"$PROJECT_SHARES")
 }
@@ -696,6 +696,87 @@ for share in shares:
     })
 payload = json.dumps(identified, separators=(",", ":"), sort_keys=True).encode()
 print(hashlib.sha256(payload).hexdigest())
+PY
+}
+
+prepare_runtime_layout() {
+  "$CODEX_VM_PYTHON" - "$STATE_DIR" "$RUNTIME_DIR" <<'PY'
+import os
+import pathlib
+import sys
+import tempfile
+
+state_dir = pathlib.Path(sys.argv[1])
+runtime_dir = pathlib.Path(sys.argv[2])
+for name in ("nix-store-overlay.img", "codex-home.img"):
+    target = state_dir / name
+    link = runtime_dir / name
+    temporary = pathlib.Path(tempfile.mktemp(prefix=f".{name}.", dir=runtime_dir))
+    try:
+        os.symlink(target, temporary)
+        os.replace(temporary, link)
+    finally:
+        temporary.unlink(missing_ok=True)
+uid = os.getuid()
+gid = os.getgid()
+for name, payload in (
+    ("passwd", f"root:x:{uid}:{gid}:root:/root:/bin/sh\n"),
+    ("group", f"root:x:{gid}:\nkvm:x:{gid}:\n"),
+):
+    destination = runtime_dir / name
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{name}.", dir=runtime_dir)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", closefd=True) as handle:
+            handle.write(payload)
+        os.replace(temporary_name, destination)
+    finally:
+        pathlib.Path(temporary_name).unlink(missing_ok=True)
+PY
+}
+
+wait_for_virtiofs_sockets() {
+  local attempt tag ready
+  local -a tags=(work host-keys bootstrap extra-ro-0 extra-rw-0 extra-ro-1 extra-rw-1 extra-ro-2 extra-rw-2 extra-ro-3 extra-rw-3)
+  for ((attempt = 1; attempt <= 100; attempt++)); do
+    ready=true
+    for tag in "${tags[@]}"; do
+      if [ ! -S "$RUNTIME_DIR/codex-vm-virtiofs-$tag.sock" ]; then
+        ready=false
+        break
+      fi
+    done
+    [ "$ready" = true ] && return 0
+    read_pid_record "$RUNTIME_DIR/virtiofsd.pid" >/dev/null || return 1
+    sleep 0.05
+  done
+  return 1
+}
+
+clear_runtime_sockets() {
+  "$CODEX_VM_PYTHON" - "$RUNTIME_DIR" <<'PY'
+import pathlib
+import stat
+import sys
+
+runtime_dir = pathlib.Path(sys.argv[1])
+names = ["codex-vm.sock"] + [
+    f"codex-vm-virtiofs-{tag}.sock"
+    for tag in (
+        "work", "host-keys", "bootstrap",
+        "extra-ro-0", "extra-rw-0", "extra-ro-1", "extra-rw-1",
+        "extra-ro-2", "extra-rw-2", "extra-ro-3", "extra-rw-3",
+    )
+]
+for name in names:
+    path = runtime_dir / name
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        continue
+    if not stat.S_ISSOCK(mode):
+        raise SystemExit(f"refusing to replace non-socket VM runtime path: {path}")
+    path.unlink()
 PY
 }
 
@@ -778,6 +859,7 @@ start_command() {
     validate_operational_paths
     mkdir -p "$RUNTIME_DIR" "$STATE_DIR/work-export"
     chmod 700 "$RUNTIME_DIR"
+    prepare_runtime_layout
     build_share_bind_args
     share_fingerprint="$(compute_share_fingerprint)"
     exec 9>"$STATE_DIR/launch.lock"
@@ -796,49 +878,64 @@ start_command() {
           die "surviving virtiofsd did not stop during VM recovery"
       fi
       rm -f "$RUNTIME_DIR/qemu.pid" "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port" "$RUNTIME_DIR/shares.sha256"
+      clear_runtime_sockets
       stage_share_manifest
       (
         exec 9>&-
         exec "$CODEX_VM_BWRAP" \
-          --die-with-parent \
           --unshare-all \
           --dir /nix \
           --ro-bind /nix/store /nix/store \
           --proc /proc \
           --dev /dev \
-          --dir /state \
-          --bind "$STATE_DIR" /state \
-          --bind "$PROJECT_ROOT" /state/work-export \
-          --tmpfs /state/work-export/.codex-vm \
+          --dir /etc \
+          --ro-bind "$RUNTIME_DIR/passwd" /etc/passwd \
+          --ro-bind "$RUNTIME_DIR/group" /etc/group \
+          --bind "$RUNTIME_DIR" /runtime \
+          --bind "$PROJECT_ROOT" /runtime/work-export \
+          --tmpfs /runtime/work-export/.codex-vm \
+          --ro-bind "$STATE_DIR/ssh-keys" /runtime/ssh-keys \
+          --ro-bind "$STATE_DIR/bootstrap" /runtime/bootstrap \
+          --dir /runtime/extra-shares \
+          --dir /runtime/extra-shares/ro-0 \
+          --dir /runtime/extra-shares/ro-1 \
+          --dir /runtime/extra-shares/ro-2 \
+          --dir /runtime/extra-shares/ro-3 \
+          --dir /runtime/extra-shares/rw-0 \
+          --dir /runtime/extra-shares/rw-1 \
+          --dir /runtime/extra-shares/rw-2 \
+          --dir /runtime/extra-shares/rw-3 \
           "${SHARE_BIND_ARGS[@]}" \
-          --chdir /state \
+          --chdir /runtime \
           "$CODEX_VM_VIRTIOFSD_RUN"
       ) >"$STATE_DIR/virtiofsd.log" 2>&1 &
       virtiofsd_pid=$!
       record_process "$virtiofsd_pid" "$RUNTIME_DIR/virtiofsd.pid" || die "virtiofsd failed to start"
-      sleep 0.2
-      if ! read_pid_record "$RUNTIME_DIR/virtiofsd.pid" >/dev/null; then
+      if ! wait_for_virtiofs_sockets; then
+        terminate_recorded_process "$RUNTIME_DIR/virtiofsd.pid" || true
         rm -f "$RUNTIME_DIR/virtiofsd.pid" "$RUNTIME_DIR/ssh.port"
-        die "virtiofsd failed to start; see $STATE_DIR/virtiofsd.log"
+        die "virtiofsd did not create the required sockets; see $STATE_DIR/virtiofsd.log"
       fi
+      sleep 0.2
 
       local attempt started=false
       for ((attempt = 1; attempt <= 5; attempt++)); do
         ssh_port="$(allocate_ssh_port)"
         (
           exec 9>&-
-          cd "$STATE_DIR"
-          export CODEX_VM_SSH_PORT="$ssh_port"
+          cd "$RUNTIME_DIR"
           exec "$CODEX_VM_RUNNER"
         ) >"$STATE_DIR/qemu.log" 2>&1 &
         qemu_pid=$!
         if record_process "$qemu_pid" "$RUNTIME_DIR/qemu.pid"; then
           sleep 0.2
           if read_pid_record "$RUNTIME_DIR/qemu.pid" >/dev/null; then
-            printf '%s\n' "$ssh_port" >"$RUNTIME_DIR/ssh.port"
-            printf '%s\n' "$share_fingerprint" >"$RUNTIME_DIR/shares.sha256"
-            started=true
-            break
+            if "$CODEX_VM_QMP_FORWARD" "$RUNTIME_DIR/codex-vm.sock" "$ssh_port"; then
+              printf '%s\n' "$ssh_port" >"$RUNTIME_DIR/ssh.port"
+              printf '%s\n' "$share_fingerprint" >"$RUNTIME_DIR/shares.sha256"
+              started=true
+              break
+            fi
           fi
         fi
         wait "$qemu_pid" 2>/dev/null || true

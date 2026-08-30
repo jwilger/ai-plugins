@@ -142,6 +142,13 @@ directory:
   sandbox;
 - QEMU and virtiofsd logs plus lifecycle lock files.
 
+Ephemeral PID records, image links, QMP and virtiofs sockets, and the selected
+SSH port live under
+`${XDG_RUNTIME_DIR:-/run/user/$UID}/ai-plugins-codex-vm/<project-id>/`. Keeping
+Unix sockets outside the checkout ensures guest-side flake evaluation never
+encounters unsupported filesystem objects. They are recreated on every start
+and are not backup or migration state.
+
 Back up `.codex-vm/` only as sensitive project state. To reset it, first run
 `vm-codex stop`, then deliberately remove `.codex-vm/`; this deletes the guest
 home, authentication, package state, keys, and VM disks and cannot be undone.
@@ -225,12 +232,14 @@ Codex and the app server run with `--yolo`, and the `codex` account has
 unrestricted passwordless sudo inside the guest. Guest root is therefore not a
 secondary security boundary; the MicroVM and explicit shares are.
 
-QEMU user networking supplies outbound Internet access. Guest nftables allow
-established traffic, QEMU DHCP and DNS, then reject private, loopback,
-link-local, multicast, and unique-local destination ranges before allowing
-other outbound traffic. SSH is forwarded only to an automatically selected
-`127.0.0.1` host port and the guest firewall does not expose port 22 on a LAN
-interface.
+QEMU user networking supplies outbound Internet access through the standard
+`10.0.2.0/24` network. The guest uses the fixed SLiRP address `10.0.2.15` and
+DNS endpoint `10.0.2.3`. Guest nftables allow established traffic and QEMU DNS,
+then reject private, loopback, link-local, multicast, and unique-local
+destination ranges before allowing other outbound traffic. After QEMU starts,
+the trusted launcher adds SSH forwarding through QMP from an automatically
+selected `127.0.0.1` host port to guest port 22. The guest firewall does not
+expose port 22 on a LAN interface.
 
 Residual limits remain: QEMU, virtiofsd, Nix, the kernel, and the loopback SSH
 forward are trusted host infrastructure; Internet and configured DNS endpoints

@@ -14,10 +14,23 @@ make_fake_vm_runtime() {
   FAKE_VM_BIN="$BATS_TEST_TMPDIR/lifecycle-bin"
   mkdir -p "$FAKE_VM_BIN"
   printf '#!/usr/bin/env bash\nexec sleep 60\n' >"$FAKE_VM_BIN/runner"
-  printf '#!/usr/bin/env bash\nexec sleep 60\n' >"$FAKE_VM_BIN/virtiofsd-run"
-  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"$FAKE_BWRAP_ARGS"\nprintf "%%s\\0" "$@" >"$FAKE_BWRAP_ARGS_NUL"\nexec "${@: -1}"\n' >"$FAKE_VM_BIN/bwrap"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exec python3 -c '\''import socket,time; tags=("work","host-keys","bootstrap","extra-ro-0","extra-rw-0","extra-ro-1","extra-rw-1","extra-ro-2","extra-rw-2","extra-ro-3","extra-rw-3"); sockets=[]; [(sockets.append(socket.socket(socket.AF_UNIX)), sockets[-1].bind(f"codex-vm-virtiofs-{tag}.sock")) for tag in tags]; time.sleep(60)'\''' \
+    >"$FAKE_VM_BIN/virtiofsd-run"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\\n" "$@" >"$FAKE_BWRAP_ARGS"' \
+    'printf "%s\\0" "$@" >"$FAKE_BWRAP_ARGS_NUL"' \
+    'arguments=("$@")' \
+    'runtime_dir=' \
+    'for ((index = 0; index < ${#arguments[@]} - 2; index++)); do [ "${arguments[$index]}" = --bind ] && [ "${arguments[$((index + 2))]}" = /runtime ] && runtime_dir="${arguments[$((index + 1))]}"; done' \
+    'for ((index = 0; index < ${#arguments[@]}; index++)); do if [ "${arguments[$index]}" = --chdir ]; then directory="${arguments[$((index + 1))]}"; [ "$directory" = /runtime ] && directory="$runtime_dir"; cd "$directory"; fi; done' \
+    'exec "${arguments[-1]}"' \
+    >"$FAKE_VM_BIN/bwrap"
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"$FAKE_SSH_ARGS"\nexit 0\n' >"$FAKE_VM_BIN/ssh"
   printf '#!/usr/bin/env bash\nexit 97\n' >"$FAKE_VM_BIN/nix"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"$FAKE_QMP_ARGS"\n' >"$FAKE_VM_BIN/qmp-forward"
   chmod +x "$FAKE_VM_BIN"/*
   export PATH="$FAKE_VM_BIN:$PATH"
   export CODEX_VM_RUNNER="$FAKE_VM_BIN/runner"
@@ -25,11 +38,13 @@ make_fake_vm_runtime() {
   export CODEX_VM_BWRAP="$FAKE_VM_BIN/bwrap"
   export CODEX_VM_FLOCK="$(command -v flock)"
   export CODEX_VM_PYTHON="$(command -v python3)"
+  export CODEX_VM_QMP_FORWARD="$FAKE_VM_BIN/qmp-forward"
   export CODEX_VM_SSH="$FAKE_VM_BIN/ssh"
   export CODEX_VM_SSH_KEYGEN="$(command -v ssh-keygen)"
   export FAKE_BWRAP_ARGS="$BATS_TEST_TMPDIR/bwrap.args"
   export FAKE_BWRAP_ARGS_NUL="$BATS_TEST_TMPDIR/bwrap.args.nul"
   export FAKE_SSH_ARGS="$BATS_TEST_TMPDIR/ssh.args"
+  export FAKE_QMP_ARGS="$BATS_TEST_TMPDIR/qmp.args"
 }
 
 @test "the root flake publishes the Codex VM command" {
@@ -63,22 +78,30 @@ make_fake_vm_runtime() {
 @test "the root flake publishes a NixOS host integration module" {
   run nix eval --json --impure --expr '
     let
-      flake = builtins.getFlake (toString ./.) ;
-      host = flake.inputs.nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = [
-          flake.nixosModules.codex-vm-host
-          {
-            system.stateVersion = "25.11";
-            programs.aiPlugins.codexVm.enable = true;
-          }
-        ];
+      flake = builtins.getFlake (toString ./.);
+      pkgs = flake.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      evaluated = flake.nixosModules.codex-vm-host {
+        config.programs.aiPlugins.codexVm = {
+          enable = true;
+          package = pkgs.hello;
+        };
+        lib = pkgs.lib;
+        inherit pkgs;
       };
-    in map (package: package.name) host.config.environment.systemPackages
+      body = evaluated.config.content;
+    in {
+      enabled = evaluated.config.condition;
+      packages = map (package: package.name) body.environment.systemPackages;
+      assertions = map (item: item.assertion) body.assertions;
+      enable_default = evaluated.options.programs.aiPlugins.codexVm.enable.default;
+    }
   '
 
   [ "$status" -eq 0 ]
-  [ "$(jq -r '[.[] | select(startswith("codex-vm-tools"))] | length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r '[.packages[] | select(startswith("hello-"))] | length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r .enabled <<<"$output")" = true ]
+  [ "$(jq -r '.assertions | all' <<<"$output")" = true ]
+  [ "$(jq -r .enable_default <<<"$output")" = false ]
 }
 
 @test "the exact-revision installer atomically publishes stable host launchers" {
@@ -300,45 +323,34 @@ PY
 }
 
 @test "the root flake owns the Codex MicroVM definition" {
-  run bash -c '
-    ref="$1#nixosConfigurations.codex-vm.config.microvm"
-    hypervisor="$(nix eval --raw "$ref.hypervisor" 2>/dev/null)" || exit
-    vcpu="$(nix eval --json "$ref.vcpu" 2>/dev/null)" || exit
-    mem="$(nix eval --json "$ref.mem" 2>/dev/null)" || exit
-    volumes="$(nix eval --json "$ref.volumes" 2>/dev/null)" || exit
-    shares="$(nix eval --json "$ref.shares" 2>/dev/null)" || exit
-    runtime_args="$(nix eval --raw "$ref.extraArgsScript" 2>/dev/null)" || exit
-    ssh="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.enable" 2>/dev/null)" || exit
-    ssh_firewall="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.openFirewall" 2>/dev/null)" || exit
-    sudo_password="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.security.sudo.wheelNeedsPassword" 2>/dev/null)" || exit
-    system_packages="$(nix eval --json --apply "ps: map (p: p.name) ps" "$1#nixosConfigurations.codex-vm.config.environment.systemPackages" 2>/dev/null)" || exit
-    egress_rules="$(nix eval --raw "$1#nixosConfigurations.codex-vm.config.networking.nftables.tables.codex-vm-egress.content" 2>/dev/null)" || exit
-    host_keys="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.services.openssh.hostKeys" 2>/dev/null)" || exit
-    bootstrap_script="$(nix eval --raw "$1#nixosConfigurations.codex-vm.config.systemd.services.codex-vm-bootstrap.script" 2>/dev/null)" || exit
-    bootstrap_before="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.systemd.services.codex-vm-bootstrap.before" 2>/dev/null)" || exit
-    environment_service="$(nix eval --json "$1#nixosConfigurations.codex-vm.config.systemd.services.codex-vm-environment.serviceConfig" 2>/dev/null)" || exit
-    runner="$(nix eval --raw "$1#packages.x86_64-linux.codex-vm-runner.drvPath" 2>/dev/null)" || exit
-    jq -cn \
-      --arg hypervisor "$hypervisor" \
-      --argjson vcpu "$vcpu" \
-      --argjson mem "$mem" \
-      --argjson volumes "$volumes" \
-      --argjson shares "$shares" \
-      --arg runtime_args "$runtime_args" \
-      --argjson ssh "$ssh" \
-      --argjson ssh_firewall "$ssh_firewall" \
-      --argjson sudo_password "$sudo_password" \
-      --argjson system_packages "$system_packages" \
-      --arg egress_rules "$egress_rules" \
-      --argjson host_keys "$host_keys" \
-      --arg bootstrap_script "$bootstrap_script" \
-      --argjson bootstrap_before "$bootstrap_before" \
-      --argjson environment_service "$environment_service" \
-      --arg runner "$runner" \
-      "{\$hypervisor, \$vcpu, \$mem, \$volumes, \$shares, \$runtime_args, \$ssh, \$ssh_firewall, \$sudo_password, \$system_packages, \$egress_rules, \$host_keys, \$bootstrap_script, \$bootstrap_before, \$environment_service, \$runner}"
-  ' _ "$ROOT"
+  run nix eval --json --impure --expr '
+    let
+      flake = builtins.getFlake (toString ./.);
+      cfg = flake.nixosConfigurations.codex-vm.config;
+    in {
+      hypervisor = cfg.microvm.hypervisor;
+      inherit (cfg.microvm) vcpu mem volumes shares;
+      interfaces = map (interface: {
+        inherit (interface) type id mac;
+      }) cfg.microvm.interfaces;
+      ssh = cfg.services.openssh.enable;
+      ssh_firewall = cfg.services.openssh.openFirewall;
+      sudo_password = cfg.security.sudo.wheelNeedsPassword;
+      blacklisted_modules = cfg.boot.blacklistedKernelModules;
+      system_packages = map (package: package.name) cfg.environment.systemPackages;
+      egress_rules = cfg.networking.nftables.tables.codex-vm-egress.content;
+      host_keys = cfg.services.openssh.hostKeys;
+      bootstrap_script = cfg.systemd.services.codex-vm-bootstrap.script;
+      bootstrap_before = cfg.systemd.services.codex-vm-bootstrap.before;
+      environment_service = cfg.systemd.services.codex-vm-environment.serviceConfig;
+      runner = flake.packages.x86_64-linux.codex-vm-runner.drvPath;
+    }
+  '
 
-  [ "$status" -eq 0 ]
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&3
+    false
+  fi
   [ "$(jq -r .hypervisor <<<"$output")" = qemu ]
   [ "$(jq -r .vcpu <<<"$output")" -eq 4 ]
   [ "$(jq -r .mem <<<"$output")" -eq 8192 ]
@@ -348,16 +360,16 @@ PY
   [ "$(jq -r '.shares[] | select(.mountPoint == "/work") | .source' <<<"$output")" = work-export ]
   [ "$(jq -r '.shares[] | select(.mountPoint == "/run/host-keys") | .readOnly' <<<"$output")" = true ]
   [ "$(jq -r '.shares[] | select(.mountPoint == "/run/codex-vm-bootstrap") | .readOnly' <<<"$output")" = true ]
-  [[ "$(jq -r .runtime_args <<<"$output")" = /nix/store/*-codex-qemu-runtime-args ]]
+  [ "$(jq -r '.interfaces[0] | [.type, .id, .mac] | @tsv' <<<"$output")" = $'user\tcodexnet\t02:00:00:00:00:01' ]
   [ "$(jq -r .ssh <<<"$output")" = true ]
   [ "$(jq -r .ssh_firewall <<<"$output")" = true ]
   [ "$(jq -r .sudo_password <<<"$output")" = false ]
+  [ "$(jq -r '[.blacklisted_modules | index("kvm"), index("kvm-intel"), index("kvm-amd")] | all(. != null)' <<<"$output")" = true ]
   [ "$(jq -r '[.system_packages[] | select(test("^codex-[0-9]"))] | length' <<<"$output")" -eq 1 ]
   [ "$(jq -r '[.system_packages[] | select(. == "codex-vm-enter")] | length' <<<"$output")" -eq 1 ]
   [ "$(jq -r '[.system_packages[] | select(startswith("direnv-"))] | length' <<<"$output")" -eq 1 ]
   egress_rules="$(jq -r .egress_rules <<<"$output")"
   [[ "$egress_rules" == *"ct state established,related accept"* ]]
-  [[ "$egress_rules" == *"10.0.2.2 udp sport 68 udp dport 67 accept"* ]]
   [[ "$egress_rules" == *"10.0.2.3 udp dport 53 accept"* ]]
   [[ "$egress_rules" == *"10.0.2.3 tcp dport 53 accept"* ]]
   [[ "$egress_rules" == *"fec0::3 udp dport 53 accept"* ]]
@@ -369,7 +381,6 @@ PY
   private_v6_line="$(grep -nF 'ip6 daddr { fc00::/7' <<<"$egress_rules" | cut -d: -f1)"
   for rule in \
     'ct state established,related accept' \
-    'ip daddr 10.0.2.2 udp sport 68 udp dport 67 accept' \
     'ip daddr 10.0.2.3 udp dport 53 accept' \
     'ip daddr 10.0.2.3 tcp dport 53 accept'; do
     [ "$(grep -nF "$rule" <<<"$egress_rules" | cut -d: -f1)" -lt "$private_v4_line" ]
@@ -382,24 +393,12 @@ PY
   [ "$(jq -r .host_keys[0].path <<<"$output")" = /run/host-keys/ssh_host_ed25519_key ]
   [[ "$(jq -r .bootstrap_script <<<"$output")" == *"preferences.toml"* ]]
   [[ "$(jq -r .bootstrap_script <<<"$output")" == *"codex_home=/home/codex/.codex"* ]]
+  [[ "$(jq -r .bootstrap_script <<<"$output")" == *"chown codex:codex /home/codex"* ]]
   [[ "$(jq -r .bootstrap_script <<<"$output")" == *'"$codex_home/config.toml"'* ]]
+  [[ "$(jq -r .bootstrap_script <<<"$output")" == *"/home/codex/.ssh/authorized_keys"* ]]
   [ "$(jq -r '.bootstrap_before | index("sshd.service") != null' <<<"$output")" = true ]
   [[ "$(jq -r .environment_service.ExecStart <<<"$output")" = /nix/store/*-codex-vm-refresh-environment ]]
   [[ "$(jq -r .runner <<<"$output")" = /nix/store/*-microvm-qemu-codex-vm.drv ]]
-}
-
-@test "the root flake runtime script safely forwards SSH" {
-  runtime_args="$(nix build --no-link --print-out-paths "$ROOT#codex-vm-qemu-runtime-args" 2>/dev/null)"
-
-  run env -i CODEX_VM_SSH_PORT=43210 "$runtime_args"
-  [ "$status" -eq 0 ]
-  [ "$output" = "-nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:43210-:22" ]
-
-  run env -i CODEX_VM_SSH_PORT='43210,hostfwd=tcp:0.0.0.0:1-:1' "$runtime_args"
-  [ "$status" -eq 2 ]
-
-  run env -i CODEX_VM_SSH_PORT=22 "$runtime_args"
-  [ "$status" -eq 2 ]
 }
 
 @test "status reports a stable project identity without creating VM state" {
@@ -478,10 +477,14 @@ PY
   ssh_port="$(jq -r .ssh_port <<<"$output")"
   kill -0 "$qemu_pid"
   [[ "$ssh_port" =~ ^[0-9]+$ ]]
+  [ "$(sed -n '1p' "$FAKE_QMP_ARGS")" = "$XDG_RUNTIME_DIR/ai-plugins-codex-vm/$(jq -r .project_id <<<"$output")/codex-vm.sock" ]
+  [ "$(sed -n '2p' "$FAKE_QMP_ARGS")" = "$ssh_port" ]
   grep -Fx -- '--ro-bind' "$FAKE_BWRAP_ARGS"
   grep -Fx -- '/nix/store' "$FAKE_BWRAP_ARGS"
+  grep -Fx -- '/etc/passwd' "$FAKE_BWRAP_ARGS"
+  grep -Fx -- '/etc/group' "$FAKE_BWRAP_ARGS"
   grep -Fx -- '--tmpfs' "$FAKE_BWRAP_ARGS"
-  grep -Fx -- '/state/work-export/.codex-vm' "$FAKE_BWRAP_ARGS"
+  grep -Fx -- '/runtime/work-export/.codex-vm' "$FAKE_BWRAP_ARGS"
 
   run bash -c "cd '$REPO' && '$ROOT/scripts/codex-vm/vm-codex' status --json"
   [ "$status" -eq 0 ]
@@ -762,8 +765,8 @@ import sys
 arguments = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
 arguments = [argument.decode() for argument in arguments if argument]
 expected = [
-    ["--ro-bind", sys.argv[2], "/state/extra-shares/ro-0"],
-    ["--bind", sys.argv[3], "/state/extra-shares/rw-0"],
+    ["--ro-bind", sys.argv[2], "/runtime/extra-shares/ro-0"],
+    ["--bind", sys.argv[3], "/runtime/extra-shares/rw-0"],
 ]
 for triple in expected:
     if not any(arguments[index:index + 3] == triple for index in range(len(arguments) - 2)):

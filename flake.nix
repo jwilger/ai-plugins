@@ -19,20 +19,6 @@
         "x86_64-linux"
       ];
       codexVmPkgs = import nixpkgs { system = "x86_64-linux"; };
-      codexVmQemuRuntimeArgs = codexVmPkgs.writeShellScript "codex-qemu-runtime-args" ''
-        port="''${CODEX_VM_SSH_PORT:-}"
-        case "$port" in
-          ""|*[!0-9]*)
-            echo "CODEX_VM_SSH_PORT must be a decimal port" >&2
-            exit 2
-            ;;
-        esac
-        if [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
-          echo "CODEX_VM_SSH_PORT must be between 1024 and 65535" >&2
-          exit 2
-        fi
-        printf '%s\n' "-nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$port-:22"
-      '';
       codexVm = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
@@ -40,11 +26,6 @@
           (
             { config, pkgs, ... }:
             let
-              authorizedKeysCommand = pkgs.writeShellScript "codex-authorized-keys" ''
-                if [ "$1" = codex ] && [ -r /run/host-keys/codex.pub ]; then
-                  exec ${pkgs.coreutils}/bin/cat /run/host-keys/codex.pub
-                fi
-              '';
               codexVmEnter = pkgs.writeScriptBin "codex-vm-enter" ''
                 #!${pkgs.python3}/bin/python3
                 import json
@@ -291,6 +272,11 @@
             {
               networking.hostName = "codex-vm";
               system.stateVersion = "25.11";
+              boot.blacklistedKernelModules = [
+                "kvm"
+                "kvm-intel"
+                "kvm-amd"
+              ];
 
               users.groups.codex.gid = 1000;
               users.users.codex = {
@@ -303,7 +289,22 @@
               };
 
               security.sudo.wheelNeedsPassword = false;
-              networking.useDHCP = true;
+              networking.useDHCP = false;
+              networking.useNetworkd = true;
+              systemd.network.networks."10-codex-user" = {
+                matchConfig.MACAddress = "02:00:00:00:00:01";
+                address = [ "10.0.2.15/24" ];
+                routes = [
+                  {
+                    Destination = "0.0.0.0/0";
+                    Gateway = "10.0.2.2";
+                  }
+                ];
+                networkConfig = {
+                  DNS = [ "10.0.2.3" ];
+                  DHCP = "no";
+                };
+              };
               networking.nftables = {
                 enable = true;
                 tables.codex-vm-egress = {
@@ -313,7 +314,6 @@
                       type filter hook output priority -5; policy accept;
                       oifname "lo" accept
                       ct state established,related accept
-                      ip daddr 10.0.2.2 udp sport 68 udp dport 67 accept
                       ip daddr 10.0.2.3 udp dport 53 accept
                       ip daddr 10.0.2.3 tcp dport 53 accept
                       ip6 daddr fec0::3 udp dport 53 accept
@@ -338,8 +338,6 @@
                   PasswordAuthentication = false;
                   KbdInteractiveAuthentication = false;
                   PermitRootLogin = "no";
-                  AuthorizedKeysCommand = "${authorizedKeysCommand} %u";
-                  AuthorizedKeysCommandUser = "nobody";
                 };
               };
 
@@ -350,11 +348,14 @@
                 unitConfig.RequiresMountsFor = [
                   "/home/codex"
                   "/run/codex-vm-bootstrap"
+                  "/run/host-keys"
                 ];
                 serviceConfig.Type = "oneshot";
                 script = ''
                   codex_home=/home/codex/.codex
                   marker="$codex_home/.vm-preferences-initialized"
+                  ${pkgs.coreutils}/bin/chown codex:codex /home/codex
+                  ${pkgs.coreutils}/bin/chmod 0700 /home/codex
                   ${pkgs.coreutils}/bin/install -d -m 0700 -o codex -g codex "$codex_home"
                   if [ ! -e "$marker" ]; then
                     ${pkgs.coreutils}/bin/install -m 0600 -o codex -g codex \
@@ -364,6 +365,10 @@
                     ${pkgs.coreutils}/bin/chown codex:codex "$marker"
                     ${pkgs.coreutils}/bin/chmod 0600 "$marker"
                   fi
+                  ${pkgs.coreutils}/bin/install -d -m 0700 -o codex -g codex /home/codex/.ssh
+                  ${pkgs.coreutils}/bin/install -m 0600 -o codex -g codex \
+                    /run/host-keys/codex.pub \
+                    /home/codex/.ssh/authorized_keys
                 '';
               };
 
@@ -428,7 +433,13 @@
                 vcpu = 4;
                 mem = 8192;
                 writableStoreOverlay = "/nix/.rw-store";
-                extraArgsScript = "${codexVmQemuRuntimeArgs}";
+                interfaces = [
+                  {
+                    type = "user";
+                    id = "codexnet";
+                    mac = "02:00:00:00:00:01";
+                  }
+                ];
                 shares = [
                   {
                     proto = "virtiofs";
@@ -732,8 +743,6 @@
         }
         // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
           codex-vm-runner = codexVm.config.microvm.declaredRunner;
-          codex-vm-qemu-runtime-args = codexVmQemuRuntimeArgs;
-
           vm-codex = pkgs.writeShellApplication {
             name = "vm-codex";
             runtimeInputs = with pkgs; [
@@ -746,6 +755,10 @@
               CODEX_VM_BWRAP = "${pkgs.bubblewrap}/bin/bwrap";
               CODEX_VM_FLOCK = "${pkgs.util-linux}/bin/flock";
               CODEX_VM_PYTHON = "${pkgs.python3}/bin/python3";
+              CODEX_VM_QMP_FORWARD = "${pkgs.writeScript "codex-vm-qmp-forward" ''
+                #!${pkgs.python3}/bin/python3
+                ${builtins.readFile ./scripts/codex-vm/qmp-forward.py}
+              ''}";
               CODEX_VM_RUNNER = "${codexVm.config.microvm.declaredRunner}/bin/microvm-run";
               CODEX_VM_SSH = "${pkgs.openssh}/bin/ssh";
               CODEX_VM_SSH_KEYGEN = "${pkgs.openssh}/bin/ssh-keygen";
