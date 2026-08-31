@@ -6,6 +6,10 @@
     clippy::non_ascii_literal,
     reason = "fixed terminal snapshots use fail-fast setup and retain the exact fork-derived glyphs under test"
 )]
+#[expect(
+    clippy::inline_modules,
+    reason = "this integration-test target groups its cases in one local module"
+)]
 mod tests {
 
     use ratatui::{

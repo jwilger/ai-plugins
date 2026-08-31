@@ -85,18 +85,9 @@ nix develop        # enter the devshell
 echo "use flake" > .envrc && direnv allow
 ```
 
-The devshell does not install or redirect package-manager state into the
-checkout. In the supported MicroVM workflow, ordinary npm and Cargo user state
-is confined to the VM's persistent home.
-
-If an older checkout still has `.dependencies/`, inspect and remove that legacy
-cache once. It remains ignored only to prevent old npm configuration or build
-state from being staged accidentally during migration.
-
-The supported isolated Codex workflow, including exact-revision installation,
-first authentication, daily commands, state cleanup, explicit shares, trust
-inventory, and network limitations, is documented in
-[`docs/codex-vm.md`](docs/codex-vm.md).
+Any **globally installed** npm tooling (`npm install -g …`) is redirected into a
+git-ignored `./.dependencies/` directory by the devshell, so it never pollutes
+your home directory. Delete that directory any time for a clean slate.
 
 This repo also has a committed `package.json`/`package-lock.json` for the local
 Promptfoo eval runner. `node_modules/` is ignored and restored with `npm ci`;

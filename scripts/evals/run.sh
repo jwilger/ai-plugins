@@ -506,8 +506,8 @@ if [ "$generated_config" -eq 1 ]; then
 fi
 
 export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
-export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$root/.evals/promptfoo}"
-export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.evals/promptfoo-cache}"
+export PROMPTFOO_CONFIG_DIR="${PROMPTFOO_CONFIG_DIR:-$root/.dependencies/promptfoo}"
+export PROMPTFOO_CACHE_PATH="${PROMPTFOO_CACHE_PATH:-$root/.dependencies/promptfoo-cache}"
 export PROMPTFOO_CACHE_TTL="${PROMPTFOO_CACHE_TTL:-86400}"
 export CODEX_EVAL_HOME="${CODEX_EVAL_HOME:-$root/.evals/codex-home-full-marketplace}"
 export CODEX_EVAL_HOME_FULL_MARKETPLACE="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-$CODEX_EVAL_HOME}"

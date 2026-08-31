@@ -35,16 +35,16 @@ Use the Nix devshell — do not install global toolchains by hand.
 nix develop                       # provides node, npm, jq, prettier, rg, fd, just, bats, lefthook
 ```
 
-The devshell supplies the repository toolchain directly. It does not redirect
-global package installations or caches into the checkout. Under the supported
-workflow it runs inside the MicroVM, so ordinary npm and Cargo user state stays
-in the VM's persistent home rather than appearing in the repository or the
-developer's normal host home.
+**Critical convention:** anything npm would normally install "globally" must
+land in the git-ignored `./.dependencies/` directory, not in `$HOME`. The
+devshell enforces this by setting `NPM_CONFIG_PREFIX` and `NPM_CONFIG_CACHE` to
+point inside `./.dependencies/` and prepending the local npm `bin/` dir to
+`PATH`. So:
 
-Older checkouts may retain a now-unused `.dependencies/` tree containing npm
-configuration or Cargo caches. It remains ignored as migration containment;
-after checking that it contains nothing you need, remove it once with `rm -rf
-.dependencies` from each checkout.
+- `npm install -g <pkg>` → installs to `./.dependencies/npm/`
+
+Never commit `./.dependencies/`. If the environment looks broken, `rm -rf
+.dependencies` and re-enter the devshell.
 
 The Promptfoo eval runner is the exception to the "no root npm project" shape:
 `package.json` and `package-lock.json` are committed so Promptfoo can resolve
@@ -123,9 +123,10 @@ launchers have been refreshed with `just worktree-hooks`.
 
 For each linked worktree, the bootstrap:
 
-- copies the warm `.direnv/` devshell cache from the main checkout when present;
-  disposable eval state remains per-worktree under the git-ignored `.evals/`
-  directory;
+- copies warm local dependency and devshell caches from the main checkout when
+  present: `.dependencies/` and `.direnv/`; legacy `.dependencies/evals/`
+  state is excluded, while current disposable eval state lives per worktree
+  under the git-ignored `.evals/` directory;
 - creates a local `.envrc` with `use flake` if the worktree does not already
   have one;
 - writes `.env.worktree` with stable, slot-based `PORT`, `PG_PORT`,

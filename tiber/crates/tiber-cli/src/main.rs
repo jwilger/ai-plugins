@@ -425,6 +425,10 @@ fn start_default_client() -> AppServerClient {
     clippy::expect_used,
     reason = "binary-shell integration fixtures use fail-fast assertions and fixed event sequences"
 )]
+#[expect(
+    clippy::inline_modules,
+    reason = "unit tests remain colocated with the private CLI implementation"
+)]
 mod tests {
     use std::{
         path::PathBuf,

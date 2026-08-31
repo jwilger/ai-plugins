@@ -1,4 +1,8 @@
 #[cfg(test)]
+#[expect(
+    clippy::inline_modules,
+    reason = "this integration-test target groups its cases in one local module"
+)]
 mod tests {
     use tiber_app_server::inspect_protocol_schema;
 

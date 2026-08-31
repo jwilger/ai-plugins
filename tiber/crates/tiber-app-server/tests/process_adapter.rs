@@ -11,6 +11,10 @@
     clippy::std_instead_of_core,
     reason = "black-box fixture setup and assertions use fail-fast test ergonomics without entering shipping library code"
 )]
+#[expect(
+    clippy::inline_modules,
+    reason = "this integration-test target groups its cases in one local module"
+)]
 mod tests {
 
     use std::{

@@ -586,7 +586,7 @@ SH
 
   rm -rf "$fixture_root"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"PROMPTFOO_CONFIG_DIR=$fixture_root/.evals/promptfoo"* ]]
+  [[ "$output" == *"PROMPTFOO_CONFIG_DIR=$fixture_root/.dependencies/promptfoo"* ]]
 }
 
 @test "eval threshold checker honors case min pass rates" {

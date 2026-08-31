@@ -1,13 +1,7 @@
-# Legacy project-local package-manager state. No current workflow creates this
-# directory, but existing clones may retain npm credentials or Cargo caches
-# here until the owner removes it.
+# Project-local "global" dependency sandbox (npm -g, cargo install, etc.).
+# Provisioned by the Nix devshell; never committed.
 /.dependencies/
 /**/.dependencies/
-
-# Durable per-project MicroVM state. Contains VM disks, Codex state, and
-# project-unique SSH keys; it is data only and must never be committed.
-/.codex-vm/
-/**/.codex-vm/
 
 # Project-local npm dependencies are restored from package-lock.json.
 /node_modules/

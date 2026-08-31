@@ -260,6 +260,10 @@ fn parse_thread_item_types(document: &serde_json::Value) -> Result<Vec<&str>, Co
     reason = "the isolated process adapter follows JSON-RPC wire order, uses typed early propagation, and keeps transport implementation details together"
 )]
 /// Isolated app-server transport implementation.
+#[expect(
+    clippy::inline_modules,
+    reason = "the runtime implementation remains colocated with its private protocol types"
+)]
 mod runtime {
     use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
     use core::{

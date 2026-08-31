@@ -1,6 +1,10 @@
 #![forbid(unsafe_code)]
 
 #[cfg(test)]
+#[expect(
+    clippy::inline_modules,
+    reason = "this integration-test target groups its cases in one local module"
+)]
 mod tests {
     use std::{path::PathBuf, process::Command};
 

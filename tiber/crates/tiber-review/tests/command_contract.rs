@@ -10,6 +10,10 @@
     clippy::too_many_lines,
     reason = "black-box EventCore contract fixtures use fail-fast test ergonomics without entering shipping library code"
 )]
+#[expect(
+    clippy::inline_modules,
+    reason = "this integration-test target groups its cases in one local module"
+)]
 mod tests {
     use eventcore::{RetryPolicy, execute};
     use eventcore_memory::InMemoryEventStore;

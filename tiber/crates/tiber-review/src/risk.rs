@@ -145,6 +145,10 @@ pub fn assess_risk(
     clippy::panic,
     reason = "model contract fixtures use fail-fast test ergonomics and never enter shipping library code"
 )]
+#[expect(
+    clippy::inline_modules,
+    reason = "unit tests remain colocated with the private risk implementation"
+)]
 mod tests {
     use eventcore::{RetryPolicy, execute};
     use eventcore_memory::InMemoryEventStore;
