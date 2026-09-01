@@ -236,6 +236,19 @@ teardown() {
   grep -q "Forced skill-invocation diagnostic" "$TMPROOT/site/evals/index.html"
 }
 
+@test "eval dashboard preserves forced status provenance without results" {
+  rm "$TMPROOT/evals/out/results.json"
+  printf '%s\n' \
+    '{"state":"running","skillInvocationMode":"forced"}' \
+    >"$TMPROOT/evals/out/status.json"
+
+  run node "$TMPROOT/scripts/evals/build-site.mjs"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.skillInvocationMode' "$TMPROOT/site/evals/summary.json")" = "forced" ]
+  grep -q "Forced skill-invocation diagnostic" "$TMPROOT/site/evals/index.html"
+}
+
 @test "eval dashboard marks legacy composition provenance unavailable instead of empty" {
   legacy_results="$TMPROOT/evals/out/results.legacy.json"
   jq 'del(.config.metadata.providerCompositions)' \

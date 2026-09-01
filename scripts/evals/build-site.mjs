@@ -418,14 +418,17 @@ function readStatus(file, cases) {
 
 fs.mkdirSync(siteDir, { recursive: true });
 
-const artifact = fs.existsSync(resultsPath)
+const hasResults = fs.existsSync(resultsPath);
+const artifact = hasResults
   ? readArtifact(resultsPath)
   : normalizeProviderCompositions(undefined);
 const cases = artifact.cases || [];
 const providerCompositions = artifact.providerCompositions;
 const providerCompositionStatus = artifact.providerCompositionStatus;
-const skillInvocationMode = artifact.skillInvocationMode || "natural";
 const runStatus = readStatus(statusPath, cases);
+const skillInvocationMode = hasResults
+  ? artifact.skillInvocationMode || runStatus.skillInvocationMode || "natural"
+  : runStatus.skillInvocationMode || "natural";
 const aggregates = aggregateCases(cases);
 const pluginSummaries = aggregateDimension(cases, "plugins", "plugin");
 const skillSummaries = aggregateDimension(cases, "skills", "skill");
