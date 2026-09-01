@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const require = createRequire(import.meta.url);
+const { resolveSkillReferences } = require("../../evals/promptfoo/fixtures.cjs");
 
 const resultsPath = process.argv[2];
 
@@ -164,23 +167,35 @@ for (const result of results) {
         skill: reference.slice(separator + 1),
       };
     });
+    let resolvedReferences = [];
+    try {
+      resolvedReferences = resolveSkillReferences(
+        {
+          case_id: id,
+          fixture_file: resultsPath,
+          plugins: declaredPlugins,
+          skills: declaredSkills,
+        },
+        { root },
+      );
+    } catch {
+      resolvedReferences = [];
+    }
     if (
       declaredPlugins.length === 0 ||
       declaredSkills.length === 0 ||
       parsedReferences.some(
         ({ plugin, skill }) =>
-          !declaredPlugins.includes(plugin) ||
-          !declaredSkills.includes(skill) ||
-          !fs.existsSync(
-            path.join(root, "plugins", plugin, "skills", skill, "SKILL.md"),
-          ),
+          !declaredPlugins.includes(plugin) || !declaredSkills.includes(skill),
       ) ||
       declaredSkills.some(
         (skill) =>
           parsedReferences.filter((reference) => reference.skill === skill)
             .length !== 1,
       ) ||
-      parsedReferences.length !== declaredSkills.length
+      parsedReferences.length !== declaredSkills.length ||
+      [...skillReferences].sort().join("\0") !==
+        [...resolvedReferences].sort().join("\0")
     ) {
       console.error(
         "forced skill-reference provenance must match declared plugins and skills",
