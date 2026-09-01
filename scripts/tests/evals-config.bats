@@ -153,6 +153,8 @@ MD
   [[ "$output" == *"full-marketplace"* ]]
   [[ "$output" != *"no-plugins"* ]]
   [[ "$output" == *"skillInvocationMode: forced"* ]]
+  [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
+  [[ "$output" != *"tests: file://$ROOT/evals/promptfoo/load-harness-cases.cjs"* ]]
   [ "$(jq -r '.skillInvocationMode' "$metadata")" = "forced" ]
   [ "$(jq '[.providerCompositions[] | select(.pluginMode == "no-plugins")] | length' "$metadata")" = "0" ]
 

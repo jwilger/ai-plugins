@@ -119,8 +119,12 @@ function fileUrl(file) {
   return `file://${path.resolve(file)}`;
 }
 
-function behaviorTestLoader() {
-  if (process.env.EVAL_CASE_FILTER || process.env.EVAL_SAMPLES) {
+function behaviorTestLoader(invocationMode) {
+  if (
+    invocationMode === "forced" ||
+    process.env.EVAL_CASE_FILTER ||
+    process.env.EVAL_SAMPLES
+  ) {
     return fileUrl(
       process.env.EVAL_RUNTIME_LOADER_FILE ||
         path.join(root, "evals/out/generated/load-harness-cases.runtime.cjs"),
@@ -304,7 +308,7 @@ function configFor(suite) {
   const testLoader =
     suite === "canary"
       ? fileUrl(path.join(root, "evals/promptfoo/load-canary-cases.cjs"))
-      : behaviorTestLoader();
+      : behaviorTestLoader(invocationMode);
   const description =
     suite === "canary"
       ? "Full-marketplace canary for the ai-plugins Codex marketplace"
