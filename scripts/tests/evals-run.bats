@@ -629,6 +629,47 @@ JSON
           "case_id": "forced-diagnostic",
           "plugin_mode": "targeted-plugins",
           "skill_invocation_mode": "forced",
+          "plugins": ["development-system"],
+          "skills": ["development-workflow"],
+          "skill_references": ["$development-system:development-workflow"],
+          "min_pass_rate": 1,
+          "value_gate_mode": "standard"
+        }
+      }
+    ]
+  }
+}
+
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Forced skill-invocation diagnostics passed"* ]]
+  [[ "$output" != *"value gates"* ]]
+}
+
+@test "threshold checker rejects unrelated forced skill provenance" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "config": {
+    "metadata": { "skillInvocationMode": "forced" }
+  },
+  "results": {
+    "results": [
+      {
+        "success": true,
+        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "vars": {
+          "case_id": "forced-diagnostic",
+          "plugin_mode": "targeted-plugins",
+          "skill_invocation_mode": "forced",
+          "plugins": ["development-system"],
+          "skills": ["development-workflow"],
+          "skill_references": ["$unrelated-plugin:unrelated-skill"],
           "min_pass_rate": 1,
           "value_gate_mode": "standard"
         }
@@ -641,9 +682,41 @@ JSON
   run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
 
   rm -rf "$fixture_root"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Forced skill-invocation diagnostics passed"* ]]
-  [[ "$output" != *"value gates"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"must match declared plugins and skills"* ]]
+}
+
+@test "threshold checker rejects forced diagnostics without skill provenance" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "config": {
+    "metadata": { "skillInvocationMode": "forced" }
+  },
+  "results": {
+    "results": [
+      {
+        "success": true,
+        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "vars": {
+          "case_id": "forced-diagnostic",
+          "plugin_mode": "targeted-plugins",
+          "skill_invocation_mode": "forced",
+          "min_pass_rate": 1,
+          "value_gate_mode": "standard"
+        }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"require exact skill-reference provenance"* ]]
 }
 
 @test "eval threshold checker treats no-plugin misses as baseline value-gate evidence" {

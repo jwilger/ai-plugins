@@ -133,6 +133,53 @@ for (const result of results) {
     );
     process.exit(1);
   }
+  if (skillInvocationMode === "forced") {
+    const skillReferences = vars.skill_references ?? vars.skillReferences;
+    const declaredPlugins = Array.isArray(vars.plugins) ? vars.plugins : [];
+    const declaredSkills = Array.isArray(vars.skills) ? vars.skills : [];
+    if (
+      !Array.isArray(skillReferences) ||
+      skillReferences.length === 0 ||
+      skillReferences.some(
+        (reference) =>
+          typeof reference !== "string" ||
+          !/^\$[a-z0-9]+(?:-[a-z0-9]+)*:[a-z0-9]+(?:-[a-z0-9]+)*$/.test(
+            reference,
+          ),
+      )
+    ) {
+      console.error(
+        "forced skill-invocation diagnostics require exact skill-reference provenance",
+      );
+      process.exit(1);
+    }
+    const parsedReferences = skillReferences.map((reference) => {
+      const separator = reference.indexOf(":");
+      return {
+        plugin: reference.slice(1, separator),
+        skill: reference.slice(separator + 1),
+      };
+    });
+    if (
+      declaredPlugins.length === 0 ||
+      declaredSkills.length === 0 ||
+      parsedReferences.some(
+        ({ plugin, skill }) =>
+          !declaredPlugins.includes(plugin) || !declaredSkills.includes(skill),
+      ) ||
+      declaredSkills.some(
+        (skill) =>
+          parsedReferences.filter((reference) => reference.skill === skill)
+            .length !== 1,
+      ) ||
+      parsedReferences.length !== declaredSkills.length
+    ) {
+      console.error(
+        "forced skill-reference provenance must match declared plugins and skills",
+      );
+      process.exit(1);
+    }
+  }
   const key = `${variant}::${mode}::${id}`;
   const reason = resultReason(result);
   const pass = resultPass(result);
