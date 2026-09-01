@@ -441,6 +441,11 @@ if [ "$config" = "evals/promptfoo/development-system.yaml" ]; then
   generated_config=1
 fi
 
+if [ "$skill_invocation_mode" = "forced" ] && [ "$generated_config" -ne 1 ]; then
+  echo "forced skill-invocation diagnostics require the generated canonical config" >&2
+  exit 2
+fi
+
 cmd=(
   "$promptfoo_bin"
   eval

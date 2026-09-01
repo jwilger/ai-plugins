@@ -107,6 +107,15 @@ teardown() {
   [[ "$output" != *"promptfoo eval"* ]]
 }
 
+@test "eval runner rejects forced mode with a custom config" {
+  run env EVAL_SKILL_INVOCATION_MODE=forced \
+    "$RUNNER" --dry-run "$ROOT/evals/promptfoo/development-system.yaml"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"forced skill-invocation diagnostics require the generated canonical config"* ]]
+  [[ "$output" != *"promptfoo eval"* ]]
+}
+
 @test "eval runner dry-run uses repo-owned generated paths from outside repo cwd" {
   other_cwd="$(mktemp -d)"
 
