@@ -432,7 +432,8 @@ const skillInvocationMode = hasResults
 const aggregates = aggregateCases(cases);
 const pluginSummaries = aggregateDimension(cases, "plugins", "plugin");
 const skillSummaries = aggregateDimension(cases, "skills", "skill");
-const valueGates = valueGateSummaries(aggregates);
+const valueGates =
+  skillInvocationMode === "forced" ? [] : valueGateSummaries(aggregates);
 const passed = cases.filter((testCase) => testCase.pass).length;
 const blocked = cases.filter((testCase) => testCase.blocked).length;
 const failed = cases.length - passed - blocked;

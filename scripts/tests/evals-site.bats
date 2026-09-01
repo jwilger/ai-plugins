@@ -222,7 +222,8 @@ teardown() {
   jq '
     .config.metadata.skillInvocationMode = "forced"
     | .results.results |= map(
-        .testCase.skill_invocation_mode = "forced"
+        select(.testCase.plugin_mode != "no-plugins")
+        | .testCase.skill_invocation_mode = "forced"
         | .testCase.skill_references = ["$development-system:agentic-systems"]
       )
   ' "$TMPROOT/evals/out/results.json" >"$updated_results"
@@ -233,6 +234,8 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.skillInvocationMode' "$TMPROOT/site/evals/summary.json")" = "forced" ]
   [ "$(jq -c '.cases[0].skillReferences' "$TMPROOT/site/evals/summary.json")" = '["$development-system:agentic-systems"]' ]
+  [ "$(jq '.valueGates | length' "$TMPROOT/site/evals/summary.json")" = "0" ]
+  [ "$(jq '.valueGatesFailed' "$TMPROOT/site/evals/summary.json")" = "0" ]
   grep -q "Forced skill-invocation diagnostic" "$TMPROOT/site/evals/index.html"
 }
 
