@@ -22,7 +22,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harness | Description                                                                                          | Version |
 | ---------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.0.0   |
+| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.1.0   |
 
 ## Using the marketplace (Codex)
 

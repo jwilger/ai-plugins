@@ -10,6 +10,33 @@ configuration, or with invalid configuration, inspection remains available but
 the plugin cannot provide configured workflow guidance. This advisory state
 does not deny ordinary host mutation capabilities.
 
+## Proportional and interruptible execution
+
+Before expanding active scope for advisory or non-blocking feedback, run the
+proportionality checkpoint in `workflow-rules.md` against the original goal,
+acceptance criteria, trust boundaries, and completion claim. A review finding
+does not authorize broader implementation. Keep materially required causal
+work and mechanical gates fail-closed. Report distinct improvements and offer
+the user a choice; worthwhile distinct work may enter the backlog without
+expanding or delaying the active goal, while implementation requires the user
+to explicitly expand the goal. A canonical final-review finding still makes
+its iteration non-clean regardless of its backlog or report-only disposition.
+In every checkpoint result, explicitly name all four boundaries and the outcome
+for each; never substitute a bare reference to "the proportionality
+checkpoint."
+
+In every status update or answer about long-running work, explicitly report
+four fields for each gate: (1) command or gate identity, (2) why it is required,
+(3) progress or last-known state, and (4) cancellation path. Apply a user's
+scope correction immediately to every subsequent action, promptly stop
+optional work, report what stopped, preserve completed valid evidence, and do
+not implicitly restart cancelled work. Reuse evidence only item by item when
+its covered source or behavior, scope, baseline, configuration, environment,
+inputs, and freshness contract are unchanged; record that decision and rerun
+affected checks plus every required post-mutation or post-commit gate.
+Deduplication never bypasses an acceptance criterion, final-review reset,
+exact-revision gate, or CI-recovery hold.
+
 ## Final-review protocol preflight
 
 For every final-review path, complete this checklist before creating any risk

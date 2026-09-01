@@ -203,10 +203,11 @@ list_server_tools() {
   local data_home="$TMPROOT/interrupted-install-xdg-data"
   local real_mv
   local host
-  local version="6.0.0"
+  local version
 
   real_mv="$(command -v mv)"
   host="$(source "$ROOT/plugins/development-system/lib/installed-binary.sh"; development_system_host)"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
   mkdir -p "$fake_bin"
   printf '%s\n' \
     '#!/usr/bin/env bash' \

@@ -22,6 +22,49 @@ count justified by that metric; expand to a full-marketplace suite only when a
 shared model-facing surface or marketplace loading is the claim. Use only the
 live harnesses selected by current repository policy.
 
+## Proportionality, interruption, and evidence reuse
+
+Before implementing an advisory or non-blocking review suggestion that would
+expand the active change, stop and compare it with all four boundaries:
+
+1. the user's original goal and latest scope correction;
+2. the ticket's acceptance criteria;
+3. the system's concrete trust boundaries and plausible in-model impact; and
+4. the exact completion or readiness claim being made.
+
+Classify the suggestion from that evidence. A material acceptance, causal,
+safety, security, verification, or delivery blocker remains required work and
+fails closed. A distinct improvement, speculative hardening, optional
+optimization, adjacent eval, cleanup, or other advisory finding does not expand
+the active implementation merely because a reviewer raised it. Report it and,
+when worthwhile, offer an explicit user choice or admit it to the backlog under
+the repository's task policy without delaying an otherwise satisfied goal.
+Never silently discard the finding or convert it into mandatory scope without
+this checkpoint.
+
+For every long-running gate, expose its command or gate identity, why the
+active claim requires it, current progress or last-known state, and how it can
+be cancelled. Prefer the smallest causal case set and sample count that prove
+the changed claim; leave exhaustive, integration, mutation, full-suite, and
+similarly expensive evidence to CI unless repository policy or failure
+diagnosis specifically requires a local run. When the user interrupts or
+corrects scope, promptly cancel optional work, retain completed valid evidence,
+report what stopped and its last-known state, and constrain every later action
+to the corrected scope. Do not restart cancelled work implicitly. A scope
+correction does not waive a mechanical gate or material blocker; report that
+remaining requirement rather than silently skipping it.
+
+Deduplicate verification item by item, not by treating a prior aggregate green
+result as universally reusable. Evidence remains reusable only when its covered
+source or behavior, requested scope, pinned baseline, configuration,
+environment, inputs, and freshness contract are unchanged. Record why each
+reused receipt still applies. Rerun every impact-selected check and every
+repository-required post-mutation or post-commit gate affected by the current
+change. Never reuse evidence across a final-review reset, a changed source
+inventory or exact-revision boundary, unmet acceptance criteria, or an active
+CI-recovery hold. A completed failed required CI job remains blocking until the
+replacement reaches terminal success.
+
 ## CI recovery record
 
 For a terminal pushed-CI failure, retain four records:
