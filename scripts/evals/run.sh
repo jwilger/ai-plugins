@@ -21,10 +21,9 @@ export EVAL_RUNTIME_LOADER_FILE="$runtime_loader_file"
 max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-1}"
 skill_invocation_mode="${EVAL_SKILL_INVOCATION_MODE:-natural}"
 case "$skill_invocation_mode" in
-  natural | forced) ;;
+  natural | forced) invalid_skill_invocation_mode=0 ;;
   *)
-    printf 'EVAL_SKILL_INVOCATION_MODE must be natural or forced; got %q\n' "$skill_invocation_mode" >&2
-    exit 2
+    invalid_skill_invocation_mode=1
     ;;
 esac
 case "$max_concurrency" in
@@ -476,6 +475,10 @@ cd "$root"
 
 if [ "$dry_run" -eq 1 ]; then
   prepare_eval_output_dir check
+  if [ "$invalid_skill_invocation_mode" -eq 1 ]; then
+    printf 'EVAL_SKILL_INVOCATION_MODE must be natural or forced; got %q\n' "$skill_invocation_mode" >&2
+    exit 2
+  fi
   if [ "$skill_invocation_mode" = "forced" ] && [ "$generated_config" -ne 1 ]; then
     echo "forced skill-invocation diagnostics require the generated canonical config" >&2
     exit 2
@@ -518,6 +521,12 @@ fi
 prepare_eval_output_dir
 mkdir -p "$out_dir"
 rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml" "$out_dir/status.json"
+if [ "$invalid_skill_invocation_mode" -eq 1 ]; then
+  invalid_mode_reason="EVAL_SKILL_INVOCATION_MODE must be natural or forced; got $(printf '%q' "$skill_invocation_mode")"
+  write_eval_status failed "$invalid_mode_reason"
+  echo "$invalid_mode_reason" >&2
+  exit 2
+fi
 if [ "$skill_invocation_mode" = "forced" ] && [ "$generated_config" -ne 1 ]; then
   write_eval_status failed "forced skill-invocation diagnostics require the generated canonical config"
   echo "forced skill-invocation diagnostics require the generated canonical config" >&2
