@@ -734,6 +734,45 @@ JSON
   [[ "$output" == *"must match declared plugins and skills"* ]]
 }
 
+@test "threshold checker rejects forced skill provenance with swapped owners" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "config": {
+    "metadata": { "skillInvocationMode": "forced" }
+  },
+  "results": {
+    "results": [
+      {
+        "success": true,
+        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "vars": {
+          "case_id": "forced-diagnostic",
+          "plugin_mode": "targeted-plugins",
+          "skill_invocation_mode": "forced",
+          "plugins": ["development-system", "mermaid-diagrams"],
+          "skills": ["development-workflow", "mermaid-diagrams"],
+          "skill_references": [
+            "$development-system:mermaid-diagrams",
+            "$mermaid-diagrams:development-workflow"
+          ],
+          "min_pass_rate": 1,
+          "value_gate_mode": "standard"
+        }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"must match declared plugins and skills"* ]]
+}
+
 @test "threshold checker rejects forced diagnostics without skill provenance" {
   fixture_root="$(mktemp -d)"
   results="$fixture_root/results.json"

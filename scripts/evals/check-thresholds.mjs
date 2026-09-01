@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const resultsPath = process.argv[2];
 
@@ -165,7 +169,11 @@ for (const result of results) {
       declaredSkills.length === 0 ||
       parsedReferences.some(
         ({ plugin, skill }) =>
-          !declaredPlugins.includes(plugin) || !declaredSkills.includes(skill),
+          !declaredPlugins.includes(plugin) ||
+          !declaredSkills.includes(skill) ||
+          !fs.existsSync(
+            path.join(root, "plugins", plugin, "skills", skill, "SKILL.md"),
+          ),
       ) ||
       declaredSkills.some(
         (skill) =>
