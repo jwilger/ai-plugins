@@ -65,8 +65,8 @@ if (natural.vars.scenario_prompt !== fixture.prompt) {
 if (natural.vars.skill_invocation_mode !== 'natural') {
   throw new Error('natural mode was not recorded');
 }
-if (JSON.stringify(natural.vars.skill_references) !== JSON.stringify(['$development-system:development-workflow'])) {
-  throw new Error(`unexpected resolved skill references: ${JSON.stringify(natural.vars.skill_references)}`);
+if (JSON.stringify(natural.vars.skill_references) !== JSON.stringify([])) {
+  throw new Error(`natural mode must not resolve skill references: ${JSON.stringify(natural.vars.skill_references)}`);
 }
 
 process.env.EVAL_SKILL_INVOCATION_MODE = 'forced';
@@ -80,6 +80,9 @@ if (forced.vars.scenario_prompt !== `${expectedPrefix}${fixture.prompt}`) {
 }
 if (forced.vars.skill_invocation_mode !== 'forced') {
   throw new Error('forced mode was not recorded');
+}
+if (JSON.stringify(forced.vars.skill_references) !== JSON.stringify(['$development-system:development-workflow'])) {
+  throw new Error(`unexpected forced skill references: ${JSON.stringify(forced.vars.skill_references)}`);
 }
 NODE
 

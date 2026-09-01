@@ -62,7 +62,8 @@ module.exports = function generateTests() {
 
   return cases.flatMap((testCase) =>
     Array.from({ length: samples }, (_, index) => {
-      const skillReferences = resolveSkillReferences(testCase);
+      const skillReferences =
+        invocationMode === "forced" ? resolveSkillReferences(testCase) : [];
       return {
         description:
           samples > 1
