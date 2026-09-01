@@ -821,6 +821,46 @@ JSON
   [[ "$output" == *"require exact skill-reference provenance"* ]]
 }
 
+@test "threshold checker rejects malformed forced artifact variants" {
+  fixture_root="$(mktemp -d)"
+  base="$fixture_root/base.json"
+  results="$fixture_root/results.json"
+  cat >"$base" <<'JSON'
+{
+  "config": { "metadata": { "skillInvocationMode": "forced" } },
+  "results": { "results": [{
+    "success": true,
+    "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+    "vars": {
+      "case_id": "forced-diagnostic",
+      "plugin_mode": "targeted-plugins",
+      "skill_invocation_mode": "forced",
+      "plugins": ["development-system"],
+      "skills": ["development-workflow"],
+      "skill_references": ["$development-system:development-workflow"],
+      "min_pass_rate": 1,
+      "value_gate_mode": "standard"
+    }
+  }] }
+}
+JSON
+
+  mutations=(
+    '.config.metadata.skillInvocationMode = "invalid"'
+    '.results.results[0].vars.skill_invocation_mode = "natural"'
+    '.results.results[0].provider.label = "codex-gpt-5.6-terra-no-plugins"'
+    '.results.results[0].vars.skill_references = ["development-system:development-workflow"]'
+    '.results.results[0].vars.skills = ["development-workflow", "delivery"]'
+  )
+  for mutation in "${mutations[@]}"; do
+    jq "$mutation" "$base" >"$results"
+    run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+    [ "$status" -eq 1 ]
+  done
+
+  rm -rf "$fixture_root"
+}
+
 @test "eval threshold checker treats no-plugin misses as baseline value-gate evidence" {
   fixture_root="$(mktemp -d)"
   results="$fixture_root/results.json"
