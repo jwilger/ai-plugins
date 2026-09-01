@@ -234,7 +234,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.skillInvocationMode' "$TMPROOT/site/evals/summary.json")" = "forced" ]
   [ "$(jq -c '.cases[0].skillReferences' "$TMPROOT/site/evals/summary.json")" = '["$development-system:agentic-systems"]' ]
-  [ "$(jq '.valueGates | length' "$TMPROOT/site/evals/summary.json")" = "0" ]
+  [ "$(jq '.valueGateSummaries | length' "$TMPROOT/site/evals/summary.json")" = "0" ]
   [ "$(jq '.valueGatesFailed' "$TMPROOT/site/evals/summary.json")" = "0" ]
   grep -q "Forced skill-invocation diagnostic" "$TMPROOT/site/evals/index.html"
 }
