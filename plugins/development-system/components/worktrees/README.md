@@ -29,5 +29,4 @@ worktree only for an explicit request or separate concurrent mutable work.
 
 ## Harnesses
 
-Harness-agnostic — the guard and scripts are plain shell, used identically by
-Claude Code and Codex.
+The guard and scripts are plain shell and are used by Codex.

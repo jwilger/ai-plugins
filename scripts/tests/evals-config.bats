@@ -10,13 +10,12 @@ teardown() {
   [ -z "$FIXTURE_TMP" ] || rm -rf "$FIXTURE_TMP"
 }
 
-make_codex_only_eval_fixture() {
+make_codex_eval_fixture() {
   FIXTURE_TMP="$(mktemp -d)"
   mkdir -p \
     "$FIXTURE_TMP/scripts/evals" \
     "$FIXTURE_TMP/evals/promptfoo" \
     "$FIXTURE_TMP/evals/fixtures/behavior" \
-    "$FIXTURE_TMP/.claude-plugin" \
     "$FIXTURE_TMP/.agents/plugins" \
     "$FIXTURE_TMP/plugins/shared/skills/shared-skill" \
     "$FIXTURE_TMP/plugins/codex-only/skills/codex-skill"
@@ -26,12 +25,6 @@ make_codex_only_eval_fixture() {
   cat >"$FIXTURE_TMP/evals/matrix.json" <<'JSON'
 {
   "providerVariants": [
-    {
-      "id": "claude-code-sonnet",
-      "provider": "anthropic:claude-agent-sdk",
-      "modelEnv": "CLAUDE_EVAL_MODEL",
-      "defaultModel": "sonnet"
-    },
     {
       "id": "codex-gpt-5.6-terra",
       "provider": "openai:codex-sdk",
@@ -55,17 +48,6 @@ JSON
     "plugins": ["shared"]
   }
 ]
-JSON
-  cat >"$FIXTURE_TMP/.claude-plugin/marketplace.json" <<'JSON'
-{
-  "plugins": [
-    {
-      "name": "shared",
-      "source": "./plugins/shared",
-      "version": "0.1.0"
-    }
-  ]
-}
 JSON
   cat >"$FIXTURE_TMP/.agents/plugins/marketplace.json" <<'JSON'
 {
@@ -102,7 +84,6 @@ MD
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"openai:codex-sdk"* ]]
-  [[ "$output" != *"anthropic:claude-agent-sdk"* ]]
   [[ "$output" == *"Answer the scenario directly as a stateless advisory question"* ]]
   [[ "$output" == *"If you recommend a command, give its exact name and flags"* ]]
   [[ "$output" == *"Apply any available instructions relevant to the scenario."* ]]
@@ -158,42 +139,8 @@ MD
   [[ "$output" != *"tests: file://$ROOT/evals/promptfoo/load-harness-cases.cjs"* ]]
 }
 
-@test "generated Claude provider config excludes Codex-only marketplace plugins" {
-  make_codex_only_eval_fixture
-
-  run node - "$FIXTURE_TMP" <<'NODE'
-const { spawnSync } = require('child_process');
-const path = require('path');
-
-const root = process.argv[2];
-const generator = path.join(root, 'scripts/evals/generate-config.mjs');
-const result = spawnSync(process.execPath, [generator, '--suite', 'behavior', '--stdout'], {
-  cwd: root,
-  encoding: 'utf8',
-});
-if (result.status !== 0) {
-  process.stderr.write(result.stderr || result.stdout);
-  process.exit(result.status);
-}
-
-const firstCodexProvider = result.stdout.indexOf('  - id: openai:codex-sdk');
-const claudeSection = result.stdout.slice(0, firstCodexProvider);
-const sharedPath = path.join(root, 'plugins/shared');
-const codexOnlyPath = path.join(root, 'plugins/codex-only');
-
-if (!claudeSection.includes(sharedPath)) {
-  throw new Error(`Claude config did not include shared plugin path: ${sharedPath}`);
-}
-if (claudeSection.includes(codexOnlyPath)) {
-  throw new Error(`Claude config included Codex-only plugin path: ${codexOnlyPath}`);
-}
-NODE
-
-  [ "$status" -eq 0 ]
-}
-
-@test "generated targeted config fails when a selected plugin is unavailable to a harness" {
-  make_codex_only_eval_fixture
+@test "generated targeted config includes a selected Codex plugin" {
+  make_codex_eval_fixture
   cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
 [
   {
@@ -205,19 +152,8 @@ JSON
 
   run env EVAL_CASE_FILTER=codex-only-case node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"selected behavior plugin(s) unavailable to Claude Code: codex-only"* ]]
-  [[ "$output" != *$'\nproviders:\n'* ]]
-}
-
-@test "generated claude plugin paths are absolute so generated configs can move" {
-  make_codex_only_eval_fixture
-
-  run node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
-
   [ "$status" -eq 0 ]
-  [[ "$output" == *"path: \"$FIXTURE_TMP/plugins/shared\""* ]]
-  [[ "$output" != *"path: \"./plugins/"* ]]
+  [[ "$output" == *"codex-gpt-5.6-terra-targeted-plugins"* ]]
 }
 
 @test "generated canary config is separate from natural behavior scenarios" {
@@ -247,34 +183,20 @@ NODE
   [ "$status" -eq 0 ]
 }
 
-@test "full marketplace canary assertion uses the active provider marketplace" {
-  make_codex_only_eval_fixture
+@test "full marketplace canary assertion uses the Codex marketplace" {
+  make_codex_eval_fixture
 
   run node - "$FIXTURE_TMP" <<'NODE'
 const path = require('path');
 process.chdir(process.argv[2]);
 const assertCanary = require(path.join(process.argv[2], 'evals/promptfoo/assert-full-marketplace-canary.cjs'));
 
-const claudeResult = assertCanary(
-  'Shared: Shared Skill',
-  { provider: { id: () => 'anthropic:claude-agent-sdk' } },
-);
-if (claudeResult.pass !== true) {
-  throw new Error(`expected Claude canary to ignore Codex-only plugin: ${JSON.stringify(claudeResult)}`);
-}
-
-const codexMissingResult = assertCanary(
-  'Shared: Shared Skill',
-  { provider: { id: () => 'openai:codex-sdk' } },
-);
+const codexMissingResult = assertCanary('Shared: Shared Skill');
 if (codexMissingResult.pass !== false || !codexMissingResult.reason.includes('codex-only')) {
   throw new Error(`expected Codex canary to require Codex-only plugin: ${JSON.stringify(codexMissingResult)}`);
 }
 
-const codexResult = assertCanary(
-  'Shared: Shared Skill\nCodex Only: Codex Skill',
-  { provider: { id: () => 'openai:codex-sdk' } },
-);
+const codexResult = assertCanary('Shared: Shared Skill\nCodex Only: Codex Skill');
 if (codexResult.pass !== true) {
   throw new Error(`expected Codex canary to accept Codex-only plugin: ${JSON.stringify(codexResult)}`);
 }
@@ -290,9 +212,7 @@ const namesOnly = [
   'development-system',
 ].join('\n');
 
-const result = assertCanary(namesOnly, {
-  provider: { id: () => 'anthropic:claude-agent-sdk' },
-});
+const result = assertCanary(namesOnly);
 
 if (result.pass !== false || !result.reason.includes('representative skill')) {
   throw new Error(`expected skill-level canary failure, got: ${JSON.stringify(result)}`);
@@ -309,9 +229,7 @@ const natural = [
   'Development System: Agentic Systems',
 ].join('\n');
 
-const result = assertCanary(natural, {
-  provider: { id: () => 'anthropic:claude-agent-sdk' },
-});
+const result = assertCanary(natural);
 
 if (result.pass !== true) {
   throw new Error(`expected title-cased skills to pass, got: ${JSON.stringify(result)}`);

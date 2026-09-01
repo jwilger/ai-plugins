@@ -79,7 +79,6 @@ teardown() {
 
   run rg -n \
     '"name": "(agentic-systems-engineering|eval-case-reporter)"' \
-    "$ROOT/.claude-plugin/marketplace.json" \
     "$ROOT/.agents/plugins/marketplace.json"
 
   [ "$status" -eq 1 ]
@@ -104,10 +103,7 @@ if (!prompt.includes('Do not modify files, invoke skills or tools, or perform wo
   throw new Error('canary must prohibit behavior execution');
 }
 
-const marketplaceFiles = [
-  '.claude-plugin/marketplace.json',
-  '.agents/plugins/marketplace.json',
-];
+const marketplaceFiles = ['.agents/plugins/marketplace.json'];
 const publicNames = new Set();
 for (const relativeFile of marketplaceFiles) {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, relativeFile), 'utf8'));
@@ -149,15 +145,6 @@ NODE
 @test "retired top-level eval decision and duplicate fixture stay removed" {
   [ ! -e "$ROOT/evals/fixtures/coverage-decisions.json" ]
   [ ! -e "$ROOT/evals/fixtures/agentic-systems-engineering/cases.json" ]
-}
-
-@test "Claude model-routing prompts use harness-neutral responsibility names" {
-  run rg -n '\bSol\b|gpt-5\.6-(sol|terra|luna)' \
-    "$ROOT/plugins/development-system/components/development-discipline/agents" \
-    --glob '*.md'
-
-  [ "$status" -eq 1 ]
-  [ -z "$output" ]
 }
 
 @test "behavior eval prefix does not cue plugin selection or answer provenance" {

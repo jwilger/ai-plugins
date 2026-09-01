@@ -9413,12 +9413,13 @@ fn unix_timestamp() -> Result<u64, Error> {
 fn ci_recovery_participant() -> Result<CiRecoveryParticipant, Error> {
     let session = std::env::var("TIBER_CLAIM_SESSION")
         .or_else(|_| std::env::var("CODEX_SESSION_ID"))
-        .or_else(|_| std::env::var("CLAUDE_SESSION_ID"))
-        .or_else(|_| MCP_CI_RECOVERY_SESSION.with(|slot| slot.borrow().clone().ok_or(std::env::VarError::NotPresent)))
+        .or_else(|_| {
+            MCP_CI_RECOVERY_SESSION
+                .with(|slot| slot.borrow().clone().ok_or(std::env::VarError::NotPresent))
+        })
         .map_err(|_| {
             Error::Parse(
-                "ci_recovery_session_required env=TIBER_CLAIM_SESSION|CODEX_SESSION_ID|CLAUDE_SESSION_ID"
-                    .to_string(),
+                "ci_recovery_session_required env=TIBER_CLAIM_SESSION|CODEX_SESSION_ID".to_string(),
             )
         })?;
     let session = frontmatter_scalar_value(&session);
@@ -10751,7 +10752,6 @@ fn claim_host() -> String {
 fn claim_session() -> String {
     std::env::var("TIBER_CLAIM_SESSION")
         .or_else(|_| std::env::var("CODEX_SESSION_ID"))
-        .or_else(|_| std::env::var("CLAUDE_SESSION_ID"))
         .map(|value| frontmatter_scalar_value(&value))
         .unwrap_or_else(|_| "unknown".to_string())
 }

@@ -44,7 +44,6 @@ const PROTECTED_PATHS: &[&str] = &[
     ".development-system.toml",
     ".development-system/",
     ".codex/agents/development-system-",
-    ".claude/agents/development-system-",
     ".git/",
 ];
 

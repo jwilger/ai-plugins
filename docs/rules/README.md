@@ -1,9 +1,7 @@
 # Engineering rules
 
-Harness-agnostic guardrails for this repository. These are the source of truth
-for **both** Claude Code and Codex (and any future harness): `AGENTS.md` links
-here, and `CLAUDE.md` is a thin pointer to `AGENTS.md`. Nothing canonical lives
-under `.claude/`.
+Guardrails for this Codex marketplace. These are the source of truth and
+`AGENTS.md` links here.
 
 Every architectural decision is additionally recorded in [`../adr/`](../adr/).
 

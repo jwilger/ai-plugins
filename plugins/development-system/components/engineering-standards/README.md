@@ -37,5 +37,4 @@ instead of expanding this general engineering guardrail.
 
 ## Harnesses
 
-Harness-agnostic — both skills (`SKILL.md` + frontmatter) are consumed
-identically by Claude Code and Codex.
+Codex consumes both skills (`SKILL.md` + frontmatter).

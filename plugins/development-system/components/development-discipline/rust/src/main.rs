@@ -12346,7 +12346,6 @@ fn tools() -> Value {
                     },
                     "project_root": { "type": "string" },
                     "config_path": { "type": "string" },
-                    "harness": { "type": "string" },
                     "fast_model_role": { "type": "string" },
                     "review_model_role": { "type": "string" },
                     "verify_model_role": { "type": "string" },
@@ -12580,7 +12579,6 @@ fn tools() -> Value {
                     "session_id": { "type": "string", "maxLength": MAX_SESSION_ID_CHARS },
                     "project_root": { "type": "string" },
                     "config_path": { "type": "string" },
-                    "harness": { "type": "string" },
                     "fast_model_role": { "type": "string" },
                     "pre_filter_model_role": { "type": "string" },
                     "model_roles": {
@@ -12982,8 +12980,8 @@ fn semantic_tools() -> Vec<Value> {
         }),
         json!({
             "name": "setup.apply",
-            "description": "Apply the exact setup.preview configuration after explicit confirmation. With a harness, it also writes only that harness's project-local MCP entries. It never stages, commits, or changes global harness settings.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 }, "harness": { "type": "string", "enum": ["codex", "claude"] } }, "required": ["confirmed"], "additionalProperties": false }
+            "description": "Apply the exact setup.preview configuration after explicit confirmation and write Codex's project-local MCP entries. It never stages, commits, or changes global Codex settings.",
+            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 } }, "required": ["confirmed"], "additionalProperties": false }
         }),
         json!({
             "name": "development_system.codex_sandbox_setup",
@@ -13493,12 +13491,7 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         }
         semantic::ConfigState::Invalid(error) => return Err(error),
     };
-    let harness_configuration = match arguments.get("harness").and_then(Value::as_str) {
-        None => None,
-        Some("codex") => Some(write_project_mcp_configuration(project_root, "codex")?),
-        Some("claude") => Some(write_project_mcp_configuration(project_root, "claude")?),
-        Some(_) => return Err("development_system.setup_harness_invalid".to_string()),
-    };
+    let harness_configuration = write_project_mcp_configuration(project_root)?;
     Ok(json!({
         "applied": true,
         "configuration_changed": configuration_changed,
@@ -13506,7 +13499,7 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         "configuration_digest": config.digest(),
         "authority": "advisory",
         "ordinary_harness_tools_restricted": false,
-        "restart_required": harness_configuration.is_some(),
+        "restart_required": true,
         "harness_configuration": harness_configuration
     }))
 }
@@ -13554,82 +13547,37 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
-fn write_project_mcp_configuration(project_root: &Path, harness: &str) -> Result<Value, String> {
+fn write_project_mcp_configuration(project_root: &Path) -> Result<Value, String> {
     let binaries = mcp_binary_directory()?;
     let discipline = binaries.join("development-discipline-mcp");
     let tiber = binaries.join("tiber");
-    match harness {
-        "codex" => {
-            let directory = project_root.join(".codex");
-            fs::create_dir_all(&directory).map_err(|error| {
-                format!("development_system.setup_harness_write_failed source={error}")
-            })?;
-            let path = directory.join("config.toml");
-            let existing = fs::read_to_string(&path).unwrap_or_default();
-            let begin = "# >>> development-system MCP servers >>>";
-            let end = "# <<< development-system MCP servers <<<";
-            let retained = match (existing.find(begin), existing.find(end)) {
-                (Some(start), Some(stop)) if stop >= start => {
-                    let after = stop + end.len();
-                    format!("{}{}", &existing[..start], &existing[after..])
-                }
-                _ => existing,
-            };
-            let block = format!(
-                "{begin}\n[mcp_servers.development-discipline]\ncommand = {}\nargs = [\"--service\", \"plugin-advisory\"]\nenv_vars = [\"SSH_AUTH_SOCK\"]\n\n[mcp_servers.tiber]\ncommand = {}\nargs = [\"mcp\", \"stdio\"]\nenv_vars = [\"SSH_AUTH_SOCK\"]\n{end}\n",
-                toml_string(discipline.to_string_lossy().as_ref()),
-                toml_string(tiber.to_string_lossy().as_ref()),
-            );
-            let separator = if retained.is_empty() || retained.ends_with('\n') {
-                ""
-            } else {
-                "\n"
-            };
-            fs::write(&path, format!("{retained}{separator}\n{block}")).map_err(|error| {
-                format!("development_system.setup_harness_write_failed source={error}")
-            })?;
-            Ok(json!({ "harness": "codex", "path": ".codex/config.toml" }))
+    let directory = project_root.join(".codex");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("development_system.setup_harness_write_failed source={error}"))?;
+    let path = directory.join("config.toml");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let begin = "# >>> development-system MCP servers >>>";
+    let end = "# <<< development-system MCP servers <<<";
+    let retained = match (existing.find(begin), existing.find(end)) {
+        (Some(start), Some(stop)) if stop >= start => {
+            let after = stop + end.len();
+            format!("{}{}", &existing[..start], &existing[after..])
         }
-        "claude" => {
-            let path = project_root.join(".mcp.json");
-            let mut document = match fs::read_to_string(&path) {
-                Ok(text) => serde_json::from_str::<Value>(&text)
-                    .map_err(|_| "development_system.setup_claude_mcp_invalid".to_string())?,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    json!({ "mcpServers": {} })
-                }
-                Err(error) => {
-                    return Err(format!(
-                        "development_system.setup_harness_read_failed source={error}"
-                    ))
-                }
-            };
-            let servers = document
-                .get_mut("mcpServers")
-                .and_then(Value::as_object_mut)
-                .ok_or_else(|| "development_system.setup_claude_mcp_invalid".to_string())?;
-            servers.insert(
-                "development-discipline".to_string(),
-                json!({ "command": discipline, "args": ["--service", "plugin-advisory"] }),
-            );
-            servers.insert(
-                "tiber".to_string(),
-                json!({ "command": tiber, "args": ["mcp", "stdio"] }),
-            );
-            fs::write(
-                &path,
-                format!(
-                    "{}\n",
-                    serde_json::to_string_pretty(&document).expect("JSON serialization")
-                ),
-            )
-            .map_err(|error| {
-                format!("development_system.setup_harness_write_failed source={error}")
-            })?;
-            Ok(json!({ "harness": "claude", "path": ".mcp.json" }))
-        }
-        _ => Err("development_system.setup_harness_invalid".to_string()),
-    }
+        _ => existing,
+    };
+    let block = format!(
+        "{begin}\n[mcp_servers.development-discipline]\ncommand = {}\nargs = [\"--service\", \"plugin-advisory\"]\nenv_vars = [\"SSH_AUTH_SOCK\"]\n\n[mcp_servers.tiber]\ncommand = {}\nargs = [\"mcp\", \"stdio\"]\nenv_vars = [\"SSH_AUTH_SOCK\"]\n{end}\n",
+        toml_string(discipline.to_string_lossy().as_ref()),
+        toml_string(tiber.to_string_lossy().as_ref()),
+    );
+    let separator = if retained.is_empty() || retained.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    fs::write(&path, format!("{retained}{separator}\n{block}"))
+        .map_err(|error| format!("development_system.setup_harness_write_failed source={error}"))?;
+    Ok(json!({ "harness": "codex", "path": ".codex/config.toml" }))
 }
 
 fn system_diagnostics_status() -> Result<Value, String> {
@@ -23578,7 +23526,7 @@ fn project_model_config(
             continue;
         }
 
-        if matches!(key.as_str(), "codex" | "claude") {
+        if key == "codex" {
             let Some(values) = value.as_table() else {
                 return Err(format!(
                     "model_config_harness_must_be_table path={} harness={key}",
@@ -23832,78 +23780,29 @@ fn normalize_config_path(path: &Path) -> Option<PathBuf> {
     Some(normalized)
 }
 
-fn detect_harness(arguments: &Value) -> String {
-    let codex_home = env::var_os("CODEX_HOME");
-    let claude_plugin_root = env::var_os("CLAUDE_PLUGIN_ROOT");
-    detect_harness_from_markers(
-        arguments,
-        harness_marker_present(codex_home.as_deref()),
-        harness_marker_present(claude_plugin_root.as_deref()),
-    )
-}
-
-fn harness_marker_present(value: Option<&OsStr>) -> bool {
-    value.is_some_and(|marker| !marker.is_empty())
-}
-
-fn detect_harness_from_markers(
-    arguments: &Value,
-    codex_home_present: bool,
-    claude_plugin_root_present: bool,
-) -> String {
-    if let Some(harness) = string_opt(arguments, "harness").filter(|value| !value.trim().is_empty())
-    {
-        return harness;
-    }
-    if claude_plugin_root_present {
-        return "claude".to_string();
-    }
-    if codex_home_present {
-        return "codex".to_string();
-    }
-    "unknown".to_string()
+fn detect_harness(_arguments: &Value) -> String {
+    "codex".to_string()
 }
 
 fn harness_model_defaults(harness: &str) -> toml::value::Table {
     let mut defaults = toml::value::Table::new();
-    match harness {
-        "codex" => {
-            defaults.insert(
-                "pre_filter".to_string(),
-                toml::Value::String("gpt-5.6-sol".to_string()),
-            );
-            defaults.insert(
-                "lens_review".to_string(),
-                toml::Value::String("gpt-5.6-terra".to_string()),
-            );
-            defaults.insert(
-                "post_filter".to_string(),
-                toml::Value::String("gpt-5.6-luna".to_string()),
-            );
-            defaults.insert(
-                "verifier".to_string(),
-                toml::Value::String("gpt-5.6-sol".to_string()),
-            );
-        }
-        "claude" => {
-            defaults.insert(
-                "pre_filter".to_string(),
-                toml::Value::String("opus".to_string()),
-            );
-            defaults.insert(
-                "lens_review".to_string(),
-                toml::Value::String("sonnet".to_string()),
-            );
-            defaults.insert(
-                "post_filter".to_string(),
-                toml::Value::String("haiku".to_string()),
-            );
-            defaults.insert(
-                "verifier".to_string(),
-                toml::Value::String("opus".to_string()),
-            );
-        }
-        _ => {}
+    if harness == "codex" {
+        defaults.insert(
+            "pre_filter".to_string(),
+            toml::Value::String("gpt-5.6-sol".to_string()),
+        );
+        defaults.insert(
+            "lens_review".to_string(),
+            toml::Value::String("gpt-5.6-terra".to_string()),
+        );
+        defaults.insert(
+            "post_filter".to_string(),
+            toml::Value::String("gpt-5.6-luna".to_string()),
+        );
+        defaults.insert(
+            "verifier".to_string(),
+            toml::Value::String("gpt-5.6-sol".to_string()),
+        );
     }
     defaults
 }
@@ -26166,7 +26065,6 @@ verifier = "config-verify"
             "diff_hash": "abc",
             "project_root": config_root,
             "config_path": "final-review.toml",
-            "harness": "codex",
             "pre_filter_model_role": "explicit-pre"
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
@@ -26190,7 +26088,6 @@ verifier = "config-verify"
             "diff_hash": "abc",
             "project_root": config_root,
             "config_path": "final-review.toml",
-            "harness": "codex",
             "pre_filter_model_role": "explicit-pre",
             "lens_review_model_role": "explicit-review",
             "post_filter_model_role": "explicit-post",
@@ -26208,7 +26105,6 @@ verifier = "config-verify"
             "diff_hash": "abc",
             "project_root": config_root,
             "config_path": "final-review.toml",
-            "harness": "codex",
             "model_roles": {
                 "pre_filter": "nested-pre",
                 "lens_review": "nested-review",
@@ -26230,8 +26126,7 @@ verifier = "config-verify"
             "base": "origin/main",
             "changed_files": ["src/lib.rs"],
             "diff_hash": "abc",
-            "project_root": config_root,
-            "harness": "codex"
+            "project_root": config_root
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
         assert_eq!(parsed["model_roles"]["pre_filter"], "gpt-5.6-sol");
@@ -26241,23 +26136,6 @@ verifier = "config-verify"
         assert_eq!(
             parsed["model_role_sources"]["pre_filter"],
             "harness_default"
-        );
-
-        let output = plan(&json!({
-            "base": "origin/main",
-            "changed_files": ["src/lib.rs"],
-            "diff_hash": "abc",
-            "project_root": config_root,
-            "harness": "unknown"
-        }));
-        let parsed: Value = serde_json::from_str(&output).expect("json");
-        assert_eq!(parsed["model_roles"]["pre_filter"], "strong-reviewer");
-        assert_eq!(parsed["model_roles"]["lens_review"], "substantive-worker");
-        assert_eq!(parsed["model_roles"]["post_filter"], "bounded-helper");
-        assert_eq!(parsed["model_roles"]["verifier"], "strong-reviewer");
-        assert_eq!(
-            parsed["model_role_sources"]["pre_filter"],
-            "generic_abstract_role"
         );
 
         let _ = fs::remove_dir_all(config_root);
@@ -26286,8 +26164,7 @@ lens_review = "gpt-5.6-sol"
             "changed_files": ["src/lib.rs"],
             "diff_hash": "abc",
             "project_root": config_root,
-            "config_path": "final-review.toml",
-            "harness": "codex"
+            "config_path": "final-review.toml"
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
 
@@ -26308,100 +26185,11 @@ lens_review = "gpt-5.6-sol"
     }
 
     #[test]
-    fn plan_resolves_claude_harness_defaults() {
-        let project_root = test_project_root("claude-defaults");
-
-        let parsed: Value = serde_json::from_str(&plan(&json!({
-            "changed_files": ["src/lib.rs"],
-            "diff_hash": "abc",
-            "project_root": project_root,
-            "harness": "claude"
-        })))
-        .expect("plan json");
-
-        assert_eq!(
-            parsed["model_roles"],
-            json!({
-                "pre_filter": "opus",
-                "lens_review": "sonnet",
-                "post_filter": "haiku",
-                "verifier": "opus"
-            })
-        );
-        assert!(parsed["model_role_sources"]
-            .as_object()
-            .expect("role sources")
-            .values()
-            .all(|source| source == "harness_default"));
-    }
-
-    #[test]
-    fn plan_resolves_claude_specific_project_model_config() {
-        let project_root = test_project_root("claude-models");
-        fs::write(
-            project_root.join("final-review.toml"),
-            r#"
-[final_review.models]
-pre_filter = "generic-pre"
-lens_review = "generic-review"
-post_filter = "generic-post"
-verifier = "generic-verify"
-
-[final_review.models.claude]
-lens_review = "claude-review"
-verifier = "claude-verify"
-"#,
-        )
-        .expect("write config");
-
-        let parsed: Value = serde_json::from_str(&plan(&json!({
-            "changed_files": ["src/lib.rs"],
-            "diff_hash": "abc",
-            "project_root": project_root,
-            "config_path": "final-review.toml",
-            "harness": "claude"
-        })))
-        .expect("plan json");
-
-        assert_eq!(parsed["model_roles"]["pre_filter"], "generic-pre");
-        assert_eq!(parsed["model_roles"]["lens_review"], "claude-review");
-        assert_eq!(parsed["model_roles"]["post_filter"], "generic-post");
-        assert_eq!(parsed["model_roles"]["verifier"], "claude-verify");
-        assert_eq!(
-            parsed["model_role_sources"]["lens_review"],
-            "project_toml_config:claude"
-        );
-    }
-
-    #[test]
-    fn harness_detection_preserves_explicit_and_marker_precedence() {
-        let cases = [
-            (json!({"harness": "explicit"}), true, true, "explicit"),
-            (json!({}), true, true, "claude"),
-            (json!({}), false, true, "claude"),
-            (json!({}), false, false, "unknown"),
-        ];
-
-        for (arguments, codex_present, claude_present, expected) in cases {
-            assert_eq!(
-                detect_harness_from_markers(&arguments, codex_present, claude_present),
-                expected
-            );
-        }
-    }
-
-    #[test]
-    fn harness_detection_ignores_empty_environment_markers() {
-        assert!(!harness_marker_present(Some(OsStr::new(""))));
-    }
-
-    #[test]
     fn plan_exposes_cost_controlled_phase_execution_policy() {
         let parsed: Value = serde_json::from_str(&plan(&json!({
             "base": "origin/main",
             "changed_files": ["src/lib.rs"],
-            "diff_hash": "abc",
-            "harness": "codex"
+            "diff_hash": "abc"
         })))
         .expect("json");
 
@@ -26501,8 +26289,7 @@ verifier = "default-verify"
             "base": "origin/main",
             "changed_files": ["src/lib.rs"],
             "diff_hash": "abc",
-            "project_root": project_root,
-            "harness": "codex"
+            "project_root": project_root
         })))
         .expect("json");
         assert_eq!(parsed["model_roles"]["pre_filter"], "default-pre");
@@ -26526,8 +26313,7 @@ verifier = "default-verify"
                 "lens_review": "explicit-review",
                 "post_filter": "explicit-post",
                 "verifier": "explicit-verify"
-            },
-            "harness": "codex"
+            }
         }))
         .expect_err("invalid present config should fail closed");
         assert!(error.contains("model_config_parse_failed"));
@@ -37947,8 +37733,7 @@ pre_filter = "project-pre"
     fn codex_mcp_configuration_forwards_the_ssh_agent_to_git_backed_services() {
         let project_root = test_project_root("codex-mcp-ssh-agent");
 
-        write_project_mcp_configuration(&project_root, "codex")
-            .expect("write Codex MCP configuration");
+        write_project_mcp_configuration(&project_root).expect("write Codex MCP configuration");
         let configuration = fs::read_to_string(project_root.join(".codex/config.toml"))
             .expect("read Codex MCP configuration");
 

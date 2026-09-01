@@ -12,18 +12,6 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd -P)"
   TMPROOT="$BATS_TEST_TMPDIR"
 
-  if [ ! -x "$ROOT/node_modules/.bin/promptfoo" ]; then
-    "$ROOT/scripts/evals/ensure-node-deps.sh"
-  fi
-}
-
-manifest_command() {
-  local manifest=$1
-  local server=$2
-  local relative
-
-  relative="$(jq -r ".mcpServers[\"$server\"].command" "$manifest")"
-  realpath "$(dirname "$manifest")/$relative"
 }
 
 initialize_server() {
@@ -52,108 +40,6 @@ list_server_tools() {
       CODEX_HOME="$TMPROOT/codex-home" \
       SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
       "$command" "$@"
-}
-
-initialize_codex_plugin_server() {
-  local manifest=$1
-  local server=$2
-  local version
-  local installed_root
-  local command
-  local cwd
-  local args
-  local env_args
-  local env_var
-
-  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
-  installed_root="$TMPROOT/codex-home/plugins/cache/ai-plugins/development-system/$version"
-  mkdir -p "$(dirname "$installed_root")" "$TMPROOT/caller"
-  ln -sfn "$ROOT/plugins/development-system" "$installed_root"
-  command="$(jq -r ".mcpServers[\"$server\"].command" "$manifest")"
-  cwd="$(jq -r ".mcpServers[\"$server\"].cwd // empty" "$manifest")"
-  mapfile -t args < <(jq -r ".mcpServers[\"$server\"].args[]" "$manifest")
-  env_args=(
-    "PATH=$PATH"
-    "HOME=$TMPROOT/home"
-    "XDG_DATA_HOME=$XDG_DATA_HOME"
-    "CODEX_HOME=$TMPROOT/codex-home"
-  )
-  while IFS= read -r env_var; do
-    if [ -n "$env_var" ] && [ -n "${!env_var+x}" ]; then
-      env_args+=("$env_var=${!env_var}")
-    fi
-  done < <(jq -r ".mcpServers[\"$server\"].env_vars[]?" "$manifest")
-
-  (
-    if [ "$cwd" = "." ]; then
-      cd "$installed_root"
-    else
-      cd "$TMPROOT/caller"
-    fi
-    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bats","version":"0.0.0"}}}' |
-      env -i \
-        "${env_args[@]}" \
-        "$command" "${args[@]}"
-  )
-}
-
-@test "component MCP manifests resolve only repository-owned launchers" {
-  local promptfoo_manifest="$ROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json"
-  local tiber_manifest="$ROOT/plugins/development-system/components/tiber/.mcp.json"
-  local discipline_manifest="$ROOT/plugins/development-system/components/development-discipline/.mcp.json"
-
-  [ "$(manifest_command "$promptfoo_manifest" promptfoo)" = \
-    "$ROOT/plugins/development-system/components/agentic-systems-engineering/bin/promptfoo-mcp" ]
-  [ "$(manifest_command "$tiber_manifest" tiber)" = \
-    "$ROOT/plugins/development-system/components/tiber/bin/tiber" ]
-  [ "$(manifest_command "$discipline_manifest" development-discipline)" = \
-    "$ROOT/plugins/development-system/components/development-discipline/bin/development-discipline-mcp" ]
-}
-
-@test "promptfoo component manifest starts with the repo-local binary and isolated state" {
-  local manifest="$ROOT/plugins/development-system/components/agentic-systems-engineering/.mcp.json"
-  local command
-  command="$(manifest_command "$manifest" promptfoo)"
-
-  run env \
-    PROMPTFOO_BIN="$ROOT/node_modules/.bin/promptfoo" \
-    PROMPTFOO_MCP_STATE_DIR="$TMPROOT/promptfoo-state" \
-    "$command" </dev/null
-
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"EROFS"* ]]
-  [ -d "$TMPROOT/promptfoo-state/home" ]
-  [ -d "$TMPROOT/promptfoo-state/config" ]
-  [ -d "$TMPROOT/promptfoo-state/cache" ]
-}
-
-@test "promptfoo component defaults disposable state to the eval runtime directory" {
-  local command="$ROOT/plugins/development-system/components/agentic-systems-engineering/bin/promptfoo-mcp"
-  local workspace="$TMPROOT/promptfoo-workspace"
-  mkdir -p "$workspace"
-
-  run bash -c 'cd "$1" && PROMPTFOO_BIN="$2" "$3" </dev/null' _ \
-    "$workspace" "$ROOT/node_modules/.bin/promptfoo" "$command"
-
-  [ "$status" -eq 0 ]
-  [ -d "$workspace/.evals/promptfoo-mcp/home" ]
-  [ -d "$workspace/.evals/promptfoo-mcp/config" ]
-  [ -d "$workspace/.evals/promptfoo-mcp/cache" ]
-  [ ! -e "$workspace/.dependencies" ]
-}
-
-@test "tiber component manifest initializes without an installed marketplace cache" {
-  local manifest="$ROOT/plugins/development-system/components/tiber/.mcp.json"
-  local command
-  local args
-  command="$(manifest_command "$manifest" tiber)"
-  mapfile -t args < <(jq -r '.mcpServers.tiber.args[]' "$manifest")
-
-  run initialize_server "$command" "${args[@]}"
-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *'"name":"tiber"'* ]]
-  [[ "$output" == *'"tools":{}'* ]]
 }
 
 @test "Tiber requires the versioned host-local installation when no binary is installed" {
@@ -317,7 +203,7 @@ initialize_codex_plugin_server() {
   local data_home="$TMPROOT/interrupted-install-xdg-data"
   local real_mv
   local host
-  local version="5.5.0"
+  local version="6.0.0"
 
   real_mv="$(command -v mv)"
   host="$(source "$ROOT/plugins/development-system/lib/installed-binary.sh"; development_system_host)"
@@ -450,20 +336,6 @@ initialize_codex_plugin_server() {
   [[ "$output" != *"cargo-must-not-run"* ]]
 }
 
-@test "development-discipline component manifest initializes the advisory plugin service" {
-  local manifest="$ROOT/plugins/development-system/components/development-discipline/.mcp.json"
-  local command
-  local args
-  command="$(manifest_command "$manifest" development-discipline)"
-  mapfile -t args < <(jq -r '.mcpServers["development-discipline"].args[]' "$manifest")
-
-  run initialize_server "$command" "${args[@]}"
-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *'"name":"development-discipline"'* ]]
-  [[ "$output" == *'"tools":{}'* ]]
-}
-
 @test "top-level MCP launchers ignore unrelated global marketplace state" {
   mkdir -p "$TMPROOT/home/.codex/plugins/cache/ai-plugins/development-system/0.0.0/bin"
   printf '%s\n' '#!/bin/sh' 'echo stale-global-launcher-used >&2' 'exit 42' \
@@ -511,7 +383,7 @@ initialize_codex_plugin_server() {
   discipline_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" development-discipline-mcp)"
   expected_discipline="$discipline_path"
   expected_tiber="$tiber_path"
-  request="$(jq -cn --arg project_root "$project" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"setup.apply",arguments:{project_root:$project_root,confirmed:true,selected_command_ids:["just-ci"],harness:"codex"}}}')"
+  request="$(jq -cn --arg project_root "$project" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"setup.apply",arguments:{project_root:$project_root,confirmed:true,selected_command_ids:["just-ci"]}}}')"
 
   run bash -c 'printf "%s\\n" "$2" | "$1" --service plugin-advisory' _ "$discipline_path" "$request"
   [ "$status" -eq 0 ]
@@ -520,15 +392,6 @@ initialize_codex_plugin_server() {
   [[ "$config" == *"command = \"$expected_discipline\""* ]]
   [[ "$config" == *"command = \"$expected_tiber\""* ]]
   [[ "$config" != *".staging."* ]]
-
-  request="$(jq -cn --arg project_root "$project" '{jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"setup.apply",arguments:{project_root:$project_root,confirmed:true,harness:"claude"}}}')"
-  run bash -c 'printf "%s\\n" "$2" | "$1" --service plugin-advisory' _ "$discipline_path" "$request"
-  [ "$status" -eq 0 ]
-  run jq -e --arg discipline "$expected_discipline" --arg tiber "$expected_tiber" '
-    .mcpServers["development-discipline"].command == $discipline and
-    .mcpServers.tiber.command == $tiber
-  ' "$project/.mcp.json"
-  [ "$status" -eq 0 ]
 
   run just --justfile "$ROOT/justfile" install-development-system-binaries
   [ "$status" -eq 0 ]

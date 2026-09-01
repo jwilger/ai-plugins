@@ -123,9 +123,8 @@ worktree-teardown path:
 
 # Marketplace manifest + formatting validation.
 validate-marketplace:
-    jq empty .claude-plugin/marketplace.json
     jq empty .agents/plugins/marketplace.json
-    find plugins -name plugin.json -exec jq empty {} \;
+    find plugins -path '*/.codex-plugin/plugin.json' -exec jq empty {} \;
     bash scripts/validate-manifests.sh
     bash scripts/check-model-routing-config.sh
     prettier --check "**/*.{json,md}"

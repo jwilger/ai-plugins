@@ -643,7 +643,8 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(codex_setup_tool.contains("Couldn't get agent socket?"));
     assert!(codex_setup_tool.contains("SSH_AUTH_SOCK"));
     assert!(codex_setup_tool.contains("env_vars = [\\\"SSH_AUTH_SOCK\\\"]"));
-    assert!(codex_setup_tool.contains("preserves the absolute installed launcher"));
+    assert!(codex_setup_tool.contains("project-local [mcp_servers.tiber] registration"));
+    assert!(codex_setup_tool.contains("preserve the absolute installed launcher"));
     assert!(codex_setup_tool.contains("Never forward SSH_AUTH_SOCK to a PATH-resolved"));
     assert!(codex_setup_tool.contains("publish event transactions to origin/tiber"));
     assert!(codex_setup_tool.contains(
@@ -1018,7 +1019,6 @@ fn mcp_stdio_generates_a_process_stable_ci_identity_when_harness_identity_is_abs
         .env("TIBER_CLAIM_HOST", "mcp-host")
         .env_remove("TIBER_CLAIM_SESSION")
         .env_remove("CODEX_SESSION_ID")
-        .env_remove("CLAUDE_SESSION_ID")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1061,7 +1061,6 @@ fn failed_mcp_claim_returns_structured_blocker_and_successful_retry_clears_it() 
         .current_dir(repo.path())
         .env_remove("TIBER_CLAIM_SESSION")
         .env_remove("CODEX_SESSION_ID")
-        .env_remove("CLAUDE_SESSION_ID")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

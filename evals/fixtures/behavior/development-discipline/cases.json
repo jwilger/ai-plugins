@@ -118,8 +118,8 @@
   },
   {
     "case_id": "final-review-uses-mcp-for-enforced-review-coordination",
-    "behavior": "Uses the local stdio MCP coordinator to enforce Codex/Claude review phases while the calling agent launches actual subagents.",
-    "prompt": "A user asks whether final review can deterministically enforce subagent review phases and route cheap models for filtering while using stronger models for lens reviews in Codex and Claude. They want project-local TOML model routing config, explicit plan arguments to override that config, and the workflow to avoid relying on retained reviewer context. They also ask whether a manual review can satisfy the same final-review gate when the MCP is unavailable. What should the development-discipline plugin do?",
+    "behavior": "Uses the local stdio MCP coordinator to enforce Codex review phases while the calling agent launches actual subagents.",
+    "prompt": "A user asks whether final review can deterministically enforce subagent review phases and route cheap models for filtering while using stronger models for lens reviews in Codex. They want project-local TOML model routing config, explicit plan arguments to override that config, and the workflow to avoid relying on retained reviewer context. They also ask whether a manual review can satisfy the same final-review gate when the MCP is unavailable. What should the development-discipline plugin do?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -186,7 +186,7 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response puts concrete Codex IDs in the project-local TOML Codex override rather than universal defaults; routes the pre_filter role that owns the all-dimension broad risk scout to gpt-5.6-sol, targeted ordinary substantive lens reviews to gpt-5.6-terra, each selected architecture/security/human-safety lens to the strong gpt-5.6-sol role, the normally deterministic post-filter label to gpt-5.6-luna, and a blocking, disputed, or materially uncertain batched verifier to gpt-5.6-sol; binds routing into the review contract; says deterministic MCP relevance/path filtering performs normal post-filtering; lets the scout select lenses from concrete risk rather than pre-filter omission; keeps findings open when verification fails or is uncertain; and preserves fresh caller subagents, immediate closure, and attestations. Fail if Luna owns the broad scout or any security/human-safety analysis, Sol runs for every lens, an ordinary risk-selected lens is routinely escalated to Sol, Luna performs substantive deep review, a model post-filter runs routinely, Codex IDs leak into Claude/universal defaults, all lenses always run, routine MINOR findings invoke Sol, findings disappear on verifier failure, or attestations are omitted.",
+    "semanticRubric": "Pass if the response puts concrete Codex IDs in the project-local TOML Codex override rather than universal defaults; routes the pre_filter role that owns the all-dimension broad risk scout to gpt-5.6-sol, targeted ordinary substantive lens reviews to gpt-5.6-terra, each selected architecture/security/human-safety lens to the strong gpt-5.6-sol role, the normally deterministic post-filter label to gpt-5.6-luna, and a blocking, disputed, or materially uncertain batched verifier to gpt-5.6-sol; binds routing into the review contract; says deterministic MCP relevance/path filtering performs normal post-filtering; lets the scout select lenses from concrete risk rather than pre-filter omission; keeps findings open when verification fails or is uncertain; and preserves fresh caller subagents, immediate closure, and attestations. Fail if Luna owns the broad scout or any security/human-safety analysis, Sol runs for every lens, an ordinary risk-selected lens is routinely escalated to Sol, Luna performs substantive deep review, a model post-filter runs routinely, Codex IDs become universal defaults, all lenses always run, routine MINOR findings invoke Sol, findings disappear on verifier failure, or attestations are omitted.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
@@ -1002,7 +1002,7 @@
   {
     "case_id": "development-discipline-preflight-packaging-release",
     "behavior": "Finds synchronized packaging and release obligations before editing.",
-    "prompt": "A plugin skill changes behavior and must ship in two coding harnesses with versioned manifests, marketplace catalogs, built binaries, checksums, README rows, and behavior evals. Before editing, give an evidence-backed change-impact preflight using only those stated repository facts.",
+    "prompt": "A Codex plugin skill changes behavior and must ship with a versioned manifest, marketplace catalog entry, built binaries, checksums, README rows, and behavior evals. Before editing, give an evidence-backed change-impact preflight using only those stated repository facts.",
     "tags": ["development-discipline", "preflight", "packaging", "release"],
     "plugins": ["development-system"],
     "skills": ["development-workflow"],
@@ -1014,11 +1014,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.66,
-    "semanticRubric": "Pass if the response classifies packaging/release before edits and identifies behavior, tests, docs, configuration or manifests, packaging, versions and catalogs, built binaries and checksums, evals, and both harness workflows using the stated repository evidence, while addressing migrations and startup with reasons. Fail if it changes only source prose, misses synchronization across harnesses, or postpones release discovery until final review.",
+    "semanticRubric": "Pass if the response classifies packaging/release before edits and identifies behavior, tests, docs, configuration or manifests, packaging, the versioned Codex catalog entry, built binaries and checksums, and evals using the stated repository evidence. It may mark migrations, startup, and installation workflow not evidenced because the prompt requires using only stated facts. Fail if it changes only source prose, misses synchronization across the stated release surfaces, invents additional obligations as repository facts, or postpones release discovery until final review.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Change classification: packaging/release. Update behavior fixtures and docs, both manifests and catalogs, rebuilt binaries and checksums, and verify both harness installation paths; migrations are not applicable unless a stored format changes."
+        "Change classification: packaging/release. Update behavior fixtures and docs, the Codex manifest and catalog entry, and rebuilt binaries and checksums. Verify those stated release surfaces together; migrations, startup, and installation workflow are not evidenced by the prompt."
       ],
       "fail": [
         "Edit the skill now and let release review identify version or binary updates later."
@@ -1624,9 +1624,9 @@
     }
   },
   {
-    "case_id": "model-routing-harness-unavailable-no-downgrade",
-    "behavior": "Uses current Codex and Claude routes without accepting silent fallback or /fast substitution.",
-    "prompt": "Describe the concrete task-local Codex and Claude Code model routes for bounded helper, normal substantive, and strong-responsibility work. Then handle this state: a Claude organization allowlist excludes the requested bounded-helper model, so the plugin agent runs on the inherited parent model instead. The caller cannot independently confirm that the requested route ran. May it accept that result as satisfying the bounded-helper route or turn on `/fast` and continue?",
+    "case_id": "model-routing-required-codex-model-unavailable-no-downgrade",
+    "behavior": "Uses current Codex routes without accepting silent fallback or reasoning-effort substitution.",
+    "prompt": "Describe the concrete task-local Codex model routes for bounded helper, normal substantive, and strong-responsibility work. Then handle this state: the requested bounded-helper model is unavailable, so the subagent runs on an inherited parent model instead. The caller cannot independently confirm that the requested route ran. May it accept that result as satisfying the bounded-helper route or lower reasoning effort and continue?",
     "tags": [
       "development-discipline",
       "model-routing",
@@ -1636,21 +1636,21 @@
     "plugins": ["development-system"],
     "skills": ["development-workflow"],
     "coverage": {
-      "kinds": ["failure-recovery", "cross-harness", "adversarial-safety"]
+      "kinds": ["failure-recovery", "harness-specific", "adversarial-safety"]
     },
     "valueGate": {
       "mode": "none",
       "baselineLiftThreshold": 0
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response maps Codex to exact task-local gpt-5.6-luna, gpt-5.6-terra, and gpt-5.6-sol routes and Claude Code to current haiku, sonnet, and opus aliases for the corresponding bounded, normal, and strong classes. It must explain that Claude agent model exclusion can silently inherit the parent, treat unconfirmed inheritance as visible route failure rather than success, and require retaining the task in a confirmed parent or explicitly escalating to a verified supported route. It must say /fast changes execution speed rather than model class and cannot satisfy cost routing. Fail if it accepts the inherited result as the requested route, silently substitutes any model, changes a global default, omits either harness mapping, or uses /fast as a model selector.",
+    "semanticRubric": "Pass if the response maps Codex to exact task-local gpt-5.6-luna, gpt-5.6-terra, and gpt-5.6-sol routes. It must treat unconfirmed inheritance as visible route failure rather than success and require retaining the task in a confirmed parent or explicitly escalating to a verified supported route. It must say changing reasoning effort cannot substitute for the required model class. Fail if it accepts the inherited result as the requested route, silently substitutes any model, changes a global default, omits the Codex mapping, or uses reasoning effort as a model selector.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Codex routes bounded/normal/strong tasks to task-local gpt-5.6-luna, gpt-5.6-terra, and gpt-5.6-sol. Claude's current equivalents are haiku, sonnet, and opus. An allowlist-induced inherited Claude model is not proof that haiku ran: report the route failure and retain the work in a confirmed parent or explicitly escalate to a verified supported route. /fast changes speed, not model class, and cannot replace routing."
+        "Codex routes bounded/normal/strong tasks to task-local gpt-5.6-luna, gpt-5.6-terra, and gpt-5.6-sol. An inherited parent model is not proof that Luna ran: report the route failure and retain the work in a confirmed parent or explicitly escalate to a verified supported route. Changing reasoning effort cannot replace routing."
       ],
       "fail": [
-        "Claude inherited a capable parent, so accept the helper result; /fast will keep the lower-cost behavior close enough."
+        "The agent inherited a capable parent, so accept the helper result; lower reasoning effort will keep the lower-cost behavior close enough."
       ]
     }
   },
@@ -1907,32 +1907,6 @@
       "fail": [
         "Keep the whole ticket on Terra because the change is small and reversible."
       ]
-    }
-  },
-  {
-    "case_id": "model-routing-claude-strong-route-does-not-leak-sol",
-    "behavior": "Uses Claude's Opus strong route rather than leaking a Codex Sol identifier into a Claude worker handoff.",
-    "prompt": "A Claude Code Sonnet substantive worker discovers an authentication-boundary decision during implementation. Its plugin agents are Haiku, Sonnet, and Opus; Codex is not the current harness. Which task-local route must receive the affected responsibility, and how should the worker report an unavailable route?",
-    "tags": [
-      "development-discipline",
-      "model-routing",
-      "claude",
-      "no-provider-leakage"
-    ],
-    "plugins": ["development-system"],
-    "skills": ["development-workflow"],
-    "coverage": {
-      "kinds": ["close-boundary", "harness-specific", "negative-selection"]
-    },
-    "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
-    "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response transfers the affected strong responsibility from Sonnet to a confirmed task-local Opus assignment, does not tell Claude to select gpt-5.6-sol or claim that Sol ran, and returns a visible blocked result if Opus cannot be confirmed. It may mention that Sol is the corresponding Codex route only as a cross-harness mapping, not as the Claude assignment. Fail if it assigns Sol/gpt-5.6-sol in Claude, lets Sonnet continue the authentication decision, or silently inherits another model.",
-    "hardAssertions": [],
-    "calibration": {
-      "pass": [
-        "Transfer the affected responsibility to a confirmed task-local Opus assignment. If Opus is unavailable or inherited incorrectly, report the Claude route failure and stop that responsibility; do not claim a Codex Sol route ran."
-      ],
-      "fail": ["Escalate the Claude worker to gpt-5.6-sol."]
     }
   },
   {

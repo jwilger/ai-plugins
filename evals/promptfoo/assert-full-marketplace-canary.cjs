@@ -39,35 +39,13 @@ function skillNames(plugin) {
     .map((entry) => entry.name);
 }
 
-function providerId(context) {
-  const provider = context?.provider;
-  if (!provider) return "";
-  if (typeof provider.id === "function") return provider.id();
-  if (typeof provider.id === "string") return provider.id;
-  return "";
-}
-
-function expectedPlugins(context) {
-  const id = providerId(context);
-
-  if (id.includes("anthropic:claude-agent-sdk")) {
-    return manifestPlugins(".claude-plugin/marketplace.json");
-  }
-
-  if (id.includes("openai:codex-sdk")) {
-    return manifestPlugins(".agents/plugins/marketplace.json");
-  }
-
-  return [
-    ...manifestPlugins(".claude-plugin/marketplace.json"),
-    ...manifestPlugins(".agents/plugins/marketplace.json"),
-  ];
-}
-
-module.exports = function assertFullMarketplaceCanary(output, context = {}) {
+module.exports = function assertFullMarketplaceCanary(output) {
   const text = String(output || "").toLowerCase();
   const plugins = new Map(
-    expectedPlugins(context).map((plugin) => [plugin.name, plugin]),
+    manifestPlugins(".agents/plugins/marketplace.json").map((plugin) => [
+      plugin.name,
+      plugin,
+    ]),
   );
   const missing = [...plugins.keys()].filter((name) => {
     const accepted = [name, titleCase(name)].map((candidate) =>

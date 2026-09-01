@@ -20,12 +20,6 @@ post_filter = "bounded-helper"
 pre_filter = "strong-reviewer"
 verifier = "strong-reviewer"
 
-[final_review.models.claude]
-lens_review = "sonnet"
-post_filter = "haiku"
-pre_filter = "opus"
-verifier = "opus"
-
 [final_review.models.codex]
 lens_review = "gpt-5.6-terra"
 post_filter = "gpt-5.6-luna"

@@ -53,8 +53,8 @@ preferred over the others.
    a permission boundary. State the exact gate and the action an authorized
    person must take.
 
-For the survive-laptop-off case, this can be backed by a scheduled/cloud agent
-(e.g. a Claude Cloud Routine) rather than a local loop.
+For the survive-laptop-off case, this can be backed by a scheduled or cloud
+agent rather than a local loop.
 
 ## Notes
 

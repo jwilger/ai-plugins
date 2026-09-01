@@ -1,15 +1,12 @@
 # ai-plugins
 
-A **multi-harness marketplace of AI coding-assistant plugins** for
-[Claude Code](https://code.claude.com), [Codex](https://openai.com/codex/), and
-other harnesses that adopt plugin or marketplace concepts.
+A **Codex marketplace of AI coding-assistant plugins**.
 
 ## Personal development system
 
 This marketplace has one audience and one installable plugin:
 [`development-system`](plugins/development-system/README.md). It supports Codex
-and Claude Code with one initialization command and one project configuration
-file.
+with one initialization command and one project configuration file.
 
 The default preset is direct-to-trunk delivery with Tiber and on-demand linked
 worktrees for concurrent mutable work.
@@ -23,42 +20,9 @@ user-managed MCPs that need compatibility review.
 
 ## Plugin catalog
 
-| Plugin                                                     | Harnesses          | Description                                                                                          | Version |
-| ---------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, Claude Code | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 5.5.0   |
-
-## Using the marketplace (Claude Code)
-
-Add this repository as a marketplace, then install a plugin from it:
-
-```shell
-# From inside Claude Code:
-/plugin marketplace add jwilger/ai-plugins      # GitHub owner/repo shorthand
-# ...or a local checkout:
-/plugin marketplace add ./ai-plugins
-
-/plugin install development-system@ai-plugins
-```
-
-After every install or upgrade, build the two local Rust executables from the
-marketplace checkout for the current host:
-
-```shell
-just install-development-system-binaries
-```
-
-The bootstrap installs the binaries under
-`$XDG_DATA_HOME/ai-plugins/development-system/` (or
-`~/.local/share/ai-plugins/development-system/`) by plugin version and host.
-Normal plugin use never invokes Cargo.
-The bootstrap itself requires a working Cargo environment; the repository Nix
-devshell is optional convenience, not a plugin prerequisite. Without `just`,
-run `scripts/install-development-system-binaries.sh` from the checkout.
-
-The marketplace is referenced by its **name** (`ai-plugins`) in install
-commands, regardless of the URL you added it from. List and manage with
-`/plugin list`, `/plugin marketplace update ai-plugins`, and
-`/plugin marketplace remove ai-plugins`.
+| Plugin                                                     | Harness | Description                                                                                          | Version |
+| ---------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- | ------- |
+| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.0.0   |
 
 ## Using the marketplace (Codex)
 
@@ -91,8 +55,8 @@ your home directory. Delete that directory any time for a clean slate.
 
 This repo also has a committed `package.json`/`package-lock.json` for the local
 Promptfoo eval runner. `node_modules/` is ignored and restored with `npm ci`;
-the eval scripts run that automatically when the Promptfoo, Codex SDK, or
-Claude Agent SDK packages are missing.
+the eval scripts run that automatically when the Promptfoo or Codex SDK
+packages are missing.
 
 See [`AGENTS.md`](AGENTS.md) for how to author, validate, and publish a plugin.
 
@@ -116,8 +80,7 @@ case-target plugin/skill summaries so regressions can be traced back to both the
 loaded marketplace surface and the behavior each scenario exercises.
 
 The canonical promptfoo behavior evals run through Promptfoo's native
-`openai:codex-sdk` coding-agent provider. Claude marketplace support remains,
-but this repository no longer runs Claude harness evals. The runner generates
+`openai:codex-sdk` coding-agent provider. The runner generates
 the promptfoo config from the current Codex marketplace manifest and labels
 no-plugin, targeted-plugin, and full-marketplace behavior modes. Codex uses a
 separate generated home for each mode. Targeted mode installs the deterministic,
@@ -129,10 +92,8 @@ separately from the plugins targeted by an individual case. An unfiltered
 targeted run equals the full catalog today because the marketplace has one
 public plugin and the selected cases target it. The two modes remain distinct
 controls for filtered runs and future catalog changes.
-Promptfoo is pinned at `0.121.18`; Promptfoo and the provider SDK packages are
-pinned in `package.json` and `package-lock.json`. The Claude Agent SDK remains
-pinned while Claude marketplace support is retained, but the canonical runner
-does not invoke it. The runner disables prompt response caching and hosted
+Promptfoo is pinned at `0.121.19`; Promptfoo and the Codex SDK are pinned in
+`package.json` and `package-lock.json`. The runner disables prompt response caching and hosted
 sharing so a behavior run is a fresh local record.
 
 Default eval harness posture:
@@ -195,21 +156,7 @@ without sharing. Interrupted, terminated, and timed-out runs all retain any
 partial artifacts under
 `evals/out/timeout-artifacts/` for debugging.
 
-The repository retains an optional Promptfoo MCP definition under
-`plugins/development-system/components/agentic-systems-engineering/`. That path
-is an internal component identity, not a public marketplace plugin or skill
-name; users install only `development-system`. A project that explicitly wires
-the optional server must provide `promptfoo@0.121.18` on `PATH`. When the
-project uses `flake.nix`, prefer `pkgs.promptfoo` when nixpkgs provides the
-required version so updates flow through the flake lockfile; otherwise use the
-project's local package-manager sandbox. The server supports agent-assisted
-config validation, focused eval runs, result inspection, and fixture
-development. It supplements the canonical runner; it does not replace the
-repo-owned artifact path above. Promptfoo's separate `mcp` provider is for
-testing MCP servers as systems under test and should be added only when a plugin
-or project exposes an MCP server to evaluate.
-
-If Codex or Claude Code reports a missing Development System binary, run
+If Codex reports a missing Development System binary, run
 `just install-development-system-binaries` from the matching
 marketplace checkout. For an explicitly configured Promptfoo server, also
 verify that the pinned runtime above is available on `PATH`.
@@ -234,8 +181,6 @@ excerpts.
 ├── .agents/
 │   └── plugins/
 │       └── marketplace.json  # Codex-facing marketplace manifest
-├── .claude-plugin/
-│   └── marketplace.json      # Claude Code marketplace manifest
 ├── .github/
 │   ├── ISSUE_TEMPLATE/       # eval-case intake form
 │   └── workflows/            # CI and eval workflows

@@ -3,10 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const supportedProviders = new Set([
-  "anthropic:claude-agent-sdk",
-  "openai:codex-sdk",
-]);
+const supportedProviders = new Set(["openai:codex-sdk"]);
 const supportedPluginModes = new Set([
   "no-plugins",
   "targeted-plugins",

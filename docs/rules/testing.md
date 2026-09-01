@@ -5,8 +5,8 @@ behavior end-to-end. Plans are shaped around behaviors, never component waterfal
 
 **Behavior tests** cover externally-observable behavior, including edge cases.
 Scenarios are **black-box**: they exercise the public surface and avoid private
-implementation details. Cross-harness behaviors should cover Claude Code and
-Codex when both harnesses are affected.
+implementation details. Cross-target behavior should use parametrized scenarios
+when multiple targets are affected.
 
 **One behavior step at a time:** get one observable behavior green with the
 fast developer gate passing (`just pre-commit`), **commit**, then move to the

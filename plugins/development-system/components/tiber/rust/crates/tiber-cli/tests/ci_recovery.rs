@@ -100,7 +100,6 @@ fn ci_recovery_claim_refuses_an_unknown_session_identity() {
         ])
         .env_remove("TIBER_CLAIM_SESSION")
         .env_remove("CODEX_SESSION_ID")
-        .env_remove("CLAUDE_SESSION_ID")
         .current_dir(repo.path())
         .output()
         .expect("run claim without session identity");

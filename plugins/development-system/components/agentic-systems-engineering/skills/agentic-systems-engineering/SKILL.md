@@ -44,7 +44,7 @@ Load only the references needed for the task:
 - Require eval evidence before reliability claims. A single good run is a demo,
   not proof.
 - Honor explicit repository live-eval authorization through existing
-  Claude Code/Anthropic and Codex/ChatGPT subscription sessions without
+  Codex/ChatGPT subscription sessions without
   demanding extra API keys or repeat approval, while keeping provider
   credentials and live execution out of untrusted pull-request code and events.
 - Prefer the smallest architecture that can be observed, evaluated, and safely

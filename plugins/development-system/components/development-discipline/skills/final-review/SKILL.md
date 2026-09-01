@@ -63,7 +63,7 @@ verifier = "gpt-5.6-sol"
 `pre_filter` owns the all-dimension broad risk scout. For Codex, `lens_review`
 is Terra for ordinary risk-selected substantive lenses. The coordinator routes
 an assigned architecture, security, or human-safety lens through the resolved
-strong role: `gpt-5.6-sol` in Codex and `opus` in Claude. `post_filter` labels
+strong role: `gpt-5.6-sol`. `post_filter` labels
 the normally deterministic
 `final_review.filter_findings` path; deterministic relevance and path filtering
 normally make no model call. `verifier` owns blocking, disputed, or materially

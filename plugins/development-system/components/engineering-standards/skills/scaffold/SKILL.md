@@ -97,8 +97,8 @@ support it — and record that gap as an ADR.
   internal modules or private types. Establish the rhythm: get one observable
   scenario green with **all gates passing**, then preserve that increment. Commit
   only when the selected delivery policy authorizes or requires it. For
-  cross-target or cross-harness behavior, parametrize examples so parity is part
-  of each slice's definition of done.
+  cross-target behavior, parametrize examples so parity is part of each slice's
+  definition of done.
 
 ### f. Decisions + guardrail docs
 
@@ -108,8 +108,7 @@ support it — and record that gap as an ADR.
   without a tool-specific scavenger hunt.
 - **Realize:** create `docs/adr/` with a MADR-lite template and an `NNNN-*.md`
   numbering scheme; seed ADR 0001 with the overall architecture. Put the
-  guardrails in `AGENTS.md` + `docs/rules/`, and make harness-specific files
-  (e.g. `CLAUDE.md`) thin pointers to `AGENTS.md`.
+  guardrails in `AGENTS.md` + `docs/rules/`.
 
 ### g. CI/CD themes
 

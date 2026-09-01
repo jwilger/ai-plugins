@@ -1,6 +1,6 @@
 # Development System
 
-The single personal development plugin for Codex and Claude Code.
+The single personal development plugin for Codex.
 
 ## Host-local binaries
 
@@ -20,8 +20,8 @@ Project-local MCP configuration always uses these stable host-directory paths,
 so a same-version reinstall can atomically replace its staging target without
 leaving a project pointed at it.
 The published plugin intentionally carries no bootstrap MCP manifest. During
-project setup, it writes only the current harness's project-local MCP
-configuration—`.codex/config.toml` for Codex or `.mcp.json` for Claude Code.
+project setup, it writes only the project's `.codex/config.toml` MCP
+configuration.
 Those entries launch the installed binaries by their absolute XDG paths; they
 do not launch a plugin-relative shell wrapper. Re-run setup after an upgrade,
 then start a new harness session.
@@ -45,7 +45,7 @@ and the Codex hooks are advisory: they
 do not establish agent identity, isolate project tools, execute project
 mutations, or deny ordinary host capabilities. `setup.apply` writes only
 repository-local configuration. It does not generate privileged agents or
-profiles and never changes global Codex, Claude, marketplace, MCP, shell, or
+profiles and never changes global Codex, marketplace, MCP, shell, or
 SSH settings.
 
 Within that advisory boundary, final-review state fails closed: risk planning
@@ -61,7 +61,7 @@ Tiber can additionally enforce those receipts at the task boundary when a
 project opts into `[final_review].minimum_clean_reviews`: its Git-backed task
 history then blocks both task completion and trailer-driven delivery until the
 required clean sequence is current. This gate is available through the same
-provider-neutral CLI and MCP surface in Codex and Claude Code.
+CLI and MCP surface in Codex.
 
 The editor, runner, repository, and diagnostic services are retained as
 unexposed reusable components for the standalone Tiber harness. Ordinary Codex
@@ -69,7 +69,7 @@ remains able to inspect, edit, verify, commit, and push while Tiber is being
 bootstrapped. Tiber, rather than this plugin, will own authoritative identity,
 isolation, workflow, memory, verification, and delivery.
 
-Codex and Claude Code each consume project-local direct binary entries. A global
+Codex consumes project-local direct binary entries. A global
 `[mcp_servers.*]` compatibility override is neither required nor part of
 supported setup.
 

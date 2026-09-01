@@ -12,7 +12,7 @@ Use this skill to add a local-first eval harness.
 Load `references/scaffold.md`.
 
 - Default to promptfoo for OSS, CI-friendly behavior evals.
-- Ensure `promptfoo@0.121.18` is installed on `PATH` for both local eval
+- Ensure `promptfoo@0.121.19` is installed on `PATH` for both local eval
   commands and optional MCP use. Prefer the consuming project's existing tool
   provisioning: if it has `flake.nix` and nixpkgs provides a compatible
   `pkgs.promptfoo`, add that package there so updates flow through the flake
@@ -25,9 +25,8 @@ Load `references/scaffold.md`.
 - Do not rely on hosted sharing as the durable record.
 - Pin promptfoo once the harness is committed, and disable prompt response
   caching for provider-backed behavior evidence.
-- For coding-agent plugins, prefer Promptfoo's native harness providers such as
-  `openai:codex-sdk` and `anthropic:claude-agent-sdk` before writing custom
-  wrappers.
+- For coding-agent plugins, prefer Promptfoo's native `openai:codex-sdk`
+  provider before writing custom wrappers.
 - Separate canaries that prove plugin/skill loading from natural behavior
   prompts that measure unaided routing. Run both the production plugin
   composition and a targeted-plugin ablation when attribution matters.
@@ -43,7 +42,7 @@ Load `references/scaffold.md`.
 - Skip provider-backed live evals on untrusted PRs.
 - Reuse existing authenticated harness sessions for local live evals; do not
   require provider API keys or fresh approval merely because a repository-owned
-  eval uses Claude/Anthropic or Codex/OpenAI.
+  eval uses Codex/OpenAI.
 - Send only the repository's purpose-built fixtures and prompts. Do not send
   secrets, private client data, proprietary unrelated content, or unrelated
   workspace files.

@@ -25,7 +25,7 @@
   "notes": [
     "Advisor benchmark scenarios are answer-quality checks; they should not require disk changes.",
     "Run benchmarks only after adding a judge/verifier that can score advisory quality for the scenario.",
-    "Do not run these scenarios against Claude Code; Advisor is a Codex-only plugin."
+    "Run these scenarios through the supported Codex harness."
   ],
   "setupQuestions": [
     "Which planning decisions should Advisor materially improve for this repo?",
@@ -38,7 +38,7 @@
       "id": "tradeoff-recommendation",
       "title": "Recommend a path through fuzzy tradeoffs",
       "purpose": "Measure whether Advisor turns an ambiguous engineering/product choice into a recommended path with scoped tradeoffs.",
-      "userInput": "Use the local Codex skill \"advisor\" if it helps. We are deciding whether to add provider-scoped behavior evals to a multi-harness plugin marketplace. Recommend the path, call out decisions the user must make, cut unnecessary scope, and name risks to verify. Do not edit files.",
+      "userInput": "Use the local Codex skill \"advisor\" if it helps. We are deciding whether to add provider-scoped behavior evals to a Codex plugin marketplace. Recommend the path, call out decisions the user must make, cut unnecessary scope, and name risks to verify. Do not edit files.",
       "successChecklist": [
         "The response recommends one path instead of presenting a neutral menu.",
         "The response identifies hard-to-reverse decisions and reasonable defaults.",
@@ -50,12 +50,12 @@
       "id": "ticket-plan-outline",
       "title": "Shape a ticket plan without creating tickets",
       "purpose": "Measure whether Advisor produces an implementation-ready ticket outline while preserving the approval gate for real ticket creation.",
-      "userInput": "Use the local Codex skill \"advisor\" if it helps. Turn this fuzzy request into a ticket plan proposal: migrate a local planning helper into a Codex-only marketplace plugin, keep it out of Claude Code, and preserve validation. Do not create real tickets or edit files.",
+      "userInput": "Use the local Codex skill \"advisor\" if it helps. Turn this fuzzy request into a ticket plan proposal: migrate a local planning helper into the Codex marketplace and preserve validation. Do not create real tickets or edit files.",
       "successChecklist": [
         "The response proposes ordered tickets with observable value.",
         "The response separates prerequisites, in-scope work, non-goals, and risks.",
         "The response explicitly avoids creating real tickets without approval.",
-        "The response keeps Claude Code exclusion as a requirement."
+        "The response keeps Codex marketplace compatibility as a requirement."
       ]
     },
     {

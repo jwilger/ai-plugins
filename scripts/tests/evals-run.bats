@@ -48,7 +48,6 @@ teardown() {
   [[ "$output" == *"CODEX_GRADER_REASONING_EFFORT (default: high)"* ]]
   [[ "$output" == *"The provider loads the relevant Codex marketplace surface"* ]]
   [[ "$output" == *"Pinned eval packages are managed by package.json and package-lock.json"* ]]
-  [[ "$output" != *"@anthropic-ai/claude-agent-sdk"* ]]
   [[ "$output" == *"Local runs reuse the existing Codex/ChatGPT subscription session"* ]]
   [[ "$output" == *"They do not require provider API keys or fresh approval for repository-owned evals"* ]]
   [[ "$output" == *"Prompt response caching and hosted sharing are disabled"* ]]
@@ -483,13 +482,6 @@ SH
   rm -rf "$fixture_root"
 }
 
-@test "eval runner rejects the retired Claude provider filter" {
-  run env EVAL_PROVIDER_FILTER=claude "$RUNNER" --dry-run
-
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"no providers match EVAL_PROVIDER_FILTER=claude"* ]]
-}
-
 @test "eval runner dry-run prepares only selected Codex plugin mode" {
   run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra "$RUNNER" --dry-run
 
@@ -528,13 +520,6 @@ SH
   [[ "$output" != *"timeout --kill-after"* ]]
 }
 
-@test "generated eval config rejects the retired Claude provider filter" {
-  run env EVAL_PROVIDER_FILTER=claude node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
-
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"no providers match EVAL_PROVIDER_FILTER=claude"* ]]
-}
-
 @test "generated eval config exact provider variant filter selects one full-marketplace provider" {
   run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
@@ -542,7 +527,6 @@ SH
   [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
   [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
   [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
-  [[ "$output" != *"label: claude-code-sonnet"* ]]
   [[ "$output" == *"pluginModes:"*$'\n'"      - id: full-marketplace"* ]]
 }
 
@@ -555,7 +539,6 @@ SH
   [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
   [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
   [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
-  [[ "$output" != *"label: claude-code-sonnet"* ]]
 }
 
 @test "eval runner uses project-local Promptfoo state for real runs" {
@@ -1539,32 +1522,16 @@ const cases = {
   invalid_plugin_name: [{ ...targeted, plugins: ['Tiber'] }],
   missing_composition_label: [targeted],
   extra_composition_label: [targeted, noPlugins],
-  both_missing_and_extra: [
-    targeted,
-    {
-      label: 'claude-b-full-marketplace',
-      provider: 'anthropic:claude-agent-sdk',
-      providerVariant: 'claude-b',
-      pluginMode: 'full-marketplace',
-      plugins: ['advisor'],
-    },
-    {
-      label: 'claude-c-no-plugins',
-      provider: 'anthropic:claude-agent-sdk',
-      providerVariant: 'claude-c',
-      pluginMode: 'no-plugins',
-      plugins: [],
-    },
-  ],
+  both_missing_and_extra: [targeted, { ...noPlugins, label: 'codex-other-no-plugins', providerVariant: 'codex-other' }],
   order_insensitive: [targeted, noPlugins],
 };
 const providerLabelsByCase = {
   missing_composition_label: [targeted.label, noPlugins.label],
   extra_composition_label: [targeted.label],
   both_missing_and_extra: [
-    'claude-z-no-plugins',
+    'codex-missing-no-plugins',
     targeted.label,
-    'claude-a-full-marketplace',
+    'codex-missing-full-marketplace',
   ],
   order_insensitive: [noPlugins.label, targeted.label],
 };
@@ -1595,7 +1562,7 @@ NODE
     "invalid_plugin_name|invalid plugin list" \
     "missing_composition_label|provider composition labels do not match configured providers: missing: codex-gpt-5.6-terra-no-plugins" \
     "extra_composition_label|provider composition labels do not match configured providers: extra: codex-gpt-5.6-terra-no-plugins" \
-    "both_missing_and_extra|provider composition labels do not match configured providers: missing: claude-a-full-marketplace, claude-z-no-plugins; extra: claude-b-full-marketplace, claude-c-no-plugins"; do
+    "both_missing_and_extra|provider composition labels do not match configured providers: missing: codex-missing-full-marketplace, codex-missing-no-plugins; extra: codex-other-no-plugins"; do
     composition_case="${fixture%%|*}"
     expected="${fixture#*|}"
 

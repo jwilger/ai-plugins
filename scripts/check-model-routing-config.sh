@@ -40,34 +40,6 @@ PY
   printf '%s\n' "$value"
 }
 
-yaml_value() {
-  local file="$1"
-  local key="$2"
-  local lines
-
-  [ -f "$file" ] || fail "missing-agent: $file"
-  [ "$(sed -n '1p' "$file")" = '---' ] ||
-    fail "$file:frontmatter-must-start-on-first-line"
-  awk 'NR > 1 && $0 == "---" { closed = 1; exit } END { exit !closed }' "$file" ||
-    fail "$file:frontmatter-must-close"
-  lines="$(awk -v key="$key" '
-    $0 == "---" {
-      boundaries++
-      if (boundaries == 1) {
-        in_frontmatter = 1
-        next
-      }
-      if (boundaries == 2) {
-        exit
-      }
-    }
-    in_frontmatter && $0 ~ ("^" key "[[:space:]]*:") { print }
-  ' "$file")"
-  [ "$(printf '%s\n' "$lines" | grep -c .)" -eq 1 ] ||
-    fail "field-count-invalid: $file:$key"
-  printf '%s\n' "$lines" | sed -E 's/^[^:]+: //'
-}
-
 require_equal() {
   local actual="$1"
   local expected="$2"
@@ -89,24 +61,10 @@ check_codex() {
   require_equal "$(quoted_value "$file" sandbox_mode)" "$sandbox" "$route.codex.sandbox"
 }
 
-check_claude() {
-  local route="$1"
-  local model="$2"
-  local tools="$3"
-  local file="$agents/$route.md"
-
-  require_equal "$(yaml_value "$file" model)" "$model" "$route.claude.model"
-  require_equal "$(yaml_value "$file" tools)" "$tools" "$route.claude.tools"
-}
-
 check_codex bounded-helper gpt-5.6-luna low read-only
 check_codex substantive-worker gpt-5.6-terra medium read-only
 check_codex strong-reviewer gpt-5.6-sol high read-only
 check_codex strong-worker gpt-5.6-sol high read-only
-check_claude bounded-helper haiku Read,Grep,Glob
-check_claude substantive-worker sonnet Read,Grep,Glob
-check_claude strong-reviewer opus Read,Grep,Glob
-check_claude strong-worker opus Read,Grep,Glob
 
 jq -cn '{
   codex: {
@@ -114,11 +72,5 @@ jq -cn '{
     "substantive-worker": {model: "gpt-5.6-terra", reasoning: "medium", sandbox: "read-only"},
     "strong-reviewer": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "read-only"},
     "strong-worker": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "read-only"}
-  },
-  claude: {
-    "bounded-helper": {model: "haiku", tools: "Read,Grep,Glob"},
-    "substantive-worker": {model: "sonnet", tools: "Read,Grep,Glob"},
-    "strong-reviewer": {model: "opus", tools: "Read,Grep,Glob"},
-    "strong-worker": {model: "opus", tools: "Read,Grep,Glob"}
   }
 }'

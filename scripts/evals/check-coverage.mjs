@@ -36,10 +36,7 @@ function readJson(file) {
 }
 
 function marketplacePlugins(root) {
-  const manifests = [
-    path.join(root, ".claude-plugin/marketplace.json"),
-    path.join(root, ".agents/plugins/marketplace.json"),
-  ];
+  const manifests = [path.join(root, ".agents/plugins/marketplace.json")];
   const plugins = new Map();
 
   for (const manifestPath of manifests) {

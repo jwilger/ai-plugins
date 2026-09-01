@@ -21,7 +21,6 @@ Usable standalone; it only needs the forge's tooling.
 | Forgejo | Forgejo MCP tools (`forgejo_*`); `tea` as fallback |
 | GitLab  | `glab`                                             |
 
-## Harnesses
+## Harness
 
-Harness-agnostic — the skill and script are consumed identically by Claude Code
-and Codex.
+Codex.

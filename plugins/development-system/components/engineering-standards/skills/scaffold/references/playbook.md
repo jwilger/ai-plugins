@@ -95,7 +95,7 @@ surface only:
 Rules: never import internal modules or assert on source text; assert observable
 behavior. Get one scenario or vertical slice green with all gates passing, then
 preserve it at the repository's selected commit cadence. For multi-target or
-cross-harness behavior, use a scenario outline / parametrized examples so parity
+cross-target behavior, use a scenario outline / parametrized examples so parity
 is verified per slice.
 
 ## f. Decisions + guardrail docs
@@ -148,16 +148,7 @@ The conditions under which this decision should be reopened.
 ```
 
 **Guardrail docs** — put the canonical rules in `AGENTS.md` + `docs/rules/`.
-`AGENTS.md` links to `docs/rules/`; harness-specific files are thin pointers,
-e.g. `CLAUDE.md`:
-
-```markdown
-# CLAUDE.md
-
-This file intentionally defers to the harness-agnostic guide. Read it:
-
-@AGENTS.md
-```
+`AGENTS.md` links to `docs/rules/`.
 
 Nothing canonical should live under a single harness's directory.
 

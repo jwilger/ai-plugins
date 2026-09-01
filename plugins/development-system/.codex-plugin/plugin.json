@@ -1,6 +1,6 @@
 {
   "name": "development-system",
-  "version": "5.5.0",
+  "version": "6.0.0",
   "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
   "author": {
     "name": "John Wilger",
@@ -11,7 +11,7 @@
   "hooks": "./hooks/codex.json",
   "interface": {
     "displayName": "Development System",
-    "shortDescription": "One configured development workflow for Codex and Claude Code.",
+    "shortDescription": "One configured development workflow for Codex.",
     "longDescription": "Use Development System for John's consolidated development discipline, engineering standards, worktree isolation, Tiber coordination, final review, and optional agentic-system workflows.",
     "developerName": "John Wilger",
     "category": "Developer Tools",

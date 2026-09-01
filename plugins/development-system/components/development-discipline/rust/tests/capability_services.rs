@@ -393,7 +393,7 @@ fn setup_preview_reports_legacy_configuration_as_migration_required() {
 }
 
 #[test]
-fn setup_requires_confirmation_and_writes_only_repository_configuration() {
+fn setup_requires_confirmation_and_writes_codex_repository_configuration() {
     let root = TempDir::new().expect("repository");
     let isolated_home = TempDir::new().expect("isolated home");
     let isolated_codex_home = TempDir::new().expect("isolated Codex home");
@@ -442,12 +442,11 @@ fn setup_requires_confirmation_and_writes_only_repository_configuration() {
     );
     assert_eq!(
         applied.pointer("/result/structuredContent/restart_required"),
-        Some(&json!(false))
+        Some(&json!(true))
     );
     assert!(root.path().join(".development-system.toml").is_file());
+    assert!(root.path().join(".codex/config.toml").is_file());
     for unexpected in [
-        ".codex",
-        ".claude",
         ".development-system/agents",
         ".development-system/boundary-proof.codex.json",
         ".development-system/activation.codex.json",
@@ -469,7 +468,7 @@ fn setup_requires_confirmation_and_writes_only_repository_configuration() {
 }
 
 #[test]
-fn setup_apply_writes_only_the_current_harness_project_mcp_configuration() {
+fn setup_apply_writes_only_codex_project_mcp_configuration() {
     let root = TempDir::new().expect("repository");
     let binaries = TempDir::new().expect("binaries");
     git(root.path(), &["init", "--quiet"]);
@@ -484,12 +483,12 @@ fn setup_apply_writes_only_the_current_harness_project_mcp_configuration() {
         root.path().join(".mcp.json"),
         r#"{"mcpServers":{"custom":{"command":"custom-mcp"}}}"#,
     )
-    .expect("Claude config");
+    .expect("unrelated MCP config");
 
     let codex = mcp_call_with_environment(
         root.path(),
         "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["just-ci"], "harness": "codex" }),
+        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["just-ci"] }),
         &[("DEVELOPMENT_SYSTEM_MCP_BINARY_DIRECTORY", binaries.path())],
     );
     assert_eq!(
@@ -501,33 +500,10 @@ fn setup_apply_writes_only_the_current_harness_project_mcp_configuration() {
     assert!(codex_config.contains("model = \"gpt-5.6\""));
     assert!(codex_config.contains("[mcp_servers.development-discipline]"));
     assert!(codex_config.contains(binaries.path().to_string_lossy().as_ref()));
-    assert!(!root.path().join(".claude").exists());
-
-    let claude = mcp_call_with_environment(
-        root.path(),
-        "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true, "harness": "claude" }),
-        &[("DEVELOPMENT_SYSTEM_MCP_BINARY_DIRECTORY", binaries.path())],
-    );
     assert_eq!(
-        claude.pointer("/result/structuredContent/restart_required"),
-        Some(&json!(true))
+        fs::read_to_string(root.path().join(".mcp.json")).expect("unrelated MCP config"),
+        r#"{"mcpServers":{"custom":{"command":"custom-mcp"}}}"#
     );
-    let claude_config: Value = serde_json::from_str(
-        &fs::read_to_string(root.path().join(".mcp.json")).expect("Claude config"),
-    )
-    .expect("Claude JSON");
-    assert_eq!(
-        claude_config.pointer("/mcpServers/custom/command"),
-        Some(&json!("custom-mcp"))
-    );
-    assert_eq!(
-        claude_config.pointer("/mcpServers/tiber/command"),
-        Some(&json!(binaries.path().join("tiber")))
-    );
-    assert!(claude_config
-        .pointer("/mcpServers/tiber/env_vars")
-        .is_none());
 }
 
 #[test]

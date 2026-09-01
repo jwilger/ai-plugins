@@ -1,141 +1,71 @@
 #!/usr/bin/env bash
-# Validate that the Claude Code and Codex marketplace manifests stay in sync.
-#
-#   validate-manifests.sh [repo-root]
-#
-# Enforces (exit non-zero with a kebab-case reason on the first violation):
-#   - both marketplace manifests exist;
-#   - every Claude Code plugin is also available to Codex;
-#   - Codex may carry additional Codex-only plugins;
-#   - every name in either manifest has a matching plugins/<name>/ directory;
-#   - every plugins/<name>/ directory is registered in at least one manifest;
-#   - registered per-harness plugin manifests exist, use the directory name,
-#     and carry valid semver versions;
-#   - marketplace entry versions match their per-harness plugin manifests;
-#   - shared Claude Code + Codex plugin versions match.
+# Validate the Codex marketplace and its public plugin manifests.
 set -euo pipefail
 
 root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}"
-claude="$root/.claude-plugin/marketplace.json"
 codex="$root/.agents/plugins/marketplace.json"
 
-fail() {
-  echo "manifest-sync: $*" >&2
-  exit 1
-}
+fail() { echo "manifest-sync: $*" >&2; exit 1; }
+is_semver() { [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?(\+([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$ ]]; }
 
-is_semver() {
-  [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?(\+([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$ ]]
-}
-
-[ -f "$claude" ] || fail "missing-claude-manifest: $claude"
 [ -f "$codex" ] || fail "missing-codex-manifest: $codex"
-
-names_claude="$(jq -r '.plugins[].name' "$claude" | sort -u)"
+jq empty "$codex" || fail "invalid-codex-manifest: $codex"
+[ ! -e "$root/CLAUDE.md" ] || fail "unsupported-claude-instructions: CLAUDE.md"
+[ ! -e "$root/.mcp.json" ] || fail "unsupported-claude-root-surface: .mcp.json"
+root_claude_plugin="$(find "$root/.claude-plugin" -mindepth 1 -print -quit 2>/dev/null || true)"
+[ -z "$root_claude_plugin" ] || fail "unsupported-claude-root-surface: ${root_claude_plugin#"$root/"}"
+root_claude="$(find "$root/.claude" -mindepth 1 \( -path "$root/.claude/settings.local.json" -o -path "$root/.claude/worktrees" \) -prune -o -print -quit 2>/dev/null || true)"
+[ -z "$root_claude" ] || fail "unsupported-claude-root-surface: ${root_claude#"$root/"}"
+unsupported_claude="$(find "$root/plugins" \( -path '*/.claude-plugin/*' -o -name '.mcp.json' -o -path '*/hooks/hooks.json' -o -path '*/agents/*.md' -o -name 'CLAUDE.md' \) -print -quit)"
+[ -z "$unsupported_claude" ] || fail "unsupported-claude-surface: ${unsupported_claude#"$root/"}"
 names_codex="$(jq -r '.plugins[].name' "$codex" | sort -u)"
-names_all="$(printf '%s\n%s\n' "$names_claude" "$names_codex" | sed '/^$/d' | sort -u)"
 
-has_name() {
-  local names="$1" name="$2"
-  grep -qx "$name" <<<"$names"
-}
+has_name() { grep -qx "$1" <<<"$names_codex"; }
 
-# Claude Code has a built-in advisor mode, so repo plugins may be Codex-only,
-# but this marketplace does not support Claude-only plugin entries.
-while read -r name; do
-  [ -n "$name" ] || continue
-  has_name "$names_codex" "$name" || fail "claude-plugin-not-in-codex-marketplace: $name"
-done <<<"$names_claude"
-
-# Every registered name has a matching plugin directory.
 while read -r name; do
   [ -n "$name" ] || continue
   [ -d "$root/plugins/$name" ] || fail "manifest-plugin-without-dir: $name"
-done <<<"$names_all"
+  source_kind="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .source.source // empty' "$codex")"
+  source_path="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .source.path // empty' "$codex")"
+  [ "$source_kind" = "local" ] || fail "codex-marketplace-source-mismatch: $name source=$source_kind"
+  [ "$source_path" = "./plugins/$name" ] || fail "codex-marketplace-path-mismatch: $name path=$source_path"
+done <<<"$names_codex"
 
-# Every plugin directory is registered in at least one manifest and carries the
-# per-harness manifests required by its marketplace entries.
 for dir in "$root"/plugins/*/; do
   [ -d "$dir" ] || continue
   name="$(basename "$dir")"
-  in_claude=0
-  in_codex=0
-  has_name "$names_claude" "$name" && in_claude=1
-  has_name "$names_codex" "$name" && in_codex=1
+  has_name "$name" || fail "unregistered-plugin: $name"
 
-  [ "$in_claude" -eq 1 ] || [ "$in_codex" -eq 1 ] || fail "unregistered-plugin: $name"
-
-  cc="${dir}.claude-plugin/plugin.json"
   cx="${dir}.codex-plugin/plugin.json"
+  [ -f "$cx" ] || fail "missing-codex-plugin-json: $name"
+  jq empty "$cx" || fail "invalid-codex-plugin-json: $name"
+  cx_name="$(jq -r '.name' "$cx")"
+  [ "$cx_name" = "$name" ] || fail "codex-plugin-name-mismatch: dir=$name json=$cx_name"
+  cx_version="$(jq -r '.version // empty' "$cx")"
+  [ -n "$cx_version" ] || fail "missing-codex-plugin-version: $name"
+  is_semver "$cx_version" || fail "invalid-codex-plugin-version: $name version=$cx_version"
+  marketplace_version="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .version // empty' "$codex")"
+  [ -n "$marketplace_version" ] || fail "missing-codex-marketplace-version: $name"
+  [ "$marketplace_version" = "$cx_version" ] || fail "codex-marketplace-version-mismatch: $name marketplace=$marketplace_version plugin=$cx_version"
 
-  if [ "$in_claude" -eq 1 ]; then
-    [ -f "$cc" ] || fail "missing-claude-plugin-json: $name"
-  elif [ -e "$cc" ]; then
-    fail "claude-plugin-json-without-marketplace: $name"
+  mcp_ref="$(jq -r '.mcpServers // empty' "$cx")"
+  codex_default_mcp="${dir}.codex-mcp.json"
+  if [ -f "$codex_default_mcp" ] && [ -z "$mcp_ref" ]; then
+    fail "codex-mcp-manifest-not-declared: $name path=./.codex-mcp.json"
   fi
-
-  if [ "$in_codex" -eq 1 ]; then
-    [ -f "$cx" ] || fail "missing-codex-plugin-json: $name"
+  if [ -f "$codex_default_mcp" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.codex-mcp.json" ]; then
+    fail "codex-mcp-manifest-not-declared: $name path=./.codex-mcp.json declared=$mcp_ref"
   fi
-
-  if [ "$in_claude" -eq 1 ]; then
-    cc_name="$(jq -r '.name' "$cc")"
-    [ "$cc_name" = "$name" ] || fail "claude-plugin-name-mismatch: dir=$name json=$cc_name"
-    cc_version="$(jq -r '.version // empty' "$cc")"
-    [ -n "$cc_version" ] || fail "missing-claude-plugin-version: $name"
-    is_semver "$cc_version" || fail "invalid-claude-plugin-version: $name version=$cc_version"
-
-    marketplace_version="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .version // empty' "$claude")"
-    [ -n "$marketplace_version" ] || fail "missing-claude-marketplace-version: $name"
-    [ "$marketplace_version" = "$cc_version" ] || fail "claude-marketplace-version-mismatch: $name marketplace=$marketplace_version plugin=$cc_version"
-  fi
-
-  if [ "$in_codex" -eq 1 ]; then
-    cx_name="$(jq -r '.name' "$cx")"
-    [ "$cx_name" = "$name" ] || fail "codex-plugin-name-mismatch: dir=$name json=$cx_name"
-    cx_version="$(jq -r '.version // empty' "$cx")"
-    [ -n "$cx_version" ] || fail "missing-codex-plugin-version: $name"
-    is_semver "$cx_version" || fail "invalid-codex-plugin-version: $name version=$cx_version"
-
-	    codex_marketplace_version="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .version // empty' "$codex")"
-	    [ -n "$codex_marketplace_version" ] || fail "missing-codex-marketplace-version: $name"
-	    [ "$codex_marketplace_version" = "$cx_version" ] || fail "codex-marketplace-version-mismatch: $name marketplace=$codex_marketplace_version plugin=$cx_version"
-
-	    mcp_ref="$(jq -r '.mcpServers // empty' "$cx")"
-	    # A dual-harness plugin may ship Claude's conventional `.mcp.json` and
-	    # a separate Codex manifest. In that case the Codex manifest is the
-	    # authoritative declaration; do not mistake Claude's file for a stale
-	    # Codex surface.
-	    codex_default_mcp="${dir}.codex-mcp.json"
-	    if [ -f "$codex_default_mcp" ] && [ -z "$mcp_ref" ]; then
-	      fail "codex-mcp-manifest-not-declared: $name path=./.codex-mcp.json"
-	    fi
-	    if [ -f "$codex_default_mcp" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.codex-mcp.json" ]; then
-	      fail "codex-mcp-manifest-not-declared: $name path=./.codex-mcp.json declared=$mcp_ref"
-	    fi
-	    if [ ! -f "$codex_default_mcp" ] && [ -f "${dir}.mcp.json" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.mcp.json" ]; then
-	      fail "codex-mcp-manifest-not-declared: $name path=./.mcp.json declared=$mcp_ref"
-	    fi
-	    if [ -n "$mcp_ref" ]; then
-	      mcp_path="${mcp_ref#./}"
-	      mcp_file="$dir$mcp_path"
-	      [ -f "$mcp_file" ] || fail "missing-codex-mcp-manifest: $name path=$mcp_ref"
-	      if jq -e '
-	        .mcpServers
-	        | to_entries[]
-	        | select(.value.command | type == "string" and startswith("./"))
-	        | select(.value.cwd != ".")
-	      ' "$mcp_file" >/dev/null; then
-	        fail "codex-relative-mcp-command-requires-plugin-root-cwd: $name path=$mcp_ref"
-	      fi
-	      if grep -q "plugins/cache/" "$mcp_file"; then
-	        fail "codex-mcp-launcher-must-use-plugin-root: $name path=$mcp_ref"
-	      fi
-	    fi
-	  fi
-
-  if [ "$in_claude" -eq 1 ] && [ "$in_codex" -eq 1 ]; then
-    [ "$cc_version" = "$cx_version" ] || fail "plugin-version-mismatch: $name claude=$cc_version codex=$cx_version"
+  if [ -n "$mcp_ref" ]; then
+    mcp_path="${mcp_ref#./}"
+    mcp_file="$dir$mcp_path"
+    [ -f "$mcp_file" ] || fail "missing-codex-mcp-manifest: $name path=$mcp_ref"
+    if jq -e '.mcpServers | to_entries[] | select(.value.command | type == "string" and startswith("./")) | select(.value.cwd != ".")' "$mcp_file" >/dev/null; then
+      fail "codex-relative-mcp-command-requires-plugin-root-cwd: $name path=$mcp_ref"
+    fi
+    if grep -q "plugins/cache/" "$mcp_file"; then
+      fail "codex-mcp-launcher-must-use-plugin-root: $name path=$mcp_ref"
+    fi
   fi
 done
 

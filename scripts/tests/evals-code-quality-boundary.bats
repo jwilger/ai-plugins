@@ -1809,7 +1809,7 @@ NODE
     fi
   done < <(
     rg -l --glob AGENTS.md \
-      'multi-harness AI plugin marketplace' /nix/store 2>/dev/null || true
+      'Codex plugin marketplace' /nix/store 2>/dev/null || true
   )
   [ -n "$forbidden_store_path" ] || skip 'no undeclared ai-plugins store snapshot exists'
   printf '%s\n' "$forbidden_store_path" >"$WORKSPACE/.forbidden-store-path"

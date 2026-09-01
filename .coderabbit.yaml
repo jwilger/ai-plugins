@@ -16,9 +16,8 @@ reviews:
         sync. When behavior, skills, commands, hooks, docs, or metadata change
         for an existing plugin, check whether the plugin version should be
         bumped according to semver. Verify the version is consistent across the
-        plugin's .claude-plugin/plugin.json, .codex-plugin/plugin.json, the
-        Claude marketplace entry in .claude-plugin/marketplace.json when that
-        manifest carries a version, and the README catalog rows. New plugins
+        plugin's .codex-plugin/plugin.json, the Codex marketplace entry in
+        .agents/plugins/marketplace.json, and the README catalog rows. New plugins
         should normally start at 0.1.0. Flag mismatched names, descriptions,
         versions, licenses, categories, capabilities, source paths, and
         install/authentication policy across manifests.
@@ -28,8 +27,8 @@ reviews:
         When plugin behavior, manifests, eval workflows, install instructions,
         permissions, or reporting URLs change, verify the top-level README,
         affected plugin README files, AGENTS.md guidance, and any relevant
-        plan/reference docs are updated. Flag stale wording, missing Codex or
-        Claude directions, missing GitHub Pages/eval report links, and docs
+        plan/reference docs are updated. Flag stale wording, missing Codex
+        directions, missing GitHub Pages/eval report links, and docs
         that describe a capability not actually configured in the repository.
     - path: "evals/**"
       instructions: >
@@ -38,8 +37,8 @@ reviews:
         and expected output paths stay compatible with scripts/evals/run.sh,
         scripts/evals/generate-config.mjs, scripts/evals/build-site.mjs, CI
         artifact upload paths, and the static Pages dashboard. For coding
-        harness behavior evals, expect Promptfoo native providers
-        (`openai:codex-sdk` and `anthropic:claude-agent-sdk`) unless a canary
+        harness behavior evals, expect Promptfoo's native `openai:codex-sdk`
+        provider unless a canary
         documents why a custom provider is required. Flag brittle keyword-only
         grading where a semantic rubric plus deterministic hard guard is more
         appropriate. Flag fixture or assertion changes that are not reflected in
@@ -49,8 +48,8 @@ reviews:
         Skill behavior changes can affect eval results. Check that the PR
         includes relevant eval evidence or explains why no existing eval covers
         the change. For this repo, expect plugin-eval analysis for changed
-        skills and provider-backed promptfoo results through both Claude Code
-        and Codex when behavior fixtures are affected.
+        skills and provider-backed Promptfoo results through Codex when behavior
+        fixtures are affected.
         If the change reveals a new reusable scenario, suggest adding an eval
         fixture or filing an eval-case issue.
     - path: "scripts/evals/**"
@@ -60,7 +59,7 @@ reviews:
         side-effect-free, local paths are unambiguous, generated outputs remain
         ignored, provider-backed behavior evidence is not served from prompt
         response cache, hosted sharing is not the durable record, generated
-        promptfoo config loads every plugin from both marketplace manifests, and
+        promptfoo config loads every plugin from the Codex marketplace manifest, and
         CI/Pages workflows consume the same artifact locations. Check that
         canary runs are separate from natural behavior evals and that dashboard
         summaries report provider/case/sample pass rates against thresholds
@@ -84,17 +83,12 @@ reviews:
         security, and design issues instead.
     - path: "plugins/**/plugin.json"
       instructions: >
-        These are AI-plugin marketplace manifest files (Claude Code /
-        Codex plugin schema). Review for manifest-shape correctness (required
+        These are Codex plugin marketplace manifests. Review for manifest-shape
+        correctness (required
         fields, valid references to skills/commands/hooks declared elsewhere
         in the same plugin directory) rather than generic JSON style.
     - path: ".agents/plugins/marketplace.json"
       instructions: >
         This is the Codex-harness marketplace manifest aggregating all
         plugins in this repo. Review for consistency with the individual
-        plugins/**/plugin.json and .claude-plugin/marketplace.json manifests.
-    - path: ".claude-plugin/marketplace.json"
-      instructions: >
-        This is the Claude Code marketplace manifest aggregating all plugins
-        in this repo. Review for consistency with the individual
-        plugins/**/plugin.json and .agents/plugins/marketplace.json manifests.
+        plugins/**/.codex-plugin/plugin.json manifests.

@@ -18,7 +18,6 @@ The skill must never post raw secrets, credentials, private client data, or
 proprietary excerpts. It prepares a preview first, asks for user approval, and
 uses `gh issue create` only after that approval.
 
-## Harnesses
+## Harness
 
-Harness-agnostic — the skill (`SKILL.md` + frontmatter) is consumed by Claude
-Code and Codex, with per-harness manifests included.
+Codex consumes the skill (`SKILL.md` + frontmatter).

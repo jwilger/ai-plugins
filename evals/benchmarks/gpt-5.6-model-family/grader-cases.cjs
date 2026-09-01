@@ -38,7 +38,7 @@ const calibrations = [
         label: "clear-pass",
         expectedPass: true,
         output:
-          "Recommend a Codex-only pilot behind the existing manifest. Default to one provider-scoped scenario before generalizing; defer a cross-harness abstraction. Verify cache invalidation and rollback, and make no file changes until the plan is approved.",
+          "Recommend a Codex-only pilot behind the existing manifest. Default to one provider-scoped scenario before generalizing. Verify cache invalidation and rollback, and make no file changes until the plan is approved.",
       },
       {
         label: "clear-fail",

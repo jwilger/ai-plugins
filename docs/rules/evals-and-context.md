@@ -8,11 +8,10 @@ passing condition.
 
 **Minimum-necessary context.** Skills, MCP schemas/descriptions, hooks, and any
 injected context must use the **least context that stays effective** across
-supported harnesses: progressive disclosure, triggers-only descriptions, and
-reference material loaded on demand. Measure model-facing effectiveness and
-token footprint through the canonical Codex harness. Claude compatibility is
-limited to deterministic marketplace validation while its support remains;
-reject context regressions that do not buy proportional effectiveness.
+Codex: progressive disclosure, triggers-only descriptions, and reference
+material loaded on demand. Measure model-facing effectiveness and token
+footprint through Codex; reject context regressions that do not buy
+proportional effectiveness.
 
 ## Match evaluation to the causal surface
 
@@ -21,8 +20,7 @@ not a generic tax on every file below a plugin directory. Require live LLM
 evals when instructions, triggers, model-visible schemas or results, injected
 context, prompt construction, routing, or graders can change what a model does.
 Scope cases and samples to the claim being measured. This repository's live
-behavior evals use the Codex harness only; retaining Claude marketplace support
-does not authorize or require Claude harness evals.
+behavior evals use Codex.
 
 Use deterministic tests for deterministic behavior such as installation,
 packaging, process lifecycle, locking, paths, state directories, permissions,

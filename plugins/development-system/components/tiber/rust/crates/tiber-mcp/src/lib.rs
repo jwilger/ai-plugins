@@ -12,7 +12,7 @@ pub fn codex_sandbox_setup() -> String {
         "Do not run the whole Tiber MCP server outside the sandbox unless these narrow permissions are insufficient.",
         "",
         "If a signed commit fails with `Couldn't get agent socket?`, first verify the active Tiber MCP registration forwards SSH_AUTH_SOCK.",
-        "Codex plugin MCP policy overlays do not change transport env; the plugin .mcp.json must declare env_vars = [\"SSH_AUTH_SOCK\"], or an already-installed plugin must be replaced by an equivalent top-level [mcp_servers.tiber] registration that preserves the absolute installed launcher and includes env_vars = [\"SSH_AUTH_SOCK\"].",
+        "Codex plugin MCP policy overlays do not change transport env; the project-local [mcp_servers.tiber] registration in .codex/config.toml must preserve the absolute installed launcher and include env_vars = [\"SSH_AUTH_SOCK\"].",
         "Never forward SSH_AUTH_SOCK to a PATH-resolved, repo-relative, or otherwise project-controlled MCP launcher.",
         "Do not try to fix SSH signing by enabling danger-full-access, unsandboxing the whole MCP server, or approving every git command.",
         "",

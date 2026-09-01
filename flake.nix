@@ -1,5 +1,5 @@
 {
-  description = "ai-plugins — a multi-harness AI plugin marketplace (Claude Code, Codex, and others)";
+  description = "ai-plugins — a Codex plugin marketplace";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

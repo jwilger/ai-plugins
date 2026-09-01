@@ -11,7 +11,7 @@ both explicit.
 
 Answer routing-classification questions directly; do not delegate the answer or
 wait for another agent. Make every recommendation self-contained by naming the
-task-local Codex identifier and corresponding Claude alias, the eligibility and
+task-local Codex identifier, the eligibility and
 exclusion rule, the capability or accountability boundary, the escalation and
 unavailable-route behavior, and that the global session default remains
 unchanged.
@@ -94,8 +94,4 @@ or satisfy cost routing.
 ## Current harness routes
 
 Use the exact `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` identifiers in
-Codex. Claude Code exposes the corresponding current plugin-agent routes as
-`haiku`, `sonnet`, and `opus`. Apply the same bounded, normal-substantive, and
-strong-responsibility boundaries to those Claude aliases. Do not pass Codex
-model identifiers to Claude Code or present inherited parent execution as the
-requested Claude route.
+Codex. Do not present inherited parent execution as the requested route.

@@ -161,10 +161,10 @@ function isProviderUnavailable(reason) {
     /\b(rate.?limit|weekly limit|session limit|usage limit|insufficient_quota|quota (?:exceeded|exhausted)|(?:exceeded|exhausted) quota|too many requests|429|provider unavailable|could not be resolved)\b/i.test(
       message,
     ) ||
-    /\b(?:Error calling (?:Claude Agent SDK|OpenAI Codex SDK)|provider error)\b[\s\S]{0,180}\b(?:not logged in|login required|authentication required|credentials? (?:missing|required)|api key (?:missing|required|not set)|unauthorized|forbidden|401|403)\b/i.test(
+    /\b(?:Error calling OpenAI Codex SDK|provider error)\b[\s\S]{0,180}\b(?:not logged in|login required|authentication required|credentials? (?:missing|required)|api key (?:missing|required|not set)|unauthorized|forbidden|401|403)\b/i.test(
       message,
     ) ||
-    /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY)\b[\s\S]{0,80}\b(?:missing|required|not set)\b/i.test(
+    /\bOPENAI_API_KEY\b[\s\S]{0,80}\b(?:missing|required|not set)\b/i.test(
       message,
     )
   );

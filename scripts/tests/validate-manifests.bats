@@ -1,57 +1,26 @@
 #!/usr/bin/env bats
-# Tests for the cross-harness marketplace manifest sync-validator.
+# Tests for the Codex marketplace manifest validator.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../validate-manifests.sh"
   ROOT="$(mktemp -d)"
 }
 
-teardown() {
-  rm -rf "$ROOT"
-}
+teardown() { rm -rf "$ROOT"; }
 
 make_plugin() {
-  # make_plugin <name> [claude-name] [codex-name] [claude-version] [codex-version]
-  local name="$1" cc="${2:-$1}" cx="${3:-$1}" cc_version="${4:-1.2.3}"
-  local cx_version="${5:-$cc_version}"
-  mkdir -p "$ROOT/plugins/$name/.claude-plugin" "$ROOT/plugins/$name/.codex-plugin"
-  echo "{\"name\":\"$cc\",\"version\":\"$cc_version\"}" >"$ROOT/plugins/$name/.claude-plugin/plugin.json"
-  echo "{\"name\":\"$cx\",\"version\":\"$cx_version\"}" >"$ROOT/plugins/$name/.codex-plugin/plugin.json"
+  local name="$1" json_name="${2:-$1}" version="${3:-1.2.3}"
+  mkdir -p "$ROOT/plugins/$name/.codex-plugin"
+  printf '{"name":"%s","version":"%s"}\n' "$json_name" "$version" >"$ROOT/plugins/$name/.codex-plugin/plugin.json"
 }
 
-add_codex_mcp_manifest() {
-  local name="$1" cache_version="$2"
-  jq '.mcpServers="./.mcp.json"' \
-    "$ROOT/plugins/$name/.codex-plugin/plugin.json" >"$ROOT/plugins/$name/.codex-plugin/plugin.json.tmp"
-  mv "$ROOT/plugins/$name/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/$name/.codex-plugin/plugin.json"
-  cat >"$ROOT/plugins/$name/.mcp.json" <<JSON
-{"mcpServers":{"$name":{"command":"/bin/sh","args":["-c","candidate=\"\${CODEX_HOME:-\$HOME/.codex}/plugins/cache/ai-plugins/$name/$cache_version/bin/$name\"; exec \"\$candidate\""]}}}
-JSON
-}
-
-add_codex_mcp_manifest_with_wildcard_cache() {
-  local name="$1"
-  jq '.mcpServers="./.mcp.json"' \
-    "$ROOT/plugins/$name/.codex-plugin/plugin.json" >"$ROOT/plugins/$name/.codex-plugin/plugin.json.tmp"
-  mv "$ROOT/plugins/$name/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/$name/.codex-plugin/plugin.json"
-  cat >"$ROOT/plugins/$name/.mcp.json" <<JSON
-{"mcpServers":{"$name":{"command":"/bin/sh","args":["-c","for candidate in \${CODEX_HOME:-\$HOME/.codex}/plugins/cache/ai-plugins/$name/*/bin/$name; do exec \"\$candidate\"; done"]}}}
-JSON
-}
-
-write_manifests() {
-  # write_manifests "<claude names>" "<codex names>"
-  mkdir -p "$ROOT/.claude-plugin" "$ROOT/.agents/plugins"
-  manifest_for "$1" >"$ROOT/.claude-plugin/marketplace.json"
-  manifest_for "$2" >"$ROOT/.agents/plugins/marketplace.json"
-}
-
-manifest_for() {
-  local entries=""
-  for n in $1; do
-    entries="$entries{\"name\":\"$n\",\"source\":\"$n\",\"version\":\"1.2.3\"},"
+write_manifest() {
+  mkdir -p "$ROOT/.agents/plugins"
+  local entries="" name
+  for name in $1; do
+    entries="${entries}{\"name\":\"$name\",\"source\":{\"source\":\"local\",\"path\":\"./plugins/$name\"},\"version\":\"1.2.3\"},"
   done
-  echo "{\"plugins\":[${entries%,}]}"
+  printf '{"plugins":[%s]}\n' "${entries%,}" >"$ROOT/.agents/plugins/marketplace.json"
 }
 
 @test "passes on the real repository" {
@@ -59,132 +28,214 @@ manifest_for() {
   [ "$status" -eq 0 ]
 }
 
-@test "passes a well-formed fixture" {
+@test "passes a well-formed Codex marketplace" {
   make_plugin alpha
   make_plugin beta
-  write_manifests "alpha beta" "alpha beta"
+  write_manifest "alpha beta"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -eq 0 ]
 }
 
-@test "passes when a plugin is registered only for Codex" {
+@test "fails when a Claude marketplace manifest remains" {
   make_plugin alpha
-  make_plugin codex-only
-  rm -rf "$ROOT/plugins/codex-only/.claude-plugin"
-  write_manifests "alpha" "alpha codex-only"
-  run bash "$SCRIPT" "$ROOT"
-  [ "$status" -eq 0 ]
-}
-
-@test "fails when a plugin is registered only for Claude Code" {
-  make_plugin alpha
-  make_plugin beta
-  write_manifests "alpha beta" "alpha"
+  write_manifest "alpha"
+  mkdir -p "$ROOT/.claude-plugin"
+  printf '{"plugins":[]}\n' >"$ROOT/.claude-plugin/marketplace.json"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"claude-plugin-not-in-codex-marketplace"* ]]
+  [[ "$output" == *"unsupported-claude-root-surface"* ]]
+}
+
+@test "fails when another root Claude plugin surface remains" {
+  make_plugin alpha
+  write_manifest "alpha"
+  mkdir -p "$ROOT/.claude-plugin"
+  printf '{}\n' >"$ROOT/.claude-plugin/plugin.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-root-surface"* ]]
+}
+
+@test "fails when root Claude project configuration remains" {
+  make_plugin alpha
+  write_manifest "alpha"
+  mkdir -p "$ROOT/.claude"
+  printf '{}\n' >"$ROOT/.claude/settings.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-root-surface"* ]]
+}
+
+@test "fails when a root legacy MCP manifest remains" {
+  make_plugin alpha
+  write_manifest "alpha"
+  printf '{}\n' >"$ROOT/.mcp.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-root-surface"* ]]
+}
+
+@test "allows ignored owner-local Claude leftovers" {
+  make_plugin alpha
+  write_manifest "alpha"
+  mkdir -p "$ROOT/.claude/worktrees/example"
+  printf '{}\n' >"$ROOT/.claude/settings.local.json"
+  printf 'legacy\n' >"$ROOT/.claude/worktrees/example/state"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "fails when a Claude plugin manifest remains" {
+  make_plugin alpha
+  write_manifest "alpha"
+  mkdir -p "$ROOT/plugins/alpha/.claude-plugin"
+  printf '{"name":"alpha","version":"1.2.3"}\n' >"$ROOT/plugins/alpha/.claude-plugin/plugin.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-surface"* ]]
+}
+
+@test "fails when a nested component Claude plugin manifest remains" {
+  make_plugin alpha
+  write_manifest "alpha"
+  mkdir -p "$ROOT/plugins/alpha/components/example/.claude-plugin"
+  printf '{"name":"example","version":"1.2.3"}\n' >"$ROOT/plugins/alpha/components/example/.claude-plugin/plugin.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-surface"* ]]
+}
+
+@test "fails when a legacy component MCP manifest remains" {
+  make_plugin alpha
+  write_manifest "alpha"
+  printf '{}\n' >"$ROOT/plugins/alpha/.mcp.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-surface"* ]]
+}
+
+@test "fails when legacy component hooks remain" {
+  make_plugin alpha
+  write_manifest "alpha"
+  mkdir -p "$ROOT/plugins/alpha/hooks"
+  printf '{}\n' >"$ROOT/plugins/alpha/hooks/hooks.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-surface"* ]]
+}
+
+@test "fails when a legacy Markdown agent remains" {
+  make_plugin alpha
+  write_manifest "alpha"
+  mkdir -p "$ROOT/plugins/alpha/agents"
+  printf '# legacy\n' >"$ROOT/plugins/alpha/agents/reviewer.md"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-surface"* ]]
+}
+
+@test "fails when component Claude instructions remain" {
+  make_plugin alpha
+  write_manifest "alpha"
+  printf '# legacy\n' >"$ROOT/plugins/alpha/CLAUDE.md"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-surface"* ]]
+}
+
+@test "fails when root Claude instructions remain" {
+  make_plugin alpha
+  write_manifest "alpha"
+  printf '# legacy\n' >"$ROOT/CLAUDE.md"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsupported-claude-instructions"* ]]
 }
 
 @test "fails when a plugin directory is unregistered" {
   make_plugin alpha
   make_plugin beta
-  write_manifests "alpha" "alpha"
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"unregistered-plugin"* ]]
 }
 
-@test "fails when a manifest lists a plugin with no directory" {
+@test "fails when the marketplace lists a plugin with no directory" {
   make_plugin alpha
-  write_manifests "alpha ghost" "alpha ghost"
+  write_manifest "alpha ghost"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"manifest-plugin-without-dir"* ]]
 }
 
-@test "fails when a codex plugin.json is missing" {
+@test "fails when a Codex marketplace source is not local" {
+  make_plugin alpha
+  write_manifest "alpha"
+  jq '.plugins[0].source.source = "remote"' "$ROOT/.agents/plugins/marketplace.json" >"$ROOT/marketplace.tmp"
+  mv "$ROOT/marketplace.tmp" "$ROOT/.agents/plugins/marketplace.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"codex-marketplace-source-mismatch"* ]]
+}
+
+@test "fails when a Codex marketplace source path does not match its plugin" {
+  make_plugin alpha
+  write_manifest "alpha"
+  jq '.plugins[0].source.path = "./plugins/wrong"' "$ROOT/.agents/plugins/marketplace.json" >"$ROOT/marketplace.tmp"
+  mv "$ROOT/marketplace.tmp" "$ROOT/.agents/plugins/marketplace.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"codex-marketplace-path-mismatch"* ]]
+}
+
+@test "fails when a Codex plugin manifest is missing" {
   make_plugin alpha
   rm "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
-  write_manifests "alpha" "alpha"
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"missing-codex-plugin-json"* ]]
 }
 
-@test "fails when a plugin.json name mismatches its directory" {
-  make_plugin alpha alpha wrong-name
-  write_manifests "alpha" "alpha"
+@test "fails when a Codex plugin name mismatches its directory" {
+  make_plugin alpha wrong-name
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"codex-plugin-name-mismatch"* ]]
 }
 
-@test "fails when plugin versions are not semver" {
-  make_plugin alpha alpha alpha not-semver not-semver
-  write_manifests "alpha" "alpha"
+@test "fails when a Codex plugin version is not semver" {
+  make_plugin alpha alpha not-semver
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"invalid-claude-plugin-version"* ]]
+  [[ "$output" == *"invalid-codex-plugin-version"* ]]
 }
 
-@test "fails when claude and codex plugin versions differ" {
-  make_plugin alpha alpha alpha 1.2.3 1.2.4
-  write_manifests "alpha" "alpha"
-  jq '(.plugins[] | select(.name == "alpha") | .version) = "1.2.4"' \
-    "$ROOT/.agents/plugins/marketplace.json" >"$ROOT/.agents/plugins/marketplace.json.tmp"
-  mv "$ROOT/.agents/plugins/marketplace.json.tmp" "$ROOT/.agents/plugins/marketplace.json"
-  run bash "$SCRIPT" "$ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"plugin-version-mismatch"* ]]
-}
-
-@test "fails when claude marketplace version differs from plugin version" {
-  make_plugin alpha alpha alpha 1.2.4
-  write_manifests "alpha" "alpha"
-  run bash "$SCRIPT" "$ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"claude-marketplace-version-mismatch"* ]]
-}
-
-@test "fails when codex marketplace version differs from plugin version" {
-  make_plugin alpha alpha alpha 1.2.3 1.2.4
-  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
-  write_manifests "" "alpha"
+@test "fails when the marketplace version differs from the plugin version" {
+  make_plugin alpha alpha 1.2.4
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"codex-marketplace-version-mismatch"* ]]
 }
 
-@test "fails when codex MCP manifest is declared but missing" {
+@test "fails when a declared Codex MCP manifest is missing" {
   make_plugin alpha
-  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
-  jq '.mcpServers="./.mcp.json"' \
-    "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
+  jq '.mcpServers="./.codex-mcp.json"' "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
   mv "$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
-  write_manifests "" "alpha"
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"missing-codex-mcp-manifest"* ]]
 }
 
-@test "allows a project-owned root MCP manifest without a static Codex declaration" {
+@test "fails when an undeclared default Codex MCP manifest exists" {
   make_plugin alpha
-  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
-  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/.mcp.json"
-  write_manifests "" "alpha"
-  run bash "$SCRIPT" "$ROOT"
-  [ "$status" -eq 0 ]
-}
-
-@test "fails when root codex MCP manifest exists but plugin declares another path" {
-  make_plugin alpha
-  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
-  jq '.mcpServers="./other.mcp.json"' \
-    "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
-  mv "$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
-  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/.mcp.json"
-  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/other.mcp.json"
-  write_manifests "" "alpha"
+  printf '{"mcpServers":{}}\n' >"$ROOT/plugins/alpha/.codex-mcp.json"
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"codex-mcp-manifest-not-declared"* ]]
@@ -192,59 +243,28 @@ manifest_for() {
 
 @test "allows a plugin with no packaged MCP manifest" {
   make_plugin alpha
-  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
-  write_manifests "" "alpha"
-
-  run bash "$SCRIPT" "$ROOT"
-
-  [ "$status" -eq 0 ]
-}
-
-@test "accepts a Codex-specific MCP manifest alongside Claude's root MCP manifest" {
-  make_plugin alpha
-  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/.mcp.json"
-  echo '{"mcpServers":{}}' >"$ROOT/plugins/alpha/.codex-mcp.json"
-  jq '.mcpServers="./.codex-mcp.json"' \
-    "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
-  mv "$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
-  write_manifests "alpha" "alpha"
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -eq 0 ]
 }
 
 @test "fails when a relative Codex MCP command has no plugin-root cwd" {
   make_plugin alpha
-  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
-  echo '{"mcpServers":{"alpha":{"command":"./bin/alpha"}}}' >"$ROOT/plugins/alpha/.codex-mcp.json"
-  jq '.mcpServers="./.codex-mcp.json"' \
-    "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
+  printf '{"mcpServers":{"alpha":{"command":"./bin/alpha"}}}\n' >"$ROOT/plugins/alpha/.codex-mcp.json"
+  jq '.mcpServers="./.codex-mcp.json"' "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
   mv "$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
-  write_manifests "" "alpha"
-
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
-
   [ "$status" -ne 0 ]
   [[ "$output" == *"codex-relative-mcp-command-requires-plugin-root-cwd"* ]]
 }
 
-@test "fails when a Codex MCP launcher hard-codes a versioned cache path" {
-  make_plugin alpha alpha alpha 1.2.3 1.2.4
-  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
-  add_codex_mcp_manifest alpha 1.2.3
-  write_manifests "" "alpha"
-  jq '(.plugins[] | select(.name == "alpha") | .version) = "1.2.4"' \
-    "$ROOT/.agents/plugins/marketplace.json" >"$ROOT/.agents/plugins/marketplace.json.tmp"
-  mv "$ROOT/.agents/plugins/marketplace.json.tmp" "$ROOT/.agents/plugins/marketplace.json"
-  run bash "$SCRIPT" "$ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"codex-mcp-launcher-must-use-plugin-root"* ]]
-}
-
-@test "fails when a Codex MCP launcher searches the cache with a wildcard" {
+@test "fails when a Codex MCP launcher hard-codes a cache path" {
   make_plugin alpha
-  rm -rf "$ROOT/plugins/alpha/.claude-plugin"
-  add_codex_mcp_manifest_with_wildcard_cache alpha
-  write_manifests "" "alpha"
+  printf '{"mcpServers":{"alpha":{"command":"/tmp/plugins/cache/alpha/bin/alpha"}}}\n' >"$ROOT/plugins/alpha/.codex-mcp.json"
+  jq '.mcpServers="./.codex-mcp.json"' "$ROOT/plugins/alpha/.codex-plugin/plugin.json" >"$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp"
+  mv "$ROOT/plugins/alpha/.codex-plugin/plugin.json.tmp" "$ROOT/plugins/alpha/.codex-plugin/plugin.json"
+  write_manifest "alpha"
   run bash "$SCRIPT" "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"codex-mcp-launcher-must-use-plugin-root"* ]]

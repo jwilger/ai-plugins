@@ -70,15 +70,14 @@ authoritative advance transition. The coordinator closes any pending verifier,
 invalidates the whole iteration, and reissues every selected lens, so correcting
 and retrying the submission cannot preserve an earlier clean streak.
 
-## Harnesses
+## Harness
 
-Claude Code and Codex consume the same canonical routing policy from `skills/`.
-The plugin also packages four task-local agents for each harness:
+Codex consumes the canonical routing policy from `skills/`. The plugin packages
+four task-local agents:
 `bounded-helper`, `substantive-worker`, `strong-reviewer`, and `strong-worker`.
 Codex agents pin
-the exact GPT-5.6 model identifiers and sandbox modes. Claude agents use the
-current Haiku, Sonnet, and Opus aliases with route-appropriate tool allowlists.
-If a harness cannot honor the requested route, the agent reports that failure
+the exact GPT-5.6 model identifiers and sandbox modes. If Codex cannot honor the
+requested route, the agent reports that failure
 instead of treating inheritance or substitution as success.
 
 The final-review coordinator runs from the Development System plugin's

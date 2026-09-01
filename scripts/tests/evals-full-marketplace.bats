@@ -217,17 +217,11 @@ NODE
   FIXTURE_TMP="$(mktemp -d)"
   fixture="$FIXTURE_TMP"
   mkdir -p "$fixture/plugins/example/skills/alpha" "$fixture/evals/fixtures/behavior/example"
-  mkdir -p "$fixture/.agents/plugins" "$fixture/.claude-plugin" "$fixture/plugins/example/.codex-plugin" "$fixture/plugins/example/.claude-plugin"
+  mkdir -p "$fixture/.agents/plugins" "$fixture/plugins/example/.codex-plugin"
   cat >"$fixture/.agents/plugins/marketplace.json" <<'JSON'
 {"plugins":[{"name":"example","source":{"source":"local","path":"./plugins/example"}}]}
 JSON
-  cat >"$fixture/.claude-plugin/marketplace.json" <<'JSON'
-{"plugins":[{"name":"example","source":"./plugins/example","version":"0.1.0"}]}
-JSON
   cat >"$fixture/plugins/example/.codex-plugin/plugin.json" <<'JSON'
-{"name":"example","version":"0.1.0"}
-JSON
-  cat >"$fixture/plugins/example/.claude-plugin/plugin.json" <<'JSON'
 {"name":"example","version":"0.1.0"}
 JSON
   cat >"$fixture/plugins/example/skills/alpha/SKILL.md" <<'MD'
@@ -264,12 +258,9 @@ JSON
   FIXTURE_TMP="$(mktemp -d)"
   fixture="$FIXTURE_TMP"
   mkdir -p "$fixture/plugins/example/skills/alpha" "$fixture/evals/fixtures"
-  mkdir -p "$fixture/.agents/plugins" "$fixture/.claude-plugin" "$fixture/plugins/example/.codex-plugin"
+  mkdir -p "$fixture/.agents/plugins" "$fixture/plugins/example/.codex-plugin"
   cat >"$fixture/.agents/plugins/marketplace.json" <<'JSON'
 {"plugins":[{"name":"example","source":{"source":"local","path":"./plugins/example"}}]}
-JSON
-  cat >"$fixture/.claude-plugin/marketplace.json" <<'JSON'
-{"plugins":[]}
 JSON
   cat >"$fixture/plugins/example/.codex-plugin/plugin.json" <<'JSON'
 {"name":"example","version":"0.1.0"}
@@ -286,7 +277,7 @@ MD
     "plugin": "example",
     "skill": "alpha",
     "decision": "deferred",
-    "reason": "Codex-only behavior coverage is deferred until the harness supports provider-scoped behavior cases without running the same case in Claude Code."
+    "reason": "Behavior coverage is deferred until the Codex harness supports the required provider-scoped case."
   }
 ]
 JSON
@@ -301,7 +292,6 @@ JSON
   run node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" != *"label: claude-code-sonnet"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
   [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]

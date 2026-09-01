@@ -166,17 +166,11 @@ teardown() {
   [ -z "$(git -C "$TEST_ROOT/project" status --porcelain=v1)" ]
 }
 
-@test "doctor warns about conflicting plugins settings and user-managed MCPs" {
+@test "doctor warns about conflicting Codex plugin settings" {
   mkdir -p \
-    "$TEST_ROOT/project/.claude" \
     "$TEST_ROOT/project/.codex" \
-    "$TEST_ROOT/home/.claude/plugins" \
     "$TEST_ROOT/home/.codex"
   touch "$TEST_ROOT/project/.development-system.toml"
-  printf '%s\n' '{"enabledPlugins":{"development-system@ai-plugins":true,"another-plugin@third-party":true}}' \
-    >"$TEST_ROOT/project/.claude/settings.json"
-  printf '%s\n' '{"plugins":{"another-plugin@third-party":[{"version":"1.0.0"}]}}' \
-    >"$TEST_ROOT/home/.claude/plugins/installed_plugins.json"
   printf '%s\n' \
     '[features]' \
     'hooks = false' \
@@ -184,9 +178,6 @@ teardown() {
     '[plugins.another-plugin]' \
     'enabled = true' \
     >"$TEST_ROOT/project/.codex/config.toml"
-  printf '%s\n' '{"mcpServers":{"custom":{"command":"custom-mcp"}}}' \
-    >"$TEST_ROOT/project/.mcp.json"
-
   printf '%s\n' '[plugins."another-global@marketplace"]' 'enabled = true' \
     >"$TEST_ROOT/home/.codex/config.toml"
 
@@ -196,19 +187,14 @@ teardown() {
     --project "$TEST_ROOT/project"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"conflicting_plugins harness=claude"* ]]
   [[ "$output" == *"conflicting_plugins harness=codex"* ]]
   [[ "$output" == *"setting=hooks_disabled"* ]]
   [[ "$output" == *"setting=managed_hooks_only"* ]]
-  [[ "$output" == *"user_managed_mcps_detected"* ]]
   [[ "$output" == *"supply_chain_recommendation"* ]]
 }
 
 @test "doctor is quiet outside configured projects" {
   mkdir -p "$TEST_ROOT/project" "$TEST_ROOT/home"
-  printf '%s\n' '{"mcpServers":{"custom":{"command":"custom-mcp"}}}' \
-    >"$TEST_ROOT/project/.mcp.json"
-
   run env HOME="$TEST_ROOT/home" \
     "$REPO_ROOT/plugins/development-system/bin/development-system" \
     doctor \
@@ -228,7 +214,6 @@ teardown() {
     "$REPO_ROOT/plugins/development-system/bin/development-system" \
     session-start \
     --project "$TEST_ROOT/project" \
-    --harness codex \
     --format json
 
   [ "$status" -eq 0 ]

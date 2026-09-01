@@ -103,30 +103,12 @@ setup_command() {
 
 inspect_conflicts() {
   local project=$1
-  local harness=$2
   local found=false
-  local claude_settings=$project/.claude/settings.json
-  local claude_plugins=${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/plugins/installed_plugins.json
   local codex_home=${CODEX_HOME:-${HOME:-}/.codex}
   local codex_config
 
   if [[ ! -f "$project/.development-system.toml" ]]; then
     return
-  fi
-
-  if [[ -f "$claude_settings" ]] &&
-    grep -q '"enabledPlugins"' "$claude_settings" &&
-    grep -Eo '"[^"]+@[^"]+"[[:space:]]*:[[:space:]]*true' "$claude_settings" |
-    grep -qv '^"development-system@'; then
-    warn "conflicting_plugins harness=claude file=$claude_settings recommendation=install_only_development-system"
-    found=true
-  fi
-
-  if [[ -f "$claude_plugins" ]] &&
-    grep -Eo '"[^"]+@[^"]+"' "$claude_plugins" |
-    grep -qv '^"development-system@'; then
-    warn "conflicting_plugins harness=claude file=$claude_plugins recommendation=install_only_development-system"
-    found=true
   fi
 
   for codex_config in "$project/.codex/config.toml" "$codex_home/config.toml"; do
@@ -150,31 +132,23 @@ inspect_conflicts() {
     fi
   done
 
-  if [[ -f "$project/.mcp.json" ]]; then
-    warn "user_managed_mcps_detected file=$project/.mcp.json action=review_for_compatibility"
-    found=true
-  fi
-
   if [[ "$found" == "true" ]]; then
-    warn "supply_chain_recommendation harness=$harness recommendation=use_only_development-system_and_plugin_managed_mcps"
+    warn "supply_chain_recommendation harness=codex recommendation=use_only_development-system_and_plugin_managed_mcps"
   fi
 }
 
 doctor_command() {
   local project=.
-  local harness=all
   local format=text
   while (($#)); do
     case "$1" in
-      --project | --harness | --format)
+      --project | --format)
         local option=$1
         if (($# < 2)) || [[ "$2" == --* ]]; then
           die "development_system.missing_option_value option=$option"
         fi
         if [[ "$option" == "--project" ]]; then
           project=$2
-        elif [[ "$option" == "--harness" ]]; then
-          harness=$2
         else
           format=$2
         fi
@@ -188,7 +162,7 @@ doctor_command() {
   project="$(cd "$project" && pwd)" ||
     die "development_system.project_not_found project=$project"
   local output
-  output="$(inspect_conflicts "$project" "$harness")"
+  output="$(inspect_conflicts "$project")"
   if [[ -z "$output" ]]; then
     return
   fi

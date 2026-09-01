@@ -387,7 +387,7 @@ Resolution precedence is:
 1. explicit `final_review.plan` tool arguments, including either
    phase-specific arguments or `model_roles.{phase}`;
 2. project-local `.development-discipline/final-review.toml`;
-3. harness-aware defaults when Codex or Claude can be detected;
+3. Codex defaults;
 4. generic abstract roles.
 
 A present explicit override must be a nonblank string using the allowed model
@@ -410,17 +410,10 @@ lens_review = "gpt-5.6-terra"
 post_filter = "gpt-5.6-luna"
 verifier = "gpt-5.6-sol"
 
-[final_review.models.claude]
-pre_filter = "opus"
-lens_review = "sonnet"
-post_filter = "haiku"
-verifier = "opus"
 ```
 
-Top-level phase values are harness-neutral. Optional `codex` or `claude`
-tables override them one phase at a time for that harness. This lets a shared
-repository use concrete Codex model IDs without routing Claude reviewers to
-unsupported models.
+Top-level phase values are abstract roles. The optional `codex` table overrides
+them one phase at a time with concrete Codex model IDs.
 
 Legacy non-risk-planned sessions can add
 `[final_review.dispositions.<SEVERITY>]` tables for `CRITICAL`, `MAJOR`,

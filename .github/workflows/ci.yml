@@ -196,8 +196,8 @@ jobs:
                 just ci
               '
 
-  codex-cross-harness:
-    name: Codex cross-harness manifests
+  codex-manifests:
+    name: Codex manifests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -242,12 +242,12 @@ jobs:
   gate:
     name: CI gate
     runs-on: ubuntu-latest
-    needs: [quality, codex-cross-harness, eval-config]
+    needs: [quality, codex-manifests, eval-config]
     if: always()
     steps:
       - name: Require all required jobs to have succeeded
         run: |
-          required="${{ needs.quality.result }} ${{ needs.codex-cross-harness.result }} ${{ needs.eval-config.result }}"
+          required="${{ needs.quality.result }} ${{ needs.codex-manifests.result }} ${{ needs.eval-config.result }}"
           echo "required job results: $required"
           for result in $required; do
             if [ "$result" != "success" ]; then

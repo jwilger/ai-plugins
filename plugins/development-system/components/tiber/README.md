@@ -491,5 +491,5 @@ installed versioned binary; it never invokes Cargo.
 
 ## Harness Support
 
-Tiber targets both Claude Code and Codex. The same plugin name, skill name, CLI
-binary, MCP server name, and documentation name are used everywhere: `tiber`.
+Tiber targets Codex. The plugin name, skill name, CLI binary, MCP server name,
+and documentation name are all `tiber`.

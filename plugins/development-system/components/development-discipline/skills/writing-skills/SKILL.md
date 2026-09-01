@@ -12,11 +12,9 @@ fixtures when the behavior matters.
 ## Marketplace Shape
 
 - Put skills at `plugins/<plugin>/skills/<skill-name>/SKILL.md`.
-- Keep component directories at the plugin root, not inside `.claude-plugin/` or
-  `.codex-plugin/`.
-- For dual-harness plugins, keep Claude and Codex plugin versions aligned and
-  register the plugin in both marketplace manifests.
-- Add catalog rows and a plugin README that state the supported harnesses.
+- Keep component directories at the plugin root, not inside `.codex-plugin/`.
+- Keep each Codex plugin manifest version aligned with its marketplace entry.
+- Add a catalog row and a plugin README that describe the supported behavior.
 
 ## Skill Shape
 

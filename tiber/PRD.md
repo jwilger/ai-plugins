@@ -135,10 +135,9 @@ memory, and integration health plus `/tasks`, `/memory`, and
 ## Non-goals
 
 - Platforms other than x86_64 Linux in v1.
-- Direct OpenAI Responses API or Anthropic/Claude inference providers.
+- Direct model-provider APIs.
 - `codex --remote` or Codex runtime authority.
-- Installing or globally configuring Codex, Claude, MCP, Hindsight, shells, or
-  SSH.
+- Installing or globally configuring Codex, MCP, Hindsight, shells, or SSH.
 - MCP sampling, elicitation, or MCP tasks in the initial integration.
 - Hindsight `reflect` as the primary agent reasoning mechanism.
 - Compatibility aliases, deprecated task commands, transition crates, or a

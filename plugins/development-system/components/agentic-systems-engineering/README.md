@@ -29,18 +29,18 @@ client data, and avoids private implementation details or private tool names.
 ## Eval and reporting lane
 
 The repo includes a promptfoo-based OSS eval lane that runs behavior scenarios
-through Promptfoo's native Claude Code and Codex coding-agent providers. The
+through Promptfoo's native Codex coding-agent provider. The
 runner generates config from the marketplace manifests and labels no-plugin,
 targeted-plugin, and full-marketplace behavior modes. Codex uses a separate
-generated home for each mode. For both harnesses, targeted mode installs the
+generated home for each mode. Targeted mode installs the
 deterministic, deduplicated union of plugins declared by the selected behavior
 cases; `EVAL_CASE_FILTER` narrows both the cases and their installed plugin set.
-Full-marketplace mode installs the complete harness-specific catalog, and
+Full-marketplace mode installs the complete Codex catalog, and
 no-plugin mode installs none. The generated config records exact installed
 provider compositions separately from individual case targets. The lane writes
 JSON, HTML, and JUnit artifacts under `evals/out/`, then builds a static
 dashboard under `site/evals/`. Hosted promptfoo sharing is not used as the
-durable record. Promptfoo is pinned at `0.121.18`; prompt response caching and
+durable record. Promptfoo is pinned at `0.121.19`; prompt response caching and
 hosted sharing are disabled for behavior evidence.
 
 The dashboard reports provider/case/sample pass rates, threshold status, and
@@ -49,11 +49,6 @@ they exercise.
 
 Default eval posture matches intended use:
 
-- Claude Code: `anthropic:claude-agent-sdk`, Sonnet 5 via the `sonnet` alias,
-  and all local plugins with `skills: all`. The intended human-facing Claude
-  Code posture remains Sonnet high effort with Opus 4.8 advisor where that harness
-  exposes those controls; Promptfoo's current Claude Agent SDK provider does
-  not expose those knobs in this repo's generated config.
 - Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with medium reasoning
   effort, a read-only sandbox, no approvals, streaming, deep tracing disabled,
   and isolated generated homes containing no plugins, the selected cases'
@@ -69,33 +64,12 @@ quality, per-input reliability, pass@k capability, pass^k reliability, judge
 variance, or close A/B comparison.
 
 PR CI only dry-runs the eval command to validate configuration. Behavior claims
-require provider-backed runs where the harnesses are authenticated. Local runs
-reuse existing Claude Code/Anthropic and Codex/ChatGPT subscription sessions;
+require provider-backed runs where Codex is authenticated. Local runs reuse the
+existing Codex/ChatGPT subscription session;
 provider API keys are not an extra prerequisite. Unattended trusted automation
 may use protected credentials when interactive harness sessions are unavailable,
 but untrusted pull-request code must not receive them.
 
-## Codex Promptfoo MCP
+## Harness
 
-The Codex manifest includes an optional Promptfoo MCP server. The bundled
-`bin/promptfoo-mcp` launcher runs `promptfoo mcp --transport stdio`, prefers
-`PROMPTFOO_BIN`, then a project-local `node_modules/.bin/promptfoo`, then
-`promptfoo` on `PATH`, and keeps Promptfoo state under a writable
-`.evals/promptfoo-mcp/` directory by default. Use it from Codex to
-validate promptfoo configs, run focused eval slices, inspect prior results, and
-develop new eval cases. Keep release evidence on the canonical runner and
-generated repo-owned artifacts.
-
-The Codex MCP manifest starts through an absolute `/bin/sh` launcher so Codex
-does not need `bash` on its MCP startup `PATH`. Reinstall or upgrade the plugin
-from marketplace version `0.3.0` or newer if Codex reports `No such file or
-directory` while starting the `promptfoo` MCP server.
-
-Promptfoo's `mcp` provider is a different feature: it treats an MCP server as
-the system under test. Add that provider only for projects or plugins that
-expose MCP tools and need MCP-specific behavior or security coverage.
-
-## Harnesses
-
-Harness-agnostic — the skills (`SKILL.md` + frontmatter) are consumed by Claude
-Code and Codex, with per-harness manifests included.
+Codex consumes the skills (`SKILL.md` + frontmatter).

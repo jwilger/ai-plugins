@@ -553,7 +553,6 @@ NODE
   [ -d "$cached_plugin/skills" ]
   [ ! -e "$cached_plugin/.mcp.json" ]
   [ ! -e "$cached_plugin/bin" ]
-  [ ! -e "$cached_plugin/.claude-plugin" ]
   [ ! -e "$cached_plugin/README.md" ]
   [ "$(grep -c '^\[plugins\.' "$eval_home/config.toml")" -eq 1 ]
   grep -q '\[plugins\."development-system@ai-plugins"\]' "$eval_home/config.toml"

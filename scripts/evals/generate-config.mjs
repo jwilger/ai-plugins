@@ -20,7 +20,7 @@ const advisoryPromptPrefix =
 function usage() {
   console.log(`Usage: node scripts/evals/generate-config.mjs [--suite behavior|canary] [--output path] [--metadata-output path] [--stdout]
 
-Generates promptfoo configs from the current Claude and Codex marketplace manifests.
+Generates promptfoo configs from the current Codex marketplace manifest.
 `);
 }
 
@@ -96,18 +96,7 @@ function manifestPlugins(file) {
 }
 
 function allMarketplacePlugins() {
-  const byName = new Map();
-
-  for (const plugin of [
-    ...manifestPlugins(".claude-plugin/marketplace.json"),
-    ...manifestPlugins(".agents/plugins/marketplace.json"),
-  ]) {
-    byName.set(plugin.name, plugin);
-  }
-
-  return [...byName.values()].sort((left, right) =>
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
-  );
+  return manifestPlugins(".agents/plugins/marketplace.json");
 }
 
 function quote(value) {
@@ -136,34 +125,6 @@ function providerEnv(value, fallback) {
   return `"{{ env.${value} | default('${fallback}') }}"`;
 }
 
-function claudeProvider(variant, pluginMode, plugins) {
-  const pluginLines =
-    pluginMode.id === "no-plugins"
-      ? ""
-      : `      plugins:
-${indentedList(plugins, 8, (plugin) => `- type: local\n${" ".repeat(10)}path: ${quote(plugin.absolutePath)}`)}
-`;
-
-  return `  - id: ${variant.provider}
-    label: ${variant.id}-${pluginMode.id}
-    pluginMode: ${pluginMode.id}
-    providerVariant: ${variant.id}
-    config:
-      apiKeyRequired: false
-      model: ${providerEnv(variant.modelEnv, variant.defaultModel)}
-      working_dir: ${quote(evalWorkspace)}
-      permission_mode: dontAsk
-      skills: all
-      setting_sources: []
-      persist_session: false
-      disallowed_tools:
-        - Bash
-        - Write
-        - Edit
-        - MultiEdit
-${pluginLines}`.trimEnd();
-}
-
 function codexProvider(variant, pluginMode) {
   const homeSuffix = pluginMode.id;
   return `  - id: ${variant.provider}
@@ -183,10 +144,7 @@ function codexProvider(variant, pluginMode) {
         CODEX_HOME: "{{ env.CODEX_EVAL_HOME_${pluginMode.id.replaceAll("-", "_").toUpperCase()} | default('${path.join(root, `.evals/codex-home-${homeSuffix}`)}') }}"`;
 }
 
-function providerFor(variant, pluginMode, plugins) {
-  if (variant.provider === "anthropic:claude-agent-sdk") {
-    return claudeProvider(variant, pluginMode, plugins);
-  }
+function providerFor(variant, pluginMode) {
   if (variant.provider === "openai:codex-sdk") {
     return codexProvider(variant, pluginMode);
   }
@@ -199,7 +157,7 @@ function providerEntry(variant, pluginMode, plugins) {
     variant,
     pluginMode,
     plugins,
-    config: providerFor(variant, pluginMode, plugins),
+    config: providerFor(variant, pluginMode),
   };
 }
 
@@ -218,26 +176,20 @@ function namedPlugins(pluginNames, marketplacePlugins, harnessName) {
   return pluginNames.map((pluginName) => byName.get(pluginName));
 }
 
-function pluginsForProvider(variant, pluginMode, pluginSets) {
+function pluginsForProvider(variant, pluginMode, pluginSet) {
   if (pluginMode.id === "no-plugins") {
     return [];
   }
 
-  const harness =
-    variant.provider === "anthropic:claude-agent-sdk"
-      ? pluginSets.claude
-      : variant.provider === "openai:codex-sdk"
-        ? pluginSets.codex
-        : null;
-  if (!harness) {
+  if (variant.provider !== "openai:codex-sdk") {
     throw new Error(`unsupported provider variant: ${variant.id}`);
   }
 
   if (pluginMode.id === "targeted-plugins") {
-    return harness.targeted;
+    return pluginSet.targeted;
   }
   if (pluginMode.id === "full-marketplace") {
-    return harness.full;
+    return pluginSet.full;
   }
   throw new Error(`unsupported plugin mode: ${pluginMode.id}`);
 }
@@ -286,7 +238,6 @@ function uniqueById(items) {
 
 function configFor(suite) {
   const allPlugins = allMarketplacePlugins();
-  const claudePlugins = manifestPlugins(".claude-plugin/marketplace.json");
   const codexPlugins = manifestPlugins(".agents/plugins/marketplace.json");
   const matrix = evalMatrix();
   const usesTargetedMode =
@@ -300,15 +251,9 @@ function configFor(suite) {
         caseFilter: process.env.EVAL_CASE_FILTER,
       })
     : [];
-  const pluginSets = {
-    claude: {
-      full: claudePlugins,
-      targeted: namedPlugins(targetedPluginNames, claudePlugins, "Claude Code"),
-    },
-    codex: {
-      full: codexPlugins,
-      targeted: namedPlugins(targetedPluginNames, codexPlugins, "Codex"),
-    },
+  const pluginSet = {
+    full: codexPlugins,
+    targeted: namedPlugins(targetedPluginNames, codexPlugins, "Codex"),
   };
   const testLoader =
     suite === "canary"
@@ -316,7 +261,7 @@ function configFor(suite) {
       : behaviorTestLoader();
   const description =
     suite === "canary"
-      ? "Full-marketplace canary for ai-plugins coding harnesses"
+      ? "Full-marketplace canary for the ai-plugins Codex marketplace"
       : "Provider-backed behavior evals for the ai-plugins marketplace";
   const providerEntries =
     suite === "behavior"
@@ -325,7 +270,7 @@ function configFor(suite) {
             providerEntry(
               variant,
               pluginMode,
-              pluginsForProvider(variant, pluginMode, pluginSets),
+              pluginsForProvider(variant, pluginMode, pluginSet),
             ),
           ),
         )
@@ -333,7 +278,7 @@ function configFor(suite) {
           providerEntry(
             variant,
             { id: "full-marketplace" },
-            pluginsForProvider(variant, { id: "full-marketplace" }, pluginSets),
+            pluginsForProvider(variant, { id: "full-marketplace" }, pluginSet),
           ),
         );
   const providers = filteredProviderEntries(providerEntries);

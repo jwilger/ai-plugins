@@ -78,7 +78,8 @@ fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
     assert!(stdout.contains("forwards SSH_AUTH_SOCK"));
     assert!(stdout.contains("env_vars = [\"SSH_AUTH_SOCK\"]"));
     assert!(stdout.contains("plugin MCP policy overlays do not change transport env"));
-    assert!(stdout.contains("preserves the absolute installed launcher"));
+    assert!(stdout.contains("project-local [mcp_servers.tiber] registration"));
+    assert!(stdout.contains("preserve the absolute installed launcher"));
     assert!(stdout.contains("Never forward SSH_AUTH_SOCK to a PATH-resolved"));
     assert!(stdout.contains("publish event transactions to origin/tiber"));
     assert!(stdout.contains(

@@ -138,12 +138,12 @@ setup() {
           "min_pass_rate": 1
         },
         "provider": {
-          "label": "claude-code-sonnet"
+          "label": "codex-gpt-5.6-terra"
         },
         "gradingResult": {
           "pass": false,
           "score": 0,
-          "reason": "Error calling Claude Agent SDK: weekly limit reached for this session"
+          "reason": "Error calling OpenAI Codex SDK: weekly limit reached for this session"
         }
       },
       {
@@ -157,7 +157,7 @@ setup() {
           "min_pass_rate": 1
         },
         "provider": {
-          "label": "claude-code-sonnet"
+          "label": "codex-gpt-5.6-terra"
         },
         "gradingResult": {
           "pass": false,
@@ -312,9 +312,9 @@ switch (compositionCase) {
     break;
   case "extra_composition":
     compositions.push({
-      label: "claude-extra-full-marketplace",
-      provider: "anthropic:claude-agent-sdk",
-      providerVariant: "claude-extra",
+      label: "codex-extra-full-marketplace",
+      provider: "openai:codex-sdk",
+      providerVariant: "codex-extra",
       pluginMode: "full-marketplace",
       plugins: ["advisor"],
     });

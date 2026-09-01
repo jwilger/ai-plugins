@@ -13,19 +13,18 @@ description: Use when initializing or reconfiguring a repository with the develo
    its required dependencies are unavailable, stop with the installer's
    diagnostic; do not configure a repository whose MCPs cannot start.
 2. From the primary checkout, invoke the installed `development-discipline-mcp`
-   binary directly for `setup.preview`, then `setup.apply` with the current
-   harness (`"codex"` or `"claude"`). Select at least one detected
+   binary directly for `setup.preview`, then `setup.apply`. Select at least one detected
    verification/test command, preferring `recommended_command_ids`; an empty
    catalog cannot configure the workflow. Show the exact preview and ask for explicit
    confirmation. Preview and confirmation are mandatory even if asked to skip
    them. Any changed option, conflict, scope, or command selection requires a
    fresh preview and approval.
-3. Call `setup.apply` with `confirmed: true` and the current `harness`. It writes
+3. Call `setup.apply` with `confirmed: true`. It writes
    schema-v3 `.development-system.toml` plus only the owned local MCP settings:
-   `.codex/config.toml` for Codex or `.mcp.json` for Claude Code. It never stages
-   or commits, and never changes global Codex, Claude, marketplace, shell, or SSH
+   `.codex/config.toml` for Codex. It never stages or commits, and never changes
+   global Codex, marketplace, shell, or SSH
    configuration.
-4. Tell the user to restart their current harness. The restarted session starts
+4. Tell the user to restart Codex. The restarted session starts
    both MCP servers from the concrete absolute XDG binary paths in that project's
    configuration. Do not add a global `mcp_servers` override to compensate for
    startup failure.
