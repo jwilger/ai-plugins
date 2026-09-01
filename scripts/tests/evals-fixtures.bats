@@ -44,6 +44,91 @@ NODE
   [ "$status" -eq 0 ]
 }
 
+@test "loader preserves natural prompts and centrally forces resolved skill references" {
+  run node - <<'NODE'
+const {
+  loadBehaviorCases,
+} = require('./evals/promptfoo/fixtures.cjs');
+const fixture = loadBehaviorCases({ root: process.cwd() }).find(
+  (testCase) => testCase.case_id === 'final-review-codex-gpt-5-6-cost-routing',
+);
+if (!fixture) throw new Error('missing routing fixture');
+
+delete process.env.EVAL_SKILL_INVOCATION_MODE;
+delete require.cache[require.resolve('./evals/promptfoo/load-harness-cases.cjs')];
+const natural = require('./evals/promptfoo/load-harness-cases.cjs')().find(
+  (testCase) => testCase.vars.case_id === fixture.case_id,
+);
+if (natural.vars.scenario_prompt !== fixture.prompt) {
+  throw new Error('natural mode must preserve the fixture prompt byte-for-byte');
+}
+if (natural.vars.skill_invocation_mode !== 'natural') {
+  throw new Error('natural mode was not recorded');
+}
+if (JSON.stringify(natural.vars.skill_references) !== JSON.stringify(['$development-system:development-workflow'])) {
+  throw new Error(`unexpected resolved skill references: ${JSON.stringify(natural.vars.skill_references)}`);
+}
+
+process.env.EVAL_SKILL_INVOCATION_MODE = 'forced';
+delete require.cache[require.resolve('./evals/promptfoo/load-harness-cases.cjs')];
+const forced = require('./evals/promptfoo/load-harness-cases.cjs')().find(
+  (testCase) => testCase.vars.case_id === fixture.case_id,
+);
+const expectedPrefix = 'Apply $development-system:development-workflow and read its instructions before answering.\n\n';
+if (forced.vars.scenario_prompt !== `${expectedPrefix}${fixture.prompt}`) {
+  throw new Error(`forced prompt did not inject the resolved skill once: ${forced.vars.scenario_prompt}`);
+}
+if (forced.vars.skill_invocation_mode !== 'forced') {
+  throw new Error('forced mode was not recorded');
+}
+NODE
+
+  [ "$status" -eq 0 ]
+}
+
+@test "skill reference resolution rejects missing and ambiguous owners" {
+  fixture_root="$(mktemp -d)"
+  mkdir -p \
+    "$fixture_root/.agents/plugins" \
+    "$fixture_root/plugins/alpha/skills/shared" \
+    "$fixture_root/plugins/beta/skills/shared"
+  cat >"$fixture_root/.agents/plugins/marketplace.json" <<'JSON'
+{
+  "plugins": [
+    {"name":"alpha","source":{"source":"local","path":"./plugins/alpha"}},
+    {"name":"beta","source":{"source":"local","path":"./plugins/beta"}}
+  ]
+}
+JSON
+  printf '%s\n' '# skill' >"$fixture_root/plugins/alpha/skills/shared/SKILL.md"
+  printf '%s\n' '# skill' >"$fixture_root/plugins/beta/skills/shared/SKILL.md"
+
+  run node - "$fixture_root" <<'NODE'
+const { resolveSkillReferences } = require('./evals/promptfoo/fixtures.cjs');
+const root = process.argv[2];
+const base = {
+  case_id: 'fixture',
+  fixture_file: 'cases.json',
+  plugins: ['alpha', 'beta'],
+};
+
+for (const [skill, expected] of [
+  ['missing', 'found 0'],
+  ['shared', 'found 2'],
+]) {
+  try {
+    resolveSkillReferences({ ...base, skills: [skill] }, { root });
+    throw new Error(`${skill} unexpectedly resolved`);
+  } catch (error) {
+    if (!error.message.includes(expected)) throw error;
+  }
+}
+NODE
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 0 ]
+}
+
 @test "tiber dashboard hard guard requires the browser-opening launch command" {
   run node - <<'NODE'
 const assertHardGuards = require('./evals/promptfoo/assert-hard-guards.cjs');

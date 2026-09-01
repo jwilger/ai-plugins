@@ -17,6 +17,15 @@ try {
 }
 const results = raw.results?.results || raw.results || [];
 
+const skillInvocationMode =
+  raw.config?.metadata?.skillInvocationMode || "natural";
+if (!["natural", "forced"].includes(skillInvocationMode)) {
+  console.error(
+    `invalid skillInvocationMode in eval artifact: ${JSON.stringify(skillInvocationMode)}`,
+  );
+  process.exit(1);
+}
+
 if (!Array.isArray(results) || results.length === 0) {
   console.error(`no eval results found: ${resultsPath}`);
   process.exit(1);
@@ -107,6 +116,23 @@ for (const result of results) {
   const id = String(vars.case_id || result.description || "unknown-case");
   const variant = providerVariant(result, vars);
   const mode = pluginMode(result, vars);
+  const resultInvocationMode = String(
+    vars.skill_invocation_mode ??
+      vars.skillInvocationMode ??
+      skillInvocationMode,
+  );
+  if (resultInvocationMode !== skillInvocationMode) {
+    console.error(
+      `eval artifact mixes skill invocation modes: metadata=${skillInvocationMode}, result=${resultInvocationMode}`,
+    );
+    process.exit(1);
+  }
+  if (skillInvocationMode === "forced" && mode === "no-plugins") {
+    console.error(
+      "forced skill-invocation diagnostics cannot contain a no-plugins composition",
+    );
+    process.exit(1);
+  }
   const key = `${variant}::${mode}::${id}`;
   const reason = resultReason(result);
   const pass = resultPass(result);
@@ -268,6 +294,12 @@ if (hardGuardFailures.length > 0 || failures.length > 0) {
   process.exit(1);
 }
 
-console.error(
-  `Eval thresholds passed for ${groups.size} aggregate(s) using plugin-mode minPassRate and value gates.`,
-);
+if (skillInvocationMode === "forced") {
+  console.error(
+    `Forced skill-invocation diagnostics passed for ${groups.size} aggregate(s) using plugin-mode minPassRate; canonical baseline comparison was not evaluated.`,
+  );
+} else {
+  console.error(
+    `Eval thresholds passed for ${groups.size} aggregate(s) using plugin-mode minPassRate and value gates.`,
+  );
+}

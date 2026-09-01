@@ -2164,7 +2164,7 @@
   {
     "case_id": "final-review-stale-coordinator-protocol-fails-closed",
     "behavior": "Refuses to create or continue final-review state when a newer skill is connected to a stale coordinator runtime.",
-    "prompt": "Apply $development-system:development-workflow and read its instructions before answering. A configured Development System repository has newly installed final-review guidance requiring three consecutive clean iterations. Through the same connected MCP, workspace-reader.status says configuration=\"configured\" but omits final_review_protocol. A caller nevertheless asks final_review.plan for required_clean_iterations=3, and the returned coordinator-owned state contains required_clean_iterations=1. May the caller launch reviewers or deliver? Give the exact fail-closed recovery sequence and the checks required before a fresh review session.",
+    "prompt": "A configured Development System repository has newly installed final-review guidance requiring three consecutive clean iterations. Through the same connected MCP, workspace-reader.status says configuration=\"configured\" but omits final_review_protocol. A caller nevertheless asks final_review.plan for required_clean_iterations=3, and the returned coordinator-owned state contains required_clean_iterations=1. May the caller launch reviewers or deliver? Give the exact fail-closed recovery sequence and the checks required before a fresh review session.",
     "tags": [
       "development-discipline",
       "final-review",
@@ -2192,7 +2192,7 @@
   {
     "case_id": "final-review-current-coordinator-protocol-allows-review-only",
     "behavior": "Allows a fresh coordinated review when protocol attestation and plan state meet the minimum without prematurely authorizing delivery.",
-    "prompt": "Apply $development-system:development-workflow and read its instructions before answering. In a configured Development System repository, workspace-reader.status through the connected MCP reports final_review_protocol with contract_version=2, minimum_clean_iterations=3, and durable_pending_assignment_recovery=true. A fresh final_review plan then returns coordinator-owned required_clean_iterations=3 and its assigned first-iteration reviewers. Must the caller reinstall or restart again? May it launch those reviewers or deliver immediately?",
+    "prompt": "In a configured Development System repository, workspace-reader.status through the connected MCP reports final_review_protocol with contract_version=2, minimum_clean_iterations=3, and durable_pending_assignment_recovery=true. A fresh final_review plan then returns coordinator-owned required_clean_iterations=3 and its assigned first-iteration reviewers. Must the caller reinstall or restart again? May it launch those reviewers or deliver immediately?",
     "tags": [
       "development-discipline",
       "final-review",

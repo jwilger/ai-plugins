@@ -53,8 +53,16 @@ function readArtifact(file) {
           provider,
           providerVariant,
           pluginMode,
+          skillInvocationMode:
+            testCase.skill_invocation_mode ||
+            testCase.skillInvocationMode ||
+            raw.config?.metadata?.skillInvocationMode ||
+            "natural",
           plugins: normalizeList(testCase.plugins || testCase.plugin),
           skills: normalizeList(testCase.skills || testCase.skill),
+          skillReferences: normalizeList(
+            testCase.skill_references || testCase.skillReferences,
+          ),
           sampleIndex: Number(testCase.sample_index ?? 1),
           minPassRate: Number(
             testCase.min_pass_rate ?? testCase.minPassRate ?? 1,
@@ -81,6 +89,10 @@ function readArtifact(file) {
 
   return {
     cases,
+    skillInvocationMode:
+      raw.config?.metadata?.skillInvocationMode ||
+      cases[0]?.skillInvocationMode ||
+      "natural",
     ...normalizeProviderCompositions(
       raw.config?.metadata?.providerCompositions,
       raw.config?.providers,
@@ -412,6 +424,7 @@ const artifact = fs.existsSync(resultsPath)
 const cases = artifact.cases || [];
 const providerCompositions = artifact.providerCompositions;
 const providerCompositionStatus = artifact.providerCompositionStatus;
+const skillInvocationMode = artifact.skillInvocationMode || "natural";
 const runStatus = readStatus(statusPath, cases);
 const aggregates = aggregateCases(cases);
 const pluginSummaries = aggregateDimension(cases, "plugins", "plugin");
@@ -424,6 +437,7 @@ const evaluated = passed + failed;
 const summary = {
   generatedAt: new Date().toISOString(),
   suite: SUITE,
+  skillInvocationMode,
   status: runStatus,
   total: cases.length,
   passed,
@@ -548,6 +562,7 @@ const html = `<!doctype html>
   <main>
     <h1>ai-plugins eval dashboard</h1>
     <p>Suite: ${escapeHtml(summary.suite)}. Generated: ${escapeHtml(summary.generatedAt)}.</p>
+    <p><strong>Skill invocation:</strong> ${skillInvocationMode === "forced" ? "Forced skill-invocation diagnostic" : "Natural contextual routing"}.</p>
     <p><strong>Status:</strong> ${escapeHtml(runStatus.state)}. ${escapeHtml(runStatus.reason)}</p>
     <section class="summary" aria-label="summary">
       <div class="metric"><strong>Total</strong><br>${summary.total}</div>

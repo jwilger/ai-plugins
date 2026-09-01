@@ -217,6 +217,25 @@ teardown() {
   grep -q "Skill summary" "$TMPROOT/site/evals/index.html"
 }
 
+@test "eval dashboard identifies forced skill-invocation diagnostics" {
+  updated_results="$TMPROOT/evals/out/results.forced.json"
+  jq '
+    .config.metadata.skillInvocationMode = "forced"
+    | .results.results |= map(
+        .testCase.skill_invocation_mode = "forced"
+        | .testCase.skill_references = ["$development-system:agentic-systems"]
+      )
+  ' "$TMPROOT/evals/out/results.json" >"$updated_results"
+  mv "$updated_results" "$TMPROOT/evals/out/results.json"
+
+  run node "$TMPROOT/scripts/evals/build-site.mjs"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.skillInvocationMode' "$TMPROOT/site/evals/summary.json")" = "forced" ]
+  [ "$(jq -c '.cases[0].skillReferences' "$TMPROOT/site/evals/summary.json")" = '["$development-system:agentic-systems"]' ]
+  grep -q "Forced skill-invocation diagnostic" "$TMPROOT/site/evals/index.html"
+}
+
 @test "eval dashboard marks legacy composition provenance unavailable instead of empty" {
   legacy_results="$TMPROOT/evals/out/results.legacy.json"
   jq 'del(.config.metadata.providerCompositions)' \

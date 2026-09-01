@@ -19,6 +19,14 @@ runtime_options_file="$generated_dir/runtime-options.json"
 runtime_loader_file="$generated_dir/load-harness-cases.runtime.cjs"
 export EVAL_RUNTIME_LOADER_FILE="$runtime_loader_file"
 max_concurrency="${PROMPTFOO_MAX_CONCURRENCY:-1}"
+skill_invocation_mode="${EVAL_SKILL_INVOCATION_MODE:-natural}"
+case "$skill_invocation_mode" in
+  natural | forced) ;;
+  *)
+    printf 'EVAL_SKILL_INVOCATION_MODE must be natural or forced; got %q\n' "$skill_invocation_mode" >&2
+    exit 2
+    ;;
+esac
 case "$max_concurrency" in
   1 | 2) ;;
   *)
@@ -66,6 +74,8 @@ Environment overrides:
   CODEX_GRADER_REASONING_EFFORT (default: high)
   EVAL_SAMPLES
   EVAL_CASE_FILTER
+  EVAL_SKILL_INVOCATION_MODE   (natural|forced; default: natural. Forced is a
+                                plugin-only diagnostic and never a baseline gate.)
   EVAL_PROVIDER_FILTER         (filters tested providers by final label, variant id,
                                 provider id, plugin mode, or substring;
                                 an exact variant id selects full-marketplace only;
@@ -109,6 +119,7 @@ if (process.env.EVAL_CASE_FILTER) {
 if (process.env.EVAL_SAMPLES) {
   options.samples = process.env.EVAL_SAMPLES;
 }
+options.skillInvocationMode = process.env.EVAL_SKILL_INVOCATION_MODE || 'natural';
 fs.writeFileSync(file, JSON.stringify(options));
 NODE
 }
@@ -152,7 +163,8 @@ write_eval_status() {
     --output "$out_dir/status.json" \
     --state "$state" \
     --reason "$reason" \
-    --provider-credentials "${EVAL_PROVIDER_CREDENTIALS_STATUS:-unknown}" >/dev/null
+    --provider-credentials "${EVAL_PROVIDER_CREDENTIALS_STATUS:-unknown}" \
+    --skill-invocation-mode "$skill_invocation_mode" >/dev/null
 }
 
 check_thresholds_and_record_status() {
@@ -162,7 +174,11 @@ check_thresholds_and_record_status() {
   threshold_status="$?"
   set -e
   if [ "$threshold_status" -eq 0 ]; then
-    write_eval_status complete "promptfoo evaluation completed and configured thresholds passed"
+    if [ "$skill_invocation_mode" = "forced" ]; then
+      write_eval_status complete "forced skill-invocation diagnostics completed and plugin-mode thresholds passed; canonical baseline comparison was not evaluated"
+    else
+      write_eval_status complete "promptfoo evaluation completed and configured thresholds passed"
+    fi
   else
     write_eval_status failed "promptfoo evaluation completed but configured thresholds failed"
   fi

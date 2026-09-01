@@ -139,6 +139,87 @@ MD
   [[ "$output" != *"tests: file://$ROOT/evals/promptfoo/load-harness-cases.cjs"* ]]
 }
 
+@test "forced skill invocation is an opt-in diagnostic without a no-plugin composition" {
+  metadata="$(mktemp)"
+
+  run env EVAL_SKILL_INVOCATION_MODE=forced \
+    node "$GENERATOR" \
+    --suite behavior \
+    --metadata-output "$metadata" \
+    --stdout
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"targeted-plugins"* ]]
+  [[ "$output" == *"full-marketplace"* ]]
+  [[ "$output" != *"no-plugins"* ]]
+  [[ "$output" == *"skillInvocationMode: forced"* ]]
+  [ "$(jq -r '.skillInvocationMode' "$metadata")" = "forced" ]
+  [ "$(jq '[.providerCompositions[] | select(.pluginMode == "no-plugins")] | length' "$metadata")" = "0" ]
+
+  rm -f "$metadata"
+
+  run env \
+    EVAL_SKILL_INVOCATION_MODE=forced \
+    EVAL_PROVIDER_FILTER=no-plugins \
+    node "$GENERATOR" --suite behavior --stdout
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"forced skill invocation cannot run against no-plugins"* ]]
+
+  run env EVAL_SKILL_INVOCATION_MODE=forced \
+    node "$GENERATOR" --suite canary --stdout
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"forced skill invocation is available only for behavior evals"* ]]
+}
+
+@test "forced config generation validates exact fixture skill ownership" {
+  make_codex_eval_fixture
+  cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'
+[
+  {
+    "case_id": "forced-case",
+    "prompt": "Answer the scenario.",
+    "plugins": ["shared"],
+    "skills": []
+  }
+]
+JSON
+
+  run env EVAL_SKILL_INVOCATION_MODE=forced \
+    node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"must declare a non-empty skills array"* ]]
+
+  jq '.[0].skills = ["missing-skill"]' \
+    "$FIXTURE_TMP/evals/fixtures/behavior/cases.json" \
+    >"$FIXTURE_TMP/cases.updated.json"
+  mv "$FIXTURE_TMP/cases.updated.json" \
+    "$FIXTURE_TMP/evals/fixtures/behavior/cases.json"
+
+  run env EVAL_SKILL_INVOCATION_MODE=forced \
+    node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"must resolve to exactly one declared plugin; found 0"* ]]
+
+  mkdir -p "$FIXTURE_TMP/plugins/codex-only/skills/shared-skill"
+  cp "$FIXTURE_TMP/plugins/shared/skills/shared-skill/SKILL.md" \
+    "$FIXTURE_TMP/plugins/codex-only/skills/shared-skill/SKILL.md"
+  jq '.[0].plugins = ["shared", "codex-only"] | .[0].skills = ["shared-skill"]' \
+    "$FIXTURE_TMP/evals/fixtures/behavior/cases.json" \
+    >"$FIXTURE_TMP/cases.updated.json"
+  mv "$FIXTURE_TMP/cases.updated.json" \
+    "$FIXTURE_TMP/evals/fixtures/behavior/cases.json"
+
+  run env EVAL_SKILL_INVOCATION_MODE=forced \
+    node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"must resolve to exactly one declared plugin; found 2"* ]]
+}
+
 @test "generated targeted config includes a selected Codex plugin" {
   make_codex_eval_fixture
   cat >"$FIXTURE_TMP/evals/fixtures/behavior/cases.json" <<'JSON'

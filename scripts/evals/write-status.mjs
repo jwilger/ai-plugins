@@ -21,6 +21,7 @@ const status = {
   state: readFlag("--state", "unknown"),
   reason: readFlag("--reason", ""),
   providerCredentials: readFlag("--provider-credentials", "unknown"),
+  skillInvocationMode: readFlag("--skill-invocation-mode", "natural"),
 };
 
 const output = path.resolve(readFlag("--output", defaultOutput));

@@ -109,6 +109,48 @@ function selectedBehaviorPluginNames(options = {}) {
   return [...pluginNames].sort();
 }
 
+function marketplacePlugins(root) {
+  const manifestFile = path.join(root, ".agents/plugins/marketplace.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  return new Map(
+    manifest.plugins.map((plugin) => {
+      const source =
+        plugin.source && typeof plugin.source === "object"
+          ? plugin.source.path
+          : plugin.source;
+      return [
+        plugin.name,
+        path.resolve(root, source || `plugins/${plugin.name}`),
+      ];
+    }),
+  );
+}
+
+function resolveSkillReferences(testCase, options = {}) {
+  const root = options.root || process.cwd();
+  const plugins = marketplacePlugins(root);
+  const declaredPlugins = testCase.plugins || [];
+  const skills = testCase.skills || [];
+
+  return skills.map((skill) => {
+    const owners = declaredPlugins.filter((pluginName) => {
+      const pluginRoot = plugins.get(pluginName);
+      return (
+        pluginRoot &&
+        fs.existsSync(path.join(pluginRoot, "skills", skill, "SKILL.md"))
+      );
+    });
+
+    if (owners.length !== 1) {
+      throw new Error(
+        `${testCase.fixture_file}: ${testCase.case_id} skill ${JSON.stringify(skill)} must resolve to exactly one declared plugin; found ${owners.length}`,
+      );
+    }
+
+    return `$${owners[0]}:${skill}`;
+  });
+}
+
 function caseById(caseId, options = {}) {
   return loadBehaviorCases(options).find(
     (testCase) => testCase.case_id === caseId,
@@ -156,6 +198,7 @@ module.exports = {
   fileUrl,
   loadBehaviorCases,
   loadMatrix,
+  resolveSkillReferences,
   selectedBehaviorCases,
   selectedBehaviorPluginNames,
   valueGateMode,

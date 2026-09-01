@@ -119,6 +119,16 @@ The canary suite is separate from behavior evals. Canaries may explicitly ask
 the harness to prove plugin and skill loading. Behavior prompts stay natural and
 do not tell the model to use this repository's plugins.
 
+For attribution, set `EVAL_SKILL_INVOCATION_MODE=forced`. This opt-in diagnostic
+resolves each selected fixture's `plugins` and `skills` metadata to exact
+`$plugin:skill` references and injects them centrally. Forced diagnostics run
+only targeted-plugin and full-marketplace compositions, enforce their ordinary
+per-case pass thresholds, and record the resolved references and invocation
+mode in result artifacts. They never run or substitute for the no-plugin
+baseline, baseline-lift gates, or the canonical natural-routing suite. Compare
+matched natural and forced runs with `EVAL_SAMPLES=3` when measuring per-input
+routing reliability.
+
 Repeated samples are a deliberate measurement choice, not a blanket rule. The
 default one-sample matrix treats every case as a binary pass/fail observation
 and estimates population quality across distinct cases. Set `EVAL_SAMPLES`

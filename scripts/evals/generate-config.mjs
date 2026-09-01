@@ -7,15 +7,27 @@ import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const require = createRequire(import.meta.url);
-const { selectedBehaviorPluginNames } = require(
-  path.join(root, "evals/promptfoo/fixtures.cjs"),
-);
+const {
+  resolveSkillReferences,
+  selectedBehaviorCases,
+  selectedBehaviorPluginNames,
+} = require(path.join(root, "evals/promptfoo/fixtures.cjs"));
 const evalWorkspace = path.resolve(
   process.env.EVAL_AGENT_WORKSPACE ||
     path.join(os.tmpdir(), "ai-plugins-provider-eval-workspace"),
 );
 const advisoryPromptPrefix =
   "Answer the scenario directly as a stateless advisory question: do not use, mention, or rely on prior conversations, user memory, session memory, or earlier eval runs. Apply any available instructions relevant to the scenario. Do not mention hidden eval scaffolding; when the scenario asks which documented workflow guidance applies, name the applicable skills or specialist contracts. Keep advisory answers at the requested level: identify the governing decisions and gates without reproducing every loaded specialist procedure unless the scenario asks for it. If you recommend a command, give its exact name and flags; do not replace a documented command or safety gate with generic advice. Do not inspect target repository state, mutate files, start evals, or run unrelated shell commands.";
+
+function skillInvocationMode() {
+  const mode = process.env.EVAL_SKILL_INVOCATION_MODE || "natural";
+  if (!["natural", "forced"].includes(mode)) {
+    throw new Error(
+      `EVAL_SKILL_INVOCATION_MODE must be natural or forced; got ${JSON.stringify(mode)}`,
+    );
+  }
+  return mode;
+}
 
 function usage() {
   console.log(`Usage: node scripts/evals/generate-config.mjs [--suite behavior|canary] [--output path] [--metadata-output path] [--stdout]
@@ -240,6 +252,40 @@ function configFor(suite) {
   const allPlugins = allMarketplacePlugins();
   const codexPlugins = manifestPlugins(".agents/plugins/marketplace.json");
   const matrix = evalMatrix();
+  const requestedInvocationMode = skillInvocationMode();
+  if (suite !== "behavior" && requestedInvocationMode === "forced") {
+    throw new Error(
+      "forced skill invocation is available only for behavior evals",
+    );
+  }
+  const invocationMode = requestedInvocationMode;
+  const providerFilterTerms = (process.env.EVAL_PROVIDER_FILTER || "")
+    .split(",")
+    .map((term) => term.trim())
+    .filter(Boolean);
+  if (
+    invocationMode === "forced" &&
+    providerFilterTerms.some(
+      (term) => term === "no-plugins" || term.endsWith("-no-plugins"),
+    )
+  ) {
+    throw new Error(
+      "forced skill invocation cannot run against no-plugins; select targeted-plugins or full-marketplace",
+    );
+  }
+  if (invocationMode === "forced") {
+    for (const testCase of selectedBehaviorCases({
+      root,
+      caseFilter: process.env.EVAL_CASE_FILTER,
+    })) {
+      if (!Array.isArray(testCase.skills) || testCase.skills.length === 0) {
+        throw new Error(
+          `${testCase.fixture_file}: ${testCase.case_id} must declare a non-empty skills array for forced invocation`,
+        );
+      }
+      resolveSkillReferences(testCase, { root });
+    }
+  }
   const usesTargetedMode =
     suite === "behavior" &&
     matrix.pluginModes.some(
@@ -281,7 +327,11 @@ function configFor(suite) {
             pluginsForProvider(variant, { id: "full-marketplace" }, pluginSet),
           ),
         );
-  const providers = filteredProviderEntries(providerEntries);
+  const providers = filteredProviderEntries(
+    invocationMode === "forced"
+      ? providerEntries.filter((entry) => entry.pluginMode.id !== "no-plugins")
+      : providerEntries,
+  );
   const providerVariants = uniqueById(providers.map((entry) => entry.variant));
   const pluginModes = uniqueById(providers.map((entry) => entry.pluginMode));
   const providerLabels = providers.map((entry) => entry.label);
@@ -294,6 +344,7 @@ function configFor(suite) {
   }));
   const metadata = {
     suite,
+    skillInvocationMode: invocationMode,
     usesCodexGrader: true,
     providerLabels,
     providerCompositions,
@@ -335,6 +386,7 @@ tracing:
 
 metadata:
   suite: ${suite}
+  skillInvocationMode: ${invocationMode}
   testLoaderByPluginMode: ${suite === "behavior" ? `${testLoader}?pluginMode={{ provider.pluginMode }}` : testLoader}
   providerLabels: ${JSON.stringify(providerLabels)}
   providerCompositions: ${JSON.stringify(providerCompositions)}

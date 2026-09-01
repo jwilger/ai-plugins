@@ -612,6 +612,40 @@ JSON
   [[ "$output" == *"Eval thresholds passed"* ]]
 }
 
+@test "threshold checker labels forced skill invocation as diagnostic evidence" {
+  fixture_root="$(mktemp -d)"
+  results="$fixture_root/results.json"
+  cat >"$results" <<'JSON'
+{
+  "config": {
+    "metadata": { "skillInvocationMode": "forced" }
+  },
+  "results": {
+    "results": [
+      {
+        "success": true,
+        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "vars": {
+          "case_id": "forced-diagnostic",
+          "plugin_mode": "targeted-plugins",
+          "skill_invocation_mode": "forced",
+          "min_pass_rate": 1,
+          "value_gate_mode": "standard"
+        }
+      }
+    ]
+  }
+}
+JSON
+
+  run node "$ROOT/scripts/evals/check-thresholds.mjs" "$results"
+
+  rm -rf "$fixture_root"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Forced skill-invocation diagnostics passed"* ]]
+  [[ "$output" != *"value gates"* ]]
+}
+
 @test "eval threshold checker treats no-plugin misses as baseline value-gate evidence" {
   fixture_root="$(mktemp -d)"
   results="$fixture_root/results.json"

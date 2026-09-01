@@ -142,6 +142,18 @@ NODE
   [ -z "$output" ]
 }
 
+@test "eval status records the skill invocation mode" {
+  status_file="$TMPROOT/status.json"
+
+  run node "$ROOT/scripts/evals/write-status.mjs" \
+    --output "$status_file" \
+    --state completed \
+    --skill-invocation-mode forced
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.skillInvocationMode' "$status_file")" = "forced" ]
+}
+
 @test "retired top-level eval decision and duplicate fixture stay removed" {
   [ ! -e "$ROOT/evals/fixtures/coverage-decisions.json" ]
   [ ! -e "$ROOT/evals/fixtures/agentic-systems-engineering/cases.json" ]
