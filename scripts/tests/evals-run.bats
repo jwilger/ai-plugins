@@ -155,6 +155,21 @@ teardown() {
   rm -rf "$temp_root"
 }
 
+@test "forced generator rejection records failed eval status" {
+  temp_root="$(mktemp -d)"
+  isolated_out="$temp_root/eval-output"
+
+  run env EVAL_SKILL_INVOCATION_MODE=forced EVAL_OUT_DIR="$isolated_out" \
+    "$RUNNER" --suite canary
+
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.state' "$isolated_out/status.json")" = "failed" ]
+  [ "$(jq -r '.skillInvocationMode' "$isolated_out/status.json")" = "forced" ]
+  [ "$(jq -r '.reason' "$isolated_out/status.json")" = "generated eval configuration was rejected" ]
+
+  rm -rf "$temp_root"
+}
+
 @test "eval runner dry-run uses repo-owned generated paths from outside repo cwd" {
   other_cwd="$(mktemp -d)"
 

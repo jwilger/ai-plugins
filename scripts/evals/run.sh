@@ -536,7 +536,13 @@ trap 'forward_eval_signal INT 130' INT
 trap 'forward_eval_signal TERM 143' TERM
 "$root/scripts/evals/ensure-node-deps.sh"
 if [ "$generated_config" -eq 1 ]; then
-  node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file" >/dev/null
+  if node "$root/scripts/evals/generate-config.mjs" --suite "$suite" --output "$config" --metadata-output "$generated_metadata_file" >/dev/null; then
+    :
+  else
+    generator_status=$?
+    write_eval_status failed "generated eval configuration was rejected"
+    exit "$generator_status"
+  fi
 fi
 
 export PROMPTFOO_DISABLE_TELEMETRY="${PROMPTFOO_DISABLE_TELEMETRY:-1}"
