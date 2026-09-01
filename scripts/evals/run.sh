@@ -441,11 +441,6 @@ if [ "$config" = "evals/promptfoo/development-system.yaml" ]; then
   generated_config=1
 fi
 
-if [ "$skill_invocation_mode" = "forced" ] && [ "$generated_config" -ne 1 ]; then
-  echo "forced skill-invocation diagnostics require the generated canonical config" >&2
-  exit 2
-fi
-
 cmd=(
   "$promptfoo_bin"
   eval
@@ -481,6 +476,10 @@ cd "$root"
 
 if [ "$dry_run" -eq 1 ]; then
   prepare_eval_output_dir check
+  if [ "$skill_invocation_mode" = "forced" ] && [ "$generated_config" -ne 1 ]; then
+    echo "forced skill-invocation diagnostics require the generated canonical config" >&2
+    exit 2
+  fi
   dry_full_home="${CODEX_EVAL_HOME_FULL_MARKETPLACE:-${CODEX_EVAL_HOME:-$root/.evals/codex-home-full-marketplace}}"
   dry_no_plugins_home="${CODEX_EVAL_HOME_NO_PLUGINS:-$root/.evals/codex-home-no-plugins}"
   dry_targeted_home="${CODEX_EVAL_HOME_TARGETED_PLUGINS:-$root/.evals/codex-home-targeted-plugins}"
@@ -519,6 +518,11 @@ fi
 prepare_eval_output_dir
 mkdir -p "$out_dir"
 rm -f "$out_dir/results.json" "$out_dir/report.html" "$out_dir/results.junit.xml" "$out_dir/status.json"
+if [ "$skill_invocation_mode" = "forced" ] && [ "$generated_config" -ne 1 ]; then
+  write_eval_status failed "forced skill-invocation diagnostics require the generated canonical config"
+  echo "forced skill-invocation diagnostics require the generated canonical config" >&2
+  exit 2
+fi
 trap 'forward_eval_signal INT 130' INT
 trap 'forward_eval_signal TERM 143' TERM
 "$root/scripts/evals/ensure-node-deps.sh"

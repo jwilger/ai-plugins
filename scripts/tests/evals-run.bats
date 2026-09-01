@@ -116,6 +116,26 @@ teardown() {
   [[ "$output" != *"promptfoo eval"* ]]
 }
 
+@test "rejected forced custom config replaces stale eval evidence" {
+  temp_root="$(mktemp -d)"
+  isolated_out="$temp_root/eval-output"
+  mkdir "$isolated_out"
+  printf 'ai-plugins eval output\n' >"$isolated_out/.ai-plugins-eval-output"
+  printf 'stale results\n' >"$isolated_out/results.json"
+  printf '{"state":"complete"}\n' >"$isolated_out/status.json"
+
+  run env EVAL_SKILL_INVOCATION_MODE=forced EVAL_OUT_DIR="$isolated_out" \
+    "$RUNNER" "$ROOT/evals/promptfoo/development-system.yaml"
+
+  [ "$status" -eq 2 ]
+  [ ! -e "$isolated_out/results.json" ]
+  [ "$(jq -r '.state' "$isolated_out/status.json")" = "failed" ]
+  [ "$(jq -r '.skillInvocationMode' "$isolated_out/status.json")" = "forced" ]
+  [[ "$(jq -r '.reason' "$isolated_out/status.json")" == *"require the generated canonical config"* ]]
+
+  rm -rf "$temp_root"
+}
+
 @test "eval runner dry-run uses repo-owned generated paths from outside repo cwd" {
   other_cwd="$(mktemp -d)"
 
