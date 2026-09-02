@@ -51,17 +51,24 @@ unavailable native workflow scheduler is never the owner. When task-board
 remote publication is authorized, append every transition to the active Tiber
 task with `tiber.note.add` (CLI: `tiber note add`). When remote mutation is not
 authorized, store the latest record at
-`$(git rev-parse --git-common-dir)/development-system/checkpoints/<task-id>.latest`
-instead. Create its parent with owner-only permissions and serialize transitions
-with an exclusive task-scoped lock in that directory. While holding the lock,
-read the current complete record and require the proposed record's
+`$(git rev-parse --git-common-dir)/development-system/checkpoints/<checkpoint-id>.latest`
+instead. Use the active task ID as `checkpoint-id` when one exists. Otherwise
+derive it as lowercase hexadecimal SHA-256 of the exact byte sequence
+`baseline_oid`, one NUL byte, and the normalized original user request, and
+record that ID in every handoff. Invoke the bundled
+`<plugin-root>/scripts/write-local-checkpoint.sh` with that ID, the expected
+generation, the expected predecessor digest (or literal `null`), and a file
+containing the proposed newline-terminated record. The helper creates the
+owner-only parent and serializes transitions with an exclusive task-scoped
+lock. While holding the lock, it reads the current complete record and requires
+the proposed record's
 `generation` to equal the current generation plus one and its
 `predecessor_sha256` to equal SHA-256 of the exact current `checkpoint-v1` line;
 the bootstrap record uses generation zero and a null predecessor. Reject a
-missing or stale predecessor without replacing the current record. Then write
-one complete line to a same-directory temporary file, flush it, atomically
-rename it over the target, flush the directory, and release the lock; never
-append in place. Keep this local file
+missing or stale predecessor without replacing the current record. The helper
+writes one complete line to a same-directory temporary file, flushes it,
+atomically renames it over the target, flushes the directory, and releases the
+lock; never synthesize a second writer or append in place. Keep this local file
 untracked and out of the content snapshot. Select one owner for the current
 delivery mode and never treat an unpublished Tiber transaction as the local
 fallback. After every transition, persist exactly one record before the next
@@ -106,8 +113,9 @@ gate receipts are `null`, and CI may be empty, only when `baseline_oid` equals
 and `delivery` identifies that same pre-existing baseline. A dirty,
 non-baseline, or unreconciled starting worktree is a recovery hold, not a
 bootstrap shortcut. Store bounded references rather than raw logs or secrets.
-At session start, restart, or handoff, read the selected owner: `tiber.show` for
-authorized task publication or the exact local `.latest` file for local-only.
+At session start, restart, or handoff, read the selected owner: `tiber.show` when
+task publication was authorized for this checkpoint, otherwise the exact local
+`.latest` file regardless of repository delivery mode.
 Select its latest `checkpoint-v1`
 record, verify its generation/predecessor chain when history is available, and
 reconcile every identity with current Git and forge state before acting. A

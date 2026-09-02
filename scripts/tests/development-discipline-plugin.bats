@@ -76,8 +76,9 @@ setup() {
 
 @test "local durable checkpoints reject stale cooperative writers" {
   skill="$ROOT/plugins/development-system/skills/development-workflow/SKILL.md"
+  writer="$ROOT/plugins/development-system/scripts/write-local-checkpoint.sh"
 
-  run grep -F "exclusive task-scoped lock" "$skill"
+  run grep -F "owner-only parent and serializes transitions with an exclusive task-scoped" "$skill"
   [ "$status" -eq 0 ]
 
   run grep -F 'generation` to equal the current generation plus one' "$skill"
@@ -88,6 +89,28 @@ setup() {
 
   run grep -F "stale predecessor" "$skill"
   [ "$status" -eq 0 ]
+
+  repo=$(mktemp -d)
+  git -C "$repo" init -q
+  first="$repo/first.record"
+  second="$repo/second.record"
+  stale="$repo/stale.record"
+  printf '%s\n' 'checkpoint-v1 {"generation":0,"predecessor_sha256":null}' >"$first"
+
+  run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$first"
+  [ "$status" -eq 0 ]
+  target="$repo/.git/development-system/checkpoints/work-item.latest"
+  predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
+  printf 'checkpoint-v1 {"generation":1,"predecessor_sha256":"%s"}\n' "$predecessor" >"$second"
+
+  run bash -c 'cd "$1" && "$2" work-item 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$second"
+  [ "$status" -eq 0 ]
+  current=$(<"$target")
+  printf 'checkpoint-v1 {"generation":1,"predecessor_sha256":"%s"}\n' "$predecessor" >"$stale"
+
+  run bash -c 'cd "$1" && "$2" work-item 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$stale"
+  [ "$status" -eq 3 ]
+  [ "$(<"$target")" = "$current" ]
 }
 
 
