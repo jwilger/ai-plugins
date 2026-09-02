@@ -70,7 +70,9 @@ When a test and its implementation cannot independently pass, declare one
 bounded RED-to-GREEN pair before the implementation edit. Persist the expected
 RED result and causal claim, allow only the paired implementation edit, test
 immediately, and enter `passing-awaiting-gates-or-review` at GREEN. This is not
-permission to bundle another behavior.
+permission to bundle another behavior. The pair is not a fifth durable state:
+its RED snapshot remains canonical `failing` with the paired implementation as
+the sole next action until the immediate retest reaches GREEN.
 
 Apply proportional checkpoints outside implementation and test files.
 Documentation, configuration, and formatting-only changes run the smallest
@@ -96,6 +98,14 @@ reset. Comprehensive, slow, integration, mutation, and pipeline-scale suites
 remain in CI rather than being duplicated in a local exact-commit gate. A
 completed exact-SHA CI failure immediately preempts review or other work through
 the existing Tiber-owned recovery hold.
+
+Keep checkpoint CI bounded per ref while continuing increments. Use existing
+provider or repository coalescing/cancellation for superseded non-terminal runs
+when available and authorized; otherwise wait for capacity before another push
+would add obsolete queued work. Never cancel the current terminal candidate's
+exact-SHA run, and never accept a successful older run as its readiness
+evidence.
+
 When explaining this workflow, explicitly state the RED pair's recorded causal
 claim, comprehensive-suite ownership in CI with no duplicate comprehensive
 local exact-commit gate, that every planned increment and acceptance criterion
