@@ -87,6 +87,9 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   tracked/untracked snapshot algorithm defined by the public
   `development-workflow` skill; that skill is the sole schema owner. Do not
   invent alternate keys, delimiters, hashes, or state-specific nullability.
+  For the local owner, also use its task-scoped lock and generation/predecessor
+  compare-and-swap rule so a stale linked-worktree writer cannot replace a
+  newer transition.
   Never put raw logs, credentials, or secrets in the note. On restart or
   handoff, use `tiber.show` for the published owner or read the selected local
   `.latest` owner, then reconcile the record with Git and forge state before

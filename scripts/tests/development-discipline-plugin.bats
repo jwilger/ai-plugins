@@ -74,6 +74,22 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+@test "local durable checkpoints reject stale cooperative writers" {
+  skill="$ROOT/plugins/development-system/skills/development-workflow/SKILL.md"
+
+  run grep -F "exclusive task-scoped lock" "$skill"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'generation` to equal the current generation plus one' "$skill"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'predecessor_sha256` to equal SHA-256' "$skill"
+  [ "$status" -eq 0 ]
+
+  run grep -F "stale predecessor" "$skill"
+  [ "$status" -eq 0 ]
+}
+
 
 @test "change-preflight benchmark rejects incomplete or speculative classifications" {
   workspace="$ROOT/evals/benchmarks/change-preflight/workspace"

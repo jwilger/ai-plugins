@@ -52,16 +52,25 @@ remote publication is authorized, append every transition to the active Tiber
 task with `tiber.note.add` (CLI: `tiber note add`). When remote mutation is not
 authorized, store the latest record at
 `$(git rev-parse --git-common-dir)/development-system/checkpoints/<task-id>.latest`
-instead. Create its parent with owner-only permissions, write one complete line
-to a same-directory temporary file, flush it, atomically rename it over the
-target, and flush the directory; never append in place. Keep this local file
+instead. Create its parent with owner-only permissions and serialize transitions
+with an exclusive task-scoped lock in that directory. While holding the lock,
+read the current complete record and require the proposed record's
+`generation` to equal the current generation plus one and its
+`predecessor_sha256` to equal SHA-256 of the exact current `checkpoint-v1` line;
+the bootstrap record uses generation zero and a null predecessor. Reject a
+missing or stale predecessor without replacing the current record. Then write
+one complete line to a same-directory temporary file, flush it, atomically
+rename it over the target, flush the directory, and release the lock; never
+append in place. Keep this local file
 untracked and out of the content snapshot. Select one owner for the current
 delivery mode and never treat an unpublished Tiber transaction as the local
 fallback. After every transition, persist exactly one record before the next
 action. The canonical wire form for both owners is the literal prefix
 `checkpoint-v1 ` followed by one compact JSON object (no Markdown) with these
-required keys: `baseline_oid`, `snapshot`, `state`, `test`, `gates`,
-`delivery`, `ci`, and `next_action`. Use strings for scalar values and `null`
+required keys: `generation`, `predecessor_sha256`, `baseline_oid`, `snapshot`,
+`state`, `test`, `gates`, `delivery`, `ci`, and `next_action`. `generation` is
+a non-negative integer and `predecessor_sha256` is a SHA-256 string except on
+the generation-zero bootstrap, where it is `null`. Use strings for other scalar values and `null`
 only where the following exact shapes permit it. `snapshot` is exactly
 `{"head_oid":string,"tracked_sha256":string,"untracked_sha256":string}`.
 `test` is either `null` or exactly
@@ -100,8 +109,9 @@ bootstrap shortcut. Store bounded references rather than raw logs or secrets.
 At session start, restart, or handoff, read the selected owner: `tiber.show` for
 authorized task publication or the exact local `.latest` file for local-only.
 Select its latest `checkpoint-v1`
-record, and reconcile every identity with current Git and forge state before
-acting. A malformed, missing, unexpectedly unpublished Tiber, non-atomic local,
+record, verify its generation/predecessor chain when history is available, and
+reconcile every identity with current Git and forge state before acting. A
+malformed, missing, unexpectedly unpublished Tiber, non-atomic or stale local,
 or mismatched record is a fail-closed
 recovery hold: do not edit, commit, push, or infer progress until the same task
 record is reconciled. This note protocol records evidence only; it does not
