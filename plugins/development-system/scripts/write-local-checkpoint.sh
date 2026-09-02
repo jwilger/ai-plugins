@@ -66,7 +66,11 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
   .snapshot.head_oid == $current_head and .snapshot.tracked_sha256 == $current_tracked and .snapshot.untracked_sha256 == $current_untracked and
   (.state | IN("failing", "passing-awaiting-gates-or-review", "committed", "pushed-or-delivery-mode-equivalent")) and
   (.test == null or (.test | exact_keys(["command", "receipt_ref", "outcome", "failure_kind"]) and (.command | type == "string") and (.receipt_ref | type == "string") and (.outcome | IN("pass", "fail")) and (.failure_kind | string_or_null))) and
-  (.gates | exact_keys(["lightweight_review_receipt", "fast_gate_receipt", "exact_identity_verification_receipt"]) and all(.[]; string_or_null)) and
+  (.gates | exact_keys(["lightweight_review_receipt", "fast_gate_receipt", "exact_identity_verification_receipt"]) and
+    (.lightweight_review_receipt | string_or_null) and (.fast_gate_receipt | string_or_null) and
+    (.exact_identity_verification_receipt == null or
+      (.exact_identity_verification_receipt | exact_keys(["receipt_ref", "outcome"]) and
+       (.receipt_ref | type == "string") and (.outcome | IN("pass", "fail"))))) and
   (.delivery == null or (.delivery | exact_keys(["mode", "commit_oid", "pushed_oid", "local_snapshot"]) and (.mode | IN("local-only", "direct-to-trunk", "pull-request")) and (.commit_oid | . == null or oid) and (.pushed_oid | . == null or oid) and (.local_snapshot | string_or_null))) and
   (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | type == "string") and (.run_id | type == "string") and (.commit_oid | oid) and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | string_or_null)) and
   (.next_action | type == "string") and
@@ -79,7 +83,8 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
      .test != null and .test.outcome == "pass" and .delivery != null and .delivery.commit_oid == .snapshot.head_oid and
      (.gates.lightweight_review_receipt | type == "string") and
      (.gates.fast_gate_receipt | type == "string") and
-     ((.gates.exact_identity_verification_receipt == null and .next_action == "verify-exact-commit") or (.gates.exact_identity_verification_receipt | type == "string"))
+     ((.gates.exact_identity_verification_receipt == null and .next_action == "verify-exact-commit") or
+      (.gates.exact_identity_verification_receipt != null))
    elif .state == "pushed-or-delivery-mode-equivalent" and .generation == 0 then
      .baseline_oid == .snapshot.head_oid and
      .snapshot.tracked_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" and
@@ -93,7 +98,7 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
      .test != null and .test.outcome == "pass" and .delivery != null and
      (.gates.lightweight_review_receipt | type == "string") and
      (.gates.fast_gate_receipt | type == "string") and
-     (.gates.exact_identity_verification_receipt | type == "string") and
+     .gates.exact_identity_verification_receipt.outcome == "pass" and
      (if .delivery.mode == "local-only" then
         .delivery.pushed_oid == null and (.delivery.local_snapshot | type == "string") and
         (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null

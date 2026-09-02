@@ -85,7 +85,7 @@ only where the following exact shapes permit it. `snapshot` is exactly
 `test` is either `null` or exactly
 `{"command":string,"receipt_ref":string,"outcome":"pass"|"fail","failure_kind":string|null}`.
 `gates` is exactly
-`{"lightweight_review_receipt":string|null,"fast_gate_receipt":string|null,"exact_identity_verification_receipt":string|null}`.
+`{"lightweight_review_receipt":string|null,"fast_gate_receipt":string|null,"exact_identity_verification_receipt":{"receipt_ref":string,"outcome":"pass"|"fail"}|null}`.
 `delivery` is either `null` or exactly
 `{"mode":"local-only"|"direct-to-trunk"|"pull-request","commit_oid":string|null,"pushed_oid":string|null,"local_snapshot":string|null}`.
 `ci` is exactly
@@ -148,7 +148,8 @@ emulate or claim native `workflow.*` enforcement.
   and fast-gate receipts are required. Immediately after commit creation,
   `exact_identity_verification_receipt` may be `null` only while `next_action` is
   `verify-exact-commit`; append the next committed checkpoint after verification.
-  A failed verification stays `committed`, records the bounded failure receipt,
+  A failed verification stays `committed`, records the bounded
+  `outcome:"fail"` receipt,
   prohibits delivery, and permits only the causal repair action followed by
   another exact verification. Push or local completion requires a successful
   exact-identity verification receipt. CI for this new commit may still have no
@@ -157,7 +158,8 @@ emulate or claim native `workflow.*` enforcement.
   or the exact local-only terminal snapshot and the fact that remote mutation
   is unauthorized; `delivery` is required and must identify the exact
   state-appropriate commit or snapshot, and all three gate receipts remain
-  required and successful except for the exact clean bootstrap above. For a
+  required, with exact-identity `outcome:"pass"`, except for the exact clean
+  bootstrap above. For a
   local-only no-commit checkpoint, exact-identity verification binds the
   reviewed local snapshot; it never implies commit authority or fabricates a
   commit receipt. Immediately after a
