@@ -78,7 +78,10 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
      (.gates.fast_gate_receipt | type == "string") and
      ((.gates.exact_identity_verification_receipt == null and .next_action == "verify-exact-commit") or (.gates.exact_identity_verification_receipt | type == "string"))
    elif .state == "pushed-or-delivery-mode-equivalent" and .generation == 0 then
-     .baseline_oid == .snapshot.head_oid and .test == null and all(.gates[]; . == null) and .delivery != null and
+     .baseline_oid == .snapshot.head_oid and
+     .snapshot.tracked_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" and
+     .snapshot.untracked_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" and
+     .test == null and all(.gates[]; . == null) and .delivery != null and
      (if .delivery.mode == "local-only" then
         (.delivery.local_snapshot | type == "string") and (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
       else .delivery.pushed_oid == .snapshot.head_oid end)

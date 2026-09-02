@@ -92,6 +92,8 @@ setup() {
 
   repo=$(mktemp -d)
   git -C "$repo" init -q
+  printf '%s\n' baseline >"$repo/tracked.txt"
+  git -C "$repo" add tracked.txt
   git -C "$repo" -c user.name=Test -c user.email=test@example.invalid commit --allow-empty -m baseline -q
   records=$(mktemp -d)
   first="$records/first.record"
@@ -104,6 +106,7 @@ setup() {
   invalid_local_ci="$records/invalid-local-ci.record"
   invalid_baseline="$records/invalid-baseline.record"
   invalid_committed_test="$records/invalid-committed-test.record"
+  dirty_bootstrap="$records/dirty-bootstrap.record"
   head_oid=$(git -C "$repo" rev-parse HEAD)
   empty_sha=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
   printf '%s\n' 'checkpoint-v1 {"generation":0,"predecessor_sha256":null}' >"$invalid"
@@ -164,6 +167,14 @@ setup() {
   lock_line=$(grep -n 'flock -x' "$writer" | cut -d: -f1)
   snapshot_line=$(grep -n 'current_head=' "$writer" | cut -d: -f1)
   [ "$lock_line" -lt "$snapshot_line" ]
+
+  printf '%s\n' dirty >"$repo/tracked.txt"
+  dirty_tracked=$(git -C "$repo" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
+  dirty_json=$(jq -cn --arg head "$head_oid" --arg tracked "$dirty_tracked" --arg empty "$empty_sha" '{generation:0,predecessor_sha256:null,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$tracked,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:{mode:"local-only",commit_oid:null,pushed_oid:null,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"edit"}')
+  printf 'checkpoint-v1 %s\n' "$dirty_json" >"$dirty_bootstrap"
+  run bash -c 'cd "$1" && "$2" dirty-item 0 null "$3"' _ "$repo" "$writer" "$dirty_bootstrap"
+  [ "$status" -ne 0 ]
+  [ ! -e "$repo/.git/development-system/checkpoints/dirty-item.latest" ]
 }
 
 
