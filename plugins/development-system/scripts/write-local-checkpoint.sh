@@ -15,7 +15,7 @@ record_file=$4
 [[ $checkpoint_id =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid checkpoint id" >&2; exit 2; }
 [[ $expected_generation =~ ^(0|[1-9][0-9]*)$ ]] || usage
 [[ -f $record_file ]] || usage
-for dependency in git jq flock sha256sum sed od tr sync mktemp cp mv chmod grep wc tail head cut; do
+for dependency in git jq flock sha256sum sed od tr sync mktemp cp mv chmod grep wc tail head cut node; do
   command -v "$dependency" >/dev/null 2>&1 || { echo "missing checkpoint runtime dependency: $dependency" >&2; exit 2; }
 done
 sync --help 2>&1 | grep -q -- ' -f' || { echo "checkpoint runtime requires sync -f support" >&2; exit 2; }
@@ -47,7 +47,11 @@ while IFS= read -r -d '' path; do
   elif [[ -f $path ]]; then mode=100644
   else echo "unsupported untracked file type: $path" >&2; exit 2
   fi
-  oid=$(git hash-object -- "$path")
+  if [[ -L $path ]]; then
+    oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding: "buffer"}))' "$path" | git hash-object --stdin)
+  else
+    oid=$(git hash-object -- "$path")
+  fi
   printf '%s\0%s\0%s\n' "$mode" "$path" "$oid" >>"$untracked_stream"
 done < <(git ls-files --others --exclude-standard -z)
 current_untracked=$(sha256sum "$untracked_stream" | cut -d ' ' -f 1)

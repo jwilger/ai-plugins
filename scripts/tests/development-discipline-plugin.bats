@@ -218,6 +218,13 @@ setup() {
   run bash -c 'cd "$1" && "$2" untracked-item 0 null "$3"' _ "$repo" "$writer" "$first"
   [ "$status" -ne 0 ]
   [ ! -e "$repo/.git/development-system/checkpoints/untracked-item.latest" ]
+
+  rm "$repo/untracked.txt"
+  ln -s missing-target "$repo/dangling-link"
+  run bash -c 'cd "$1" && "$2" dangling-link-item 0 null "$3"' _ "$repo" "$writer" "$first"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"checkpoint record failed schema, snapshot, or state validation"* ]]
+  [ ! -e "$repo/.git/development-system/checkpoints/dangling-link-item.latest" ]
 }
 
 
