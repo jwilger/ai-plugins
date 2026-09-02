@@ -54,23 +54,35 @@ append one single-line `checkpoint-v1` record with `tiber.note.add` (CLI:
 required keys: `baseline_oid`, `snapshot`, `state`, `test`, `gates`,
 `delivery`, `ci`, and `next_action`. Use strings for scalar values, arrays of
 strings for `gates` and `ci`, and `null` only for an inapplicable `test` or
-`delivery`. `snapshot` must contain the full current `HEAD` OID plus
-`tracked_sha256` and `untracked_sha256`:
+`delivery`. `snapshot` is exactly
+`{"head_oid":string,"tracked_sha256":string,"untracked_sha256":string}`.
+`test` is either `null` or exactly
+`{"command":string,"receipt_ref":string,"outcome":"pass"|"fail","failure_kind":string|null}`.
+`delivery` is either `null` or exactly
+`{"mode":"local-only"|"direct-to-trunk"|"pull-request","commit_oid":string|null,"pushed_oid":string|null,"local_snapshot":string|null}`.
+The snapshot hashes are defined as follows:
 
 - `tracked_sha256` is SHA-256 of the exact byte stream from
   `git diff --binary --full-index HEAD --`.
 - `untracked_sha256` is SHA-256 of the byte stream produced by iterating
   `git ls-files --others --exclude-standard -z` in its emitted order and, for
-  each path, appending the path bytes, one NUL byte, the file's
-  `git hash-object -- <path>` OID, and one newline byte. The empty stream has
-  the standard SHA-256 empty digest.
+  each path, appending its Git mode token (`100755` for an executable regular
+  file, `100644` for another regular file, or `120000` for a symlink), one NUL
+  byte, the path bytes, one NUL byte, the file's `git hash-object -- <path>`
+  OID, and one newline byte. An unsupported file type is a recovery hold. The
+  empty stream has the standard SHA-256 empty digest.
 
-`test` contains the focused command plus a bounded receipt reference.
-`delivery` contains the signed commit OID, pushed OID, or local-only snapshot
-identity required by the current state. State-specific absent values remain
-`null` or empty arrays; never omit or rename keys. JSON escaping is the only
-escaping. Store bounded references rather than raw logs or secrets. At session start, restart,
-or handoff, read the task with `tiber.show`, select its latest `checkpoint-v1`
+State-specific absent values remain `null` or empty arrays; never omit or
+rename keys. JSON escaping is the only escaping. Before the first edit on a
+clean task-start worktree, bootstrap the first record as
+`pushed-or-delivery-mode-equivalent`: use the ticket-start OID for
+`snapshot.head_oid`, set `test` to `null`, describe the already-authorized
+starting identity in `delivery` (a pushed OID for a remote mode or
+`local_snapshot` for local-only), and make the first planned causal edit the
+sole `next_action`. A dirty or unreconciled starting worktree is a recovery
+hold, not a bootstrap shortcut. Store bounded references rather than raw logs
+or secrets. At session start, restart, or handoff, read the task with
+`tiber.show`, select its latest `checkpoint-v1`
 record, and reconcile every identity with current Git and forge state before
 acting. A malformed, missing, unpublished, or mismatched record is a fail-closed
 recovery hold: do not edit, commit, push, or infer progress until the same task
@@ -89,7 +101,7 @@ emulate or claim native `workflow.*` enforcement.
   immediate focused test. `test` is required and `delivery` is `null`.
 - `committed`: record the signed commit OID and whether the next action is the
   delivery-mode checkpoint or a locally complete checkpoint; `delivery` is
-  required and its commit OID must equal `snapshot.head`.
+  required and its commit OID must equal `snapshot.head_oid`.
 - `pushed-or-delivery-mode-equivalent`: record the exact pushed OID and CI runs,
   or the exact local-only terminal snapshot and the fact that remote mutation
   is unauthorized; `delivery` is required and must identify the exact
