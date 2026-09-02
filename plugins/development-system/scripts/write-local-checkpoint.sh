@@ -79,7 +79,9 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
   (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | type == "string") and (.run_id | type == "string") and (.commit_oid | oid) and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | string_or_null)) and
   (.next_action | type == "string") and
   ($generation != 0 or .state == "pushed-or-delivery-mode-equivalent") and
-  (.ci.terminal_success_run_id == null or any(.ci.runs[]; .run_id == $record.ci.terminal_success_run_id and .status == "success" and .commit_oid == $record.delivery.pushed_oid)) and
+  (.ci.terminal_success_run_id == null or
+   ((.ci.runs | length) > 0 and .ci.runs[-1].run_id == .ci.terminal_success_run_id and
+    .ci.runs[-1].status == "success" and .ci.runs[-1].commit_oid == $record.delivery.pushed_oid)) and
   (if .state == "failing" then
      .test != null and .test.outcome == "fail" and .delivery == null and all(.gates[]; . == null) and
      .next_action == "causal-edit"

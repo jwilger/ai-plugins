@@ -89,7 +89,9 @@ only where the following exact shapes permit it. `snapshot` is exactly
 `delivery` is either `null` or exactly
 `{"mode":"local-only"|"direct-to-trunk"|"pull-request","commit_oid":string|null,"pushed_oid":string|null,"local_snapshot":string|null}`.
 `ci` is exactly
-`{"runs":[{"provider":string,"run_id":string,"commit_oid":string,"status":"queued"|"running"|"success"|"failure"}],"terminal_success_run_id":string|null}`.
+`{"runs":[{"provider":string,"run_id":string,"commit_oid":string,"status":"queued"|"running"|"success"|"failure"}],"terminal_success_run_id":string|null}`;
+`runs` is append-ordered by observation, and a non-null
+`terminal_success_run_id` must name the final array entry.
 The snapshot hashes are defined as follows:
 
 - `tracked_sha256` is SHA-256 of the exact byte stream from
@@ -182,7 +184,8 @@ schema, identity, or lineage mismatch remains a recovery hold.
   all runs are queued/running without terminal success, `enter-ci-recovery` as
   the sole action when an exact-SHA run fails and no replacement has reached
   terminal success, and `terminal-review` after the named terminal success,
-  including when retained CI history contains the earlier failure. Local-only
+  which must be the final append-ordered CI observation. Retained CI history
+  may contain earlier failures. Local-only
   requires no remote run and uses
   `terminal-review`. Set
   `terminal_success_run_id` only when it names an included exact-OID success

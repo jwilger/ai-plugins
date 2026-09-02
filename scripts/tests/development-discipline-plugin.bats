@@ -141,6 +141,18 @@ setup() {
   target="$repo/.git/development-system/checkpoints/work-item.latest"
   predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
 
+  run bash -c 'cd "$1" && "$2" legacy-upgrade 0 null "$3"' _ "$repo" "$writer" "$first"
+  [ "$status" -eq 0 ]
+  legacy_target="$repo/.git/development-system/checkpoints/legacy-upgrade.latest"
+  legacy_zero_predecessor=$(sha256sum "$legacy_target" | cut -d ' ' -f 1)
+  legacy_json=$(jq -cn --arg predecessor "$legacy_zero_predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"legacy descriptive action"}')
+  printf 'checkpoint-v1 %s\n' "$legacy_json" >"$legacy_target"
+  legacy_predecessor=$(sha256sum "$legacy_target" | cut -d ' ' -f 1)
+  legacy_successor_json=$(printf '%s' "$legacy_json" | jq -c --arg predecessor "$legacy_predecessor" '.generation = 2 | .predecessor_sha256 = $predecessor | .next_action = "causal-edit"')
+  printf 'checkpoint-v1 %s\n' "$legacy_successor_json" >"$stale"
+  run bash -c 'cd "$1" && "$2" legacy-upgrade 2 "$3" "$4"' _ "$repo" "$writer" "$legacy_predecessor" "$stale"
+  [ "$status" -eq 0 ]
+
   for passing_case in lightweight fast commit; do
     case_id="passing-$passing_case"
     run bash -c 'cd "$1" && "$2" "$3" 0 null "$4"' _ "$repo" "$writer" "$case_id" "$first"
@@ -202,6 +214,11 @@ setup() {
   printf 'checkpoint-v1 %s\n' "$recovered_json" >"$stale"
   run bash -c 'cd "$1" && "$2" remote-ci 2 "$3" "$4"' _ "$repo" "$writer" "$recovered_predecessor" "$stale"
   [ "$status" -eq 0 ]
+  recovered_terminal_predecessor=$(sha256sum "$remote_target" | cut -d ' ' -f 1)
+  stale_success_json=$(printf '%s' "$recovered_json" | jq -c --arg predecessor "$recovered_terminal_predecessor" '.generation = 3 | .predecessor_sha256 = $predecessor | .ci.runs += [{provider:"ci",run_id:"newer-failure",commit_oid:.snapshot.head_oid,status:"failure"}]')
+  printf 'checkpoint-v1 %s\n' "$stale_success_json" >"$stale"
+  run bash -c 'cd "$1" && "$2" remote-ci 3 "$3" "$4"' _ "$repo" "$writer" "$recovered_terminal_predecessor" "$stale"
+  [ "$status" -ne 0 ]
 
   invalid_baseline_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:"0000000000000000000000000000000000000000",snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit"}')
   printf 'checkpoint-v1 %s\n' "$invalid_baseline_json" >"$invalid_baseline"
