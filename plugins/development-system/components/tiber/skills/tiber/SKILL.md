@@ -80,11 +80,11 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - When the development workflow requires a durable per-edit checkpoint, append
   a single-line `checkpoint-v1` record to the active task with `tiber.note.add`
   (CLI: `tiber note add`).
-  Record the full immutable ticket-start OID, exact content snapshot identity,
-  canonical state, focused-test command and bounded receipt reference,
-  completed gates, commit or delivery identity and CI references when present,
-  and the sole next permitted action. Never put raw logs, credentials, or
-  secrets in the note. On restart or handoff, use `tiber.show` to load the
+  Use the canonical `checkpoint-v1 ` compact-JSON wire form and deterministic
+  tracked/untracked snapshot algorithm defined by the public
+  `development-workflow` skill; that skill is the sole schema owner. Do not
+  invent alternate keys, delimiters, hashes, or state-specific nullability.
+  Never put raw logs, credentials, or secrets in the note. On restart or handoff, use `tiber.show` to load the
   latest record and reconcile it with Git and forge state before acting. Missing,
   malformed, unpublished, or mismatched evidence is a recovery hold, not
   permission to infer progress. These notes are evidence records; they do not

@@ -49,11 +49,27 @@ checkpoint and into terminal review:
 The available persistence owner is the active Tiber task's Git-backed notes,
 not the unavailable native workflow scheduler. After every state transition,
 append one single-line `checkpoint-v1` record with `tiber.note.add` (CLI:
-`tiber note add`); include the
-full ticket-start OID, an exact content snapshot identity, state, focused-test
-command and receipt reference, completed gates, commit or delivery identity when
-present, CI references when present, and the sole next permitted action. Store
-bounded references rather than raw logs or secrets. At session start, restart,
+`tiber note add`). The canonical wire form is the literal prefix
+`checkpoint-v1 ` followed by one compact JSON object (no Markdown) with these
+required keys: `baseline_oid`, `snapshot`, `state`, `test`, `gates`,
+`delivery`, `ci`, and `next_action`. Use strings for scalar values, arrays of
+strings for `gates` and `ci`, and `null` only for an inapplicable `test` or
+`delivery`. `snapshot` must contain the full current `HEAD` OID plus
+`tracked_sha256` and `untracked_sha256`:
+
+- `tracked_sha256` is SHA-256 of the exact byte stream from
+  `git diff --binary --full-index HEAD --`.
+- `untracked_sha256` is SHA-256 of the byte stream produced by iterating
+  `git ls-files --others --exclude-standard -z` in its emitted order and, for
+  each path, appending the path bytes, one NUL byte, the file's
+  `git hash-object -- <path>` OID, and one newline byte. The empty stream has
+  the standard SHA-256 empty digest.
+
+`test` contains the focused command plus a bounded receipt reference.
+`delivery` contains the signed commit OID, pushed OID, or local-only snapshot
+identity required by the current state. State-specific absent values remain
+`null` or empty arrays; never omit or rename keys. JSON escaping is the only
+escaping. Store bounded references rather than raw logs or secrets. At session start, restart,
 or handoff, read the task with `tiber.show`, select its latest `checkpoint-v1`
 record, and reconcile every identity with current Git and forge state before
 acting. A malformed, missing, unpublished, or mismatched record is a fail-closed
@@ -63,16 +79,21 @@ emulate or claim native `workflow.*` enforcement.
 
 - `failing`: commit and push are prohibited. Permit only the next causal edit
   needed to address that failure, reject unrelated or convenience changes, and
-  immediately test again.
+  immediately test again. `test` is required and `delivery` is `null`.
+  A newly written test that passes unexpectedly is still `failing`, with an
+  `invalid-test` reason and only the causal test rewrite as `next_action`; do
+  not checkpoint that test as passing or introduce a fifth state.
 - `passing-awaiting-gates-or-review`: freeze further implementation and test
   edits. Run the bounded lightweight review and repository fast pre-commit
   gate; any remediation is a new causal edit and therefore triggers another
-  immediate focused test.
+  immediate focused test. `test` is required and `delivery` is `null`.
 - `committed`: record the signed commit OID and whether the next action is the
-  delivery-mode checkpoint or a locally complete checkpoint.
+  delivery-mode checkpoint or a locally complete checkpoint; `delivery` is
+  required and its commit OID must equal `snapshot.head`.
 - `pushed-or-delivery-mode-equivalent`: record the exact pushed OID and CI runs,
   or the exact local-only terminal snapshot and the fact that remote mutation
-  is unauthorized. When Tiber's opt-in final-review policy requires reviewed
+  is unauthorized; `delivery` is required and must identify the exact
+  state-appropriate commit or snapshot. When Tiber's opt-in final-review policy requires reviewed
   source and verification paths in a commit tree, the local equivalent is a
   required local commit; if commit authority is explicitly withheld, completion
   blocks without authorizing a push.
