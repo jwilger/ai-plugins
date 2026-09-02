@@ -14,7 +14,12 @@ setup() {
 
 copy_eval_runner() {
   destination="$1"
+  fixture_root="$(cd "${destination%/*}/../.." && pwd)"
   cp "$RUNNER" "$destination"
+  mkdir -p "$fixture_root/evals/promptfoo"
+  cp \
+    "$ROOT/evals/promptfoo/fixtures.cjs" \
+    "$fixture_root/evals/promptfoo/fixtures.cjs"
   cp \
     "$ROOT/scripts/evals/provider-compositions.mjs" \
     "${destination%/*}/provider-compositions.mjs"
