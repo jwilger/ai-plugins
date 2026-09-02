@@ -96,13 +96,24 @@ setup() {
   second="$repo/second.record"
   stale="$repo/stale.record"
   invalid="$repo/invalid.record"
+  invalid_state="$repo/invalid-state.record"
+  invalid_framing="$repo/invalid-framing.record"
   printf '%s\n' 'checkpoint-v1 {"generation":0,"predecessor_sha256":null}' >"$invalid"
 
   run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$invalid"
   [ "$status" -ne 0 ]
   [ ! -e "$repo/.git/development-system/checkpoints/work-item.latest" ]
 
-  first_json=$(jq -cn '{generation:0,predecessor_sha256:null,baseline_oid:"baseline",snapshot:{head_oid:"head",tracked_sha256:"tracked",untracked_sha256:"untracked"},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:{mode:"local-only",commit_oid:null,pushed_oid:null,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"edit"}')
+  invalid_state_json=$(jq -cn '{generation:0,predecessor_sha256:null,baseline_oid:"baseline",snapshot:{head_oid:"head",tracked_sha256:"tracked",untracked_sha256:"untracked"},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"edit"}')
+  printf 'checkpoint-v1 %s\n' "$invalid_state_json" >"$invalid_state"
+  run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$invalid_state"
+  [ "$status" -ne 0 ]
+
+  printf 'checkpoint-v1 %s\n%s' "$invalid_state_json" "$invalid_state_json" >"$invalid_framing"
+  run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$invalid_framing"
+  [ "$status" -ne 0 ]
+
+  first_json=$(jq -cn '{generation:0,predecessor_sha256:null,baseline_oid:"baseline",snapshot:{head_oid:"baseline",tracked_sha256:"tracked",untracked_sha256:"untracked"},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:{mode:"local-only",commit_oid:null,pushed_oid:null,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"edit"}')
   printf 'checkpoint-v1 %s\n' "$first_json" >"$first"
 
   run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$first"

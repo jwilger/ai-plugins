@@ -15,7 +15,7 @@ record_file=$4
 [[ $checkpoint_id =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid checkpoint id" >&2; exit 2; }
 [[ $expected_generation =~ ^(0|[1-9][0-9]*)$ ]] || usage
 [[ -f $record_file ]] || usage
-[[ $(wc -l < "$record_file") -eq 1 ]] || { echo "record must contain exactly one newline-terminated line" >&2; exit 2; }
+[[ $(wc -l < "$record_file") -eq 1 && $(tail -c 1 "$record_file" | od -An -t u1 | tr -d ' ') == 10 ]] || { echo "record must contain exactly one newline-terminated line" >&2; exit 2; }
 
 record=$(<"$record_file")
 [[ $record == checkpoint-v1\ * ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
@@ -23,6 +23,7 @@ json=${record#checkpoint-v1 }
 jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" '
   def exact_keys($expected): (keys | sort) == ($expected | sort);
   def string_or_null: type == "string" or . == null;
+  . as $record |
   exact_keys(["generation", "predecessor_sha256", "baseline_oid", "snapshot", "state", "test", "gates", "delivery", "ci", "next_action"]) and
   .generation == $generation and
   (if $generation == 0 then .predecessor_sha256 == null else .predecessor_sha256 == $predecessor end) and
@@ -33,7 +34,33 @@ jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_p
   (.gates | exact_keys(["lightweight_review_receipt", "fast_gate_receipt", "exact_identity_verification_receipt"]) and all(.[]; string_or_null)) and
   (.delivery == null or (.delivery | exact_keys(["mode", "commit_oid", "pushed_oid", "local_snapshot"]) and (.mode | IN("local-only", "direct-to-trunk", "pull-request")) and (.commit_oid | string_or_null) and (.pushed_oid | string_or_null) and (.local_snapshot | string_or_null))) and
   (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | type == "string") and (.run_id | type == "string") and (.commit_oid | type == "string") and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | string_or_null)) and
-  (.next_action | type == "string")
+  (.next_action | type == "string") and
+  (.ci.terminal_success_run_id == null or any(.ci.runs[]; .run_id == $record.ci.terminal_success_run_id and .status == "success" and .commit_oid == $record.delivery.pushed_oid)) and
+  (if .state == "failing" then
+     .test != null and .test.outcome == "fail" and .delivery == null and all(.gates[]; . == null)
+   elif .state == "passing-awaiting-gates-or-review" then
+     .test != null and .test.outcome == "pass" and .delivery == null and .gates.exact_identity_verification_receipt == null
+   elif .state == "committed" then
+     .delivery != null and .delivery.commit_oid == .snapshot.head_oid and
+     (.gates.lightweight_review_receipt | type == "string") and
+     (.gates.fast_gate_receipt | type == "string") and
+     ((.gates.exact_identity_verification_receipt == null and .next_action == "verify-exact-commit") or (.gates.exact_identity_verification_receipt | type == "string"))
+   elif .state == "pushed-or-delivery-mode-equivalent" and .generation == 0 then
+     .baseline_oid == .snapshot.head_oid and .test == null and all(.gates[]; . == null) and .delivery != null and
+     (if .delivery.mode == "local-only" then (.delivery.local_snapshot | type == "string") else .delivery.pushed_oid == .snapshot.head_oid end)
+   else
+     .delivery != null and
+     (.gates.lightweight_review_receipt | type == "string") and
+     (.gates.fast_gate_receipt | type == "string") and
+     (.gates.exact_identity_verification_receipt | type == "string") and
+     (if .delivery.mode == "local-only" then
+        (.delivery.local_snapshot | type == "string")
+      else
+        .delivery.pushed_oid == .snapshot.head_oid and
+        ((.ci.runs | length) > 0 or .next_action == "register-exact-sha-ci-monitor") and
+        all(.ci.runs[]; .commit_oid == .delivery.pushed_oid)
+      end)
+   end)
 ' <<<"$json" >/dev/null
 
 git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
