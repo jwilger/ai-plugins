@@ -12,7 +12,7 @@
     "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
   },
   "workspace": {
-    "sourcePath": "plugins/development-discipline/skills/development-workflow/.plugin-eval/workspace",
+    "sourcePath": "plugins/development-system/components/development-discipline/skills/development-workflow/.plugin-eval/workspace",
     "setupMode": "copy",
     "preserve": "on-failure"
   },

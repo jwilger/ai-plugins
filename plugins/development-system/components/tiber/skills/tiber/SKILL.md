@@ -77,16 +77,21 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - Before actively working on an existing Tiber task, move it to `in-progress`
   with `tiber transition <ref> in-progress`; do not leave active work in the
   backlog as an informal reservation.
-- When the development workflow requires a durable per-edit checkpoint, append
-  a single-line `checkpoint-v1` record to the active task with `tiber.note.add`
-  (CLI: `tiber note add`).
+- When the development workflow requires a durable per-edit checkpoint and
+  task-board remote publication is independently authorized, append a
+  single-line `checkpoint-v1` record to the active task with `tiber.note.add`
+  (CLI: `tiber note add`). If remote publication is not authorized, do not call
+  a mutating Tiber operation; use the atomic Git-common-directory local owner
+  defined by `development-workflow` instead.
   Use the canonical `checkpoint-v1 ` compact-JSON wire form and deterministic
   tracked/untracked snapshot algorithm defined by the public
   `development-workflow` skill; that skill is the sole schema owner. Do not
   invent alternate keys, delimiters, hashes, or state-specific nullability.
-  Never put raw logs, credentials, or secrets in the note. On restart or handoff, use `tiber.show` to load the
-  latest record and reconcile it with Git and forge state before acting. Missing,
-  malformed, unpublished, or mismatched evidence is a recovery hold, not
+  Never put raw logs, credentials, or secrets in the note. On restart or
+  handoff, use `tiber.show` for the published owner or read the selected local
+  `.latest` owner, then reconcile the record with Git and forge state before
+  acting. Missing, malformed, unexpectedly unpublished, non-atomic local, or
+  mismatched evidence is a recovery hold, not
   permission to infer progress. These notes are evidence records; they do not
   emulate the unavailable native `workflow.*` scheduler.
 - When `.tiber.toml` configures `[final_review].minimum_clean_reviews`, record

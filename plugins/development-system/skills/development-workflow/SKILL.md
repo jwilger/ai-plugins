@@ -46,10 +46,19 @@ the first edit, commit, or push, resolve the full ticket-start commit OID and
 persist it in this record; carry that immutable baseline through every later
 checkpoint and into terminal review:
 
-The available persistence owner is the active Tiber task's Git-backed notes,
-not the unavailable native workflow scheduler. After every state transition,
-append one single-line `checkpoint-v1` record with `tiber.note.add` (CLI:
-`tiber note add`). The canonical wire form is the literal prefix
+The persistence owner depends on independently authorized publication; the
+unavailable native workflow scheduler is never the owner. When task-board
+remote publication is authorized, append every transition to the active Tiber
+task with `tiber.note.add` (CLI: `tiber note add`). When remote mutation is not
+authorized, store the latest record at
+`$(git rev-parse --git-common-dir)/development-system/checkpoints/<task-id>.latest`
+instead. Create its parent with owner-only permissions, write one complete line
+to a same-directory temporary file, flush it, atomically rename it over the
+target, and flush the directory; never append in place. Keep this local file
+untracked and out of the content snapshot. Select one owner for the current
+delivery mode and never treat an unpublished Tiber transaction as the local
+fallback. After every transition, persist exactly one record before the next
+action. The canonical wire form for both owners is the literal prefix
 `checkpoint-v1 ` followed by one compact JSON object (no Markdown) with these
 required keys: `baseline_oid`, `snapshot`, `state`, `test`, `gates`,
 `delivery`, `ci`, and `next_action`. Use strings for scalar values and `null`
@@ -87,10 +96,13 @@ gate receipts are `null`, and CI may be empty, only when `baseline_oid` equals
 `snapshot.head_oid`, both snapshot hashes prove the clean starting worktree,
 and `delivery` identifies that same pre-existing baseline. A dirty,
 non-baseline, or unreconciled starting worktree is a recovery hold, not a
-bootstrap shortcut. Store bounded references rather than raw logs or secrets. At session start, restart, or handoff, read the task with
-`tiber.show`, select its latest `checkpoint-v1`
+bootstrap shortcut. Store bounded references rather than raw logs or secrets.
+At session start, restart, or handoff, read the selected owner: `tiber.show` for
+authorized task publication or the exact local `.latest` file for local-only.
+Select its latest `checkpoint-v1`
 record, and reconcile every identity with current Git and forge state before
-acting. A malformed, missing, unpublished, or mismatched record is a fail-closed
+acting. A malformed, missing, unexpectedly unpublished Tiber, non-atomic local,
+or mismatched record is a fail-closed
 recovery hold: do not edit, commit, push, or infer progress until the same task
 record is reconciled. This note protocol records evidence only; it does not
 emulate or claim native `workflow.*` enforcement.
