@@ -127,6 +127,13 @@ recovery hold: do not edit, commit, push, or infer progress until the same task
 record is reconciled. This note protocol records evidence only; it does not
 emulate or claim native `workflow.*` enforcement.
 
+For upgrade compatibility, a pre-6.2 `checkpoint-v1` record whose only
+noncanonical field is a free-form `next_action` remains readable evidence, but
+its action is never executable authority. Under the same task lock, derive the
+canonical action from its state and receipts, append the next generation through
+the bundled writer, and reconcile that successor before acting. Any other
+schema, identity, or lineage mismatch remains a recovery hold.
+
 - `failing`: commit and push are prohibited. Permit only the next causal edit
   needed to address that failure, reject unrelated or convenience changes, and
   immediately test again. `test` is required and `delivery` is `null`.
