@@ -58,7 +58,9 @@ whitespace, normalize Unicode, interpolate variables, or append a newline.
 Record that ID in every handoff. Invoke the bundled
 `<plugin-root>/scripts/write-local-checkpoint.sh` with that ID, the expected
 generation, the expected predecessor digest (or literal `null`), and a file
-containing the proposed newline-terminated record. The helper creates the
+containing the proposed newline-terminated record. Create that proposal outside
+the worktree; the helper rejects an in-worktree proposal because it would become
+part of the untracked snapshot it is trying to describe. The helper creates the
 owner-only parent and serializes transitions with an exclusive task-scoped
 lock. While holding the lock, it reads the current complete record and requires
 the proposed record's
@@ -67,8 +69,10 @@ the proposed record's
 the bootstrap record uses generation zero and a null predecessor. Reject a
 missing or stale predecessor without replacing the current record. The helper
 writes one complete line to a same-directory temporary file, flushes it,
-atomically renames it over the target, flushes the directory, and releases the
-lock; never synthesize a second writer or append in place. Keep this local file
+recomputes the complete worktree identity and rejects publication if it changed
+since validation, atomically renames the stable record over the target, flushes
+the directory, and releases the lock; never synthesize a second writer or append
+in place. Keep this local file
 untracked and out of the content snapshot. After every transition, persist
 exactly one authoritative local record before the next action. When task-board
 remote publication is independently authorized, append that successfully

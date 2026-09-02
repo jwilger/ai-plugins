@@ -138,6 +138,13 @@ setup() {
   first_json=$(jq -cn --arg head "$head_oid" --arg empty "$empty_sha" '{generation:0,predecessor_sha256:null,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:{mode:"local-only",commit_oid:null,pushed_oid:null,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit: implement the first planned ticket increment"}')
   printf 'checkpoint-v1 %s\n' "$first_json" >"$first"
 
+  in_worktree_record="$repo/proposal.record"
+  printf 'checkpoint-v1 %s\n' "$first_json" >"$in_worktree_record"
+  run bash -c 'cd "$1" && "$2" self-referential 0 null "$3"' _ "$repo" "$writer" "$in_worktree_record"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"record file must be outside the worktree"* ]]
+  rm "$in_worktree_record"
+
   empty_action_json=$(printf '%s' "$first_json" | jq -c '.next_action = ""')
   printf 'checkpoint-v1 %s\n' "$empty_action_json" >"$empty_action"
   run bash -c 'cd "$1" && "$2" empty-action 0 null "$3"' _ "$repo" "$writer" "$empty_action"
@@ -297,6 +304,28 @@ setup() {
   flock -u "$held_lock"
   wait "$blocked_writer" && false
   [ ! -e "$repo/.git/development-system/checkpoints/lock-order.latest" ]
+  git -C "$repo" checkout -- tracked.txt
+
+  git_shim_dir=$(mktemp -d)
+  real_git=$(command -v git)
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'if [[ " $* " == *" diff --binary "* ]]; then' \
+    '  "$REAL_GIT" "$@"' \
+    '  result=$?' \
+    '  if [[ ! -e $MUTATION_MARKER ]]; then' \
+    '    : >"$MUTATION_MARKER"' \
+    '    printf "%s\n" dirty >>"$MUTATION_WORKTREE/tracked.txt"' \
+    '  fi' \
+    '  exit "$result"' \
+    'fi' \
+    'exec "$REAL_GIT" "$@"' >"$git_shim_dir/git"
+  chmod +x "$git_shim_dir/git"
+  run env PATH="$git_shim_dir:$PATH" REAL_GIT="$real_git" \
+    MUTATION_MARKER="$repo/.git/mutated-after-snapshot" MUTATION_WORKTREE="$repo" \
+    bash -c 'cd "$1" && "$2" post-snapshot-mutation 0 null "$3"' _ "$repo" "$writer" "$first"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"worktree changed while publishing checkpoint"* ]]
+  [ ! -e "$repo/.git/development-system/checkpoints/post-snapshot-mutation.latest" ]
   git -C "$repo" checkout -- tracked.txt
 
   printf '%s\n' dirty >"$repo/tracked.txt"

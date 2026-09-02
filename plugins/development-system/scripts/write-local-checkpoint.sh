@@ -15,7 +15,7 @@ record_file=$4
 [[ $checkpoint_id =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid checkpoint id" >&2; exit 2; }
 [[ $expected_generation =~ ^(0|[1-9][0-9]*)$ ]] || usage
 [[ -f $record_file ]] || usage
-for dependency in git jq flock sha256sum sed od tr sync mktemp cp mv chmod grep wc tail head cut node; do
+for dependency in git jq flock sha256sum sed od tr sync mktemp cp mv chmod grep wc tail head cut node realpath; do
   command -v "$dependency" >/dev/null 2>&1 || { echo "missing checkpoint runtime dependency: $dependency" >&2; exit 2; }
 done
 sync --help 2>&1 | grep -q -- ' -f' || { echo "checkpoint runtime requires sync -f support" >&2; exit 2; }
@@ -25,6 +25,13 @@ cmp -s "$record_file" <(tr -d '\000' <"$record_file") || { echo "record must not
 [[ $(head -c 14 "$record_file") == "checkpoint-v1 " ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
 
 worktree_root=$(git rev-parse --show-toplevel)
+record_absolute=$(realpath -- "$record_file")
+case "$record_absolute" in
+  "$worktree_root"|"$worktree_root"/*)
+    echo "record file must be outside the worktree" >&2
+    exit 2
+    ;;
+esac
 git_common_dir=$(git -C "$worktree_root" rev-parse --path-format=absolute --git-common-dir)
 checkpoint_dir="$git_common_dir/development-system/checkpoints"
 target="$checkpoint_dir/$checkpoint_id.latest"
@@ -165,7 +172,32 @@ trap 'rm -f -- "$temporary" "$untracked_stream"' EXIT
 cp -- "$record_file" "$temporary"
 chmod 600 "$temporary"
 sync -f "$temporary"
+
+final_head=$(git -C "$worktree_root" rev-parse HEAD)
+final_tracked=$(git -C "$worktree_root" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
+final_untracked_stream=$(mktemp)
+trap 'rm -f -- "$temporary" "$untracked_stream" "$final_untracked_stream"' EXIT
+while IFS= read -r -d '' path; do
+  absolute_path="$worktree_root/$path"
+  if [[ -L $absolute_path ]]; then mode=120000
+  elif [[ -f $absolute_path && -x $absolute_path ]]; then mode=100755
+  elif [[ -f $absolute_path ]]; then mode=100644
+  else echo "unsupported untracked file type: $path" >&2; exit 2
+  fi
+  if [[ -L $absolute_path ]]; then
+    oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding: "buffer"}))' "$absolute_path" | git -C "$worktree_root" hash-object --stdin)
+  else
+    oid=$(git -C "$worktree_root" hash-object -- "$path")
+  fi
+  printf '%s\0%s\0%s\n' "$mode" "$path" "$oid" >>"$final_untracked_stream"
+done < <(git -C "$worktree_root" ls-files --full-name --others --exclude-standard -z)
+final_untracked=$(sha256sum "$final_untracked_stream" | cut -d ' ' -f 1)
+if [[ $final_head != "$current_head" || $final_tracked != "$current_tracked" || $final_untracked != "$current_untracked" ]]; then
+  echo "worktree changed while publishing checkpoint" >&2
+  exit 3
+fi
+
 mv -f -- "$temporary" "$target"
 sync -f "$checkpoint_dir"
-rm -f -- "$untracked_stream"
+rm -f -- "$untracked_stream" "$final_untracked_stream"
 trap - EXIT
