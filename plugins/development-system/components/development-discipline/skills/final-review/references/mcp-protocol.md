@@ -79,9 +79,11 @@ unchanged content between the worktree, index, and `HEAD` can therefore change
 the hash, and callers must continue sending the fresh helper output on every
 `final_review.advance` call. Do not weaken or replace that contract.
 
-Terminal review consumes the already-delivered identity: the exact pushed SHA
-for remote modes or the exact local snapshot for local-only. Retain its pinned
-ticket-start baseline, requested scope, exact path inventory, and reviewed path
+Terminal review starts only after every planned implementation increment and
+every actual acceptance criterion have been completed and checkpoint-delivered.
+It consumes that ticket-complete identity: the exact pushed SHA for remote modes
+or the exact local snapshot for local-only. Retain its pinned ticket-start
+baseline, requested scope, exact path inventory, and reviewed path
 content/modes. A clean unchanged review adds review evidence only; it creates no
 commit, empty commit, push, or replacement local checkpoint.
 
@@ -90,10 +92,14 @@ or requested scope is source-changing remediation. Complete its mode-specific
 immediate-test, lightweight-review, fast-gate checkpoint first, including exact
 commit, message, and signature verification for remote commits, then perform a
 delta assessment and the complete selected lens set in fresh contexts under the
-clean-streak reset. Comprehensive suites remain in CI. Review may proceed while
-exact-SHA CI is pending, but a completed failure preempts through recovery and
-readiness requires terminal success for the exact final-reviewed SHA. Local-only
-uses fresh exact local evidence and never invents a remote action.
+clean-streak reset. In remote modes, comprehensive suites remain in CI; review
+may proceed while exact-SHA CI is pending, but a completed failure preempts
+through recovery and readiness requires terminal success for the exact
+final-reviewed pushed SHA. Local-only instead requires fresh readiness evidence
+bound to the exact final-reviewed local identity, requires no remote CI, and
+never invents a remote action. A local-only remediation commit is permitted only
+when authorized. If repository policy requires committed evidence but the user
+explicitly withholds commit authority, block without committing or pushing.
 
 `final_review.advance` also validates scope state; when `current_diff_hash`
 differs from the stored hash, provide `current_changed_files` so the next review
@@ -335,18 +341,20 @@ send empty `lens_results`, and add one `review_budget_decision`:
 `decision` is exactly `ship`, `split`, or `escalate`. `split` additionally
 requires 2-16 distinct nonblank `ticket_references`; `escalate` requires a
 nonblank `escalation_reference`. The coordinator rejects premature, duplicate,
-malformed, or diff-changing decision calls. `ship` is rejected while any known
-blocking finding remains or fewer than three consecutive complete finding-free
-iterations exist, and it never substitutes for acceptance criteria or CI. A
-valid `ship` decision is terminal for final review, returns `complete: true`,
-and schedules no reviewers; it cannot discard remaining lens work.
-The calling workflow must still satisfy the ticket's acceptance criteria and
-confirm terminal CI success for the exact final-reviewed pushed SHA before
-release or new work. A successful build for an older revision never satisfies
+malformed, or diff-changing decision calls. `ship` is rejected while any
+planned increment or acceptance criterion remains undelivered, any known
+blocking finding remains, or fewer than three consecutive complete finding-free
+iterations exist. In direct-to-trunk or PR/MR mode it is also rejected until CI
+succeeds terminally for the exact final-reviewed pushed SHA with no current
+completed failed job. A successful build for an older revision never satisfies
 that gate; a queued or running build for the reviewed SHA remains pending. Any
-current build with a completed failed job activates
-`ci-failure-follow-up`, which takes precedence and
-requires exact diagnosis plus terminal success before release or new work.
+current remote build with a completed failed job activates
+`ci-failure-follow-up`, which takes precedence and requires exact diagnosis plus
+terminal success before release or new work. In local-only mode, `ship` instead
+requires fresh readiness evidence bound to the exact final-reviewed local
+identity and no remote CI. A valid `ship` decision is terminal for final review,
+returns `complete: true`, and schedules no reviewers; it cannot discard
+remaining lens work or substitute for any mode-specific gate.
 `split` and `escalate` persist a contract-bound terminal hold, preserve
 every completion blocker, schedule no reviewers, and reject any later advance
 for that session.

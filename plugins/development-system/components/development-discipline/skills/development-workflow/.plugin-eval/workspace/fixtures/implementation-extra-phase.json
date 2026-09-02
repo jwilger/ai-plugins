@@ -7,11 +7,10 @@
     "change-preflight",
     "delivery-selection",
     "test-driven-development",
-    "verification-before-completion",
-    "final-review",
+    "per-edit-checkpoint-delivery",
     "pull-request-creation",
-    "final-delivery",
-    "exact-revision-ci"
+    "terminal-review",
+    "exact-identity-readiness"
   ],
   "specialists": [
     "change-preflight",

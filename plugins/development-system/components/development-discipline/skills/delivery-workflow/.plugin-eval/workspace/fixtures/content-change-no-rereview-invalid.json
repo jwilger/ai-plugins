@@ -1,25 +1,13 @@
 {
-  "scenario": "content-identical-commit-boundary",
+  "scenario": "clean-review-no-new-checkpoint",
   "selectedMode": "direct-to-trunk",
-  "remoteActions": ["push"],
-  "ci": { "required": true, "status": "terminal-success" },
-  "reviewEvidence": ["terminal final review before a later content change"],
-  "stageAwareHashChanged": true,
+  "remoteActions": [],
+  "ci": { "required": true, "status": "running" },
+  "reviewEvidence": ["terminal review before a later content change"],
+  "terminalReviewIdentity": "mutable-working-tree",
+  "cleanReviewCreatesCheckpoint": false,
   "reviewedSourceChanged": true,
   "sourceReviewRestartRequired": false,
-  "postCommitGateRequired": true,
-  "postCommitGateExactRevision": true,
-  "commitMetadataChecksPhase": "delivery-verification",
-  "invalidatesReview": {
-    "paths": true,
-    "content": false,
-    "modes": true,
-    "untracked": true,
-    "baseline": true,
-    "requestedScope": true,
-    "stagingPartition": false,
-    "head": false,
-    "signature": false,
-    "commitMetadata": false
-  }
+  "readinessStatus": "awaiting-exact-sha-ci",
+  "exactRevisionBinding": false
 }

@@ -40,8 +40,13 @@ switch (plan.scenario) {
     if (plan.ci.required !== true || plan.ci.status !== "terminal-success") {
       fail("required direct-to-trunk CI must reach terminal success");
     }
-    if (plan.reviewBeforePush !== true) {
-      fail("direct-to-trunk review must happen before the first push");
+    if (
+      plan.checkpointDeliveredBeforeTerminalReview !== true ||
+      plan.cleanReviewCreatesCheckpoint !== false
+    ) {
+      fail(
+        "terminal review must consume the delivered checkpoint without creating another one",
+      );
     }
     if (plan.exactRevisionBinding !== true) {
       fail("CI evidence must bind to the exact pushed revision");
@@ -78,68 +83,49 @@ switch (plan.scenario) {
     }
     if (
       !plan.modes ||
-      plan.modes.directToTrunk?.evidence !== "local" ||
-      plan.modes.localOnly?.evidence !== "local" ||
+      plan.modes.directToTrunk?.evidence !== "exact-pushed-sha" ||
+      plan.modes.directToTrunk?.readiness !== "exact-sha-terminal-ci" ||
+      plan.modes.localOnly?.evidence !== "exact-local-identity" ||
+      plan.modes.localOnly?.readiness !== "fresh-exact-local-evidence" ||
       plan.modes.pullRequest?.status !== "blocked"
     ) {
       fail("mode-specific review evidence or PR hold is incorrect");
     }
+    if (plan.cleanReviewCreatesCheckpoint !== false)
+      fail("clean review must not manufacture a checkpoint");
     break;
-  case "content-identical-commit-boundary": {
+  case "clean-review-no-new-checkpoint": {
     if (plan.selectedMode !== "direct-to-trunk")
-      fail("content-identical delivery must retain direct-to-trunk mode");
-    if (!plan.remoteActions.includes("push"))
-      fail("content-identical delivery must still plan the authorized push");
+      fail("clean terminal review must retain direct-to-trunk mode");
+    if (plan.remoteActions.length !== 0)
+      fail("clean terminal review must not plan another remote action");
     if (
-      plan.stageAwareHashChanged !== true ||
+      plan.terminalReviewIdentity !== "exact-pushed-sha" ||
+      plan.cleanReviewCreatesCheckpoint !== false ||
       plan.reviewedSourceChanged !== false ||
       plan.sourceReviewRestartRequired !== false
     ) {
-      fail(
-        "Git partition changes alone must not restart completed source review",
-      );
+      fail("clean terminal review must remain bound to the delivered identity");
     }
     if (
-      plan.postCommitGateRequired !== true ||
-      plan.postCommitGateExactRevision !== true ||
-      plan.commitMetadataChecksPhase !== "delivery-verification"
+      plan.readinessStatus !== "awaiting-exact-sha-ci" ||
+      plan.exactRevisionBinding !== true
     ) {
-      fail(
-        "exact-commit gates, message, and signature checks remain mandatory",
-      );
+      fail("readiness must remain bound to exact-SHA CI");
     }
-    if (plan.ci.required !== true || plan.ci.status !== "terminal-success") {
-      fail("required pushed CI must bind to terminal success");
-    }
-    const invalidates = plan.invalidatesReview;
-    for (const key of [
-      "paths",
-      "content",
-      "modes",
-      "untracked",
-      "baseline",
-      "requestedScope",
-    ]) {
-      if (invalidates?.[key] !== true)
-        fail(`${key} changes must invalidate completed source review`);
-    }
-    for (const key of [
-      "stagingPartition",
-      "head",
-      "signature",
-      "commitMetadata",
-    ]) {
-      if (invalidates?.[key] !== false)
-        fail(`${key} alone must remain delivery verification`);
-    }
+    if (plan.ci.required !== true || plan.ci.status !== "running")
+      fail("running exact-SHA CI is waiting, not readiness");
     break;
   }
   case "source-change-invalidates-review": {
     if (
       plan.reviewedSourceChanged !== true ||
-      plan.sourceReviewRestartRequired !== true
+      plan.remediationCheckpointDelivered !== true ||
+      plan.sourceReviewRestartRequired !== true ||
+      plan.deltaAssessmentRequired !== true ||
+      plan.completeLensSetRequired !== true
     ) {
-      fail("a real source change must restart final review");
+      fail("remediation must be delivered before the complete review reset");
     }
     if (
       plan.postCommitGateRequired !== true ||

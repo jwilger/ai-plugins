@@ -43,10 +43,9 @@ switch (plan.scenario) {
       "change-preflight",
       "delivery-selection",
       "test-driven-development",
-      "verification-before-completion",
-      "final-review",
-      "final-delivery",
-      "exact-revision-ci",
+      "per-edit-checkpoint-delivery",
+      "terminal-review",
+      "exact-identity-readiness",
     ];
     if (JSON.stringify(plan.orderedPhases) !== JSON.stringify(required)) {
       fail("implementation phases are missing or out of order");
@@ -147,8 +146,7 @@ switch (plan.scenario) {
       fail("review-only boundary invariants are incorrect");
     }
     for (const action of ["edit", "ticket", "commit", "push", "pull-request"]) {
-      if (!hasProhibition(action))
-        fail(`missing prohibition ${action}`);
+      if (!hasProhibition(action)) fail(`missing prohibition ${action}`);
     }
     break;
   default:

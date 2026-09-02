@@ -31,10 +31,10 @@
       "id": "direct-to-trunk",
       "title": "Follow direct-to-trunk policy",
       "purpose": "Verify that repository-local direct delivery wins over generic pull-request wording.",
-      "userInput": "Use the delivery-workflow skill. Repository instructions require direct pushes to main, require CI to reach terminal success, and authorize ordinary pushes; a specialist says to open a PR. Do not perform remote actions. Write delivery-plan.json with scenario=direct-to-trunk, selectedMode, remoteActions (the planned action names), ci.required, ci.status, a nonempty reviewEvidence array, reviewBeforePush, exactRevisionBinding, authorization, failedRunHold, and modes=null.",
+      "userInput": "Use the delivery-workflow skill. Repository instructions require direct pushes to main, require CI to reach terminal success, and authorize ordinary pushes; a specialist says to open a PR. Every planned increment and acceptance criterion must reach its signed pushed checkpoint before terminal review. Do not perform remote actions. Write delivery-plan.json with scenario=direct-to-trunk, selectedMode, remoteActions (the planned action names), ci.required, ci.status, a nonempty reviewEvidence array, checkpointDeliveredBeforeTerminalReview, cleanReviewCreatesCheckpoint, exactRevisionBinding, authorization, failedRunHold, and modes=null.",
       "successChecklist": [
         "delivery-plan.json selects direct-to-trunk and does not invent a PR.",
-        "The plan reviews before the first push and binds CI to the exact pushed revision.",
+        "The plan delivers every passing checkpoint before terminal review, creates no new checkpoint after clean unchanged review, and binds CI to the exact final-reviewed revision.",
         "The plan does not ask again for the already authorized ordinary push."
       ]
     },
@@ -52,33 +52,34 @@
     {
       "id": "final-review-ci-hold",
       "title": "Compose final review with delivery mode",
-      "purpose": "Verify that unpushed modes use local evidence while a known failed pushed build remains a hold.",
-      "userInput": "Use the delivery-workflow skill. Compare an unpushed direct-to-trunk change, a local-only change, and a PR whose latest pushed CI failed. Do not perform remote actions. Write delivery-plan.json with scenario=final-review-ci-hold, selectedMode=comparison, empty remoteActions, ci.required, ci.status, a nonempty reviewEvidence array, failedRunHold, and modes containing directToTrunk.evidence, localOnly.evidence, and pullRequest.status.",
+      "purpose": "Verify that terminal review consumes a delivery-mode-specific exact identity while a known failed pushed build remains a hold.",
+      "userInput": "Use the delivery-workflow skill. Compare a direct-to-trunk change whose final checkpoint is already pushed, a local-only change whose final exact snapshot is recorded, and a PR whose exact current-head CI failed. Do not perform remote actions. Write delivery-plan.json with scenario=final-review-ci-hold, selectedMode=comparison, empty remoteActions, ci.required, ci.status, a nonempty reviewEvidence array, failedRunHold, cleanReviewCreatesCheckpoint, and modes containing directToTrunk.evidence, directToTrunk.readiness, localOnly.evidence, localOnly.readiness, and pullRequest.status.",
       "successChecklist": [
-        "delivery-plan.json uses local evidence for unpushed direct-to-trunk and local-only review without fabricating a push.",
+        "delivery-plan.json reviews the exact already-pushed direct-to-trunk SHA and exact recorded local-only identity without fabricating a post-review checkpoint.",
+        "Readiness uses terminal-success CI for the exact final-reviewed remote SHA and fresh exact-local evidence for local-only.",
         "The failed PR remains held under CI failure follow-up until replacement terminal success.",
         "The plan says changing modes cannot erase a known failed-run hold."
       ]
     },
     {
-      "id": "content-identical-commit-boundary",
-      "title": "Cross the final-review delivery boundary once",
-      "purpose": "Verify that a content-identical commit does not reopen source review while real source changes do and exact-commit gates remain mandatory.",
-      "userInput": "Use delivery-workflow. Final review completed against the final uncommitted source snapshot. A signed commit contains identical paths, bytes, and modes with the same pinned baseline and requested scope, but the stage-aware review hash changed because HEAD and the staging partition changed. Do not perform remote actions. Write delivery-plan.json with scenario=content-identical-commit-boundary, selectedMode=direct-to-trunk, remoteActions=[push], a nonempty reviewEvidence array, stageAwareHashChanged, reviewedSourceChanged, sourceReviewRestartRequired, postCommitGateRequired, postCommitGateExactRevision, commitMetadataChecksPhase, invalidatesReview keys paths/content/modes/untracked/baseline/requestedScope/stagingPartition/head/signature/commitMetadata, and ci.required/status.",
+      "id": "clean-review-no-new-checkpoint",
+      "title": "Keep a clean terminal review on the delivered identity",
+      "purpose": "Verify that a clean unchanged terminal review of an already-delivered checkpoint does not manufacture another commit or push.",
+      "userInput": "Use delivery-workflow. Every planned increment and acceptance criterion has reached a signed direct-to-trunk pushed checkpoint. Terminal review completes cleanly against that exact pushed SHA with the immutable ticket-start baseline, and exact-SHA CI is still running. Do not perform remote actions. Write delivery-plan.json with scenario=clean-review-no-new-checkpoint, selectedMode=direct-to-trunk, empty remoteActions, a nonempty reviewEvidence array, terminalReviewIdentity, cleanReviewCreatesCheckpoint, reviewedSourceChanged, sourceReviewRestartRequired, readinessStatus, exactRevisionBinding, and ci.required/status.",
       "successChecklist": [
-        "The content-identical commit does not reopen the completed source review solely because Git partition or metadata changed.",
-        "Every real source or requested-scope change invalidates review, while active-review hashing remains stage-aware.",
-        "Post-commit gates, message/signature checks, push, and required CI bind to the exact commit."
+        "Terminal review consumes the exact already-pushed checkpoint and immutable ticket-start baseline.",
+        "Clean unchanged review creates no commit, push, or replacement checkpoint.",
+        "Readiness remains pending until terminal-success CI binds to that exact final-reviewed SHA."
       ]
     },
     {
       "id": "source-change-invalidates-review",
-      "title": "Restart review after a real source change",
-      "purpose": "Verify the delivery boundary cannot preserve a completed review after reviewed source content or paths change.",
-      "userInput": "Use delivery-workflow. Final review completed, then a delivery hook added a new in-scope untracked source path. Do not perform remote actions. Write delivery-plan.json with scenario=source-change-invalidates-review, reviewedSourceChanged=true, sourceReviewRestartRequired=true, postCommitGateRequired=true, and postCommitGateExactRevision=true.",
+      "title": "Checkpoint remediation before restarting review",
+      "purpose": "Verify that a source-changing terminal-review finding completes the normal delivery checkpoint before delta assessment and a fresh full review set.",
+      "userInput": "Use delivery-workflow. Terminal review of an already-pushed direct-to-trunk checkpoint finds a real source defect, and remediation adds a new in-scope source path. Do not perform remote actions. Write delivery-plan.json with scenario=source-change-invalidates-review, reviewedSourceChanged=true, remediationCheckpointDelivered=true, sourceReviewRestartRequired=true, deltaAssessmentRequired=true, completeLensSetRequired=true, postCommitGateRequired=true, and postCommitGateExactRevision=true.",
       "successChecklist": [
-        "The new in-scope source path invalidates the completed review.",
-        "The replacement reviewed snapshot still crosses the exact-commit verification gate before push."
+        "The remediation runs its immediate test, lightweight review, fast gate, signed additive commit, exact verification, and authorized push before review resumes.",
+        "The delivered replacement identity receives one delta assessment and the complete selected lens set in fresh contexts under the reset."
       ]
     }
   ]

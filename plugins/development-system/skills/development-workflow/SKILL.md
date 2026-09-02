@@ -127,8 +127,10 @@ or review state:
    as stale or mismatched. Do not call `final_review.assess_risk` or
    `final_review.plan`; if a plan was already created, discard that entire
    session. State that zero clean iterations are accepted, launch no reviewers,
-   and reject commit, push, pull/merge-request creation, merge, delivery, and
-   readiness claims.
+   and reject terminal delivery, pull/merge-request creation or update, merge,
+   and readiness claims. Preserve separately authorized intermediate or
+   terminal-finding-remediation checkpoints: their normal commit and push may
+   proceed, but neither is terminal delivery or readiness evidence.
 4. Recover by installing the current-host binaries from the updated marketplace
    checkout with `just install-development-system-binaries` (or
    `scripts/install-development-system-binaries.sh`), then rerun Development
@@ -139,14 +141,19 @@ or review state:
 5. After planning, require the returned coordinator-owned
    `required_clean_iterations` to be at least the attested minimum. A lower
    value invalidates and discards that session; it cannot schedule reviewers or
-   authorize delivery.
+   authorize terminal delivery. Reject terminal delivery, PR/MR creation or
+   update, merge, and readiness until a fresh coordinator-compatible session
+   succeeds. Preserve any separately authorized intermediate or
+   terminal-finding-remediation commit/push checkpoint; it is not terminal
+   delivery or readiness evidence.
 
 When reporting a protocol mismatch, do not abbreviate this checklist. Name the
 same-MCP status requirement and all three predicate names and thresholds; say
 that `final_review.assess_risk` and `final_review.plan` are prohibited; say the
 old session is discarded with zero accepted clean iterations and no reviewers;
-name commit, push, pull/merge-request creation, merge, delivery, and readiness
-as rejected actions; require current-host binary installation, rerunning
+name terminal delivery, pull/merge-request creation or update, merge, and
+readiness as rejected actions while preserving separately authorized
+intermediate or terminal-finding-remediation commit/push checkpoints; require current-host binary installation, rerunning
 Development System setup for the current harness to rewrite the project-local
 absolute MCP binding, and harness restart; and require a fresh plan whose
 coordinator-owned minimum is at least the attested minimum. A generic
@@ -271,9 +278,9 @@ for the exact final-reviewed SHA; pending CI is
 `review-complete-awaiting-exact-sha-ci`. Source-changing remediation creates a
 new mode-specific checkpoint and resets review as described above.
 
-Load `delivery-workflow` before the first implementation increment so the
-configured delivery mode and green-increment preservation cadence are known
-before any commit or push. After final review, recheck it only to confirm that
+Load `delivery-workflow` before the first implementation or test increment so
+the configured delivery mode and green-increment preservation cadence are known
+before even a standalone test edit, commit, or push. After final review, recheck it only to confirm that
 the reviewed delivered identity has the required exact-SHA CI or local
 readiness evidence; a clean unchanged review creates no final delivery action.
 

@@ -1,10 +1,15 @@
 {
   "scenario": "source-change-invalidates-review",
   "remoteActions": ["push"],
-  "reviewEvidence": ["replacement source snapshot received terminal review"],
+  "reviewEvidence": [
+    "source-changing remediation completed its normal delivery checkpoint before review resumed"
+  ],
   "ci": { "required": true, "status": "terminal-success" },
   "reviewedSourceChanged": true,
+  "remediationCheckpointDelivered": true,
   "sourceReviewRestartRequired": true,
+  "deltaAssessmentRequired": true,
+  "completeLensSetRequired": true,
   "postCommitGateRequired": true,
   "postCommitGateExactRevision": true
 }

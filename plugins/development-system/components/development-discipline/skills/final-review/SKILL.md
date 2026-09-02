@@ -83,12 +83,16 @@ or claiming a change is ready.
 
 ## Delivered-checkpoint terminal boundary
 
-Final review consumes the ticket's already-delivered identity: the exact pushed
-commit for direct-to-trunk or PR/MR mode, or the exact local snapshot for
-local-only. A clean unchanged review adds review evidence only; it creates no
-commit, empty commit, push, or replacement local checkpoint. Required pushed
+Final review starts only after every planned implementation increment and every
+actual acceptance criterion have been completed and checkpoint-delivered. It
+consumes that ticket-complete identity: the exact pushed commit for
+direct-to-trunk or PR/MR mode, or the exact local snapshot for local-only. A
+clean unchanged review adds review evidence only; it creates no commit, empty
+commit, push, or replacement local checkpoint. In remote modes, required pushed
 CI may run concurrently with review, but readiness requires terminal success
-for the exact final-reviewed SHA.
+for the exact final-reviewed pushed SHA. In local-only mode, readiness instead
+requires fresh evidence bound to the exact final-reviewed local identity and
+never requires or invents remote CI.
 
 When explaining this boundary, explicitly state that every remote remediation
 checkpoint verifies the exact commit, commit message, and signature, and that a
@@ -113,23 +117,28 @@ before every advance and treat a changed hash as the protocol requires. Never
 use the delivery boundary to excuse a staged, unstaged, mode, path, or untracked
 content change while review is active.
 
-Each checkpoint commit already carries exact-commit verification of the required
-fast non-duplicated checks plus message and signature. Comprehensive evidence
-remains in CI. A clean terminal review creates no post-review commit. Only
-terminal-success CI for the exact final-reviewed pushed SHA supports readiness;
-pending CI yields `review-complete-awaiting-exact-sha-ci`.
+Each remote checkpoint commit already carries exact-commit verification of the
+required fast non-duplicated checks plus message and signature. Comprehensive
+remote evidence remains in CI. A clean terminal review creates no post-review
+commit. In remote modes, only terminal-success CI for the exact final-reviewed
+pushed SHA supports readiness; pending CI yields
+`review-complete-awaiting-exact-sha-ci`. In local-only mode, fresh readiness
+evidence must be bound to the exact final-reviewed local identity; remote CI is
+not a gate and must not be requested.
 
 This is the ticket-completion gate, not the gate for preserving each green
-implementation increment. Start it after the ticket's actual acceptance
-criteria are implemented and checkpoint-delivered and no prior failed-run hold
-remains. Direct-to-trunk and PR/MR review consumes the exact already-pushed final
-checkpoint SHA; PR creation and merge remain separately authorized operations.
-Local-only review consumes the exact local identity and never creates a remote
-action solely to unlock review. Required exact-SHA CI may be pending while
-review proceeds, but any completed failure activates `ci-failure-follow-up`
-immediately. A clean review with pending CI reports
-`review-complete-awaiting-exact-sha-ci`; readiness waits for terminal success on
-the exact final-reviewed SHA.
+implementation increment. Start it only after every planned implementation
+increment and every actual acceptance criterion are completed and
+checkpoint-delivered and no prior failed-run hold remains. Direct-to-trunk and
+PR/MR review consumes the exact already-pushed final checkpoint SHA; PR creation
+and merge remain separately authorized operations. Required exact-SHA CI may be
+pending while remote-mode review proceeds, but any completed failure activates
+`ci-failure-follow-up` immediately. A clean remote-mode review with pending CI
+reports `review-complete-awaiting-exact-sha-ci`; readiness waits for terminal
+success on the exact final-reviewed pushed SHA. Local-only review consumes the
+exact local identity, requires fresh readiness evidence bound to that identity,
+and never creates a remote action or waits for remote CI solely to unlock
+review.
 
 A failed pushed build invokes `ci-failure-follow-up` and blocks final review and
 follow-up work until that skill's terminal-success hold is released; a newer
@@ -252,12 +261,14 @@ checkpoint. Apply this contract when `advance_kind` is
   requires at least two distinct ticket references. For landed reviews, the
   choices are only `ship` or `escalate` because landed work cannot be decomposed
   into delivery tickets. `escalate` requires a nonblank escalation reference.
-- Reject `ship` until every independent delivery gate passes: acceptance
-  criteria are met, CI for the exact final-reviewed pushed SHA is terminally
-  successful with no current completed failed job, every blocking finding is resolved, and
-  the durable review state contains at least three consecutive complete
-  finding-free iterations. Once valid, `ship` is terminal and schedules no more
-  reviewers.
+- Reject `ship` until every planned increment and acceptance criterion is
+  delivered, every blocking finding is resolved, and the durable review state
+  contains at least three consecutive complete finding-free iterations. For
+  direct-to-trunk or PR/MR mode, also require terminally successful CI for the
+  exact final-reviewed pushed SHA with no current completed failed job. For
+  local-only mode, instead require fresh readiness evidence bound to the exact
+  final-reviewed local identity and require no remote CI. Once valid, `ship` is
+  terminal and schedules no more reviewers.
 - For unlanded reviews, `split` creates a terminal hold. `escalate` creates one
   in either lifecycle. Each hold preserves blockers, schedules no reviewers,
   and rejects every later `final_review.advance` for that session.
@@ -603,13 +614,18 @@ policy.
    Direct-to-trunk uses a signed additive commit, exact commit/message/signature
    verification, and normal push. PR/MR uses a signed additive commit and only
    an already-authorized branch push without inferring PR operations. Local-only
-   creates a signed local commit only when required or authorized; otherwise it
-   records a new exact no-commit snapshot and never pushes to resume review.
+   creates a signed local remediation commit only when that commit is authorized;
+   otherwise it records a new exact no-commit snapshot and never pushes to
+   resume review. If repository policy requires committed evidence but the user
+   explicitly withholds commit authority, stop as blocked without committing or
+   pushing; do not silently replace the required evidence with a snapshot.
    Submit exactly one diff-bound delta risk assessment and run the complete
-   selected lens set in fresh contexts while required exact-SHA CI may remain
-   pending. A later completed failure immediately preempts through Tiber
-   recovery. The material delta invalidates the old iteration and no unaffected
-   peer evidence carries forward. On the initial advancing call
+   selected lens set in fresh contexts. In remote modes, required exact-SHA CI
+   may remain pending; a later completed failure immediately preempts through
+   Tiber recovery. In local-only mode, refresh readiness evidence against the
+   new exact local identity and do not request remote CI. The material delta
+   invalidates the old iteration and no unaffected peer evidence carries
+   forward. On the initial advancing call
    that records each disposition, send `caller_decisions` in this shape:
 
    ```json

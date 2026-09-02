@@ -31,7 +31,7 @@
       "successChecklist": [
         "State inspection and preflight precede implementation.",
         "Delivery mode is selected before the first preservation commit or push.",
-        "Verification, final review, final delivery, and exact-revision CI remain explicit."
+        "Per-edit checkpoint delivery, terminal review of the delivered identity, and exact-identity readiness remain explicit and ordered."
       ]
     },
     {

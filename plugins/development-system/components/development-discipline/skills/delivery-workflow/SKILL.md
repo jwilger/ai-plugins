@@ -45,9 +45,10 @@ consequential. Do not invent a pull request.
 
 ### Direct-to-trunk
 
-Use the repository's declared trunk branch. For each passing implementation
-checkpoint, complete its immediate focused test, bounded lightweight review,
-fast pre-commit gate, and signed commit, then make the authorized
+Use the repository's declared trunk branch. For every passing per-edit
+checkpoint, including a standalone test-file edit, complete its immediate
+focused test, bounded lightweight review, fast pre-commit gate, and signed
+commit, then make the authorized
 non-history-rewriting push immediately to the policy-selected trunk ref without creating a
 PR/MR. Preserve repository-required branch or worktree topology; direct-to-trunk
 describes the delivery destination, not where development must occur. After pushing, bind the delivery evidence to the exact
@@ -64,23 +65,33 @@ untracked content, adds a newly in-scope untracked path, changes the pinned
 baseline, or changes the requested scope, the prior review is
 stale: treat the mutation as a new causal checkpoint, rerun its immediate test,
 lightweight review, fast gate, signed commit, exact verification, and normal
-push. Then run terminal delta/reset review against that new delivered identity.
-A source mutation triggers terminal delta/reset review only when terminal review
-was already active or the mutation remediates a terminal-review finding. During
-an ordinary checkpoint before ticket completion, deliver the new causal
-checkpoint and continue with the next planned increment; do not start terminal
-review early.
+push. Run terminal delta/reset review against that new delivered identity only
+when terminal review was already active or the mutation remediates a
+terminal-review finding. During an ordinary checkpoint before ticket
+completion, deliver the new causal checkpoint and continue with the next
+planned increment; do not start terminal review early.
 A metadata-only revision change stays in delivery verification and does not
 reopen source review.
+
+Keep checkpoint CI bounded per pushed ref. Prefer the forge or repository's
+existing coalescing of superseded non-terminal runs; cancel an obsolete run
+only when cancellation is authorized. If neither is available, wait for
+capacity before another push would create obsolete queued work. Never cancel
+the current terminal candidate's exact-SHA run, and never use a successful run
+for an older SHA as readiness evidence for a newer checkpoint.
 
 ### PR/MR
 
 Use a branch and the repository's pull-request or merge-request process. Push
-each passing checkpoint only when that branch mutation is already authorized;
+each passing per-edit checkpoint only after its immediate focused test,
+lightweight review, repository fast gate, and signed branch commit, and only
+when that branch mutation is already authorized;
 do not infer permission to open, update, or merge a PR/MR. Honor
 its required checks, review, approval, merge queue, and cleanup rules. Opening,
 updating, or merging the PR/MR must be authorized by the user or repository
-policy. Terminal review consumes the already-pushed branch identity; a clean
+policy. Start terminal review only after every planned increment and acceptance
+criterion is checkpoint-delivered. It consumes the exact already-pushed branch
+identity; a clean
 unchanged review creates no push. Source-changing remediation uses a signed
 additive commit and authorized branch push without inferring PR operations.
 Bind every check, approval, review, and readiness claim to the PR/MR's exact
@@ -89,15 +100,19 @@ current head revision.
 ### Local-only
 
 Keep all work local. Run checks and review in proportion to the claim, but do not
-push, open a PR/MR, or merge. Do not commit by default: commit only when requested or required by the
-repository-local instructions. Record the exact locally authorized terminal
+push, open a PR/MR, or merge. Do not commit by default: commit only when the
+user authorizes it or repository-local instructions require it. If the
+repository requires a commit but the user explicitly withholds commit
+authority, block without committing or pushing. Record the exact locally authorized terminal
 snapshot, completed gates, and next permitted action as the delivery-mode
 equivalent checkpoint, and report remaining remote work plainly. Final review
 still applies at ticket completion in local-only mode: run it with
 fresh local evidence, and do not dismiss it as a publication-only or PR-only
 gate. A clean unchanged terminal review creates no commit. Source-changing
-remediation creates a signed local commit only when required or authorized;
-otherwise record a new exact reviewed, fast-gate-passing no-commit snapshot.
+remediation creates a signed local commit only when authorized. When committed
+evidence is repository-required but commit authority is explicitly withheld,
+block without committing or pushing; otherwise record a new exact reviewed,
+fast-gate-passing no-commit snapshot.
 
 ## Authorization and evidence
 
