@@ -7,7 +7,6 @@
     "change-preflight",
     "delivery-selection",
     "test-driven-development",
-    "verification-before-completion",
     "per-edit-checkpoint-delivery",
     "terminal-review",
     "exact-identity-readiness"
@@ -15,11 +14,10 @@
   "specialists": [
     "change-preflight",
     "delivery-workflow",
+    "rationale-commit-messages",
     "test-driven-development",
     "verification-before-completion",
-    "final-review",
-    "rationale-commit-messages",
-    "babysit-pr"
+    "final-review"
   ],
   "deliverySelectedBeforePreservation": true,
   "exactRevisionBinding": true,

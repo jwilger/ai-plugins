@@ -6,6 +6,7 @@
     "inspect-state",
     "change-preflight",
     "test-driven-development",
+    "verification-before-completion",
     "delivery-selection",
     "per-edit-checkpoint-delivery",
     "terminal-review",

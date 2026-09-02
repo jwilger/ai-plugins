@@ -43,6 +43,9 @@ setup() {
   run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/implementation-valid.json"
   [ "$status" -eq 0 ]
 
+  run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/implementation-missing-verification.json"
+  [ "$status" -ne 0 ]
+
   run node "$workspace/verify-workflow-plan.mjs" "$workspace/fixtures/implementation-delivery-late.json"
   [ "$status" -ne 0 ]
 

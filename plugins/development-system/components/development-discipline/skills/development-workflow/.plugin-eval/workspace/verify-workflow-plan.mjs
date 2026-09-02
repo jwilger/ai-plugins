@@ -43,6 +43,7 @@ switch (plan.scenario) {
       "change-preflight",
       "delivery-selection",
       "test-driven-development",
+      "verification-before-completion",
       "per-edit-checkpoint-delivery",
       "terminal-review",
       "exact-identity-readiness",
