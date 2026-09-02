@@ -108,7 +108,6 @@ file, different baseline, or different requested scope is source-changing
 remediation: create its new mode-specific checkpoint first, then perform the
 delta assessment and complete clean-iteration reset against that new identity.
 
-This exception begins only after the coordinator reports terminal completion.
 During an active review, continue to rerun the bundled stage-aware scope hash
 before every advance and treat a changed hash as the protocol requires. Never
 use the delivery boundary to excuse a staged, unstaged, mode, path, or untracked
