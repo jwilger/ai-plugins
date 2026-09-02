@@ -46,6 +46,20 @@ the first edit, commit, or push, resolve the full ticket-start commit OID and
 persist it in this record; carry that immutable baseline through every later
 checkpoint and into terminal review:
 
+The available persistence owner is the active Tiber task's Git-backed notes,
+not the unavailable native workflow scheduler. After every state transition,
+append one single-line `checkpoint-v1` record with `tiber.note_add`; include the
+full ticket-start OID, an exact content snapshot identity, state, focused-test
+command and receipt reference, completed gates, commit or delivery identity when
+present, CI references when present, and the sole next permitted action. Store
+bounded references rather than raw logs or secrets. At session start, restart,
+or handoff, read the task with `tiber.show`, select its latest `checkpoint-v1`
+record, and reconcile every identity with current Git and forge state before
+acting. A malformed, missing, unpublished, or mismatched record is a fail-closed
+recovery hold: do not edit, commit, push, or infer progress until the same task
+record is reconciled. This note protocol records evidence only; it does not
+emulate or claim native `workflow.*` enforcement.
+
 - `failing`: commit and push are prohibited. Permit only the next causal edit
   needed to address that failure, reject unrelated or convenience changes, and
   immediately test again.
