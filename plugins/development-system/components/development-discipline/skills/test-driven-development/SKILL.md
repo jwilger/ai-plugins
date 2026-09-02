@@ -118,8 +118,12 @@ record the exact snapshot as `failing` or
 
 An immediately passing newly written test is not GREEN and must not enter
 `passing-awaiting-gates-or-review`. Record the snapshot in canonical `failing`
-state with `failure_kind: invalid-test` and the causal test rewrite as its sole
-next action, then rerun it immediately. Commit and push remain prohibited until
+state while preserving the truthful `outcome: pass`, set
+`failure_kind: invalid-test`, and record
+`rewrite-invalid-test: <specific causal rewrite>` as its sole next action, then
+rerun it immediately. Other failing records use
+`causal-edit: <specific causal change>` so the RED evidence and exact next edit
+survive interruption. Commit and push remain prohibited until
 a valid RED result (or an explicitly recorded RED exemption) is followed by
 GREEN. `failure_kind` explains the failure without introducing another durable
 checkpoint state.

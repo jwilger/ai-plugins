@@ -52,8 +52,10 @@ the owner. Store the latest record at
 `$(git rev-parse --git-common-dir)/development-system/checkpoints/<checkpoint-id>.latest`
 in every delivery mode. Use the active task ID as `checkpoint-id` when one exists. Otherwise
 derive it as lowercase hexadecimal SHA-256 of the exact byte sequence
-`baseline_oid`, one NUL byte, and the normalized original user request, and
-record that ID in every handoff. Invoke the bundled
+`baseline_oid`, one NUL byte, and the original user-request text encoded as
+UTF-8 after replacing every CRLF or lone CR line ending with LF. Do not trim
+whitespace, normalize Unicode, interpolate variables, or append a newline.
+Record that ID in every handoff. Invoke the bundled
 `<plugin-root>/scripts/write-local-checkpoint.sh` with that ID, the expected
 generation, the expected predecessor digest (or literal `null`), and a file
 containing the proposed newline-terminated record. The helper creates the
@@ -90,7 +92,8 @@ only where the following exact shapes permit it. `snapshot` is exactly
 `{"mode":"local-only"|"direct-to-trunk"|"pull-request","commit_oid":string|null,"pushed_oid":string|null,"local_snapshot":string|null}`.
 `ci` is exactly
 `{"runs":[{"provider":string,"run_id":string,"commit_oid":string,"status":"queued"|"running"|"success"|"failure"}],"terminal_success_run_id":string|null}`;
-`runs` is append-ordered by observation, and a non-null
+`runs` is append-ordered by observation and every successor must retain the
+predecessor's complete array as an exact prefix. A non-null
 `terminal_success_run_id` must name the final array entry.
 Every command, receipt, provider, run ID, and local-snapshot string used as
 evidence must contain at least one non-whitespace character.
@@ -143,9 +146,12 @@ schema, identity, or lineage mismatch remains a recovery hold.
   immediately test again. `test` is required and `delivery` is `null`.
   Every gate receipt is `null`; CI entries may only describe already-delivered
   earlier commits and cannot satisfy a gate for this snapshot.
-  A newly written test that passes unexpectedly is still `failing`, with an
-  `invalid-test` reason and only the causal test rewrite as `next_action`; do
-  not checkpoint that test as passing or introduce a fifth state.
+  A newly written test that passes unexpectedly is still `failing`: preserve
+  the truthful `outcome:"pass"`, set `failure_kind:"invalid-test"`, and record
+  only `rewrite-invalid-test: <specific causal rewrite>` as `next_action`; do
+  not represent the execution as a failed test or introduce a fifth state.
+  Other failing records use `causal-edit: <specific causal change>` so the
+  exact RED evidence, diagnosis, and next edit survive interruption.
 - `passing-awaiting-gates-or-review`: freeze further implementation and test
   edits. Run the bounded lightweight review and repository fast pre-commit
   gate; any remediation is a new causal edit and therefore triggers another

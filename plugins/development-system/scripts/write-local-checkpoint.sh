@@ -24,7 +24,8 @@ cmp -s "$record_file" <(tr -d '\000' <"$record_file") || { echo "record must not
 
 [[ $(head -c 14 "$record_file") == "checkpoint-v1 " ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
 
-git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+worktree_root=$(git rev-parse --show-toplevel)
+git_common_dir=$(git -C "$worktree_root" rev-parse --path-format=absolute --git-common-dir)
 checkpoint_dir="$git_common_dir/development-system/checkpoints"
 target="$checkpoint_dir/$checkpoint_id.latest"
 lock="$checkpoint_dir/$checkpoint_id.lock"
@@ -37,23 +38,24 @@ if ! flock -x -w 30 "$lock_fd"; then
   exit 3
 fi
 
-current_head=$(git rev-parse HEAD)
-current_tracked=$(git diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
+current_head=$(git -C "$worktree_root" rev-parse HEAD)
+current_tracked=$(git -C "$worktree_root" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
 untracked_stream=$(mktemp)
 trap 'rm -f -- "$untracked_stream"' EXIT
 while IFS= read -r -d '' path; do
-  if [[ -L $path ]]; then mode=120000
-  elif [[ -f $path && -x $path ]]; then mode=100755
-  elif [[ -f $path ]]; then mode=100644
+  absolute_path="$worktree_root/$path"
+  if [[ -L $absolute_path ]]; then mode=120000
+  elif [[ -f $absolute_path && -x $absolute_path ]]; then mode=100755
+  elif [[ -f $absolute_path ]]; then mode=100644
   else echo "unsupported untracked file type: $path" >&2; exit 2
   fi
-  if [[ -L $path ]]; then
-    oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding: "buffer"}))' "$path" | git hash-object --stdin)
+  if [[ -L $absolute_path ]]; then
+    oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding: "buffer"}))' "$absolute_path" | git -C "$worktree_root" hash-object --stdin)
   else
-    oid=$(git hash-object -- "$path")
+    oid=$(git -C "$worktree_root" hash-object -- "$path")
   fi
   printf '%s\0%s\0%s\n' "$mode" "$path" "$oid" >>"$untracked_stream"
-done < <(git ls-files --others --exclude-standard -z)
+done < <(git -C "$worktree_root" ls-files --full-name --others --exclude-standard -z)
 current_untracked=$(sha256sum "$untracked_stream" | cut -d ' ' -f 1)
 
 if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" '
@@ -79,14 +81,18 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
        (.receipt_ref | nonblank) and (.outcome | IN("pass", "fail"))))) and
   (.delivery == null or (.delivery | exact_keys(["mode", "commit_oid", "pushed_oid", "local_snapshot"]) and (.mode | IN("local-only", "direct-to-trunk", "pull-request")) and (.commit_oid | . == null or oid) and (.pushed_oid | . == null or oid) and (.local_snapshot | nonblank_or_null))) and
   (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | nonblank) and (.run_id | nonblank) and (.commit_oid | oid) and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | nonblank_or_null)) and
-  (.next_action | type == "string") and
+  (.next_action | nonblank) and
   ($generation != 0 or .state == "pushed-or-delivery-mode-equivalent") and
   (.ci.terminal_success_run_id == null or
    ((.ci.runs | length) > 0 and .ci.runs[-1].run_id == .ci.terminal_success_run_id and
     .ci.runs[-1].status == "success" and .ci.runs[-1].commit_oid == $record.delivery.pushed_oid)) and
   (if .state == "failing" then
-     .test != null and .test.outcome == "fail" and .delivery == null and all(.gates[]; . == null) and
-     .next_action == "causal-edit"
+     .test != null and .delivery == null and all(.gates[]; . == null) and
+     (if .test.outcome == "pass" then
+        .test.failure_kind == "invalid-test" and (.next_action | test("^rewrite-invalid-test: \\S"))
+      else
+        (.test.failure_kind | nonblank) and (.next_action | test("^causal-edit: \\S"))
+      end)
    elif .state == "passing-awaiting-gates-or-review" then
      .test != null and .test.outcome == "pass" and .delivery == null and .gates.exact_identity_verification_receipt == null and
      (if .gates.lightweight_review_receipt == null then
@@ -107,6 +113,7 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
      .snapshot.tracked_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" and
      .snapshot.untracked_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" and
      .test == null and all(.gates[]; . == null) and .delivery != null and
+     (.next_action | test("^causal-edit: \\S")) and
      (if .delivery.mode == "local-only" then
         .delivery.pushed_oid == null and (.delivery.local_snapshot | type == "string") and
         (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
@@ -142,6 +149,13 @@ if [[ -e $target ]]; then
   [[ $expected_generation -eq $((current_generation + 1)) ]] || { echo "stale checkpoint generation" >&2; exit 3; }
   [[ $expected_predecessor == "$current_predecessor" ]] || { echo "stale checkpoint predecessor" >&2; exit 3; }
   [[ $proposed_baseline == "$current_baseline" ]] || { echo "checkpoint baseline does not match predecessor" >&2; exit 3; }
+  current_ci=$(sed -n 's/^checkpoint-v1 //p' "$target" | jq -c '.ci.runs')
+  proposed_ci=$(tail -c +15 "$record_file" | jq -c '.ci.runs')
+  jq -en --argjson current "$current_ci" --argjson proposed "$proposed_ci" \
+    '$proposed[0:($current | length)] == $current' >/dev/null || {
+      echo "checkpoint CI observations do not preserve predecessor history" >&2
+      exit 3
+    }
 else
   [[ $expected_generation -eq 0 && $expected_predecessor == null ]] || { echo "missing checkpoint predecessor" >&2; exit 3; }
 fi

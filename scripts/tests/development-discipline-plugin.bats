@@ -95,6 +95,8 @@ setup() {
   invalid_baseline="$records/invalid-baseline.record"
   invalid_committed_test="$records/invalid-committed-test.record"
   dirty_bootstrap="$records/dirty-bootstrap.record"
+  empty_action="$records/empty-action.record"
+  invalid_test="$records/invalid-test.record"
   head_oid=$(git -C "$repo" rev-parse HEAD)
   empty_sha=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
   printf '%s\n' 'checkpoint-v1 {"generation":0,"predecessor_sha256":null}' >"$invalid"
@@ -133,8 +135,20 @@ setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"checkpoint record failed schema, snapshot, or state validation"* ]]
 
-  first_json=$(jq -cn --arg head "$head_oid" --arg empty "$empty_sha" '{generation:0,predecessor_sha256:null,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:{mode:"local-only",commit_oid:null,pushed_oid:null,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"edit"}')
+  first_json=$(jq -cn --arg head "$head_oid" --arg empty "$empty_sha" '{generation:0,predecessor_sha256:null,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:{mode:"local-only",commit_oid:null,pushed_oid:null,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit: implement the first planned ticket increment"}')
   printf 'checkpoint-v1 %s\n' "$first_json" >"$first"
+
+  empty_action_json=$(printf '%s' "$first_json" | jq -c '.next_action = ""')
+  printf 'checkpoint-v1 %s\n' "$empty_action_json" >"$empty_action"
+  run bash -c 'cd "$1" && "$2" empty-action 0 null "$3"' _ "$repo" "$writer" "$empty_action"
+  [ "$status" -ne 0 ]
+
+  mkdir "$repo/nested"
+  printf '%s\n' outside >"$repo/root-untracked"
+  run bash -c 'cd "$1/nested" && "$2" nested-cwd 0 null "$3"' _ "$repo" "$writer" "$first"
+  [ "$status" -ne 0 ]
+  [ ! -e "$repo/.git/development-system/checkpoints/nested-cwd.latest" ]
+  rm "$repo/root-untracked"
 
   run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$first"
   [ "$status" -eq 0 ]
@@ -148,7 +162,7 @@ setup() {
   legacy_json=$(jq -cn --arg predecessor "$legacy_zero_predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"legacy descriptive action"}')
   printf 'checkpoint-v1 %s\n' "$legacy_json" >"$legacy_target"
   legacy_predecessor=$(sha256sum "$legacy_target" | cut -d ' ' -f 1)
-  legacy_successor_json=$(printf '%s' "$legacy_json" | jq -c --arg predecessor "$legacy_predecessor" '.generation = 2 | .predecessor_sha256 = $predecessor | .next_action = "causal-edit"')
+  legacy_successor_json=$(printf '%s' "$legacy_json" | jq -c --arg predecessor "$legacy_predecessor" '.generation = 2 | .predecessor_sha256 = $predecessor | .next_action = "causal-edit: implement the recorded RED behavior"')
   printf 'checkpoint-v1 %s\n' "$legacy_successor_json" >"$stale"
   run bash -c 'cd "$1" && "$2" legacy-upgrade 2 "$3" "$4"' _ "$repo" "$writer" "$legacy_predecessor" "$stale"
   [ "$status" -eq 0 ]
@@ -174,6 +188,13 @@ setup() {
   printf 'checkpoint-v1 %s\n' "$invalid_passing_json" >"$stale"
   run bash -c 'cd "$1" && "$2" work-item 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$stale"
   [ "$status" -ne 0 ]
+
+  invalid_test_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"new-test",receipt_ref:"unexpected-pass",outcome:"pass",failure_kind:"invalid-test"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"rewrite-invalid-test: make the new test prove the missing behavior"}')
+  printf 'checkpoint-v1 %s\n' "$invalid_test_json" >"$invalid_test"
+  run bash -c 'cd "$1" && "$2" invalid-test 0 null "$3"' _ "$repo" "$writer" "$first"
+  [ "$status" -eq 0 ]
+  run bash -c 'cd "$1" && "$2" invalid-test 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$invalid_test"
+  [ "$status" -eq 0 ]
 
   invalid_committed_test_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"committed",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"regression"},gates:{lightweight_review_receipt:"review",fast_gate_receipt:"gate",exact_identity_verification_receipt:{receipt_ref:"verified",outcome:"fail"}},delivery:{mode:"local-only",commit_oid:$head,pushed_oid:null,local_snapshot:null},ci:{runs:[],terminal_success_run_id:null},next_action:"local-complete"}')
   printf 'checkpoint-v1 %s\n' "$invalid_committed_test_json" >"$invalid_committed_test"
@@ -220,18 +241,22 @@ setup() {
   run bash -c 'cd "$1" && "$2" remote-ci 2 "$3" "$4"' _ "$repo" "$writer" "$recovered_predecessor" "$stale"
   [ "$status" -eq 0 ]
   recovered_terminal_predecessor=$(sha256sum "$remote_target" | cut -d ' ' -f 1)
+  dropped_failure_json=$(printf '%s' "$recovered_json" | jq -c --arg predecessor "$recovered_terminal_predecessor" '.generation = 3 | .predecessor_sha256 = $predecessor | .ci.runs = [.ci.runs[-1]]')
+  printf 'checkpoint-v1 %s\n' "$dropped_failure_json" >"$stale"
+  run bash -c 'cd "$1" && "$2" remote-ci 3 "$3" "$4"' _ "$repo" "$writer" "$recovered_terminal_predecessor" "$stale"
+  [ "$status" -ne 0 ]
   stale_success_json=$(printf '%s' "$recovered_json" | jq -c --arg predecessor "$recovered_terminal_predecessor" '.generation = 3 | .predecessor_sha256 = $predecessor | .ci.runs += [{provider:"ci",run_id:"newer-failure",commit_oid:.snapshot.head_oid,status:"failure"}]')
   printf 'checkpoint-v1 %s\n' "$stale_success_json" >"$stale"
   run bash -c 'cd "$1" && "$2" remote-ci 3 "$3" "$4"' _ "$repo" "$writer" "$recovered_terminal_predecessor" "$stale"
   [ "$status" -ne 0 ]
 
-  invalid_baseline_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:"0000000000000000000000000000000000000000",snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit"}')
+  invalid_baseline_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:"0000000000000000000000000000000000000000",snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit: correct the mismatched baseline"}')
   printf 'checkpoint-v1 %s\n' "$invalid_baseline_json" >"$invalid_baseline"
   run bash -c 'cd "$1" && "$2" work-item 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$invalid_baseline"
   [ "$status" -eq 3 ]
   [[ "$output" == *"checkpoint baseline does not match predecessor"* ]]
 
-  second_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit"}')
+  second_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit: implement the recorded RED behavior"}')
   printf 'checkpoint-v1 %s\n' "$second_json" >"$second"
 
   failing_push_json=$(printf '%s' "$second_json" | jq -c '.next_action = "push"')
@@ -248,9 +273,16 @@ setup() {
   [ "$status" -eq 3 ]
   [ "$(<"$target")" = "$current" ]
 
-  lock_line=$(grep -n 'flock -x' "$writer" | cut -d: -f1)
-  snapshot_line=$(grep -n 'current_head=' "$writer" | cut -d: -f1)
-  [ "$lock_line" -lt "$snapshot_line" ]
+  lock_path="$repo/.git/development-system/checkpoints/lock-order.lock"
+  exec {held_lock}>"$lock_path"
+  flock -x "$held_lock"
+  bash -c 'cd "$1" && "$2" lock-order 0 null "$3"' _ "$repo" "$writer" "$first" &
+  blocked_writer=$!
+  printf '%s\n' dirty >"$repo/tracked.txt"
+  flock -u "$held_lock"
+  wait "$blocked_writer" && false
+  [ ! -e "$repo/.git/development-system/checkpoints/lock-order.latest" ]
+  git -C "$repo" checkout -- tracked.txt
 
   printf '%s\n' dirty >"$repo/tracked.txt"
   dirty_tracked=$(git -C "$repo" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
