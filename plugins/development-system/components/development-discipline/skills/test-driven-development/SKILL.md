@@ -152,13 +152,13 @@ At `passing-awaiting-gates-or-review`, stop all implementation and test editing:
    to open or merge; local-only records the locally permitted terminal snapshot
    and performs no remote mutation.
 
-Every interruption preserves the exact snapshot, immediate-test receipt,
-durable state, completed gates, and sole next permitted action. Documentation,
-configuration, formatting-only changes, generated output, and mechanically
-required metadata use proportional formatter/parser/validation gates and the
-same checkpoint discipline. Generated or required companions may travel only
-with their causal source snapshot; unrelated passing work is never batched for
-convenience.
+Every interruption preserves the immutable ticket-start baseline, exact
+snapshot, immediate-test receipt, durable state, completed gates, and sole next
+permitted action. Documentation, configuration, formatting-only changes,
+generated output, and mechanically required metadata use proportional
+formatter/parser/validation gates and the same checkpoint discipline. Generated
+or required companions may travel only with their causal source snapshot;
+unrelated passing work is never batched for convenience.
 
 After an authorized push, begin the next iteration immediately while monitoring
 the exact pushed OID's CI concurrently. A queued or running build is not green,
