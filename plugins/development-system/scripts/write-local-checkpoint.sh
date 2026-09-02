@@ -59,6 +59,8 @@ current_untracked=$(sha256sum "$untracked_stream" | cut -d ' ' -f 1)
 if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" '
   def exact_keys($expected): (keys | sort) == ($expected | sort);
   def string_or_null: type == "string" or . == null;
+  def nonblank: type == "string" and test("\\S");
+  def nonblank_or_null: . == null or nonblank;
   def oid: type == "string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$");
   def sha256: type == "string" and test("^[0-9a-f]{64}$");
   . as $record |
@@ -69,14 +71,14 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
   (.snapshot | exact_keys(["head_oid", "tracked_sha256", "untracked_sha256"]) and (.head_oid | oid) and (.tracked_sha256 | sha256) and (.untracked_sha256 | sha256)) and
   .snapshot.head_oid == $current_head and .snapshot.tracked_sha256 == $current_tracked and .snapshot.untracked_sha256 == $current_untracked and
   (.state | IN("failing", "passing-awaiting-gates-or-review", "committed", "pushed-or-delivery-mode-equivalent")) and
-  (.test == null or (.test | exact_keys(["command", "receipt_ref", "outcome", "failure_kind"]) and (.command | type == "string") and (.receipt_ref | type == "string") and (.outcome | IN("pass", "fail")) and (.failure_kind | string_or_null))) and
+  (.test == null or (.test | exact_keys(["command", "receipt_ref", "outcome", "failure_kind"]) and (.command | nonblank) and (.receipt_ref | nonblank) and (.outcome | IN("pass", "fail")) and (.failure_kind | string_or_null))) and
   (.gates | exact_keys(["lightweight_review_receipt", "fast_gate_receipt", "exact_identity_verification_receipt"]) and
-    (.lightweight_review_receipt | string_or_null) and (.fast_gate_receipt | string_or_null) and
+    (.lightweight_review_receipt | nonblank_or_null) and (.fast_gate_receipt | nonblank_or_null) and
     (.exact_identity_verification_receipt == null or
       (.exact_identity_verification_receipt | exact_keys(["receipt_ref", "outcome"]) and
-       (.receipt_ref | type == "string") and (.outcome | IN("pass", "fail"))))) and
-  (.delivery == null or (.delivery | exact_keys(["mode", "commit_oid", "pushed_oid", "local_snapshot"]) and (.mode | IN("local-only", "direct-to-trunk", "pull-request")) and (.commit_oid | . == null or oid) and (.pushed_oid | . == null or oid) and (.local_snapshot | string_or_null))) and
-  (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | type == "string") and (.run_id | type == "string") and (.commit_oid | oid) and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | string_or_null)) and
+       (.receipt_ref | nonblank) and (.outcome | IN("pass", "fail"))))) and
+  (.delivery == null or (.delivery | exact_keys(["mode", "commit_oid", "pushed_oid", "local_snapshot"]) and (.mode | IN("local-only", "direct-to-trunk", "pull-request")) and (.commit_oid | . == null or oid) and (.pushed_oid | . == null or oid) and (.local_snapshot | nonblank_or_null))) and
+  (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | nonblank) and (.run_id | nonblank) and (.commit_oid | oid) and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | nonblank_or_null)) and
   (.next_action | type == "string") and
   ($generation != 0 or .state == "pushed-or-delivery-mode-equivalent") and
   (.ci.terminal_success_run_id == null or

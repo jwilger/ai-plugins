@@ -92,6 +92,8 @@ only where the following exact shapes permit it. `snapshot` is exactly
 `{"runs":[{"provider":string,"run_id":string,"commit_oid":string,"status":"queued"|"running"|"success"|"failure"}],"terminal_success_run_id":string|null}`;
 `runs` is append-ordered by observation, and a non-null
 `terminal_success_run_id` must name the final array entry.
+Every command, receipt, provider, run ID, and local-snapshot string used as
+evidence must contain at least one non-whitespace character.
 The snapshot hashes are defined as follows:
 
 - `tracked_sha256` is SHA-256 of the exact byte stream from
