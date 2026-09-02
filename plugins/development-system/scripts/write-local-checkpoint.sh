@@ -15,10 +15,24 @@ record_file=$4
 [[ $checkpoint_id =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid checkpoint id" >&2; exit 2; }
 [[ $expected_generation =~ ^(0|[1-9][0-9]*)$ ]] || usage
 [[ -f $record_file ]] || usage
+for dependency in git jq flock sha256sum sed od tr sync mktemp cp mv chmod grep wc tail head cut; do
+  command -v "$dependency" >/dev/null 2>&1 || { echo "missing checkpoint runtime dependency: $dependency" >&2; exit 2; }
+done
+sync --help 2>&1 | grep -q -- ' -f' || { echo "checkpoint runtime requires sync -f support" >&2; exit 2; }
 [[ $(wc -l < "$record_file") -eq 1 && $(tail -c 1 "$record_file" | od -An -t u1 | tr -d ' ') == 10 ]] || { echo "record must contain exactly one newline-terminated line" >&2; exit 2; }
 cmp -s "$record_file" <(tr -d '\000' <"$record_file") || { echo "record must not contain NUL bytes" >&2; exit 2; }
 
 [[ $(head -c 14 "$record_file") == "checkpoint-v1 " ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
+
+git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+checkpoint_dir="$git_common_dir/development-system/checkpoints"
+target="$checkpoint_dir/$checkpoint_id.latest"
+lock="$checkpoint_dir/$checkpoint_id.lock"
+umask 077
+mkdir -p "$checkpoint_dir"
+chmod 700 "$checkpoint_dir"
+exec {lock_fd}>"$lock"
+flock -x "$lock_fd"
 
 current_head=$(git rev-parse HEAD)
 current_tracked=$(git diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
@@ -59,7 +73,7 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
    elif .state == "passing-awaiting-gates-or-review" then
      .test != null and .test.outcome == "pass" and .delivery == null and .gates.exact_identity_verification_receipt == null
    elif .state == "committed" then
-     .delivery != null and .delivery.commit_oid == .snapshot.head_oid and
+     .test != null and .test.outcome == "pass" and .delivery != null and .delivery.commit_oid == .snapshot.head_oid and
      (.gates.lightweight_review_receipt | type == "string") and
      (.gates.fast_gate_receipt | type == "string") and
      ((.gates.exact_identity_verification_receipt == null and .next_action == "verify-exact-commit") or (.gates.exact_identity_verification_receipt | type == "string"))
@@ -69,7 +83,7 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
         (.delivery.local_snapshot | type == "string") and (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
       else .delivery.pushed_oid == .snapshot.head_oid end)
    else
-      .delivery != null and
+     .test != null and .test.outcome == "pass" and .delivery != null and
      (.gates.lightweight_review_receipt | type == "string") and
      (.gates.fast_gate_receipt | type == "string") and
      (.gates.exact_identity_verification_receipt | type == "string") and
@@ -86,16 +100,6 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
   exit 2
 fi
 proposed_baseline=$(tail -c +15 "$record_file" | jq -er '.baseline_oid')
-
-git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
-checkpoint_dir="$git_common_dir/development-system/checkpoints"
-target="$checkpoint_dir/$checkpoint_id.latest"
-lock="$checkpoint_dir/$checkpoint_id.lock"
-umask 077
-mkdir -p "$checkpoint_dir"
-chmod 700 "$checkpoint_dir"
-exec {lock_fd}>"$lock"
-flock -x "$lock_fd"
 
 if [[ -e $target ]]; then
   current_generation=$(sed -n 's/^checkpoint-v1 //p' "$target" | jq -er '.generation')
