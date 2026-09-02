@@ -185,11 +185,15 @@ actual acceptance criteria are delivered; it is not a prerequisite for
 preserving each green increment, and lightweight review never substitutes for
 its configured clean iterations.
 When full review requires a code or guidance edit, first confirm that the most
-recently completed pushed build is successful and no current build has a
-completed failed job, classify whether RED applies and use it when
-required, then repeat the immediate focused test, lightweight review, fast
-pre-commit gate, signed commit, exact verification, and authorized push. Only
-then resume full review through its diff-bound delta/reset protocol.
+recently completed in-scope CI has no unresolved failed job, classify whether
+RED applies and use it when required, then repeat the immediate focused test,
+lightweight review, fast pre-commit gate, and selected delivery-mode checkpoint.
+Direct-to-trunk and PR/MR use a signed additive commit, exact verification, and
+already-authorized push. Local-only uses a signed local commit only when
+required and authorized, otherwise the exact no-commit snapshot, and performs
+no remote mutation. Only then resume full review through its diff-bound
+delta/reset protocol; pushed readiness still waits for terminal CI success on
+the exact final-reviewed SHA.
 
 ## Lightweight Review
 
