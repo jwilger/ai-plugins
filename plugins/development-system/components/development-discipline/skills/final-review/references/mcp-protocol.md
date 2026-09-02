@@ -341,9 +341,10 @@ iterations exist, and it never substitutes for acceptance criteria or CI. A
 valid `ship` decision is terminal for final review, returns `complete: true`,
 and schedules no reviewers; it cannot discard remaining lens work.
 The calling workflow must still satisfy the ticket's acceptance criteria and
-confirm the most recently completed pushed CI build is successful before
-release or new work. A newer queued or running build does not replace that
-result; any current build with a completed failed job activates
+confirm terminal CI success for the exact final-reviewed pushed SHA before
+release or new work. A successful build for an older revision never satisfies
+that gate; a queued or running build for the reviewed SHA remains pending. Any
+current build with a completed failed job activates
 `ci-failure-follow-up`, which takes precedence and
 requires exact diagnosis plus terminal success before release or new work.
 `split` and `escalate` persist a contract-bound terminal hold, preserve

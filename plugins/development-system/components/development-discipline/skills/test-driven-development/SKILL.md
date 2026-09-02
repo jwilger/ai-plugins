@@ -116,6 +116,12 @@ increment boundary. Immediately run the smallest relevant test and durably
 record the exact snapshot as `failing` or
 `passing-awaiting-gates-or-review`.
 
+An immediately passing newly written test is not GREEN and must not enter
+`passing-awaiting-gates-or-review`. Record it as `invalid-test`, permit only the
+causal rewrite needed to make the test demonstrate missing behavior, and rerun
+it immediately. Commit and push remain prohibited until a valid RED result (or
+an explicitly recorded RED exemption) is followed by GREEN.
+
 At `failing`, prohibit commit, push, unrelated edits, cleanup, and convenience
 changes. Permit only the next causal edit, then run the smallest relevant test
 again immediately. When test and implementation cannot independently pass,
@@ -159,6 +165,14 @@ build is successful and no current required run has a completed failed job. Any
 completed CI failure immediately preempts the current edit and invokes
 `ci-failure-follow-up`; its recovery hold permits only the selected causal repair
 or authorized unchanged-SHA rerun until terminal success.
+
+Keep checkpoint CI bounded per ref. Use the repository or provider's existing
+superseded-run cancellation or coalescing policy when available; otherwise,
+before another checkpoint push would create an additional obsolete queued run,
+wait for capacity or cancel only the superseded non-terminal run when that
+mutation is already authorized. Never cancel the current terminal-review
+candidate's exact-SHA run, and never let an older run satisfy its readiness
+gate.
 
 Long-running integration, mutation, exhaustive, full-suite, and similarly
 expensive checks belong in CI unless a local run is directly required to

@@ -41,7 +41,10 @@ exact-revision gate, or CI-recovery hold.
 
 After every individual implementation-file or test-file edit, stop and run the
 smallest relevant test immediately. Bind the exact worktree snapshot and test
-receipt to exactly one durable state, plus its next permitted action:
+receipt to exactly one durable state, plus its next permitted action. Before
+the first edit, commit, or push, resolve the full ticket-start commit OID and
+persist it in this record; carry that immutable baseline through every later
+checkpoint and into terminal review:
 
 - `failing`: commit and push are prohibited. Permit only the next causal edit
   needed to address that failure, reject unrelated or convenience changes, and
@@ -59,9 +62,9 @@ receipt to exactly one durable state, plus its next permitted action:
   required local commit; if commit authority is explicitly withheld, completion
   blocks without authorizing a push.
 
-Every interruption or handoff must preserve that state, exact snapshot, test
-receipt, completed gates, and sole next permitted action. Never infer progress
-from an unbound green test or a clean worktree alone.
+Every interruption or handoff must preserve the ticket-start baseline, state,
+exact snapshot, test receipt, completed gates, and sole next permitted action.
+Never infer progress from an unbound green test or a clean worktree alone.
 
 When a test and its implementation cannot independently pass, declare one
 bounded RED-to-GREEN pair before the implementation edit. Persist the expected
@@ -260,7 +263,9 @@ new mode-specific checkpoint and resets review as described above.
 
 Load `delivery-workflow` before the first implementation increment so the
 configured delivery mode and green-increment preservation cadence are known
-before any commit or push. Recheck it after final review for final delivery.
+before any commit or push. After final review, recheck it only to confirm that
+the reviewed delivered identity has the required exact-SHA CI or local
+readiness evidence; a clean unchanged review creates no final delivery action.
 
 ## Structured lifecycle
 
