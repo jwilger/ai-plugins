@@ -32,7 +32,10 @@ umask 077
 mkdir -p "$checkpoint_dir"
 chmod 700 "$checkpoint_dir"
 exec {lock_fd}>"$lock"
-flock -x "$lock_fd"
+if ! flock -x -w 30 "$lock_fd"; then
+  echo "checkpoint lock timed out; retry after the active writer completes" >&2
+  exit 3
+fi
 
 current_head=$(git rev-parse HEAD)
 current_tracked=$(git diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)

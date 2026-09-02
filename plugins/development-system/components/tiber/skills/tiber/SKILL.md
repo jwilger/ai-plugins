@@ -95,10 +95,12 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   linked-worktree writer cannot replace a newer transition; do not synthesize a
   second filesystem implementation.
   Never put raw logs, credentials, or secrets in the note. On restart or
-  handoff, use `tiber.show` for the published owner or read the selected local
-  `.latest` owner, then reconcile the record with Git and forge state before
-  acting. Missing, malformed, unexpectedly unpublished, non-atomic local, or
-  mismatched evidence is a recovery hold, not
+  handoff, read the authoritative local `.latest` owner first, then use
+  `tiber.show` only to compare an authorized optional mirror or recover a
+  retained publication failure. Reconcile the local record with Git and forge
+  state before acting; a missing or behind mirror does not override valid local
+  authority. Missing, malformed, non-atomic local, or mismatched authoritative
+  evidence is a recovery hold, not
   permission to infer progress. These notes are evidence records; they do not
   emulate the unavailable native `workflow.*` scheduler.
 - When `.tiber.toml` configures `[final_review].minimum_clean_reviews`, record

@@ -115,14 +115,14 @@ gate receipts are `null`, and CI may be empty, only when `baseline_oid` equals
 and `delivery` identifies that same pre-existing baseline. A dirty,
 non-baseline, or unreconciled starting worktree is a recovery hold, not a
 bootstrap shortcut. Store bounded references rather than raw logs or secrets.
-At session start, restart, or handoff, read the selected owner: `tiber.show` when
-task publication was authorized for this checkpoint, otherwise the exact local
-`.latest` file regardless of repository delivery mode.
-Select its latest `checkpoint-v1`
-record, verify its generation/predecessor chain when history is available, and
-reconcile every identity with current Git and forge state before acting. A
-malformed, missing, unexpectedly unpublished Tiber, non-atomic or stale local,
-or mismatched record is a fail-closed
+At session start, restart, or handoff, always read the authoritative local
+`.latest` file regardless of repository delivery mode. Select its latest
+`checkpoint-v1` record, verify its generation/predecessor chain when history is
+available, and reconcile every identity with current Git and forge state before
+acting. When task publication was authorized, use `tiber.show` only to compare
+the optional mirror and recover any retained publication failure; a missing or
+behind mirror does not override valid local authority. A malformed, missing,
+non-atomic or stale local, or mismatched authoritative record is a fail-closed
 recovery hold: do not edit, commit, push, or infer progress until the same task
 record is reconciled. This note protocol records evidence only; it does not
 emulate or claim native `workflow.*` enforcement.

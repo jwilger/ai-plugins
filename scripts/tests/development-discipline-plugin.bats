@@ -82,7 +82,7 @@ setup() {
   git -C "$repo" init -q
   printf '%s\n' baseline >"$repo/tracked.txt"
   git -C "$repo" add tracked.txt
-  git -C "$repo" -c user.name=Test -c user.email=test@example.invalid commit --allow-empty -m baseline -q
+  git -C "$repo" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit --allow-empty -m baseline -q
   records=$(mktemp -d)
   first="$records/first.record"
   second="$records/second.record"
