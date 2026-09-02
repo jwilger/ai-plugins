@@ -117,10 +117,12 @@ record the exact snapshot as `failing` or
 `passing-awaiting-gates-or-review`.
 
 An immediately passing newly written test is not GREEN and must not enter
-`passing-awaiting-gates-or-review`. Record it as `invalid-test`, permit only the
-causal rewrite needed to make the test demonstrate missing behavior, and rerun
-it immediately. Commit and push remain prohibited until a valid RED result (or
-an explicitly recorded RED exemption) is followed by GREEN.
+`passing-awaiting-gates-or-review`. Record the snapshot in canonical `failing`
+state with `failure_kind: invalid-test` and the causal test rewrite as its sole
+next action, then rerun it immediately. Commit and push remain prohibited until
+a valid RED result (or an explicitly recorded RED exemption) is followed by
+GREEN. `failure_kind` explains the failure without introducing another durable
+checkpoint state.
 
 At `failing`, prohibit commit, push, unrelated edits, cleanup, and convenience
 changes. Permit only the next causal edit, then run the smallest relevant test

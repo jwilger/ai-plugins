@@ -65,6 +65,11 @@ baseline, or changes the requested scope, the prior review is
 stale: treat the mutation as a new causal checkpoint, rerun its immediate test,
 lightweight review, fast gate, signed commit, exact verification, and normal
 push. Then run terminal delta/reset review against that new delivered identity.
+A source mutation triggers terminal delta/reset review only when terminal review
+was already active or the mutation remediates a terminal-review finding. During
+an ordinary checkpoint before ticket completion, deliver the new causal
+checkpoint and continue with the next planned increment; do not start terminal
+review early.
 A metadata-only revision change stays in delivery verification and does not
 reopen source review.
 
