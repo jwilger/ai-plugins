@@ -83,17 +83,19 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
      .snapshot.untracked_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" and
      .test == null and all(.gates[]; . == null) and .delivery != null and
      (if .delivery.mode == "local-only" then
-        (.delivery.local_snapshot | type == "string") and (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
-      else .delivery.pushed_oid == .snapshot.head_oid end)
+        .delivery.pushed_oid == null and (.delivery.local_snapshot | type == "string") and
+        (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
+      else .delivery.local_snapshot == null and .delivery.pushed_oid == .snapshot.head_oid end)
    else
      .test != null and .test.outcome == "pass" and .delivery != null and
      (.gates.lightweight_review_receipt | type == "string") and
      (.gates.fast_gate_receipt | type == "string") and
      (.gates.exact_identity_verification_receipt | type == "string") and
      (if .delivery.mode == "local-only" then
-        (.delivery.local_snapshot | type == "string") and (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
+        .delivery.pushed_oid == null and (.delivery.local_snapshot | type == "string") and
+        (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
       else
-        .delivery.pushed_oid == .snapshot.head_oid and
+        .delivery.local_snapshot == null and .delivery.pushed_oid == .snapshot.head_oid and
         ((.ci.runs | length) > 0 or .next_action == "register-exact-sha-ci-monitor") and
         all(.ci.runs[]; .commit_oid == .delivery.pushed_oid)
       end)

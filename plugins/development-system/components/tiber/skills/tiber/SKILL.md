@@ -77,17 +77,20 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - Before actively working on an existing Tiber task, move it to `in-progress`
   with `tiber transition <ref> in-progress`; do not leave active work in the
   backlog as an informal reservation.
-- When the development workflow requires a durable per-edit checkpoint and
-  task-board remote publication is independently authorized, append a
-  single-line `checkpoint-v1` record to the active task with `tiber.note.add`
-  (CLI: `tiber note add`). If remote publication is not authorized, do not call
-  a mutating Tiber operation; use the atomic Git-common-directory local owner
-  defined by `development-workflow` instead.
+- When the development workflow requires a durable per-edit checkpoint, first
+  persist it through the atomic Git-common-directory local owner defined by
+  `development-workflow`. When task-board remote publication is independently
+  authorized, append that successfully validated single-line `checkpoint-v1`
+  record to the active task with `tiber.note.add` (CLI: `tiber note add`) as an
+  optional mirror. If remote publication is not authorized, do not call a
+  mutating Tiber operation. A mirror failure never makes the generic note API
+  authoritative or invalidates the local record; retain it for handoff and
+  retry only while publication remains authorized.
   Use the canonical `checkpoint-v1 ` compact-JSON wire form and deterministic
   tracked/untracked snapshot algorithm defined by the public
   `development-workflow` skill; that skill is the sole schema owner. Do not
   invent alternate keys, delimiters, hashes, or state-specific nullability.
-  For the local owner, use the task-scoped lock and generation/predecessor
+  For the authoritative local owner, use the task-scoped lock and generation/predecessor
   compare-and-swap writer bundled with the public skill so a stale
   linked-worktree writer cannot replace a newer transition; do not synthesize a
   second filesystem implementation.

@@ -46,13 +46,11 @@ the first edit, commit, or push, resolve the full ticket-start commit OID and
 persist it in this record; carry that immutable baseline through every later
 checkpoint and into terminal review:
 
-The persistence owner depends on independently authorized publication; the
-unavailable native workflow scheduler is never the owner. When task-board
-remote publication is authorized, append every transition to the active Tiber
-task with `tiber.note.add` (CLI: `tiber note add`). When remote mutation is not
-authorized, store the latest record at
+The authoritative persistence owner is always the validated local record; the
+unavailable native workflow scheduler and a generic remote note API are never
+the owner. Store the latest record at
 `$(git rev-parse --git-common-dir)/development-system/checkpoints/<checkpoint-id>.latest`
-instead. Use the active task ID as `checkpoint-id` when one exists. Otherwise
+in every delivery mode. Use the active task ID as `checkpoint-id` when one exists. Otherwise
 derive it as lowercase hexadecimal SHA-256 of the exact byte sequence
 `baseline_oid`, one NUL byte, and the normalized original user request, and
 record that ID in every handoff. Invoke the bundled
@@ -69,10 +67,14 @@ missing or stale predecessor without replacing the current record. The helper
 writes one complete line to a same-directory temporary file, flushes it,
 atomically renames it over the target, flushes the directory, and releases the
 lock; never synthesize a second writer or append in place. Keep this local file
-untracked and out of the content snapshot. Select one owner for the current
-delivery mode and never treat an unpublished Tiber transaction as the local
-fallback. After every transition, persist exactly one record before the next
-action. The canonical wire form for both owners is the literal prefix
+untracked and out of the content snapshot. After every transition, persist
+exactly one authoritative local record before the next action. When task-board
+remote publication is independently authorized, append that successfully
+validated transition to the active Tiber task with `tiber.note.add` (CLI:
+`tiber note add`) as an optional mirror. Mirror failure does not replace or
+invalidate the authoritative local transition; retain the publication failure
+for handoff and retry it only while remote mutation remains authorized. The
+canonical wire form is the literal prefix
 `checkpoint-v1 ` followed by one compact JSON object (no Markdown) with these
 required keys: `generation`, `predecessor_sha256`, `baseline_oid`, `snapshot`,
 `state`, `test`, `gates`, `delivery`, `ci`, and `next_action`. `generation` is

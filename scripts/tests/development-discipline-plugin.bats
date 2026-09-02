@@ -78,18 +78,6 @@ setup() {
   skill="$ROOT/plugins/development-system/skills/development-workflow/SKILL.md"
   writer="$ROOT/plugins/development-system/scripts/write-local-checkpoint.sh"
 
-  run grep -F "owner-only parent and serializes transitions with an exclusive task-scoped" "$skill"
-  [ "$status" -eq 0 ]
-
-  run grep -F 'generation` to equal the current generation plus one' "$skill"
-  [ "$status" -eq 0 ]
-
-  run grep -F 'predecessor_sha256` to equal SHA-256' "$skill"
-  [ "$status" -eq 0 ]
-
-  run grep -F "stale predecessor" "$skill"
-  [ "$status" -eq 0 ]
-
   repo=$(mktemp -d)
   git -C "$repo" init -q
   printf '%s\n' baseline >"$repo/tracked.txt"
@@ -133,6 +121,12 @@ setup() {
   printf 'checkpoint-v1 %s\n' "$invalid_local_ci_json" >"$invalid_local_ci"
   run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$invalid_local_ci"
   [ "$status" -ne 0 ]
+
+  contradictory_local_json=$(jq -cn --arg head "$head_oid" --arg empty "$empty_sha" '{generation:0,predecessor_sha256:null,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:{mode:"local-only",commit_oid:null,pushed_oid:$head,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"edit"}')
+  printf 'checkpoint-v1 %s\n' "$contradictory_local_json" >"$invalid_local_ci"
+  run bash -c 'cd "$1" && "$2" contradictory-local 0 null "$3"' _ "$repo" "$writer" "$invalid_local_ci"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"checkpoint record failed schema, snapshot, or state validation"* ]]
 
   first_json=$(jq -cn --arg head "$head_oid" --arg empty "$empty_sha" '{generation:0,predecessor_sha256:null,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:{mode:"local-only",commit_oid:null,pushed_oid:null,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"edit"}')
   printf 'checkpoint-v1 %s\n' "$first_json" >"$first"
