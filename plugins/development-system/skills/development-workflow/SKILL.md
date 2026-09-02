@@ -150,7 +150,8 @@ emulate or claim native `workflow.*` enforcement.
   `verify-exact-commit`; append the next committed checkpoint after verification.
   A failed verification stays `committed`, records the bounded
   `outcome:"fail"` receipt,
-  prohibits delivery, and permits only the causal repair action followed by
+  sets `next_action` to `repair-exact-identity-verification`, prohibits delivery,
+  and permits only the causal repair action followed by
   another exact verification. Push or local completion requires a successful
   exact-identity verification receipt. CI for this new commit may still have no
   runs before remote delivery.

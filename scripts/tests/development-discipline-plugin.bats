@@ -140,6 +140,11 @@ setup() {
   run bash -c 'cd "$1" && "$2" work-item 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$invalid_committed_test"
   [ "$status" -ne 0 ]
 
+  failed_verification_push_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"committed",test:{command:"test",receipt_ref:"receipt",outcome:"pass",failure_kind:null},gates:{lightweight_review_receipt:"review",fast_gate_receipt:"gate",exact_identity_verification_receipt:{receipt_ref:"verified",outcome:"fail"}},delivery:{mode:"direct-to-trunk",commit_oid:$head,pushed_oid:null,local_snapshot:null},ci:{runs:[],terminal_success_run_id:null},next_action:"push"}')
+  printf 'checkpoint-v1 %s\n' "$failed_verification_push_json" >"$invalid_committed_test"
+  run bash -c 'cd "$1" && "$2" failed-push 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$invalid_committed_test"
+  [ "$status" -ne 0 ]
+
   failed_verification_delivery_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:{command:"test",receipt_ref:"receipt",outcome:"pass",failure_kind:null},gates:{lightweight_review_receipt:"review",fast_gate_receipt:"gate",exact_identity_verification_receipt:{receipt_ref:"verification",outcome:"fail"}},delivery:{mode:"local-only",commit_oid:null,pushed_oid:null,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"local-complete"}')
   printf 'checkpoint-v1 %s\n' "$failed_verification_delivery_json" >"$invalid_committed_test"
   run bash -c 'cd "$1" && "$2" failed-verification 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$invalid_committed_test"
@@ -174,6 +179,12 @@ setup() {
   run bash -c 'cd "$1" && "$2" dirty-item 0 null "$3"' _ "$repo" "$writer" "$dirty_bootstrap"
   [ "$status" -ne 0 ]
   [ ! -e "$repo/.git/development-system/checkpoints/dirty-item.latest" ]
+
+  git -C "$repo" checkout -- tracked.txt
+  printf '%s\n' untracked >"$repo/untracked.txt"
+  run bash -c 'cd "$1" && "$2" untracked-item 0 null "$3"' _ "$repo" "$writer" "$first"
+  [ "$status" -ne 0 ]
+  [ ! -e "$repo/.git/development-system/checkpoints/untracked-item.latest" ]
 }
 
 
