@@ -19,10 +19,6 @@ for dependency in git jq flock sha256sum sed od tr sync mktemp cp mv chmod grep 
   command -v "$dependency" >/dev/null 2>&1 || { echo "missing checkpoint runtime dependency: $dependency" >&2; exit 2; }
 done
 sync --help 2>&1 | grep -q -- ' -f' || { echo "checkpoint runtime requires sync -f support" >&2; exit 2; }
-[[ $(wc -l < "$record_file") -eq 1 && $(tail -c 1 "$record_file" | od -An -t u1 | tr -d ' ') == 10 ]] || { echo "record must contain exactly one newline-terminated line" >&2; exit 2; }
-cmp -s "$record_file" <(tr -d '\000' <"$record_file") || { echo "record must not contain NUL bytes" >&2; exit 2; }
-
-[[ $(head -c 14 "$record_file") == "checkpoint-v1 " ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
 
 worktree_root=$(git rev-parse --show-toplevel)
 record_absolute=$(realpath -- "$record_file")
@@ -45,10 +41,26 @@ if ! flock -x -w 30 "$lock_fd"; then
   exit 3
 fi
 
+candidate=$(mktemp "$checkpoint_dir/.$checkpoint_id.candidate.XXXXXX")
+untracked_stream=
+final_untracked_stream=
+cleanup() {
+  [[ -z $candidate ]] || rm -f -- "$candidate"
+  [[ -z $untracked_stream ]] || rm -f -- "$untracked_stream"
+  [[ -z $final_untracked_stream ]] || rm -f -- "$final_untracked_stream"
+}
+trap cleanup EXIT
+cp -- "$record_file" "$candidate"
+chmod 600 "$candidate"
+sync -f "$candidate"
+
+[[ $(wc -l < "$candidate") -eq 1 && $(tail -c 1 "$candidate" | od -An -t u1 | tr -d ' ') == 10 ]] || { echo "record must contain exactly one newline-terminated line" >&2; exit 2; }
+cmp -s "$candidate" <(tr -d '\000' <"$candidate") || { echo "record must not contain NUL bytes" >&2; exit 2; }
+[[ $(head -c 14 "$candidate") == "checkpoint-v1 " ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
+
 current_head=$(git -C "$worktree_root" rev-parse HEAD)
 current_tracked=$(git -C "$worktree_root" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
 untracked_stream=$(mktemp)
-trap 'rm -f -- "$untracked_stream"' EXIT
 while IFS= read -r -d '' path; do
   absolute_path="$worktree_root/$path"
   if [[ -L $absolute_path ]]; then mode=120000
@@ -65,7 +77,7 @@ while IFS= read -r -d '' path; do
 done < <(git -C "$worktree_root" ls-files --full-name --others --exclude-standard -z)
 current_untracked=$(sha256sum "$untracked_stream" | cut -d ' ' -f 1)
 
-if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" '
+if ! tail -c +15 "$candidate" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" '
   def exact_keys($expected): (keys | sort) == ($expected | sort);
   def string_or_null: type == "string" or . == null;
   def nonblank: type == "string" and test("\\S");
@@ -147,7 +159,7 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
   echo "checkpoint record failed schema, snapshot, or state validation" >&2
   exit 2
 fi
-proposed_baseline=$(tail -c +15 "$record_file" | jq -er '.baseline_oid')
+proposed_baseline=$(tail -c +15 "$candidate" | jq -er '.baseline_oid')
 
 if [[ -e $target ]]; then
   current_generation=$(sed -n 's/^checkpoint-v1 //p' "$target" | jq -er '.generation')
@@ -157,7 +169,7 @@ if [[ -e $target ]]; then
   [[ $expected_predecessor == "$current_predecessor" ]] || { echo "stale checkpoint predecessor" >&2; exit 3; }
   [[ $proposed_baseline == "$current_baseline" ]] || { echo "checkpoint baseline does not match predecessor" >&2; exit 3; }
   current_ci=$(sed -n 's/^checkpoint-v1 //p' "$target" | jq -c '.ci.runs')
-  proposed_ci=$(tail -c +15 "$record_file" | jq -c '.ci.runs')
+  proposed_ci=$(tail -c +15 "$candidate" | jq -c '.ci.runs')
   jq -en --argjson current "$current_ci" --argjson proposed "$proposed_ci" \
     '$proposed[0:($current | length)] == $current' >/dev/null || {
       echo "checkpoint CI observations do not preserve predecessor history" >&2
@@ -167,16 +179,9 @@ else
   [[ $expected_generation -eq 0 && $expected_predecessor == null ]] || { echo "missing checkpoint predecessor" >&2; exit 3; }
 fi
 
-temporary=$(mktemp "$checkpoint_dir/.$checkpoint_id.tmp.XXXXXX")
-trap 'rm -f -- "$temporary" "$untracked_stream"' EXIT
-cp -- "$record_file" "$temporary"
-chmod 600 "$temporary"
-sync -f "$temporary"
-
 final_head=$(git -C "$worktree_root" rev-parse HEAD)
 final_tracked=$(git -C "$worktree_root" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
 final_untracked_stream=$(mktemp)
-trap 'rm -f -- "$temporary" "$untracked_stream" "$final_untracked_stream"' EXIT
 while IFS= read -r -d '' path; do
   absolute_path="$worktree_root/$path"
   if [[ -L $absolute_path ]]; then mode=120000
@@ -197,7 +202,8 @@ if [[ $final_head != "$current_head" || $final_tracked != "$current_tracked" || 
   exit 3
 fi
 
-mv -f -- "$temporary" "$target"
+mv -f -- "$candidate" "$target"
+candidate=
 sync -f "$checkpoint_dir"
-rm -f -- "$untracked_stream" "$final_untracked_stream"
+cleanup
 trap - EXIT

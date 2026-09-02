@@ -145,6 +145,19 @@ setup() {
   [[ "$output" == *"record file must be outside the worktree"* ]]
   rm "$in_worktree_record"
 
+  proposal_race="$records/proposal-race.record"
+  printf 'checkpoint-v1 %s\n' "$first_json" >"$proposal_race"
+  cp_shim_dir=$(mktemp -d)
+  real_cp=$(command -v cp)
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'printf "%s\n" "checkpoint-v1 {}" >"$MUTATE_SOURCE"' \
+    'exec "$REAL_CP" "$@"' >"$cp_shim_dir/cp"
+  chmod +x "$cp_shim_dir/cp"
+  run env PATH="$cp_shim_dir:$PATH" REAL_CP="$real_cp" MUTATE_SOURCE="$proposal_race" \
+    bash -c 'cd "$1" && "$2" proposal-race 0 null "$3"' _ "$repo" "$writer" "$proposal_race"
+  [ "$status" -ne 0 ]
+  [ ! -e "$repo/.git/development-system/checkpoints/proposal-race.latest" ]
+
   empty_action_json=$(printf '%s' "$first_json" | jq -c '.next_action = ""')
   printf 'checkpoint-v1 %s\n' "$empty_action_json" >"$empty_action"
   run bash -c 'cd "$1" && "$2" empty-action 0 null "$3"' _ "$repo" "$writer" "$empty_action"

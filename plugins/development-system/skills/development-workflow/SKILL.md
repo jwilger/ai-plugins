@@ -62,13 +62,14 @@ containing the proposed newline-terminated record. Create that proposal outside
 the worktree; the helper rejects an in-worktree proposal because it would become
 part of the untracked snapshot it is trying to describe. The helper creates the
 owner-only parent and serializes transitions with an exclusive task-scoped
-lock. While holding the lock, it reads the current complete record and requires
-the proposed record's
+lock. While holding the lock, it first copies the proposal to a private
+same-directory candidate, then validates and publishes that exact candidate.
+It reads the current complete record and requires the candidate's
 `generation` to equal the current generation plus one and its
 `predecessor_sha256` to equal SHA-256 of the exact current `checkpoint-v1` line;
 the bootstrap record uses generation zero and a null predecessor. Reject a
 missing or stale predecessor without replacing the current record. The helper
-writes one complete line to a same-directory temporary file, flushes it,
+flushes the private candidate,
 recomputes the complete worktree identity and rejects publication if it changed
 since validation, atomically renames the stable record over the target, flushes
 the directory, and releases the lock; never synthesize a second writer or append
