@@ -285,7 +285,7 @@ review.
 
 | User asks for                  | Review scope                                            |
 | ------------------------------ | ------------------------------------------------------- |
-| No explicit base               | `origin/main` to the complete tracked worktree          |
+| No explicit base               | ticket-start baseline to the complete tracked worktree  |
 | Uncommitted changes            | ticket-start baseline to the complete tracked worktree  |
 | Since a branch, tag, or commit | that ref to the complete tracked worktree               |
 | Existing PR/MR                 | PR/MR base to the checked-out complete tracked worktree |

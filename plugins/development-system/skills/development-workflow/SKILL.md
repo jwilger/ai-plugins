@@ -111,14 +111,20 @@ emulate or claim native `workflow.*` enforcement.
   exact-commit verification remains `null` until a commit exists.
 - `committed`: record the signed commit OID and whether the next action is the
   delivery-mode checkpoint or a locally complete checkpoint; `delivery` is
-  required and its commit OID must equal `snapshot.head_oid`. All three gate
-  receipts are required and bind to this snapshot or commit. CI for this new
-  commit may still have no runs before remote delivery.
+  required and its commit OID must equal `snapshot.head_oid`. Lightweight-review
+  and fast-gate receipts are required. Immediately after commit creation,
+  `exact_commit_verification_receipt` may be `null` only while `next_action` is
+  `verify-exact-commit`; append the next committed checkpoint after verification.
+  A failed verification stays `committed`, records the bounded failure receipt,
+  prohibits delivery, and permits only the causal repair action followed by
+  another exact verification. Push or local completion requires a successful
+  exact-commit verification receipt. CI for this new commit may still have no
+  runs before remote delivery.
 - `pushed-or-delivery-mode-equivalent`: record the exact pushed OID and CI runs,
   or the exact local-only terminal snapshot and the fact that remote mutation
   is unauthorized; `delivery` is required and must identify the exact
   state-appropriate commit or snapshot, and all three gate receipts remain
-  required except for the exact clean bootstrap above. Immediately after a
+  required and successful except for the exact clean bootstrap above. Immediately after a
   successful remote push, `ci.runs` may be empty only while `next_action` is
   `register-exact-sha-ci-monitor`; append the next checkpoint as soon as the run
   reference exists. Otherwise direct-to-trunk and pull-request records require
@@ -266,6 +272,17 @@ delivery detail:
   renamed, mode-changed, and untracked byte. A review-only request reports
   findings and never edits; remediate valid findings only when remediation was
   requested.
+- With no explicit base, use the immutable full ticket-start OID—never a newly
+  resolved `origin/main`. For both base and explicitly uncommitted review, use
+  the one-revision `git diff --find-renames --find-copies --end-of-options
+<baseline-oid> --` content surface plus separately NUL-parse `git status
+--short -z --untracked-files=all` as exact path bytes without display
+  unquoting. Read in-scope untracked content, including newline-containing
+  paths. Write the deduplicated inventory to a temporary NUL-delimited file,
+  pass it with the full OID to `scripts/final-review-scope-hash.sh`, use exact
+  helper stdout for plan `diff_hash` and every advance `current_diff_hash`, and
+  delete the temporary file after each call. Reject triple-dot, index-only,
+  bare-worktree, symbolic-baseline, and caller-invented hashes.
 - Use a fresh-context subagent for every assigned lens in every iteration.
   Always include an independent `production-risk-footguns` lens for latent
   traps, fragile defaults, production-scale data/resource access, and
