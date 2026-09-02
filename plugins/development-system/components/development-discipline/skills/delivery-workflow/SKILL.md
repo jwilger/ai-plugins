@@ -122,8 +122,7 @@ fast-gate-passing no-commit snapshot.
   decision context, tradeoff, or failure being prevented; reject a subject-only
   message and a body that merely restates the subject or diff.
 - After creating the commit, prove that its paths, contents, and modes are
-  identical to the lightweight-reviewed checkpoint snapshot, or to the
-  terminally reviewed source snapshot at ticket completion. Verify its message
+  identical to the lightweight-reviewed checkpoint snapshot. Verify its message
   and signature against the exact commit. Do not insert a duplicate
   comprehensive local exact-commit suite after the repository fast pre-commit
   gate; comprehensive, slow, integration, mutation, and pipeline-scale checks
