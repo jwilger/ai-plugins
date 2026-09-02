@@ -16,24 +16,42 @@ record_file=$4
 [[ $expected_generation =~ ^(0|[1-9][0-9]*)$ ]] || usage
 [[ -f $record_file ]] || usage
 [[ $(wc -l < "$record_file") -eq 1 && $(tail -c 1 "$record_file" | od -An -t u1 | tr -d ' ') == 10 ]] || { echo "record must contain exactly one newline-terminated line" >&2; exit 2; }
+cmp -s "$record_file" <(tr -d '\000' <"$record_file") || { echo "record must not contain NUL bytes" >&2; exit 2; }
 
-record=$(<"$record_file")
-[[ $record == checkpoint-v1\ * ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
-json=${record#checkpoint-v1 }
-jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" '
+[[ $(head -c 14 "$record_file") == "checkpoint-v1 " ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
+
+current_head=$(git rev-parse HEAD)
+current_tracked=$(git diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
+untracked_stream=$(mktemp)
+trap 'rm -f -- "$untracked_stream"' EXIT
+while IFS= read -r -d '' path; do
+  if [[ -L $path ]]; then mode=120000
+  elif [[ -f $path && -x $path ]]; then mode=100755
+  elif [[ -f $path ]]; then mode=100644
+  else echo "unsupported untracked file type: $path" >&2; exit 2
+  fi
+  oid=$(git hash-object -- "$path")
+  printf '%s\0%s\0%s\n' "$mode" "$path" "$oid" >>"$untracked_stream"
+done < <(git ls-files --others --exclude-standard -z)
+current_untracked=$(sha256sum "$untracked_stream" | cut -d ' ' -f 1)
+
+tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" '
   def exact_keys($expected): (keys | sort) == ($expected | sort);
   def string_or_null: type == "string" or . == null;
+  def oid: type == "string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$");
+  def sha256: type == "string" and test("^[0-9a-f]{64}$");
   . as $record |
   exact_keys(["generation", "predecessor_sha256", "baseline_oid", "snapshot", "state", "test", "gates", "delivery", "ci", "next_action"]) and
   .generation == $generation and
   (if $generation == 0 then .predecessor_sha256 == null else .predecessor_sha256 == $predecessor end) and
-  (.baseline_oid | type == "string") and
-  (.snapshot | exact_keys(["head_oid", "tracked_sha256", "untracked_sha256"]) and all(.[]; type == "string")) and
+  (.baseline_oid | oid) and
+  (.snapshot | exact_keys(["head_oid", "tracked_sha256", "untracked_sha256"]) and (.head_oid | oid) and (.tracked_sha256 | sha256) and (.untracked_sha256 | sha256)) and
+  .snapshot.head_oid == $current_head and .snapshot.tracked_sha256 == $current_tracked and .snapshot.untracked_sha256 == $current_untracked and
   (.state | IN("failing", "passing-awaiting-gates-or-review", "committed", "pushed-or-delivery-mode-equivalent")) and
   (.test == null or (.test | exact_keys(["command", "receipt_ref", "outcome", "failure_kind"]) and (.command | type == "string") and (.receipt_ref | type == "string") and (.outcome | IN("pass", "fail")) and (.failure_kind | string_or_null))) and
   (.gates | exact_keys(["lightweight_review_receipt", "fast_gate_receipt", "exact_identity_verification_receipt"]) and all(.[]; string_or_null)) and
-  (.delivery == null or (.delivery | exact_keys(["mode", "commit_oid", "pushed_oid", "local_snapshot"]) and (.mode | IN("local-only", "direct-to-trunk", "pull-request")) and (.commit_oid | string_or_null) and (.pushed_oid | string_or_null) and (.local_snapshot | string_or_null))) and
-  (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | type == "string") and (.run_id | type == "string") and (.commit_oid | type == "string") and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | string_or_null)) and
+  (.delivery == null or (.delivery | exact_keys(["mode", "commit_oid", "pushed_oid", "local_snapshot"]) and (.mode | IN("local-only", "direct-to-trunk", "pull-request")) and (.commit_oid | . == null or oid) and (.pushed_oid | . == null or oid) and (.local_snapshot | string_or_null))) and
+  (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | type == "string") and (.run_id | type == "string") and (.commit_oid | oid) and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | string_or_null)) and
   (.next_action | type == "string") and
   (.ci.terminal_success_run_id == null or any(.ci.runs[]; .run_id == $record.ci.terminal_success_run_id and .status == "success" and .commit_oid == $record.delivery.pushed_oid)) and
   (if .state == "failing" then
@@ -47,21 +65,23 @@ jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_p
      ((.gates.exact_identity_verification_receipt == null and .next_action == "verify-exact-commit") or (.gates.exact_identity_verification_receipt | type == "string"))
    elif .state == "pushed-or-delivery-mode-equivalent" and .generation == 0 then
      .baseline_oid == .snapshot.head_oid and .test == null and all(.gates[]; . == null) and .delivery != null and
-     (if .delivery.mode == "local-only" then (.delivery.local_snapshot | type == "string") else .delivery.pushed_oid == .snapshot.head_oid end)
+     (if .delivery.mode == "local-only" then
+        (.delivery.local_snapshot | type == "string") and (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
+      else .delivery.pushed_oid == .snapshot.head_oid end)
    else
-     .delivery != null and
+      .delivery != null and
      (.gates.lightweight_review_receipt | type == "string") and
      (.gates.fast_gate_receipt | type == "string") and
      (.gates.exact_identity_verification_receipt | type == "string") and
      (if .delivery.mode == "local-only" then
-        (.delivery.local_snapshot | type == "string")
+        (.delivery.local_snapshot | type == "string") and (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
       else
         .delivery.pushed_oid == .snapshot.head_oid and
         ((.ci.runs | length) > 0 or .next_action == "register-exact-sha-ci-monitor") and
         all(.ci.runs[]; .commit_oid == .delivery.pushed_oid)
       end)
    end)
-' <<<"$json" >/dev/null
+  ' >/dev/null
 
 git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
 checkpoint_dir="$git_common_dir/development-system/checkpoints"
@@ -83,10 +103,11 @@ else
 fi
 
 temporary=$(mktemp "$checkpoint_dir/.$checkpoint_id.tmp.XXXXXX")
-trap 'rm -f -- "$temporary"' EXIT
+trap 'rm -f -- "$temporary" "$untracked_stream"' EXIT
 cp -- "$record_file" "$temporary"
 chmod 600 "$temporary"
 sync -f "$temporary"
 mv -f -- "$temporary" "$target"
 sync -f "$checkpoint_dir"
+rm -f -- "$untracked_stream"
 trap - EXIT
