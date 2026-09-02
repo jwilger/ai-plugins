@@ -78,7 +78,8 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   with `tiber transition <ref> in-progress`; do not leave active work in the
   backlog as an informal reservation.
 - When the development workflow requires a durable per-edit checkpoint, append
-  a single-line `checkpoint-v1` record to the active task with `tiber.note_add`.
+  a single-line `checkpoint-v1` record to the active task with `tiber.note.add`
+  (CLI: `tiber note add`).
   Record the full immutable ticket-start OID, exact content snapshot identity,
   canonical state, focused-test command and bounded receipt reference,
   completed gates, commit or delivery identity and CI references when present,

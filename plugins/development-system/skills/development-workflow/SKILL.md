@@ -48,7 +48,8 @@ checkpoint and into terminal review:
 
 The available persistence owner is the active Tiber task's Git-backed notes,
 not the unavailable native workflow scheduler. After every state transition,
-append one single-line `checkpoint-v1` record with `tiber.note_add`; include the
+append one single-line `checkpoint-v1` record with `tiber.note.add` (CLI:
+`tiber note add`); include the
 full ticket-start OID, an exact content snapshot identity, state, focused-test
 command and receipt reference, completed gates, commit or delivery identity when
 present, CI references when present, and the sole next permitted action. Store
