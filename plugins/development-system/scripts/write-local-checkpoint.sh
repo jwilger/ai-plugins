@@ -35,7 +35,7 @@ while IFS= read -r -d '' path; do
 done < <(git ls-files --others --exclude-standard -z)
 current_untracked=$(sha256sum "$untracked_stream" | cut -d ' ' -f 1)
 
-tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" '
+if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" '
   def exact_keys($expected): (keys | sort) == ($expected | sort);
   def string_or_null: type == "string" or . == null;
   def oid: type == "string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$");
@@ -81,7 +81,11 @@ tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generation" -
         all(.ci.runs[]; .commit_oid == .delivery.pushed_oid)
       end)
    end)
-  ' >/dev/null
+  ' >/dev/null; then
+  echo "checkpoint record failed schema, snapshot, or state validation" >&2
+  exit 2
+fi
+proposed_baseline=$(tail -c +15 "$record_file" | jq -er '.baseline_oid')
 
 git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
 checkpoint_dir="$git_common_dir/development-system/checkpoints"
@@ -95,9 +99,11 @@ flock -x "$lock_fd"
 
 if [[ -e $target ]]; then
   current_generation=$(sed -n 's/^checkpoint-v1 //p' "$target" | jq -er '.generation')
+  current_baseline=$(sed -n 's/^checkpoint-v1 //p' "$target" | jq -er '.baseline_oid')
   current_predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
   [[ $expected_generation -eq $((current_generation + 1)) ]] || { echo "stale checkpoint generation" >&2; exit 3; }
   [[ $expected_predecessor == "$current_predecessor" ]] || { echo "stale checkpoint predecessor" >&2; exit 3; }
+  [[ $proposed_baseline == "$current_baseline" ]] || { echo "checkpoint baseline does not match predecessor" >&2; exit 3; }
 else
   [[ $expected_generation -eq 0 && $expected_predecessor == null ]] || { echo "missing checkpoint predecessor" >&2; exit 3; }
 fi

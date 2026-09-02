@@ -102,6 +102,7 @@ setup() {
   invalid_framing="$records/invalid-framing.record"
   invalid_nul="$records/invalid-nul.record"
   invalid_local_ci="$records/invalid-local-ci.record"
+  invalid_baseline="$records/invalid-baseline.record"
   head_oid=$(git -C "$repo" rev-parse HEAD)
   empty_sha=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
   printf '%s\n' 'checkpoint-v1 {"generation":0,"predecessor_sha256":null}' >"$invalid"
@@ -114,6 +115,7 @@ setup() {
   printf 'checkpoint-v1 %s\n' "$invalid_state_json" >"$invalid_state"
   run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$invalid_state"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"checkpoint record failed schema, snapshot, or state validation"* ]]
 
   printf 'checkpoint-v1 %s\n%s' "$invalid_state_json" "$invalid_state_json" >"$invalid_framing"
   run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$invalid_framing"
@@ -135,6 +137,12 @@ setup() {
   [ "$status" -eq 0 ]
   target="$repo/.git/development-system/checkpoints/work-item.latest"
   predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
+  invalid_baseline_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:"0000000000000000000000000000000000000000",snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit"}')
+  printf 'checkpoint-v1 %s\n' "$invalid_baseline_json" >"$invalid_baseline"
+  run bash -c 'cd "$1" && "$2" work-item 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$invalid_baseline"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"checkpoint baseline does not match predecessor"* ]]
+
   second_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit"}')
   printf 'checkpoint-v1 %s\n' "$second_json" >"$second"
 
