@@ -122,6 +122,11 @@ setup() {
   run bash -c 'cd "$1" && "$2" work-item 0 null "$3"' _ "$repo" "$writer" "$invalid_local_ci"
   [ "$status" -ne 0 ]
 
+  generation_zero_failing_json=$(jq -cn --arg head "$head_oid" --arg empty "$empty_sha" '{generation:0,predecessor_sha256:null,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit"}')
+  printf 'checkpoint-v1 %s\n' "$generation_zero_failing_json" >"$invalid_local_ci"
+  run bash -c 'cd "$1" && "$2" generation-zero-failing 0 null "$3"' _ "$repo" "$writer" "$invalid_local_ci"
+  [ "$status" -ne 0 ]
+
   contradictory_local_json=$(jq -cn --arg head "$head_oid" --arg empty "$empty_sha" '{generation:0,predecessor_sha256:null,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:null,gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:{mode:"local-only",commit_oid:null,pushed_oid:$head,local_snapshot:"snapshot"},ci:{runs:[],terminal_success_run_id:null},next_action:"edit"}')
   printf 'checkpoint-v1 %s\n' "$contradictory_local_json" >"$invalid_local_ci"
   run bash -c 'cd "$1" && "$2" contradictory-local 0 null "$3"' _ "$repo" "$writer" "$invalid_local_ci"
@@ -158,6 +163,11 @@ setup() {
 
   second_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"failing",test:{command:"test",receipt_ref:"receipt",outcome:"fail",failure_kind:"expected-red"},gates:{lightweight_review_receipt:null,fast_gate_receipt:null,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"causal-edit"}')
   printf 'checkpoint-v1 %s\n' "$second_json" >"$second"
+
+  failing_push_json=$(printf '%s' "$second_json" | jq -c '.next_action = "push"')
+  printf 'checkpoint-v1 %s\n' "$failing_push_json" >"$stale"
+  run bash -c 'cd "$1" && "$2" work-item 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$stale"
+  [ "$status" -ne 0 ]
 
   run bash -c 'cd "$1" && "$2" work-item 1 "$3" "$4"' _ "$repo" "$writer" "$predecessor" "$second"
   [ "$status" -eq 0 ]

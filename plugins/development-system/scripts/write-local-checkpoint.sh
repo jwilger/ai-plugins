@@ -74,11 +74,18 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
   (.delivery == null or (.delivery | exact_keys(["mode", "commit_oid", "pushed_oid", "local_snapshot"]) and (.mode | IN("local-only", "direct-to-trunk", "pull-request")) and (.commit_oid | . == null or oid) and (.pushed_oid | . == null or oid) and (.local_snapshot | string_or_null))) and
   (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | type == "string") and (.run_id | type == "string") and (.commit_oid | oid) and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | string_or_null)) and
   (.next_action | type == "string") and
+  ($generation != 0 or .state == "pushed-or-delivery-mode-equivalent") and
   (.ci.terminal_success_run_id == null or any(.ci.runs[]; .run_id == $record.ci.terminal_success_run_id and .status == "success" and .commit_oid == $record.delivery.pushed_oid)) and
   (if .state == "failing" then
-     .test != null and .test.outcome == "fail" and .delivery == null and all(.gates[]; . == null)
+     .test != null and .test.outcome == "fail" and .delivery == null and all(.gates[]; . == null) and
+     .next_action == "causal-edit"
    elif .state == "passing-awaiting-gates-or-review" then
-     .test != null and .test.outcome == "pass" and .delivery == null and .gates.exact_identity_verification_receipt == null
+     .test != null and .test.outcome == "pass" and .delivery == null and .gates.exact_identity_verification_receipt == null and
+     (if .gates.lightweight_review_receipt == null then
+        .gates.fast_gate_receipt == null and .next_action == "lightweight-review"
+      elif .gates.fast_gate_receipt == null then
+        .next_action == "fast-gate"
+      else .next_action == "commit-or-record-local-snapshot" end)
    elif .state == "committed" then
      .test != null and .test.outcome == "pass" and .delivery != null and .delivery.commit_oid == .snapshot.head_oid and
      (.gates.lightweight_review_receipt | type == "string") and

@@ -140,6 +140,9 @@ emulate or claim native `workflow.*` enforcement.
   gate; any remediation is a new causal edit and therefore triggers another
   immediate focused test. `test` is required and `delivery` is `null`.
   Record each completed lightweight-review and fast-gate receipt as it occurs;
+  use `lightweight-review`, then `fast-gate`, then
+  `commit-or-record-local-snapshot` as the exact successive `next_action`
+  values.
   exact-identity verification remains `null` until a commit or reviewed
   local-only snapshot exists.
 - `committed`: record the signed commit OID and whether the next action is the
