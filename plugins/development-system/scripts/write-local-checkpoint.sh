@@ -120,8 +120,8 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
         .delivery.pushed_oid == .snapshot.head_oid and
         all(.ci.runs[]; .commit_oid == $record.delivery.pushed_oid) and
         (if (.ci.runs | length) == 0 then .next_action == "register-exact-sha-ci-monitor"
-         elif any(.ci.runs[]; .status == "failure") then .next_action == "enter-ci-recovery"
          elif .ci.terminal_success_run_id != null then .next_action == "terminal-review"
+         elif any(.ci.runs[]; .status == "failure") then .next_action == "enter-ci-recovery"
          else .next_action == "monitor-exact-sha-ci" end)
       end)
    end)

@@ -180,8 +180,10 @@ schema, identity, or lineage mismatch remains a recovery hold.
   reference exists. Otherwise direct-to-trunk and pull-request records require
   at least one CI run for the exact pushed OID. Use `monitor-exact-sha-ci` while
   all runs are queued/running without terminal success, `enter-ci-recovery` as
-  the sole action when any exact-SHA run fails, and `terminal-review` after the
-  named terminal success. Local-only requires no remote run and uses
+  the sole action when an exact-SHA run fails and no replacement has reached
+  terminal success, and `terminal-review` after the named terminal success,
+  including when retained CI history contains the earlier failure. Local-only
+  requires no remote run and uses
   `terminal-review`. Set
   `terminal_success_run_id` only when it names an included exact-OID success
   run; queued, running, older-OID, or failed runs never satisfy readiness. When Tiber's opt-in final-review policy requires reviewed
