@@ -58,7 +58,7 @@ only where the following exact shapes permit it. `snapshot` is exactly
 `test` is either `null` or exactly
 `{"command":string,"receipt_ref":string,"outcome":"pass"|"fail","failure_kind":string|null}`.
 `gates` is exactly
-`{"lightweight_review_receipt":string|null,"fast_gate_receipt":string|null,"exact_commit_verification_receipt":string|null}`.
+`{"lightweight_review_receipt":string|null,"fast_gate_receipt":string|null,"exact_identity_verification_receipt":string|null}`.
 `delivery` is either `null` or exactly
 `{"mode":"local-only"|"direct-to-trunk"|"pull-request","commit_oid":string|null,"pushed_oid":string|null,"local_snapshot":string|null}`.
 `ci` is exactly
@@ -108,23 +108,27 @@ emulate or claim native `workflow.*` enforcement.
   gate; any remediation is a new causal edit and therefore triggers another
   immediate focused test. `test` is required and `delivery` is `null`.
   Record each completed lightweight-review and fast-gate receipt as it occurs;
-  exact-commit verification remains `null` until a commit exists.
+  exact-identity verification remains `null` until a commit or reviewed
+  local-only snapshot exists.
 - `committed`: record the signed commit OID and whether the next action is the
   delivery-mode checkpoint or a locally complete checkpoint; `delivery` is
   required and its commit OID must equal `snapshot.head_oid`. Lightweight-review
   and fast-gate receipts are required. Immediately after commit creation,
-  `exact_commit_verification_receipt` may be `null` only while `next_action` is
+  `exact_identity_verification_receipt` may be `null` only while `next_action` is
   `verify-exact-commit`; append the next committed checkpoint after verification.
   A failed verification stays `committed`, records the bounded failure receipt,
   prohibits delivery, and permits only the causal repair action followed by
   another exact verification. Push or local completion requires a successful
-  exact-commit verification receipt. CI for this new commit may still have no
+  exact-identity verification receipt. CI for this new commit may still have no
   runs before remote delivery.
 - `pushed-or-delivery-mode-equivalent`: record the exact pushed OID and CI runs,
   or the exact local-only terminal snapshot and the fact that remote mutation
   is unauthorized; `delivery` is required and must identify the exact
   state-appropriate commit or snapshot, and all three gate receipts remain
-  required and successful except for the exact clean bootstrap above. Immediately after a
+  required and successful except for the exact clean bootstrap above. For a
+  local-only no-commit checkpoint, exact-identity verification binds the
+  reviewed local snapshot; it never implies commit authority or fabricates a
+  commit receipt. Immediately after a
   successful remote push, `ci.runs` may be empty only while `next_action` is
   `register-exact-sha-ci-monitor`; append the next checkpoint as soon as the run
   reference exists. Otherwise direct-to-trunk and pull-request records require
