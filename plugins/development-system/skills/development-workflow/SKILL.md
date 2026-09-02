@@ -82,9 +82,12 @@ clean task-start worktree, bootstrap the first record as
 `snapshot.head_oid`, set `test` to `null`, describe the already-authorized
 starting identity in `delivery` (a pushed OID for a remote mode or
 `local_snapshot` for local-only), and make the first planned causal edit the
-sole `next_action`. A dirty or unreconciled starting worktree is a recovery
-hold, not a bootstrap shortcut. Store bounded references rather than raw logs
-or secrets. At session start, restart, or handoff, read the task with
+sole `next_action`. This is the only delivered-state gate exception: all three
+gate receipts are `null`, and CI may be empty, only when `baseline_oid` equals
+`snapshot.head_oid`, both snapshot hashes prove the clean starting worktree,
+and `delivery` identifies that same pre-existing baseline. A dirty,
+non-baseline, or unreconciled starting worktree is a recovery hold, not a
+bootstrap shortcut. Store bounded references rather than raw logs or secrets. At session start, restart, or handoff, read the task with
 `tiber.show`, select its latest `checkpoint-v1`
 record, and reconcile every identity with current Git and forge state before
 acting. A malformed, missing, unpublished, or mismatched record is a fail-closed
@@ -115,8 +118,11 @@ emulate or claim native `workflow.*` enforcement.
   or the exact local-only terminal snapshot and the fact that remote mutation
   is unauthorized; `delivery` is required and must identify the exact
   state-appropriate commit or snapshot, and all three gate receipts remain
-  required. Direct-to-trunk and pull-request records require at least one CI run
-  for the exact pushed OID; local-only requires no remote run. Set
+  required except for the exact clean bootstrap above. Immediately after a
+  successful remote push, `ci.runs` may be empty only while `next_action` is
+  `register-exact-sha-ci-monitor`; append the next checkpoint as soon as the run
+  reference exists. Otherwise direct-to-trunk and pull-request records require
+  at least one CI run for the exact pushed OID; local-only requires no remote run. Set
   `terminal_success_run_id` only when it names an included exact-OID success
   run; queued, running, older-OID, or failed runs never satisfy readiness. When Tiber's opt-in final-review policy requires reviewed
   source and verification paths in a commit tree, the local equivalent is a
