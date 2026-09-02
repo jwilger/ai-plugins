@@ -52,14 +52,17 @@ append one single-line `checkpoint-v1` record with `tiber.note.add` (CLI:
 `tiber note add`). The canonical wire form is the literal prefix
 `checkpoint-v1 ` followed by one compact JSON object (no Markdown) with these
 required keys: `baseline_oid`, `snapshot`, `state`, `test`, `gates`,
-`delivery`, `ci`, and `next_action`. Use strings for scalar values, arrays of
-strings for `gates` and `ci`, and `null` only for an inapplicable `test` or
-`delivery`. `snapshot` is exactly
+`delivery`, `ci`, and `next_action`. Use strings for scalar values and `null`
+only where the following exact shapes permit it. `snapshot` is exactly
 `{"head_oid":string,"tracked_sha256":string,"untracked_sha256":string}`.
 `test` is either `null` or exactly
 `{"command":string,"receipt_ref":string,"outcome":"pass"|"fail","failure_kind":string|null}`.
+`gates` is exactly
+`{"lightweight_review_receipt":string|null,"fast_gate_receipt":string|null,"exact_commit_verification_receipt":string|null}`.
 `delivery` is either `null` or exactly
 `{"mode":"local-only"|"direct-to-trunk"|"pull-request","commit_oid":string|null,"pushed_oid":string|null,"local_snapshot":string|null}`.
+`ci` is exactly
+`{"runs":[{"provider":string,"run_id":string,"commit_oid":string,"status":"queued"|"running"|"success"|"failure"}],"terminal_success_run_id":string|null}`.
 The snapshot hashes are defined as follows:
 
 - `tracked_sha256` is SHA-256 of the exact byte stream from
@@ -92,6 +95,8 @@ emulate or claim native `workflow.*` enforcement.
 - `failing`: commit and push are prohibited. Permit only the next causal edit
   needed to address that failure, reject unrelated or convenience changes, and
   immediately test again. `test` is required and `delivery` is `null`.
+  Every gate receipt is `null`; CI entries may only describe already-delivered
+  earlier commits and cannot satisfy a gate for this snapshot.
   A newly written test that passes unexpectedly is still `failing`, with an
   `invalid-test` reason and only the causal test rewrite as `next_action`; do
   not checkpoint that test as passing or introduce a fifth state.
@@ -99,13 +104,21 @@ emulate or claim native `workflow.*` enforcement.
   edits. Run the bounded lightweight review and repository fast pre-commit
   gate; any remediation is a new causal edit and therefore triggers another
   immediate focused test. `test` is required and `delivery` is `null`.
+  Record each completed lightweight-review and fast-gate receipt as it occurs;
+  exact-commit verification remains `null` until a commit exists.
 - `committed`: record the signed commit OID and whether the next action is the
   delivery-mode checkpoint or a locally complete checkpoint; `delivery` is
-  required and its commit OID must equal `snapshot.head_oid`.
+  required and its commit OID must equal `snapshot.head_oid`. All three gate
+  receipts are required and bind to this snapshot or commit. CI for this new
+  commit may still have no runs before remote delivery.
 - `pushed-or-delivery-mode-equivalent`: record the exact pushed OID and CI runs,
   or the exact local-only terminal snapshot and the fact that remote mutation
   is unauthorized; `delivery` is required and must identify the exact
-  state-appropriate commit or snapshot. When Tiber's opt-in final-review policy requires reviewed
+  state-appropriate commit or snapshot, and all three gate receipts remain
+  required. Direct-to-trunk and pull-request records require at least one CI run
+  for the exact pushed OID; local-only requires no remote run. Set
+  `terminal_success_run_id` only when it names an included exact-OID success
+  run; queued, running, older-OID, or failed runs never satisfy readiness. When Tiber's opt-in final-review policy requires reviewed
   source and verification paths in a commit tree, the local equivalent is a
   required local commit; if commit authority is explicitly withheld, completion
   blocks without authorizing a push.
