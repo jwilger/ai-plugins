@@ -163,8 +163,9 @@ schema, identity, or lineage mismatch remains a recovery hold.
   sets `next_action` to `repair-exact-identity-verification`, prohibits delivery,
   and permits only the causal repair action followed by
   another exact verification. Push or local completion requires a successful
-  exact-identity verification receipt. CI for this new commit may still have no
-  runs before remote delivery.
+  exact-identity verification receipt; then use `push` for a remote mode or
+  `record-local-delivery` for local-only as the exact `next_action`. CI for this
+  new commit may still have no runs before remote delivery.
 - `pushed-or-delivery-mode-equivalent`: record the exact pushed OID and CI runs,
   or the exact local-only terminal snapshot and the fact that remote mutation
   is unauthorized; `delivery` is required and must identify the exact
@@ -177,7 +178,11 @@ schema, identity, or lineage mismatch remains a recovery hold.
   successful remote push, `ci.runs` may be empty only while `next_action` is
   `register-exact-sha-ci-monitor`; append the next checkpoint as soon as the run
   reference exists. Otherwise direct-to-trunk and pull-request records require
-  at least one CI run for the exact pushed OID; local-only requires no remote run. Set
+  at least one CI run for the exact pushed OID. Use `monitor-exact-sha-ci` while
+  all runs are queued/running without terminal success, `enter-ci-recovery` as
+  the sole action when any exact-SHA run fails, and `terminal-review` after the
+  named terminal success. Local-only requires no remote run and uses
+  `terminal-review`. Set
   `terminal_success_run_id` only when it names an included exact-OID success
   run; queued, running, older-OID, or failed runs never satisfy readiness. When Tiber's opt-in final-review policy requires reviewed
   source and verification paths in a commit tree, the local equivalent is a

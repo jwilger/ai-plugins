@@ -95,7 +95,8 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
      (.gates.lightweight_review_receipt | type == "string") and
      (.gates.fast_gate_receipt | type == "string") and
      ((.gates.exact_identity_verification_receipt == null and .next_action == "verify-exact-commit") or
-      (.gates.exact_identity_verification_receipt.outcome == "pass") or
+      (.gates.exact_identity_verification_receipt.outcome == "pass" and
+       (if .delivery.mode == "local-only" then .next_action == "record-local-delivery" else .next_action == "push" end)) or
       (.gates.exact_identity_verification_receipt.outcome == "fail" and .next_action == "repair-exact-identity-verification"))
    elif .state == "pushed-or-delivery-mode-equivalent" and .generation == 0 then
      .baseline_oid == .snapshot.head_oid and
@@ -113,12 +114,15 @@ if ! tail -c +15 "$record_file" | jq -e --argjson generation "$expected_generati
      .gates.exact_identity_verification_receipt.outcome == "pass" and
      (if .delivery.mode == "local-only" then
         .delivery.pushed_oid == null and (.delivery.local_snapshot | type == "string") and
-        (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
+        (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null and .next_action == "terminal-review"
       else
         .delivery.local_snapshot == null and .delivery.commit_oid == .snapshot.head_oid and
         .delivery.pushed_oid == .snapshot.head_oid and
-        ((.ci.runs | length) > 0 or .next_action == "register-exact-sha-ci-monitor") and
-        all(.ci.runs[]; .commit_oid == .delivery.pushed_oid)
+        all(.ci.runs[]; .commit_oid == $record.delivery.pushed_oid) and
+        (if (.ci.runs | length) == 0 then .next_action == "register-exact-sha-ci-monitor"
+         elif any(.ci.runs[]; .status == "failure") then .next_action == "enter-ci-recovery"
+         elif .ci.terminal_success_run_id != null then .next_action == "terminal-review"
+         else .next_action == "monitor-exact-sha-ci" end)
       end)
    end)
   ' >/dev/null; then
