@@ -79,23 +79,21 @@ unchanged content between the worktree, index, and `HEAD` can therefore change
 the hash, and callers must continue sending the fresh helper output on every
 `final_review.advance` call. Do not weaken or replace that contract.
 
-After a review reaches terminal completion, delivery is a one-way boundary.
-Retain the terminal review's pinned baseline, requested scope, exact path
-inventory, and reviewed path content/modes. A newly created commit may consume
-that completed review without replanning only when its source-content snapshot
-is identical: the baseline and requested scope are unchanged and the commit has
-exactly the reviewed paths, bytes, and modes, including formerly untracked
-content. A hash change caused solely by the new `HEAD`, staging
-partition, commit object, signature, identities, timestamps, or message is not
-a scope change and must not be submitted as a new review iteration.
+Terminal review consumes the already-delivered identity: the exact pushed SHA
+for remote modes or the exact local snapshot for local-only. Retain its pinned
+ticket-start baseline, requested scope, exact path inventory, and reviewed path
+content/modes. A clean unchanged review adds review evidence only; it creates no
+commit, empty commit, push, or replacement local checkpoint.
 
 Any changed reviewed path, content, mode, untracked content, pinned baseline,
-or requested scope invalidates terminal completion and requires a fresh risk
-assessment. Regardless of content identity, run the repository's fresh
-post-commit full gate against the exact commit and verify commit-message and
-signature policy there, then push or otherwise deliver. After push, bind
-required remote checks to that exact revision. This
-delivery verification is mandatory and is distinct from source-content review.
+or requested scope is source-changing remediation. Complete its mode-specific
+immediate-test, lightweight-review, fast-gate checkpoint first, including exact
+commit, message, and signature verification for remote commits, then perform a
+delta assessment and the complete selected lens set in fresh contexts under the
+clean-streak reset. Comprehensive suites remain in CI. Review may proceed while
+exact-SHA CI is pending, but a completed failure preempts through recovery and
+readiness requires terminal success for the exact final-reviewed SHA. Local-only
+uses fresh exact local evidence and never invents a remote action.
 
 `final_review.advance` also validates scope state; when `current_diff_hash`
 differs from the stored hash, provide `current_changed_files` so the next review

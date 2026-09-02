@@ -90,6 +90,12 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   persist that immutable identity, and reject mutable or legacy-v4 evidence
   with condition-specific diagnostics. There is no runtime bypass; opting out
   requires an auditable repository configuration change.
+  This requirement covers the source and verification paths selected by the
+  review record, not the later Tiber review event itself. In local-only mode it
+  makes a local commit repository-required; it never authorizes a push. If the
+  user forbids committing while this policy is enabled, completion is blocked
+  rather than replaced by a no-commit snapshot, empty post-review commit, or
+  remote action.
 - When `.tiber.toml` sets `[backlog].max_queued`, only `backlog` tasks count.
   The active `in-progress` task does not count. Creating, reopening, or moving
   work into `backlog` refuses once the limit is full across CLI and MCP.

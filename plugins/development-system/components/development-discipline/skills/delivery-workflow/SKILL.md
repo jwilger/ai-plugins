@@ -45,43 +45,54 @@ consequential. Do not invent a pull request.
 
 ### Direct-to-trunk
 
-Use the repository's declared trunk branch. Complete the required local checks
-and final review, then make the authorized non-history-rewriting push to the
-policy-selected trunk ref without creating a
+Use the repository's declared trunk branch. For each passing implementation
+checkpoint, complete its immediate focused test, bounded lightweight review,
+fast pre-commit gate, and signed commit, then make the authorized
+non-history-rewriting push immediately to the policy-selected trunk ref without creating a
 PR/MR. Preserve repository-required branch or worktree topology; direct-to-trunk
 describes the delivery destination, not where development must occur. After pushing, bind the delivery evidence to the exact
-pushed revision and verify its required CI run reaches the state the repository
-requires. Treat final source review, commit, and push as a one-way delivery
-boundary. Creating a commit from the content-identical reviewed snapshot does
-not require another full review merely because `HEAD`, staging state, signature,
-commit metadata, or coordinator event/snapshot/state bookkeeping changed. That
-bookkeeping never enters the reviewed source inventory or hash. It does require
-a fresh post-commit full gate,
-commit-message validation, and signature verification against that exact
-commit before push. If a rejected push, rebase, merge, conflict resolution, hook, formatter,
+pushed revision and monitor its required CI concurrently with the next
+increment. A completed failure preempts that work through CI recovery. Reserve
+the full final review for ticket completion, when it consumes the last delivered
+pushed identity. A clean unchanged terminal review creates no additional commit
+or push. Each checkpoint commit requires fresh exact-commit verification of the
+repository-required fast non-duplicated checks plus commit-message and signature
+validation before push; comprehensive suites remain in CI. If a rejected push,
+rebase, merge, conflict resolution, hook, formatter,
 or other delivery step changes any reviewed path, content, mode, formerly
 untracked content, adds a newly in-scope untracked path, changes the pinned
 baseline, or changes the requested scope, the prior review is
-stale: rerun the repository-required checks and final review against the new
-source snapshot before retrying the push. A metadata-only revision change stays
-in delivery verification and does not reopen source review.
+stale: treat the mutation as a new causal checkpoint, rerun its immediate test,
+lightweight review, fast gate, signed commit, exact verification, and normal
+push. Then run terminal delta/reset review against that new delivered identity.
+A metadata-only revision change stays in delivery verification and does not
+reopen source review.
 
 ### PR/MR
 
-Use a branch and the repository's pull-request or merge-request process. Honor
+Use a branch and the repository's pull-request or merge-request process. Push
+each passing checkpoint only when that branch mutation is already authorized;
+do not infer permission to open, update, or merge a PR/MR. Honor
 its required checks, review, approval, merge queue, and cleanup rules. Opening,
 updating, or merging the PR/MR must be authorized by the user or repository
-policy. Bind every check, approval, review, and readiness claim to the PR/MR's
-exact current head revision.
+policy. Terminal review consumes the already-pushed branch identity; a clean
+unchanged review creates no push. Source-changing remediation uses a signed
+additive commit and authorized branch push without inferring PR operations.
+Bind every check, approval, review, and readiness claim to the PR/MR's exact
+current head revision.
 
 ### Local-only
 
 Keep all work local. Run checks and review in proportion to the claim, but do not
 push, open a PR/MR, or merge. Do not commit by default: commit only when requested or required by the
-repository-local instructions, and report the local evidence and remaining
-remote work plainly. Final review still applies in local-only mode: run it with
+repository-local instructions. Record the exact locally authorized terminal
+snapshot, completed gates, and next permitted action as the delivery-mode
+equivalent checkpoint, and report remaining remote work plainly. Final review
+still applies at ticket completion in local-only mode: run it with
 fresh local evidence, and do not dismiss it as a publication-only or PR-only
-gate.
+gate. A clean unchanged terminal review creates no commit. Source-changing
+remediation creates a signed local commit only when required or authorized;
+otherwise record a new exact reviewed, fast-gate-passing no-commit snapshot.
 
 ## Authorization and evidence
 
@@ -91,8 +102,12 @@ gate.
   decision context, tradeoff, or failure being prevented; reject a subject-only
   message and a body that merely restates the subject or diff.
 - After creating the commit, prove that its paths, contents, and modes are
-  identical to the terminally reviewed source snapshot. Then run every required
-  post-commit gate against the exact commit and verify its message and signature.
+  identical to the lightweight-reviewed checkpoint snapshot, or to the
+  terminally reviewed source snapshot at ticket completion. Verify its message
+  and signature against the exact commit. Do not insert a duplicate
+  comprehensive local exact-commit suite after the repository fast pre-commit
+  gate; comprehensive, slow, integration, mutation, and pipeline-scale checks
+  belong in CI unless failure diagnosis requires them locally.
   The stage-aware review hash may change at this boundary without reopening
   review; source identity, not Git partition or metadata identity, decides that
   question. Before terminal completion, preserve the stage-aware contract:

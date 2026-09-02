@@ -101,45 +101,79 @@ then, implementation proceeds one step or scenario at a time.
    until RED proves the behavior is missing.
 4. Implement only enough code for that test. For removal work, instead follow
    the remove-first sequence above with the old tests unchanged.
-5. Run the focused test, the owning component suite, and the
-   repository-required fast gate.
-6. Run a lightweight post-implementation review before the next testing cycle.
-7. Refactor only with the tests green and the lightweight review clean.
+5. Run the focused test and the owning component suite.
+6. Run a lightweight post-implementation review, then the
+   repository-required fast gate, before the next testing cycle.
+7. Refactor only after the current GREEN snapshot has completed its fast gate,
+   signed commit or authorized local-only equivalent, and delivery checkpoint;
+   the refactor begins the next per-edit cycle.
 8. Repeat for the next behavior.
 
 ## Green Increment Delivery
 
-Treat each completed behavior as a preservable implementation increment. Before
-starting the next RED test:
+Treat every individual implementation-file or test-file edit as an interruptible
+increment boundary. Immediately run the smallest relevant test and durably
+record the exact snapshot as `failing` or
+`passing-awaiting-gates-or-review`.
 
-1. Run the focused test, owning component suite, and repository-required fast
-   checks.
-2. Run the lightweight review below. If it causes an edit, repeat the fast tests
-   and lightweight review until both are green.
-3. Use `rationale-commit-messages`, then commit and push the green increment.
-4. Record the exact pushed commit OID and its repository-required in-scope CI
-   runs. Before starting a new task, the most recently **completed** in-scope
-   build must be successful. A newer queued or running build is waiting and does
-   not replace that completed result. A completed failed job in any required
-   current run invokes `ci-failure-follow-up`; its exact diagnosis, constrained
-   next push, and terminal-success recovery rule blocks follow-up
-   implementation, review-finding remediation, and a new ticket. Final review
-   and delivery apply their own exact-revision terminal-evidence requirements;
-   do not report queued or running CI as green.
+At `failing`, prohibit commit, push, unrelated edits, cleanup, and convenience
+changes. Permit only the next causal edit, then run the smallest relevant test
+again immediately. When test and implementation cannot independently pass,
+declare one bounded RED-to-GREEN pair: record the expected RED and causal claim,
+make only the paired implementation edit, retest immediately, and continue from
+GREEN.
+
+At `passing-awaiting-gates-or-review`, stop all implementation and test editing:
+
+1. Run the lightweight review below. Any remediation is a causal edit and
+   returns immediately to the focused-test boundary.
+2. Let the repository fast pre-commit gate run its formatting, linting, unit,
+   manifest/config, and comparable fast checks. Do not duplicate comprehensive
+   suites in a second local exact-commit gate.
+3. When the selected mode authorizes or requires a commit, use
+   `rationale-commit-messages`, create a signed commit, and record its exact OID
+   and the snapshot transition to `committed`. In local-only mode without commit
+   authority, record the exact reviewed and fast-gate-passing worktree snapshot
+   as the authorized no-commit terminal equivalent instead, unless Tiber's
+   opt-in final-review policy makes a local commit repository-required for the
+   selected source and verification paths. Under that policy, withheld commit
+   authority blocks completion without authorizing a push.
+4. Complete the authorized delivery-mode checkpoint immediately and record
+   `pushed-or-delivery-mode-equivalent`. Direct-to-trunk pushes normally; PR
+   mode pushes only the already-authorized branch and does not infer permission
+   to open or merge; local-only records the locally permitted terminal snapshot
+   and performs no remote mutation.
+
+Every interruption preserves the exact snapshot, immediate-test receipt,
+durable state, completed gates, and sole next permitted action. Documentation,
+configuration, formatting-only changes, generated output, and mechanically
+required metadata use proportional formatter/parser/validation gates and the
+same checkpoint discipline. Generated or required companions may travel only
+with their causal source snapshot; unrelated passing work is never batched for
+convenience.
+
+After an authorized push, begin the next iteration immediately while monitoring
+the exact pushed OID's CI concurrently. A queued or running build is not green,
+but does not serialize feature work when the most recently completed in-scope
+build is successful and no current required run has a completed failed job. Any
+completed CI failure immediately preempts the current edit and invokes
+`ci-failure-follow-up`; its recovery hold permits only the selected causal repair
+or authorized unchanged-SHA rerun until terminal success.
 
 Long-running integration, mutation, exhaustive, full-suite, and similarly
 expensive checks belong in CI unless a local run is directly required to
 diagnose a failure. Do not make every local increment wait for them.
 
-Full review is the ticket-completion gate after the actual acceptance criteria
-are implemented; it is not a prerequisite for preserving each green increment.
+Full review is the ticket-completion gate after all planned increments and the
+actual acceptance criteria are delivered; it is not a prerequisite for
+preserving each green increment, and lightweight review never substitutes for
+its configured clean iterations.
 When full review requires a code or guidance edit, first confirm that the most
 recently completed pushed build is successful and no current build has a
 completed failed job, classify whether RED applies and use it when
-required, then repeat fast
-unit tests, lightweight review, commit and push, and the CI check. Resume full
-review through one diff-bound delta risk assessment rather than restarting
-unaffected lenses.
+required, then repeat the immediate focused test, lightweight review, fast
+pre-commit gate, signed commit, exact verification, and authorized push. Only
+then resume full review through its diff-bound delta/reset protocol.
 
 ## Lightweight Review
 
@@ -172,22 +206,26 @@ cannot be completed to this standard instead of silently skipping it.
 
 ## Stop Signals
 
-| Signal                                                 | Action                                                  |
-| ------------------------------------------------------ | ------------------------------------------------------- |
-| Production code exists without prior RED when required | Revert or discard it, then restart from the test        |
-| Test passes immediately                                | Replace it with a test for missing behavior             |
-| Test checks internals or mocks instead of behavior     | Rewrite against the public surface                      |
-| Test checks committed text or CI workflow structure    | Remove it or replace it with observable behavior        |
-| Several cases are bundled into one test                | Split them unless this is the acceptance scenario table |
-| You want to "add tests after"                          | Stop; that is not TDD                                   |
-| Lightweight review is skipped after GREEN              | Run it before starting the next RED cycle               |
+| Signal                                                        | Action                                                                    |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Production code exists without prior RED when required        | Revert or discard it, then restart from the test                          |
+| Test passes immediately                                       | Replace it with a test for missing behavior                               |
+| Test checks internals or mocks instead of behavior            | Rewrite against the public surface                                        |
+| Test checks committed text or CI workflow structure           | Remove it or replace it with observable behavior                          |
+| Several cases are bundled into one test                       | Split them unless this is the acceptance scenario table                   |
+| You want to "add tests after"                                 | Stop; that is not TDD                                                     |
+| Lightweight review is skipped after GREEN                     | Run it before starting the next RED cycle                                 |
+| Another implementation/test edit follows uncheckpointed GREEN | Stop and finish review, fast gate, signed commit, and delivery checkpoint |
+| Unrelated passing work is added to the checkpoint             | Remove it and preserve only the causal snapshot                           |
 
 ## Completion Check
 
 When RED applies, point to the RED output, GREEN output, and the small
 implementation step connecting them. For exempt work, point to the applicability
 decision and fresh verification; for removals, also show the unchanged-suite
-failure classification. Before starting the next cycle,
-also point to the clean lightweight review or the defended finding accepted by a
-follow-up review, the pushed commit, and a successful most-recently-completed
-CI build (with no current completed failed job).
+failure classification. Before starting the next cycle, also point to the exact
+durable state and next action, the clean lightweight review or defended finding
+accepted by a follow-up review, and the signed commit plus authorized push or
+the exact authorized local-only no-commit equivalent. Track exact-SHA CI
+concurrently; a completed failure
+preempts the next cycle.

@@ -19,8 +19,8 @@ When the configured value is unavailable, do not choose a mode. State that
 `.development-system.toml` is authoritative and summarize all three modes so
 the user knows what evidence is missing.
 
-- A semantic commit/tag operation must consume a clean workflow checkpoint and
-  return a signed receipt when signing is required.
+- A semantic commit/tag operation must consume a passing per-edit delivery
+  checkpoint and return a signed receipt when signing is required.
 - A semantic push/PR/merge operation must return an idempotent remote receipt.
 - Failed pushed CI is blocking recovery work; the CI-recovery service performs
   only typed recovery actions.
@@ -38,19 +38,22 @@ it must not merely restate the subject or summarize the diff. Reject a
 subject-only message. Never add `Co-Authored-By` or another AI-attribution
 trailer.
 
-Treat final source review, commit, and push as a one-way delivery boundary. A
-commit that contains exactly the terminally reviewed paths, contents, and modes
-does not trigger another full source review solely because staging state,
-`HEAD`, signature, identities, timestamps, or other commit metadata changed.
-Coordinator event, snapshot, and state bookkeeping likewise never enters the
-reviewed source inventory or hash. Still run the repository-required fresh
-post-commit full gate against the exact commit, verify its message and signature,
-then push and bind required CI to that revision.
+Preserve every passing increment through its mode-authorized checkpoint before
+terminal review. Remote modes use a signed commit, exact verification of the
+repository-required fast non-duplicated checks plus message and signature, and
+an authorized push. Comprehensive suites remain in CI. Local-only uses the
+authorized local identity, subject to any repository policy that requires a
+local commit. Terminal review consumes that already-delivered pushed SHA or
+local identity. A clean unchanged review adds evidence only and creates no
+commit, empty commit, push, or replacement checkpoint. Coordinator event,
+snapshot, and state bookkeeping never enters the reviewed source inventory or
+hash. Bind readiness to terminal-success CI for the exact final-reviewed SHA or
+fresh evidence for the exact local identity.
 If delivery changes a reviewed path, content, mode, formerly untracked content,
 adds a newly in-scope untracked path, changes the pinned baseline, or changes
-the requested scope, return to final review for the changed
-source snapshot. This boundary applies only after terminal review; while review
-is active, keep the stage-aware helper unchanged and submit its fresh
+the requested scope, complete a new mode-specific checkpoint first, then run the
+terminal delta/reset review against that delivered identity. While review is
+active, keep the stage-aware helper unchanged and submit its fresh
 `current_diff_hash` on every advance.
 
 Always state each protected action explicitly: never infer permission to

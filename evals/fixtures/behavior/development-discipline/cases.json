@@ -506,9 +506,47 @@
     }
   },
   {
+    "case_id": "development-discipline-per-edit-durable-checkpoint",
+    "behavior": "Preserves every implementation or test edit through immediate testing, durable resume state, and delivery-mode-specific checkpointing.",
+    "prompt": "You are midway through a ticket with several small implementation and test edits. Define the exact state machine after each individual edit, including a failed immediate test, a passing immediate test, an inseparable RED-to-GREEN pair, an interruption at any transition, documentation/configuration/formatting/generated-file changes, all three delivery modes, CI running or failing after push, and the terminal full-review sequence. Explicitly assign comprehensive slow suites and say whether they may be duplicated locally. For local-only mode, explicitly cover Tiber's opt-in committed-evidence policy when commit authority is withheld. What may be edited or batched at each point?",
+    "tags": [
+      "development-discipline",
+      "tdd",
+      "checkpoint",
+      "delivery",
+      "interruption"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": [
+        "core-behavior",
+        "workflow",
+        "state-transition",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response requires the smallest relevant test immediately after every individual implementation-file or test-file edit and durably binds the exact snapshot to one of four states: failing, passing-awaiting-gates-or-review, committed, or pushed/delivery-mode-equivalent, with the next permitted action. On failure it prohibits commit, push, unrelated edits, and convenience changes, allowing only the next causal edit followed immediately by another test. On pass it stops implementation/test editing until bounded lightweight review, the repository fast pre-commit gate, and the authorized delivery-mode checkpoint complete: a signed commit and push where authorized, or an exact reviewed and fast-gate-passing no-commit terminal snapshot in local-only mode when commit authority is absent. It must add that Tiber's opt-in final-review policy makes a local commit repository-required when reviewed source/verification paths must be in a commit tree; if commit authority is withheld, completion blocks without a no-commit substitute or push. It permits exactly one declared inseparable RED-to-GREEN pair by recording the expected RED and causal claim, allowing only its paired implementation edit, immediately retesting, and entering the normal green checkpoint. It gives proportional tests and checkpoint rules for docs, configuration, formatting-only work, and generated or mechanically required companions while forbidding unrelated passing work from being batched. It defines local-only as the locally authorized terminal checkpoint with no remote mutation, direct-to-trunk as a normal push, and PR mode as an authorized branch push without inferring permission to open or merge; each state must resume from exact durable evidence. After push it begins the next iteration while exact-SHA CI runs, but a completed CI failure immediately preempts work through Tiber recovery. It leaves comprehensive slow suites to CI rather than duplicating them locally. Full multi-lens review begins only after all acceptance criteria and planned increments are delivered; a review finding follows the normal tested, lightweight-reviewed, signed, exactly verified, pushed checkpoint when remote delivery is authorized, or the exact local-only equivalent, before the full clean-iteration/reset protocol resumes. Fail if tests may be deferred across edits, passing changes may be convenience-batched, remotely delivered commits are unsigned or unreviewed, failed work is committed, CI success serializes every next increment, CI failure does not preempt, PR/merge authority is inferred, local-only pushes or commits without authority, policy-required committed evidence is replaced by a mutable snapshot, comprehensive gates are duplicated locally, intermediate commits require full multi-lens review, or lightweight review substitutes for terminal clean iterations.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "After each implementation or test edit, immediately run the smallest relevant test and persist the exact snapshot as failing, passing-awaiting-gates-or-review, committed, or pushed/local-equivalent plus its sole next action. Failure permits only one causal edit then another immediate test. GREEN freezes implementation/test edits until bounded lightweight review, fast pre-commit, signed commit, and the mode-authorized checkpoint. Declare and record one inseparable RED-to-GREEN pair only when necessary. Give proportional gates to docs/config/format/generated companions but never batch unrelated passing work. Local-only stays local and may use a no-commit snapshot unless Tiber policy requires committed evidence; then a local commit is required and withheld authority blocks without authorizing a push. Trunk and PR modes push only as already authorized. Start the next increment while exact-SHA CI runs, preempt immediately on failure, and reserve comprehensive suites for CI. Run full multi-lens clean iterations only after all increments are delivered; review remediation itself goes through the normal checkpoint before review resets."
+      ],
+      "fail": [
+        "Make several convenient edits, run tests once, then wait for three full-review passes and every comprehensive local suite before one unsigned commit; continue working through failed CI and open or merge a PR automatically."
+      ]
+    }
+  },
+  {
     "case_id": "development-discipline-green-increment-ci-loop",
     "behavior": "Preserves each green implementation increment through fast local gates and delegates expensive evidence to CI before ticket-completion review.",
-    "prompt": "You are implementing a medium-risk ticket in several small TDD increments. Which checks gate each local commit and push, when may work continue based on CI state, when should full review begin, and what sequence applies if full review requires an edit?",
+    "prompt": "You are implementing a medium-risk ticket in several small TDD increments. Which checks gate each local commit and push, when may work continue based on CI state, and when exactly may terminal review begin? Explicitly state the prerequisite for every planned increment and acceptance criterion, the delivered identity terminal review consumes, and the sequence if terminal review requires an edit.",
     "tags": [
       "development-discipline",
       "tdd",
@@ -526,11 +564,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response gives the increment loop as focused test, owning component suite, repository-required fast checks, lightweight review, commit and push, then records the exact pushed OID and required in-scope CI runs; requires the most recently completed in-scope build to be successful before a new task; treats a newer queued/running build as waiting rather than green or replacement evidence; and says any completed failed job activates the recovery hold. It assigns long-running integration, mutation, exhaustive, or full-suite checks to CI unless locally needed to diagnose a failure and starts full review only after the ticket's actual acceptance criteria are implemented. If full review requires an edit, it must recheck the in-scope CI state, classify whether RED applies, use test-first implementation when required, repeat the local increment gate, commit and push, then run one delta risk assessment and resume only affected/guard assignments. Fail if queued/running CI is called green, the exact pushed OID is omitted, expensive suites run locally after every edit, failed CI is ignored, acceptance criteria can be deferred, every edit is forced through synthetic RED evidence, or every review lens restarts after a fix.",
+    "semanticRubric": "Pass if the response gives each increment loop as immediate focused test, lightweight review, repository-required fast checks, signed commit and authorized push or local-only equivalent, then records the exact delivered identity and required CI runs. It begins the next increment while exact-SHA CI runs, but says any completed failed job immediately preempts work through the Tiber recovery hold. It assigns long-running integration, mutation, exhaustive, or full-suite checks to CI unless locally needed to diagnose a failure and starts terminal review only after every planned increment and acceptance criterion is checkpoint-delivered. Terminal review consumes that exact pushed SHA or local identity; clean unchanged review creates no new commit/push, and pushed readiness requires terminal-success CI for the exact final-reviewed SHA. If review requires a source edit, it must classify RED applicability, repeat the immediate test, lightweight review, fast checkpoint gate, and mode-specific delivery checkpoint, then run one delta risk assessment and rerun the complete selected lens set in fresh contexts under the clean-streak reset. Fail if queued/running CI is called green readiness evidence, the exact delivered identity is omitted, expensive suites run locally after every edit, failed CI is ignored, undelivered increments enter terminal review, clean review manufactures a commit, every edit is forced through synthetic RED evidence, or unaffected lens evidence survives remediation.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "For each increment: focused test, owning component suite, required fast checks, lightweight review, commit and push; then record the exact OID and required in-scope CI runs. Before another task, the most recently completed in-scope build must be successful; queued/running remains waiting and any completed failure activates recovery. Begin full review only after every acceptance criterion is implemented; after a review edit, repeat the increment gate and use one delta scout to select affected reruns."
+        "For each increment: immediate focused test, lightweight review, required fast gate, and the authorized signed delivery checkpoint; record its exact identity and monitor exact-SHA CI while starting the next increment, preempting on failure. Review only after every increment and acceptance criterion is delivered. Clean review adds no commit; remediation repeats the checkpoint, then one delta assessment and the complete selected lens set in fresh contexts."
       ],
       "fail": [
         "Wait to commit until three broad full-review passes and every exhaustive suite finish locally; continue to the next ticket even if the latest pushed build failed."
@@ -2078,9 +2116,9 @@
     }
   },
   {
-    "case_id": "final-review-content-identical-commit-crosses-delivery-boundary-once",
-    "behavior": "Preserves a completed source review across a content-identical commit while retaining exact-commit delivery gates.",
-    "prompt": "A direct-to-trunk change completed final review against its final uncommitted source snapshot. Creating the signed commit changes the stage-aware review hash because the same bytes move from the index/worktree into HEAD, but the committed paths, contents, and modes are identical and the pinned baseline and requested scope are unchanged. Must you run another full final review before pushing? Contrast that with a commit hook changing one reviewed file and an additional in-scope untracked file appearing. State what remains mandatory after commit and why stage-aware hashing must remain unchanged during an active review.",
+    "case_id": "final-review-consumes-delivered-checkpoint-identity",
+    "behavior": "Runs terminal review against an already-delivered checkpoint without manufacturing another commit or push.",
+    "prompt": "A direct-to-trunk ticket has delivered every green increment, including its final signed commit, and CI for that exact pushed SHA is still running when terminal review begins. What identity and baseline does review use, what happens if review is clean without a source edit, and when may readiness be claimed? Contrast that with a review finding whose remediation changes a reviewed file, and cover the PR/MR and local-only remediation variants too.",
     "tags": [
       "development-discipline",
       "final-review",
@@ -2094,14 +2132,14 @@
     },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response defines a one-way sequence of final source-content review, commit, exact-commit verification, and push. It must say the content-identical commit does not require a second full review solely because HEAD, index/worktree partition, signature, identities, timestamps, message, or commit object changed, while post-commit repository gates plus commit-message and signature verification remain mandatory against the exact commit and required remote CI remains bound to the exact pushed revision. It must restart final review for the hook-caused content change and for the new in-scope untracked path/content, and name path, content, mode, untracked content, pinned baseline, or requested-scope changes as invalidators. It must preserve the existing stage-aware hash and fresh current_diff_hash behavior during every active review advance. Fail if it repeats review after every commit metadata/hash change, skips exact-commit gates because source review passed, treats the hook or untracked change as metadata-only, or weakens the active-review hash.",
+    "semanticRubric": "Pass if the response says terminal review consumes the exact already-pushed final checkpoint SHA and immutable ticket-start baseline while exact-SHA CI may run concurrently. A clean unchanged review adds review evidence only and creates no commit, empty commit, push, or replacement checkpoint; pending CI yields review-complete-awaiting-exact-sha-ci and readiness requires terminal-success CI for that exact final-reviewed SHA. A source-changing finding makes the iteration non-clean, then remediation completes immediate focused testing, lightweight review, and the fast checkpoint gate. Direct-to-trunk uses a signed additive commit with exact commit/message/signature verification and a normal push; PR/MR uses a signed additive commit and only an authorized branch push without inferring PR operations; local-only commits only when required/authorized and otherwise records a new exact no-commit snapshot. It must submit a delta assessment and rerun the complete selected lens set in fresh contexts under the normal clean-streak reset. Fail if clean review manufactures another commit/push, review targets a newly resolved movable baseline, readiness uses an older successful build or pending CI, local-only pushes or commits without authority, PR authority is inferred, remediation skips its checkpoint, or unaffected lens evidence survives the reset.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Do not reopen the completed source review for a content-identical commit. Verify that the commit has the reviewed paths, bytes, and modes, then run required post-commit gates and check its message/signature before pushing and binding CI to the pushed SHA. Reopen review for either the hook's source edit or the new in-scope untracked file. During an active review, keep using the stage-aware helper on every advance."
+        "Review the already-pushed final checkpoint SHA from the immutable ticket-start baseline while exact-SHA CI runs. If review is clean and unchanged, add no commit or push and report review-complete-awaiting-exact-sha-ci until that SHA is green. A source-changing finding goes through the mode-specific tested, lightly reviewed, fast-gated checkpoint, then a delta assessment and the complete fresh lens set; local-only may use an exact no-commit snapshot."
       ],
       "fail": [
-        "Because the scope hash changed after commit, repeat the full review. Once that passes, the commit needs no separate signature or post-commit gate checks."
+        "After clean review, create an empty commit and push it so CI has a new SHA. Reuse unaffected lenses after a finding, and push local-only remediation for consistency."
       ]
     }
   },
@@ -2135,8 +2173,8 @@
   },
   {
     "case_id": "final-review-recovers-truncated-assignment-provenance",
-    "behavior": "Recovers exact pending review assignments without replanning or repeating unrelated clean lenses.",
-    "prompt": "Using the Development System final-review guidance, a final_review.plan response was too large and the caller retained only its state_ref. Explain how the caller recovers each pending lens's exact assignment and full prompt, what resume_latest must expose, what assignment retrieval is allowed to change, and how to recover when advance reports a model-role mismatch for one lens. Also distinguish coordinator bookkeeping and a content-identical commit from real source-scope changes, and end with the exact source-review-to-push delivery sequence.",
+    "behavior": "Recovers exact pending review assignments without replanning and applies the required reset for invalid role evidence.",
+    "prompt": "Using the Development System final-review guidance, a final_review.plan response was too large and the caller retained only its state_ref. Explain how the caller recovers each pending lens's exact assignment and full prompt. Explicitly name the compact iteration and shared-evidence-ID fields, what resume_latest exposes, and what assignment retrieval may change. Explain the reset when advance reports invalid model-role evidence. Explicitly define source scope from the immutable ticket-start baseline and repository paths/content/modes/untracked inventory, distinguish coordinator bookkeeping, and end with the delivered-checkpoint-to-readiness sequence including whether a clean unchanged review creates any commit or push.",
     "tags": [
       "development-discipline",
       "final-review",
@@ -2150,11 +2188,11 @@
     },
     "valueGate": { "mode": "standard", "baselineLiftThreshold": 0.1 },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response calls final_review.pending_assignments with the retained state_ref, uses its compact per-lens lens, iteration, exact subagent_key, exact model_role, close_after_result, shared evidence ID, and schema version, and retrieves only an individual full prompt by that exact key when needed. It must say an incomplete resume_latest returns the same compact summary; retrieval is read-only and idempotent and cannot append events, alter scope/hash, reassign a lens, or change its role. For a role mismatch it must rerun only the named lens in fresh context with the expected role and resubmit while preserving unrelated accepted clean lenses. It must say baseline plus in-repository paths/content/modes/untracked inventory define source scope, while coordinator state/events/snapshots and a content-identical commit do not reopen completed source review; real path/content/mode/untracked/baseline/requested-scope changes do. It must preserve the delivery sequence source review, commit, fresh exact-commit full gate, push. Fail if it replans, guesses provenance, restarts all lenses, treats bookkeeping as source, repeats review for commit metadata alone, or skips the post-commit gate.",
+    "semanticRubric": "Pass if the response calls final_review.pending_assignments with the retained state_ref, uses its compact per-lens lens, iteration, exact subagent_key, exact model_role, close_after_result, shared evidence ID, and schema version, and retrieves only an individual full prompt by that exact key when needed. It must say an incomplete resume_latest returns the same compact summary; retrieval is read-only and idempotent and cannot append events, alter scope/hash, reassign a lens, or change its role. It must treat a role mismatch as invalid assigned evidence: accept the coordinator's non-clean reset, discard the iteration, and run every fresh next-iteration assignment rather than repairing the old assignment. It must explicitly say the immutable ticket-start baseline plus in-repository paths/content/modes/untracked inventory define source scope, while coordinator state/events/snapshots do not; real path/content/mode/untracked/baseline/requested-scope changes do. It must preserve the terminal sequence: already-delivered exact pushed SHA or local identity, terminal review, then exact-SHA CI or fresh local readiness evidence, with no new commit/push for a clean unchanged review. Fail if it replans, guesses provenance, repairs malformed role evidence in place, treats bookkeeping as source, resolves a movable baseline after incremental pushes, or manufactures a post-review commit/push.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Use final_review.pending_assignments({state_ref}) or the identical summary returned by resume_latest, then fetch only the needed assignment prompt by exact subagent_key. Retrieval changes no review state. A mismatch reruns only that lens with its expected role. Coordinator bookkeeping and a content-identical commit do not reopen source review; actual source-scope changes do, and the exact commit still needs the fresh full gate before push."
+        "Use final_review.pending_assignments({state_ref}) or the identical summary returned by resume_latest, then fetch only the needed assignment prompt by exact subagent_key. Retrieval changes no review state. Invalid role evidence triggers the coordinator's non-clean full-iteration reset and every fresh returned assignment. Coordinator bookkeeping is outside source scope. Review the already-delivered identity from the immutable ticket-start baseline; clean review adds no commit or push, and readiness binds to that exact SHA's CI or exact local evidence."
       ],
       "fail": [
         "Call plan again to regenerate assignments, guess the reviewer roles, and repeat every lens after the commit changes the hash."

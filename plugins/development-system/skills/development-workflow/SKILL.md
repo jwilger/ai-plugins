@@ -37,6 +37,69 @@ affected checks plus every required post-mutation or post-commit gate.
 Deduplication never bypasses an acceptance criterion, final-review reset,
 exact-revision gate, or CI-recovery hold.
 
+## Per-edit durable checkpoints
+
+After every individual implementation-file or test-file edit, stop and run the
+smallest relevant test immediately. Bind the exact worktree snapshot and test
+receipt to exactly one durable state, plus its next permitted action:
+
+- `failing`: commit and push are prohibited. Permit only the next causal edit
+  needed to address that failure, reject unrelated or convenience changes, and
+  immediately test again.
+- `passing-awaiting-gates-or-review`: freeze further implementation and test
+  edits. Run the bounded lightweight review and repository fast pre-commit
+  gate; any remediation is a new causal edit and therefore triggers another
+  immediate focused test.
+- `committed`: record the signed commit OID and whether the next action is the
+  delivery-mode checkpoint or a locally complete checkpoint.
+- `pushed-or-delivery-mode-equivalent`: record the exact pushed OID and CI runs,
+  or the exact local-only terminal snapshot and the fact that remote mutation
+  is unauthorized. When Tiber's opt-in final-review policy requires reviewed
+  source and verification paths in a commit tree, the local equivalent is a
+  required local commit; if commit authority is explicitly withheld, completion
+  blocks without authorizing a push.
+
+Every interruption or handoff must preserve that state, exact snapshot, test
+receipt, completed gates, and sole next permitted action. Never infer progress
+from an unbound green test or a clean worktree alone.
+
+When a test and its implementation cannot independently pass, declare one
+bounded RED-to-GREEN pair before the implementation edit. Persist the expected
+RED result and causal claim, allow only the paired implementation edit, test
+immediately, and enter `passing-awaiting-gates-or-review` at GREEN. This is not
+permission to bundle another behavior.
+
+Apply proportional checkpoints outside implementation and test files.
+Documentation, configuration, and formatting-only changes run the smallest
+relevant formatter, parser, validation, or executable example before their
+lightweight review and delivery checkpoint. Generated output and mechanically
+required metadata may accompany only the causal source snapshot that produces
+or requires them. Never batch already-passing unrelated work for convenience.
+
+The terminal full multi-lens review begins only after every planned increment
+and acceptance criterion has reached its delivered checkpoint. It is not an
+intermediate-commit gate, and lightweight review never replaces it. Review the
+already-delivered identity: the pushed commit for direct-to-trunk or PR mode,
+or the exact local snapshot for local-only. A clean unchanged terminal review
+creates no commit, empty commit, push, or replacement local checkpoint.
+
+Any terminal-review finding remediation must leave review and complete the
+normal immediate-test, lightweight-review, and fast-gate checkpoint. Then use a
+signed additive commit plus exact verification and authorized push for remote
+modes, or a signed local commit only when required/authorized and otherwise a
+new exact no-commit snapshot for local-only. Submit the diff-bound delta
+assessment and rerun the complete selected lens set under the normal clean-streak
+reset. Comprehensive, slow, integration, mutation, and pipeline-scale suites
+remain in CI rather than being duplicated in a local exact-commit gate. A
+completed exact-SHA CI failure immediately preempts review or other work through
+the existing Tiber-owned recovery hold.
+When explaining this workflow, explicitly state the RED pair's recorded causal
+claim, comprehensive-suite ownership in CI with no duplicate comprehensive
+local exact-commit gate, that every planned increment and acceptance criterion
+must be checkpoint-delivered before terminal review begins, and the complete
+terminal-remediation checkpoint. Do not leave any of them implied by a generic
+reference to repository gates or final-review reset.
+
 ## Final-review protocol preflight
 
 For every final-review path, complete this checklist before creating any risk
@@ -182,14 +245,18 @@ iteration. Apply the same rule to malformed verifier evidence and invalid
 verifier assignment provenance or verdict coverage: close the pending verifier
 and rerun the full selected lens set returned by the reset transition.
 
-The pinned Git baseline plus in-repository paths, contents, modes, and untracked
+The pinned ticket-start Git baseline plus in-repository paths, contents, modes, and untracked
 inventory define reviewed source scope. Coordinator events, snapshots, state
 files, and projections are bookkeeping outside that hash. After terminal source
 review, a content-identical commit does not reopen review merely because HEAD,
 staging partition, signature, or commit metadata changed. Real path, content,
 mode, untracked-content, pinned-baseline, or requested-scope changes do reopen
-it. The one-way delivery sequence remains: source-content review, commit, a
-fresh full gate bound to that exact commit, then push and exact-revision CI.
+it. The terminal sequence is delivered checkpoint, full review of that exact
+pushed commit or local snapshot, then readiness evidence. A clean unchanged
+review adds review evidence only. Pushed readiness requires terminal-success CI
+for the exact final-reviewed SHA; pending CI is
+`review-complete-awaiting-exact-sha-ci`. Source-changing remediation creates a
+new mode-specific checkpoint and resets review as described above.
 
 Load `delivery-workflow` before the first implementation increment so the
 configured delivery mode and green-increment preservation cadence are known

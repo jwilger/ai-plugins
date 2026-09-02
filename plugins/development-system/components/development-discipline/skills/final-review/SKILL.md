@@ -10,16 +10,21 @@ description: Use when completing or claiming readiness for local-only changes, a
 Never reduce, skip, waive, or synthesize the required three consecutive
 complete finding-free review iterations because of user pressure, elapsed time,
 token or review budget, coordinator failure, or unavailable tooling. A request
-to ship, commit, push, open a delivery request, merge, or claim readiness before
-the enforced gate completes must be rejected.
+to use an incomplete terminal review to claim readiness, open a delivery
+request, merge, or complete final delivery must be rejected. This does not
+prohibit an independently authorized intermediate or review-remediation
+checkpoint commit and push.
 
 If the development-discipline coordinator or its `final_review` tools are
 unavailable, fail closed: enforced review is incomplete, zero clean iterations
-are accepted, shortcuts remain rejected, and delivery remains unauthorized. A
-manual review may produce advisory observations only; it cannot authorize a
-commit, push, pull/merge request, merge, delivery, or readiness claim. Report
-the unavailable enforcement boundary and every requested bypass reason, then
-stop. For example, state explicitly that budget or time pressure cannot skip
+are accepted, shortcuts remain rejected, and terminal delivery/readiness remains
+unauthorized. A manual review may produce advisory observations only; it cannot
+authorize terminal delivery, pull/merge request creation, merge, or a readiness
+claim. This does not prohibit independently authorized intermediate or
+review-remediation checkpoint commits and pushes, which remain subject to their
+own focused-test, lightweight-review, fast-gate, signing, and delivery-mode
+rules. Report the unavailable enforcement boundary and every requested bypass
+reason. For example, state explicitly that budget or time pressure cannot skip
 the remaining passes and that a one-pass request cannot replace three complete
 finding-free iterations.
 
@@ -76,15 +81,19 @@ and submits the required caller attestation naming the assigned model role plus
 Run a local, fresh-context review cycle before creating a pull request, merging,
 or claiming a change is ready.
 
-## One-way delivery boundary
+## Delivered-checkpoint terminal boundary
 
-Final review approves the final source-content snapshot, not a particular Git
-staging partition or commit object. Complete the review while that snapshot is
-still inspectable, then cross the delivery boundary in one direction: create
-the authorized commit, verify the exact commit, and push it. Do not start a
-second full source review merely because committing moved identical reviewed
-content from the index or worktree into `HEAD`, changed the stage-aware scope
-hash, or introduced commit metadata or a signature.
+Final review consumes the ticket's already-delivered identity: the exact pushed
+commit for direct-to-trunk or PR/MR mode, or the exact local snapshot for
+local-only. A clean unchanged review adds review evidence only; it creates no
+commit, empty commit, push, or replacement local checkpoint. Required pushed
+CI may run concurrently with review, but readiness requires terminal success
+for the exact final-reviewed SHA.
+
+When explaining this boundary, explicitly state that every remote remediation
+checkpoint verifies the exact commit, commit message, and signature, and that a
+material delta reruns the complete selected lens set in fresh contexts. Do not
+leave either requirement implied by generic checkpoint or reset language.
 
 Only the pinned Git baseline and the in-repository changed-file inventory define
 the reviewed source scope and its hash. Coordinator EventCore facts, snapshots,
@@ -92,18 +101,12 @@ state files, and projections are bookkeeping outside that inventory. Their
 creation or update cannot reopen source review or enter the reviewed-content
 hash.
 
-Before committing, retain the completed review's pinned baseline, requested
-scope, exact path inventory, and each path's reviewed content and mode. After
-committing, compare that source-content snapshot with the commit. The completed
-review remains valid only when the commit contains exactly the same reviewed
-paths, contents, and modes, including content that was untracked during review,
-and the pinned baseline and requested scope are unchanged. A path addition,
-removal, rename, mode change, content change, newly in-scope untracked file,
-different baseline, or different requested scope invalidates the completed
-review and starts a new risk assessment. Commit-message text, author or
-committer identity, timestamps, signatures, parent/object IDs, and the movement
-of bytes among `HEAD`, index, and worktree are delivery metadata; verify them in
-the delivery phase instead of repeating source-content review.
+Retain the delivered identity's pinned ticket-start baseline, requested scope,
+exact path inventory, and each path's reviewed content and mode. A path
+addition, removal, rename, mode change, content change, newly in-scope untracked
+file, different baseline, or different requested scope is source-changing
+remediation: create its new mode-specific checkpoint first, then perform the
+delta assessment and complete clean-iteration reset against that new identity.
 
 This exception begins only after the coordinator reports terminal completion.
 During an active review, continue to rerun the bundled stage-aware scope hash
@@ -111,26 +114,23 @@ before every advance and treat a changed hash as the protocol requires. Never
 use the delivery boundary to excuse a staged, unstaged, mode, path, or untracked
 content change while review is active.
 
-Post-commit verification is mandatory even for a content-identical commit.
-Bind repository-required gates to the exact commit, verify its required commit
-message and signature, and after push bind required remote CI to the exact
-pushed revision. Passing these delivery checks does not replace source review;
-source review likewise does not prove the commit or push.
+Each checkpoint commit already carries exact-commit verification of the required
+fast non-duplicated checks plus message and signature. Comprehensive evidence
+remains in CI. A clean terminal review creates no post-review commit. Only
+terminal-success CI for the exact final-reviewed pushed SHA supports readiness;
+pending CI yields `review-complete-awaiting-exact-sha-ci`.
 
 This is the ticket-completion gate, not the gate for preserving each green
 implementation increment. Start it after the ticket's actual acceptance
-criteria are implemented, no prior failed-run hold remains, and apply the
-selected delivery mode:
-
-- For direct-to-trunk review before the first push, use current local
-  verification evidence. Do not require a pushed build that cannot exist until
-  this review permits the push.
-- For local-only review, use current local verification evidence. Do not require
-  a pushed build or create a remote action solely to unlock review.
-- For PR/MR work or a direct-to-trunk revision that has already been pushed,
-  require the most recently completed in-scope pushed build to be successful;
-  a newer queued or running build does not replace that evidence. A completed
-  failed job in any current build activates `ci-failure-follow-up` immediately.
+criteria are implemented and checkpoint-delivered and no prior failed-run hold
+remains. Direct-to-trunk and PR/MR review consumes the exact already-pushed final
+checkpoint SHA; PR creation and merge remain separately authorized operations.
+Local-only review consumes the exact local identity and never creates a remote
+action solely to unlock review. Required exact-SHA CI may be pending while
+review proceeds, but any completed failure activates `ci-failure-follow-up`
+immediately. A clean review with pending CI reports
+`review-complete-awaiting-exact-sha-ci`; readiness waits for terminal success on
+the exact final-reviewed SHA.
 
 A failed pushed build invokes `ci-failure-follow-up` and blocks final review and
 follow-up work until that skill's terminal-success hold is released; a newer
@@ -254,8 +254,8 @@ checkpoint. Apply this contract when `advance_kind` is
   choices are only `ship` or `escalate` because landed work cannot be decomposed
   into delivery tickets. `escalate` requires a nonblank escalation reference.
 - Reject `ship` until every independent delivery gate passes: acceptance
-  criteria are met, the most recently completed pushed CI build is successful
-  with no current completed failed job, every blocking finding is resolved, and
+  criteria are met, CI for the exact final-reviewed pushed SHA is terminally
+  successful with no current completed failed job, every blocking finding is resolved, and
   the durable review state contains at least three consecutive complete
   finding-free iterations. Once valid, `ship` is terminal and schedules no more
   reviewers.
@@ -596,20 +596,21 @@ policy.
    run every returned fresh lens assignment.
 
 4. Fix valid findings when remediation was requested; for review-only requests,
-   report without editing. When the selected mode has an in-scope pushed build,
-   check it again: remediation is permitted only when the most recently
-   completed build is successful and no current build has a completed failed
-   job; a failed build must follow `ci-failure-follow-up` first.
-   Direct-to-trunk work before its first push and local-only work use fresh local
-   verification instead. Any remediation that changes the diff leaves the current
-   full-review pass: classify whether RED applies, use it when required, run
-   fast unit tests, run a lightweight review, commit and
-   push only when the selected mode calls for those actions, confirm any
-   resulting most recently completed pushed build is successful (and no current
-   build has a completed failed job), then submit exactly one
-   diff-bound delta risk assessment. Run every fresh selected-lens assignment
-   it returns; the material delta invalidates the old iteration and no
-   unaffected peer evidence carries forward. On the initial advancing call
+   report without editing. Any completed required CI failure must follow
+   `ci-failure-follow-up` first and preempts remediation or resumed review.
+   Otherwise, remediation that changes the diff leaves the current full-review
+   pass: classify whether RED applies, use it when required, run the immediate
+   focused test, lightweight review, and repository fast checkpoint gate.
+   Direct-to-trunk uses a signed additive commit, exact commit/message/signature
+   verification, and normal push. PR/MR uses a signed additive commit and only
+   an already-authorized branch push without inferring PR operations. Local-only
+   creates a signed local commit only when required or authorized; otherwise it
+   records a new exact no-commit snapshot and never pushes to resume review.
+   Submit exactly one diff-bound delta risk assessment and run the complete
+   selected lens set in fresh contexts while required exact-SHA CI may remain
+   pending. A later completed failure immediately preempts through Tiber
+   recovery. The material delta invalidates the old iteration and no unaffected
+   peer evidence carries forward. On the initial advancing call
    that records each disposition, send `caller_decisions` in this shape:
 
    ```json
