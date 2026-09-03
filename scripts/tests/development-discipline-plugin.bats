@@ -274,6 +274,17 @@ setup() {
   printf 'checkpoint-v1 %s\n' "$recovered_json" >"$stale"
   run bash -c 'cd "$1" && "$2" remote-ci 2 "$3" "$4"' _ "$repo" "$writer" "$recovered_predecessor" "$stale"
   [ "$status" -eq 0 ]
+
+  printf 'checkpoint-v1 %s\n' "$remote_bootstrap_json" >"$stale"
+  run bash -c 'cd "$1" && "$2" concurrent-increment 0 null "$3"' _ "$repo" "$writer" "$stale"
+  [ "$status" -eq 0 ]
+  concurrent_target="$repo/.git/development-system/checkpoints/concurrent-increment.latest"
+  printf 'checkpoint-v1 %s\n' "$remote_ready_json" >"$concurrent_target"
+  concurrent_predecessor=$(sha256sum "$concurrent_target" | cut -d ' ' -f 1)
+  concurrent_json=$(printf '%s' "$passing_json" | jq -c --arg predecessor "$concurrent_predecessor" '.generation = 1 | .predecessor_sha256 = $predecessor | .gates.lightweight_review_receipt = null | .gates.fast_gate_receipt = null | .next_action = "lightweight-review"')
+  printf 'checkpoint-v1 %s\n' "$concurrent_json" >"$stale"
+  run bash -c 'cd "$1" && "$2" concurrent-increment 1 "$3" "$4"' _ "$repo" "$writer" "$concurrent_predecessor" "$stale"
+  [ "$status" -eq 0 ]
   recovered_terminal_predecessor=$(sha256sum "$remote_target" | cut -d ' ' -f 1)
   dropped_failure_json=$(printf '%s' "$recovered_json" | jq -c --arg predecessor "$recovered_terminal_predecessor" '.generation = 3 | .predecessor_sha256 = $predecessor | .ci.runs = [.ci.runs[-1]]')
   printf 'checkpoint-v1 %s\n' "$dropped_failure_json" >"$stale"

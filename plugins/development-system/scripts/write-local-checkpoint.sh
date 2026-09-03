@@ -217,8 +217,9 @@ if [[ -e $target ]]; then
       $proposed.state == "pushed-or-delivery-mode-equivalent" and
       $proposed.delivery.mode == "local-only" and $proposed.next_action == "terminal-review"
     elif ($current.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery")) then
-      $proposed.state == "pushed-or-delivery-mode-equivalent" and
-      ($proposed.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery", "terminal-review"))
+      (($proposed.state == "pushed-or-delivery-mode-equivalent" and
+        ($proposed.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery", "terminal-review"))) or
+       remediation_result)
     elif $current.next_action == "terminal-review" then
       remediation_result
     else

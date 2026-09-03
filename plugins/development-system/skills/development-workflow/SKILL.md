@@ -253,7 +253,11 @@ provider or repository coalescing/cancellation for superseded non-terminal runs
 when available and authorized; otherwise wait for capacity before another push
 would add obsolete queued work. Never cancel the current terminal candidate's
 exact-SHA run, and never accept a successful older run as its readiness
-evidence.
+evidence. `register-exact-sha-ci-monitor`, `monitor-exact-sha-ci`, and
+`enter-ci-recovery` are delivery-readiness actions, not a serialization barrier
+for local causal work: after the next increment's immediate focused test, the
+successor may enter `failing` or the initial `passing-awaiting-gates-or-review`
+stage while retaining the complete CI observation history.
 
 When explaining this workflow, explicitly state the RED pair's recorded causal
 claim, comprehensive-suite ownership in CI with no duplicate comprehensive
