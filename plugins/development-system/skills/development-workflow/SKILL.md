@@ -67,8 +67,12 @@ same-directory candidate, then validates and publishes that exact candidate.
 It reads the current complete record and requires the candidate's
 `generation` to equal the current generation plus one and its
 `predecessor_sha256` to equal SHA-256 of the exact current `checkpoint-v1` line;
-the bootstrap record uses generation zero and a null predecessor. Reject a
-missing or stale predecessor without replacing the current record. The helper
+the bootstrap record uses generation zero and a null predecessor. It also
+requires the candidate to perform the predecessor's exact `next_action`, so a
+schema-valid record cannot skip or reorder an edit, test, review, gate,
+verification, delivery, CI-monitoring, recovery, or terminal-review transition.
+Reject a missing, stale, or action-incompatible predecessor without replacing
+the current record. The helper
 flushes the private candidate,
 recomputes the complete worktree identity and rejects publication if it changed
 since validation, atomically renames the stable record over the target, flushes

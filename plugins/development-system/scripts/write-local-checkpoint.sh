@@ -168,13 +168,68 @@ if [[ -e $target ]]; then
   [[ $expected_generation -eq $((current_generation + 1)) ]] || { echo "stale checkpoint generation" >&2; exit 3; }
   [[ $expected_predecessor == "$current_predecessor" ]] || { echo "stale checkpoint predecessor" >&2; exit 3; }
   [[ $proposed_baseline == "$current_baseline" ]] || { echo "checkpoint baseline does not match predecessor" >&2; exit 3; }
-  current_ci=$(sed -n 's/^checkpoint-v1 //p' "$target" | jq -c '.ci.runs')
-  proposed_ci=$(tail -c +15 "$candidate" | jq -c '.ci.runs')
+  current_record=$(sed -n 's/^checkpoint-v1 //p' "$target")
+  proposed_record=$(tail -c +15 "$candidate")
+  current_ci=$(jq -c '.ci.runs' <<<"$current_record")
+  proposed_ci=$(jq -c '.ci.runs' <<<"$proposed_record")
   jq -en --argjson current "$current_ci" --argjson proposed "$proposed_ci" \
     '$proposed[0:($current | length)] == $current' >/dev/null || {
       echo "checkpoint CI observations do not preserve predecessor history" >&2
       exit 3
     }
+  jq -en --argjson current "$current_record" --argjson proposed "$proposed_record" '
+    def passing($action):
+      $proposed.state == "passing-awaiting-gates-or-review" and
+      $proposed.next_action == $action;
+    def remediation_result:
+      $proposed.state == "failing" or
+      (passing("lightweight-review") and
+       $proposed.gates.lightweight_review_receipt == null and
+       $proposed.gates.fast_gate_receipt == null);
+    if ($current.next_action | test("^(causal-edit|rewrite-invalid-test): \\S")) then
+      remediation_result
+    elif $current.next_action == "lightweight-review" then
+      passing("fast-gate") and
+      $proposed.test == $current.test and
+      ($proposed.gates.lightweight_review_receipt | type == "string") and
+      $proposed.gates.fast_gate_receipt == null
+    elif $current.next_action == "fast-gate" then
+      passing("commit-or-record-local-snapshot") and
+      $proposed.test == $current.test and
+      $proposed.gates.lightweight_review_receipt == $current.gates.lightweight_review_receipt and
+      ($proposed.gates.fast_gate_receipt | type == "string")
+    elif $current.next_action == "commit-or-record-local-snapshot" then
+      $proposed.test == $current.test and
+      $proposed.gates.lightweight_review_receipt == $current.gates.lightweight_review_receipt and
+      $proposed.gates.fast_gate_receipt == $current.gates.fast_gate_receipt and
+      (($proposed.state == "committed" and $proposed.next_action == "verify-exact-commit") or
+       ($proposed.state == "pushed-or-delivery-mode-equivalent" and
+        $proposed.delivery.mode == "local-only" and $proposed.next_action == "terminal-review"))
+    elif $current.next_action == "verify-exact-commit" then
+      $proposed.state == "committed" and
+      ($proposed.next_action | IN("repair-exact-identity-verification", "push", "record-local-delivery"))
+    elif $current.next_action == "repair-exact-identity-verification" then
+      $proposed.state == "committed" and $proposed.next_action == "verify-exact-commit"
+    elif $current.next_action == "push" then
+      $proposed.state == "pushed-or-delivery-mode-equivalent" and
+      $proposed.next_action == "register-exact-sha-ci-monitor"
+    elif $current.next_action == "record-local-delivery" then
+      $proposed.state == "pushed-or-delivery-mode-equivalent" and
+      $proposed.delivery.mode == "local-only" and $proposed.next_action == "terminal-review"
+    elif ($current.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery")) then
+      $proposed.state == "pushed-or-delivery-mode-equivalent" and
+      ($proposed.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery", "terminal-review"))
+    elif $current.next_action == "terminal-review" then
+      remediation_result
+    else
+      ($proposed | del(.generation, .predecessor_sha256, .next_action)) ==
+      ($current | del(.generation, .predecessor_sha256, .next_action)) and
+      ($proposed.next_action | test("^(causal-edit|rewrite-invalid-test): \\S"))
+    end
+  ' >/dev/null || {
+    echo "successor does not perform predecessor next_action" >&2
+    exit 3
+  }
 else
   [[ $expected_generation -eq 0 && $expected_predecessor == null ]] || { echo "missing checkpoint predecessor" >&2; exit 3; }
 fi

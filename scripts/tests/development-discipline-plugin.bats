@@ -187,22 +187,34 @@ setup() {
   run bash -c 'cd "$1" && "$2" legacy-upgrade 2 "$3" "$4"' _ "$repo" "$writer" "$legacy_predecessor" "$stale"
   [ "$status" -eq 0 ]
 
+  run bash -c 'cd "$1" && "$2" passing-sequence 0 null "$3"' _ "$repo" "$writer" "$first"
+  [ "$status" -eq 0 ]
+  case_target="$repo/.git/development-system/checkpoints/passing-sequence.latest"
+  case_predecessor=$(sha256sum "$case_target" | cut -d ' ' -f 1)
+  passing_generation=1
   for passing_case in lightweight fast commit; do
-    case_id="passing-$passing_case"
-    run bash -c 'cd "$1" && "$2" "$3" 0 null "$4"' _ "$repo" "$writer" "$case_id" "$first"
-    [ "$status" -eq 0 ]
-    case_target="$repo/.git/development-system/checkpoints/$case_id.latest"
-    case_predecessor=$(sha256sum "$case_target" | cut -d ' ' -f 1)
     case "$passing_case" in
       lightweight) light=null; fast=null; action=lightweight-review ;;
       fast) light='"review"'; fast=null; action=fast-gate ;;
       commit) light='"review"'; fast='"gate"'; action=commit-or-record-local-snapshot ;;
     esac
-    passing_json=$(jq -cn --arg predecessor "$case_predecessor" --arg head "$head_oid" --arg empty "$empty_sha" --arg action "$action" --argjson light "$light" --argjson fast "$fast" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"passing-awaiting-gates-or-review",test:{command:"test",receipt_ref:"receipt",outcome:"pass",failure_kind:null},gates:{lightweight_review_receipt:$light,fast_gate_receipt:$fast,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:$action}')
+    passing_json=$(jq -cn --argjson generation "$passing_generation" --arg predecessor "$case_predecessor" --arg head "$head_oid" --arg empty "$empty_sha" --arg action "$action" --argjson light "$light" --argjson fast "$fast" '{generation:$generation,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"passing-awaiting-gates-or-review",test:{command:"test",receipt_ref:"receipt",outcome:"pass",failure_kind:null},gates:{lightweight_review_receipt:$light,fast_gate_receipt:$fast,exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:$action}')
     printf 'checkpoint-v1 %s\n' "$passing_json" >"$stale"
-    run bash -c 'cd "$1" && "$2" "$3" 1 "$4" "$5"' _ "$repo" "$writer" "$case_id" "$case_predecessor" "$stale"
+    run bash -c 'cd "$1" && "$2" passing-sequence "$3" "$4" "$5"' _ "$repo" "$writer" "$passing_generation" "$case_predecessor" "$stale"
     [ "$status" -eq 0 ]
+    case_predecessor=$(sha256sum "$case_target" | cut -d ' ' -f 1)
+    passing_generation=$((passing_generation + 1))
   done
+
+  run bash -c 'cd "$1" && "$2" skipped-gates 0 null "$3"' _ "$repo" "$writer" "$first"
+  [ "$status" -eq 0 ]
+  skipped_target="$repo/.git/development-system/checkpoints/skipped-gates.latest"
+  skipped_predecessor=$(sha256sum "$skipped_target" | cut -d ' ' -f 1)
+  skipped_json=$(printf '%s' "$passing_json" | jq -c --arg predecessor "$skipped_predecessor" '.generation = 1 | .predecessor_sha256 = $predecessor')
+  printf 'checkpoint-v1 %s\n' "$skipped_json" >"$stale"
+  run bash -c 'cd "$1" && "$2" skipped-gates 1 "$3" "$4"' _ "$repo" "$writer" "$skipped_predecessor" "$stale"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"successor does not perform predecessor next_action"* ]]
 
   invalid_passing_json=$(jq -cn --arg predecessor "$predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"passing-awaiting-gates-or-review",test:{command:"test",receipt_ref:"receipt",outcome:"pass",failure_kind:null},gates:{lightweight_review_receipt:null,fast_gate_receipt:"gate",exact_identity_verification_receipt:null},delivery:null,ci:{runs:[],terminal_success_run_id:null},next_action:"lightweight-review"}')
   printf 'checkpoint-v1 %s\n' "$invalid_passing_json" >"$stale"
@@ -246,6 +258,8 @@ setup() {
   run bash -c 'cd "$1" && "$2" remote-ci 0 null "$3"' _ "$repo" "$writer" "$stale"
   [ "$status" -eq 0 ]
   remote_target="$repo/.git/development-system/checkpoints/remote-ci.latest"
+  remote_ready_json=$(jq -cn --arg head "$head_oid" --arg empty "$empty_sha" '{generation:0,predecessor_sha256:null,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:{command:"test",receipt_ref:"receipt",outcome:"pass",failure_kind:null},gates:{lightweight_review_receipt:"review",fast_gate_receipt:"gate",exact_identity_verification_receipt:{receipt_ref:"verification",outcome:"pass"}},delivery:{mode:"direct-to-trunk",commit_oid:$head,pushed_oid:$head,local_snapshot:null},ci:{runs:[],terminal_success_run_id:null},next_action:"register-exact-sha-ci-monitor"}')
+  printf 'checkpoint-v1 %s\n' "$remote_ready_json" >"$remote_target"
   remote_predecessor=$(sha256sum "$remote_target" | cut -d ' ' -f 1)
   remote_failure_json=$(jq -cn --arg predecessor "$remote_predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:{command:"test",receipt_ref:"receipt",outcome:"pass",failure_kind:null},gates:{lightweight_review_receipt:"review",fast_gate_receipt:"gate",exact_identity_verification_receipt:{receipt_ref:"verification",outcome:"pass"}},delivery:{mode:"direct-to-trunk",commit_oid:$head,pushed_oid:$head,local_snapshot:null},ci:{runs:[{provider:"ci",run_id:"failed",commit_oid:$head,status:"failure"}],terminal_success_run_id:null},next_action:"edit"}')
   printf 'checkpoint-v1 %s\n' "$remote_failure_json" >"$stale"
@@ -274,6 +288,7 @@ setup() {
   run bash -c 'cd "$1" && "$2" cross-commit-ci 0 null "$3"' _ "$repo" "$writer" "$stale"
   [ "$status" -eq 0 ]
   cross_commit_target="$repo/.git/development-system/checkpoints/cross-commit-ci.latest"
+  printf 'checkpoint-v1 %s\n' "$remote_ready_json" >"$cross_commit_target"
   cross_commit_predecessor=$(sha256sum "$cross_commit_target" | cut -d ' ' -f 1)
   retained_older_ci_json=$(jq -cn --arg predecessor "$cross_commit_predecessor" --arg head "$head_oid" --arg empty "$empty_sha" '{generation:1,predecessor_sha256:$predecessor,baseline_oid:$head,snapshot:{head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty},state:"pushed-or-delivery-mode-equivalent",test:{command:"test",receipt_ref:"receipt",outcome:"pass",failure_kind:null},gates:{lightweight_review_receipt:"review",fast_gate_receipt:"gate",exact_identity_verification_receipt:{receipt_ref:"verification",outcome:"pass"}},delivery:{mode:"direct-to-trunk",commit_oid:$head,pushed_oid:$head,local_snapshot:null},ci:{runs:[{provider:"ci",run_id:"older-success",commit_oid:"1111111111111111111111111111111111111111",status:"success"}],terminal_success_run_id:null},next_action:"register-exact-sha-ci-monitor"}')
   printf 'checkpoint-v1 %s\n' "$retained_older_ci_json" >"$stale"
