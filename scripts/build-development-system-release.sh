@@ -49,7 +49,7 @@ build_component() {
 build_component tiber tiber
 build_component development-discipline development-discipline-mcp
 
-mkdir -p "$build_root/home"
+mkdir -p "$build_root/home" "$build_root/codex-home"
 for binary in tiber development-discipline-mcp; do
   binary_path="$build_root/$binary"
   file "$binary_path" | grep -Eq 'static(-pie|ally) linked' || {
@@ -68,8 +68,20 @@ for binary in tiber development-discipline-mcp; do
     printf '%s\n' "development_system.release_binary_has_nix_reference binary=$binary" >&2
     exit 1
   fi
-  env -i PATH=/usr/bin:/bin HOME="$build_root/home" "$binary_path" --help >/dev/null
 done
+
+initialize_request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"release-builder","version":"0.0.0"}}}'
+initialize_binary() {
+  local binary=$1
+  local expected_name=$2
+  shift 2
+  printf '%s\n' "$initialize_request" |
+    env -i PATH=/usr/bin:/bin HOME="$build_root/home" CODEX_HOME="$build_root/codex-home" \
+      "$build_root/$binary" "$@" |
+    grep -Fq "\"name\":\"$expected_name\""
+}
+initialize_binary development-discipline-mcp development-discipline --service plugin-advisory
+initialize_binary tiber tiber mcp stdio
 
 release_name="development-system-v${version}"
 bundle_root="$build_root/$release_name-$platform"

@@ -21,7 +21,11 @@ setup() {
     'done' \
     'printf "%s|%s|%s\n" "$PWD" "$binary" "$target" >>"$CARGO_LOG"' \
     'mkdir -p "$CARGO_TARGET_DIR/$target/release"' \
-    'printf "%s\n" "#!/bin/sh" "${START_COMMAND:-exit 0}" >"$CARGO_TARGET_DIR/$target/release/$binary"' \
+    'if [[ -n "${START_COMMAND:-}" ]]; then' \
+    '  printf "%s\n" "#!/bin/sh" "$START_COMMAND" >"$CARGO_TARGET_DIR/$target/release/$binary"' \
+    'else' \
+    '  printf "%s\n" "#!/bin/sh" "read request" "case \"\${0##*/}\" in" "  tiber) echo '\''{\"name\":\"tiber\"}'\'' ;;" "  *) echo '\''{\"name\":\"development-discipline\"}'\'' ;;" "esac" >"$CARGO_TARGET_DIR/$target/release/$binary"' \
+    'fi' \
     'if [[ "${NIX_REFERENCE:-}" == "$binary" ]]; then printf "%s\n" "/nix/store/example" >>"$CARGO_TARGET_DIR/$target/release/$binary"; fi' \
     'chmod +x "$CARGO_TARGET_DIR/$target/release/$binary"' >"$FAKE_BIN/cargo"
   printf '%s\n' '#!/bin/sh' 'if [ "${STATIC_FAILURE:-}" = 1 ]; then echo "$2: ELF 64-bit LSB pie executable, dynamically linked"; else echo "$2: ELF 64-bit LSB executable, statically linked"; fi' >"$FAKE_BIN/file"
