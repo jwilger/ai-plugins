@@ -4,14 +4,16 @@ The single personal development plugin for Codex.
 
 ## Host-local binaries
 
-After installing or upgrading this plugin, build its Rust executables once from
-the marketplace checkout:
+After installing or upgrading this plugin, download and verify its Rust
+executables once from the marketplace checkout:
 
 ```shell
 just install-development-system-binaries
 ```
 
-The command builds only the current host and atomically installs `tiber` and
+On Linux x86_64, the command downloads the exact plugin-version bundle from the
+repository's GitHub Release, verifies its SHA-256 sidecar and fixed archive
+layout, and atomically installs `tiber` and
 `development-discipline-mcp` in
 `$XDG_DATA_HOME/ai-plugins/development-system/<plugin-version>/<host>/`.
 When `XDG_DATA_HOME` is unset, it uses `~/.local/share`. Re-running the command
@@ -25,8 +27,15 @@ configuration.
 Those entries launch the installed binaries by their absolute XDG paths; they
 do not launch a plugin-relative shell wrapper. Re-run setup after an upgrade,
 then start a new harness session.
-The bootstrap requires a working Cargo environment; the repository's Nix
-devshell is optional. If `just` is unavailable, run
+The release bundle contains statically linked Linux x86_64 executables, the
+applicable license, and the exact source tag and commit. Other hosts must use
+the explicit source fallback and a working Cargo environment:
+
+```shell
+just install-development-system-binaries --from-source
+```
+
+The repository's Nix devshell is optional. If `just` is unavailable, run
 `scripts/install-development-system-binaries.sh` from the marketplace checkout.
 
 The `setup` skill runs this bootstrap automatically before it configures a

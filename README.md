@@ -22,7 +22,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harness | Description                                                                                          | Version |
 | ---------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.2.5   |
+| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.3.0   |
 
 ## Using the marketplace (Codex)
 
@@ -34,9 +34,11 @@ using the Codex plugin flow available in your Codex environment.
 
 Install `development-system` from the local marketplace, then start a new
 thread and run its setup skill from the target repository's primary checkout.
-The setup skill installs the required current-host binaries before configuring
-the repository. You can also run `just install-development-system-binaries`
-manually from the marketplace checkout.
+The setup skill downloads and verifies the version-matched Linux x86_64 release
+bundle before configuring the repository. You can also run
+`just install-development-system-binaries` manually from the marketplace
+checkout. Other hosts can explicitly build with
+`just install-development-system-binaries --from-source`.
 
 ## Developing in this repo
 
@@ -168,7 +170,8 @@ partial artifacts under
 
 If Codex reports a missing Development System binary, run
 `just install-development-system-binaries` from the matching
-marketplace checkout. For an explicitly configured Promptfoo server, also
+marketplace checkout. On hosts other than Linux x86_64, add `--from-source` and
+use a working Cargo environment. For an explicitly configured Promptfoo server, also
 verify that the pinned runtime above is available on `PATH`.
 
 ## Reporting eval cases

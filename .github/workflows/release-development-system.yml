@@ -1,0 +1,149 @@
+name: Release Development System
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+concurrency:
+  group: release-development-system
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build attested static bundle
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      archive: ${{ steps.version.outputs.archive }}
+      commit: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the green commit is still main
+        id: commit
+        env:
+          GREEN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch --no-tags origin refs/heads/main
+          main_sha="$(git rev-parse FETCH_HEAD)"
+          [ "$main_sha" = "$GREEN_SHA" ] || {
+            echo "Green commit $GREEN_SHA is no longer the main tip ($main_sha); skipping stale release." >&2
+            exit 1
+          }
+          [ "$(git rev-parse HEAD)" = "$GREEN_SHA" ]
+          echo "sha=$GREEN_SHA" >>"$GITHUB_OUTPUT"
+
+      - name: Derive synchronized release identity
+        id: version
+        run: |
+          plugin_version="$(jq -er '.version' plugins/development-system/.codex-plugin/plugin.json)"
+          marketplace_version="$(jq -er '.plugins[] | select(.name == "development-system") | .version' .agents/plugins/marketplace.json)"
+          [ "$plugin_version" = "$marketplace_version" ]
+          tag="development-system-v$plugin_version"
+          {
+            echo "version=$plugin_version"
+            echo "tag=$tag"
+            echo "archive=$tag-linux-x86_64.tar.gz"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Install pinned Rust target and musl linker
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          rustup target add --toolchain 1.96.0 x86_64-unknown-linux-musl
+
+      - name: Build and inspect release assets
+        run: scripts/build-development-system-release.sh dist
+
+      - name: Generate GitHub build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            dist/${{ steps.version.outputs.archive }}
+            dist/${{ steps.version.outputs.archive }}.sha256
+
+      - name: Preserve assets for isolated publication
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-system-release-${{ steps.commit.outputs.sha }}
+          path: |
+            dist/${{ steps.version.outputs.archive }}
+            dist/${{ steps.version.outputs.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish immutable release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.build.outputs.tag }}
+      ARCHIVE: ${{ needs.build.outputs.archive }}
+      GREEN_SHA: ${{ needs.build.outputs.commit }}
+    steps:
+      - name: Download attested build outputs
+        uses: actions/download-artifact@v5
+        with:
+          name: development-system-release-${{ needs.build.outputs.commit }}
+          path: dist
+
+      - name: Create, repair, verify, and publish the release
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+          if [ -n "$tag_sha" ] && [ "$tag_sha" != "$GREEN_SHA" ]; then
+            echo "Tag $TAG points to $tag_sha instead of $GREEN_SHA." >&2
+            exit 1
+          fi
+
+          release_json="$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>/dev/null || true)"
+          if [ -n "$release_json" ] && [ "$(jq -r '.draft' <<<"$release_json")" = false ]; then
+            [ "$tag_sha" = "$GREEN_SHA" ] || {
+              echo "Published release $TAG does not have its immutable tag at $GREEN_SHA." >&2
+              exit 1
+            }
+            for asset in "$ARCHIVE" "$ARCHIVE.sha256"; do
+              jq -e --arg asset "$asset" '.assets | any(.name == $asset)' <<<"$release_json" >/dev/null || {
+                echo "Published release $TAG is missing $asset and cannot be repaired." >&2
+                exit 1
+              }
+            done
+            echo "Published release $TAG already has the expected immutable assets."
+            exit 0
+          fi
+
+          if [ -z "$release_json" ]; then
+            gh release create "$TAG" --draft --latest=false --target "$GREEN_SHA" \
+              --title "Development System $TAG" \
+              --notes "Static linux-x86_64 Development System MCP bundle built from $GREEN_SHA." \
+              "dist/$ARCHIVE" "dist/$ARCHIVE.sha256"
+          else
+            gh release upload "$TAG" --clobber "dist/$ARCHIVE" "dist/$ARCHIVE.sha256"
+          fi
+
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$verify_dir"' EXIT
+          gh release download "$TAG" --dir "$verify_dir" --pattern "$ARCHIVE" --pattern "$ARCHIVE.sha256"
+          (cd "$verify_dir" && sha256sum -c "$ARCHIVE.sha256")
+          gh release edit "$TAG" --draft=false --latest=false --target "$GREEN_SHA"
+          [ "$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha')" = "$GREEN_SHA" ]

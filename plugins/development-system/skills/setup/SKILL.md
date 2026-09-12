@@ -7,11 +7,18 @@ description: Use when initializing or reconfiguring a repository with the develo
 
 1. Resolve the installed Development System plugin root relative to this skill,
    then run `scripts/install-development-system-binaries.sh` from that root.
-   This is a required setup prerequisite: it builds and installs the current
-   host's `tiber` and `development-discipline-mcp` executables with Cargo. Do
-   not use Nix as a requirement and do not defer this to the user. If Cargo or
-   its required dependencies are unavailable, stop with the installer's
-   diagnostic; do not configure a repository whose MCPs cannot start.
+   This is a required setup prerequisite: on Linux x86_64 it downloads the
+   exact plugin-version GitHub Release bundle, verifies its SHA-256 checksum and
+   archive layout, and atomically installs `tiber` and
+   `development-discipline-mcp`. Do not require Cargo or Nix for this default
+   path and do not defer installation to the user. On another host, explain
+   that `--from-source` performs the locked Cargo builds and therefore requires
+   a working Cargo environment, then rerun the installer with that option. If
+   download, verification, extraction, or source compilation fails, stop with
+   the installer's diagnostic; do not configure a repository whose MCPs cannot
+   start. In the setup sequence you present, state explicitly that the supported
+   default is an exact-version, checksum-verified GitHub Release download that
+   needs no Cargo; do not leave that contract implicit in the command name.
 2. From the primary checkout, invoke the installed `development-discipline-mcp`
    binary directly for `setup.preview`, then `setup.apply`. Select at least one detected
    verification/test command, preferring `recommended_command_ids`; an empty
@@ -27,7 +34,11 @@ description: Use when initializing or reconfiguring a repository with the develo
 4. Tell the user to restart Codex. The restarted session starts
    both MCP servers from the concrete absolute XDG binary paths in that project's
    configuration. Do not add a global `mcp_servers` override to compensate for
-   startup failure.
+   startup failure. From a working directory outside the plugin checkout,
+   verify both installed executables through those versioned absolute paths:
+   initialize `development-discipline-mcp` and initialize Tiber's MCP stdio
+   server. A status response from only one server is not complete startup
+   evidence.
 
 The plugin is advisory. Setup does not prove or enforce caller identity,
 per-agent tool filtering, sandboxing, or mutation denial. Ordinary Codex can

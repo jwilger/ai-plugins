@@ -485,9 +485,11 @@ admit the generated workflow.
 Tiber ships Rust source and a `bin/tiber` launcher. After installing or
 upgrading Development System, run
 `just install-development-system-binaries` from the marketplace
-checkout. It builds Tiber for the current host and installs it alongside the
-matching Development Discipline MCP binary. The launcher only executes that
-installed versioned binary; it never invokes Cargo.
+checkout. It installs Tiber alongside the matching Development Discipline MCP
+binary. Linux x86_64 uses the verified
+version-matched GitHub Release by default; other hosts explicitly pass
+`--from-source` and require Cargo. The launcher only executes the installed
+versioned binary; it never invokes Cargo.
 
 ## Harness Support
 

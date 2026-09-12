@@ -5,7 +5,7 @@ bats_require_minimum_version 1.5.0
 setup_file() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd -P)"
   export XDG_DATA_HOME="$BATS_FILE_TMPDIR/xdg-data"
-  just --justfile "$ROOT/justfile" install-development-system-binaries
+  just --justfile "$ROOT/justfile" install-development-system-binaries --from-source
 }
 
 setup() {
@@ -68,7 +68,7 @@ list_server_tools() {
   first_target="$(readlink "$host_link")"
   [[ -n "$first_target" ]]
 
-  run just --justfile "$ROOT/justfile" install-development-system-binaries
+  run just --justfile "$ROOT/justfile" install-development-system-binaries --from-source
   [ "$status" -eq 0 ]
   [[ "$output" == *"development_system.binaries_installed"* ]]
   [ -x "$tiber_path" ]
@@ -109,7 +109,7 @@ list_server_tools() {
     CARGO_TARGET_DIR="$fake_target" \
     CARGO_CALL_LOG="$call_log" \
     XDG_DATA_HOME="$TMPROOT/fake-cargo-xdg-data" \
-    "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh"
+    "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" --from-source
 
   [ "$status" -eq 0 ]
   mapfile -t directories <"$call_log"
@@ -143,7 +143,7 @@ list_server_tools() {
     PATH="$fake_bin:$PATH" \
     CARGO_TARGET_LOG="$target_log" \
     XDG_DATA_HOME="$data_home" \
-    "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh"
+    "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" --from-source
 
   [ "$status" -eq 0 ]
   [ "$(wc -l <"$target_log")" -eq 2 ]
@@ -185,8 +185,8 @@ list_server_tools() {
     XDG_DATA_HOME="$data_home" \
     STATUS_DIR="$status_dir" \
     bash -c '
-      "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" >"$STATUS_DIR/one.log" 2>&1 & one=$!
-      "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" >"$STATUS_DIR/two.log" 2>&1 & two=$!
+      "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" --from-source >"$STATUS_DIR/one.log" 2>&1 & one=$!
+      "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" --from-source >"$STATUS_DIR/two.log" 2>&1 & two=$!
       wait "$one"; one_status=$?
       wait "$two"; two_status=$?
       printf "%s %s\n" "$one_status" "$two_status"
@@ -234,7 +234,7 @@ list_server_tools() {
     PATH="$fake_bin:$PATH" \
     REAL_MV="$real_mv" \
     XDG_DATA_HOME="$data_home" \
-    "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh"
+    "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" --from-source
 
   [ "$status" -ne 0 ]
   [ -x "$data_home/ai-plugins/development-system/$version/$host/tiber" ]
@@ -274,7 +274,7 @@ list_server_tools() {
     PATH="$fake_bin:$PATH" \
     CARGO_TARGET_DIR="$relative_target" \
     XDG_DATA_HOME="$TMPROOT/relative-cargo-xdg-data" \
-    "$ROOT/scripts/install-development-system-binaries.sh"
+    "$ROOT/scripts/install-development-system-binaries.sh" --from-source
 
   rm -rf -- "$expected_target"
   [ "$status" -eq 0 ]
@@ -394,7 +394,7 @@ list_server_tools() {
   [[ "$config" == *"command = \"$expected_tiber\""* ]]
   [[ "$config" != *".staging."* ]]
 
-  run just --justfile "$ROOT/justfile" install-development-system-binaries
+  run just --justfile "$ROOT/justfile" install-development-system-binaries --from-source
   [ "$status" -eq 0 ]
   [ -x "$expected_discipline" ]
   [ -x "$expected_tiber" ]

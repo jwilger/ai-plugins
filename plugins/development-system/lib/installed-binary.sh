@@ -63,7 +63,7 @@ development_system_exec_installed_binary() {
   binary_path="$data_home/ai-plugins/development-system/$version/$host/$binary_name"
   if [[ ! -x "$binary_path" ]]; then
     printf '%s\n' \
-      "development_system.binary_missing binary=$binary_path remediation='run the Development System setup skill, or from the marketplace checkout run: just install-development-system-binaries; requires Cargo'" >&2
+      "development_system.binary_missing binary=$binary_path remediation='run the Development System setup skill, or from the marketplace checkout run: just install-development-system-binaries; unsupported hosts use --from-source with Cargo'" >&2
     exit 1
   fi
   exec "$binary_path" "$@"

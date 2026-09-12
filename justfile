@@ -52,8 +52,8 @@ development-discipline-rust:
     cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
     cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml -- --test-threads=1
 
-install-development-system-binaries:
-    scripts/install-development-system-binaries.sh
+install-development-system-binaries *args:
+    scripts/install-development-system-binaries.sh {{args}}
 
 # Browser smoke coverage for the read-only tiber dashboard.
 tiber-dashboard-smoke:

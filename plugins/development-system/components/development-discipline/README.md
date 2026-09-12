@@ -81,7 +81,7 @@ requested route, the agent reports that failure
 instead of treating inheritance or substitution as success.
 
 The final-review coordinator runs from the Development System plugin's
-versioned host-local binary installation. Build it with
+versioned host-local binary installation. Download and verify it with
 `just install-development-system-binaries` from the marketplace
 checkout after every plugin install or upgrade. The launcher never compiles
 source at runtime.
