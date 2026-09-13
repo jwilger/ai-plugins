@@ -5,10 +5,61 @@ setup() {
   PLANNER="$ROOT/scripts/evals/plan-model-routing-campaign.mjs"
   RUNNER="$ROOT/scripts/evals/run-model-routing-job.mjs"
   CODEX_JUDGE_PROVIDER="$ROOT/evals/benchmarks/model-routing/codex-judge-provider.mjs"
+  CODEX_SUBJECT_PROVIDER="$ROOT/evals/benchmarks/model-routing/codex-subject-provider.mjs"
   CAMPAIGN="$ROOT/evals/benchmarks/model-routing/campaign.json"
   CASES="$ROOT/evals/benchmarks/model-routing/cases.json"
   TMPROOT="$(mktemp -d)"
   PLAN="$TMPROOT/plan.json"
+}
+
+@test "Codex subject adapter binds a prepared fixture workspace and execution surface" {
+  run node --input-type=module - "$CODEX_SUBJECT_PROVIDER" <<'EOF'
+import { pathToFileURL } from "node:url";
+const { createCodexSubjectProviderFunction } = await import(pathToFileURL(process.argv[2]));
+let observed;
+const inner = {
+  async callApi(prompt) {
+    if (prompt !== "implement fix") throw new Error("unexpected prompt");
+    return {
+      output: "done",
+      tokenUsage: { prompt: 13, cached: 1, completion: 7, total: 20 },
+      raw: JSON.stringify({ notifications: [] })
+    };
+  },
+  async cleanup() {}
+};
+const run = createCodexSubjectProviderFunction({
+  providerLoader: async (id, options) => {
+    observed = { id, options };
+    return inner;
+  },
+  prepareWorkspace: () => "/tmp/fixed-workspace",
+  environment: {
+    MODEL_ROUTING_CODEX_HOME: "/tmp/codex-home",
+    MODEL_ROUTING_TOOL_PATH: "/nix/store/example-tools/bin"
+  },
+  now: (() => { const values = [10, 55]; return () => values.shift(); })()
+});
+const result = await run({
+  job_id: "implementation/case-001/gpt-5.6-terra/high",
+  prompt: "implement fix",
+  fixture: "implementation-001",
+  model: "gpt-5.6-terra",
+  effort: "high",
+  execution_surface: "workspace-write"
+});
+console.log(JSON.stringify({ result, observed }));
+EOF
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.observed.id' <<<"$output")" = "openai:codex-app-server" ]
+  [ "$(jq -r '.observed.options.options.config.model' <<<"$output")" = "gpt-5.6-terra" ]
+  [ "$(jq -r '.observed.options.options.config.model_reasoning_effort' <<<"$output")" = "high" ]
+  [ "$(jq -r '.observed.options.options.config.working_dir' <<<"$output")" = "/tmp/fixed-workspace" ]
+  [ "$(jq -r '.observed.options.options.config.sandbox_mode' <<<"$output")" = "workspace-write" ]
+  [ "$(jq -r '.observed.options.options.config.network_access_enabled' <<<"$output")" = "false" ]
+  [ "$(jq -r '.observed.options.options.config.cli_config.features.plugins' <<<"$output")" = "true" ]
+  [ "$(jq -r '.result.usage.input_tokens' <<<"$output")" -eq 13 ]
+  [ "$(jq -r '.result.elapsed_ms' <<<"$output")" -eq 45 ]
 }
 
 @test "Codex judge adapter pins model and effort while preserving isolated execution and usage" {
