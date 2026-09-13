@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "campaign_id": "development-system-model-routing-v1",
+  "status": "measurement",
+  "behavior_claim": "Each development role uses the least-cost supported model and reasoning effort that preserves accepted-task quality and meets the approved completion-time tradeoff.",
+  "unit_of_analysis": "accepted task trajectory",
+  "task_families": [
+    "mechanical-assistance",
+    "implementation-and-tests",
+    "review",
+    "diagnosis-and-correction",
+    "architecture-and-advice",
+    "orchestration"
+  ],
+  "case_kinds": [
+    "nominal",
+    "boundary",
+    "expected-error-or-refusal",
+    "partial-credit",
+    "adversarial",
+    "regression"
+  ],
+  "candidates": {
+    "models": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"],
+    "efforts": ["low", "medium", "high", "xhigh", "max"],
+    "mechanical_additional_efforts": ["none"],
+    "unsupported_combinations_are_results": true,
+    "service_tier": "standard"
+  },
+  "sampling": {
+    "screening": {
+      "distinct_cases_per_task_family": 8,
+      "samples_per_case": 1,
+      "metric": "paired accepted-task rate"
+    },
+    "confirmation": {
+      "held_out_distinct_cases_per_task_family": 160,
+      "samples_per_case": 1,
+      "metric": "paired candidate-only failure rate"
+    },
+    "reliability": {
+      "difficult_cases_per_task_family": 8,
+      "samples_per_case": 3,
+      "metrics": ["per-run pass rate", "pass^3 reliability"]
+    },
+    "workflow": {
+      "distinct_scenarios": 24,
+      "samples_per_scenario": 3,
+      "policies": ["incumbent", "10kr-inspired", "selected"],
+      "metrics": ["accepted-task rate", "pass^3 reliability"]
+    }
+  },
+  "promotion": {
+    "quality": {
+      "critical_regressions_allowed": 0,
+      "accepted_task_success": "not-lower-than-incumbent",
+      "candidate_only_failure_upper_bound": {
+        "confidence": 0.95,
+        "maximum": 0.02,
+        "sidedness": "one-sided"
+      },
+      "inconclusive_result": "retain-incumbent"
+    },
+    "efficiency": {
+      "minimum_subscription_savings": 0.25,
+      "maximum_completion_time_increase": 0.25,
+      "alternative": {
+        "minimum_completion_time_savings": 0.15,
+        "maximum_subscription_increase": 0.1
+      }
+    }
+  },
+  "judge": {
+    "isolation": {
+      "plugins": "none",
+      "tools": "none",
+      "workspace": "none",
+      "candidate_identity": "blinded"
+    },
+    "rubric_families": [
+      "instruction-adherence",
+      "engineering-and-architecture",
+      "review-findings",
+      "orchestration-and-advice"
+    ],
+    "reference": {
+      "deterministic_witnesses_first": true,
+      "semantic_assessors": ["gpt-6-astra/high", "gpt-5.6-sol/high"],
+      "disagreement": "unresolved"
+    },
+    "calibration": {
+      "screening_examples_per_rubric_family": 24,
+      "held_out_examples_per_rubric_family": 160,
+      "borderline_samples": 3,
+      "minimum_agreement": 0.95,
+      "critical_false_accepts_allowed": 0,
+      "false_accept_rate": "not-worse-than-reference"
+    },
+    "bias_controls": [
+      "balanced-pairwise-order",
+      "length-audit",
+      "self-preference-audit"
+    ],
+    "uncalibrated_demanding_default": "gpt-6-astra/high"
+  },
+  "cost": {
+    "primary_metric": "subscription credits per accepted task",
+    "latency_metrics": ["active p50", "active p95", "quota wait"],
+    "accounting": {
+      "workflow": [
+        "orchestration",
+        "context-replay",
+        "workers",
+        "operational-review",
+        "corrections",
+        "retries",
+        "escalation"
+      ],
+      "benchmark_judges": "reported-separately",
+      "missing_usage": "unknown"
+    },
+    "rate_card": {
+      "source": "https://learn.chatgpt.com/docs/pricing",
+      "as_of": "2026-09-13",
+      "label": "credit-equivalent estimate"
+    }
+  },
+  "execution": {
+    "max_concurrency": 2,
+    "cache": "disabled",
+    "resumable": true,
+    "purchase_credits": false,
+    "termination_reasons": [
+      "success",
+      "task-failure",
+      "unsupported-model-effort",
+      "timeout",
+      "quota-exhausted",
+      "provider-error",
+      "cancelled",
+      "no-progress"
+    ]
+  },
+  "artifacts": {
+    "manifest": "evals/benchmarks/model-routing/campaign.json",
+    "cases": "evals/benchmarks/model-routing/cases/",
+    "checkpoints": "evals/out/model-routing/checkpoints/",
+    "machine_results": "evals/out/model-routing/results.json",
+    "human_report": "evals/out/model-routing/report.html",
+    "ci_results": "evals/out/model-routing/results.junit.xml",
+    "decision_report": "evals/benchmarks/model-routing/README.md"
+  }
+}
