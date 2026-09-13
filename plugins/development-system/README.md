@@ -22,8 +22,8 @@ Project-local MCP configuration always uses these stable host-directory paths,
 so a same-version reinstall can atomically replace its staging target without
 leaving a project pointed at it.
 The published plugin intentionally carries no bootstrap MCP manifest. During
-project setup, it writes only the project's `.codex/config.toml` MCP
-configuration.
+project setup, it writes the project's `.codex/config.toml` MCP configuration
+alongside the confirmed Development System and Lefthook project files.
 Those entries launch the installed binaries by their absolute XDG paths; they
 do not launch a plugin-relative shell wrapper. Re-run setup after an upgrade,
 then start a new harness session.
@@ -53,14 +53,22 @@ tool. It detects the project's manifests, lockfiles, conventional
 source/test/docs and build paths, Nix devshell, and stack-native test commands,
 then produces a schema-validated project-specific configuration instead of a
 generic template. Review its exact scopes and named command catalog, then
-explicitly confirm `setup.apply`. Setup never stages or commits configuration.
+review the generated project `lefthook.yml` and its separate pre-commit and
+pre-push command selections, then explicitly confirm `setup.apply`. Setup
+installs both Git hooks with Lefthook but never stages or commits configuration.
+
+Normal Development System work relies on those Git operations for repository
+verification: `git commit` triggers the fast pre-commit checks and `git push`
+triggers the pre-push checks. Agents must not run the same gate commands
+separately unless the user explicitly requests a diagnostic run.
 
 The plugin-wide Development Discipline MCP surface provides bounded repository
 inspection, deterministic setup, and multi-agent final review. Those services
 and the Codex hooks are advisory: they
 do not establish agent identity, isolate project tools, execute project
-mutations, or deny ordinary host capabilities. `setup.apply` writes only
-repository-local configuration. It does not generate privileged agents or
+mutations, or deny ordinary host capabilities. `setup.apply` writes only the
+previewed repository-local configuration and installs its Git hook launchers.
+It does not generate privileged agents or
 profiles and never changes global Codex, marketplace, MCP, shell, or
 SSH settings.
 

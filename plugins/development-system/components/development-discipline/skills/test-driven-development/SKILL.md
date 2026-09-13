@@ -68,7 +68,7 @@ only asserts the capability is absent.
 - GREEN is the smallest change that passes the current test without weakening
   another preserved contract.
 - REFACTOR starts only after the focused test, owning component suite, and
-  repository-required fast gate are green.
+  repository-required Lefthook pre-commit gate and commit are green.
 - No production code before the failing test has been observed when RED applies.
 
 When a program creates or edits a file, first test the behavioral effect visible
@@ -103,8 +103,8 @@ then, implementation proceeds one step or scenario at a time.
    the remove-first sequence above with the old tests unchanged.
 5. Run the focused test and the owning component suite.
 6. Run a lightweight post-implementation review, then the
-   repository-required fast gate, before the next testing cycle.
-7. Refactor only after the current GREEN snapshot has completed its fast gate,
+   repository-required pre-commit hook, before the next testing cycle.
+7. Refactor only after the current GREEN snapshot has completed its commit hook,
    signed commit or authorized local-only equivalent, and delivery checkpoint;
    the refactor begins the next per-edit cycle.
 8. Repeat for the next behavior.
@@ -139,21 +139,18 @@ At `passing-awaiting-gates-or-review`, stop all implementation and test editing:
 
 1. Run the lightweight review below. Any remediation is a causal edit and
    returns immediately to the focused-test boundary.
-2. Let the repository fast pre-commit gate run its formatting, linting, unit,
-   manifest/config, and comparable fast checks. Do not duplicate comprehensive
-   suites in a second local exact-commit gate.
-3. When the selected mode authorizes or requires a commit, use
-   `rationale-commit-messages`, create a signed commit, and record its exact OID
-   and the snapshot transition to `committed`. In local-only mode without commit
-   authority, record the exact reviewed and fast-gate-passing worktree snapshot
-   as the authorized no-commit terminal equivalent instead, unless Tiber's
-   opt-in final-review policy makes a local commit repository-required for the
-   selected source and verification paths. Under that policy, withheld commit
-   authority blocks completion without authorizing a push.
-4. Complete the authorized delivery-mode checkpoint immediately and record
+2. When the selected mode authorizes or requires a commit, use
+   `rationale-commit-messages` and create the signed commit. That Git operation
+   must trigger Lefthook's repository fast pre-commit gate; never run the same
+   gate separately first. Record the hook receipt, exact OID, and transition to
+   `committed` together. Local-only verification therefore requires an
+   authorized local commit; withheld commit authority blocks completion rather
+   than replacing the mechanical hook with a manual gate.
+3. Complete the authorized delivery-mode checkpoint immediately and record
    `pushed-or-delivery-mode-equivalent`. Direct-to-trunk pushes normally; PR
    mode pushes only the already-authorized branch and does not infer permission
-   to open or merge; local-only records the locally permitted terminal snapshot
+   to open or merge. The Git push must trigger Lefthook's pre-push verification;
+   do not invoke that gate separately. Local-only records the verified commit
    and performs no remote mutation.
 
 Every interruption preserves the immutable ticket-start baseline, exact
@@ -191,7 +188,7 @@ its configured clean iterations.
 When full review requires a code or guidance edit, first confirm that the most
 recently completed in-scope CI has no unresolved failed job, classify whether
 RED applies and use it when required, then repeat the immediate focused test,
-lightweight review, fast pre-commit gate, and selected delivery-mode checkpoint.
+lightweight review, signed commit through the pre-commit hook, and selected delivery-mode checkpoint.
 Direct-to-trunk and PR/MR use a signed additive commit, exact verification, and
 already-authorized push. Local-only uses a signed local commit only when
 required and authorized, otherwise the exact no-commit snapshot, and performs
@@ -230,17 +227,17 @@ cannot be completed to this standard instead of silently skipping it.
 
 ## Stop Signals
 
-| Signal                                                        | Action                                                                    |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Production code exists without prior RED when required        | Revert or discard it, then restart from the test                          |
-| Test passes immediately                                       | Replace it with a test for missing behavior                               |
-| Test checks internals or mocks instead of behavior            | Rewrite against the public surface                                        |
-| Test checks committed text or CI workflow structure           | Remove it or replace it with observable behavior                          |
-| Several cases are bundled into one test                       | Split them unless this is the acceptance scenario table                   |
-| You want to "add tests after"                                 | Stop; that is not TDD                                                     |
-| Lightweight review is skipped after GREEN                     | Run it before starting the next RED cycle                                 |
-| Another implementation/test edit follows uncheckpointed GREEN | Stop and finish review, fast gate, signed commit, and delivery checkpoint |
-| Unrelated passing work is added to the checkpoint             | Remove it and preserve only the causal snapshot                           |
+| Signal                                                        | Action                                                                                     |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Production code exists without prior RED when required        | Revert or discard it, then restart from the test                                           |
+| Test passes immediately                                       | Replace it with a test for missing behavior                                                |
+| Test checks internals or mocks instead of behavior            | Rewrite against the public surface                                                         |
+| Test checks committed text or CI workflow structure           | Remove it or replace it with observable behavior                                           |
+| Several cases are bundled into one test                       | Split them unless this is the acceptance scenario table                                    |
+| You want to "add tests after"                                 | Stop; that is not TDD                                                                      |
+| Lightweight review is skipped after GREEN                     | Run it before starting the next RED cycle                                                  |
+| Another implementation/test edit follows uncheckpointed GREEN | Stop and finish review, signed commit through the pre-commit hook, and delivery checkpoint |
+| Unrelated passing work is added to the checkpoint             | Remove it and preserve only the causal snapshot                                            |
 
 ## Completion Check
 

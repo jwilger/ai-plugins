@@ -22,7 +22,7 @@ unauthorized. A manual review may produce advisory observations only; it cannot
 authorize terminal delivery, pull/merge request creation, merge, or a readiness
 claim. This does not prohibit independently authorized intermediate or
 review-remediation checkpoint commits and pushes, which remain subject to their
-own focused-test, lightweight-review, fast-gate, signing, and delivery-mode
+own focused-test, lightweight-review, signed commit through Lefthook, and delivery-mode
 rules. Report the unavailable enforcement boundary and every requested bypass
 reason. For example, state explicitly that budget or time pressure cannot skip
 the remaining passes and that a one-pass request cannot replace three complete

@@ -12792,7 +12792,7 @@ fn semantic_tools() -> Vec<Value> {
         json!({
             "name": "workspace-reader.status",
             "description": "Read whether Development System is absent, configured, or invalid for this Git repository. The result is advisory and never changes ordinary harness capabilities.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root }, "additionalProperties": false }
+            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 }, "pre_commit_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "minItems": 1, "maxItems": 16 }, "pre_push_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "minItems": 1, "maxItems": 16 }, "replace_lefthook": { "type": "boolean" } }, "additionalProperties": false }
         }),
         json!({
             "name": "workspace-reader.read",
@@ -12980,8 +12980,8 @@ fn semantic_tools() -> Vec<Value> {
         }),
         json!({
             "name": "setup.apply",
-            "description": "Apply the exact setup.preview configuration after explicit confirmation and write Codex's project-local MCP entries. It never stages, commits, or changes global Codex settings.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 } }, "required": ["confirmed"], "additionalProperties": false }
+            "description": "Apply the exact setup.preview configuration after explicit confirmation, install the approved project Lefthook pre-commit and pre-push jobs, and write Codex's project-local MCP entries. It never stages, commits, or changes global Codex settings.",
+            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 }, "pre_commit_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "minItems": 1, "maxItems": 16 }, "pre_push_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "minItems": 1, "maxItems": 16 }, "replace_lefthook": { "type": "boolean" } }, "required": ["confirmed"], "additionalProperties": false }
         }),
         json!({
             "name": "development_system.codex_sandbox_setup",
@@ -13442,7 +13442,10 @@ fn call_semantic_tool(name: &str, arguments: &Value) -> Result<Value, String> {
             config["final_review_protocol"] = final_review_protocol_attestation();
             Ok(semantic_result(config))
         }
-        "setup.preview" => Ok(semantic_result(semantic_setup_preview(&project_root)?)),
+        "setup.preview" => Ok(semantic_result(semantic_setup_preview(
+            &project_root,
+            arguments,
+        )?)),
         "setup.apply" => apply_setup(&project_root, arguments).map(semantic_result),
         _ => Err(format!("unsupported tool: {name}")),
     }
@@ -13452,7 +13455,7 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
     if arguments.get("confirmed") != Some(&Value::Bool(true)) {
         return Err("development_system.setup_confirmation_required".to_string());
     }
-    let preview = semantic_setup_preview(project_root)?;
+    let preview = semantic_setup_preview(project_root, arguments)?;
     let migrating = preview.get("configuration_state")
         == Some(&Value::String("migration_required".to_string()));
     let configuration_path = project_root.join(semantic::CONFIG_FILE);
@@ -13465,6 +13468,20 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         .get("configuration")
         .and_then(Value::as_str)
         .ok_or_else(|| "development_system.setup_preview_invalid".to_string())?;
+    let lefthook_preview = preview
+        .get("lefthook_configuration")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "development_system.setup_preview_invalid".to_string())?;
+    if fs::read_to_string(project_root.join("lefthook.yml"))
+        .ok()
+        .as_deref()
+        .is_some_and(|existing| existing != lefthook_preview)
+        && arguments.get("replace_lefthook") != Some(&Value::Bool(true))
+    {
+        return Err(
+            "development_system.setup_lefthook_conflict replace_lefthook_required=true".to_string(),
+        );
+    }
     let has_commands = setup_configuration_has_commands(base_configuration)?;
     if !has_commands && !selected_commands {
         return Err("development_system.setup_command_selection_required".to_string());
@@ -13491,6 +13508,7 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         }
         semantic::ConfigState::Invalid(error) => return Err(error),
     };
+    let lefthook = write_project_lefthook_configuration(project_root, &config, arguments)?;
     let harness_configuration = write_project_mcp_configuration(project_root)?;
     Ok(json!({
         "applied": true,
@@ -13500,8 +13518,135 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         "authority": "advisory",
         "ordinary_harness_tools_restricted": false,
         "restart_required": true,
+        "lefthook": lefthook,
         "harness_configuration": harness_configuration
     }))
+}
+
+fn selected_hook_command_ids(
+    arguments: &Value,
+    key: &str,
+    fallback: &[String],
+) -> Result<Vec<String>, String> {
+    let Some(selected) = arguments.get(key).and_then(Value::as_array) else {
+        if fallback.is_empty() {
+            return Err("development_system.setup_hook_command_selection_required".to_string());
+        }
+        return Ok(fallback.to_vec());
+    };
+    selected
+        .iter()
+        .map(|value| {
+            value.as_str().map(str::to_string).ok_or_else(|| {
+                "development_system.setup_hook_command_selection_invalid".to_string()
+            })
+        })
+        .collect()
+}
+
+fn shell_argument(argument: &str) -> String {
+    format!("'{}'", argument.replace('\'', "'\\''"))
+}
+
+fn hook_jobs(config: &semantic::ProjectConfig, ids: &[String]) -> Result<String, String> {
+    let mut jobs = String::new();
+    for id in ids {
+        let command = config
+            .commands
+            .get(id)
+            .ok_or_else(|| format!("development_system.setup_hook_command_unknown id={id}"))?;
+        if !matches!(
+            command.capability,
+            semantic::CommandCapability::Tests | semantic::CommandCapability::Verification
+        ) {
+            return Err(format!(
+                "development_system.setup_hook_command_capability_invalid id={id}"
+            ));
+        }
+        let run = command
+            .argv
+            .iter()
+            .map(|argument| shell_argument(argument))
+            .collect::<Vec<_>>()
+            .join(" ");
+        jobs.push_str(&format!(
+            "    - name: development-system-{id}\n      run: {}\n",
+            serde_json::to_string(&run).map_err(|error| format!(
+                "development_system.setup_lefthook_serialize_failed source={error}"
+            ))?
+        ));
+    }
+    Ok(jobs)
+}
+
+fn write_project_lefthook_configuration(
+    project_root: &Path,
+    config: &semantic::ProjectConfig,
+    arguments: &Value,
+) -> Result<Value, String> {
+    let fallback = arguments
+        .get("selected_command_ids")
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let (configuration, pre_commit_ids, pre_push_ids) =
+        project_lefthook_configuration(config, arguments, &fallback)?;
+    let path = project_root.join("lefthook.yml");
+    let existing = fs::read_to_string(&path).ok();
+    if existing
+        .as_deref()
+        .is_some_and(|existing| existing != configuration)
+        && arguments.get("replace_lefthook") != Some(&Value::Bool(true))
+    {
+        return Err(
+            "development_system.setup_lefthook_conflict replace_lefthook_required=true".to_string(),
+        );
+    }
+    fs::write(&path, &configuration).map_err(|error| {
+        format!("development_system.setup_lefthook_write_failed source={error}")
+    })?;
+
+    let mut command = if project_root.join("flake.nix").is_file() {
+        let mut command = ProcessCommand::new("nix");
+        command.args(["develop", "-c", "lefthook"]);
+        command
+    } else {
+        ProcessCommand::new("lefthook")
+    };
+    let output = command
+        .args(["install", "pre-commit", "pre-push"])
+        .current_dir(project_root)
+        .output()
+        .map_err(|error| format!("development_system.setup_lefthook_unavailable source={error}"))?;
+    if !output.status.success() {
+        return Err("development_system.setup_lefthook_install_failed".to_string());
+    }
+    Ok(json!({
+        "path": "lefthook.yml",
+        "pre_commit_command_ids": pre_commit_ids,
+        "pre_push_command_ids": pre_push_ids,
+        "installed": true
+    }))
+}
+
+fn project_lefthook_configuration(
+    config: &semantic::ProjectConfig,
+    arguments: &Value,
+    fallback: &[String],
+) -> Result<(String, Vec<String>, Vec<String>), String> {
+    let pre_commit_ids = selected_hook_command_ids(arguments, "pre_commit_command_ids", fallback)?;
+    let pre_push_ids = selected_hook_command_ids(arguments, "pre_push_command_ids", fallback)?;
+    let configuration = format!(
+        "assert_lefthook_installed: true\nno_auto_install: true\n\npre-commit:\n  jobs:\n{}\npre-push:\n  jobs:\n{}",
+        hook_jobs(config, &pre_commit_ids)?,
+        hook_jobs(config, &pre_push_ids)?,
+    );
+    Ok((configuration, pre_commit_ids, pre_push_ids))
 }
 
 fn mcp_binary_directory() -> Result<PathBuf, String> {
@@ -13767,7 +13912,7 @@ fn semantic_result(structured: Value) -> Value {
     })
 }
 
-fn semantic_setup_preview(project_root: &Path) -> Result<Value, String> {
+fn semantic_setup_preview(project_root: &Path, arguments: &Value) -> Result<Value, String> {
     if !project_root.join(".git").exists() {
         return Err("development_system.setup_git_repository_required".to_string());
     }
@@ -13788,6 +13933,33 @@ fn semantic_setup_preview(project_root: &Path) -> Result<Value, String> {
     };
     semantic::ProjectConfig::parse(&configuration)?;
     let detected_commands = setup_command_candidates(project_root);
+    let recommended_command_ids = setup_recommended_command_ids(project_root);
+    let detected_command_ids = detected_commands
+        .iter()
+        .filter_map(|command| command.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    let hook_configuration = setup_configuration_with_selected_commands(
+        &configuration,
+        Some(&json!(detected_command_ids)),
+        Some(&Value::Array(detected_commands.clone())),
+    )?;
+    let hook_config = semantic::ProjectConfig::parse(&hook_configuration)?;
+    let fallback = recommended_command_ids
+        .iter()
+        .map(|id| (*id).to_string())
+        .collect::<Vec<_>>();
+    let (lefthook_configuration, pre_commit_command_ids, pre_push_command_ids) =
+        project_lefthook_configuration(&hook_config, arguments, &fallback)?;
+    let lefthook_configuration_state = match fs::read_to_string(project_root.join("lefthook.yml")) {
+        Ok(existing) if existing == lefthook_configuration => "current",
+        Ok(_) => "conflict",
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "absent",
+        Err(error) => {
+            return Err(format!(
+                "development_system.setup_lefthook_read_failed source={error}"
+            ));
+        }
+    };
     let existing = match semantic::config_at(project_root) {
         semantic::ConfigState::Absent => json!({
             "configuration_state": "absent",
@@ -13830,9 +14002,13 @@ fn semantic_setup_preview(project_root: &Path) -> Result<Value, String> {
         "configuration": configuration,
         "detected_scopes": setup_detected_scope_names(&configuration)?,
         "detected_commands": detected_commands,
-        "recommended_command_ids": setup_recommended_command_ids(project_root),
+        "recommended_command_ids": recommended_command_ids,
+        "lefthook_configuration": lefthook_configuration,
+        "lefthook_configuration_state": lefthook_configuration_state,
+        "recommended_pre_commit_command_ids": pre_commit_command_ids,
+        "recommended_pre_push_command_ids": pre_push_command_ids,
         "requires_confirmation": true,
-        "mutation_policy": "Setup writes only the repository-local development-system configuration; harness capabilities remain advisory.",
+        "mutation_policy": "Setup writes the approved repository-local Development System and Lefthook configurations, installs pre-commit and pre-push hooks, and writes owned project-local MCP settings; harness capabilities remain advisory.",
         "configuration_state": existing["configuration_state"],
         "existing_schema_version": existing["existing_schema_version"],
         "remediation": existing["remediation"],
@@ -37774,6 +37950,12 @@ pre_filter = "project-pre"
     #[test]
     fn stdio_uses_codex_sandbox_cwd_for_implicit_project_root() {
         let project_root = test_project_root("stdio-sandbox-cwd");
+        fs::create_dir_all(project_root.join("src")).expect("create source directory");
+        fs::write(
+            project_root.join("package.json"),
+            "{\"scripts\":{\"test\":\"true\"}}\n",
+        )
+        .expect("write package manifest");
         fs::write(
             project_root.join(".development-system.toml"),
             "schema_version = 3\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n\n[commands.test]\nargv = [\"true\"]\ncapability = \"tests\"\nnetwork = \"denied\"\n",

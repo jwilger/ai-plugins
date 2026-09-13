@@ -47,25 +47,27 @@ consequential. Do not invent a pull request.
 
 Use the repository's declared trunk branch. For every passing per-edit
 checkpoint, including a standalone test-file edit, complete its immediate
-focused test, bounded lightweight review, fast pre-commit gate, and signed
-commit, then make the authorized
+focused test and bounded lightweight review, then create the signed commit.
+That Git operation triggers Lefthook's pre-commit gate; never run the same gate
+separately. Then make the authorized
 non-history-rewriting push immediately to the policy-selected trunk ref without creating a
-PR/MR. Preserve repository-required branch or worktree topology; direct-to-trunk
+PR/MR. The push triggers Lefthook's pre-push gate; never run that verification
+separately. Preserve repository-required branch or worktree topology; direct-to-trunk
 describes the delivery destination, not where development must occur. After pushing, bind the delivery evidence to the exact
 pushed revision and monitor its required CI concurrently with the next
 increment. A completed failure preempts that work through CI recovery. Reserve
 the full final review for ticket completion, when it consumes the last delivered
 pushed identity. A clean unchanged terminal review creates no additional commit
-or push. Each checkpoint commit requires fresh exact-commit verification of the
-repository-required fast non-duplicated checks plus commit-message and signature
-validation before push; comprehensive suites remain in CI. If a rejected push,
+or push. Each checkpoint commit requires fresh exact-commit verification of
+source identity, commit message, and signature before push; it does not rerun
+the hook-owned repository checks. Comprehensive suites remain in CI. If a rejected push,
 rebase, merge, conflict resolution, hook, formatter,
 or other delivery step changes any reviewed path, content, mode, formerly
 untracked content, adds a newly in-scope untracked path, changes the pinned
 baseline, or changes the requested scope, the prior review is
 stale: treat the mutation as a new causal checkpoint, rerun its immediate test,
-lightweight review, fast gate, signed commit, exact verification, and normal
-push. Run terminal delta/reset review against that new delivered identity only
+lightweight review, signed commit through the pre-commit hook, exact identity
+verification, and normal push through the pre-push hook. Run terminal delta/reset review against that new delivered identity only
 when terminal review was already active or the mutation remediates a
 terminal-review finding. During an ordinary checkpoint before ticket
 completion, deliver the new causal checkpoint and continue with the next
@@ -84,7 +86,7 @@ for an older SHA as readiness evidence for a newer checkpoint.
 
 Use a branch and the repository's pull-request or merge-request process. Push
 each passing per-edit checkpoint only after its immediate focused test,
-lightweight review, repository fast gate, and signed branch commit, and only
+lightweight review, and signed branch commit through Lefthook's pre-commit gate, and only
 when that branch mutation is already authorized;
 do not infer permission to open, update, or merge a PR/MR. Honor
 its required checks, review, approval, merge queue, and cleanup rules. Opening,
@@ -99,20 +101,17 @@ current head revision.
 
 ### Local-only
 
-Keep all work local. Run checks and review in proportion to the claim, but do not
-push, open a PR/MR, or merge. Do not commit by default: commit only when the
-user authorizes it or repository-local instructions require it. If the
-repository requires a commit but the user explicitly withholds commit
-authority, block without committing or pushing. Record the exact locally authorized terminal
-snapshot, completed gates, and next permitted action as the delivery-mode
+Keep all work local and do not push, open a PR/MR, or merge. Because repository
+verification is mechanically owned by Lefthook's commit hook, local completion
+requires an authorized local commit. If the user withholds commit authority,
+block without replacing the hook with a manual gate. Record the exact verified
+commit, completed gates, and next permitted action as the delivery-mode
 equivalent checkpoint, and report remaining remote work plainly. Final review
 still applies at ticket completion in local-only mode: run it with
 fresh local evidence, and do not dismiss it as a publication-only or PR-only
 gate. A clean unchanged terminal review creates no commit. Source-changing
-remediation creates a signed local commit only when authorized. When committed
-evidence is repository-required but commit authority is explicitly withheld,
-block without committing or pushing; otherwise record a new exact reviewed,
-fast-gate-passing no-commit snapshot.
+remediation creates a signed local commit only when authorized. When commit
+authority is explicitly withheld, block without committing or pushing.
 
 ## Authorization and evidence
 
@@ -123,10 +122,10 @@ fast-gate-passing no-commit snapshot.
   message and a body that merely restates the subject or diff.
 - After creating the commit, prove that its paths, contents, and modes are
   identical to the lightweight-reviewed checkpoint snapshot. Verify its message
-  and signature against the exact commit. Do not insert a duplicate
-  comprehensive local exact-commit suite after the repository fast pre-commit
-  gate; comprehensive, slow, integration, mutation, and pipeline-scale checks
-  belong in CI unless failure diagnosis requires them locally.
+  and signature against the exact commit. Do not rerun pre-commit or pre-push
+  verification manually; the Lefthook receipts from the Git operations are the
+  evidence. Comprehensive, slow, integration, mutation, and pipeline-scale
+  checks belong in CI unless failure diagnosis requires them locally.
   The stage-aware review hash may change at this boundary without reopening
   review; source identity, not Git partition or metadata identity, decides that
   question. Before terminal completion, preserve the stage-aware contract:

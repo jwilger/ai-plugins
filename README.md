@@ -38,7 +38,10 @@ The installed `SessionStart` hook checks the MCP binary installation against
 the plugin version on every startup and repairs missing or stale binaries. Linux
 x86_64 downloads the checksum-verified release; hosts without a prebuilt
 release build both locked Cargo workspaces automatically. The setup skill
-performs the same check before configuring the repository.
+performs the same check before configuring the repository. Setup also generates
+and installs a stack-specific project Lefthook configuration with both
+pre-commit and pre-push jobs; installed workflow guidance relies on those Git
+hooks rather than duplicating their verification commands manually.
 
 ## Developing in this repo
 

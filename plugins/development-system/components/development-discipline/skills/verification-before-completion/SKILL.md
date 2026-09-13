@@ -24,8 +24,11 @@ must remain on the strong route defined by that canonical matrix.
 1. State the claim precisely and split compound claims into independently
    provable parts.
 2. Map each part to its required command or authoritative source.
-3. Capture the exact commit OID or worktree diff hash, then run or inspect the
-   evidence after the last relevant mutation.
+3. Capture the exact commit OID or worktree diff hash, then inspect the evidence
+   produced after the last relevant mutation. Repository verification commands
+   are owned by Lefthook: `git commit` triggers the pre-commit evidence and
+   `git push` triggers the pre-push evidence. Do not run those commands again as
+   separate manual verification unless the user explicitly requests it.
 4. Record the command/source, project or working directory, revision/hash,
    relevant configuration or toolchain identity, timestamp/current-state
    identity, exit/status, and failures.

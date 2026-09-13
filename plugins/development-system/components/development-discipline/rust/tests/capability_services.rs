@@ -451,6 +451,13 @@ fn setup_requires_confirmation_and_writes_codex_repository_configuration() {
     );
     assert!(root.path().join(".development-system.toml").is_file());
     assert!(root.path().join(".codex/config.toml").is_file());
+    let lefthook = fs::read_to_string(root.path().join("lefthook.yml")).expect("Lefthook config");
+    assert!(lefthook.contains("pre-commit:"));
+    assert!(lefthook.contains("pre-push:"));
+    assert!(lefthook.contains("development-system-just-ci"));
+    assert!(lefthook.contains("'just' 'ci'"));
+    assert!(root.path().join(".git/hooks/pre-commit").is_file());
+    assert!(root.path().join(".git/hooks/pre-push").is_file());
     for unexpected in [
         ".development-system/agents",
         ".development-system/boundary-proof.codex.json",
@@ -693,6 +700,13 @@ fn setup_preview_tailors_commands_and_scopes_to_a_python_uv_project() {
         preview.pointer("/result/structuredContent/recommended_command_ids"),
         Some(&json!(["python-test"]))
     );
+    let lefthook = preview
+        .pointer("/result/structuredContent/lefthook_configuration")
+        .and_then(Value::as_str)
+        .expect("Lefthook preview");
+    assert!(lefthook.contains("pre-commit:"));
+    assert!(lefthook.contains("pre-push:"));
+    assert!(lefthook.contains("'uv' 'run' 'pytest'"));
 }
 
 #[test]
@@ -852,6 +866,41 @@ fn setup_apply_can_add_a_detected_command_to_existing_configuration() {
     let configuration =
         fs::read_to_string(root.path().join(".development-system.toml")).expect("configuration");
     assert!(configuration.contains("[commands.just-ci]"));
+}
+
+#[test]
+fn setup_apply_requires_explicit_approval_before_replacing_lefthook() {
+    let root = TempDir::new().expect("repository");
+    git(root.path(), &["init", "--quiet"]);
+    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
+    fs::write(root.path().join("lefthook.yml"), "pre-commit: {}\n").expect("existing hook");
+
+    let preview = mcp_call(
+        root.path(),
+        "setup.preview",
+        json!({ "project_root": root.path() }),
+    );
+    assert_eq!(
+        preview.pointer("/result/structuredContent/lefthook_configuration_state"),
+        Some(&json!("conflict"))
+    );
+
+    let rejected = mcp_call(
+        root.path(),
+        "setup.apply",
+        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["just-ci"] }),
+    );
+    assert_eq!(
+        rejected.pointer("/error/message"),
+        Some(&json!(
+            "development_system.setup_lefthook_conflict replace_lefthook_required=true"
+        ))
+    );
+    assert!(!root.path().join(".development-system.toml").exists());
+    assert_eq!(
+        fs::read_to_string(root.path().join("lefthook.yml")).expect("existing hook"),
+        "pre-commit: {}\n"
+    );
 }
 
 #[test]

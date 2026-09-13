@@ -18,7 +18,7 @@ record_file=$4
 for dependency in git jq flock sha256sum sed od tr sync mktemp cp mv chmod grep wc tail head cut node realpath; do
   command -v "$dependency" >/dev/null 2>&1 || { echo "missing checkpoint runtime dependency: $dependency" >&2; exit 2; }
 done
-sync --help 2>&1 | grep -q -- ' -f' || { echo "checkpoint runtime requires sync -f support" >&2; exit 2; }
+TERM=dumb sync --help 2>&1 | grep -q -- ' -f' || { echo "checkpoint runtime requires sync -f support" >&2; exit 2; }
 
 worktree_root=$(git rev-parse --show-toplevel)
 record_absolute=$(realpath -- "$record_file")
@@ -117,7 +117,7 @@ if ! tail -c +15 "$candidate" | jq -e --argjson generation "$expected_generation
      (if .gates.lightweight_review_receipt == null then
         .gates.fast_gate_receipt == null and .next_action == "lightweight-review"
       elif .gates.fast_gate_receipt == null then
-        .next_action == "fast-gate"
+        (.next_action | IN("fast-gate", "commit-through-pre-commit-hook"))
       else .next_action == "commit-or-record-local-snapshot" end)
    elif .state == "committed" then
      .test != null and .test.outcome == "pass" and .delivery != null and .delivery.commit_oid == .snapshot.head_oid and
@@ -189,10 +189,16 @@ if [[ -e $target ]]; then
     if ($current.next_action | test("^(causal-edit|rewrite-invalid-test): \\S")) then
       remediation_result
     elif $current.next_action == "lightweight-review" then
-      passing("fast-gate") and
+      (passing("fast-gate") or passing("commit-through-pre-commit-hook")) and
       $proposed.test == $current.test and
       ($proposed.gates.lightweight_review_receipt | type == "string") and
       $proposed.gates.fast_gate_receipt == null
+    elif $current.next_action == "commit-through-pre-commit-hook" then
+      $proposed.state == "committed" and
+      $proposed.next_action == "verify-exact-commit" and
+      $proposed.test == $current.test and
+      $proposed.gates.lightweight_review_receipt == $current.gates.lightweight_review_receipt and
+      ($proposed.gates.fast_gate_receipt | type == "string")
     elif $current.next_action == "fast-gate" then
       passing("commit-or-record-local-snapshot") and
       $proposed.test == $current.test and

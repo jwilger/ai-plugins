@@ -5,6 +5,20 @@ description: Use when initializing or reconfiguring a repository with the develo
 
 # Development system setup
 
+Every setup or reconfiguration response must cover all four installed-user
+outcomes below: version-matched automatic binary repair, stack-derived
+schema-validated configuration, separately selected and installed Lefthook
+pre-commit/pre-push jobs, and startup verification of both versioned MCP
+executables. Do not abbreviate this sequence merely because the plugin was
+already installed or upgraded.
+
+When reporting the binary step, explicitly state both supported paths:
+SessionStart compares the atomic marker and both binaries to the plugin manifest
+version, then Linux x86_64 downloads and SHA-256-verifies that exact release
+without Cargo, while hosts lacking a release automatically fall back to locked
+Cargo builds. Saying only “run the installer” or “version-matched repair” is
+incomplete.
+
 1. Resolve the installed Development System plugin root relative to this skill,
    then run `scripts/install-development-system-binaries.sh --auto` from that
    root. The installed `SessionStart` hook performs the same check on every
@@ -30,11 +44,15 @@ description: Use when initializing or reconfiguring a repository with the develo
    confirmation. Preview and confirmation are mandatory even if asked to skip
    them. Any changed option, conflict, scope, or command selection requires a
    fresh preview and approval.
-3. Call `setup.apply` with `confirmed: true`. It writes
-   schema-v3 `.development-system.toml` plus only the owned local MCP settings:
-   `.codex/config.toml` for Codex. It never stages or commits, and never changes
-   global Codex, marketplace, shell, or SSH
-   configuration.
+3. The preview also shows the exact `lefthook.yml` generated from independently
+   selected `pre_commit_command_ids` and `pre_push_command_ids`. Require both
+   hooks. If a different Lefthook configuration exists, show the conflict and
+   require explicit `replace_lefthook: true` approval; never silently replace
+   it. Call `setup.apply` with `confirmed: true`. It writes schema-v3
+   `.development-system.toml`, the approved `lefthook.yml`, installs both Git
+   hooks with Lefthook, and writes the owned local `.codex/config.toml` MCP
+   settings. It never stages or commits, and never changes global Codex,
+   marketplace, shell, or SSH configuration.
 4. Tell the user to restart Codex. The restarted session starts
    both MCP servers from the concrete absolute XDG binary paths in that project's
    configuration. Do not add a global `mcp_servers` override to compensate for

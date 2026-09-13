@@ -21,13 +21,17 @@ the user knows what evidence is missing.
 
 - A semantic commit operation must consume a
   `passing-awaiting-gates-or-review` per-edit checkpoint whose bounded
-  lightweight review and repository fast pre-commit gate have completed, and
-  return a signed commit receipt when signing is required. This prerequisite is
-  not a circular claim that the checkpoint is already delivered.
+  lightweight review has completed. The commit operation itself must trigger
+  the Lefthook pre-commit gate and return both its gate receipt and a signed
+  commit receipt when signing is required. Never run the same gate separately
+  before committing.
 - A semantic tag operation is separate from an increment commit: it consumes
   the repository-authorized delivered revision and release evidence required
   by policy, and returns a tag receipt when signing is required.
-- A semantic push/PR/merge operation must return an idempotent remote receipt.
+- A semantic push operation must trigger the Lefthook pre-push gate and return
+  its verification plus an idempotent remote receipt. Never run that gate
+  separately before pushing. PR/merge operations return their idempotent remote
+  receipts.
 - Failed pushed CI is blocking recovery work; the CI-recovery service performs
   only typed recovery actions.
 

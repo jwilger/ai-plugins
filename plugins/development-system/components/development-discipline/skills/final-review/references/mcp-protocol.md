@@ -89,7 +89,7 @@ commit, empty commit, push, or replacement local checkpoint.
 
 Any changed reviewed path, content, mode, untracked content, pinned baseline,
 or requested scope is source-changing remediation. Complete its mode-specific
-immediate-test, lightweight-review, fast-gate checkpoint first, including exact
+immediate-test, lightweight-review, and commit-through-Lefthook checkpoint first, including exact
 commit, message, and signature verification for remote commits, then perform a
 delta assessment and the complete selected lens set in fresh contexts under the
 clean-streak reset. In remote modes, comprehensive suites remain in CI; review

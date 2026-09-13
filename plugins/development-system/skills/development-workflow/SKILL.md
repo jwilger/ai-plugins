@@ -162,22 +162,24 @@ schema, identity, or lineage mismatch remains a recovery hold.
   Other failing records use `causal-edit: <specific causal change>` so the
   exact RED evidence, diagnosis, and next edit survive interruption.
 - `passing-awaiting-gates-or-review`: freeze further implementation and test
-  edits. Run the bounded lightweight review and repository fast pre-commit
-  gate; any remediation is a new causal edit and therefore triggers another
-  immediate focused test. `test` is required and `delivery` is `null`.
-  Record each completed lightweight-review and fast-gate receipt as it occurs;
-  use `lightweight-review`, then `fast-gate`, then
-  `commit-or-record-local-snapshot` as the exact successive `next_action`
-  values.
+  edits. Run the bounded lightweight review; any remediation is a new causal
+  edit and therefore triggers another immediate focused test. `test` is
+  required and `delivery` is `null`. Then create the authorized signed commit.
+  Git must trigger the Lefthook pre-commit gate during that operation; do not
+  run the gate separately. Record the hook receipt and commit together, using
+  `lightweight-review` and then `commit-through-pre-commit-hook` as the exact
+  successive `next_action` values.
   exact-identity verification remains `null` until a commit or reviewed
   local-only snapshot exists.
 - `committed`: record the signed commit OID and whether the next action is the
   delivery-mode checkpoint or a locally complete checkpoint; `delivery` is
   required and its commit OID must equal `snapshot.head_oid`. Lightweight-review
-  and fast-gate receipts are required. Immediately after commit creation,
+  and the pre-commit hook receipt are required. Immediately after commit creation,
   `exact_identity_verification_receipt` may be `null` only while `next_action` is
   `verify-exact-commit`; append the next committed checkpoint after verification.
-  A failed verification stays `committed`, records the bounded
+  Exact-identity verification checks source identity, message, and signature;
+  it never reruns repository verification already owned by Lefthook. A failed
+  verification stays `committed`, records the bounded
   `outcome:"fail"` receipt,
   sets `next_action` to `repair-exact-identity-verification`, prohibits delivery,
   and permits only the causal repair action followed by
@@ -203,9 +205,9 @@ schema, identity, or lineage mismatch remains a recovery hold.
   terminal success, and `terminal-review` after the named terminal success,
   which must be the final append-ordered CI observation. Retained CI history
   may contain earlier failures. Local-only
-  requires no remote run and uses
-  `terminal-review`. Set
-  `terminal_success_run_id` only when it names an included exact-OID success
+  requires no remote run and uses `terminal-review`. A remote push must trigger
+  the Lefthook pre-push gate; do not run its verification commands separately.
+  Set `terminal_success_run_id` only when it names an included exact-OID success
   run; queued, running, older-OID, or failed runs never satisfy readiness. When Tiber's opt-in final-review policy requires reviewed
   source and verification paths in a commit tree, the local equivalent is a
   required local commit; if commit authority is explicitly withheld, completion
@@ -238,7 +240,7 @@ or the exact local snapshot for local-only. A clean unchanged terminal review
 creates no commit, empty commit, push, or replacement local checkpoint.
 
 Any terminal-review finding remediation must leave review and complete the
-normal immediate-test, lightweight-review, and fast-gate checkpoint. Then use a
+normal immediate-test and lightweight-review checkpoint. Then use a
 signed additive commit plus exact verification and authorized push for remote
 modes, or a signed local commit only when required/authorized and otherwise a
 new exact no-commit snapshot for local-only. Submit the diff-bound delta

@@ -147,13 +147,19 @@ support it — and record that gap as an ADR.
    confirm with the human.
 2. Realize each applicable goal, generating artifacts tailored to the stack;
    adapt or skip what the ecosystem can't support and record the gap as an ADR.
-3. Wire **one** local gate command that runs format + lint + tests (+ mutation).
-   CI may fan those same logical checks into dependency-staged jobs, but it must
-   not weaken or silently omit the local contract.
+3. Install Lefthook and wire separate `pre-commit` and `pre-push` jobs from the
+   detected stack. The commit hook owns fast format, lint, unit, manifest, and
+   configuration checks; the push hook owns the remaining local verification
+   required before publication. CI may fan those same logical checks into
+   dependency-staged jobs, but it must not weaken or silently omit the contract.
+   Agents must trigger these checks through normal `git commit` and `git push`;
+   do not also invoke the same gate commands manually unless the user explicitly
+   requests that diagnostic run.
 4. Establish the harness and a green gate; then build behavior one BDD step at a
    time. Use the commit cadence selected by repository-local delivery policy.
-5. Validate: the gate command passes, the dev environment builds from a clean
-   checkout, and CI mirrors the local gate.
+5. Validate through the installed Git hooks: the commit and push gates pass,
+   the dev environment builds from a clean checkout, and CI mirrors the local
+   contract.
 
 For per-ecosystem tool choices and copy-paste templates (env-redirect snippets,
 strict-lint configs, the ADR template, the guardrail-docs layout, and a
