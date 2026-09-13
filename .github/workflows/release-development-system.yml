@@ -110,13 +110,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+          if ! tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null)"; then
+            tag_sha=""
+          fi
           if [ -n "$tag_sha" ] && [ "$tag_sha" != "$GREEN_SHA" ]; then
             echo "Tag $TAG points to $tag_sha instead of $GREEN_SHA." >&2
             exit 1
           fi
 
-          release_json="$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>/dev/null || true)"
+          if ! release_json="$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>/dev/null)"; then
+            release_json=""
+          fi
           if [ -n "$release_json" ] && [ "$(jq -r '.draft' <<<"$release_json")" = false ]; then
             [ "$tag_sha" = "$GREEN_SHA" ] || {
               echo "Published release $TAG does not have its immutable tag at $GREEN_SHA." >&2
