@@ -533,11 +533,12 @@ Marketplace installs require the current-host Development System executable.
 From the marketplace checkout, run `just install-development-system-binaries`
 (or `scripts/install-development-system-binaries.sh`). Linux x86_64 downloads
 the exact plugin-version GitHub Release and verifies its SHA-256 sidecar and
-fixed archive layout; unsupported hosts explicitly pass `--from-source` and
-require Cargo. The bootstrap installs versioned, host-local executables under
-the XDG data directory. Launchers resolve only those installed executables and
-never fall back to Cargo at MCP startup; when absent, MCP enforcement is
-unavailable and must be reported with the bootstrap command. Incoming stdio requests and
+fixed archive layout; hosts without a prebuilt release build both locked Cargo
+workspaces. The installed `SessionStart` hook verifies the installation marker
+against the plugin version and automatically repairs missing or stale binaries
+before normal MCP use. Direct MCP launchers resolve only those installed
+executables and never compile as a side effect of an individual invocation.
+Incoming stdio requests and
 conditional-lens fanout are bounded so malformed or bursty callers cannot grow
 coordinator memory or review-agent count without limit. On any oversized stdio
 frame, the server stops reading at the request byte limit, emits

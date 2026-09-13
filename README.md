@@ -34,11 +34,11 @@ using the Codex plugin flow available in your Codex environment.
 
 Install `development-system` from the local marketplace, then start a new
 thread and run its setup skill from the target repository's primary checkout.
-The setup skill downloads and verifies the version-matched Linux x86_64 release
-bundle before configuring the repository. You can also run
-`just install-development-system-binaries` manually from the marketplace
-checkout. Other hosts can explicitly build with
-`just install-development-system-binaries --from-source`.
+The installed `SessionStart` hook checks the MCP binary installation against
+the plugin version on every startup and repairs missing or stale binaries. Linux
+x86_64 downloads the checksum-verified release; hosts without a prebuilt
+release build both locked Cargo workspaces automatically. The setup skill
+performs the same check before configuring the repository.
 
 ## Developing in this repo
 
@@ -168,11 +168,11 @@ without sharing. Interrupted, terminated, and timed-out runs all retain any
 partial artifacts under
 `evals/out/timeout-artifacts/` for debugging.
 
-If Codex reports a missing Development System binary, run
-`just install-development-system-binaries` from the matching
-marketplace checkout. On hosts other than Linux x86_64, add `--from-source` and
-use a working Cargo environment. For an explicitly configured Promptfoo server, also
-verify that the pinned runtime above is available on `PATH`.
+If automatic startup repair reports a Development System binary installation
+failure, use its download, checksum, archive, or Cargo diagnostic. A manual
+`just install-development-system-binaries --from-source` remains available for
+diagnosis. For an explicitly configured Promptfoo server, also verify that the
+pinned runtime above is available on `PATH`.
 
 ## Reporting eval cases
 

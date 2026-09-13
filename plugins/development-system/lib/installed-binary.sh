@@ -32,13 +32,34 @@ development_system_host() {
     "$(printf '%s' "$architecture" | tr '[:upper:]' '[:lower:]')"
 }
 
+development_system_effective_host() {
+  if [[ -n "${DEVELOPMENT_SYSTEM_HOST_OVERRIDE:-}" ]]; then
+    printf '%s\n' "$DEVELOPMENT_SYSTEM_HOST_OVERRIDE"
+  else
+    development_system_host
+  fi
+}
+
+development_system_installation_matches_plugin() {
+  local plugin_root=$1
+  local data_home version host installation
+  data_home="$(development_system_data_home)" || return 1
+  version="$(development_system_plugin_version "$plugin_root")" || return 1
+  host="$(development_system_effective_host)" || return 1
+  installation="$data_home/ai-plugins/development-system/$version/$host"
+  [[ -x "$installation/tiber" ]] || return 1
+  [[ -x "$installation/development-discipline-mcp" ]] || return 1
+  [[ -f "$installation/.plugin-version" ]] || return 1
+  [[ "$(<"$installation/.plugin-version")" == "$version" ]]
+}
+
 development_system_installed_binary_path() {
   local plugin_root=$1
   local binary_name=$2
   local data_home version host
   data_home="$(development_system_data_home)" || return 1
   version="$(development_system_plugin_version "$plugin_root")" || return 1
-  host="$(development_system_host)" || return 1
+  host="$(development_system_effective_host)" || return 1
   printf '%s/ai-plugins/development-system/%s/%s/%s\n' \
     "$data_home" "$version" "$host" "$binary_name"
 }
@@ -56,14 +77,14 @@ development_system_exec_installed_binary() {
     printf '%s\n' "development_system.plugin_version_unavailable plugin_root=$plugin_root" >&2
     exit 1
   }
-  host="$(development_system_host)" || {
+  host="$(development_system_effective_host)" || {
     printf '%s\n' "development_system.host_unavailable" >&2
     exit 1
   }
   binary_path="$data_home/ai-plugins/development-system/$version/$host/$binary_name"
   if [[ ! -x "$binary_path" ]]; then
     printf '%s\n' \
-      "development_system.binary_missing binary=$binary_path remediation='run the Development System setup skill, or from the marketplace checkout run: just install-development-system-binaries; unsupported hosts use --from-source with Cargo'" >&2
+      "development_system.binary_missing binary=$binary_path remediation='restart Codex to run automatic SessionStart repair, or run the Development System setup skill; manual diagnosis: scripts/install-development-system-binaries.sh --auto'" >&2
     exit 1
   fi
   exec "$binary_path" "$@"

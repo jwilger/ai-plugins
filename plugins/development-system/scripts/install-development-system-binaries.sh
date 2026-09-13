@@ -6,19 +6,24 @@ marketplace_root="$(cd -- "$plugin_root/../.." && pwd -P)"
 source "$plugin_root/lib/installed-binary.sh"
 
 from_source=false
+auto_mode=false
 case "${1:-}" in
   "") ;;
+  --auto)
+    auto_mode=true
+    shift
+    ;;
   --from-source)
     from_source=true
     shift
     ;;
   *)
-    printf '%s\n' "development_system.install_usage usage='$0 [--from-source]'" >&2
+    printf '%s\n' "development_system.install_usage usage='$0 [--auto|--from-source]'" >&2
     exit 2
     ;;
 esac
 if [[ $# -ne 0 ]]; then
-  printf '%s\n' "development_system.install_usage usage='$0 [--from-source]'" >&2
+  printf '%s\n' "development_system.install_usage usage='$0 [--auto|--from-source]'" >&2
   exit 2
 fi
 
@@ -34,6 +39,9 @@ host="${DEVELOPMENT_SYSTEM_HOST_OVERRIDE:-$(development_system_host)}" || {
   printf '%s\n' "development_system.host_unavailable" >&2
   exit 1
 }
+if [[ "$auto_mode" == true ]] && [[ "$host" != linux-x86_64 ]]; then
+  from_source=true
+fi
 
 version_dir="$data_home/ai-plugins/development-system/$version"
 mkdir -p "$version_dir"
@@ -167,6 +175,8 @@ else
   install -m 0644 "$download_dir/$archive_root/LICENSE" "$staged_dir/LICENSE"
   install -m 0644 "$download_dir/$archive_root/SOURCE" "$staged_dir/SOURCE"
 fi
+
+printf '%s\n' "$version" >"$staged_dir/.plugin-version"
 
 staged_link="$(mktemp "$version_dir/.${host}.link.XXXXXX")"
 rm -f -- "$staged_link"

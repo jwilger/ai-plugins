@@ -37,13 +37,13 @@ handling is explicitly planned and verified.
 
 Initial installation requires a local Rust build and any required dependency
 downloads. Plugin upgrades keep prior versioned installations available, while
-normal MCP and CLI startup has no Cargo dependency. Releases no longer provide
+normal MCP and CLI invocation has no Cargo dependency. Releases no longer provide
 prebuilt cross-platform payloads.
 
 ## Alternatives considered
 
 Keeping bundled binaries retains the clone-size and history cost. Keeping a
-Cargo fallback makes normal startup unpredictable and turns a missing install
+Cargo fallback inside an individual launcher makes invocation unpredictable and turns a missing install
 into an implicit build. Both were rejected.
 
 ## Revisit when

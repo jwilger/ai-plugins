@@ -28,8 +28,8 @@ Those entries launch the installed binaries by their absolute XDG paths; they
 do not launch a plugin-relative shell wrapper. Re-run setup after an upgrade,
 then start a new harness session.
 The release bundle contains statically linked Linux x86_64 executables, the
-applicable license, and the exact source tag and commit. Other hosts must use
-the explicit source fallback and a working Cargo environment:
+applicable license, and the exact source tag and commit. To force a locked
+source build for diagnosis:
 
 ```shell
 just install-development-system-binaries --from-source
@@ -38,9 +38,13 @@ just install-development-system-binaries --from-source
 The repository's Nix devshell is optional. If `just` is unavailable, run
 `scripts/install-development-system-binaries.sh` from the marketplace checkout.
 
-The `setup` skill runs this bootstrap automatically before it configures a
-repository, so manual use is only needed when you want the MCPs available
-before running setup.
+The installed `SessionStart` hook verifies the binaries and atomic installation
+marker against the plugin manifest version every time Codex starts. It repairs
+missing or stale installations automatically: Linux x86_64 uses the verified
+release bundle, while hosts without a prebuilt bundle use the locked Cargo
+build. The `setup` skill performs the same automatic check before configuring a
+repository. Manual use is only needed for diagnosis or an intentional source
+build.
 
 It is inert outside a Git repository or without a valid schema-3
 `.development-system.toml`. Read-only repository inspection remains available

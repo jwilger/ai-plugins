@@ -8,8 +8,8 @@
           {
             "type": "command",
             "command": "\"${PLUGIN_ROOT}/bin/development-system\" session-start --project \"$PWD\" --format json",
-            "timeout": 10,
-            "statusMessage": "Checking development system compatibility"
+            "timeout": 900,
+            "statusMessage": "Checking Development System binaries and compatibility"
           }
         ]
       }

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+plugin_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "$plugin_root/lib/installed-binary.sh"
+
 die() {
   printf '%s\n' "$*" >&2
   exit 2
@@ -178,13 +181,27 @@ doctor_command() {
   fi
 }
 
+ensure_current_binaries() {
+  if development_system_installation_matches_plugin "$plugin_root"; then
+    return
+  fi
+  "$plugin_root/scripts/install-development-system-binaries.sh" --auto >/dev/null
+  development_system_installation_matches_plugin "$plugin_root" ||
+    die "development_system.binary_install_verification_failed"
+}
+
 case "${1:-}" in
   setup)
     shift
     setup_command "$@"
     ;;
-  doctor | session-start)
+  doctor)
     shift
+    doctor_command "$@"
+    ;;
+  session-start)
+    shift
+    ensure_current_binaries
     doctor_command "$@"
     ;;
   *)

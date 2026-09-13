@@ -6,19 +6,18 @@ description: Use when initializing or reconfiguring a repository with the develo
 # Development system setup
 
 1. Resolve the installed Development System plugin root relative to this skill,
-   then run `scripts/install-development-system-binaries.sh` from that root.
-   This is a required setup prerequisite: on Linux x86_64 it downloads the
-   exact plugin-version GitHub Release bundle, verifies its SHA-256 checksum and
-   archive layout, and atomically installs `tiber` and
-   `development-discipline-mcp`. Do not require Cargo or Nix for this default
-   path and do not defer installation to the user. On another host, explain
-   that `--from-source` performs the locked Cargo builds and therefore requires
-   a working Cargo environment, then rerun the installer with that option. If
+   then run `scripts/install-development-system-binaries.sh --auto` from that
+   root. The installed `SessionStart` hook performs the same check on every
+   session: both executables and their atomic installation marker must match the
+   plugin manifest version. Missing or stale installations are repaired. Linux
+   x86_64 downloads the exact-version GitHub Release bundle, verifies its
+   SHA-256 checksum and archive layout, and atomically installs `tiber` and
+   `development-discipline-mcp` without Cargo or Nix. A host without a prebuilt
+   release automatically performs both locked Cargo builds and therefore needs
+   a working Cargo environment. Do not defer either path to the user. If
    download, verification, extraction, or source compilation fails, stop with
    the installer's diagnostic; do not configure a repository whose MCPs cannot
-   start. In the setup sequence you present, state explicitly that the supported
-   default is an exact-version, checksum-verified GitHub Release download that
-   needs no Cargo; do not leave that contract implicit in the command name.
+   start.
 2. From the primary checkout, invoke the installed `development-discipline-mcp`
    binary directly for `setup.preview`, then `setup.apply`. The preview detects
    manifests, lockfiles, source/test/documentation directories, build outputs,

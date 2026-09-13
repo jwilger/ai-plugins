@@ -209,8 +209,17 @@ teardown() {
   touch "$TEST_ROOT/project/.development-system.toml"
   printf '%s\n' '[features]' 'hooks = false' \
     >"$TEST_ROOT/project/.codex/config.toml"
+  local version host installation
+  version="$(jq -r '.version' "$REPO_ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  host="$(source "$REPO_ROOT/plugins/development-system/lib/installed-binary.sh"; development_system_host)"
+  installation="$TEST_ROOT/xdg-data/ai-plugins/development-system/$version/$host"
+  mkdir -p "$installation"
+  printf '%s\n' '#!/bin/sh' 'exit 0' >"$installation/tiber"
+  printf '%s\n' '#!/bin/sh' 'exit 0' >"$installation/development-discipline-mcp"
+  chmod +x "$installation/tiber" "$installation/development-discipline-mcp"
+  printf '%s\n' "$version" >"$installation/.plugin-version"
 
-  run env HOME="$TEST_ROOT/home" \
+  run env HOME="$TEST_ROOT/home" XDG_DATA_HOME="$TEST_ROOT/xdg-data" \
     "$REPO_ROOT/plugins/development-system/bin/development-system" \
     session-start \
     --project "$TEST_ROOT/project" \
