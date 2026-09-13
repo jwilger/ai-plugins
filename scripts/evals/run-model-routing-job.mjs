@@ -73,6 +73,15 @@ function resolveCase(catalog, job) {
   return fixedCase;
 }
 
+const executionSurfaceByFamily = {
+  "mechanical-assistance": "workspace-write",
+  "research-and-discovery": "workspace-read",
+  implementation: "workspace-write",
+  review: "text-only",
+  debugging: "workspace-write",
+  "architecture-and-advice": "text-only",
+};
+
 function writeAtomically(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.tmp-${process.pid}`;
@@ -142,8 +151,10 @@ async function main() {
     prompt: fixedCase.prompt,
     model: job.model,
     effort: job.effort,
-    isolation: { plugins: false, tools: false, workspace: false },
+    execution_surface: executionSurfaceByFamily[job.task_family],
+    fixture: fixedCase.verifier.fixture,
   };
+  if (!request.execution_surface) fail("task family has no execution surface");
   const resultName = `${crypto.createHash("sha256").update(job.job_id).digest("hex")}.json`;
   const resultPath = path.join(options.resultsRoot, resultName);
   const persisted = recoverPersistedResult(resultPath, {

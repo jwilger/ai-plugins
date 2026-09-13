@@ -4,13 +4,57 @@ setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   PLANNER="$ROOT/scripts/evals/plan-model-routing-campaign.mjs"
   RUNNER="$ROOT/scripts/evals/run-model-routing-job.mjs"
+  CODEX_JUDGE_PROVIDER="$ROOT/evals/benchmarks/model-routing/codex-judge-provider.mjs"
   CAMPAIGN="$ROOT/evals/benchmarks/model-routing/campaign.json"
   CASES="$ROOT/evals/benchmarks/model-routing/cases.json"
   TMPROOT="$(mktemp -d)"
   PLAN="$TMPROOT/plan.json"
 }
 
-@test "runner resolves a fixed case and records an isolated successful result" {
+@test "Codex judge adapter pins model and effort while preserving isolated execution and usage" {
+  run node --input-type=module - "$CODEX_JUDGE_PROVIDER" <<'EOF'
+import { pathToFileURL } from "node:url";
+const { createCodexJudgeProviderFunction } = await import(pathToFileURL(process.argv[2]));
+let observed;
+class FakeProvider {
+  constructor(options) { observed = options; }
+  async callApi(prompt) {
+    if (prompt !== "fixed prompt") throw new Error("unexpected prompt");
+    return {
+      output: "answer",
+      tokenUsage: { prompt: 17, cached: 4, completion: 5, total: 22 },
+      raw: JSON.stringify({
+        notifications: [{ method: "error", params: { willRetry: true } }]
+      })
+    };
+  }
+  async cleanup() {}
+}
+const run = createCodexJudgeProviderFunction({
+  ProviderClass: FakeProvider,
+  environment: {
+    MODEL_ROUTING_CODEX_HOME: "/tmp/codex-home",
+    MODEL_ROUTING_WORKSPACE: "/tmp/workspace"
+  },
+  now: (() => { const values = [100, 145]; return () => values.shift(); })()
+});
+const result = await run({
+  prompt: "fixed prompt",
+  model: "gpt-5.6-luna",
+  effort: "max",
+  isolation: { plugins: false, tools: false, workspace: false }
+});
+console.log(JSON.stringify({ result, observed }));
+EOF
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.observed.config.model' <<<"$output")" = "gpt-5.6-luna" ]
+  [ "$(jq -r '.observed.config.model_reasoning_effort' <<<"$output")" = "max" ]
+  [ "$(jq -r '.observed.config.cli_config.features.plugins' <<<"$output")" = "false" ]
+  [ "$(jq -r '.result.usage.cached_input_tokens' <<<"$output")" -eq 4 ]
+  [ "$(jq -r '.result.attempts' <<<"$output")" -eq 2 ]
+}
+
+@test "runner resolves a fixed case and records a successful subject result" {
   node "$PLANNER" "$CAMPAIGN" --phase screening --output "$PLAN"
   job_id="mechanical-assistance/case-001/gpt-5.6-luna/none"
   provider="$TMPROOT/provider.mjs"
