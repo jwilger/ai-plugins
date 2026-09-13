@@ -42,7 +42,7 @@ list_server_tools() {
       "$command" "$@"
 }
 
-@test "Tiber requires the versioned host-local installation when no binary is installed" {
+@test "Tiber reports installed-user repair when no binary is installed" {
   run env \
     XDG_DATA_HOME="$TMPROOT/empty-xdg-data" \
     HOME="$TMPROOT/home" \
@@ -50,7 +50,8 @@ list_server_tools() {
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"development_system.binary_missing"* ]]
-  [[ "$output" == *"just install-development-system-binaries"* ]]
+  [[ "$output" == *"restart Codex to run automatic SessionStart repair"* ]]
+  [[ "$output" == *"scripts/install-development-system-binaries.sh --auto"* ]]
 }
 
 @test "the host-local bootstrap is safe to rerun" {
