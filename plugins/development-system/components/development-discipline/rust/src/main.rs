@@ -12975,7 +12975,7 @@ fn semantic_tools() -> Vec<Value> {
         }),
         json!({
             "name": "setup.preview",
-            "description": "Discover a generic repository-relative Development System configuration and report exact scopes and the command catalog. This operation never writes.",
+            "description": "Detect the repository's stack and preview a schema-validated Development System configuration with project-specific scopes and named direct-argv commands. This operation never writes.",
             "inputSchema": { "type": "object", "properties": { "project_root": project_root }, "additionalProperties": false }
         }),
         json!({
@@ -13772,32 +13772,13 @@ fn semantic_setup_preview(project_root: &Path) -> Result<Value, String> {
         return Err("development_system.setup_git_repository_required".to_string());
     }
     require_primary_setup_checkout(project_root)?;
-    let default_configuration = r#"schema_version = 3
-
-[scopes.source]
-category = "source"
-include = ["src/**", "lib/**", "app/**", "**/src/**", "**/lib/**", "**/app/**"]
-
-[scopes.tests]
-category = "tests"
-include = ["test/**", "tests/**", "spec/**", "specs/**", "**/test/**", "**/tests/**", "**/spec/**", "**/specs/**"]
-
-[scopes.documentation]
-category = "documentation"
-include = ["docs/**", "README.md", "CHANGELOG.md", "**/docs/**", "**/README.md", "**/CHANGELOG.md"]
-
-[scopes.developer_environment]
-category = "developer_environment"
-include = [".github/**", "scripts/**", "flake.nix", "flake.lock", "justfile", "package.json", "Cargo.toml"]
-
-[scopes.build_output]
-category = "build_output"
-include = ["target/**", "dist/**", "build/**", ".evals/**"]
-"#;
     let configuration = match fs::read_to_string(project_root.join(semantic::CONFIG_FILE)) {
-        Ok(existing) => setup_configuration_with_scopes(&existing)?,
+        Ok(existing) => setup_configuration_with_scopes(&existing, project_root)?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            default_configuration.to_string()
+            setup_configuration_with_scopes(
+                &format!("schema_version = {}\n", semantic::SCHEMA_VERSION),
+                project_root,
+            )?
         }
         Err(error) => {
             return Err(format!(
@@ -13847,7 +13828,7 @@ include = ["target/**", "dist/**", "build/**", ".evals/**"]
     Ok(json!({
         "project_root": project_root,
         "configuration": configuration,
-        "detected_scopes": ["source", "tests", "documentation", "developer_environment", "build_output"],
+        "detected_scopes": setup_detected_scope_names(&configuration)?,
         "detected_commands": detected_commands,
         "recommended_command_ids": setup_recommended_command_ids(project_root),
         "requires_confirmation": true,
@@ -13929,19 +13910,41 @@ fn setup_command_candidates(project_root: &Path) -> Vec<Value> {
             "requires_confirmation": true
         }));
     }
+    if project_root.join("pyproject.toml").is_file() {
+        let command = if project_root.join("uv.lock").is_file() {
+            vec!["uv", "run", "pytest"]
+        } else {
+            vec!["python", "-m", "pytest"]
+        };
+        candidates.push(json!({
+            "id": "python-test",
+            "argv": argv(&command),
+            "capability": "tests",
+            "requires_confirmation": true
+        }));
+    }
+    if project_root.join("go.mod").is_file() {
+        candidates.push(json!({
+            "id": "go-test",
+            "argv": argv(&["go", "test", "./..."]),
+            "capability": "tests",
+            "requires_confirmation": true
+        }));
+    }
     candidates
 }
 
 fn setup_recommended_command_ids(project_root: &Path) -> Vec<&'static str> {
-    if project_root.join("justfile").is_file() {
-        vec!["just-ci"]
-    } else if project_root.join("Cargo.toml").is_file() {
-        vec!["cargo-test"]
-    } else if project_root.join("package.json").is_file() {
-        vec!["npm-test"]
-    } else {
-        Vec::new()
-    }
+    [
+        ("justfile", "just-ci"),
+        ("Cargo.toml", "cargo-test"),
+        ("package.json", "npm-test"),
+        ("pyproject.toml", "python-test"),
+        ("go.mod", "go-test"),
+    ]
+    .into_iter()
+    .find_map(|(path, id)| project_root.join(path).is_file().then_some(vec![id]))
+    .unwrap_or_default()
 }
 
 fn setup_configuration_has_commands(configuration: &str) -> Result<bool, String> {
@@ -14033,7 +14036,7 @@ fn setup_configuration_with_selected_commands(
         .map_err(|error| format!("development_system.setup_serialize_failed source={error}"))
 }
 
-fn setup_configuration_with_scopes(existing: &str) -> Result<String, String> {
+fn setup_configuration_with_scopes(existing: &str, project_root: &Path) -> Result<String, String> {
     let mut value: toml::Value = existing.parse().map_err(|error| {
         format!("development_system.setup_existing_config_invalid source={error}")
     })?;
@@ -14044,32 +14047,114 @@ fn setup_configuration_with_scopes(existing: &str) -> Result<String, String> {
         "schema_version".to_string(),
         toml::Value::Integer(i64::from(semantic::SCHEMA_VERSION)),
     );
-    let scopes: toml::Value = r#"
-[source]
-category = "source"
-include = ["src/**", "lib/**", "app/**", "**/src/**", "**/lib/**", "**/app/**"]
-
-[tests]
-category = "tests"
-include = ["test/**", "tests/**", "spec/**", "specs/**", "**/test/**", "**/tests/**", "**/spec/**", "**/specs/**"]
-
-[documentation]
-category = "documentation"
-include = ["docs/**", "README.md", "CHANGELOG.md", "**/docs/**", "**/README.md", "**/CHANGELOG.md"]
-
-[developer_environment]
-category = "developer_environment"
-include = [".github/**", "scripts/**", "flake.nix", "flake.lock", "justfile", "package.json", "Cargo.toml"]
-
-[build_output]
-category = "build_output"
-include = ["target/**", "dist/**", "build/**", ".evals/**"]
-"#
-    .parse()
-    .map_err(|error| format!("development_system.setup_scope_template_invalid source={error}"))?;
-    table.insert("scopes".to_string(), scopes);
+    if !table.contains_key("scopes") {
+        table.insert(
+            "scopes".to_string(),
+            toml::Value::Table(setup_detected_scopes(project_root)),
+        );
+    }
     toml::to_string(&value)
         .map_err(|error| format!("development_system.setup_serialize_failed source={error}"))
+}
+
+fn setup_detected_scopes(project_root: &Path) -> toml::map::Map<String, toml::Value> {
+    let has = |path: &str| project_root.join(path).exists();
+    let has_root_extension = |extension: &str| {
+        fs::read_dir(project_root).is_ok_and(|entries| {
+            entries.filter_map(Result::ok).any(|entry| {
+                entry.path().is_file()
+                    && entry.path().extension().and_then(OsStr::to_str) == Some(extension)
+            })
+        })
+    };
+    let mut scopes = toml::map::Map::new();
+    let mut add_scope = |name: &str, category: &str, includes: Vec<String>| {
+        if includes.is_empty() {
+            return;
+        }
+        let mut scope = toml::map::Map::new();
+        scope.insert(
+            "category".to_string(),
+            toml::Value::String(category.to_string()),
+        );
+        scope.insert(
+            "include".to_string(),
+            toml::Value::Array(includes.into_iter().map(toml::Value::String).collect()),
+        );
+        scopes.insert(name.to_string(), toml::Value::Table(scope));
+    };
+    let detected = |paths: &[&str]| {
+        paths
+            .iter()
+            .filter(|path| has(path))
+            .map(|path| {
+                if project_root.join(path).is_dir() {
+                    format!("{path}/**")
+                } else {
+                    (*path).to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let mut source = detected(&["src", "lib", "app"]);
+    if source.is_empty() && has("Cargo.toml") {
+        source.push("src/**".to_string());
+    }
+    if has("go.mod") && has_root_extension("go") {
+        source.push("*.go".to_string());
+    }
+    add_scope("source", "source", source);
+    add_scope(
+        "tests",
+        "tests",
+        detected(&["test", "tests", "spec", "specs", "benches"]),
+    );
+    add_scope(
+        "documentation",
+        "documentation",
+        detected(&["docs", "README.md", "CHANGELOG.md"]),
+    );
+    add_scope(
+        "developer_environment",
+        "developer_environment",
+        detected(&[
+            ".github",
+            "scripts",
+            "flake.nix",
+            "flake.lock",
+            "justfile",
+            "package.json",
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "Cargo.toml",
+            "Cargo.lock",
+            "rust-toolchain.toml",
+            "pyproject.toml",
+            "uv.lock",
+            "poetry.lock",
+            "go.mod",
+            "go.sum",
+        ]),
+    );
+    add_scope(
+        "build_output",
+        "build_output",
+        detected(&["target", "dist", "build", ".evals"]),
+    );
+    scopes
+}
+
+fn setup_detected_scope_names(configuration: &str) -> Result<Vec<String>, String> {
+    let value: toml::Value = configuration.parse().map_err(|error| {
+        format!("development_system.setup_configuration_invalid source={error}")
+    })?;
+    Ok(value
+        .get("scopes")
+        .and_then(toml::Value::as_table)
+        .map(|scopes| scopes.keys().cloned().collect())
+        .unwrap_or_default())
 }
 
 fn workflow_project_root(arguments: &Value) -> Result<PathBuf, String> {
@@ -37691,7 +37776,7 @@ pre_filter = "project-pre"
         let project_root = test_project_root("stdio-sandbox-cwd");
         fs::write(
             project_root.join(".development-system.toml"),
-            "schema_version = 3\n\n[commands.test]\nargv = [\"true\"]\ncapability = \"tests\"\nnetwork = \"denied\"\n",
+            "schema_version = 3\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n\n[commands.test]\nargv = [\"true\"]\ncapability = \"tests\"\nnetwork = \"denied\"\n",
         )
         .expect("write project configuration");
         let request = json!({

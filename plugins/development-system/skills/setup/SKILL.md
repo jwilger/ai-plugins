@@ -20,9 +20,14 @@ description: Use when initializing or reconfiguring a repository with the develo
    default is an exact-version, checksum-verified GitHub Release download that
    needs no Cargo; do not leave that contract implicit in the command name.
 2. From the primary checkout, invoke the installed `development-discipline-mcp`
-   binary directly for `setup.preview`, then `setup.apply`. Select at least one detected
+   binary directly for `setup.preview`, then `setup.apply`. The preview detects
+   manifests, lockfiles, source/test/documentation directories, build outputs,
+   the repository's Nix wrapper, and stack-native test runners; it emits only
+   project-supported scopes and named direct-argv command candidates. Do not
+   replace that discovery with a generic template. Select at least one detected
    verification/test command, preferring `recommended_command_ids`; an empty
-   catalog cannot configure the workflow. Show the exact preview and ask for explicit
+   command catalog or a repository with no detectable scope cannot configure
+   the workflow. Show the exact schema-validated preview and ask for explicit
    confirmation. Preview and confirmation are mandatory even if asked to skip
    them. Any changed option, conflict, scope, or command selection requires a
    fresh preview and approval.

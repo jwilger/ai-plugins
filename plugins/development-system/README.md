@@ -45,7 +45,10 @@ before running setup.
 It is inert outside a Git repository or without a valid schema-3
 `.development-system.toml`. Read-only repository inspection remains available
 in every state. Start configuration through the structured `setup.preview`
-tool, review the discovered path scopes and named command catalog, then
+tool. It detects the project's manifests, lockfiles, conventional
+source/test/docs and build paths, Nix devshell, and stack-native test commands,
+then produces a schema-validated project-specific configuration instead of a
+generic template. Review its exact scopes and named command catalog, then
 explicitly confirm `setup.apply`. Setup never stages or commits configuration.
 
 The plugin-wide Development Discipline MCP surface provides bounded repository

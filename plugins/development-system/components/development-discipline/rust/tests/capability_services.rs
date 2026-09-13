@@ -347,6 +347,11 @@ fn setup_preview_reports_legacy_configuration_as_migration_required() {
     let root = TempDir::new().expect("repository");
     git(root.path(), &["init", "--quiet"]);
     fs::write(
+        root.path().join("Cargo.toml"),
+        "[package]\nname='fixture'\nversion='0.1.0'\n",
+    )
+    .expect("Cargo manifest");
+    fs::write(
         root.path().join(".development-system.toml"),
         "schema_version = 2\n\n[delivery]\nmode = \"direct-to-trunk\"\n\n[features]\ntiber = true\n\n[worktrees]\nroot = \".worktrees\"\n\n[final_review.models.codex]\npre_filter = \"gpt-5.6-sol\"\n",
     )
@@ -514,6 +519,11 @@ fn setup_apply_migrates_legacy_configuration_without_dropping_project_policy() {
     fs::create_dir_all(root.path().join(".codex")).expect("codex directory");
     fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
     fs::write(
+        root.path().join("Cargo.toml"),
+        "[package]\nname='fixture'\nversion='0.1.0'\n",
+    )
+    .expect("Cargo manifest");
+    fs::write(
         root.path().join(".development-system.toml"),
         "schema_version = 2\n\n[delivery]\nmode = \"direct-to-trunk\"\ntrunk_branch = \"main\"\n\n[features]\ntiber = true\n\n[final_review.models.codex]\npre_filter = \"gpt-5.6-sol\"\n",
     )
@@ -628,6 +638,89 @@ fn setup_preview_wraps_detected_commands_in_the_repository_nix_devshell() {
 }
 
 #[test]
+fn setup_preview_tailors_commands_and_scopes_to_a_python_uv_project() {
+    let root = TempDir::new().expect("repository");
+    git(root.path(), &["init", "--quiet"]);
+    fs::create_dir_all(root.path().join("src/example")).expect("source directory");
+    fs::create_dir_all(root.path().join("tests")).expect("tests directory");
+    fs::create_dir_all(root.path().join("docs")).expect("docs directory");
+    fs::write(
+        root.path().join("pyproject.toml"),
+        "[project]\nname = 'example'\nversion = '0.1.0'\n",
+    )
+    .expect("Python manifest");
+    fs::write(root.path().join("uv.lock"), "version = 1\n").expect("uv lockfile");
+
+    let preview = mcp_call(
+        root.path(),
+        "setup.preview",
+        json!({ "project_root": root.path() }),
+    );
+
+    let configuration = preview
+        .pointer("/result/structuredContent/configuration")
+        .and_then(Value::as_str)
+        .expect("configuration");
+    for expected in [
+        "include = [\"src/**\"]",
+        "include = [\"tests/**\"]",
+        "include = [\"docs/**\"]",
+        "\"pyproject.toml\"",
+        "\"uv.lock\"",
+    ] {
+        assert!(
+            configuration.contains(expected),
+            "missing detected configuration {expected}: {configuration}"
+        );
+    }
+    for irrelevant in ["app/**", "lib/**", "target/**", "package.json"] {
+        assert!(
+            !configuration.contains(irrelevant),
+            "configuration retained unrelated static scope {irrelevant}: {configuration}"
+        );
+    }
+
+    let candidates = preview
+        .pointer("/result/structuredContent/detected_commands")
+        .and_then(Value::as_array)
+        .expect("candidates");
+    assert!(candidates.iter().any(|candidate| {
+        candidate.get("id") == Some(&json!("python-test"))
+            && candidate.get("argv") == Some(&json!(["uv", "run", "pytest"]))
+            && candidate.get("capability") == Some(&json!("tests"))
+    }));
+    assert_eq!(
+        preview.pointer("/result/structuredContent/recommended_command_ids"),
+        Some(&json!(["python-test"]))
+    );
+}
+
+#[test]
+fn setup_preview_uses_go_root_sources_without_inventing_a_src_directory() {
+    let root = TempDir::new().expect("repository");
+    git(root.path(), &["init", "--quiet"]);
+    fs::write(
+        root.path().join("go.mod"),
+        "module example.invalid/project\n",
+    )
+    .expect("Go module");
+    fs::write(root.path().join("main.go"), "package main\n").expect("Go source");
+
+    let preview = mcp_call(
+        root.path(),
+        "setup.preview",
+        json!({ "project_root": root.path() }),
+    );
+    let configuration = preview
+        .pointer("/result/structuredContent/configuration")
+        .and_then(Value::as_str)
+        .expect("configuration");
+
+    assert!(configuration.contains("include = [\"*.go\"]"));
+    assert!(!configuration.contains("src/**"));
+}
+
+#[test]
 fn setup_preview_rejects_a_linked_worktree_and_reports_the_primary_checkout() {
     let root = TempDir::new().expect("repository");
     git(root.path(), &["init", "--quiet"]);
@@ -693,7 +786,7 @@ fn setup_apply_enables_only_explicitly_selected_detected_commands() {
 }
 
 #[test]
-fn setup_apply_refuses_an_unusable_empty_command_catalog() {
+fn setup_apply_refuses_a_repository_with_no_detectable_scopes() {
     let root = TempDir::new().expect("repository");
     git(root.path(), &["init", "--quiet"]);
 
@@ -705,9 +798,7 @@ fn setup_apply_refuses_an_unusable_empty_command_catalog() {
 
     assert_eq!(
         rejected.pointer("/error/message"),
-        Some(&json!(
-            "development_system.setup_command_selection_required"
-        ))
+        Some(&json!("development_system.config_scope_required"))
     );
     assert!(!root.path().join(".development-system.toml").exists());
 }
