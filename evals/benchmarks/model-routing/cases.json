@@ -1,0 +1,366 @@
+{
+  "schema_version": 1,
+  "catalog_id": "development-system-model-routing-v1",
+  "cases": [
+    {
+      "case_id": "mechanical-001",
+      "task_family": "mechanical-assistance",
+      "case_index": 1,
+      "prompt": "Replace the exact token OLD_ROUTE with NEW_ROUTE in config.txt.",
+      "verifier": {
+        "kind": "exact-workspace-diff",
+        "fixture": "mechanical-001"
+      }
+    },
+    {
+      "case_id": "mechanical-002",
+      "task_family": "mechanical-assistance",
+      "case_index": 2,
+      "prompt": "Rename the JSON key timeout to timeout_ms without changing its value.",
+      "verifier": {
+        "kind": "exact-workspace-diff",
+        "fixture": "mechanical-002"
+      }
+    },
+    {
+      "case_id": "mechanical-003",
+      "task_family": "mechanical-assistance",
+      "case_index": 3,
+      "prompt": "Sort the three import lines alphabetically and make no other edits.",
+      "verifier": {
+        "kind": "exact-workspace-diff",
+        "fixture": "mechanical-003"
+      }
+    },
+    {
+      "case_id": "mechanical-004",
+      "task_family": "mechanical-assistance",
+      "case_index": 4,
+      "prompt": "Change the package version from 1.4.2 to 1.4.3 in both manifests.",
+      "verifier": {
+        "kind": "exact-workspace-diff",
+        "fixture": "mechanical-004"
+      }
+    },
+    {
+      "case_id": "mechanical-005",
+      "task_family": "mechanical-assistance",
+      "case_index": 5,
+      "prompt": "Delete the single line marked REMOVE_ME and preserve all other bytes.",
+      "verifier": {
+        "kind": "exact-workspace-diff",
+        "fixture": "mechanical-005"
+      }
+    },
+    {
+      "case_id": "mechanical-006",
+      "task_family": "mechanical-assistance",
+      "case_index": 6,
+      "prompt": "Add a trailing newline to notes.txt and make no other change.",
+      "verifier": {
+        "kind": "exact-workspace-diff",
+        "fixture": "mechanical-006"
+      }
+    },
+    {
+      "case_id": "mechanical-007",
+      "task_family": "mechanical-assistance",
+      "case_index": 7,
+      "prompt": "Change enabled=false to enabled=true in the named service block only.",
+      "verifier": {
+        "kind": "exact-workspace-diff",
+        "fixture": "mechanical-007"
+      }
+    },
+    {
+      "case_id": "mechanical-008",
+      "task_family": "mechanical-assistance",
+      "case_index": 8,
+      "prompt": "Copy the existing lint command to a new check command verbatim.",
+      "verifier": {
+        "kind": "exact-workspace-diff",
+        "fixture": "mechanical-008"
+      }
+    },
+    {
+      "case_id": "research-001",
+      "task_family": "research-and-discovery",
+      "case_index": 1,
+      "prompt": "Locate the function that owns retry backoff and report its file and exported name.",
+      "verifier": { "kind": "fact-set", "fixture": "research-001" }
+    },
+    {
+      "case_id": "research-002",
+      "task_family": "research-and-discovery",
+      "case_index": 2,
+      "prompt": "Trace which configuration field controls worker concurrency and cite every read site.",
+      "verifier": { "kind": "fact-set", "fixture": "research-002" }
+    },
+    {
+      "case_id": "research-003",
+      "task_family": "research-and-discovery",
+      "case_index": 3,
+      "prompt": "Identify the tests that cover malformed manifest input and summarize their assertions.",
+      "verifier": { "kind": "fact-set", "fixture": "research-003" }
+    },
+    {
+      "case_id": "research-004",
+      "task_family": "research-and-discovery",
+      "case_index": 4,
+      "prompt": "Find the call chain from the CLI entry point to atomic file replacement.",
+      "verifier": { "kind": "fact-set", "fixture": "research-004" }
+    },
+    {
+      "case_id": "research-005",
+      "task_family": "research-and-discovery",
+      "case_index": 5,
+      "prompt": "Determine whether cache keys include model effort and support the answer with code locations.",
+      "verifier": { "kind": "fact-set", "fixture": "research-005" }
+    },
+    {
+      "case_id": "research-006",
+      "task_family": "research-and-discovery",
+      "case_index": 6,
+      "prompt": "Inventory the public error variants produced during configuration loading.",
+      "verifier": { "kind": "fact-set", "fixture": "research-006" }
+    },
+    {
+      "case_id": "research-007",
+      "task_family": "research-and-discovery",
+      "case_index": 7,
+      "prompt": "Find all code paths that can mark a run complete without a result artifact.",
+      "verifier": { "kind": "fact-set", "fixture": "research-007" }
+    },
+    {
+      "case_id": "research-008",
+      "task_family": "research-and-discovery",
+      "case_index": 8,
+      "prompt": "Explain the ownership boundary between planning and execution using cited symbols.",
+      "verifier": { "kind": "fact-set", "fixture": "research-008" }
+    },
+    {
+      "case_id": "implementation-001",
+      "task_family": "implementation",
+      "case_index": 1,
+      "prompt": "Implement parsing for an optional positive retry limit with focused tests.",
+      "verifier": { "kind": "test-command", "fixture": "implementation-001" }
+    },
+    {
+      "case_id": "implementation-002",
+      "task_family": "implementation",
+      "case_index": 2,
+      "prompt": "Add atomic JSON persistence that preserves the previous file on serialization failure.",
+      "verifier": { "kind": "test-command", "fixture": "implementation-002" }
+    },
+    {
+      "case_id": "implementation-003",
+      "task_family": "implementation",
+      "case_index": 3,
+      "prompt": "Add a deduplicating queue insertion operation while preserving stable order.",
+      "verifier": { "kind": "test-command", "fixture": "implementation-003" }
+    },
+    {
+      "case_id": "implementation-004",
+      "task_family": "implementation",
+      "case_index": 4,
+      "prompt": "Implement strict enum decoding with a useful error for unknown values.",
+      "verifier": { "kind": "test-command", "fixture": "implementation-004" }
+    },
+    {
+      "case_id": "implementation-005",
+      "task_family": "implementation",
+      "case_index": 5,
+      "prompt": "Add bounded exponential backoff with deterministic clock-driven tests.",
+      "verifier": { "kind": "test-command", "fixture": "implementation-005" }
+    },
+    {
+      "case_id": "implementation-006",
+      "task_family": "implementation",
+      "case_index": 6,
+      "prompt": "Implement a path parser that rejects traversal and absolute paths.",
+      "verifier": { "kind": "test-command", "fixture": "implementation-006" }
+    },
+    {
+      "case_id": "implementation-007",
+      "task_family": "implementation",
+      "case_index": 7,
+      "prompt": "Add a stable summary grouped by provider, case, and outcome.",
+      "verifier": { "kind": "test-command", "fixture": "implementation-007" }
+    },
+    {
+      "case_id": "implementation-008",
+      "task_family": "implementation",
+      "case_index": 8,
+      "prompt": "Implement cancellation cleanup that removes only the owned temporary file.",
+      "verifier": { "kind": "test-command", "fixture": "implementation-008" }
+    },
+    {
+      "case_id": "review-001",
+      "task_family": "review",
+      "case_index": 1,
+      "prompt": "Review the patch for correctness and report only actionable defects with line references.",
+      "verifier": { "kind": "seeded-defect-recall", "fixture": "review-001" }
+    },
+    {
+      "case_id": "review-002",
+      "task_family": "review",
+      "case_index": 2,
+      "prompt": "Review the parser change for fail-open behavior and compatibility regressions.",
+      "verifier": { "kind": "seeded-defect-recall", "fixture": "review-002" }
+    },
+    {
+      "case_id": "review-003",
+      "task_family": "review",
+      "case_index": 3,
+      "prompt": "Review the concurrent writer for races, partial writes, and unsafe cleanup.",
+      "verifier": { "kind": "seeded-defect-recall", "fixture": "review-003" }
+    },
+    {
+      "case_id": "review-004",
+      "task_family": "review",
+      "case_index": 4,
+      "prompt": "Review the authorization change for privilege expansion and confused-deputy risks.",
+      "verifier": { "kind": "seeded-defect-recall", "fixture": "review-004" }
+    },
+    {
+      "case_id": "review-005",
+      "task_family": "review",
+      "case_index": 5,
+      "prompt": "Review the cache-key change for collisions and stale-result reuse.",
+      "verifier": { "kind": "seeded-defect-recall", "fixture": "review-005" }
+    },
+    {
+      "case_id": "review-006",
+      "task_family": "review",
+      "case_index": 6,
+      "prompt": "Review the migration for rollback safety and mixed-version operation.",
+      "verifier": { "kind": "seeded-defect-recall", "fixture": "review-006" }
+    },
+    {
+      "case_id": "review-007",
+      "task_family": "review",
+      "case_index": 7,
+      "prompt": "Review the retry loop for quota amplification and incorrect terminal states.",
+      "verifier": { "kind": "seeded-defect-recall", "fixture": "review-007" }
+    },
+    {
+      "case_id": "review-008",
+      "task_family": "review",
+      "case_index": 8,
+      "prompt": "Review the metrics aggregation for denominator and missing-data errors.",
+      "verifier": { "kind": "seeded-defect-recall", "fixture": "review-008" }
+    },
+    {
+      "case_id": "debugging-001",
+      "task_family": "debugging",
+      "case_index": 1,
+      "prompt": "Diagnose why resume duplicates completed work and identify the minimal causal fix.",
+      "verifier": { "kind": "root-cause-and-fix", "fixture": "debugging-001" }
+    },
+    {
+      "case_id": "debugging-002",
+      "task_family": "debugging",
+      "case_index": 2,
+      "prompt": "Diagnose an intermittent atomic-rename failure under concurrent execution.",
+      "verifier": { "kind": "root-cause-and-fix", "fixture": "debugging-002" }
+    },
+    {
+      "case_id": "debugging-003",
+      "task_family": "debugging",
+      "case_index": 3,
+      "prompt": "Find why cached results cross model-effort boundaries and propose a regression test.",
+      "verifier": { "kind": "root-cause-and-fix", "fixture": "debugging-003" }
+    },
+    {
+      "case_id": "debugging-004",
+      "task_family": "debugging",
+      "case_index": 4,
+      "prompt": "Diagnose a cancellation path that leaves a job permanently running.",
+      "verifier": { "kind": "root-cause-and-fix", "fixture": "debugging-004" }
+    },
+    {
+      "case_id": "debugging-005",
+      "task_family": "debugging",
+      "case_index": 5,
+      "prompt": "Explain why an empty optional field is accepted despite strict validation.",
+      "verifier": { "kind": "root-cause-and-fix", "fixture": "debugging-005" }
+    },
+    {
+      "case_id": "debugging-006",
+      "task_family": "debugging",
+      "case_index": 6,
+      "prompt": "Diagnose incorrect cost totals when cached input tokens are present.",
+      "verifier": { "kind": "root-cause-and-fix", "fixture": "debugging-006" }
+    },
+    {
+      "case_id": "debugging-007",
+      "task_family": "debugging",
+      "case_index": 7,
+      "prompt": "Find the cause of a deadlock between the plan lock and result writer.",
+      "verifier": { "kind": "root-cause-and-fix", "fixture": "debugging-007" }
+    },
+    {
+      "case_id": "debugging-008",
+      "task_family": "debugging",
+      "case_index": 8,
+      "prompt": "Diagnose why a failed judge response is counted as a subject failure.",
+      "verifier": { "kind": "root-cause-and-fix", "fixture": "debugging-008" }
+    },
+    {
+      "case_id": "advice-001",
+      "task_family": "architecture-and-advice",
+      "case_index": 1,
+      "prompt": "Recommend a compatibility-preserving schema evolution strategy and explain its tradeoffs.",
+      "verifier": { "kind": "decision-rubric", "fixture": "advice-001" }
+    },
+    {
+      "case_id": "advice-002",
+      "task_family": "architecture-and-advice",
+      "case_index": 2,
+      "prompt": "Choose a retry boundary that avoids duplicating non-idempotent effects.",
+      "verifier": { "kind": "decision-rubric", "fixture": "advice-002" }
+    },
+    {
+      "case_id": "advice-003",
+      "task_family": "architecture-and-advice",
+      "case_index": 3,
+      "prompt": "Design an evidence threshold for promoting a cheaper model route.",
+      "verifier": { "kind": "decision-rubric", "fixture": "advice-003" }
+    },
+    {
+      "case_id": "advice-004",
+      "task_family": "architecture-and-advice",
+      "case_index": 4,
+      "prompt": "Recommend where deterministic verification should replace model judging.",
+      "verifier": { "kind": "decision-rubric", "fixture": "advice-004" }
+    },
+    {
+      "case_id": "advice-005",
+      "task_family": "architecture-and-advice",
+      "case_index": 5,
+      "prompt": "Design a resumable artifact layout for a quota-limited benchmark.",
+      "verifier": { "kind": "decision-rubric", "fixture": "advice-005" }
+    },
+    {
+      "case_id": "advice-006",
+      "task_family": "architecture-and-advice",
+      "case_index": 6,
+      "prompt": "Choose an escalation policy that accounts for retries and end-to-end cost.",
+      "verifier": { "kind": "decision-rubric", "fixture": "advice-006" }
+    },
+    {
+      "case_id": "advice-007",
+      "task_family": "architecture-and-advice",
+      "case_index": 7,
+      "prompt": "Recommend how to isolate judges from subject outputs and repository context.",
+      "verifier": { "kind": "decision-rubric", "fixture": "advice-007" }
+    },
+    {
+      "case_id": "advice-008",
+      "task_family": "architecture-and-advice",
+      "case_index": 8,
+      "prompt": "Design a rollout and rollback plan for changing default model routes.",
+      "verifier": { "kind": "decision-rubric", "fixture": "advice-008" }
+    }
+  ]
+}

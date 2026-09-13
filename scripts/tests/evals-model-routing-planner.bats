@@ -3,9 +3,75 @@
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   PLANNER="$ROOT/scripts/evals/plan-model-routing-campaign.mjs"
+  RUNNER="$ROOT/scripts/evals/run-model-routing-job.mjs"
   CAMPAIGN="$ROOT/evals/benchmarks/model-routing/campaign.json"
+  CASES="$ROOT/evals/benchmarks/model-routing/cases.json"
   TMPROOT="$(mktemp -d)"
   PLAN="$TMPROOT/plan.json"
+}
+
+@test "runner resolves a fixed case and records an isolated successful result" {
+  node "$PLANNER" "$CAMPAIGN" --phase screening --output "$PLAN"
+  job_id="mechanical-assistance/case-001/gpt-5.6-luna/none"
+  provider="$TMPROOT/provider.mjs"
+  result_root="$TMPROOT/results"
+  cat >"$provider" <<'EOF'
+export default async function run(request) {
+  if (request.prompt !== "Replace the exact token OLD_ROUTE with NEW_ROUTE in config.txt.") throw new Error("unexpected prompt");
+  return {
+    status: "success",
+    output: "NEW_ROUTE",
+    usage: { input_tokens: 11, cached_input_tokens: 2, output_tokens: 3 },
+    elapsed_ms: 40,
+    attempts: 1
+  };
+}
+EOF
+
+  run node "$RUNNER" --plan "$PLAN" --job-id "$job_id" --cases "$CASES" --results "$result_root" --provider "$provider"
+  [ "$status" -eq 0 ]
+  [ "$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .status' "$PLAN")" = "success" ]
+  result_ref="$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .result_ref' "$PLAN")"
+  [ -f "$result_root/$result_ref" ]
+  [ "$(jq -r '.request.model' "$result_root/$result_ref")" = "gpt-5.6-luna" ]
+  [ "$(jq -r '.request.effort' "$result_root/$result_ref")" = "none" ]
+  [ "$(jq -r '.cost.subject.input_tokens' "$result_root/$result_ref")" -eq 11 ]
+  [ "$(jq -r '.cost.judges' "$result_root/$result_ref")" = "null" ]
+}
+
+@test "runner resumes from a persisted result without repeating the provider call" {
+  node "$PLANNER" "$CAMPAIGN" --phase screening --output "$PLAN"
+  job_id="mechanical-assistance/case-001/gpt-5.6-luna/none"
+  provider="$TMPROOT/provider.mjs"
+  result_root="$TMPROOT/results"
+  cat >"$provider" <<'EOF'
+export default async function run() {
+  return {
+    status: "success",
+    output: "NEW_ROUTE",
+    usage: { input_tokens: 11, cached_input_tokens: 2, output_tokens: 3 },
+    elapsed_ms: 40,
+    attempts: 1
+  };
+}
+EOF
+  node "$RUNNER" --plan "$PLAN" --job-id "$job_id" --cases "$CASES" --results "$result_root" --provider "$provider"
+  jq --arg id "$job_id" '(.jobs[] | select(.job_id == $id)) += {
+    status: "pending",
+    attempt_count: 0,
+    result_ref: null
+  }' "$PLAN" >"$TMPROOT/interrupted.json"
+  mv "$TMPROOT/interrupted.json" "$PLAN"
+  cat >"$provider" <<'EOF'
+export default async function run() {
+  throw new Error("provider must not be called during recovery");
+}
+EOF
+
+  run node "$RUNNER" --plan "$PLAN" --job-id "$job_id" --cases "$CASES" --results "$result_root" --provider "$provider"
+  [ "$status" -eq 0 ]
+  [ "$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .status' "$PLAN")" = "success" ]
+  [ "$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .attempt_count' "$PLAN")" -eq 1 ]
 }
 
 teardown() {
