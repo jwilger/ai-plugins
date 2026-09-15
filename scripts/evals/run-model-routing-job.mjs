@@ -16,23 +16,42 @@ function parseArguments(argv) {
     const value = argv[index + 1];
     if (!key?.startsWith("--") || !value || value.startsWith("--")) {
       fail(
-        "usage: --plan PLAN --job-id ID --cases CASES --results DIR --provider MODULE",
+        "usage: --plan PLAN --job-id ID --cases CASES --fixture-specs SPECS --results DIR --provider MODULE",
       );
     }
     const name = key.slice(2).replaceAll("-", "_");
     if (options[name]) fail(`${key} may be specified only once`);
     options[name] = value;
   }
-  for (const name of ["plan", "job_id", "cases", "results", "provider"]) {
+  for (const name of [
+    "plan",
+    "job_id",
+    "cases",
+    "fixture_specs",
+    "results",
+    "provider",
+  ]) {
     if (!options[name]) fail(`--${name.replaceAll("_", "-")} is required`);
   }
   return {
     planPath: path.resolve(options.plan),
     jobId: options.job_id,
     casesPath: path.resolve(options.cases),
+    fixtureSpecsPath: path.resolve(options.fixture_specs),
     resultsRoot: path.resolve(options.results),
     providerPath: path.resolve(options.provider),
   };
+}
+
+function sha256File(filePath, label) {
+  try {
+    return crypto
+      .createHash("sha256")
+      .update(fs.readFileSync(filePath))
+      .digest("hex");
+  } catch {
+    fail(`${label} could not be read`);
+  }
 }
 
 function readJson(filePath, label) {
@@ -71,6 +90,17 @@ function resolveCase(catalog, job) {
     fail("fixed case is incomplete");
   }
   return fixedCase;
+}
+
+function requireFixtureSpec(document, fixedCase) {
+  if (document?.schema_version !== 1 || !Array.isArray(document.fixtures)) {
+    fail("fixture specs have an unsupported schema");
+  }
+  const matches = document.fixtures.filter(
+    (fixture) => fixture?.fixture_id === fixedCase.verifier.fixture,
+  );
+  if (matches.length !== 1)
+    fail("fixed case fixture must resolve exactly once");
 }
 
 const executionSurfaceByFamily = {
@@ -140,10 +170,22 @@ function recoverPersistedResult(resultPath, expected) {
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   const plan = readJson(options.planPath, "plan");
+  if (
+    sha256File(options.casesPath, "case catalog") !==
+      plan.case_catalog_sha256 ||
+    sha256File(options.fixtureSpecsPath, "fixture specs") !==
+      plan.fixture_specs_sha256
+  ) {
+    fail("fixed input hashes do not match the plan");
+  }
   const job = resolveJob(plan, options.jobId);
   const fixedCase = resolveCase(
     readJson(options.casesPath, "case catalog"),
     job,
+  );
+  requireFixtureSpec(
+    readJson(options.fixtureSpecsPath, "fixture specs"),
+    fixedCase,
   );
   const request = {
     job_id: job.job_id,

@@ -8,6 +8,9 @@ setup() {
   CODEX_SUBJECT_PROVIDER="$ROOT/evals/benchmarks/model-routing/codex-subject-provider.mjs"
   CAMPAIGN="$ROOT/evals/benchmarks/model-routing/campaign.json"
   CASES="$ROOT/evals/benchmarks/model-routing/cases.json"
+  FIXTURE_SPECS="$ROOT/evals/benchmarks/model-routing/fixture-specs.json"
+  MATERIALIZER="$ROOT/scripts/evals/materialize-model-routing-fixtures.mjs"
+  VERIFIER="$ROOT/scripts/evals/verify-model-routing-result.mjs"
   TMPROOT="$(mktemp -d)"
   PLAN="$TMPROOT/plan.json"
 }
@@ -123,7 +126,7 @@ export default async function run(request) {
 }
 EOF
 
-  run node "$RUNNER" --plan "$PLAN" --job-id "$job_id" --cases "$CASES" --results "$result_root" --provider "$provider"
+  run node "$RUNNER" --plan "$PLAN" --job-id "$job_id" --cases "$CASES" --fixture-specs "$FIXTURE_SPECS" --results "$result_root" --provider "$provider"
   [ "$status" -eq 0 ]
   [ "$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .status' "$PLAN")" = "success" ]
   result_ref="$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .result_ref' "$PLAN")"
@@ -150,7 +153,7 @@ export default async function run() {
   };
 }
 EOF
-  node "$RUNNER" --plan "$PLAN" --job-id "$job_id" --cases "$CASES" --results "$result_root" --provider "$provider"
+  node "$RUNNER" --plan "$PLAN" --job-id "$job_id" --cases "$CASES" --fixture-specs "$FIXTURE_SPECS" --results "$result_root" --provider "$provider"
   jq --arg id "$job_id" '(.jobs[] | select(.job_id == $id)) += {
     status: "pending",
     attempt_count: 0,
@@ -163,7 +166,7 @@ export default async function run() {
 }
 EOF
 
-  run node "$RUNNER" --plan "$PLAN" --job-id "$job_id" --cases "$CASES" --results "$result_root" --provider "$provider"
+  run node "$RUNNER" --plan "$PLAN" --job-id "$job_id" --cases "$CASES" --fixture-specs "$FIXTURE_SPECS" --results "$result_root" --provider "$provider"
   [ "$status" -eq 0 ]
   [ "$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .status' "$PLAN")" = "success" ]
   [ "$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .attempt_count' "$PLAN")" -eq 1 ]
@@ -179,12 +182,65 @@ teardown() {
 
   [ "$(jq -r '.schema_version' "$PLAN")" = "1" ]
   [ "$(jq -r '.phase' "$PLAN")" = "screening" ]
+  [[ "$(jq -r '.case_catalog_sha256' "$PLAN")" =~ ^[0-9a-f]{64}$ ]]
+  [[ "$(jq -r '.fixture_specs_sha256' "$PLAN")" =~ ^[0-9a-f]{64}$ ]]
   [ "$(jq '.jobs | length' "$PLAN")" -eq 992 ]
   [ "$(jq '[.jobs[].task_family] | unique | length' "$PLAN")" -eq 6 ]
   [ "$(jq '[.jobs[] | select(.task_family == "mechanical-assistance") | .effort] | unique | sort == ["high", "low", "max", "medium", "none", "xhigh"]' "$PLAN")" = "true" ]
   [ "$(jq '[.jobs[] | select(.task_family != "mechanical-assistance") | .effort] | unique | sort == ["high", "low", "max", "medium", "xhigh"]' "$PLAN")" = "true" ]
   [ "$(jq '[.jobs[].status] | unique == ["pending"]' "$PLAN")" = "true" ]
   [ "$(jq '[.jobs[].job_id] | length == (unique | length)' "$PLAN")" = "true" ]
+}
+
+@test "fixed workspace fixtures materialize byte-stably and verify mechanically" {
+  first="$TMPROOT/fixtures-first"
+  second="$TMPROOT/fixtures-second"
+  run node "$MATERIALIZER" --specs "$FIXTURE_SPECS" --output "$first"
+  [ "$status" -eq 0 ]
+  node "$MATERIALIZER" --specs "$FIXTURE_SPECS" --output "$second"
+  run diff -ru "$first" "$second"
+  [ "$status" -eq 0 ]
+  [ -f "$first/mechanical-001/config.txt" ]
+
+  cp -R "$first/mechanical-001" "$TMPROOT/completed"
+  sed -i 's/OLD_ROUTE/NEW_ROUTE/' "$TMPROOT/completed/config.txt"
+  run node "$VERIFIER" --specs "$FIXTURE_SPECS" --fixture mechanical-001 --workspace "$TMPROOT/completed" --output "NEW_ROUTE"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status' <<<"$output")" = "pass" ]
+  [ "$(jq -r '.method' <<<"$output")" = "exact-workspace" ]
+}
+
+@test "every mechanical fixture accepts only its exact expected workspace" {
+  fixtures="$TMPROOT/fixtures"
+  node "$MATERIALIZER" --specs "$FIXTURE_SPECS" --output "$fixtures"
+  while IFS= read -r fixture; do
+    workspace="$TMPROOT/$fixture-completed"
+    mkdir "$workspace"
+    node --input-type=module - "$FIXTURE_SPECS" "$fixture" "$workspace" <<'EOF'
+import fs from "node:fs";
+import path from "node:path";
+const document = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const fixture = document.fixtures.find((item) => item.fixture_id === process.argv[3]);
+for (const [file, contents] of Object.entries(fixture.verification.expected_files)) {
+  const destination = path.join(process.argv[4], file);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.writeFileSync(destination, contents);
+}
+EOF
+    run node "$VERIFIER" --specs "$FIXTURE_SPECS" --fixture "$fixture" --workspace "$workspace" --output ignored
+    [ "$status" -eq 0 ]
+    [ "$(jq -r '.status' <<<"$output")" = "pass" ]
+  done < <(jq -r '.fixtures[].fixture_id' "$FIXTURE_SPECS")
+}
+
+@test "resume rejects tampered fixed-input hashes" {
+  node "$PLANNER" "$CAMPAIGN" --phase screening --output "$PLAN"
+  jq '.fixture_specs_sha256 = ("0" * 64)' "$PLAN" >"$TMPROOT/tampered.json"
+  mv "$TMPROOT/tampered.json" "$PLAN"
+
+  run node "$PLANNER" "$CAMPAIGN" --phase screening --output "$PLAN" --resume
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"campaign identity"* ]]
 }
 
 @test "planner output is byte-stable for the same campaign" {

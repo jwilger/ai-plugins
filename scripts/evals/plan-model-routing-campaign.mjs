@@ -10,7 +10,9 @@ function fail(message) {
 
 function parseArguments(argv) {
   if (argv.length < 1) {
-    fail("usage: plan-model-routing-campaign.mjs CAMPAIGN --phase screening --output PLAN [--resume]");
+    fail(
+      "usage: plan-model-routing-campaign.mjs CAMPAIGN --phase screening --output PLAN [--resume]",
+    );
   }
 
   const campaignPath = path.resolve(argv[0]);
@@ -78,7 +80,24 @@ function readCampaign(campaignPath) {
   return {
     campaign,
     sourceSha256: crypto.createHash("sha256").update(source).digest("hex"),
+    caseCatalogSha256: hashSibling(campaignPath, "cases.json", "case catalog"),
+    fixtureSpecsSha256: hashSibling(
+      campaignPath,
+      "fixture-specs.json",
+      "fixture specs",
+    ),
   };
+}
+
+function hashSibling(campaignPath, name, label) {
+  try {
+    return crypto
+      .createHash("sha256")
+      .update(fs.readFileSync(path.join(path.dirname(campaignPath), name)))
+      .digest("hex");
+  } catch {
+    fail(`${label} could not be read`);
+  }
 }
 
 function jobId({ taskFamily, caseIndex, model, effort }) {
@@ -91,8 +110,7 @@ function jobId({ taskFamily, caseIndex, model, effort }) {
 }
 
 function buildJobs(campaign) {
-  const caseCount =
-    campaign.sampling.screening.distinct_cases_per_task_family;
+  const caseCount = campaign.sampling.screening.distinct_cases_per_task_family;
   const jobs = [];
 
   for (const taskFamily of campaign.task_families) {
@@ -125,11 +143,19 @@ function buildJobs(campaign) {
   return jobs;
 }
 
-function buildPlan(campaign, sourceSha256, phase) {
+function buildPlan(
+  campaign,
+  sourceSha256,
+  caseCatalogSha256,
+  fixtureSpecsSha256,
+  phase,
+) {
   return {
     schema_version: 1,
     campaign_id: campaign.campaign_id,
     campaign_source_sha256: sourceSha256,
+    case_catalog_sha256: caseCatalogSha256,
+    fixture_specs_sha256: fixtureSpecsSha256,
     phase,
     jobs: buildJobs(campaign),
   };
@@ -147,6 +173,8 @@ function mergeResume(planned, outputPath) {
     previous?.schema_version !== planned.schema_version ||
     previous.campaign_id !== planned.campaign_id ||
     previous.campaign_source_sha256 !== planned.campaign_source_sha256 ||
+    previous.case_catalog_sha256 !== planned.case_catalog_sha256 ||
+    previous.fixture_specs_sha256 !== planned.fixture_specs_sha256 ||
     previous.phase !== planned.phase
   ) {
     fail("resume campaign identity does not match the current campaign");
@@ -183,9 +211,7 @@ function mergeResume(planned, outputPath) {
   for (const plannedJob of planned.jobs) {
     const previousJob = previousById.get(plannedJob.job_id);
     if (
-      identityFields.some(
-        (field) => previousJob[field] !== plannedJob[field],
-      )
+      identityFields.some((field) => previousJob[field] !== plannedJob[field])
     ) {
       fail(`resume job identity fields do not match: ${plannedJob.job_id}`);
     }
@@ -218,8 +244,15 @@ function writeAtomically(outputPath, document) {
 function main() {
   try {
     const options = parseArguments(process.argv.slice(2));
-    const { campaign, sourceSha256 } = readCampaign(options.campaignPath);
-    let plan = buildPlan(campaign, sourceSha256, options.phase);
+    const { campaign, sourceSha256, caseCatalogSha256, fixtureSpecsSha256 } =
+      readCampaign(options.campaignPath);
+    let plan = buildPlan(
+      campaign,
+      sourceSha256,
+      caseCatalogSha256,
+      fixtureSpecsSha256,
+      options.phase,
+    );
     if (options.resume) plan = mergeResume(plan, options.outputPath);
     writeAtomically(options.outputPath, plan);
     console.log(

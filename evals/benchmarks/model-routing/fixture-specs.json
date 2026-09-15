@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "fixture_set_id": "development-system-model-routing-fixtures-v1",
+  "fixtures": [
+    {
+      "fixture_id": "mechanical-001",
+      "files": { "config.txt": "route=OLD_ROUTE\n" },
+      "verification": {
+        "kind": "exact-workspace",
+        "expected_files": { "config.txt": "route=NEW_ROUTE\n" }
+      }
+    },
+    {
+      "fixture_id": "mechanical-002",
+      "files": {
+        "config.json": "{\n  \"timeout\": 30,\n  \"retries\": 2\n}\n"
+      },
+      "verification": {
+        "kind": "exact-workspace",
+        "expected_files": {
+          "config.json": "{\n  \"timeout_ms\": 30,\n  \"retries\": 2\n}\n"
+        }
+      }
+    },
+    {
+      "fixture_id": "mechanical-003",
+      "files": {
+        "imports.js": "import zeta from \"zeta\";\nimport alpha from \"alpha\";\nimport middle from \"middle\";\n"
+      },
+      "verification": {
+        "kind": "exact-workspace",
+        "expected_files": {
+          "imports.js": "import alpha from \"alpha\";\nimport middle from \"middle\";\nimport zeta from \"zeta\";\n"
+        }
+      }
+    },
+    {
+      "fixture_id": "mechanical-004",
+      "files": {
+        "plugin.json": "{\n  \"name\": \"sample\",\n  \"version\": \"1.4.2\"\n}\n",
+        "marketplace.json": "{\n  \"plugin\": \"sample\",\n  \"version\": \"1.4.2\"\n}\n"
+      },
+      "verification": {
+        "kind": "exact-workspace",
+        "expected_files": {
+          "plugin.json": "{\n  \"name\": \"sample\",\n  \"version\": \"1.4.3\"\n}\n",
+          "marketplace.json": "{\n  \"plugin\": \"sample\",\n  \"version\": \"1.4.3\"\n}\n"
+        }
+      }
+    },
+    {
+      "fixture_id": "mechanical-005",
+      "files": { "notes.txt": "keep first\nREMOVE_ME\nkeep last\n" },
+      "verification": {
+        "kind": "exact-workspace",
+        "expected_files": { "notes.txt": "keep first\nkeep last\n" }
+      }
+    },
+    {
+      "fixture_id": "mechanical-006",
+      "files": { "notes.txt": "missing trailing newline" },
+      "verification": {
+        "kind": "exact-workspace",
+        "expected_files": { "notes.txt": "missing trailing newline\n" }
+      }
+    },
+    {
+      "fixture_id": "mechanical-007",
+      "files": {
+        "services.ini": "[named-service]\nenabled=false\n\n[other-service]\nenabled=false\n"
+      },
+      "verification": {
+        "kind": "exact-workspace",
+        "expected_files": {
+          "services.ini": "[named-service]\nenabled=true\n\n[other-service]\nenabled=false\n"
+        }
+      }
+    },
+    {
+      "fixture_id": "mechanical-008",
+      "files": {
+        "package.json": "{\n  \"scripts\": {\n    \"lint\": \"eslint . --max-warnings=0\"\n  }\n}\n"
+      },
+      "verification": {
+        "kind": "exact-workspace",
+        "expected_files": {
+          "package.json": "{\n  \"scripts\": {\n    \"lint\": \"eslint . --max-warnings=0\",\n    \"check\": \"eslint . --max-warnings=0\"\n  }\n}\n"
+        }
+      }
+    }
+  ]
+}
