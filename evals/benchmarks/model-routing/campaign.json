@@ -6,11 +6,11 @@
   "unit_of_analysis": "accepted task trajectory",
   "task_families": [
     "mechanical-assistance",
-    "implementation-and-tests",
+    "research-and-discovery",
+    "implementation",
     "review",
-    "diagnosis-and-correction",
-    "architecture-and-advice",
-    "orchestration"
+    "debugging",
+    "architecture-and-advice"
   ],
   "case_kinds": [
     "nominal",

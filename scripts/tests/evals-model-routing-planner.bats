@@ -192,6 +192,19 @@ teardown() {
   [ "$(jq '[.jobs[].job_id] | length == (unique | length)' "$PLAN")" = "true" ]
 }
 
+@test "every planned task family resolves to the complete fixed case catalog" {
+  node "$PLANNER" "$CAMPAIGN" --phase screening --output "$PLAN"
+
+  run jq -e --slurpfile cases "$CASES" '
+    ([.jobs[].task_family] | unique) as $planned |
+    ([$cases[0].cases[].task_family] | unique) as $catalog |
+    $planned == $catalog and
+    ([$cases[0].cases | group_by(.task_family)[] | length] | all(. == 8))
+  ' "$PLAN"
+
+  [ "$status" -eq 0 ]
+}
+
 @test "fixed workspace fixtures materialize byte-stably and verify mechanically" {
   first="$TMPROOT/fixtures-first"
   second="$TMPROOT/fixtures-second"
